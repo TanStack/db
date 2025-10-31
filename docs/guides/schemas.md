@@ -96,6 +96,8 @@ Examples in this guide use Zod, but patterns apply to all libraries.
 
 Understanding TInput and TOutput is key to working effectively with schemas in TanStack DB.
 
+> **Important:** Schemas validate **client changes only** - data you insert or update via `collection.insert()` and `collection.update()`. They do not automatically validate data loaded from your server or sync layer. If you need to validate server data, you must do so explicitly in your integration layer.
+
 ### What are TInput and TOutput?
 
 When you define a schema with transformations, it has two types:
@@ -557,126 +559,71 @@ collection.insert({
 
 ---
 
-## Handling Updates
+## Handling Timestamps
 
-When updating data, your schema needs to handle both new input (TInput) and existing data (already TOutput).
+When working with timestamps, you typically want automatic creation dates rather than transforming user input.
 
-### The Challenge
+### Use Defaults for Timestamps
 
-Consider this schema:
-
-```typescript
-const todoSchema = z.object({
-  id: z.string(),
-  created_at: z.string().transform(val => new Date(val))
-})
-```
-
-**Problem:** During updates, `created_at` is already a Date (TOutput), but the transform expects a string (TInput). The validation will fail!
-
-```typescript
-// Initial insert works
-collection.insert({
-  id: "1",
-  created_at: "2024-01-01T00:00:00Z"  // string → Date
-})
-
-// Update fails!
-collection.update("1", (draft) => {
-  draft.text = "Updated"
-  // draft.created_at is already a Date, but schema expects string
-})
-```
-
-### Solution: Union Types
-
-Accept both the input type and the output type:
-
-```typescript
-const todoSchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  created_at: z.union([
-    z.string(),  // Accept string (new input)
-    z.date()     // Accept Date (existing data)
-  ]).transform(val =>
-    typeof val === 'string' ? new Date(val) : val
-  )
-})
-```
-
-Now both inserts and updates work:
-
-```typescript
-// Insert with string (TInput)
-collection.insert({
-  id: "1",
-  text: "Task",
-  created_at: "2024-01-01T00:00:00Z"  // string
-})
-
-// Update works - created_at is already a Date
-collection.update("1", (draft) => {
-  draft.text = "Updated"  // created_at stays as Date
-})
-
-// Can also update with a new string
-collection.update("1", (draft) => {
-  draft.updated_at = "2024-01-02T00:00:00Z"  // string → Date
-})
-```
-
-### Pattern: Union Transform Helper
-
-For schemas with many date fields, create a helper:
-
-```typescript
-const dateField = z.union([
-  z.string(),
-  z.date()
-]).transform(val => typeof val === 'string' ? new Date(val) : val)
-
-const todoSchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  created_at: dateField,
-  updated_at: dateField,
-  completed_at: dateField.optional()
-})
-```
-
-### When You Don't Need Unions
-
-If your schema doesn't have transformations, you don't need unions:
+For `created_at` and `updated_at` fields, use defaults to automatically generate timestamps:
 
 ```typescript
 const todoSchema = z.object({
   id: z.string(),
   text: z.string(),
   completed: z.boolean().default(false),
-  priority: z.number().default(0)
+  created_at: z.date().default(() => new Date()),
+  updated_at: z.date().default(() => new Date())
 })
 
-// TInput === TOutput (no transformations)
-// Updates work fine without unions
+// Timestamps generated automatically
+collection.insert({
+  id: "1",
+  text: "Buy groceries"
+  // created_at and updated_at filled automatically
+})
+
+// Update timestamps
+collection.update("1", (draft) => {
+  draft.text = "Buy groceries and milk"
+  draft.updated_at = new Date()
+})
 ```
 
-### Optional Fields in Updates
+### When You Need Union Types
 
-For partial updates, use `.partial()`:
+If you're accepting date input from external sources (forms, APIs), you may need to accept both strings and Date objects:
 
 ```typescript
-const insertSchema = z.object({
+const eventSchema = z.object({
   id: z.string(),
   name: z.string(),
-  email: z.string().email(),
-  age: z.number()
+  scheduled_for: z.union([
+    z.string(),  // Accept ISO string from form input
+    z.date()     // Accept Date from existing data or programmatic input
+  ]).transform(val =>
+    typeof val === 'string' ? new Date(val) : val
+  )
 })
 
-const updateSchema = insertSchema.partial()
+// Works with string input
+collection.insert({
+  id: "1",
+  name: "Meeting",
+  scheduled_for: "2024-12-31T15:00:00Z"  // From form input
+})
 
-// Now all fields except id are optional for updates
-collection.update("1", { name: "Updated Name" })  // OK
+// Works with Date input
+collection.insert({
+  id: "2",
+  name: "Workshop",
+  scheduled_for: new Date()  // Programmatic
+})
+
+// Updates work - scheduled_for is already a Date
+collection.update("1", (draft) => {
+  draft.name = "Updated Meeting"
+})
 ```
 
 ---
@@ -782,65 +729,9 @@ function TodoForm() {
 }
 ```
 
-### Handling Sync Validation Errors
-
-When syncing data into your collection, handle validation errors gracefully:
-
-```typescript
-sync: {
-  sync: ({ write, begin, commit, collection }) => {
-    const data = await fetchFromAPI()
-
-    begin()
-    for (const item of data) {
-      try {
-        const validated = collection.validateData(item, 'insert')
-        write({ type: 'insert', value: validated })
-      } catch (error) {
-        if (error instanceof SchemaValidationError) {
-          // Log but don't stop sync
-          console.error(`Invalid data from server:`, item, error.issues)
-          continue  // Skip this item
-        }
-        throw error  // Re-throw other errors
-      }
-    }
-    commit()
-  }
-}
-```
-
-### Safe Parsing (Zod)
-
-For cases where you want a result type instead of throwing:
-
-```typescript
-const result = todoSchema.safeParse(data)
-
-if (result.success) {
-  collection.insert(result.data)
-} else {
-  console.error(result.error.issues)
-}
-```
-
 ---
 
 ## Best Practices
-
-### When to Use Schemas
-
-✅ **Use schemas when you want:**
-- Runtime validation of user input
-- Type transformations (string → Date, etc.)
-- Automatic default values
-- Better TypeScript inference
-- Validation error messages
-
-❌ **You might not need schemas if:**
-- Your data is already validated (e.g., from a type-safe backend)
-- You don't need transformations or defaults
-- Performance is critical and validation would be a bottleneck
 
 ### Keep Transformations Simple
 
@@ -941,36 +832,6 @@ const userSchema = z.object({
 })
 ```
 
-### Schema Organization
-
-For large schemas, organize by domain:
-
-```typescript
-// schemas/user.ts
-export const userSchema = z.object({
-  id: z.string(),
-  username: z.string().min(3),
-  email: z.string().email()
-})
-
-// schemas/todo.ts
-export const todoSchema = z.object({
-  id: z.string(),
-  text: z.string().min(1),
-  user_id: z.string()
-})
-
-// collections/todos.ts
-import { todoSchema } from '../schemas/todo'
-
-export const todoCollection = createCollection(
-  queryCollectionOptions({
-    schema: todoSchema,
-    // ...
-  })
-)
-```
-
 ---
 
 ## Full-Context Examples
@@ -1011,8 +872,12 @@ const todoCollection = createCollection(
     queryFn: async () => {
       const response = await fetch('/api/todos')
       const todos = await response.json()
-      // API returns ISO strings for dates
-      return todos
+      // Manually parse API responses - schemas only validate client changes
+      return todos.map((todo: any) => ({
+        ...todo,
+        due_date: todo.due_date ? new Date(todo.due_date) : undefined,
+        created_at: new Date(todo.created_at)
+      }))
     },
     getKey: (item) => item.id,
     schema: todoSchema,
@@ -1234,78 +1099,9 @@ function ProductList() {
 
 ## For Integration Authors
 
-If you're creating a custom collection options creator (like `electricCollectionOptions` or `trailbaseCollectionOptions`), you need to understand how schemas interact with your sync layer.
+If you're building a custom collection (like Electric or TrailBase), you'll need to handle data parsing and serialization between your storage format and the in-memory collection format. This is separate from schema validation, which happens during client mutations.
 
-### Two Type Conversion Mechanisms
-
-There are **two separate but complementary** type conversion mechanisms:
-
-1. **Your integration's parsing** (storage format ↔ in-memory format)
-   - Example: Unix timestamp → Date, WKB → GeoJSON
-   - Layer: Sync (during `write()`)
-   - Your responsibility as integration author
-
-2. **User schemas** (TInput → TOutput for mutations)
-   - Example: ISO string → Date, validation, defaults
-   - Layer: Mutations (during `insert()`/`update()`)
-   - User's choice
-
-### How They Work Together
-
-```typescript
-// 1. User defines schema
-const todoSchema = z.object({
-  created_at: z.string().transform(val => new Date(val))
-})
-
-// 2. Your integration handles storage format
-export function myCollectionOptions(config) {
-  return {
-    // Parse from storage format (e.g., Unix timestamp → Date)
-    sync: {
-      sync: ({ write, collection }) => {
-        const storageRow = { id: "1", created_at: 1704067200 }  // Unix timestamp
-
-        // Your parsing layer
-        const parsed = {
-          ...storageRow,
-          created_at: new Date(storageRow.created_at * 1000)  // → Date
-        }
-
-        // Validate with user's schema (if provided)
-        const validated = collection.validateData(parsed, 'insert')
-
-        // Write TOutput to collection
-        write({ type: 'insert', value: validated })
-      }
-    },
-
-    // Serialize for storage format
-    onInsert: async ({ transaction }) => {
-      const item = transaction.mutations[0].modified  // TOutput (Date)
-
-      // Your serialization layer
-      const serialized = {
-        ...item,
-        created_at: Math.floor(item.created_at.valueOf() / 1000)  // Date → Unix
-      }
-
-      await storage.write(serialized)
-    }
-  }
-}
-```
-
-### Best Practices for Integration Authors
-
-1. **Always call `collection.validateData()`** when syncing data into the collection
-2. **Don't constrain user schemas** to match your storage types - let users define rich TOutput
-3. **Handle serialization in mutation handlers** when persisting to your storage
-4. **Document your storage formats** so users know what to expect
-
-### Complete Example
-
-See the [Collection Options Creator Guide](./collection-options-creator.md) for comprehensive documentation on creating integrations, including detailed guidance on handling schemas.
+See the [Collection Options Creator Guide](./collection-options-creator.md) for comprehensive documentation on creating custom collection integrations, including how to handle schemas, data parsing, and type transformations.
 
 ---
 
