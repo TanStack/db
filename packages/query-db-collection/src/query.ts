@@ -164,15 +164,28 @@ export interface QueryCollectionUtils<
   writeUpsert: (data: Partial<TItem> | Array<Partial<TItem>>) => void
   /** Execute multiple write operations as a single atomic batch to the synced data store */
   writeBatch: (callback: () => void) => void
+
+  // Query Observer State (getters)
   /** Get the last error encountered by the query (if any); reset on success */
-  lastError: () => TError | undefined
+  lastError: TError | undefined
   /** Check if the collection is in an error state */
-  isError: () => boolean
+  isError: boolean
   /**
    * Get the number of consecutive sync failures.
    * Incremented only when query fails completely (not per retry attempt); reset on success.
    */
-  errorCount: () => number
+  errorCount: number
+  /** Check if query is currently fetching (initial or background) */
+  isFetching: boolean
+  /** Check if query is refetching in background (not initial fetch) */
+  isRefetching: boolean
+  /** Check if query is loading for the first time (no data yet) */
+  isLoading: boolean
+  /** Get timestamp of last successful data update (in milliseconds) */
+  dataUpdatedAt: number
+  /** Get current fetch status */
+  fetchStatus: `fetching` | `paused` | `idle`
+
   /**
    * Clear the error state and trigger a refetch of the query
    * @returns Promise that resolves when the refetch completes successfully
@@ -286,7 +299,12 @@ export function queryCollectionOptions<
     schema: T
     select: (data: TQueryData) => Array<InferSchemaInput<T>>
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+): CollectionConfig<
+  InferSchemaOutput<T>,
+  TKey,
+  T,
+  QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
+> & {
   schema: T
   utils: QueryCollectionUtils<
     InferSchemaOutput<T>,
@@ -319,7 +337,12 @@ export function queryCollectionOptions<
     schema?: never // prohibit schema
     select: (data: TQueryData) => Array<T>
   }
-): CollectionConfig<T, TKey> & {
+): CollectionConfig<
+  T,
+  TKey,
+  never,
+  QueryCollectionUtils<T, TKey, T, TError>
+> & {
   schema?: never // no schema in the result
   utils: QueryCollectionUtils<T, TKey, T, TError>
 }
@@ -343,7 +366,12 @@ export function queryCollectionOptions<
   > & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+): CollectionConfig<
+  InferSchemaOutput<T>,
+  TKey,
+  T,
+  QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
+> & {
   schema: T
   utils: QueryCollectionUtils<
     InferSchemaOutput<T>,
@@ -369,14 +397,24 @@ export function queryCollectionOptions<
   > & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey> & {
+): CollectionConfig<
+  T,
+  TKey,
+  never,
+  QueryCollectionUtils<T, TKey, T, TError>
+> & {
   schema?: never // no schema in the result
   utils: QueryCollectionUtils<T, TKey, T, TError>
 }
 
 export function queryCollectionOptions(
   config: QueryCollectionConfig<Record<string, unknown>>
-): CollectionConfig & {
+): CollectionConfig<
+  Record<string, unknown>,
+  string | number,
+  never,
+  QueryCollectionUtils
+> & {
   utils: QueryCollectionUtils
 } {
   const {
@@ -418,14 +456,15 @@ export function queryCollectionOptions(
     throw new GetKeyRequiredError()
   }
 
-  /** The last error encountered by the query */
-  let lastError: any
-  /** The number of consecutive sync failures */
-  let errorCount = 0
-  /** The timestamp for when the query most recently returned the status as "error" */
-  let lastErrorUpdatedAt = 0
-  /** Reference to the QueryObserver for imperative refetch */
-  let queryObserver: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
+  /** State object to hold error tracking and observer reference */
+  const state = {
+    lastError: undefined as any,
+    errorCount: 0,
+    lastErrorUpdatedAt: 0,
+    queryObserver: undefined as
+      | QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
+      | undefined,
+  }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
     const { begin, write, commit, markReady, collection } = params
@@ -459,7 +498,7 @@ export function queryCollectionOptions(
     >(queryClient, observerOptions)
 
     // Store reference for imperative refetch
-    queryObserver = localObserver
+    state.queryObserver = localObserver
 
     let isSubscribed = false
     let actualUnsubscribeFn: (() => void) | null = null
@@ -468,8 +507,8 @@ export function queryCollectionOptions(
     const handleQueryResult: UpdateHandler = (result) => {
       if (result.isSuccess) {
         // Clear error state
-        lastError = undefined
-        errorCount = 0
+        state.lastError = undefined
+        state.errorCount = 0
 
         const rawData = result.data
         const newItemsArray = select ? select(rawData) : rawData
@@ -543,10 +582,10 @@ export function queryCollectionOptions(
         // Mark collection as ready after first successful query result
         markReady()
       } else if (result.isError) {
-        if (result.errorUpdatedAt !== lastErrorUpdatedAt) {
-          lastError = result.error
-          errorCount++
-          lastErrorUpdatedAt = result.errorUpdatedAt
+        if (result.errorUpdatedAt !== state.lastErrorUpdatedAt) {
+          state.lastError = result.error
+          state.errorCount++
+          state.lastErrorUpdatedAt = result.errorUpdatedAt
         }
 
         console.error(
@@ -622,12 +661,12 @@ export function queryCollectionOptions(
    */
   const refetch: RefetchFn = async (opts) => {
     // Observer is created when sync starts. If never synced, nothing to refetch.
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (!queryObserver) {
+
+    if (!state.queryObserver) {
       return
     }
     // Return the QueryObserverResult for users to inspect
-    return queryObserver.refetch({
+    return state.queryObserver.refetch({
       throwOnError: opts?.throwOnError,
     })
   }
@@ -710,6 +749,73 @@ export function queryCollectionOptions(
       }
     : undefined
 
+  // Create utils object with getters using a class pattern
+  // This ensures proper closure and compatibility with testing frameworks like vitest
+  class QueryCollectionUtilsImpl {
+    // Write methods
+    public refetch: RefetchFn
+    public writeInsert: any
+    public writeUpdate: any
+    public writeDelete: any
+    public writeUpsert: any
+    public writeBatch: any
+
+    constructor() {
+      // Initialize methods in constructor to capture correct scope
+      this.refetch = refetch
+      this.writeInsert = writeUtils.writeInsert
+      this.writeUpdate = writeUtils.writeUpdate
+      this.writeDelete = writeUtils.writeDelete
+      this.writeUpsert = writeUtils.writeUpsert
+      this.writeBatch = writeUtils.writeBatch
+    }
+
+    public async clearError() {
+      state.lastError = undefined
+      state.errorCount = 0
+      state.lastErrorUpdatedAt = 0
+      await refetch({ throwOnError: true })
+    }
+
+    // Getters for error state
+    public get lastError() {
+      return state.lastError
+    }
+
+    public get isError() {
+      return !!state.lastError
+    }
+
+    public get errorCount() {
+      return state.errorCount
+    }
+
+    // Getters for QueryObserver state
+    public get isFetching() {
+      return state.queryObserver?.getCurrentResult().isFetching ?? false
+    }
+
+    public get isRefetching() {
+      return state.queryObserver?.getCurrentResult().isRefetching ?? false
+    }
+
+    public get isLoading() {
+      return state.queryObserver?.getCurrentResult().isLoading ?? false
+    }
+
+    public get dataUpdatedAt() {
+      return state.queryObserver?.getCurrentResult().dataUpdatedAt ?? 0
+    }
+
+    public get fetchStatus() {
+      return state.queryObserver?.getCurrentResult().fetchStatus ?? `idle`
+    }
+  }
+
+  // Use class instance directly with getters
+  // createCollection now preserves the utils object instead of spreading it
+  const utils: any = new QueryCollectionUtilsImpl()
+
   return {
     ...baseCollectionConfig,
     getKey,
@@ -717,18 +823,6 @@ export function queryCollectionOptions(
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
-    utils: {
-      refetch,
-      ...writeUtils,
-      lastError: () => lastError,
-      isError: () => !!lastError,
-      errorCount: () => errorCount,
-      clearError: async () => {
-        lastError = undefined
-        errorCount = 0
-        lastErrorUpdatedAt = 0
-        await refetch({ throwOnError: true })
-      },
-    },
+    utils,
   }
 }
