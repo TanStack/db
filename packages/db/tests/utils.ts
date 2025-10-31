@@ -172,11 +172,13 @@ export function withIndexTracking(
   }
 }
 
-type MockSyncCollectionConfig<T> = {
+type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   id: string
   initialData: Array<T>
   getKey: (item: T) => string | number
   autoIndex?: `off` | `eager`
+  sync?: SyncConfig<T>
+  syncMode?: `eager` | `on-demand`
 }
 
 export function mockSyncCollectionOptions<
@@ -218,27 +220,30 @@ export function mockSyncCollectionOptions<
     },
   }
 
+  const sync = config.sync ?? {
+    sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
+      begin = params.begin
+      write = params.write
+      commit = params.commit
+      const markReady = params.markReady
+
+      begin()
+      config.initialData.forEach((item) => {
+        write({
+          type: `insert`,
+          value: item,
+        })
+      })
+      commit()
+      markReady()
+    },
+  }
+
   const options: CollectionConfig<T, string | number, never> & {
     utils: typeof utils
   } = {
-    sync: {
-      sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-        begin = params.begin
-        write = params.write
-        commit = params.commit
-        const markReady = params.markReady
-
-        begin()
-        config.initialData.forEach((item) => {
-          write({
-            type: `insert`,
-            value: item,
-          })
-        })
-        commit()
-        markReady()
-      },
-    },
+    sync,
+    ...(config.syncMode ? { syncMode: config.syncMode } : {}),
     startSync: true,
     onInsert: async (_params: MutationFnParams<T>) => {
       // TODO
