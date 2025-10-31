@@ -250,8 +250,7 @@ export class CollectionLifecycleManager<
       !deadline || deadline.timeRemaining() > 0 || deadline.didTimeout
 
     if (hasTime) {
-      // Perform all cleanup operations
-      this.events.cleanup()
+      // Perform all cleanup operations except events
       this.sync.cleanup()
       this.state.cleanup()
       this.changes.cleanup()
@@ -265,8 +264,13 @@ export class CollectionLifecycleManager<
       this.hasBeenReady = false
       this.onFirstReadyCallbacks = []
 
-      // Set status to cleaned-up
+      // Set status to cleaned-up after everything is cleaned up
+      // This fires the status:change event to notify listeners
       this.setStatus(`cleaned-up`)
+
+      // Finally, cleanup event handlers after the event has been fired
+      this.events.cleanup()
+
       return true
     } else {
       // If we don't have time, reschedule for the next idle period

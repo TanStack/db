@@ -330,9 +330,22 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
     return query
   }
 
-  // Skip optimization if there are no joins - predicate pushdown only benefits joins
-  // Single-table queries don't benefit from this optimization
+  // For queries without joins, combine multiple WHERE clauses into a single clause
+  // to avoid creating multiple filter operators in the pipeline
   if (!query.join || query.join.length === 0) {
+    // Only optimize if there are multiple WHERE clauses to combine
+    if (query.where.length > 1) {
+      // Combine multiple WHERE clauses into a single AND expression
+      const splitWhereClauses = splitAndClauses(query.where)
+      const combinedWhere = combineWithAnd(splitWhereClauses)
+
+      return {
+        ...query,
+        where: [combinedWhere],
+      }
+    }
+
+    // For single WHERE clauses, no optimization needed
     return query
   }
 
@@ -674,6 +687,20 @@ function applyOptimizations(
     // If optimized and no outer JOINs - don't keep (original behavior)
   }
 
+  // Combine multiple remaining WHERE clauses into a single clause to avoid
+  // multiple filter operations in the pipeline (performance optimization)
+  // First flatten any nested AND expressions to avoid and(and(...), ...)
+  const finalWhere: Array<Where> =
+    remainingWhereClauses.length > 1
+      ? [
+          combineWithAnd(
+            remainingWhereClauses.flatMap((clause) =>
+              splitAndClausesRecursive(getWhereExpression(clause))
+            )
+          ),
+        ]
+      : remainingWhereClauses
+
   // Create a completely new query object to ensure immutability
   const optimizedQuery: QueryIR = {
     // Copy all non-optimized fields as-is
@@ -692,8 +719,8 @@ function applyOptimizations(
     from: optimizedFrom,
     join: optimizedJoins,
 
-    // Only include WHERE clauses that weren't successfully optimized
-    where: remainingWhereClauses.length > 0 ? remainingWhereClauses : [],
+    // Include combined WHERE clauses
+    where: finalWhere.length > 0 ? finalWhere : [],
   }
 
   return optimizedQuery
