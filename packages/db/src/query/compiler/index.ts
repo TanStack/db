@@ -3,6 +3,7 @@ import { optimizeQuery } from "../optimizer.js"
 import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
+  DuplicateAliasInSubqueryError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
@@ -98,6 +99,11 @@ export function compileQuery(
   if (cachedResult) {
     return cachedResult
   }
+
+  // Validate the raw query BEFORE optimization to check user's original structure.
+  // This must happen before optimization because the optimizer may create internal
+  // subqueries (e.g., for predicate pushdown) that reuse aliases, which is fine.
+  validateQueryStructure(rawQuery)
 
   // Optimize the query before compilation
   const { optimizedQuery: query, sourceWhereClauses } = optimizeQuery(rawQuery)
@@ -373,6 +379,74 @@ export function compileQuery(
   cache.set(rawQuery, compilationResult)
 
   return compilationResult
+}
+
+/**
+ * Collects aliases used for DIRECT collection references (not subqueries).
+ * Used to validate that subqueries don't reuse parent query collection aliases.
+ * Only direct CollectionRef aliases matter - QueryRef aliases don't cause conflicts.
+ */
+function collectDirectCollectionAliases(query: QueryIR): Set<string> {
+  const aliases = new Set<string>()
+
+  // Collect FROM alias only if it's a direct collection reference
+  if (query.from.type === `collectionRef`) {
+    aliases.add(query.from.alias)
+  }
+
+  // Collect JOIN aliases only for direct collection references
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (joinClause.from.type === `collectionRef`) {
+        aliases.add(joinClause.from.alias)
+      }
+    }
+  }
+
+  return aliases
+}
+
+/**
+ * Validates the structure of a query and its subqueries.
+ * Checks that subqueries don't reuse collection aliases from parent queries.
+ * This must be called on the RAW query before optimization.
+ */
+function validateQueryStructure(
+  query: QueryIR,
+  parentCollectionAliases: Set<string> = new Set()
+): void {
+  // Collect direct collection aliases from this query level
+  const currentLevelAliases = collectDirectCollectionAliases(query)
+
+  // Check if any current alias conflicts with parent aliases
+  for (const alias of currentLevelAliases) {
+    if (parentCollectionAliases.has(alias)) {
+      throw new DuplicateAliasInSubqueryError(
+        alias,
+        Array.from(parentCollectionAliases)
+      )
+    }
+  }
+
+  // Combine parent and current aliases for checking nested subqueries
+  const combinedAliases = new Set([
+    ...parentCollectionAliases,
+    ...currentLevelAliases,
+  ])
+
+  // Recursively validate FROM subquery
+  if (query.from.type === `queryRef`) {
+    validateQueryStructure(query.from.query, combinedAliases)
+  }
+
+  // Recursively validate JOIN subqueries
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (joinClause.from.type === `queryRef`) {
+        validateQueryStructure(joinClause.from.query, combinedAliases)
+      }
+    }
+  }
 }
 
 /**
