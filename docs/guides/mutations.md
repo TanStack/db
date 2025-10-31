@@ -814,8 +814,12 @@ const userProfile = createCollection(
 
 const tx = createTransaction({
   mutationFn: async ({ transaction }) => {
-    // Server collection mutations are handled by their onUpdate handler automatically
-    // (onUpdate will be called and awaited first)
+    // Handle server collection mutations explicitly in mutationFn
+    await Promise.all(
+      transaction.mutations
+        .filter((m) => m.collection === userProfile)
+        .map((m) => api.profile.update(m.modified))
+    )
 
     // After server mutations succeed, accept local collection mutations
     localSettings.utils.acceptMutations(transaction)

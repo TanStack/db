@@ -125,8 +125,12 @@ const serverCollection = createCollection(
 
 const tx = createTransaction({
   mutationFn: async ({ transaction }) => {
-    // Server collection mutations are handled by their onInsert handler automatically
-    // (onInsert will be called and awaited first)
+    // Handle server collection mutations explicitly in mutationFn
+    await Promise.all(
+      transaction.mutations
+        .filter((m) => m.collection === serverCollection)
+        .map((m) => api.items.create(m.modified))
+    )
 
     // After server mutations succeed, accept local collection mutations
     localData.utils.acceptMutations(transaction)
