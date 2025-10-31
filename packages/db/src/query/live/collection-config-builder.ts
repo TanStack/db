@@ -2,7 +2,6 @@ import { D2, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../compiler/index.js"
 import { buildQuery, getQueryIR } from "../builder/index.js"
 import {
-  CustomGetKeyWithJoinError,
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
 } from "../../errors.js"
@@ -152,11 +151,6 @@ export class CollectionConfigBuilder<
     this.collections = extractCollectionsFromQuery(this.query)
     const collectionAliasesById = extractCollectionAliases(this.query)
 
-    // Validate: Custom getKey is not allowed with joined queries
-    if (config.getKey && this.hasJoins(this.query)) {
-      throw new CustomGetKeyWithJoinError()
-    }
-
     // Build a reverse lookup map from alias to collection instance.
     // This enables self-join support where the same collection can be referenced
     // multiple times with different aliases (e.g., { employee: col, manager: col })
@@ -231,6 +225,9 @@ export class CollectionConfigBuilder<
         getBuilder: () => this,
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
+        // Metadata for error handling
+        _hasCustomGetKey: !!this.config.getKey,
+        _hasJoins: this.hasJoins(this.query),
       },
     }
   }

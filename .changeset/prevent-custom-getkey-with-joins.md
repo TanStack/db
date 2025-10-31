@@ -2,40 +2,54 @@
 "@tanstack/db": patch
 ---
 
-Fix: Prevent custom getKey with joined queries to avoid key conflicts
+Improve error messages for custom getKey with joined queries
 
-Added runtime validation that throws a clear error when attempting to use a custom `getKey` function with queries containing joins. This prevents a confusing bug where composite keys used internally by joins would conflict with custom keys, causing `CollectionOperationError` during sync.
+Enhanced `DuplicateKeySyncError` to provide better guidance when custom `getKey` is used with joined queries and produces duplicate keys during sync.
 
-Joined queries use composite keys like `"[key1,key2]"` internally to ensure uniqueness across multiple collections. Custom `getKey` functions that return simple keys create a mismatch that leads to duplicate key errors.
+**The Problem:**
+When using custom `getKey` with joins, it's possible to create duplicate keys if the join produces multiple rows. For 1:1 relationships this works fine, but for 1:many relationships it causes confusing duplicate key errors.
 
-The new validation:
+**The Solution:**
+Instead of blocking all custom `getKey` with joins upfront, we now:
 
-- Detects joins in queries and nested subqueries
-- Throws `CustomGetKeyWithJoinError` at collection creation time
-- Provides clear guidance on how to fix the issue
+- Allow custom `getKey` with joins (enabling valid 1:1 use cases)
+- Detect when duplicate keys occur during sync
+- Provide enhanced error message with actionable guidance
 
-**Before:**
+**Valid use case (now supported):**
 
 ```typescript
-// This would fail during sync with confusing errors
-const mediaCollection = createLiveQueryCollection({
-  query: (q) => q.from({ media: mediaBase })
-    .join({ metadata: metadataCollection }, ...),
-  getKey: (media) => media.id, // ❌ Causes key conflict
+// ✅ Works fine - each profile has one user (1:1 relationship)
+const userProfiles = createLiveQueryCollection({
+  query: (q) =>
+    q
+      .from({ profile: profiles })
+      .join({ user: users }, ({ profile, user }) =>
+        eq(profile.userId, user.id)
+      ),
+  getKey: (profile) => profile.id, // Unique keys - no problem!
 })
 ```
 
-**After:**
+**Error case with better messaging:**
 
 ```typescript
-// Now throws immediately with clear error message
-// Remove getKey to use default composite key behavior
-const mediaCollection = createLiveQueryCollection({
-  query: (q) => q.from({ media: mediaBase })
-    .join({ metadata: metadataCollection }, ...),
-  // ✅ No getKey - uses composite keys correctly
+// ⚠️ Multiple comments per user - produces duplicate keys
+const userComments = createLiveQueryCollection({
+  query: (q) =>
+    q
+      .from({ user: users })
+      .join({ comment: comments }, ({ user, comment }) =>
+        eq(user.id, comment.userId)
+      ),
+  getKey: (item) => item.userId, // Same userId for multiple rows!
 })
 
-// To find items, use array methods instead of .get()
-const item = mediaCollection.toArray.find(m => m.id === 'uuid')
+// Now throws helpful error:
+// "Cannot insert document with key "user1" from sync because it already exists.
+// This collection uses a custom getKey with joined queries. Joined queries can
+// produce multiple rows with the same key when relationships are not 1:1.
+// Consider: (1) using a composite key (e.g., `${item.key1}-${item.key2}`),
+// (2) ensuring your join produces unique rows per key, or (3) removing the
+// custom getKey to use the default composite key behavior."
 ```
