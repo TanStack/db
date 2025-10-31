@@ -11,6 +11,7 @@ import type {
   QueryFunctionContext,
   QueryKey,
   QueryObserverOptions,
+  QueryObserverResult,
 } from "@tanstack/query-core"
 import type {
   BaseCollectionConfig,
@@ -130,8 +131,11 @@ export interface QueryCollectionConfig<
 
 /**
  * Type for the refetch utility function
+ * Returns the QueryObserverResult from TanStack Query
  */
-export type RefetchFn = (opts?: { throwOnError?: boolean }) => Promise<void>
+export type RefetchFn = (opts?: {
+  throwOnError?: boolean
+}) => Promise<QueryObserverResult<any, any> | void>
 
 /**
  * Utility methods available on Query Collections for direct writes and manual operations.
@@ -473,6 +477,8 @@ export function queryCollectionOptions(
   let errorCount = 0
   /** The timestamp for when the query most recently returned the status as "error" */
   let lastErrorUpdatedAt = 0
+  /** Reference to the QueryObserver for imperative refetch */
+  let queryObserver: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
 
   /** Query state tracking from QueryObserver */
   const queryState = {
@@ -495,14 +501,15 @@ export function queryCollectionOptions(
     > = {
       queryKey: queryKey,
       queryFn: queryFn,
-      meta: meta,
-      enabled: enabled,
-      refetchInterval: refetchInterval,
-      retry: retry,
-      retryDelay: retryDelay,
-      staleTime: staleTime,
       structuralSharing: true,
       notifyOnChangeProps: `all`,
+      // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used
+      ...(meta !== undefined && { meta }),
+      ...(enabled !== undefined && { enabled }),
+      ...(refetchInterval !== undefined && { refetchInterval }),
+      ...(retry !== undefined && { retry }),
+      ...(retryDelay !== undefined && { retryDelay }),
+      ...(staleTime !== undefined && { staleTime }),
     }
 
     const localObserver = new QueryObserver<
@@ -512,6 +519,9 @@ export function queryCollectionOptions(
       Array<any>,
       any
     >(queryClient, observerOptions)
+
+    // Store reference for imperative refetch
+    queryObserver = localObserver
 
     // Initialize query state with current observer state
     const initialResult = localObserver.getCurrentResult()
@@ -671,17 +681,32 @@ export function queryCollectionOptions(
 
   /**
    * Refetch the query data
-   * @returns Promise that resolves when the refetch is complete
+   *
+   * Uses queryObserver.refetch() because:
+   * - Bypasses `enabled: false` to support manual/imperative refetch patterns (e.g., button-triggered fetch)
+   * - Ensures clearError() works even when enabled: false
+   * - Always refetches THIS specific collection (exact targeting via observer)
+   * - Respects retry, retryDelay, and other observer options
+   *
+   * This matches TanStack Query's hook behavior where refetch() bypasses enabled: false.
+   * See: https://tanstack.com/query/latest/docs/framework/react/guides/disabling-queries
+   *
+   * Used by both:
+   * - utils.refetch() - for explicit user-triggered refetches
+   * - Internal handlers (onInsert/onUpdate/onDelete) - after mutations to get fresh data
+   *
+   * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
    */
-  const refetch: RefetchFn = (opts) => {
-    return queryClient.refetchQueries(
-      {
-        queryKey: queryKey,
-      },
-      {
-        throwOnError: opts?.throwOnError,
-      }
-    )
+  const refetch: RefetchFn = async (opts) => {
+    // Observer is created when sync starts. If never synced, nothing to refetch.
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+    if (!queryObserver) {
+      return
+    }
+    // Return the QueryObserverResult for users to inspect
+    return queryObserver.refetch({
+      throwOnError: opts?.throwOnError,
+    })
   }
 
   // Create write context for manual write operations
@@ -773,11 +798,11 @@ export function queryCollectionOptions(
       {
         refetch,
         ...writeUtils,
-        clearError: () => {
+        clearError: async () => {
           lastError = undefined
           errorCount = 0
           lastErrorUpdatedAt = 0
-          return refetch({ throwOnError: true })
+          await refetch({ throwOnError: true })
         },
       },
       {
@@ -830,6 +855,6 @@ export function queryCollectionOptions(
           enumerable: true,
         },
       }
-    ),
+    ) as any,
   }
 }

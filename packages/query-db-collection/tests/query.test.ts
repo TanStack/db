@@ -669,52 +669,78 @@ describe(`QueryCollection`, () => {
       const onInsertDefault = vi.fn().mockResolvedValue(undefined) // Default behavior should refetch
       const onInsertFalse = vi.fn().mockResolvedValue({ refetch: false }) // No refetch
 
-      // Create a spy on the refetch function itself
-      const refetchSpy = vi.fn().mockResolvedValue(undefined)
-
       // Create configs with the handlers
+      const queryFnDefault = vi
+        .fn()
+        .mockResolvedValue([{ id: `1`, name: `Item 1` }])
+      const queryFnFalse = vi
+        .fn()
+        .mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
       const configDefault: QueryCollectionConfig<TestItem> = {
         id: `test-default`,
         queryClient,
         queryKey: [`refetchTest`, `default`],
-        queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+        queryFn: queryFnDefault,
         getKey,
         onInsert: onInsertDefault,
+        startSync: true,
       }
 
       const configFalse: QueryCollectionConfig<TestItem> = {
         id: `test-false`,
         queryClient,
         queryKey: [`refetchTest`, `false`],
-        queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+        queryFn: queryFnFalse,
         getKey,
         onInsert: onInsertFalse,
+        startSync: true,
       }
-
-      // Mock the queryClient.refetchQueries method which is called by collection.utils.refetch()
-      vi.spyOn(queryClient, `refetchQueries`).mockImplementation(refetchSpy)
 
       // Test case 1: Default behavior (undefined return) should trigger refetch
       const optionsDefault = queryCollectionOptions(configDefault)
+      const collectionDefault = createCollection(optionsDefault)
+
+      // Wait for initial sync
+      await vi.waitFor(() => {
+        expect(collectionDefault.status).toBe(`ready`)
+      })
+
+      // Clear initial call
+      queryFnDefault.mockClear()
+
       await optionsDefault.onInsert!(insertMockParams)
 
-      // Verify handler was called and refetch was triggered
+      // Verify handler was called and refetch was triggered (queryFn called again)
       expect(onInsertDefault).toHaveBeenCalledWith(insertMockParams)
-      expect(refetchSpy).toHaveBeenCalledTimes(1)
-
-      // Reset mocks
-      refetchSpy.mockClear()
+      await vi.waitFor(() => {
+        expect(queryFnDefault).toHaveBeenCalledTimes(1)
+      })
 
       // Test case 2: Explicit { refetch: false } should not trigger refetch
       const optionsFalse = queryCollectionOptions(configFalse)
+      const collectionFalse = createCollection(optionsFalse)
+
+      // Wait for initial sync
+      await vi.waitFor(() => {
+        expect(collectionFalse.status).toBe(`ready`)
+      })
+
+      // Clear initial call
+      queryFnFalse.mockClear()
+
       await optionsFalse.onInsert!(insertMockParams)
 
-      // Verify handler was called but refetch was NOT triggered
+      // Verify handler was called but refetch was NOT triggered (queryFn not called)
       expect(onInsertFalse).toHaveBeenCalledWith(insertMockParams)
-      expect(refetchSpy).not.toHaveBeenCalled()
+      // Wait a bit to ensure no refetch happens
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(queryFnFalse).not.toHaveBeenCalled()
 
-      // Restore original function
-      vi.restoreAllMocks()
+      await Promise.all([
+        collectionDefault.cleanup(),
+        collectionFalse.cleanup(),
+      ])
     })
   })
 
@@ -1958,6 +1984,247 @@ describe(`QueryCollection`, () => {
     })
   })
 
+  it(`should use exact targeting when refetching to avoid unintended cascading of related queries`, async () => {
+    // Create multiple collections with related but distinct query keys
+    const queryKey = [`todos`]
+    const queryKey1 = [`todos`, `project-1`]
+    const queryKey2 = [`todos`, `project-2`]
+
+    const mockItems = [{ id: `1`, name: `Item 1` }]
+    const queryFn = vi.fn().mockResolvedValue(mockItems)
+    const queryFn1 = vi.fn().mockResolvedValue(mockItems)
+    const queryFn2 = vi.fn().mockResolvedValue(mockItems)
+
+    const config: QueryCollectionConfig<TestItem> = {
+      id: `all-todos`,
+      queryClient,
+      queryKey: queryKey,
+      queryFn: queryFn,
+      getKey,
+      startSync: true,
+    }
+    const config1: QueryCollectionConfig<TestItem> = {
+      id: `project-1-todos`,
+      queryClient,
+      queryKey: queryKey1,
+      queryFn: queryFn1,
+      getKey,
+      startSync: true,
+    }
+    const config2: QueryCollectionConfig<TestItem> = {
+      id: `project-2-todos`,
+      queryClient,
+      queryKey: queryKey2,
+      queryFn: queryFn2,
+      getKey,
+      startSync: true,
+    }
+
+    const options = queryCollectionOptions(config)
+    const options1 = queryCollectionOptions(config1)
+    const options2 = queryCollectionOptions(config2)
+
+    const collection = createCollection(options)
+    const collection1 = createCollection(options1)
+    const collection2 = createCollection(options2)
+
+    // Wait for initial queries to complete
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(queryFn1).toHaveBeenCalledTimes(1)
+      expect(queryFn2).toHaveBeenCalledTimes(1)
+      expect(collection.status).toBe(`ready`)
+    })
+
+    // Reset call counts to test refetch behavior
+    queryFn.mockClear()
+    queryFn1.mockClear()
+    queryFn2.mockClear()
+
+    // Refetch the target collection with key ['todos', 'project-1']
+    await collection1.utils.refetch()
+
+    // Verify that only the target query was refetched
+    await vi.waitFor(() => {
+      expect(queryFn1).toHaveBeenCalledTimes(1)
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(queryFn2).not.toHaveBeenCalled()
+    })
+
+    // Cleanup
+    await Promise.all([
+      collection.cleanup(),
+      collection1.cleanup(),
+      collection2.cleanup(),
+    ])
+  })
+
+  it(`should use exact targeting when clearError() refetches to avoid unintended cascading`, async () => {
+    const queryKey1 = [`todos`, `project-1`]
+    const queryKey2 = [`todos`, `project-2`]
+
+    const testError = new Error(`Test error`)
+    const mockItems = [{ id: `1`, name: `Item 1` }]
+    const queryFn1 = vi
+      .fn()
+      .mockRejectedValueOnce(testError)
+      .mockResolvedValue(mockItems)
+    const queryFn2 = vi.fn().mockResolvedValue(mockItems)
+
+    const config1: QueryCollectionConfig<TestItem> = {
+      id: `project-1-todos-clear-error`,
+      queryClient,
+      queryKey: queryKey1,
+      queryFn: queryFn1,
+      getKey,
+      startSync: true,
+      retry: false,
+    }
+    const config2: QueryCollectionConfig<TestItem> = {
+      id: `project-2-todos-clear-error`,
+      queryClient,
+      queryKey: queryKey2,
+      queryFn: queryFn2,
+      getKey,
+      startSync: true,
+      retry: false,
+    }
+
+    const options1 = queryCollectionOptions(config1)
+    const options2 = queryCollectionOptions(config2)
+
+    const collection1 = createCollection(options1)
+    const collection2 = createCollection(options2)
+
+    await vi.waitFor(() => {
+      expect(collection1.utils.isError()).toBe(true)
+      expect(collection2.status).toBe(`ready`)
+    })
+
+    queryFn1.mockClear()
+    queryFn2.mockClear()
+
+    await collection1.utils.clearError()
+
+    await vi.waitFor(() => {
+      expect(queryFn1).toHaveBeenCalledTimes(1)
+      expect(queryFn2).not.toHaveBeenCalled()
+    })
+
+    await Promise.all([collection1.cleanup(), collection2.cleanup()])
+  })
+
+  it(`should propagate errors when throwOnError is true in refetch`, async () => {
+    const testError = new Error(`Refetch error`)
+    const queryKey = [`throw-on-error-test`]
+    const queryFn = vi.fn().mockRejectedValue(testError)
+
+    await queryClient.prefetchQuery({ queryKey, queryFn })
+
+    const collection = createCollection(
+      queryCollectionOptions({
+        id: `throw-on-error-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        retry: false,
+        startSync: true,
+      })
+    )
+
+    await vi.waitFor(() => {
+      expect(collection.utils.isError).toBe(true)
+    })
+
+    await expect(
+      collection.utils.refetch({ throwOnError: true })
+    ).rejects.toThrow(testError)
+
+    // Should not throw when throwOnError is false
+    await collection.utils.refetch({ throwOnError: false })
+
+    await collection.cleanup()
+  })
+
+  describe(`refetch() behavior`, () => {
+    it(`should refetch when collection is syncing (startSync: true)`, async () => {
+      const queryKey = [`refetch-test-syncing`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-test-syncing`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          startSync: true,
+        })
+      )
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      queryFn.mockClear()
+
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      await collection.cleanup()
+    })
+
+    it(`should refetch even when enabled: false (imperative refetch pattern)`, async () => {
+      const mockItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryKey = [`manual-fetch-test`]
+      const queryFn = vi.fn().mockResolvedValue(mockItems)
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `manual-fetch-test`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          enabled: false,
+          startSync: true,
+        })
+      )
+
+      // Query should not auto-fetch due to enabled: false
+      expect(queryFn).not.toHaveBeenCalled()
+
+      // But manual refetch should work
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      await collection.cleanup()
+    })
+
+    it(`should be no-op when sync has not started (no observer created)`, async () => {
+      const queryKey = [`refetch-test-no-sync`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-test-no-sync`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          startSync: false,
+        })
+      )
+
+      // Refetch should be no-op because observer doesn't exist yet
+      await collection.utils.refetch()
+      expect(queryFn).not.toHaveBeenCalled()
+
+      await collection.cleanup()
+    })
+  })
+
   describe(`Error Handling`, () => {
     // Helper to create test collection with common configuration
     const createErrorHandlingTestCollection = (
@@ -2338,6 +2605,187 @@ describe(`QueryCollection`, () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.status).toBe(`ready`)
       expect(collection.size).toBe(items.length)
+    })
+
+    it(`should allow writeDelete in onDelete handler to write to synced store`, async () => {
+      const queryKey = [`writeDelete-in-onDelete-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const onDelete = vi.fn(async ({ transaction, collection }) => {
+        const deletedItem = transaction.mutations[0]?.original
+        // Call writeDelete inside onDelete handler - this should work without throwing
+        collection.utils.writeDelete(deletedItem.id)
+        return { refetch: false }
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `writeDelete-in-onDelete-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        onDelete,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.size).toBe(2)
+      })
+
+      const transaction = collection.delete(`1`)
+      await transaction.isPersisted.promise
+
+      // Verify the fix: writeDelete should work, transaction completes, item is deleted
+      expect(transaction.state).toBe(`completed`)
+      expect(onDelete).toHaveBeenCalledTimes(1)
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.size).toBe(1)
+    })
+  })
+
+  describe(`QueryClient defaultOptions`, () => {
+    it(`should respect defaultOptions from QueryClient when not overridden`, async () => {
+      // Create a QueryClient with custom defaultOptions
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 10000, // 10 seconds
+            retry: 2,
+            refetchOnWindowFocus: false,
+          },
+        },
+      })
+
+      const queryKey = [`defaultOptionsTest`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Create a collection without specifying staleTime or retry
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `defaultOptionsTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Verify queryFn was called once
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // Verify the query has the correct staleTime from defaultOptions
+      const query = customQueryClient.getQueryCache().find({ queryKey })
+      expect((query?.options as any).staleTime).toBe(10000)
+
+      // Clean up
+      customQueryClient.clear()
+    })
+
+    it(`should override defaultOptions when explicitly provided in queryCollectionOptions`, async () => {
+      // Create a QueryClient with custom defaultOptions
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 10000, // 10 seconds default
+            retry: 2,
+          },
+        },
+      })
+
+      const queryKey = [`overrideOptionsTest`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Create a collection WITH explicit staleTime override
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `overrideOptionsTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        staleTime: 100, // Override to 100ms
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Verify the query uses the overridden staleTime (100ms), not the default (10000ms)
+      const query = customQueryClient.getQueryCache().find({ queryKey })
+      expect((query?.options as any).staleTime).toBe(100)
+
+      // Clean up
+      customQueryClient.clear()
+    })
+
+    it(`should use retry from QueryClient defaultOptions when not overridden`, async () => {
+      let callCount = 0
+      // Create a QueryClient with custom retry defaultOption
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: 2, // Retry 2 times
+            retryDelay: 1, // 1ms delay for fast test
+          },
+        },
+      })
+
+      const queryKey = [`retryDefaultOptionsTest`]
+      const queryFn = vi.fn().mockImplementation(() => {
+        callCount++
+        // Fail on first 2 attempts, succeed on 3rd
+        if (callCount <= 2) {
+          return Promise.reject(new Error(`Attempt ${callCount} failed`))
+        }
+        return Promise.resolve([{ id: `1`, name: `Item 1` }])
+      })
+
+      // Create a collection without specifying retry
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `retryDefaultOptionsTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for the query to eventually succeed (after retries)
+      await vi.waitFor(
+        () => {
+          expect(collection.status).toBe(`ready`)
+        },
+        { timeout: 2000 }
+      )
+
+      // Should have called queryFn 3 times (initial + 2 retries)
+      expect(callCount).toBe(3)
+
+      // Clean up
+      customQueryClient.clear()
     })
   })
 
