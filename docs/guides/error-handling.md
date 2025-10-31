@@ -358,34 +358,6 @@ try {
 }
 ```
 
-### Storage Errors
-
-#### SerializationError
-
-Thrown when an item cannot be JSON serialized during storage operations:
-
-```ts
-import { SerializationError } from "@tanstack/db"
-
-const collection = createCollection({
-  id: "todos",
-  getKey: (item) => item.id,
-})
-
-// Objects with circular references or functions can't be serialized
-const itemWithCircularRef = { id: "1", text: "Todo" }
-itemWithCircularRef.self = itemWithCircularRef
-
-try {
-  collection.insert(itemWithCircularRef)
-} catch (error) {
-  if (error instanceof SerializationError) {
-    console.log("Item contains non-serializable data")
-    // Remove circular references, functions, or other non-serializable data
-  }
-}
-```
-
 ## Sync Error Handling
 
 ### Query Collection Sync Errors
