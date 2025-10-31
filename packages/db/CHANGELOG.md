@@ -1,5 +1,101 @@
 # @tanstack/db
 
+## 0.4.16
+
+### Patch Changes
+
+- Enable auto-indexing for nested field paths ([#728](https://github.com/TanStack/db/pull/728))
+
+  Previously, auto-indexes were only created for top-level fields. Queries filtering on nested fields like `vehicleDispatch.date` or `profile.score` were forced to perform full table scans, causing significant performance issues.
+
+  Now, auto-indexes are automatically created for nested field paths of any depth when using `eq()`, `gt()`, `gte()`, `lt()`, `lte()`, or `in()` operations.
+
+  **Performance Impact:**
+
+  Before this fix, filtering on nested fields resulted in expensive full scans:
+  - Query time: ~353ms for 39 executions (from issue #727)
+  - "graph run" and "d2ts join" operations dominated execution time
+
+  After this fix, nested field queries use indexes:
+  - Query time: Sub-millisecond (typical indexed lookup)
+  - Proper index utilization verified through query optimizer
+
+  **Example:**
+
+  ```typescript
+  const collection = createCollection({
+    getKey: (item) => item.id,
+    autoIndex: "eager", // default
+    // ... sync config
+  })
+
+  // These now automatically create and use indexes:
+  collection.subscribeChanges((items) => console.log(items), {
+    whereExpression: eq(row.vehicleDispatch?.date, "2024-01-01"),
+  })
+
+  collection.subscribeChanges((items) => console.log(items), {
+    whereExpression: gt(row.profile?.stats.rating, 4.5),
+  })
+  ```
+
+  **Index Naming:**
+
+  Auto-indexes for nested paths use the format `auto:field.path` to avoid naming conflicts:
+  - `auto:status` for top-level field `status`
+  - `auto:profile.score` for nested field `profile.score`
+  - `auto:metadata.stats.views` for deeply nested field `metadata.stats.views`
+
+  Fixes #727
+
+- Fixed performance issue where using multiple `.where()` calls created multiple filter operators in the query pipeline. The optimizer now implements the missing final step (step 3) of combining remaining WHERE clauses into a single AND expression. This applies to both queries with and without joins: ([#732](https://github.com/TanStack/db/pull/732))
+  - Queries without joins: Multiple WHERE clauses are now combined before compilation
+  - Queries with joins: Remaining WHERE clauses after predicate pushdown are combined
+
+  This reduces filter operators from N to 1, making chained `.where()` calls perform identically to using a single `.where()` with `and()`.
+
+- Add paced mutations with pluggable timing strategies ([#704](https://github.com/TanStack/db/pull/704))
+
+  Introduces a new paced mutations system that enables optimistic mutations with pluggable timing strategies. This provides fine-grained control over when and how mutations are persisted to the backend. Powered by [TanStack Pacer](https://github.com/TanStack/pacer).
+
+  **Key Design:**
+  - **Debounce/Throttle**: Only one pending transaction (collecting mutations) and one persisting transaction (writing to backend) at a time. Multiple rapid mutations automatically merge together.
+  - **Queue**: Each mutation creates a separate transaction, guaranteed to run in the order they're made (FIFO by default, configurable to LIFO).
+
+  **Core Features:**
+  - **Pluggable Strategy System**: Choose from debounce, queue, or throttle strategies to control mutation timing
+  - **Auto-merging Mutations**: Multiple rapid mutations on the same item automatically merge for efficiency (debounce/throttle only)
+  - **Transaction Management**: Full transaction lifecycle tracking (pending → persisting → completed/failed)
+  - **React Hook**: `usePacedMutations` for easy integration in React applications
+
+  **Available Strategies:**
+  - `debounceStrategy`: Wait for inactivity before persisting. Only final state is saved. (ideal for auto-save, search-as-you-type)
+  - `queueStrategy`: Each mutation becomes a separate transaction, processed sequentially in order (defaults to FIFO, configurable to LIFO). All mutations are guaranteed to persist. (ideal for sequential workflows, rate-limited APIs)
+  - `throttleStrategy`: Ensure minimum spacing between executions. Mutations between executions are merged. (ideal for analytics, progress updates)
+
+  **Example Usage:**
+
+  ```ts
+  import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
+
+  const mutate = usePacedMutations({
+    mutationFn: async ({ transaction }) => {
+      await api.save(transaction.mutations)
+    },
+    strategy: debounceStrategy({ wait: 500 }),
+  })
+
+  // Trigger a mutation
+  const tx = mutate(() => {
+    collection.update(id, (draft) => {
+      draft.value = newValue
+    })
+  })
+
+  // Optionally await persistence
+  await tx.isPersisted.promise
+  ```
+
 ## 0.4.15
 
 ### Patch Changes

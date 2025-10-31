@@ -230,10 +230,10 @@ importers:
         specifier: ^5.90.5
         version: 5.90.5
       '@tanstack/query-db-collection':
-        specifier: ^0.2.38
+        specifier: ^0.2.39
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.37
+        specifier: ^0.1.38
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.133.32
