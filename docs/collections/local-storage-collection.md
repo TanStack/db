@@ -52,6 +52,7 @@ The `localStorageCollectionOptions` function accepts the following options:
 
 - `schema`: [Standard Schema](https://standardschema.dev) compatible schema (e.g., Zod, Effect) for client-side validation
 - `storage`: Custom storage implementation (defaults to `localStorage`). Can be `sessionStorage` or any object with the localStorage API
+- `storageEventApi`: Event API for subscribing to storage events (defaults to `window`). Enables custom cross-tab, cross-window, or cross-process synchronization
 - `onInsert`: Optional handler function called when items are inserted
 - `onUpdate`: Optional handler function called when items are updated
 - `onDelete`: Optional handler function called when items are deleted
@@ -116,6 +117,39 @@ const secureCollection = createCollection(
   })
 )
 ```
+
+### Cross-Tab Sync with Custom Storage
+
+The `storageEventApi` option (defaults to `window`) allows the collection to subscribe to storage events for cross-tab synchronization. A custom storage implementation can provide this API to enable custom cross-tab, cross-window, or cross-process sync:
+
+```typescript
+// Example: Custom storage event API for cross-process sync
+const customStorageEventApi = {
+  addEventListener(event: string, handler: (e: StorageEvent) => void) {
+    // Custom event subscription logic
+    // Could be IPC, WebSocket, or any other mechanism
+    myCustomEventBus.on('storage-change', handler)
+  },
+  removeEventListener(event: string, handler: (e: StorageEvent) => void) {
+    myCustomEventBus.off('storage-change', handler)
+  },
+}
+
+const syncedCollection = createCollection(
+  localStorageCollectionOptions({
+    id: 'synced-data',
+    storageKey: 'data-key',
+    storage: customStorage,
+    storageEventApi: customStorageEventApi, // Custom event API
+    getKey: (item) => item.id,
+  })
+)
+```
+
+This enables synchronization across different contexts beyond just browser tabs, such as:
+- Cross-process communication in Electron apps
+- WebSocket-based sync across multiple browser windows
+- Custom IPC mechanisms in desktop applications
 
 ## Mutation Handlers
 
@@ -251,14 +285,6 @@ LocalStorage collections are perfect for:
 - Recently viewed items
 - User-specific configurations
 - Small amounts of cached data
-
-## When Not to Use
-
-For these scenarios, consider other collection types:
-- **Large datasets**: localStorage has size limits (typically 5-10MB)
-- **Server-synchronized data**: Use [`QueryCollection`](./query-collection.md) or [`ElectricCollection`](./electric-collection.md)
-- **Session-only data without persistence**: Use [`LocalOnlyCollection`](./local-only-collection.md)
-- **Offline-first with sync**: Use [`RxDBCollection`](./rxdb-collection.md)
 
 ## Learn More
 

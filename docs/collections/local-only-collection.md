@@ -287,14 +287,6 @@ LocalOnly collections are perfect for:
 - Temporary filters or search state
 - In-memory caches
 
-## When Not to Use
-
-For these scenarios, consider other collection types:
-- **Data that should persist across sessions**: Use [`LocalStorageCollection`](./local-storage-collection.md)
-- **Data that syncs across tabs**: Use [`LocalStorageCollection`](./local-storage-collection.md)
-- **Server-synchronized data**: Use [`QueryCollection`](./query-collection.md) or [`ElectricCollection`](./electric-collection.md)
-- **Offline-first with sync**: Use [`RxDBCollection`](./rxdb-collection.md)
-
 ## Comparison with LocalStorageCollection
 
 | Feature | LocalOnly | LocalStorage |
