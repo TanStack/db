@@ -225,9 +225,9 @@ export class CollectionConfigBuilder<
         getBuilder: () => this,
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
-        // Metadata for error handling
-        _hasCustomGetKey: !!this.config.getKey,
-        _hasJoins: this.hasJoins(this.query),
+        // Metadata for error handling (as functions to match UtilsRecord type)
+        _hasCustomGetKey: () => !!this.config.getKey,
+        _hasJoins: () => this.hasJoins(this.query),
       },
     }
   }

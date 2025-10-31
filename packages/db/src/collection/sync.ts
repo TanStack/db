@@ -130,8 +130,8 @@ export class CollectionSyncManager<
                   // Check if this is a live query with custom getKey and joins for better error messaging
                   const utils = this.config.utils as any
                   throw new DuplicateKeySyncError(key, this.id, {
-                    hasCustomGetKey: utils?._hasCustomGetKey,
-                    hasJoins: utils?._hasJoins,
+                    hasCustomGetKey: utils?._hasCustomGetKey?.(),
+                    hasJoins: utils?._hasJoins?.(),
                   })
                 }
               }
