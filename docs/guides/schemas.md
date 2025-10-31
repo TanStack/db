@@ -17,7 +17,7 @@ This guide covers:
 
 ## Quick Example
 
-Schemas catch invalid data before it enters your collection:
+Schemas catch invalid data from optimistic mutations before it enters your collection:
 
 ```typescript
 import { z } from 'zod'
@@ -154,55 +154,6 @@ collection.insert({
 const todo = collection.get("1")
 console.log(todo.created_at.getFullYear())  // It's a Date!
 ```
-
-### The Data Flow
-
-Here's how data flows through the system:
-
-```
-┌─────────────────────────────────────────────────┐
-│           User Code / API Response              │
-│              (TInput format)                    │
-│     { created_at: "2024-01-01T00:00:00Z" }    │
-└────────────────────┬────────────────────────────┘
-                     │
-                     ↓
-┌─────────────────────────────────────────────────┐
-│         collection.insert(data)                 │
-│                    or                           │
-│         collection.validateData(data)           │
-└────────────────────┬────────────────────────────┘
-                     │
-                     ↓
-┌─────────────────────────────────────────────────┐
-│      Schema Validation & Transformation         │
-│              (TInput → TOutput)                 │
-│                                                 │
-│  1. Validate types and constraints              │
-│  2. Apply transformations (.transform())        │
-│  3. Apply defaults (.default())                 │
-│  4. Return validated TOutput                    │
-└────────────────────┬────────────────────────────┘
-                     │
-                     ↓
-┌─────────────────────────────────────────────────┐
-│           Collection Storage                    │
-│             (TOutput format)                    │
-│         { created_at: Date object }            │
-└────────────────────┬────────────────────────────┘
-                     │
-                     ↓
-┌─────────────────────────────────────────────────┐
-│      Queries / Reads / Mutation Handlers        │
-│             (TOutput format)                    │
-│         { created_at: Date object }            │
-└─────────────────────────────────────────────────┘
-```
-
-**Key points:**
-1. Schema validation happens at the **collection boundary**
-2. **Everything inside the collection is TOutput**
-3. Validation runs during `insert()`, `update()`, and `validateData()`
 
 ---
 
@@ -872,12 +823,8 @@ const todoCollection = createCollection(
     queryFn: async () => {
       const response = await fetch('/api/todos')
       const todos = await response.json()
-      // Manually parse API responses - schemas only validate client changes
-      return todos.map((todo: any) => ({
-        ...todo,
-        due_date: todo.due_date ? new Date(todo.due_date) : undefined,
-        created_at: new Date(todo.created_at)
-      }))
+      // Reuse schema to parse and transform API responses
+      return todos.map((todo: any) => todoSchema.parse(todo))
     },
     getKey: (item) => item.id,
     schema: todoSchema,
