@@ -4,22 +4,25 @@
 
 Improve error messages for custom getKey with joined queries
 
-Enhanced `DuplicateKeySyncError` to provide better guidance when custom `getKey` is used with joined queries and produces duplicate keys during sync.
+Enhanced `DuplicateKeySyncError` to provide context-aware guidance when duplicate keys occur with custom `getKey` and joined queries.
 
-**The Problem:**
-When using custom `getKey` with joins, it's possible to create duplicate keys if the join produces multiple rows. For 1:1 relationships this works fine, but for 1:many relationships it causes confusing duplicate key errors.
+**The Issue:**
 
-**The Solution:**
-Instead of blocking all custom `getKey` with joins upfront, we now:
+When using custom `getKey` with joins, duplicate keys can occur if the join produces multiple rows with the same key value. This is valid for 1:1 relationships but problematic for 1:many relationships, and the previous error message didn't explain what went wrong or how to fix it.
 
-- Allow custom `getKey` with joins (enabling valid 1:1 use cases)
-- Detect when duplicate keys occur during sync
-- Provide enhanced error message with actionable guidance
+**What's New:**
 
-**Valid use case (now supported):**
+When a duplicate key error occurs in a live query collection that uses both custom `getKey` and joins, the error message now:
+
+- Explains that joined queries can produce multiple rows with the same key
+- Suggests using a composite key in your `getKey` function
+- Provides concrete examples of solutions
+- Helps distinguish between correctly structured 1:1 joins vs problematic 1:many joins
+
+**Example:**
 
 ```typescript
-// ✅ Works fine - each profile has one user (1:1 relationship)
+// ✅ Valid - 1:1 relationship with unique keys
 const userProfiles = createLiveQueryCollection({
   query: (q) =>
     q
@@ -27,14 +30,12 @@ const userProfiles = createLiveQueryCollection({
       .join({ user: users }, ({ profile, user }) =>
         eq(profile.userId, user.id)
       ),
-  getKey: (profile) => profile.id, // Unique keys - no problem!
+  getKey: (profile) => profile.id, // Each profile has unique ID
 })
 ```
 
-**Error case with better messaging:**
-
 ```typescript
-// ⚠️ Multiple comments per user - produces duplicate keys
+// ⚠️ Problematic - 1:many relationship with duplicate keys
 const userComments = createLiveQueryCollection({
   query: (q) =>
     q
@@ -42,14 +43,14 @@ const userComments = createLiveQueryCollection({
       .join({ comment: comments }, ({ user, comment }) =>
         eq(user.id, comment.userId)
       ),
-  getKey: (item) => item.userId, // Same userId for multiple rows!
+  getKey: (item) => item.userId, // Multiple comments share same userId!
 })
 
-// Now throws helpful error:
+// Enhanced error message:
 // "Cannot insert document with key "user1" from sync because it already exists.
 // This collection uses a custom getKey with joined queries. Joined queries can
 // produce multiple rows with the same key when relationships are not 1:1.
-// Consider: (1) using a composite key (e.g., `${item.key1}-${item.key2}`),
+// Consider: (1) using a composite key in your getKey function (e.g., `${item.key1}-${item.key2}`),
 // (2) ensuring your join produces unique rows per key, or (3) removing the
 // custom getKey to use the default composite key behavior."
 ```
