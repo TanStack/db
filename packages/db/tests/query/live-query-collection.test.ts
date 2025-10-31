@@ -1706,4 +1706,45 @@ describe(`createLiveQueryCollection`, () => {
       }
     })
   })
+
+  describe(`custom getKey with joins error handling`, () => {
+    it(`should allow custom getKey with joins (1:1 relationships)`, async () => {
+      // Custom getKey with joins is allowed for 1:1 relationships
+      // where the join produces unique keys per row
+      const base = createCollection(
+        mockSyncCollectionOptions<{ id: string; name: string }>({
+          id: `base-with-custom-key`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, name: `Item 1` }],
+        })
+      )
+
+      const related = createCollection(
+        mockSyncCollectionOptions<{ id: string; value: number }>({
+          id: `related-with-custom-key`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, value: 100 }],
+        })
+      )
+
+      // Custom getKey is allowed - error only occurs if actual duplicates happen
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ base })
+            .join({ related }, ({ base: b, related: r }) => eq(b.id, r.id))
+            .select(({ base: b, related: r }) => ({
+              id: b.id,
+              name: b.name,
+              value: r?.value,
+            })),
+        getKey: (item) => item.id, // Valid for 1:1 joins with unique keys
+      })
+
+      await liveQuery.preload()
+      expect(liveQuery.size).toBe(1)
+      // If duplicate keys occurred, an enhanced error would be thrown
+      // with guidance about composite keys
+    })
+  })
 })

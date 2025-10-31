@@ -173,6 +173,36 @@ export class CollectionConfigBuilder<
     this.compileBasePipeline()
   }
 
+  /**
+   * Recursively checks if a query or any of its subqueries contains joins
+   */
+  private hasJoins(query: QueryIR): boolean {
+    // Check if this query has joins
+    if (query.join && query.join.length > 0) {
+      return true
+    }
+
+    // Recursively check subqueries in the from clause
+    if (query.from.type === `queryRef`) {
+      if (this.hasJoins(query.from.query)) {
+        return true
+      }
+    }
+
+    // Recursively check subqueries in join clauses
+    if (query.join) {
+      for (const joinClause of query.join) {
+        if (joinClause.from.type === `queryRef`) {
+          if (this.hasJoins(joinClause.from.query)) {
+            return true
+          }
+        }
+      }
+    }
+
+    return false
+  }
+
   getConfig(): CollectionConfigSingleRowOption<TResult> & {
     utils: LiveQueryCollectionUtils
   } {
@@ -195,6 +225,9 @@ export class CollectionConfigBuilder<
         getBuilder: () => this,
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
+        // Metadata for error handling (as functions to match UtilsRecord type)
+        _hasCustomGetKey: () => !!this.config.getKey,
+        _hasJoins: () => this.hasJoins(this.query),
       },
     }
   }
