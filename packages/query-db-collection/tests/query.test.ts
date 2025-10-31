@@ -2097,7 +2097,7 @@ describe(`QueryCollection`, () => {
     const collection2 = createCollection(options2)
 
     await vi.waitFor(() => {
-      expect(collection1.utils.isError()).toBe(true)
+      expect(collection1.utils.isError).toBe(true)
       expect(collection2.status).toBe(`ready`)
     })
 

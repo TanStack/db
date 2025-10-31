@@ -21,6 +21,7 @@ import type {
   InsertMutationFnParams,
   SyncConfig,
   UpdateMutationFnParams,
+  UtilsRecord,
 } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
@@ -151,8 +152,6 @@ export interface QueryCollectionUtils<
   TInsertInput extends object = TItem,
   TError = unknown,
 > {
-  /** Allow additional utility functions to be added */
-  [key: string]: any
   /** Manually trigger a refetch of the query */
   refetch: RefetchFn
   /** Insert one or more items directly into the synced data store without triggering a query refetch or optimistic update */
@@ -314,12 +313,7 @@ export function queryCollectionOptions<
     schema: T
     select: (data: TQueryData) => Array<InferSchemaInput<T>>
   }
-): CollectionConfig<
-  InferSchemaOutput<T>,
-  TKey,
-  T,
-  QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
-> & {
+): CollectionConfig<InferSchemaOutput<T>, TKey, T, UtilsRecord> & {
   schema: T
   utils: QueryCollectionUtils<
     InferSchemaOutput<T>,
@@ -352,12 +346,7 @@ export function queryCollectionOptions<
     schema?: never // prohibit schema
     select: (data: TQueryData) => Array<T>
   }
-): CollectionConfig<
-  T,
-  TKey,
-  never,
-  QueryCollectionUtils<T, TKey, T, TError>
-> & {
+): CollectionConfig<T, TKey, never, UtilsRecord> & {
   schema?: never // no schema in the result
   utils: QueryCollectionUtils<T, TKey, T, TError>
 }
@@ -381,12 +370,7 @@ export function queryCollectionOptions<
   > & {
     schema: T
   }
-): CollectionConfig<
-  InferSchemaOutput<T>,
-  TKey,
-  T,
-  QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>
-> & {
+): CollectionConfig<InferSchemaOutput<T>, TKey, T, UtilsRecord> & {
   schema: T
   utils: QueryCollectionUtils<
     InferSchemaOutput<T>,
@@ -412,12 +396,7 @@ export function queryCollectionOptions<
   > & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<
-  T,
-  TKey,
-  never,
-  QueryCollectionUtils<T, TKey, T, TError>
-> & {
+): CollectionConfig<T, TKey, never, UtilsRecord> & {
   schema?: never // no schema in the result
   utils: QueryCollectionUtils<T, TKey, T, TError>
 }
@@ -428,7 +407,7 @@ export function queryCollectionOptions(
   Record<string, unknown>,
   string | number,
   never,
-  QueryCollectionUtils
+  UtilsRecord
 > & {
   utils: QueryCollectionUtils
 } {
@@ -522,14 +501,6 @@ export function queryCollectionOptions(
 
     // Store reference for imperative refetch
     queryObserver = localObserver
-
-    // Initialize query state with current observer state
-    const initialResult = localObserver.getCurrentResult()
-    queryState.isFetching = initialResult.isFetching
-    queryState.isRefetching = initialResult.isRefetching
-    queryState.isLoading = initialResult.isLoading
-    queryState.dataUpdatedAt = initialResult.dataUpdatedAt
-    queryState.fetchStatus = initialResult.fetchStatus
 
     let isSubscribed = false
     let actualUnsubscribeFn: (() => void) | null = null
