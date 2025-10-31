@@ -189,9 +189,9 @@ export function createCollection(
     options
   )
 
-  // Copy utils to both top level and .utils namespace
+  // Attach utils to collection
   if (options.utils) {
-    collection.utils = { ...options.utils }
+    collection.utils = options.utils
   } else {
     collection.utils = {}
   }

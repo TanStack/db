@@ -35,9 +35,9 @@ export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 export type Fn = (...args: Array<any>) => any
 
 /**
- * A record of utility functions that can be attached to a collection
+ * A record of utilities (functions or getters) that can be attached to a collection
  */
-export type UtilsRecord = Record<string, Fn>
+export type UtilsRecord = Record<string, any>
 
 /**
  *
