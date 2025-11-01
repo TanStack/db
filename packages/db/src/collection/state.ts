@@ -50,6 +50,9 @@ export class CollectionStateManager<
   public optimisticUpserts = new Map<TKey, TOutput>()
   public optimisticDeletes = new Set<TKey>()
 
+  // ViewKey mapping for stable rendering keys across ID transitions
+  public viewKeyMap = new Map<TKey, string>()
+
   // Cached size for performance
   public size = 0
 
