@@ -197,6 +197,7 @@ export function processOrderBy(
       limit,
       offset,
       comparator: compare,
+      groupByKey: false,
       setSizeCallback,
       setWindowFn: (
         windowFn: (options: { offset?: number; limit?: number }) => void
