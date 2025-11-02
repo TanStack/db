@@ -14,7 +14,10 @@ import type { Transaction } from "../transactions"
  *
  * @example
  * ```ts
- * const mutate = useSerializedTransaction({
+ * const mutate = usePacedMutations({
+ *   onMutate: (value) => {
+ *     collection.update(id, draft => { draft.value = value })
+ *   },
  *   mutationFn: async ({ transaction }) => {
  *     await api.save(transaction.mutations)
  *   },
