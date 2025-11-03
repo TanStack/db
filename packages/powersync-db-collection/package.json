@@ -39,7 +39,7 @@
   "module": "dist/esm/index.js",
   "packageManager": "pnpm@10.17.0",
   "author": "POWERSYNC",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/TanStack/db.git",
