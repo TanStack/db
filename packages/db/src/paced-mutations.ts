@@ -53,7 +53,7 @@ export interface PacedMutationsConfig<
  *     // Apply optimistic update immediately
  *     collection.update(id, draft => { draft.text = text })
  *   },
- *   mutationFn: async (text, { transaction }) => {
+ *   mutationFn: async ({ transaction }) => {
  *     await api.save(transaction.mutations)
  *   },
  *   strategy: debounceStrategy({ wait: 500 })
@@ -73,7 +73,7 @@ export interface PacedMutationsConfig<
  *   onMutate: ({ text }) => {
  *     collection.insert({ id: uuid(), text, completed: false })
  *   },
- *   mutationFn: async ({ text }, { transaction }) => {
+ *   mutationFn: async ({ transaction }) => {
  *     await api.save(transaction.mutations)
  *   },
  *   strategy: queueStrategy({
