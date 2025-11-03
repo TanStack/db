@@ -235,7 +235,7 @@ How to sync changes back:
 - **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for a specific transaction to sync
 - **Other sync systems**: Wait for your sync mechanism to update the collection
 
-After the sync completes, the collection will have the updated server data and you can render the new state, hide loading indicators, navigate to a new page, etc.
+After the sync completes, the collection will have the updated server data and you can render the new state, hide loading indicators, show success messages, navigate to a new page, etc.
 
 ## Mutation Lifecycle
 
