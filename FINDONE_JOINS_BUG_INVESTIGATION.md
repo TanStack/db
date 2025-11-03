@@ -12,11 +12,12 @@ const query = useLiveQuery(
     q
       .from({ todo: todoCollection })
       .where(({ todo }) => eq(todo.id, id))
-      .leftJoin({ todoOptions: todoOptionsCollection }, ({ todo, todoOptions }) =>
-        eq(todo.id, todoOptions.todoId)
+      .leftJoin(
+        { todoOptions: todoOptionsCollection },
+        ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
       )
       .findOne() // ❌ Causes type of query.data to become never
-);
+)
 ```
 
 ### Workaround
@@ -29,11 +30,12 @@ const query = useLiveQuery(
     q
       .from({ todo: todoCollection })
       .where(({ todo }) => eq(todo.id, id))
-      .leftJoin({ todoOptions: todoOptionsCollection }, ({ todo, todoOptions }) =>
-        eq(todo.id, todoOptions.todoId)
+      .leftJoin(
+        { todoOptions: todoOptionsCollection },
+        ({ todo, todoOptions }) => eq(todo.id, todoOptions.todoId)
       )
       .limit(1) // ✅ Works correctly
-);
+)
 ```
 
 ## Root Cause Analysis
@@ -62,6 +64,7 @@ const query = useLiveQuery(
 The issue was in the `MergeContextWithJoinType` type definition, which was forcing `singleResult` to be explicitly `false` instead of preserving its original value.
 
 **Before (Buggy)**:
+
 ```typescript
 export type MergeContextWithJoinType<
   TContext extends Context,
@@ -87,6 +90,7 @@ export type MergeContextWithJoinType<
 Changed line 577 in `/packages/db/src/query/builder/types.ts` to preserve the `singleResult` value as-is:
 
 **After (Fixed)**:
+
 ```typescript
 export type MergeContextWithJoinType<
   TContext extends Context,
@@ -110,6 +114,7 @@ export type MergeContextWithJoinType<
 ### Why This Works
 
 By preserving `singleResult` as-is:
+
 - If `findOne()` is called **before** join: `singleResult` is `true` and stays `true`
 - If `findOne()` is called **after** join: `singleResult` is `undefined` and the intersection `undefined & { singleResult: true }` properly resolves to `{ singleResult: true }`
 - No type conflict occurs
@@ -130,6 +135,7 @@ Added comprehensive type tests in `/packages/db/tests/query/join.test-d.ts`:
 ## Impact
 
 This fix ensures that:
+
 - ✅ `findOne()` works correctly with all join types (left, right, inner, full)
 - ✅ Type inference works correctly for `query.data` in `useLiveQuery`
 - ✅ No breaking changes to existing code
