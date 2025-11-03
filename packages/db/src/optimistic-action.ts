@@ -1,14 +1,7 @@
 import { createTransaction } from "./transactions"
 import { OnMutateMustBeSynchronousError } from "./errors"
+import { isPromiseLike } from "./utils/type-guards"
 import type { CreateOptimisticActionsOptions, Transaction } from "./types"
-
-function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
-  return (
-    !!value &&
-    (typeof value === `object` || typeof value === `function`) &&
-    typeof (value as { then?: unknown }).then === `function`
-  )
-}
 
 /**
  * Creates an optimistic action function that applies local optimistic updates immediately
