@@ -38,7 +38,7 @@
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
   "packageManager": "pnpm@10.17.0",
-  "author": "JOURNEYAPPS",
+  "author": "POWERSYNC",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
