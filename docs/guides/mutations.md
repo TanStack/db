@@ -110,36 +110,6 @@ The benefits:
 
 TanStack DB provides different approaches to mutations, each suited to different use cases:
 
-### Bypass the Mutation System
-
-If you already have mutation logic in an existing system and don't want to rewrite it, you can **completely bypass** TanStack DB's mutation system and use your existing patterns.
-
-```tsx
-// Call your backend directly with your existing logic
-const handleUpdateTodo = async (todoId, changes) => {
-  await api.todos.update(todoId, changes)
-
-  // Wait for sync back
-  await todoCollection.utils.refetch()
-}
-
-// With Electric
-const handleUpdateTodo = async (todoId, changes) => {
-  const { txid } = await api.todos.update(todoId, changes)
-  await todoCollection.utils.awaitTxId(txid)
-}
-```
-
-Use this approach when:
-- You have existing mutation logic you don't want to rewrite
-- You're comfortable with your current mutation patterns
-- You want to use TanStack DB only for queries and state management
-
-How to sync changes back:
-- **QueryCollection**: Manually refetch with `collection.utils.refetch()`
-- **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for specific transactions
-- **Other sync systems**: Wait for your sync mechanism to update the collection
-
 ### Collection-Level Mutations
 
 Collection-level mutations (`insert`, `update`, `delete`) are designed for **direct state manipulation** of a single collection. These are the simplest way to make changes and work well for straightforward CRUD operations.
@@ -228,6 +198,37 @@ Custom actions provide the cleanest way to capture specific types of mutations a
 - **Collection-level mutations** (`collection.update`): Simple CRUD operations on a single collection
 - **`createOptimisticAction`**: Intent-based operations, multi-collection mutations, immediately committed
 - **`createTransaction`**: Fully custom transactions, delayed commits, multi-step workflows
+- **Bypass the mutation system**: Use your existing mutation logic without rewriting
+
+### Bypass the Mutation System
+
+If you already have mutation logic in an existing system and don't want to rewrite it, you can **completely bypass** TanStack DB's mutation system and use your existing patterns.
+
+```tsx
+// Call your backend directly with your existing logic
+const handleUpdateTodo = async (todoId, changes) => {
+  await api.todos.update(todoId, changes)
+
+  // Wait for sync back
+  await todoCollection.utils.refetch()
+}
+
+// With Electric
+const handleUpdateTodo = async (todoId, changes) => {
+  const { txid } = await api.todos.update(todoId, changes)
+  await todoCollection.utils.awaitTxId(txid)
+}
+```
+
+Use this approach when:
+- You have existing mutation logic you don't want to rewrite
+- You're comfortable with your current mutation patterns
+- You want to use TanStack DB only for queries and state management
+
+How to sync changes back:
+- **QueryCollection**: Manually refetch with `collection.utils.refetch()`
+- **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for specific transactions
+- **Other sync systems**: Wait for your sync mechanism to update the collection
 
 ## Mutation Lifecycle
 
