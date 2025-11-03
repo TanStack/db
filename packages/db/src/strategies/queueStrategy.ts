@@ -1,4 +1,4 @@
-import { asyncQueue } from "@tanstack/pacer/async-queuer"
+import { AsyncQueuer } from "@tanstack/pacer/async-queuer"
 import type { QueueStrategy, QueueStrategyOptions } from "./types"
 import type { Transaction } from "../transactions"
 
@@ -44,7 +44,8 @@ import type { Transaction } from "../transactions"
  * ```
  */
 export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
-  const enqueue = asyncQueue<() => Promise<void>>(
+  // Create AsyncQueuer instance manually since helper function has type issues
+  const queuer = new AsyncQueuer(
     async (task: () => Promise<void>) => {
       // Execute the queued task
       await task()
@@ -66,7 +67,7 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
       fn: () => Transaction<T>
     ) => {
       // Wrap the callback in an async function that waits for persistence
-      enqueue(async () => {
+      queuer.addItem(async () => {
         const transaction = fn()
         // Wait for the transaction to be persisted before processing next item
         // Note: fn() already calls commit(), we just wait for it to complete
@@ -74,8 +75,8 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
       })
     },
     cleanup: () => {
-      // asyncQueue doesn't expose stop/clear, but cleanup isn't critical
-      // since the queue will be garbage collected when the strategy is discarded
+      queuer.stop()
+      queuer.clear()
     },
   }
 }
