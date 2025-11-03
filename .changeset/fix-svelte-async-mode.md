@@ -31,9 +31,9 @@ Removed the unnecessary `flushSync()` call from the `onFirstReady` callback. Sve
 export default {
   compilerOptions: {
     experimental: {
-      async: true
-    }
-  }
+      async: true,
+    },
+  },
 }
 ```
 
