@@ -1,11 +1,10 @@
 import { DiffTriggerOperation, sanitizeSQL } from "@powersync/common"
-import { DEFAULT_BATCH_SIZE } from "./definitions"
-import { asPowerSyncRecord, mapOperation } from "./helpers"
 import { PendingOperationStore } from "./PendingOperationStore"
 import { PowerSyncTransactor } from "./PowerSyncTransactor"
+import { DEFAULT_BATCH_SIZE } from "./definitions"
+import { asPowerSyncRecord, mapOperation } from "./helpers"
 import { convertTableToSchema } from "./schema"
-import { serializeForSQLite } from "./serlization"
-import type { PendingOperation } from "./PendingOperationStore"
+import { serializeForSQLite } from "./serialization"
 import type {
   AnyTableColumnType,
   ExtractedTable,
@@ -24,6 +23,7 @@ import type {
   PowerSyncCollectionConfig,
   PowerSyncCollectionUtils,
 } from "./definitions"
+import type { PendingOperation } from "./PendingOperationStore"
 import type { SyncConfig } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Table, TriggerDiffRecord } from "@powersync/common"
