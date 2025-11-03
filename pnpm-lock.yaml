@@ -690,6 +690,37 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
 
+  packages/powersync-db-collection:
+    dependencies:
+      '@standard-schema/spec':
+        specifier: ^1.0.0
+        version: 1.0.0
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
+      '@tanstack/store':
+        specifier: ^0.8.0
+        version: 0.8.0
+      debug:
+        specifier: ^4.4.3
+        version: 4.4.3
+      p-defer:
+        specifier: ^4.0.1
+        version: 4.0.1
+    devDependencies:
+      '@powersync/common':
+        specifier: ^1.41.0
+        version: 1.41.0
+      '@powersync/node':
+        specifier: ^0.13.0
+        version: 0.13.0(@powersync/common@1.41.0)
+      '@types/debug':
+        specifier: ^4.1.12
+        version: 4.1.12
+      '@vitest/coverage-istanbul':
+        specifier: ^3.2.4
+        version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
+
   packages/query-db-collection:
     dependencies:
       '@standard-schema/spec':
@@ -2846,6 +2877,18 @@ packages:
     resolution: {integrity: sha512-QNqXyfVS2wm9hweSYD2O7F0G06uurj9kZ96TRQE5Y9hU7+tgdZwIkbAKc5Ocy1HxEY2kuDQa6cQ1WRs/O5LFKA==}
     engines: {node: ^12.20.0 || ^14.18.0 || >=16.0.0}
 
+  '@powersync/common@1.41.0':
+    resolution: {integrity: sha512-N5Tpp2QU0RnP9eEDu+/Ok/IccSk8sNxnCBQgByEHg+DAHvSeSpIFe4nDSZwaRJrcltKi/FMzzjSIBjFrtsUz/g==}
+
+  '@powersync/node@0.13.0':
+    resolution: {integrity: sha512-G/vVkQjQsyQ41213atf0/b+Z0kQwSjKPdQ+3Og0wRnIS6ul8nBKPAsd1wbPh7dXetoOicKPnFY3Bso4YIGAmLw==}
+    peerDependencies:
+      '@powersync/common': ^1.41.0
+      better-sqlite3: 12.x
+    peerDependenciesMeta:
+      better-sqlite3:
+        optional: true
+
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
 
@@ -4382,6 +4425,9 @@ packages:
     resolution: {integrity: sha512-hsU18Ae8CDTR6Kgu9DYf0EbCr/a5iGL0rytQDobUcdpYOKokk8LEjVphnXkDkgpi0wYVsqrXuP0bZxJaTqdgoA==}
     engines: {node: '>= 0.4'}
 
+  async-lock@1.4.1:
+    resolution: {integrity: sha512-Az2ZTpuytrtqENulXwO3GGv1Bztugx6TT37NIo7imr/Qo0gsYiGtSdBa2B6fsXhTpVZDNfu1Qn3pk531e3q+nQ==}
+
   autoprefixer@10.4.21:
     resolution: {integrity: sha512-O+A6LWV5LDHSJD3LjHYoNi4VLsj/Whi7k6zG12xTYaU4cQ8oxQGckXNX8cRHK5yOZ/ppVHe0ZBXGzSV9jXdVbQ==}
     engines: {node: ^10 || ^12 || >=14}
@@ -4635,6 +4681,9 @@ packages:
 
   colorette@2.0.20:
     resolution: {integrity: sha512-IfEDxwoWIjkeXL1eXcDiow4UbKjhLdq6/EuSVR9GMN7KVH3r9gQ83e73hsz1Nd1T3ijd5xv1wcWRYO+D6kCI2w==}
+
+  comlink@4.4.2:
+    resolution: {integrity: sha512-OxGdvBmJuNKSCMO4NTl1L47VRp6xn2wG4F/2hYzB6tiCb709otOxtEYCSvK80PtjODfXXZu8ds+Nw5kVCjqd2g==}
 
   commander@11.1.0:
     resolution: {integrity: sha512-yPVavfyCcRhmorC7rWlkHn15b4wDVgVmBA7kV4QVBsF7kv/9TKJAbAXVTxvTnwP8HHKjRCJDClKbciiYS7p0DQ==}
@@ -6152,6 +6201,9 @@ packages:
   js-base64@3.7.8:
     resolution: {integrity: sha512-hNngCeKxIUQiEUN3GPJOkz4wF/YvdUdbNL9hsBcMQTkKzboD7T/q3OYOuuPZLUE6dBxSGpwhk5mwuDud7JVAow==}
 
+  js-logger@1.6.1:
+    resolution: {integrity: sha512-yTgMCPXVjhmg28CuUH8CKjU+cIKL/G+zTu4Fn4lQxs8mRFH/03QTNvEFngcxfg/gRDiQAOoyCKmMTOm9ayOzXA==}
+
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
 
@@ -6915,6 +6967,10 @@ packages:
 
   oxc-resolver@11.8.4:
     resolution: {integrity: sha512-qpimS3tHHEf+kgESMAme+q+rj7aCzMya00u9YdKOKyX2o7q4lozjPo6d7ZTTi979KHEcVOPWdNTueAKdeNq72w==}
+
+  p-defer@4.0.1:
+    resolution: {integrity: sha512-Mr5KC5efvAK5VUptYEIopP1bakB85k2IWXaRC0rsh1uwn1L6M0LVml8OIQ4Gudg4oyZakf7FmeRLkMMtZW1i5A==}
+    engines: {node: '>=12'}
 
   p-filter@2.1.0:
     resolution: {integrity: sha512-ZBxxZ5sL2HghephhpGAQdoskxplTwr7ICaehZwLIlfL6acuVgZPm8yBNuRAFBGEqtD/hmUeq9eqLg2ys9Xr/yw==}
@@ -10777,6 +10833,18 @@ snapshots:
 
   '@pkgr/core@0.2.9': {}
 
+  '@powersync/common@1.41.0':
+    dependencies:
+      js-logger: 1.6.1
+
+  '@powersync/node@0.13.0(@powersync/common@1.41.0)':
+    dependencies:
+      '@powersync/common': 1.41.0
+      async-lock: 1.4.1
+      bson: 6.10.4
+      comlink: 4.4.2
+      undici: 7.16.0
+
   '@protobufjs/aspromise@1.1.2': {}
 
   '@protobufjs/base64@1.1.2': {}
@@ -12731,6 +12799,8 @@ snapshots:
 
   async-function@1.0.0: {}
 
+  async-lock@1.4.1: {}
+
   autoprefixer@10.4.21(postcss@8.5.6):
     dependencies:
       browserslist: 4.25.4
@@ -13045,6 +13115,8 @@ snapshots:
   color-name@1.1.4: {}
 
   colorette@2.0.20: {}
+
+  comlink@4.4.2: {}
 
   commander@11.1.0:
     optional: true
@@ -14720,6 +14792,8 @@ snapshots:
 
   js-base64@3.7.8: {}
 
+  js-logger@1.6.1: {}
+
   js-tokens@4.0.0: {}
 
   js-tokens@9.0.1: {}
@@ -15554,6 +15628,8 @@ snapshots:
       '@oxc-resolver/binding-win32-arm64-msvc': 11.8.4
       '@oxc-resolver/binding-win32-ia32-msvc': 11.8.4
       '@oxc-resolver/binding-win32-x64-msvc': 11.8.4
+
+  p-defer@4.0.1: {}
 
   p-filter@2.1.0:
     dependencies:
