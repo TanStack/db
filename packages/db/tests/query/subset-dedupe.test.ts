@@ -53,7 +53,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
     await deduplicated.loadSubset({ where: gt(ref(`age`), val(10)) })
 
     expect(callCount).toBe(1)
@@ -66,7 +68,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
 
     // First call: age > 10
     await deduplicated.loadSubset({ where: gt(ref(`age`), val(10)) })
@@ -87,7 +91,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
 
     // First call: age > 20
     await deduplicated.loadSubset({ where: gt(ref(`age`), val(20)) })
@@ -105,7 +111,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
 
     // First call: age > 20
     await deduplicated.loadSubset({ where: gt(ref(`age`), val(20)) })
@@ -130,7 +138,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
 
     const orderBy1: OrderBy = [
       {
@@ -168,7 +178,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
 
     const orderBy1: OrderBy = [
       {
@@ -205,7 +217,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
 
     const orderBy1: OrderBy = [
       {
@@ -240,7 +254,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
 
     const orderBy1: OrderBy = [
       {
@@ -275,7 +291,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
 
     // First call: no where clause (all data)
     await deduplicated.loadSubset({})
@@ -298,7 +316,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
       return Promise.resolve()
     }
 
-    const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
 
     const orderBy1: OrderBy = [
       {
@@ -353,7 +373,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
         return Promise.resolve()
       }
 
-      const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
 
       // First call: age > 20 (loads data for age > 20)
       await deduplicated.loadSubset({ where: gt(ref(`age`), val(20)) })
@@ -377,7 +399,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
         return Promise.resolve()
       }
 
-      const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
 
       // First call: status IN ['B', 'C'] (loads data for B and C)
       await deduplicated.loadSubset({
@@ -405,7 +429,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
         return Promise.resolve()
       }
 
-      const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
 
       // First call: age > 10 (loads data for age > 10)
       await deduplicated.loadSubset({ where: gt(ref(`age`), val(10)) })
@@ -428,7 +454,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
         return Promise.resolve()
       }
 
-      const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
 
       // First call: age > 20 AND status = 'active'
       const firstPredicate = and(
@@ -468,7 +496,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
         return Promise.resolve()
       }
 
-      const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
 
       const orderBy1: OrderBy = [
         {
@@ -509,7 +539,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
         return Promise.resolve()
       }
 
-      const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
 
       // First call: age > 20
       await deduplicated.loadSubset({ where: gt(ref(`age`), val(20)) })
@@ -532,7 +564,9 @@ describe(`createDeduplicatedLoadSubset`, () => {
         return Promise.resolve()
       }
 
-      const deduplicated = new DeduplicatedLoadSubset(mockLoadSubset)
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
 
       // First call: age > 20
       await deduplicated.loadSubset({ where: gt(ref(`age`), val(20)) })
@@ -569,10 +603,10 @@ describe(`createDeduplicatedLoadSubset`, () => {
       }
 
       const onDeduplicate = vi.fn()
-      const deduplicated = new DeduplicatedLoadSubset(
-        mockLoadSubset,
-        onDeduplicate
-      )
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+        onDeduplicate,
+      })
 
       // Load all data
       await deduplicated.loadSubset({})
@@ -595,10 +629,10 @@ describe(`createDeduplicatedLoadSubset`, () => {
       }
 
       const onDeduplicate = vi.fn()
-      const deduplicated = new DeduplicatedLoadSubset(
-        mockLoadSubset,
-        onDeduplicate
-      )
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+        onDeduplicate: onDeduplicate,
+      })
 
       // First call loads a broader set
       await deduplicated.loadSubset({ where: gt(ref(`age`), val(10)) })
@@ -621,10 +655,10 @@ describe(`createDeduplicatedLoadSubset`, () => {
       }
 
       const onDeduplicate = vi.fn()
-      const deduplicated = new DeduplicatedLoadSubset(
-        mockLoadSubset,
-        onDeduplicate
-      )
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+        onDeduplicate,
+      })
 
       const orderBy1: OrderBy = [
         {
@@ -677,10 +711,10 @@ describe(`createDeduplicatedLoadSubset`, () => {
       }
 
       const onDeduplicate = vi.fn()
-      const deduplicated = new DeduplicatedLoadSubset(
-        mockLoadSubset,
-        onDeduplicate
-      )
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+        onDeduplicate: onDeduplicate,
+      })
 
       // Start a broad in-flight request
       const inflightOptions = { where: gt(ref(`age`), val(10)) }

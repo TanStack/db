@@ -12,14 +12,15 @@ import type { LoadSubsetOptions } from "../types.js"
  * Tracks what data has been loaded and avoids redundant calls by applying
  * subset logic to predicates.
  *
- * @param loadSubset - The underlying loadSubset function to wrap
- * @param onDeduplicate - An optional callback function that is invoked when a loadSubset call is deduplicated.
- *                        If the call is deduplicated because the requested data is being loaded by an inflight request,
- *                        then this callback is invoked when the inflight request completes successfully and the data is fully loaded.
- *                        This callback is useful if you need to track rows per query, in which case you can't ignore deduplicated calls
- *                        because you need to know which rows were loaded for each query.
+ * @param opts - The options for the DeduplicatedLoadSubset
+ * @param opts.loadSubset - The underlying loadSubset function to wrap
+ * @param opts.onDeduplicate - An optional callback function that is invoked when a loadSubset call is deduplicated.
+ *                              If the call is deduplicated because the requested data is being loaded by an inflight request,
+ *                              then this callback is invoked when the inflight request completes successfully and the data is fully loaded.
+ *                              This callback is useful if you need to track rows per query, in which case you can't ignore deduplicated calls
+ *                              because you need to know which rows were loaded for each query.
  * @example
- * const dedupe = new DeduplicatedLoadSubset(myLoadSubset, (opts) => console.log(`Call was deduplicated:`, opts))
+ * const dedupe = new DeduplicatedLoadSubset({ loadSubset: myLoadSubset, onDeduplicate: (opts) => console.log(`Call was deduplicated:`, opts) })
  *
  * // First call - fetches data
  * await dedupe.loadSubset({ where: gt(ref('age'), val(10)) })
@@ -63,12 +64,12 @@ export class DeduplicatedLoadSubset {
   // check if their captured generation matches before updating tracking state
   private generation = 0
 
-  constructor(
-    loadSubset: (options: LoadSubsetOptions) => true | Promise<void>,
+  constructor(opts: {
+    loadSubset: (options: LoadSubsetOptions) => true | Promise<void>
     onDeduplicate?: (options: LoadSubsetOptions) => void
-  ) {
-    this._loadSubset = loadSubset
-    this.onDeduplicate = onDeduplicate
+  }) {
+    this._loadSubset = opts.loadSubset
+    this.onDeduplicate = opts.onDeduplicate
   }
 
   /**
