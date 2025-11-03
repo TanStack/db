@@ -925,8 +925,14 @@ The debounce strategy waits for a period of inactivity before persisting. This i
 ```tsx
 import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
 
-function AutoSaveForm() {
-  const mutate = usePacedMutations({
+function AutoSaveForm({ formId }: { formId: string }) {
+  const mutate = usePacedMutations<{ field: string; value: string }>({
+    onMutate: ({ field, value }) => {
+      // Apply optimistic update immediately
+      formCollection.update(formId, (draft) => {
+        draft[field] = value
+      })
+    },
     mutationFn: async ({ transaction }) => {
       // Persist the final merged state to the backend
       await api.forms.save(transaction.mutations)
@@ -937,11 +943,7 @@ function AutoSaveForm() {
 
   const handleChange = (field: string, value: string) => {
     // Multiple rapid changes merge into a single transaction
-    mutate(() => {
-      formCollection.update(formId, (draft) => {
-        draft[field] = value
-      })
-    })
+    mutate({ field, value })
   }
 
   return (
@@ -966,7 +968,13 @@ The throttle strategy ensures a minimum spacing between executions. This is idea
 import { usePacedMutations, throttleStrategy } from "@tanstack/react-db"
 
 function VolumeSlider() {
-  const mutate = usePacedMutations({
+  const mutate = usePacedMutations<number>({
+    onMutate: (volume) => {
+      // Apply optimistic update immediately
+      settingsCollection.update('volume', (draft) => {
+        draft.value = volume
+      })
+    },
     mutationFn: async ({ transaction }) => {
       await api.settings.updateVolume(transaction.mutations)
     },
@@ -979,11 +987,7 @@ function VolumeSlider() {
   })
 
   const handleVolumeChange = (volume: number) => {
-    mutate(() => {
-      settingsCollection.update('volume', (draft) => {
-        draft.value = volume
-      })
-    })
+    mutate(volume)
   }
 
   return (
@@ -1010,7 +1014,15 @@ The queue strategy creates a separate transaction for each mutation and processe
 import { usePacedMutations, queueStrategy } from "@tanstack/react-db"
 
 function FileUploader() {
-  const mutate = usePacedMutations({
+  const mutate = usePacedMutations<File>({
+    onMutate: (file) => {
+      // Apply optimistic update immediately
+      uploadCollection.insert({
+        id: crypto.randomUUID(),
+        file,
+        status: 'pending',
+      })
+    },
     mutationFn: async ({ transaction }) => {
       // Each file upload is its own transaction
       const mutation = transaction.mutations[0]
@@ -1026,14 +1038,8 @@ function FileUploader() {
 
   const handleFileSelect = (files: FileList) => {
     // Each file creates its own transaction, queued for sequential processing
-    Array.from(files).forEach((file, idx) => {
-      mutate(() => {
-        uploadCollection.insert({
-          id: crypto.randomUUID(),
-          file,
-          status: 'pending',
-        })
-      })
+    Array.from(files).forEach((file) => {
+      mutate(file)
     })
   }
 
@@ -1078,8 +1084,14 @@ The `usePacedMutations` hook makes it easy to use paced mutations in React compo
 ```tsx
 import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
 
-function MyComponent() {
-  const mutate = usePacedMutations({
+function MyComponent({ itemId }: { itemId: string }) {
+  const mutate = usePacedMutations<number>({
+    onMutate: (newValue) => {
+      // Apply optimistic update immediately
+      collection.update(itemId, (draft) => {
+        draft.value = newValue
+      })
+    },
     mutationFn: async ({ transaction }) => {
       await api.save(transaction.mutations)
     },
@@ -1087,12 +1099,8 @@ function MyComponent() {
   })
 
   // Each mutate call returns a Transaction you can await
-  const handleSave = async () => {
-    const tx = mutate(() => {
-      collection.update(id, (draft) => {
-        draft.value = newValue
-      })
-    })
+  const handleSave = async (newValue: number) => {
+    const tx = mutate(newValue)
 
     // Optionally wait for persistence
     try {
@@ -1103,7 +1111,7 @@ function MyComponent() {
     }
   }
 
-  return <button onClick={handleSave}>Save</button>
+  return <button onClick={() => handleSave(42)}>Save</button>
 }
 ```
 
@@ -1112,7 +1120,13 @@ The hook automatically memoizes the strategy and mutation function to prevent un
 ```ts
 import { createPacedMutations, queueStrategy } from "@tanstack/db"
 
-const { mutate } = createPacedMutations({
+const mutate = createPacedMutations<{ id: string; changes: Partial<Item> }>({
+  onMutate: ({ id, changes }) => {
+    // Apply optimistic update immediately
+    collection.update(id, (draft) => {
+      Object.assign(draft, changes)
+    })
+  },
   mutationFn: async ({ transaction }) => {
     await api.save(transaction.mutations)
   },
@@ -1120,10 +1134,89 @@ const { mutate } = createPacedMutations({
 })
 
 // Use anywhere in your application
-mutate(() => {
-  collection.update(id, updater)
-})
+mutate({ id: '123', changes: { name: 'New Name' } })
 ```
+
+### Understanding Queues and Hook Instances
+
+**Each unique `usePacedMutations` hook call creates its own independent queue.** This is an important design decision that affects how you structure your mutations.
+
+If you have multiple components calling `usePacedMutations` separately, each will have its own isolated queue:
+
+```tsx
+function EmailDraftEditor1({ draftId }: { draftId: string }) {
+  // This creates Queue A
+  const mutate = usePacedMutations({
+    onMutate: (text) => {
+      draftCollection.update(draftId, (draft) => {
+        draft.text = text
+      })
+    },
+    mutationFn: async ({ transaction }) => {
+      await api.saveDraft(transaction.mutations)
+    },
+    strategy: debounceStrategy({ wait: 500 }),
+  })
+
+  return <textarea onChange={(e) => mutate(e.target.value)} />
+}
+
+function EmailDraftEditor2({ draftId }: { draftId: string }) {
+  // This creates Queue B (separate from Queue A)
+  const mutate = usePacedMutations({
+    onMutate: (text) => {
+      draftCollection.update(draftId, (draft) => {
+        draft.text = text
+      })
+    },
+    mutationFn: async ({ transaction }) => {
+      await api.saveDraft(transaction.mutations)
+    },
+    strategy: debounceStrategy({ wait: 500 }),
+  })
+
+  return <textarea onChange={(e) => mutate(e.target.value)} />
+}
+```
+
+In this example, mutations from `EmailDraftEditor1` and `EmailDraftEditor2` will be queued and processed **independently**. They won't share the same debounce timer or queue.
+
+**To share the same queue across multiple components**, create a single `createPacedMutations` instance and use it everywhere:
+
+```tsx
+// Create a single shared instance
+import { createPacedMutations, debounceStrategy } from "@tanstack/db"
+
+export const mutateDraft = createPacedMutations<{ draftId: string; text: string }>({
+  onMutate: ({ draftId, text }) => {
+    draftCollection.update(draftId, (draft) => {
+      draft.text = text
+    })
+  },
+  mutationFn: async ({ transaction }) => {
+    await api.saveDraft(transaction.mutations)
+  },
+  strategy: debounceStrategy({ wait: 500 }),
+})
+
+// Now both components share the same queue
+function EmailDraftEditor1({ draftId }: { draftId: string }) {
+  return <textarea onChange={(e) => mutateDraft({ draftId, text: e.target.value })} />
+}
+
+function EmailDraftEditor2({ draftId }: { draftId: string }) {
+  return <textarea onChange={(e) => mutateDraft({ draftId, text: e.target.value })} />
+}
+```
+
+With this approach, all mutations from both components share the same debounce timer and queue, ensuring they're processed in the correct order with a single debounce implementation.
+
+**Key takeaways:**
+
+- Each `usePacedMutations()` call = unique queue
+- Each `createPacedMutations()` call = unique queue
+- To share a queue: create one instance and import it everywhere you need it
+- Shared queues ensure mutations from different places are ordered correctly
 
 ## Mutation Merging
 
