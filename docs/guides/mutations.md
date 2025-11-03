@@ -38,23 +38,32 @@ With an instant inner loop of optimistic state, superseded in time by the slower
 > [!TIP]
 > **You Can Skip TanStack DB Mutations Entirely**
 >
-> If you already have mutation logic in an existing system or simply prefer not to use optimistic updates, you can **completely bypass** TanStack DB's mutation system. For many collection types (especially `QueryCollection`), you can:
+> If you already have mutation logic in an existing system and don't want to rewrite it, you can **completely bypass** TanStack DB's mutation system. For many collection types, you can:
 >
-> 1. Call your backend mutation API directly
-> 2. Wait for sync systems to sync changes back, **OR** manually refetch the collection with `collection.utils.refetch()`
+> 1. Call your backend mutation API directly (using your existing logic)
+> 2. Wait for changes to sync back:
+>    - **QueryCollection**: Manually refetch with `collection.utils.refetch()`
+>    - **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for sync
+>    - **Other sync systems**: Wait for your sync mechanism to update the collection
 >
 > ```tsx
 > // Bypass TanStack DB mutations - use your existing mutation logic
 > const handleUpdateTodo = async (todoId, changes) => {
->   // Call your backend directly
+>   // Call your backend directly with your existing logic
 >   await api.todos.update(todoId, changes)
 >
->   // Refetch to get updated data
+>   // Wait for sync back
 >   await todoCollection.utils.refetch()
+> }
+>
+> // With Electric
+> const handleUpdateTodo = async (todoId, changes) => {
+>   const { txid } = await api.todos.update(todoId, changes)
+>   await todoCollection.utils.awaitTxId(txid)
 > }
 > ```
 >
-> This approach is perfectly valid! The mutation system is optional and designed for scenarios where you want optimistic updates and automatic state management.
+> This approach is perfectly valid! The mutation system is optional and designed for when you want the built-in optimistic updates and automatic state management patterns.
 
 ### Simplified Mutations vs Traditional Approaches
 
