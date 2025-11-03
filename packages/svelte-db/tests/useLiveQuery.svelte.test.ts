@@ -116,6 +116,96 @@ describe(`Query Collections`, () => {
     })
   })
 
+  it(`should maintain reactivity when destructuring return values with $derived`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-destructure`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    cleanup = $effect.root(() => {
+      // IMPORTANT: In Svelte 5, destructuring breaks reactivity unless wrapped in $derived
+      // This is the correct pattern for destructuring (Issue #414)
+      const query = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+            age: persons.age,
+          }))
+      )
+
+      // Destructure using $derived to maintain reactivity
+      const { data, state, isReady, isLoading } = $derived(query)
+
+      flushSync()
+
+      // Initial state checks
+      expect(isReady).toBe(true)
+      expect(isLoading).toBe(false)
+      expect(state.size).toBe(1)
+      expect(data).toHaveLength(1)
+      expect(data[0]).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+        age: 35,
+      })
+
+      // Add a new person that matches the filter
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `4`,
+          name: `Alice Johnson`,
+          age: 40,
+          email: `alice.johnson@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      flushSync()
+
+      // Verify destructured values are still reactive after collection change
+      expect(state.size).toBe(2)
+      expect(data).toHaveLength(2)
+      expect(data.some((p) => p.id === `4`)).toBe(true)
+      expect(data.some((p) => p.id === `3`)).toBe(true)
+
+      // Remove a person
+      collection.utils.begin()
+      collection.utils.write({
+        type: `delete`,
+        value: {
+          id: `3`,
+          name: `John Smith`,
+          age: 35,
+          email: `john.smith@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      flushSync()
+
+      // Verify destructured values still track changes
+      expect(state.size).toBe(1)
+      expect(data).toHaveLength(1)
+      expect(data[0]).toMatchObject({
+        id: `4`,
+        name: `Alice Johnson`,
+        age: 40,
+      })
+    })
+  })
+
   it(`should be able to query a collection with live updates`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({

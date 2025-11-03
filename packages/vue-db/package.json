@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/vue-db",
   "description": "Vue integration for @tanstack/db",
-  "version": "0.0.67",
+  "version": "0.0.71",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
@@ -15,12 +15,12 @@
     "vue",
     "typescript"
   ],
-  "packageManager": "pnpm@10.18.3",
+  "packageManager": "pnpm@10.19.0",
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@electric-sql/client": "1.0.14",
+    "@electric-sql/client": "1.1.0",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vitest/coverage-istanbul": "^3.2.4",
     "vue": "^3.5.22"
