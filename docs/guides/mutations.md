@@ -208,14 +208,20 @@ If you already have mutation logic in an existing system and don't want to rewri
 const handleUpdateTodo = async (todoId, changes) => {
   await api.todos.update(todoId, changes)
 
-  // Wait for sync back
+  // Wait for the server change to load into the collection
   await todoCollection.utils.refetch()
+
+  // Now you know the new data is loaded and can render it or hide loaders
 }
 
 // With Electric
 const handleUpdateTodo = async (todoId, changes) => {
   const { txid } = await api.todos.update(todoId, changes)
+
+  // Wait for this specific transaction to sync into the collection
   await todoCollection.utils.awaitTxId(txid)
+
+  // Now the server change is loaded and you can update UI accordingly
 }
 ```
 
@@ -225,9 +231,11 @@ Use this approach when:
 - You want to use TanStack DB only for queries and state management
 
 How to sync changes back:
-- **QueryCollection**: Manually refetch with `collection.utils.refetch()`
-- **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for specific transactions
+- **QueryCollection**: Manually refetch with `collection.utils.refetch()` to reload data from the server
+- **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for a specific transaction to sync
 - **Other sync systems**: Wait for your sync mechanism to update the collection
+
+After the sync completes, the collection will have the updated server data and you can render the new state, hide loading indicators, navigate to a new page, etc.
 
 ## Mutation Lifecycle
 
