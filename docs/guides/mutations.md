@@ -203,6 +203,8 @@ Custom actions provide the cleanest way to capture specific types of mutations a
 
 If you already have mutation logic in an existing system and don't want to rewrite it, you can **completely bypass** TanStack DB's mutation system and use your existing patterns.
 
+With this approach, you write to the server like normal using your existing logic, then use your collection's mechanism for refetching or syncing data to await the server write. After the sync completes, the collection will have the updated server data and you can render the new state, hide loading indicators, show success messages, navigate to a new page, etc.
+
 ```tsx
 // Call your backend directly with your existing logic
 const handleUpdateTodo = async (todoId, changes) => {
@@ -234,8 +236,6 @@ How to sync changes back:
 - **QueryCollection**: Manually refetch with `collection.utils.refetch()` to reload data from the server
 - **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for a specific transaction to sync
 - **Other sync systems**: Wait for your sync mechanism to update the collection
-
-After the sync completes, the collection will have the updated server data and you can render the new state, hide loading indicators, show success messages, navigate to a new page, etc.
 
 ## Mutation Lifecycle
 
