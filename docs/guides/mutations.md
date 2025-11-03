@@ -35,36 +35,6 @@ This pattern extends the Redux/Flux unidirectional data flow beyond the client t
 
 With an instant inner loop of optimistic state, superseded in time by the slower outer loop of persisting to the server and syncing the updated server state back into the collection.
 
-> [!TIP]
-> **You Can Skip TanStack DB Mutations Entirely**
->
-> If you already have mutation logic in an existing system and don't want to rewrite it, you can **completely bypass** TanStack DB's mutation system. For many collection types, you can:
->
-> 1. Call your backend mutation API directly (using your existing logic)
-> 2. Wait for changes to sync back:
->    - **QueryCollection**: Manually refetch with `collection.utils.refetch()`
->    - **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for sync
->    - **Other sync systems**: Wait for your sync mechanism to update the collection
->
-> ```tsx
-> // Bypass TanStack DB mutations - use your existing mutation logic
-> const handleUpdateTodo = async (todoId, changes) => {
->   // Call your backend directly with your existing logic
->   await api.todos.update(todoId, changes)
->
->   // Wait for sync back
->   await todoCollection.utils.refetch()
-> }
->
-> // With Electric
-> const handleUpdateTodo = async (todoId, changes) => {
->   const { txid } = await api.todos.update(todoId, changes)
->   await todoCollection.utils.awaitTxId(txid)
-> }
-> ```
->
-> This approach is perfectly valid! The mutation system is optional and designed for when you want the built-in optimistic updates and automatic state management patterns.
-
 ### Simplified Mutations vs Traditional Approaches
 
 TanStack DB's mutation system eliminates much of the boilerplate required for optimistic updates in traditional approaches. Compare the difference:
@@ -139,6 +109,36 @@ The benefits:
 ## Mutation Approaches
 
 TanStack DB provides different approaches to mutations, each suited to different use cases:
+
+### Bypass the Mutation System
+
+If you already have mutation logic in an existing system and don't want to rewrite it, you can **completely bypass** TanStack DB's mutation system and use your existing patterns.
+
+```tsx
+// Call your backend directly with your existing logic
+const handleUpdateTodo = async (todoId, changes) => {
+  await api.todos.update(todoId, changes)
+
+  // Wait for sync back
+  await todoCollection.utils.refetch()
+}
+
+// With Electric
+const handleUpdateTodo = async (todoId, changes) => {
+  const { txid } = await api.todos.update(todoId, changes)
+  await todoCollection.utils.awaitTxId(txid)
+}
+```
+
+Use this approach when:
+- You have existing mutation logic you don't want to rewrite
+- You're comfortable with your current mutation patterns
+- You want to use TanStack DB only for queries and state management
+
+How to sync changes back:
+- **QueryCollection**: Manually refetch with `collection.utils.refetch()`
+- **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for specific transactions
+- **Other sync systems**: Wait for your sync mechanism to update the collection
 
 ### Collection-Level Mutations
 
