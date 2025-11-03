@@ -574,8 +574,7 @@ export type MergeContextWithJoinType<
     [K in keyof TNewSchema & string]: TJoinType
   }
   result: TContext[`result`]
-  singleResult: TContext[`singleResult`]
-}
+} & (TContext[`singleResult`] extends true ? { singleResult: true } : {})
 
 /**
  * ApplyJoinOptionalityToMergedSchema - Applies optionality rules when merging schemas
