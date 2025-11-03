@@ -2,14 +2,13 @@
 "@tanstack/db": patch
 ---
 
-Fix AsyncQueuer constructor usage in queueStrategy
+Fix queueStrategy implementation to use asyncQueue helper
 
-The AsyncQueuer constructor from `@tanstack/pacer` requires a function as the first parameter to process queued items, with options as the second parameter. The previous implementation incorrectly passed only the options object, causing TypeScript build errors.
+The previous implementation incorrectly instantiated `AsyncQueuer` directly, which caused TypeScript build errors due to constructor signature mismatches. This fix switches to using the `asyncQueue` helper function from `@tanstack/pacer`, which provides the correct API for creating queued task processors.
 
-This fix properly initializes AsyncQueuer with:
-
-- A processing function that executes queued tasks as the first parameter
-- Configuration options as the second parameter
-- Explicit type annotation to avoid implicit `any` errors
+Changes:
+- Use `asyncQueue()` helper instead of `new AsyncQueuer()`
+- Properly pass task processing function and options to asyncQueue
+- Remove cleanup methods that aren't exposed by asyncQueue (not needed as queue is garbage collected)
 
 This resolves the type check errors that were preventing builds from completing.
