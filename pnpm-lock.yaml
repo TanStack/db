@@ -669,11 +669,11 @@ importers:
         version: 4.0.1
     devDependencies:
       '@powersync/common':
-        specifier: 0.0.0-dev-20251021113138
-        version: 0.0.0-dev-20251021113138
+        specifier: ^1.41.0
+        version: 1.41.0
       '@powersync/node':
-        specifier: 0.0.0-dev-20251021113138
-        version: 0.0.0-dev-20251021113138(@powersync/common@0.0.0-dev-20251021113138)
+        specifier: ^0.13.0
+        version: 0.13.0(@powersync/common@1.41.0)
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
@@ -2837,13 +2837,13 @@ packages:
     resolution: {integrity: sha512-QNqXyfVS2wm9hweSYD2O7F0G06uurj9kZ96TRQE5Y9hU7+tgdZwIkbAKc5Ocy1HxEY2kuDQa6cQ1WRs/O5LFKA==}
     engines: {node: ^12.20.0 || ^14.18.0 || >=16.0.0}
 
-  '@powersync/common@0.0.0-dev-20251021113138':
-    resolution: {integrity: sha512-+E9+4p5xgzdIPr38EayS83+J04G9E89cVUMTCihgJ+P1VqZljuTBj/fnqshuALfcPofOpTryobsO+7CeWNuyEw==}
+  '@powersync/common@1.41.0':
+    resolution: {integrity: sha512-N5Tpp2QU0RnP9eEDu+/Ok/IccSk8sNxnCBQgByEHg+DAHvSeSpIFe4nDSZwaRJrcltKi/FMzzjSIBjFrtsUz/g==}
 
-  '@powersync/node@0.0.0-dev-20251021113138':
-    resolution: {integrity: sha512-1fvtRWQdxgWMjmnOLXE1PbM6JqmxDn5xy4eI46VzSEOMjgkkah0Vn6C9mjPrs7gtlkuDMKRqPQm024Fl3CmPZQ==}
+  '@powersync/node@0.13.0':
+    resolution: {integrity: sha512-G/vVkQjQsyQ41213atf0/b+Z0kQwSjKPdQ+3Og0wRnIS6ul8nBKPAsd1wbPh7dXetoOicKPnFY3Bso4YIGAmLw==}
     peerDependencies:
-      '@powersync/common': 0.0.0-dev-20251021113138
+      '@powersync/common': ^1.41.0
       better-sqlite3: 12.x
     peerDependenciesMeta:
       better-sqlite3:
@@ -10685,13 +10685,13 @@ snapshots:
 
   '@pkgr/core@0.2.9': {}
 
-  '@powersync/common@0.0.0-dev-20251021113138':
+  '@powersync/common@1.41.0':
     dependencies:
       js-logger: 1.6.1
 
-  '@powersync/node@0.0.0-dev-20251021113138(@powersync/common@0.0.0-dev-20251021113138)':
+  '@powersync/node@0.13.0(@powersync/common@1.41.0)':
     dependencies:
-      '@powersync/common': 0.0.0-dev-20251021113138
+      '@powersync/common': 1.41.0
       async-lock: 1.4.1
       bson: 6.10.4
       comlink: 4.4.2

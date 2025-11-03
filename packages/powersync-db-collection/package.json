@@ -10,11 +10,11 @@
     "p-defer": "^4.0.1"
   },
   "peerDependencies": {
-    "@powersync/common": "0.0.0-dev-20251021113138"
+    "@powersync/common": "^1.41.0"
   },
   "devDependencies": {
-    "@powersync/common": "0.0.0-dev-20251021113138",
-    "@powersync/node": "0.0.0-dev-20251021113138",
+    "@powersync/common": "^1.41.0",
+    "@powersync/node": "^0.13.0",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4"
   },
