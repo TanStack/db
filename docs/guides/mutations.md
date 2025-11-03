@@ -35,6 +35,27 @@ This pattern extends the Redux/Flux unidirectional data flow beyond the client t
 
 With an instant inner loop of optimistic state, superseded in time by the slower outer loop of persisting to the server and syncing the updated server state back into the collection.
 
+> [!TIP]
+> **You Can Skip TanStack DB Mutations Entirely**
+>
+> If you already have mutation logic in an existing system or simply prefer not to use optimistic updates, you can **completely bypass** TanStack DB's mutation system. For many collection types (especially `QueryCollection`), you can:
+>
+> 1. Call your backend mutation API directly
+> 2. Wait for sync systems to sync changes back, **OR** manually refetch the collection with `collection.utils.refetch()`
+>
+> ```tsx
+> // Bypass TanStack DB mutations - use your existing mutation logic
+> const handleUpdateTodo = async (todoId, changes) => {
+>   // Call your backend directly
+>   await api.todos.update(todoId, changes)
+>
+>   // Refetch to get updated data
+>   await todoCollection.utils.refetch()
+> }
+> ```
+>
+> This approach is perfectly valid! The mutation system is optional and designed for scenarios where you want optimistic updates and automatic state management.
+
 ### Simplified Mutations vs Traditional Approaches
 
 TanStack DB's mutation system eliminates much of the boilerplate required for optimistic updates in traditional approaches. Compare the difference:
