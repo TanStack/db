@@ -160,7 +160,7 @@ onUpdate: async ({ transaction }) => {
 
 ### Intent-Based Mutations with Custom Actions
 
-For more complex scenarios, use `createOptimisticAction` or `createTransaction` to create **intent-based mutations** that capture specific user actions.
+For more complex scenarios, use `createOptimisticAction` to create **intent-based mutations** that capture specific user actions.
 
 ```tsx
 // Intent: "like this post"
@@ -197,7 +197,6 @@ Custom actions provide the cleanest way to capture specific types of mutations a
 
 - **Collection-level mutations** (`collection.update`): Simple CRUD operations on a single collection
 - **`createOptimisticAction`**: Intent-based operations, multi-collection mutations, immediately committed
-- **`createTransaction`**: Fully custom transactions, delayed commits, multi-step workflows
 - **Bypass the mutation system**: Use your existing mutation logic without rewriting
 
 ### Bypass the Mutation System
