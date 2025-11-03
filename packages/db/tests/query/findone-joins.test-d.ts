@@ -3,8 +3,6 @@ import { createLiveQueryCollection, eq } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection/index.js"
 import { mockSyncCollectionOptions } from "../utils.js"
 
-// Direct reproduction of the Discord bug report
-
 type Todo = {
   id: string
   text: string
@@ -19,7 +17,7 @@ type TodoOption = {
 
 const todoCollection = createCollection(
   mockSyncCollectionOptions<Todo>({
-    id: `test-todos-discord-bug`,
+    id: `test-todos-findone-joins`,
     getKey: (todo) => todo.id,
     initialData: [],
   })
@@ -27,14 +25,14 @@ const todoCollection = createCollection(
 
 const todoOptionsCollection = createCollection(
   mockSyncCollectionOptions<TodoOption>({
-    id: `test-todo-options-discord-bug`,
+    id: `test-todo-options-findone-joins`,
     getKey: (opt) => opt.id,
     initialData: [],
   })
 )
 
-describe(`Discord Bug: findOne() with joins`, () => {
-  test(`findOne() after leftJoin should not have never type`, () => {
+describe(`findOne() with joins`, () => {
+  test(`findOne() after leftJoin should infer correct types`, () => {
     const query = createLiveQueryCollection({
       query: (q) =>
         q
@@ -48,20 +46,16 @@ describe(`Discord Bug: findOne() with joins`, () => {
           .findOne(),
     })
 
-    // The key assertion: query.data should NOT be never
-    // It should be the joined result or undefined
+    // Verify query result is properly typed (not never)
     type QueryData = typeof query.toArray
     type IsNever<T> = [T] extends [never] ? true : false
     type DataIsNever = IsNever<QueryData>
 
-    // This will fail if QueryData is never
     expectTypeOf<DataIsNever>().toEqualTypeOf<false>()
-
-    // Also verify the structure is correct
     expectTypeOf(query.toArray).not.toBeNever()
   })
 
-  test(`limit(1) works as baseline (should not be never)`, () => {
+  test(`limit(1) should infer array type`, () => {
     const query = createLiveQueryCollection({
       query: (q) =>
         q
@@ -75,7 +69,7 @@ describe(`Discord Bug: findOne() with joins`, () => {
           .limit(1),
     })
 
-    // This should work fine (baseline)
+    // Verify query result is properly typed as array
     expectTypeOf(query.toArray).not.toBeNever()
   })
 })
