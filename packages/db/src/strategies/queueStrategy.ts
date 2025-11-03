@@ -44,14 +44,20 @@ import type { Transaction } from "../transactions"
  * ```
  */
 export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
-  const queuer = new AsyncQueuer<void>({
-    concurrency: 1, // Process one at a time to ensure serialization
-    wait: options?.wait,
-    maxSize: options?.maxSize,
-    addItemsTo: options?.addItemsTo ?? `back`, // Default FIFO: add to back
-    getItemsFrom: options?.getItemsFrom ?? `front`, // Default FIFO: get from front
-    started: true, // Start processing immediately
-  })
+  const queuer = new AsyncQueuer<() => Promise<void>>(
+    async (task: () => Promise<void>) => {
+      // Execute the queued task
+      await task()
+    },
+    {
+      concurrency: 1, // Process one at a time to ensure serialization
+      wait: options?.wait,
+      maxSize: options?.maxSize,
+      addItemsTo: options?.addItemsTo ?? `back`, // Default FIFO: add to back
+      getItemsFrom: options?.getItemsFrom ?? `front`, // Default FIFO: get from front
+      started: true, // Start processing immediately
+    }
+  )
 
   return {
     _type: `queue`,
