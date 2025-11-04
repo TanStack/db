@@ -1,3 +1,4 @@
+import * as React from "react"
 import { createFileRoute } from "@tanstack/react-router"
 import { useLiveQuery } from "@tanstack/react-db"
 import {
@@ -30,6 +31,13 @@ function TrailBasePage() {
   const { data: configData } = useLiveQuery((q) =>
     q.from({ config: trailBaseConfigCollection })
   )
+
+  // Note: TrailBase collections use recordApi internally, which is not exposed
+  // as a collection utility. For this example, we're not using serialized
+  // transactions with TrailBase - the color picker will use naked collection
+  // calls which invoke the collection's built-in handlers automatically.
+  // In a real app, you could expose the recordApi via utils to enable
+  // serialized transactions with TrailBase collections.
 
   return (
     <TodoApp

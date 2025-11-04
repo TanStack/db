@@ -1,10 +1,11 @@
 {
   "name": "@tanstack/db",
   "description": "A reactive client store for building super fast apps on sync",
-  "version": "0.4.15",
+  "version": "0.4.18",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
-    "@tanstack/db-ivm": "workspace:*"
+    "@tanstack/db-ivm": "workspace:*",
+    "@tanstack/pacer": "^0.1.0"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.2.4",
@@ -49,6 +50,7 @@
   ],
   "scripts": {
     "build": "vite build",
+    "build:minified": "vite build --minify",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "npx vitest --run"

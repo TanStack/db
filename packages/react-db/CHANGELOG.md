@@ -1,5 +1,68 @@
 # @tanstack/react-db
 
+## 0.1.40
+
+### Patch Changes
+
+- Updated dependencies [[`f416231`](https://github.com/TanStack/db/commit/f41623180c862b58b4fa6415383dfdb034f84ee9), [`b1b8299`](https://github.com/TanStack/db/commit/b1b82994cb9765225129b5a19be06e9369e3158d)]:
+  - @tanstack/db@0.4.18
+
+## 0.1.39
+
+### Patch Changes
+
+- Updated dependencies [[`49bcaa5`](https://github.com/TanStack/db/commit/49bcaa5557ba8d647c947811ed6e0c2450159d84)]:
+  - @tanstack/db@0.4.17
+
+## 0.1.38
+
+### Patch Changes
+
+- Add paced mutations with pluggable timing strategies ([#704](https://github.com/TanStack/db/pull/704))
+
+  Introduces a new paced mutations system that enables optimistic mutations with pluggable timing strategies. This provides fine-grained control over when and how mutations are persisted to the backend. Powered by [TanStack Pacer](https://github.com/TanStack/pacer).
+
+  **Key Design:**
+  - **Debounce/Throttle**: Only one pending transaction (collecting mutations) and one persisting transaction (writing to backend) at a time. Multiple rapid mutations automatically merge together.
+  - **Queue**: Each mutation creates a separate transaction, guaranteed to run in the order they're made (FIFO by default, configurable to LIFO).
+
+  **Core Features:**
+  - **Pluggable Strategy System**: Choose from debounce, queue, or throttle strategies to control mutation timing
+  - **Auto-merging Mutations**: Multiple rapid mutations on the same item automatically merge for efficiency (debounce/throttle only)
+  - **Transaction Management**: Full transaction lifecycle tracking (pending → persisting → completed/failed)
+  - **React Hook**: `usePacedMutations` for easy integration in React applications
+
+  **Available Strategies:**
+  - `debounceStrategy`: Wait for inactivity before persisting. Only final state is saved. (ideal for auto-save, search-as-you-type)
+  - `queueStrategy`: Each mutation becomes a separate transaction, processed sequentially in order (defaults to FIFO, configurable to LIFO). All mutations are guaranteed to persist. (ideal for sequential workflows, rate-limited APIs)
+  - `throttleStrategy`: Ensure minimum spacing between executions. Mutations between executions are merged. (ideal for analytics, progress updates)
+
+  **Example Usage:**
+
+  ```ts
+  import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
+
+  const mutate = usePacedMutations({
+    mutationFn: async ({ transaction }) => {
+      await api.save(transaction.mutations)
+    },
+    strategy: debounceStrategy({ wait: 500 }),
+  })
+
+  // Trigger a mutation
+  const tx = mutate(() => {
+    collection.update(id, (draft) => {
+      draft.value = newValue
+    })
+  })
+
+  // Optionally await persistence
+  await tx.isPersisted.promise
+  ```
+
+- Updated dependencies [[`979a66f`](https://github.com/TanStack/db/commit/979a66f2f6eff0ffe44dfde7c67feea933ee6110), [`f8a979b`](https://github.com/TanStack/db/commit/f8a979ba3aa90ac7e85f7a065fc050bda6589b4b), [`cb25623`](https://github.com/TanStack/db/commit/cb256234c9cd8df7771808b147e5afc2be56f51f)]:
+  - @tanstack/db@0.4.16
+
 ## 0.1.37
 
 ### Patch Changes

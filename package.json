@@ -9,6 +9,7 @@
   "type": "module",
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
+    "build:minified": "pnpm --filter \"./packages/**\" build:minified",
     "changeset": "changeset",
     "changeset:publish": "changeset publish",
     "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
@@ -59,5 +60,24 @@
     "*.{ts,tsx}": [
       "eslint --fix"
     ]
+  },
+  "workspaces": [
+    "packages/*",
+    "examples/*",
+    "examples/react/*"
+  ],
+  "overrides": {
+    "@tanstack/db": "workspace:*",
+    "@tanstack/db-ivm": "workspace:*",
+    "@tanstack/react-db": "workspace:*",
+    "@tanstack/vue-db": "workspace:*"
+  },
+  "pnpm": {
+    "overrides": {
+      "@tanstack/db": "workspace:*",
+      "@tanstack/query-db-collection": "workspace:*",
+      "@tanstack/react-db": "workspace:*",
+      "@tanstack/offline-transactions": "workspace:*"
+    }
   }
 }
