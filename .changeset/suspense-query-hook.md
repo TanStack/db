@@ -4,7 +4,7 @@
 
 Add `useLiveSuspenseQuery` hook for React Suspense support
 
-Introduces a new `useLiveSuspenseQuery` hook that provides declarative data loading with React Suspense, following TanStack Query's `useSuspenseQuery` pattern.
+Introduces a new `useLiveSuspenseQuery` hook that integrates with React Suspense and Error Boundaries, following TanStack Query's `useSuspenseQuery` pattern.
 
 **Key features:**
 
@@ -54,5 +54,12 @@ function App() {
 - Reuses promise across re-renders to prevent infinite loops
 - Detects dependency changes and creates new collection/promise
 - Same TypeScript overloads as useLiveQuery for consistency
+
+**Documentation:**
+
+- Comprehensive guide in live-queries.md covering usage patterns and when to use each hook
+- Comparison with useLiveQuery showing different approaches to loading/error states
+- Router loader pattern recommendation for React Router/TanStack Router users
+- Error handling examples with Suspense and Error Boundaries
 
 Resolves #692

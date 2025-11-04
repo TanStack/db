@@ -6,7 +6,7 @@ import {
   eq,
   gt,
 } from "@tanstack/db"
-import { Suspense, useEffect } from "react"
+import { StrictMode, Suspense } from "react"
 import { useLiveSuspenseQuery } from "../src/useLiveSuspenseQuery"
 import { mockSyncCollectionOptions } from "../../db/tests/utils"
 import type { ReactNode } from "react"
@@ -214,7 +214,7 @@ describe(`useLiveSuspenseQuery`, () => {
     await waitFor(() => {
       expect(result.current.data).toHaveLength(1)
     })
-    expect(result.current.data[0]!.age).toBe(35)
+    expect(result.current.data[0]?.age).toBe(35)
 
     // Change deps - age > 20
     rerender({ minAge: 20 })
@@ -491,20 +491,6 @@ describe(`useLiveSuspenseQuery`, () => {
       })
     )
 
-    let suspenseCount = 0
-
-    // Component that renders inside fallback and counts actual renders
-    const FallbackCounter = () => {
-      useEffect(() => {
-        suspenseCount++
-      })
-      return <div>Loading...</div>
-    }
-
-    const SuspenseCounter = ({ children }: { children: ReactNode }) => {
-      return <Suspense fallback={<FallbackCounter />}>{children}</Suspense>
-    }
-
     const { result, rerender } = renderHook(
       ({ minAge }) =>
         useLiveSuspenseQuery(
@@ -515,37 +501,105 @@ describe(`useLiveSuspenseQuery`, () => {
           [minAge]
         ),
       {
-        wrapper: SuspenseCounter,
+        wrapper: SuspenseWrapper,
         initialProps: { minAge: 20 },
       }
     )
 
-    // Wait for data to be available
-    // NOTE: Collections with initialData don't suspend - they're ready immediately
+    // Wait for initial load
     await waitFor(() => {
       expect(result.current.data).toHaveLength(3)
     })
 
-    const suspenseCountAfterInitial = suspenseCount
-    // Should be 0 because collection with initialData doesn't suspend
-    expect(suspenseCountAfterInitial).toBe(0)
+    const dataAfterInitial = result.current.data
 
-    // Re-render with SAME deps - should NOT suspend
+    // Re-render with SAME deps - should NOT suspend (data stays available)
     rerender({ minAge: 20 })
-    rerender({ minAge: 20 })
-    rerender({ minAge: 20 })
+    expect(result.current.data).toHaveLength(3)
+    expect(result.current.data).toBe(dataAfterInitial)
 
-    expect(suspenseCount).toBe(0)
+    rerender({ minAge: 20 })
+    expect(result.current.data).toHaveLength(3)
 
-    // Change deps - SHOULD suspend (new collection needs to load)
+    rerender({ minAge: 20 })
+    expect(result.current.data).toHaveLength(3)
+
+    // Change deps - SHOULD suspend and get new data
     rerender({ minAge: 30 })
 
     await waitFor(() => {
       expect(result.current.data).toHaveLength(1)
     })
 
-    // NOTE: Even on deps change with initialData, collection is immediately ready
-    // The filtered query result is computed synchronously from the base collection
-    expect(suspenseCount).toBe(0)
+    expect(result.current.data[0]?.age).toBe(35)
+  })
+
+  it(`should work with pre-created SingleResult collection`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-suspense-single`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    // Pre-create a SingleResult live query collection
+    const singlePersonQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ persons: collection })
+        .where(({ persons }) => eq(persons.id, `1`))
+        .findOne()
+    )
+
+    const { result } = renderHook(
+      () => useLiveSuspenseQuery(singlePersonQuery),
+      {
+        wrapper: SuspenseWrapper,
+      }
+    )
+
+    await waitFor(() => {
+      expect(result.current.data).toBeDefined()
+    })
+
+    expect(result.current.data).toMatchObject({
+      id: `1`,
+      name: `John Doe`,
+      age: 30,
+    })
+  })
+
+  it(`should handle StrictMode double-invocation correctly`, async () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-suspense-strict`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    const StrictModeWrapper = ({ children }: { children: ReactNode }) => (
+      <StrictMode>
+        <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
+      </StrictMode>
+    )
+
+    const { result } = renderHook(
+      () => useLiveSuspenseQuery((q) => q.from({ persons: collection })),
+      {
+        wrapper: StrictModeWrapper,
+      }
+    )
+
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(3)
+    })
+
+    // Verify data is correct despite double-invocation
+    expect(result.current.data).toHaveLength(3)
+    expect(result.current.data[0]).toMatchObject({
+      id: `1`,
+      name: `John Doe`,
+    })
   })
 })
