@@ -20,6 +20,7 @@ import type { CollectionImpl } from "./index.js"
 type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
   optimizedOnly?: boolean
+  trackLoadSubsetPromise?: boolean
 }
 
 type RequestLimitedSnapshotOptions = {
@@ -197,7 +198,10 @@ export class CollectionSubscription
       subscription: this,
     })
 
-    this.trackLoadSubsetPromise(syncResult)
+    const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
+    if (trackLoadSubsetPromise) {
+      this.trackLoadSubsetPromise(syncResult)
+    }
 
     // Also load data immediately from the collection
     const snapshot = this.collection.currentStateAsChanges(stateOpts)
