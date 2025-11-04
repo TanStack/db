@@ -108,7 +108,7 @@ export class CollectionChangesManager<
     })
 
     if (options.includeInitialState) {
-      subscription.requestSnapshot()
+      subscription.requestSnapshot({ trackLoadSubsetPromise: false })
     }
 
     // Add to batched listeners
