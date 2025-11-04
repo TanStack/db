@@ -403,9 +403,7 @@ export function localStorageCollectionOptions(
     }
 
     // Always persist to storage
-    // Load current data from storage
-    const currentData = loadFromStorage<any>(config.storageKey, storage, parser)
-
+    // Use lastKnownData (in-memory cache) instead of reading from storage
     // Add new items with version keys
     params.transaction.mutations.forEach((mutation) => {
       const key = config.getKey(mutation.modified)
@@ -413,21 +411,11 @@ export function localStorageCollectionOptions(
         versionKey: generateUuid(),
         data: mutation.modified,
       }
-      currentData.set(key, storedItem)
+      lastKnownData.set(key, storedItem)
     })
 
     // Save to storage
-    saveToStorage(currentData)
-
-    // Update lastKnownData to match what we just saved
-    // This is needed for cross-tab sync to work correctly
-    params.transaction.mutations.forEach((mutation) => {
-      const key = config.getKey(mutation.modified)
-      const storedItem = currentData.get(key)
-      if (storedItem) {
-        lastKnownData.set(key, storedItem)
-      }
-    })
+    saveToStorage(lastKnownData)
 
     // Confirm mutations through sync interface (moves from optimistic to synced state)
     // without reloading from storage
@@ -449,9 +437,7 @@ export function localStorageCollectionOptions(
     }
 
     // Always persist to storage
-    // Load current data from storage
-    const currentData = loadFromStorage<any>(config.storageKey, storage, parser)
-
+    // Use lastKnownData (in-memory cache) instead of reading from storage
     // Update items with new version keys
     params.transaction.mutations.forEach((mutation) => {
       const key = config.getKey(mutation.modified)
@@ -459,21 +445,11 @@ export function localStorageCollectionOptions(
         versionKey: generateUuid(),
         data: mutation.modified,
       }
-      currentData.set(key, storedItem)
+      lastKnownData.set(key, storedItem)
     })
 
     // Save to storage
-    saveToStorage(currentData)
-
-    // Update lastKnownData to match what we just saved
-    // This is needed for cross-tab sync to work correctly
-    params.transaction.mutations.forEach((mutation) => {
-      const key = config.getKey(mutation.modified)
-      const storedItem = currentData.get(key)
-      if (storedItem) {
-        lastKnownData.set(key, storedItem)
-      }
-    })
+    saveToStorage(lastKnownData)
 
     // Confirm mutations through sync interface (moves from optimistic to synced state)
     // without reloading from storage
@@ -490,25 +466,16 @@ export function localStorageCollectionOptions(
     }
 
     // Always persist to storage
-    // Load current data from storage
-    const currentData = loadFromStorage<any>(config.storageKey, storage, parser)
-
+    // Use lastKnownData (in-memory cache) instead of reading from storage
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
       // For delete operations, mutation.original contains the full object
       const key = config.getKey(mutation.original)
-      currentData.delete(key)
+      lastKnownData.delete(key)
     })
 
     // Save to storage
-    saveToStorage(currentData)
-
-    // Update lastKnownData to match what we just saved
-    // This is needed for cross-tab sync to work correctly
-    params.transaction.mutations.forEach((mutation) => {
-      const key = config.getKey(mutation.original)
-      lastKnownData.delete(key)
-    })
+    saveToStorage(lastKnownData)
 
     // Confirm mutations through sync interface (moves from optimistic to synced state)
     // without reloading from storage
