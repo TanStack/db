@@ -104,7 +104,7 @@ jobs:
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             echo "Error: Generated docs are out of sync!"
-            echo "Please run 'pnpm generateDocs' locally and commit the changes."
+            echo "Please run 'pnpm generate:docs' locally and commit the changes."
             echo ""
             echo "Files that need to be updated:"
             git status --short
