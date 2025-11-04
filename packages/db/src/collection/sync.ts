@@ -21,6 +21,7 @@ import type { CollectionImpl } from "./index.js"
 import type { CollectionStateManager } from "./state"
 import type { CollectionLifecycleManager } from "./lifecycle"
 import type { CollectionEventsManager } from "./events.js"
+import type { LiveQueryCollectionUtils } from "../query/live/collection-config-builder.js"
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -127,11 +128,11 @@ export class CollectionSyncManager<
                   // throwing a duplicate-key error during reconciliation.
                   messageType = `update`
                 } else {
-                  // Check if this is a live query with custom getKey and joins for better error messaging
-                  const utils = this.config.utils as any
+                  const utils = this.config
+                    .utils as Partial<LiveQueryCollectionUtils>
                   throw new DuplicateKeySyncError(key, this.id, {
-                    hasCustomGetKey: utils?._hasCustomGetKey?.(),
-                    hasJoins: utils?._hasJoins?.(),
+                    hasCustomGetKey: utils._hasCustomGetKey?.(),
+                    hasJoins: utils._hasJoins?.(),
                   })
                 }
               }

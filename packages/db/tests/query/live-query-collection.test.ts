@@ -1743,8 +1743,67 @@ describe(`createLiveQueryCollection`, () => {
 
       await liveQuery.preload()
       expect(liveQuery.size).toBe(1)
-      // If duplicate keys occurred, an enhanced error would be thrown
-      // with guidance about composite keys
+    })
+
+    it(`should throw enhanced error when duplicate keys occur with custom getKey + joins`, async () => {
+      const usersOptions = mockSyncCollectionOptions<{
+        id: string
+        name: string
+      }>({
+        id: `users-duplicate-test`,
+        getKey: (item) => item.id,
+        initialData: [{ id: `user1`, name: `User 1` }],
+      })
+      const users = createCollection(usersOptions)
+
+      const commentsOptions = mockSyncCollectionOptions<{
+        id: string
+        userId: string
+        text: string
+      }>({
+        id: `comments-duplicate-test`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `comment1`, userId: `user1`, text: `First comment` },
+        ],
+      })
+      const comments = createCollection(commentsOptions)
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ comments })
+            .join({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id))
+            .select(({ comments: c, users: u }) => ({
+              id: c.id,
+              userId: u.id,
+              text: c.text,
+              userName: u?.name,
+            })),
+        getKey: (item) => item.userId,
+        startSync: true,
+      })
+
+      await liveQuery.preload()
+      expect(liveQuery.size).toBe(1)
+
+      try {
+        commentsOptions.utils.begin()
+        commentsOptions.utils.write({
+          type: `insert`,
+          value: { id: `comment2`, userId: `user1`, text: `Second comment` },
+        })
+        commentsOptions.utils.commit()
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      } catch (error: any) {
+        expect(error.message).toContain(`already exists in the collection`)
+        expect(error.message).toContain(`custom getKey`)
+        expect(error.message).toContain(`joined queries`)
+        expect(error.message).toContain(`composite key`)
+        return
+      }
+
+      throw new Error(`Expected DuplicateKeySyncError to be thrown`)
     })
   })
 })

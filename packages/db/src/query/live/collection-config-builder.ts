@@ -189,17 +189,6 @@ export class CollectionConfigBuilder<
       }
     }
 
-    // Recursively check subqueries in join clauses
-    if (query.join) {
-      for (const joinClause of query.join) {
-        if (joinClause.from.type === `queryRef`) {
-          if (this.hasJoins(joinClause.from.query)) {
-            return true
-          }
-        }
-      }
-    }
-
     return false
   }
 
@@ -225,7 +214,6 @@ export class CollectionConfigBuilder<
         getBuilder: () => this,
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
-        // Metadata for error handling (as functions to match UtilsRecord type)
         _hasCustomGetKey: () => !!this.config.getKey,
         _hasJoins: () => this.hasJoins(this.query),
       },
