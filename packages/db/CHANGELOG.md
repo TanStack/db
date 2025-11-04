@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.4.18
+
+### Patch Changes
+
+- Fix bug with orderBy that caused queries to skip duplicate values and/or stall on duplicate values. ([#713](https://github.com/TanStack/db/pull/713))
+
+- Validate against duplicate collection aliases in subqueries. Prevents a bug where using the same alias for a collection in both parent and subquery causes empty results or incorrect aggregation values. Now throws a clear `DuplicateAliasInSubqueryError` when this pattern is detected, guiding users to rename the conflicting alias. ([#719](https://github.com/TanStack/db/pull/719))
+
 ## 0.4.17
 
 ### Patch Changes
