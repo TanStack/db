@@ -572,6 +572,7 @@ describe(`Collection with schema validation`, () => {
 
   it(`should apply schema transformations on insert operations`, () => {
     // Create a schema with transformations
+    // Note: Using z.object for metadata instead of z.record due to Zod v4 bug with z.record() and Standard Schema
     const userSchema = z.object({
       id: z.string(),
       name: z.string(),
@@ -583,7 +584,7 @@ describe(`Collection with schema validation`, () => {
         .array(z.string())
         .transform((val) => val.map((tag) => tag.toLowerCase())),
       metadata: z
-        .record(z.string())
+        .object({ source: z.string() })
         .transform((val) => ({ ...val, processed: true })),
     })
 
@@ -634,6 +635,7 @@ describe(`Collection with schema validation`, () => {
 
   it(`should apply schema transformations on update operations`, async () => {
     // Create a schema with transformations that can handle both input and existing data
+    // Note: Using z.object for metadata instead of z.record due to Zod v4 bug with z.record() and Standard Schema
     const userSchema = z.object({
       id: z.string(),
       name: z.string(),
@@ -655,9 +657,9 @@ describe(`Collection with schema validation`, () => {
         .transform((val) => val.map((tag) => tag.toLowerCase())),
       metadata: z
         .union([
-          z.record(z.string()),
+          z.object({ source: z.string().optional(), role: z.string().optional() }).passthrough(),
           z
-            .record(z.string())
+            .object({ source: z.string().optional(), role: z.string().optional() }).passthrough()
             .transform((val) => ({ ...val, processed: true })),
         ])
         .transform((val) => ({ ...val, processed: true })),
