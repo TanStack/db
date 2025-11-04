@@ -16,7 +16,7 @@
     "@powersync/common": "^1.41.0",
     "@powersync/node": "^0.13.0",
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.2.4"
+    "@vitest/coverage-istanbul": "^4.0.7"
   },
   "exports": {
     ".": {

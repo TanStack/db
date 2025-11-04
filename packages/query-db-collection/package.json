@@ -7,8 +7,8 @@
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@tanstack/query-core": "^5.90.5",
-    "@vitest/coverage-istanbul": "^3.2.4"
+    "@tanstack/query-core": "^5.90.6",
+    "@vitest/coverage-istanbul": "^4.0.7"
   },
   "exports": {
     ".": {

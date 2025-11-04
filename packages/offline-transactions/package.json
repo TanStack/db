@@ -55,10 +55,10 @@
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "eslint": "^8.57.0",
-    "typescript": "^5.5.4",
-    "vitest": "^3.2.4"
+    "@types/node": "^24.10.0",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.7"
   },
   "peerDependencies": {
     "@tanstack/db": "*"

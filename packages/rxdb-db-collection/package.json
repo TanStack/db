@@ -3,15 +3,15 @@
   "description": "RxDB collection for TanStack DB",
   "version": "0.1.28",
   "dependencies": {
-    "rxdb": "16.20.0",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.8.0",
-    "debug": "^4.4.3"
+    "debug": "^4.4.3",
+    "rxdb": "16.20.0"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.2.4"
+    "@vitest/coverage-istanbul": "^4.0.7"
   },
   "exports": {
     ".": {
