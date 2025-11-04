@@ -347,16 +347,6 @@ export function localStorageCollectionOptions(
   )
 
   /**
-   * Manual trigger function for local sync updates
-   * Forces a check for storage changes and updates the collection if needed
-   */
-  const triggerLocalSync = () => {
-    if (sync.manualTrigger) {
-      sync.manualTrigger()
-    }
-  }
-
-  /**
    * Save data to storage
    * @param dataMap - Map of items with version tracking to save to storage
    */
@@ -429,8 +419,19 @@ export function localStorageCollectionOptions(
     // Save to storage
     saveToStorage(currentData)
 
-    // Manually trigger local sync since storage events don't fire for current tab
-    triggerLocalSync()
+    // Update lastKnownData to match what we just saved
+    // This is needed for cross-tab sync to work correctly
+    params.transaction.mutations.forEach((mutation) => {
+      const key = config.getKey(mutation.modified)
+      const storedItem = currentData.get(key)
+      if (storedItem) {
+        lastKnownData.set(key, storedItem)
+      }
+    })
+
+    // Confirm mutations through sync interface (moves from optimistic to synced state)
+    // without reloading from storage
+    sync.confirmOperationsSync(params.transaction.mutations)
 
     return handlerResult
   }
@@ -464,8 +465,19 @@ export function localStorageCollectionOptions(
     // Save to storage
     saveToStorage(currentData)
 
-    // Manually trigger local sync since storage events don't fire for current tab
-    triggerLocalSync()
+    // Update lastKnownData to match what we just saved
+    // This is needed for cross-tab sync to work correctly
+    params.transaction.mutations.forEach((mutation) => {
+      const key = config.getKey(mutation.modified)
+      const storedItem = currentData.get(key)
+      if (storedItem) {
+        lastKnownData.set(key, storedItem)
+      }
+    })
+
+    // Confirm mutations through sync interface (moves from optimistic to synced state)
+    // without reloading from storage
+    sync.confirmOperationsSync(params.transaction.mutations)
 
     return handlerResult
   }
@@ -491,8 +503,16 @@ export function localStorageCollectionOptions(
     // Save to storage
     saveToStorage(currentData)
 
-    // Manually trigger local sync since storage events don't fire for current tab
-    triggerLocalSync()
+    // Update lastKnownData to match what we just saved
+    // This is needed for cross-tab sync to work correctly
+    params.transaction.mutations.forEach((mutation) => {
+      const key = config.getKey(mutation.original)
+      lastKnownData.delete(key)
+    })
+
+    // Confirm mutations through sync interface (moves from optimistic to synced state)
+    // without reloading from storage
+    sync.confirmOperationsSync(params.transaction.mutations)
 
     return handlerResult
   }
