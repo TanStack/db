@@ -82,8 +82,8 @@ function compileOrderByClause(
   clause: IR.OrderByClause,
   params: Array<unknown>
 ): string {
-  // TODO: what to do with stringSort and locale?
-  //       Correctly supporting them is tricky as it depends on Postgres' collation
+  // FIXME: We should handle stringSort and locale.
+  //        Correctly supporting them is tricky as it depends on Postgres' collation
   const { expression, compareOptions } = clause
   let sql = compileBasicExpression(expression, params)
 
