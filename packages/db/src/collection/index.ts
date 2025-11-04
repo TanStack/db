@@ -214,7 +214,7 @@ export class CollectionImpl<
   public utils: Record<string, Fn> = {}
 
   // Managers
-  private _events: CollectionEventsManager
+  public events: CollectionEventsManager
   private _changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
   public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   public _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
@@ -260,7 +260,7 @@ export class CollectionImpl<
     }
 
     this._changes = new CollectionChangesManager()
-    this._events = new CollectionEventsManager()
+    this.events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
     this._lifecycle = new CollectionLifecycleManager(config, this.id)
     this._mutations = new CollectionMutationsManager(config, this.id)
@@ -271,9 +271,9 @@ export class CollectionImpl<
       collection: this, // Required for passing to CollectionSubscription
       lifecycle: this._lifecycle,
       sync: this._sync,
-      events: this._events,
+      events: this.events,
     })
-    this._events.setDeps({
+    this.events.setDeps({
       collection: this, // Required for adding to emitted events
     })
     this._indexes.setDeps({
@@ -282,7 +282,7 @@ export class CollectionImpl<
     })
     this._lifecycle.setDeps({
       changes: this._changes,
-      events: this._events,
+      events: this.events,
       indexes: this._indexes,
       state: this._state,
       sync: this._sync,
@@ -806,7 +806,7 @@ export class CollectionImpl<
     event: T,
     callback: CollectionEventHandler<T>
   ) {
-    return this._events.on(event, callback)
+    return this.events.on(event, callback)
   }
 
   /**
@@ -816,7 +816,7 @@ export class CollectionImpl<
     event: T,
     callback: CollectionEventHandler<T>
   ) {
-    return this._events.once(event, callback)
+    return this.events.once(event, callback)
   }
 
   /**
@@ -826,7 +826,7 @@ export class CollectionImpl<
     event: T,
     callback: CollectionEventHandler<T>
   ) {
-    this._events.off(event, callback)
+    this.events.off(event, callback)
   }
 
   /**
@@ -836,7 +836,7 @@ export class CollectionImpl<
     event: T,
     timeout?: number
   ) {
-    return this._events.waitFor(event, timeout)
+    return this.events.waitFor(event, timeout)
   }
 
   /**
