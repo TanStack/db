@@ -99,12 +99,12 @@ jobs:
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
       - name: Generate Docs
-        run: pnpm generate:docs
+        run: pnpm docs:generate
       - name: Check for changes
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             echo "Error: Generated docs are out of sync!"
-            echo "Please run 'pnpm generate:docs' locally and commit the changes."
+            echo "Please run 'pnpm docs:generate' locally and commit the changes."
             echo ""
             echo "Files that need to be updated:"
             git status --short
