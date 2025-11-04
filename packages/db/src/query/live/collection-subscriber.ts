@@ -98,12 +98,6 @@ export class CollectionSubscriber<
 
     // Subscribe to subscription status changes to propagate loading state
     const statusUnsubscribe = subscription.on(`status:change`, (event) => {
-      // TODO: For now we are setting this loading state whenever the subscription
-      // status changes to 'loadingSubset'. But we have discussed it only happening
-      // when the the live query has it's offset/limit changed, and that triggers the
-      // subscription to request a snapshot. This will require more work to implement,
-      // and builds on https://github.com/TanStack/db/pull/663 which this PR
-      // does not yet depend on.
       if (event.status === `loadingSubset`) {
         trackLoadPromise()
       } else {
