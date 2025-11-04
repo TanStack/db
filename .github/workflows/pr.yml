@@ -98,6 +98,8 @@ jobs:
         uses: actions/checkout@v5.0.0
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
+      - name: Build Packages
+        run: pnpm run build
       - name: Generate Docs
         run: pnpm docs:generate
       - name: Check for changes
