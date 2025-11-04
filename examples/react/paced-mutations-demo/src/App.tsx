@@ -8,6 +8,7 @@ import {
   usePacedMutations,
 } from "@tanstack/react-db"
 import type { PendingMutation, Transaction } from "@tanstack/react-db"
+import { EmailDraftExample } from "./EmailDraftExample"
 
 interface Item {
   id: number
@@ -78,8 +79,11 @@ interface TrackedTransaction {
 }
 
 type StrategyType = `debounce` | `queue` | `throttle`
+type ExampleType = `strategies` | `zod-validation`
 
 export function App() {
+  const [selectedExample, setSelectedExample] =
+    useState<ExampleType>(`strategies`)
   const [strategyType, setStrategyType] = useState<StrategyType>(`debounce`)
   const [wait, setWait] = useState(300)
   const [leading, setLeading] = useState(false)
@@ -224,6 +228,30 @@ export function App() {
   const executing = transactions.filter((t) => t.state === `executing`)
   const completed = transactions.filter((t) => t.state === `completed`)
 
+  // Render the selected example
+  if (selectedExample === `zod-validation`) {
+    return (
+      <div className="app">
+        <div style={{ marginBottom: `20px` }}>
+          <button
+            onClick={() => setSelectedExample(`strategies`)}
+            style={{
+              padding: `8px 16px`,
+              backgroundColor: `#666`,
+              color: `white`,
+              border: `none`,
+              borderRadius: `4px`,
+              cursor: `pointer`,
+            }}
+          >
+            ← Back to Strategies Demo
+          </button>
+        </div>
+        <EmailDraftExample />
+      </div>
+    )
+  }
+
   return (
     <div className="app">
       <h1>Paced Mutations Demo</h1>
@@ -231,6 +259,22 @@ export function App() {
         Drag the slider to trigger mutations and see how different strategies
         batch, queue, and persist changes
       </p>
+
+      <div style={{ marginBottom: `20px` }}>
+        <button
+          onClick={() => setSelectedExample(`zod-validation`)}
+          style={{
+            padding: `8px 16px`,
+            backgroundColor: `#0066cc`,
+            color: `white`,
+            border: `none`,
+            borderRadius: `4px`,
+            cursor: `pointer`,
+          }}
+        >
+          View Email Draft Example (Zod Validation) →
+        </button>
+      </div>
 
       <div className="stats">
         <div className="stat-card">
