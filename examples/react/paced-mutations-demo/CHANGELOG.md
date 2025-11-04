@@ -1,5 +1,13 @@
 # @tanstack/db-example-paced-mutations-demo
 
+## 0.0.4
+
+### Patch Changes
+
+- Updated dependencies [[`f416231`](https://github.com/TanStack/db/commit/f41623180c862b58b4fa6415383dfdb034f84ee9), [`b1b8299`](https://github.com/TanStack/db/commit/b1b82994cb9765225129b5a19be06e9369e3158d)]:
+  - @tanstack/db@0.4.18
+  - @tanstack/react-db@0.1.40
+
 ## 0.0.3
 
 ### Patch Changes
