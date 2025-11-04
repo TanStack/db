@@ -99,7 +99,7 @@ jobs:
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
       - name: Generate Docs
-        run: pnpm generateDocs
+        run: pnpm generate:docs
       - name: Check for changes
         run: |
           if [ -n "$(git status --porcelain)" ]; then
