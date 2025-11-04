@@ -156,6 +156,8 @@ export function useLiveSuspenseQuery(
   // After success, errors surface as stale data (matches TanStack Query behavior)
   if (result.status === `error` && !hasBeenReadyRef.current) {
     promiseRef.current = null
+    // TODO: Once collections hold a reference to their last error object (#671),
+    // we should rethrow that actual error instead of creating a generic message
     throw new Error(`Collection "${result.collection.id}" failed to load`)
   }
 
@@ -164,7 +166,9 @@ export function useLiveSuspenseQuery(
     if (!promiseRef.current) {
       promiseRef.current = result.collection.preload()
     }
-    // THROW PROMISE - React Suspense catches this (React 18+ compatible)
+    // THROW PROMISE - React Suspense catches this (React 18+ required)
+    // Note: We don't check React version here. In React <18, this will be caught
+    // by an Error Boundary, which provides a reasonable failure mode.
     throw promiseRef.current
   }
 

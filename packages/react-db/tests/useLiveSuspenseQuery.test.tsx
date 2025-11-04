@@ -214,7 +214,7 @@ describe(`useLiveSuspenseQuery`, () => {
     await waitFor(() => {
       expect(result.current.data).toHaveLength(1)
     })
-    expect(result.current.data[0].age).toBe(35)
+    expect(result.current.data[0]!.age).toBe(35)
 
     // Change deps - age > 20
     rerender({ minAge: 20 })
@@ -272,7 +272,7 @@ describe(`useLiveSuspenseQuery`, () => {
           wrapper: SuspenseWrapper,
         }
       )
-    }).toThrow(/does not support returning undefined/)
+    }).toThrow(/does not support disabled queries/)
   })
 
   it(`should work with config object`, async () => {
