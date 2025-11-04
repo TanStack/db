@@ -44,14 +44,25 @@ export function ensureIndexForField<
 
   // Create a new index for this field using the collection's createIndex method
   try {
-    collection.createIndex((row) => (row as any)[fieldName], {
-      name: `auto_${fieldName}`,
-      indexType: BTreeIndex,
-      options: compareFn ? { compareFn, compareOptions } : {},
-    })
+    // Use the proxy-based approach to create the proper accessor for nested paths
+    collection.createIndex(
+      (row) => {
+        // Navigate through the field path
+        let current: any = row
+        for (const part of fieldPath) {
+          current = current[part]
+        }
+        return current
+      },
+      {
+        name: `auto:${fieldPath.join(`.`)}`,
+        indexType: BTreeIndex,
+        options: compareFn ? { compareFn, compareOptions } : {},
+      }
+    )
   } catch (error) {
     console.warn(
-      `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field "${fieldName}":`,
+      `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":`,
       error
     )
   }
@@ -108,7 +119,7 @@ function extractIndexableExpressions(
       return
     }
 
-    // Check if the first argument is a property reference (single field)
+    // Check if the first argument is a property reference
     if (func.args.length < 1 || func.args[0].type !== `ref`) {
       return
     }
@@ -116,12 +127,14 @@ function extractIndexableExpressions(
     const fieldRef = func.args[0]
     const fieldPath = fieldRef.path
 
-    // Skip if it's not a simple field (e.g., nested properties or array access)
-    if (fieldPath.length !== 1) {
+    // Skip if the path is empty
+    if (fieldPath.length === 0) {
       return
     }
 
-    const fieldName = fieldPath[0]
+    // For nested paths, use the full path joined with underscores as the field name
+    // For simple paths, use the first (and only) element
+    const fieldName = fieldPath.join(`_`)
     results.push({ fieldName, fieldPath })
   }
 

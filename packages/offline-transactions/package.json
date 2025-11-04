@@ -1,0 +1,66 @@
+{
+  "name": "@tanstack/offline-transactions",
+  "version": "0.1.0",
+  "description": "Offline-first transaction capabilities for TanStack DB",
+  "author": "TanStack",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/offline-transactions"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "tanstack",
+    "database",
+    "offline",
+    "transactions",
+    "persistence",
+    "sync"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@tanstack/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "eslint": "^8.57.0",
+    "typescript": "^5.5.4",
+    "vitest": "^3.2.4"
+  },
+  "peerDependencies": {
+    "@tanstack/db": "*"
+  }
+}

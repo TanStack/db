@@ -28,8 +28,8 @@ function checkLexicographicOrder(results: Array<any>) {
 
   // Check that indices are in the same order as the sorted values
   for (let i = 0; i < sortedByValue.length - 1; i++) {
-    const currentIndex = sortedByValue[i].index
-    const nextIndex = sortedByValue[i + 1].index
+    const currentIndex = sortedByValue[i]!.index
+    const nextIndex = sortedByValue[i + 1]!.index
 
     // Indices should be in lexicographic order
     if (!(currentIndex < nextIndex)) {
@@ -1119,6 +1119,582 @@ describe(`Operators`, () => {
         ([_key, [value, _index]]) => value.value
       )
       expect(moveSortedValues4).toEqual([`a`, `b`])
+    })
+
+    it(`should handle moving window from infinite limit to finite limit with same offset`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
+      const tracker = new MessageTracker<
+        [number, [{ id: number; value: string }, string]]
+      >()
+
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
+
+      // Start with no limit (infinite limit)
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data - a, b, c, d, e, f
+      input.sendData(
+        new MultiSet([
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+        ])
+      )
+      graph.run()
+
+      // Initial result should have all 6 elements (no limit)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(initialResult.sortedResults.length).toBe(6)
+
+      const initialSortedValues = initialResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(initialSortedValues).toEqual([`a`, `b`, `c`, `d`, `e`, `f`])
+
+      // Verify windowFn was set
+      expect(windowFn).toBeDefined()
+
+      // Move to finite limit of 3 (should show a, b, c)
+      windowFn!({ offset: 0, limit: 3 })
+      graph.run()
+
+      const moveResult = tracker.getResult(compareFractionalIndex)
+
+      // Should now show only first 3 elements
+      const moveSortedValues = moveResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(moveSortedValues).toEqual([`a`, `b`, `c`])
+
+      // Check that we have changes (elements d, e, f should be removed)
+      expect(moveResult.messageCount).toBeGreaterThan(0)
+    })
+
+    it(`should handle moving window from infinite limit to finite limit while moving offset forward`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
+      const tracker = new MessageTracker<
+        [number, [{ id: number; value: string }, string]]
+      >()
+
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
+
+      // Start with no limit (infinite limit)
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          offset: 0,
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data - a, b, c, d, e, f
+      input.sendData(
+        new MultiSet([
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+        ])
+      )
+      graph.run()
+
+      // Initial result should have all 6 elements (no limit)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(initialResult.sortedResults.length).toBe(6)
+
+      // Move to offset 2, limit 3 (should show c, d, e)
+      windowFn!({ offset: 2, limit: 3 })
+      graph.run()
+
+      const moveResult = tracker.getResult(compareFractionalIndex)
+
+      // Should now show elements c, d, e
+      const moveSortedValues = moveResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(moveSortedValues).toEqual([`c`, `d`, `e`])
+
+      // Check that we have changes
+      expect(moveResult.messageCount).toBeGreaterThan(0)
+    })
+
+    it(`should handle moving window from infinite limit to finite limit while moving offset backward`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
+      const tracker = new MessageTracker<
+        [number, [{ id: number; value: string }, string]]
+      >()
+
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
+
+      // Start with no limit (infinite limit) and offset 3
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          offset: 3,
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data - a, b, c, d, e, f
+      input.sendData(
+        new MultiSet([
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+        ])
+      )
+      graph.run()
+
+      // Initial result should have elements d, e, f (no limit, offset 3)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(initialResult.sortedResults.length).toBe(3)
+
+      const initialSortedValues = initialResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(initialSortedValues).toEqual([`d`, `e`, `f`])
+
+      // Move to finite limit of 2, moving offset backward to 1 (should show b, c)
+      windowFn!({ offset: 1, limit: 2 })
+      graph.run()
+
+      const moveResult = tracker.getResult(compareFractionalIndex)
+
+      // Should now show elements b, c (offset 1, limit 2)
+      const moveSortedValues = moveResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(moveSortedValues).toEqual([`b`, `c`])
+
+      // Check that we have changes (elements d, e, f should be removed, b, c should be added)
+      expect(moveResult.messageCount).toBeGreaterThan(0)
+    })
+
+    it(`should handle moving window from infinite limit to infinite limit with same offset (no-op)`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
+      const tracker = new MessageTracker<
+        [number, [{ id: number; value: string }, string]]
+      >()
+
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
+
+      // Start with no limit (infinite limit) and offset 2
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          offset: 2,
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data - a, b, c, d, e, f
+      input.sendData(
+        new MultiSet([
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+        ])
+      )
+      graph.run()
+
+      // Initial result should have elements c, d, e, f (no limit, offset 2)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(initialResult.sortedResults.length).toBe(4)
+
+      const initialSortedValues = initialResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(initialSortedValues).toEqual([`c`, `d`, `e`, `f`])
+
+      // Move to same offset, still no limit (should show same elements c, d, e, f)
+      windowFn!({ offset: 2 })
+      graph.run()
+
+      const moveResult = tracker.getResult(compareFractionalIndex)
+
+      // Should show same elements c, d, e, f (offset 2, no limit)
+      const moveSortedValues = moveResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(moveSortedValues).toEqual([`c`, `d`, `e`, `f`])
+
+      // Check that we have no more changes (this should be a no-op)
+      expect(moveResult.messageCount).toBe(initialResult.messageCount)
+    })
+
+    it(`should handle moving window from infinite limit to infinite limit while moving offset forward`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
+      const tracker = new MessageTracker<
+        [number, [{ id: number; value: string }, string]]
+      >()
+
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
+
+      // Start with no limit (infinite limit) and offset 0
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          offset: 0,
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data - a, b, c, d, e, f
+      input.sendData(
+        new MultiSet([
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+        ])
+      )
+      graph.run()
+
+      // Initial result should have all 6 elements (no limit, offset 0)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(initialResult.sortedResults.length).toBe(6)
+
+      const initialSortedValues = initialResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(initialSortedValues).toEqual([`a`, `b`, `c`, `d`, `e`, `f`])
+
+      // Move to offset 2, still no limit (should show c, d, e, f)
+      windowFn!({ offset: 2 })
+      graph.run()
+
+      const moveResult = tracker.getResult(compareFractionalIndex)
+
+      // Should now show elements c, d, e, f (offset 2, no limit)
+      const moveSortedValues = moveResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(moveSortedValues).toEqual([`c`, `d`, `e`, `f`])
+
+      // Check that we have changes (elements a, b should be removed)
+      expect(moveResult.messageCount).toBeGreaterThan(0)
+    })
+
+    it(`should handle moving window from infinite limit to infinite limit while moving offset backward`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
+      const tracker = new MessageTracker<
+        [number, [{ id: number; value: string }, string]]
+      >()
+
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
+
+      // Start with no limit (infinite limit) and offset 3
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          offset: 3,
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data - a, b, c, d, e, f
+      input.sendData(
+        new MultiSet([
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+        ])
+      )
+      graph.run()
+
+      // Initial result should have elements d, e, f (no limit, offset 3)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(initialResult.sortedResults.length).toBe(3)
+
+      const initialSortedValues = initialResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(initialSortedValues).toEqual([`d`, `e`, `f`])
+
+      // Move to offset 1, still no limit (should show b, c, d, e, f)
+      windowFn!({ offset: 1 })
+      graph.run()
+
+      const moveResult = tracker.getResult(compareFractionalIndex)
+
+      // Should now show elements b, c, d, e, f (offset 1, no limit)
+      const moveSortedValues = moveResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(moveSortedValues).toEqual([`b`, `c`, `d`, `e`, `f`])
+
+      // Check that we have changes (elements b, c should be added)
+      expect(moveResult.messageCount).toBeGreaterThan(0)
+    })
+
+    it(`should handle moving window from finite limit to infinite limit with same offset`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
+      const tracker = new MessageTracker<
+        [number, [{ id: number; value: string }, string]]
+      >()
+
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
+
+      // Start with finite limit of 2 and offset 2
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          limit: 2,
+          offset: 2,
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data - a, b, c, d, e, f
+      input.sendData(
+        new MultiSet([
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+        ])
+      )
+      graph.run()
+
+      // Initial result should have 2 elements starting from offset 2 (c, d)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(initialResult.sortedResults.length).toBe(2)
+
+      const initialSortedValues = initialResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(initialSortedValues).toEqual([`c`, `d`])
+
+      // Move to infinite limit, keeping offset 2 (should show c, d, e, f)
+      windowFn!({ offset: 2, limit: Infinity })
+      graph.run()
+
+      const moveResult = tracker.getResult(compareFractionalIndex)
+
+      // Should now show elements c, d, e, f (offset 2, no limit)
+      const moveSortedValues = moveResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(moveSortedValues).toEqual([`c`, `d`, `e`, `f`])
+
+      // Check that we have changes (elements e, f should be added)
+      expect(moveResult.messageCount).toBeGreaterThan(0)
+    })
+
+    it(`should handle moving window from finite limit to infinite limit while moving offset forward`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
+      const tracker = new MessageTracker<
+        [number, [{ id: number; value: string }, string]]
+      >()
+
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
+
+      // Start with finite limit of 2 and offset 1
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          limit: 2,
+          offset: 1,
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data - a, b, c, d, e, f
+      input.sendData(
+        new MultiSet([
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+        ])
+      )
+      graph.run()
+
+      // Initial result should have 2 elements starting from offset 1 (b, c)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(initialResult.sortedResults.length).toBe(2)
+
+      const initialSortedValues = initialResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(initialSortedValues).toEqual([`b`, `c`])
+
+      // Move to infinite limit, moving offset forward to 3 (should show d, e, f)
+      windowFn!({ offset: 3, limit: Infinity })
+      graph.run()
+
+      const moveResult = tracker.getResult(compareFractionalIndex)
+
+      // Should now show elements d, e, f (offset 3, no limit)
+      const moveSortedValues = moveResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(moveSortedValues).toEqual([`d`, `e`, `f`])
+
+      // Check that we have changes (elements b, c should be removed, d, e, f should be added)
+      expect(moveResult.messageCount).toBeGreaterThan(0)
+    })
+
+    it(`should handle moving window from finite limit to infinite limit while moving offset backward`, () => {
+      const graph = new D2()
+      const input = graph.newInput<[number, { id: number; value: string }]>()
+      const tracker = new MessageTracker<
+        [number, [{ id: number; value: string }, string]]
+      >()
+
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | null = null
+
+      // Start with finite limit of 2 and offset 3
+      input.pipe(
+        topKWithFractionalIndex((a, b) => a.value.localeCompare(b.value), {
+          limit: 2,
+          offset: 3,
+          setWindowFn: (fn) => {
+            windowFn = fn
+          },
+        }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      // Initial data - a, b, c, d, e, f
+      input.sendData(
+        new MultiSet([
+          [[1, { id: 1, value: `a` }], 1],
+          [[2, { id: 2, value: `b` }], 1],
+          [[3, { id: 3, value: `c` }], 1],
+          [[4, { id: 4, value: `d` }], 1],
+          [[5, { id: 5, value: `e` }], 1],
+          [[6, { id: 6, value: `f` }], 1],
+        ])
+      )
+      graph.run()
+
+      // Initial result should have 2 elements starting from offset 3 (d, e)
+      const initialResult = tracker.getResult(compareFractionalIndex)
+      expect(initialResult.sortedResults.length).toBe(2)
+
+      const initialSortedValues = initialResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(initialSortedValues).toEqual([`d`, `e`])
+
+      // Move to infinite limit, moving offset backward to 1 (should show b, c, d, e, f)
+      windowFn!({ offset: 1, limit: Infinity })
+      graph.run()
+
+      const moveResult = tracker.getResult(compareFractionalIndex)
+
+      // Should now show elements b, c, d, e, f (offset 1, no limit)
+      const moveSortedValues = moveResult.sortedResults.map(
+        ([_key, [value, _index]]) => value.value
+      )
+      expect(moveSortedValues).toEqual([`b`, `c`, `d`, `e`, `f`])
+
+      // Check that we have changes (elements b, c, f should be added, d, e should remain)
+      expect(moveResult.messageCount).toBeGreaterThan(0)
     })
   })
 })

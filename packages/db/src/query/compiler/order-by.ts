@@ -179,13 +179,11 @@ export function processOrderBy(
           orderByOptimizationInfo
 
         setSizeCallback = (getSize: () => number) => {
-          optimizableOrderByCollections[followRefCollection.id] = {
-            ...optimizableOrderByCollections[followRefCollection.id]!,
-            dataNeeded: () => {
+          optimizableOrderByCollections[followRefCollection.id]![`dataNeeded`] =
+            () => {
               const size = getSize()
               return Math.max(0, orderByOptimizationInfo!.limit - size)
-            },
-          }
+            }
         }
       }
     }
