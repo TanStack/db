@@ -404,6 +404,22 @@ export class CollectionInputNotFoundError extends QueryCompilationError {
   }
 }
 
+/**
+ * Error thrown when a subquery uses the same alias as its parent query.
+ * This causes issues because parent and subquery would share the same input streams,
+ * leading to empty results or incorrect data (aggregation cross-leaking).
+ */
+export class DuplicateAliasInSubqueryError extends QueryCompilationError {
+  constructor(alias: string, parentAliases: Array<string>) {
+    super(
+      `Subquery uses alias "${alias}" which is already used in the parent query. ` +
+        `Each alias must be unique across parent and subquery contexts. ` +
+        `Parent query aliases: ${parentAliases.join(`, `)}. ` +
+        `Please rename "${alias}" in either the parent query or subquery to avoid conflicts.`
+    )
+  }
+}
+
 export class UnsupportedFromTypeError extends QueryCompilationError {
   constructor(type: string) {
     super(`Unsupported FROM type: ${type}`)
