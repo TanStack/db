@@ -568,6 +568,13 @@ export function queryCollectionOptions(
         subscribeToQuery(localObserver, hashedQueryKey)
       }
 
+      // Tell tanstack query to GC the query when the subscription is unsubscribed
+      // The subscription is unsubscribed when the live query is GCed.
+      const subscription = opts.subscription
+      subscription?.once(`unsubscribed`, () => {
+        queryClient.removeQueries({ queryKey: key, exact: true })
+      })
+
       return readyPromise
     }
 
@@ -829,10 +836,6 @@ export function queryCollectionOptions(
             loadSubset: createQueryFromOpts,
             onDeduplicate: createLocalQuery,
           })
-
-    // TODO: run the tests, probably some will fail bc different requests are made now
-    //       so fix the test expectations
-    //       then also add all the new dedup tests that Sam also added to the Electric collection
 
     return {
       loadSubset: loadSubsetDedupe?.loadSubset,

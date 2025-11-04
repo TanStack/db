@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/query-core"
-import { createCollection } from "@tanstack/db"
+import {
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  or,
+} from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
-import { Func, PropRef, Value } from "../../db/src/query/ir"
 import type { QueryFunctionContext } from "@tanstack/query-core"
 import type {
   CollectionImpl,
@@ -2846,6 +2850,16 @@ describe(`QueryCollection`, () => {
   })
 
   describe(`Query Garbage Collection`, () => {
+    const isCategory = (category: `A` | `B` | `C`, where: any) => {
+      return (
+        where &&
+        where.type === `func` &&
+        where.name === `eq` &&
+        where.args[0].path[0] === `category` &&
+        where.args[1].value === category
+      )
+    }
+
     it(`should delete all rows when a single query is garbage collected`, async () => {
       const queryKey = [`single-query-gc-test`]
       const items: Array<TestItem> = [
@@ -2882,12 +2896,7 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`3`)).toBe(true)
 
       // Simulate query garbage collection by removing the query from the cache
-      queryClient.removeQueries({ queryKey })
-
-      // Wait for GC to process
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0)
-      })
+      await collection.cleanup()
 
       // Verify all items are removed
       expect(collection.has(`1`)).toBe(false)
@@ -2904,8 +2913,11 @@ describe(`QueryCollection`, () => {
         const loadSubsetOptions = meta?.loadSubsetOptions ?? {}
         const { where } = loadSubsetOptions
 
+        console.log(`In queryFn:\n`, JSON.stringify(where, null, 2))
+
         // Query 1: items 1, 2, 3 (where: { category: 'A' })
-        if (where?.category === `A`) {
+        if (isCategory(`A`, where)) {
+          console.log(`Is category A`)
           return Promise.resolve([
             { id: `1`, name: `Item 1` },
             { id: `2`, name: `Item 2` },
@@ -2914,7 +2926,7 @@ describe(`QueryCollection`, () => {
         }
 
         // Query 2: items 2, 3, 4 (where: { category: 'B' })
-        if (where?.category === `B`) {
+        if (isCategory(`B`, where)) {
           return Promise.resolve([
             { id: `2`, name: `Item 2` },
             { id: `3`, name: `Item 3` },
@@ -2923,7 +2935,7 @@ describe(`QueryCollection`, () => {
         }
 
         // Query 3: items 3, 4, 5 (where: { category: 'C' })
-        if (where?.category === `C`) {
+        if (isCategory(`C`, where)) {
           return Promise.resolve([
             { id: `3`, name: `Item 3` },
             { id: `4`, name: `Item 4` },
@@ -2940,7 +2952,9 @@ describe(`QueryCollection`, () => {
         return baseQueryKey
       }
 
-      const config: QueryCollectionConfig<TestItem> = {
+      const config: QueryCollectionConfig<
+        TestItem & { category: `A` | `B` | `C` }
+      > = {
         id: `overlapping-test`,
         queryClient,
         queryKey,
@@ -2957,7 +2971,14 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(0)
 
       // Load query 1 with no predicates (items 1, 2, 3)
-      await collection._sync.loadSubset({ where: { category: `A` } } as any)
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query1.preload()
 
       // Wait for query 1 data to load
       await vi.waitFor(() => {
@@ -2967,7 +2988,14 @@ describe(`QueryCollection`, () => {
       // Add query 2 with different predicates (items 2, 3, 4)
       // We abuse the `where` clause being typed as `any` to pass a category
       // but in real usage this would be some Intermediate Representation of the where clause
-      await collection._sync.loadSubset({ where: { category: `B` } } as any)
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `B`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query2.preload()
 
       // Wait for query 2 data to load
       await vi.waitFor(() => {
@@ -2975,7 +3003,14 @@ describe(`QueryCollection`, () => {
       })
 
       // Add query 3 with different predicates
-      await collection._sync.loadSubset({ where: { category: `C` } } as any)
+      const query3 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `C`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query3.preload()
 
       // Wait for query 3 data to load
       await vi.waitFor(() => {
@@ -2991,14 +3026,9 @@ describe(`QueryCollection`, () => {
 
       // GC query 1 (no predicates) - should only remove item 1 (unique to query 1)
       // Items 2 and 3 should remain because they're shared with other queries
-      queryClient.removeQueries({
-        queryKey: queryKey({ where: { category: `A` } }),
-        exact: true,
-      })
+      await query1.cleanup()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(4) // Should have items 2, 3, 4, 5
-      })
+      expect(collection.size).toBe(4) // Should have items 2, 3, 4, 5
 
       // Verify item 1 is removed (it was only in query 1)
       expect(collection.has(`1`)).toBe(false)
@@ -3011,14 +3041,9 @@ describe(`QueryCollection`, () => {
 
       // GC query 2 (where: { category: 'B' }) - should remove item 2
       // Items 3 and 4 should remain because they are shared with query 3
-      queryClient.removeQueries({
-        queryKey: queryKey({ where: { category: `B` } }),
-        exact: true,
-      })
+      await query2.cleanup()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3) // Should have items 3, 4, 5
-      })
+      expect(collection.size).toBe(3) // Should have items 3, 4, 5
 
       // Verify item 2 is removed (it was only in query 2)
       expect(collection.has(`2`)).toBe(false)
@@ -3029,14 +3054,9 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`5`)).toBe(true)
 
       // GC query 3 (where: { category: 'C' }) - should remove all remaining items
-      queryClient.removeQueries({
-        queryKey: queryKey({ where: { category: `C` } }),
-        exact: true,
-      })
+      await query3.cleanup()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0)
-      })
+      expect(collection.size).toBe(0)
 
       // Verify all items are now removed
       expect(collection.has(`3`)).toBe(false)
@@ -3079,7 +3099,13 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(0)
 
       // Load query 1 with no predicates (items 1, 2, 3)
-      await collection._sync.loadSubset({})
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query1.preload()
 
       // Wait for query 1 data to load
       await vi.waitFor(() => {
@@ -3087,14 +3113,14 @@ describe(`QueryCollection`, () => {
       })
 
       // Add query 2 with different predicates (but returns same data)
-      const whereClause1 = new Func(`eq`, [
-        new PropRef([`category`]),
-        new Value(`A`),
-      ])
-
-      await collection._sync.loadSubset({
-        where: whereClause1,
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
       })
+      await query2.preload()
 
       // Wait for query 2 data to load
       await vi.waitFor(() => {
@@ -3102,14 +3128,16 @@ describe(`QueryCollection`, () => {
       })
 
       // Add query 3 with different predicates (but returns same data)
-      const whereClause2 = new Func(`or`, [
-        new Func(`eq`, [new PropRef([`category`]), new Value(`A`)]),
-        new Func(`eq`, [new PropRef([`category`]), new Value(`B`)]),
-      ])
-
-      await collection._sync.loadSubset({
-        where: whereClause2,
+      const query3 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) =>
+              or(eq(item.category, `A`), eq(item.category, `B`))
+            )
+            .select(({ item }) => ({ id: item.id, name: item.name })),
       })
+      await query3.preload()
 
       // Wait for query 3 data to load
       await vi.waitFor(() => {
@@ -3117,14 +3145,9 @@ describe(`QueryCollection`, () => {
       })
 
       // GC query 1 - should not remove any items (all items are shared with other queries)
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({}),
-        exact: true,
-      })
+      await query1.cleanup()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3) // Items still present due to other queries
-      })
+      expect(collection.size).toBe(3) // Items still present due to other queries
 
       // All items should still be present
       expect(collection.has(`1`)).toBe(true)
@@ -3132,14 +3155,9 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`3`)).toBe(true)
 
       // GC query 2 - should still not remove any items (all items are shared with query 3)
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({ where: whereClause1 }),
-        exact: true,
-      })
+      await query2.cleanup()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3) // Items still present due to query 3
-      })
+      expect(collection.size).toBe(3) // Items still present due to query 3
 
       // All items should still be present
       expect(collection.has(`1`)).toBe(true)
@@ -3147,14 +3165,9 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`3`)).toBe(true)
 
       // GC query 3 - should remove all items (no more queries reference them)
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({ where: whereClause2 }),
-        exact: true,
-      })
+      await query3.cleanup()
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0)
-      })
+      expect(collection.size).toBe(0)
 
       // All items should now be removed
       expect(collection.has(`1`)).toBe(false)
@@ -3172,7 +3185,7 @@ describe(`QueryCollection`, () => {
         const { where } = loadSubsetOptions
 
         // Query 2: some items (where: { category: 'B' })
-        if (where?.name === `eq` && where?.args[1].value === `B`) {
+        if (isCategory(`B`, where)) {
           return Promise.resolve([
             { id: `1`, name: `Item 1`, category: `B` },
             { id: `2`, name: `Item 2`, category: `B` },
@@ -3182,20 +3195,21 @@ describe(`QueryCollection`, () => {
         return Promise.resolve([])
       })
 
-      const config: QueryCollectionConfig<TestItem> = {
-        id: `empty-test`,
-        queryClient,
-        queryKey: (ctx) => {
-          if (ctx.where) {
-            return [...baseQueryKey, ctx.where]
-          }
-          return baseQueryKey
-        },
-        queryFn,
-        getKey,
-        startSync: true,
-        syncMode: `on-demand`,
-      }
+      const config: QueryCollectionConfig<TestItem & { category: `A` | `B` }> =
+        {
+          id: `empty-test`,
+          queryClient,
+          queryKey: (ctx) => {
+            if (ctx.where) {
+              return [...baseQueryKey, ctx.where]
+            }
+            return baseQueryKey
+          },
+          queryFn,
+          getKey,
+          startSync: true,
+          syncMode: `on-demand`,
+        }
 
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
@@ -3203,12 +3217,16 @@ describe(`QueryCollection`, () => {
       // Collection should start empty with on-demand sync mode
       expect(collection.size).toBe(0)
 
-      // Load query 1 with no predicates (returns empty array)
-      const whereClause1 = new Func(`eq`, [
-        new PropRef([`category`]),
-        new Value(`A`),
-      ])
-      await collection._sync.loadSubset({ where: whereClause1 })
+      // Load query 1 (returns empty array)
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await query1.preload()
 
       // Wait for query 1 data to load (still empty)
       await vi.waitFor(() => {
@@ -3216,11 +3234,14 @@ describe(`QueryCollection`, () => {
       })
 
       // Add query 2 with different predicates (items 1, 2)
-      const whereClause2 = new Func(`eq`, [
-        new PropRef([`category`]),
-        new Value(`B`),
-      ])
-      await collection._sync.loadSubset({ where: whereClause2 } as any)
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `B`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query2.preload()
 
       // Wait for query 2 data to load
       await vi.waitFor(() => {
@@ -3232,12 +3253,7 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`2`)).toBe(true)
 
       // GC empty query 1 - should not affect the collection
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({}),
-        exact: true,
-      })
-
-      await flushPromises()
+      await query1.cleanup()
 
       // Collection should still have items from query 2
       expect(collection.size).toBe(2)
@@ -3245,10 +3261,7 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`2`)).toBe(true)
 
       // GC non-empty query 2 - should remove its items
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({ where: whereClause2 }),
-        exact: true,
-      })
+      await query2.cleanup()
 
       await vi.waitFor(() => {
         expect(collection.size).toBe(0)
@@ -3268,33 +3281,35 @@ describe(`QueryCollection`, () => {
         const { where } = loadSubsetOptions
 
         // Query 1: items 1, 2 (no predicates)
-        if (where?.name === `eq` && where?.args[1].value === `C`) {
+        if (isCategory(`C`, where)) {
           return Promise.resolve([
-            { id: `1`, name: `Item 1`, type: `C` },
-            { id: `2`, name: `Item 2`, type: `C` },
+            { id: `1`, name: `Item 1`, category: `C` },
+            { id: `2`, name: `Item 2`, category: `C` },
           ])
         }
 
         // Query 2: items 2, 3 (where: { type: 'A' })
-        if (where?.name === `eq` && where?.args[1].value === `A`) {
+        if (isCategory(`A`, where)) {
           return Promise.resolve([
-            { id: `2`, name: `Item 2`, type: `A` },
-            { id: `3`, name: `Item 3`, type: `A` },
+            { id: `2`, name: `Item 2`, category: `A` },
+            { id: `3`, name: `Item 3`, category: `A` },
           ])
         }
 
         // Query 3: items 3, 4 (where: { type: 'B' })
-        if (where?.name === `eq` && where?.args[1].value === `B`) {
+        if (isCategory(`B`, where)) {
           return Promise.resolve([
-            { id: `3`, name: `Item 3`, type: `B` },
-            { id: `4`, name: `Item 4`, type: `B` },
+            { id: `3`, name: `Item 3`, category: `B` },
+            { id: `4`, name: `Item 4`, category: `B` },
           ])
         }
 
         return Promise.resolve([])
       })
 
-      const config: QueryCollectionConfig<TestItem> = {
+      const config: QueryCollectionConfig<
+        TestItem & { category: `A` | `B` | `C` }
+      > = {
         id: `concurrent-test`,
         queryClient,
         queryKey: (ctx) => {
@@ -3316,11 +3331,14 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(0)
 
       // Load query 1 with no predicates (items 1, 2)
-      const whereClause1 = new Func(`eq`, [
-        new PropRef([`type`]),
-        new Value(`C`),
-      ])
-      await collection._sync.loadSubset({ where: whereClause1 })
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `C`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query1.preload()
 
       // Wait for query 1 data to load
       await vi.waitFor(() => {
@@ -3328,11 +3346,14 @@ describe(`QueryCollection`, () => {
       })
 
       // Add query 2 with different predicates (items 2, 3)
-      const whereClause2 = new Func(`eq`, [
-        new PropRef([`type`]),
-        new Value(`A`),
-      ])
-      await collection._sync.loadSubset({ where: whereClause2 })
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query2.preload()
 
       // Wait for query 2 data to load
       await vi.waitFor(() => {
@@ -3340,11 +3361,14 @@ describe(`QueryCollection`, () => {
       })
 
       // Add query 3 with different predicates
-      const whereClause3 = new Func(`eq`, [
-        new PropRef([`type`]),
-        new Value(`B`),
-      ])
-      await collection._sync.loadSubset({ where: whereClause3 } as any)
+      const query3 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `B`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query3.preload()
 
       // Wait for query 3 data to load
       await vi.waitFor(() => {
@@ -3352,23 +3376,12 @@ describe(`QueryCollection`, () => {
       })
 
       // GC all queries concurrently
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({ where: whereClause1 }),
-        exact: true,
-      })
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({ where: whereClause2 }),
-        exact: true,
-      })
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({ where: whereClause3 }),
-        exact: true,
-      })
+      const queries = [query1, query2, query3]
+      const proms = queries.map((query) => query.cleanup())
+      await Promise.all(proms)
 
-      // Wait for all GC operations to complete
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0)
-      })
+      // Collection should be empty after all queries are GCed
+      expect(collection.size).toBe(0)
 
       // Verify all items are removed
       expect(collection.has(`1`)).toBe(false)
@@ -3387,12 +3400,7 @@ describe(`QueryCollection`, () => {
         const { where, limit } = loadSubsetOptions
 
         // Query 1: all items with category A (no limit)
-        if (
-          where?.name === `eq` &&
-          where?.args[0].path?.[0] === `category` &&
-          where?.args[1].value === `A` &&
-          !limit
-        ) {
+        if (isCategory(`A`, where) && !limit) {
           return Promise.resolve([
             { id: `1`, name: `Item 1`, category: `A` },
             { id: `2`, name: `Item 2`, category: `A` },
@@ -3432,13 +3440,14 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(0)
 
       // Execute first query: load all rows that belong to category A (returns 3 rows)
-      const whereClause1 = new Func(`eq`, [
-        new PropRef([`category`]),
-        new Value(`A`),
-      ])
-      await collection._sync.loadSubset({
-        where: whereClause1,
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
       })
+      await query1.preload()
 
       // Wait for first query data to load
       await vi.waitFor(() => {
@@ -3454,24 +3463,18 @@ describe(`QueryCollection`, () => {
       // Execute second query: load rows with category A, limit 2, ordered by ID
       // This should be deduplicated since we already have all category A data
       // So it will load the data from the local collection
-      const whereClause2 = new Func(`eq`, [
-        new PropRef([`category`]),
-        new Value(`A`),
-      ])
-      await collection._sync.loadSubset({
-        where: whereClause2,
-        limit: 2,
-        orderBy: [
-          {
-            expression: new PropRef([`id`]),
-            compareOptions: {
-              direction: `asc`,
-              nulls: `last`,
-              stringSort: `lexical`,
-            },
-          },
-        ],
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .orderBy(({ item }) => item.id, `asc`)
+            .limit(2)
+            .select(({ item }) => ({ id: item.id, name: item.name })),
       })
+      await query2.preload()
+
+      await flushPromises()
 
       // Second query should still only have been called once
       // since query2 is deduplicated so it is executed against the local collection
@@ -3485,15 +3488,9 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`3`)).toBe(true)
 
       // GC the first query (all category A without limit)
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({ where: whereClause1 }),
-        exact: true,
-      })
+      await query1.cleanup()
 
-      // Wait for GC to process
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
-      })
+      expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
 
       // Verify that only row 3 is removed (it was only referenced by query 1)
       expect(collection.has(`1`)).toBe(true) // Still present (referenced by query 2)
@@ -3501,28 +3498,10 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`3`)).toBe(false) // Removed (only referenced by query 1)
 
       // GC the second query (category A with limit 2)
-      queryClient.removeQueries({
-        queryKey: (config.queryKey as any)({
-          where: whereClause2,
-          limit: 2,
-          orderBy: [
-            {
-              expression: new PropRef([`id`]),
-              compareOptions: {
-                direction: `asc`,
-                nulls: `last`,
-                stringSort: `lexical`,
-              },
-            },
-          ],
-        }),
-        exact: true,
-      })
+      await query2.cleanup()
 
       // Wait for final GC to process
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0)
-      })
+      expect(collection.size).toBe(0)
     })
   })
 })
