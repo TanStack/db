@@ -1,6 +1,6 @@
+import { readFileSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { readFileSync, writeFileSync } from "node:fs"
 import { generateReferenceDocs } from "@tanstack/config/typedoc"
 import { glob } from "tinyglobby"
 
@@ -36,6 +36,21 @@ await generateReferenceDocs({
         `../packages/query-db-collection/tsconfig.docs.json`
       ),
       outputDir: resolve(__dirname, `../docs/reference/query-db-collection`),
+      exclude: [`packages/db/**/*`],
+    },
+    {
+      name: `powersync-db-collection`,
+      entryPoints: [
+        resolve(__dirname, `../packages/powersync-db-collection/src/index.ts`),
+      ],
+      tsconfig: resolve(
+        __dirname,
+        `../packages/powersync-db-collection/tsconfig.docs.json`
+      ),
+      outputDir: resolve(
+        __dirname,
+        `../docs/reference/powersync-db-collection`
+      ),
       exclude: [`packages/db/**/*`],
     },
     {
