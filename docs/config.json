@@ -105,6 +105,10 @@
         {
           "label": "RxDB Collection",
           "to": "collections/rxdb-collection"
+        },
+        {
+          "label": "PowerSync Collection",
+          "to": "collections/powersync-collection"
         }
       ]
     },
@@ -171,6 +175,14 @@
         {
           "label": "rxdbCollectionOptions",
           "to": "reference/rxdb-db-collection/functions/rxdbcollectionoptions"
+        },
+        {
+          "label": "PowerSync Collection",
+          "to": "reference/powersync-db-collection/index"
+        },
+        {
+          "label": "powersyncCollectionOptions",
+          "to": "reference/powersync-db-collection/functions/powerSyncCollectionOptions"
         }
       ],
       "frameworks": [
