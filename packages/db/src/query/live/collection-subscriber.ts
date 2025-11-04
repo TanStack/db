@@ -73,6 +73,29 @@ export class CollectionSubscriber<
       )
     }
 
+    const trackLoadPromise = () => {
+      // Guard against duplicate transitions
+      if (!this.subscriptionLoadingPromises.has(subscription)) {
+        let resolve: () => void
+        const promise = new Promise<void>((res) => {
+          resolve = res
+        })
+
+        this.subscriptionLoadingPromises.set(subscription, {
+          resolve: resolve!,
+        })
+        this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
+          promise
+        )
+      }
+    }
+
+    // It can be that we are not yet subscribed when the first `loadSubset` call happens (i.e. the initial query).
+    // So we also check the status here and if it's `loadingSubset` then we track the load promise
+    if (subscription.status === `loadingSubset`) {
+      trackLoadPromise()
+    }
+
     // Subscribe to subscription status changes to propagate loading state
     const statusUnsubscribe = subscription.on(`status:change`, (event) => {
       // TODO: For now we are setting this loading state whenever the subscription
@@ -82,20 +105,7 @@ export class CollectionSubscriber<
       // and builds on https://github.com/TanStack/db/pull/663 which this PR
       // does not yet depend on.
       if (event.status === `loadingSubset`) {
-        // Guard against duplicate transitions
-        if (!this.subscriptionLoadingPromises.has(subscription)) {
-          let resolve: () => void
-          const promise = new Promise<void>((res) => {
-            resolve = res
-          })
-
-          this.subscriptionLoadingPromises.set(subscription, {
-            resolve: resolve!,
-          })
-          this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
-            promise
-          )
-        }
+        trackLoadPromise()
       } else {
         // status is 'ready'
         const deferred = this.subscriptionLoadingPromises.get(subscription)
