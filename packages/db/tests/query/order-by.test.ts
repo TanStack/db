@@ -2543,12 +2543,8 @@ describe(`OrderBy with duplicate values`, () => {
           offset: 5,
           limit: 5,
         })
-        // expect(moveToSecondPage).toBeInstanceOf(Promise)
+        expect(moveToSecondPage).toBeInstanceOf(Promise)
         await moveToSecondPage
-
-        // Because of a bug with `setWindow` it currently always returns true
-        // instead of the promise, so we can't wait for it so instead we sleep
-        await sleep(20)
 
         // Second page should return items 6-10 (all with value 5, loaded from sync layer)
         results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
@@ -2568,10 +2564,12 @@ describe(`OrderBy with duplicate values`, () => {
           offset: 10,
           limit: 5,
         })
-        // expect(moveToThirdPage).toBeInstanceOf(Promise)
-        await moveToThirdPage
 
-        await sleep(20)
+        // Now it is `true` because we already have that page
+        // because when we loaded the 2nd page we loaded all the duplicate 5s and then we loaded
+        // values > 5 with limit 5 but since the entire 2nd page is filled with the duplicate 5s
+        // we in fact already loaded the third page so it is immediately available here
+        expect(moveToThirdPage).toBe(true)
 
         // Third page should return items 11-13 (the items after the duplicate 5s)
         // The bug would cause this to stall and return empty or get stuck
@@ -2589,7 +2587,7 @@ describe(`OrderBy with duplicate values`, () => {
         expect(loadSubsetCallCount).toBe(3)
       })
 
-      it(`should correctly advance window when there are duplicate values loaded fro both local collection and sync layer`, async () => {
+      it(`should correctly advance window when there are duplicate values loaded from both local collection and sync layer`, async () => {
         // Create test data that reproduces the specific bug described:
         // Items with many duplicates at value 5, then normal progression
         const allTestData: Array<TestItem> = [
@@ -2722,12 +2720,8 @@ describe(`OrderBy with duplicate values`, () => {
           offset: 5,
           limit: 5,
         })
-        // expect(moveToSecondPage).toBeInstanceOf(Promise)
+        expect(moveToSecondPage).toBeInstanceOf(Promise)
         await moveToSecondPage
-
-        // Because of a bug with `setWindow` it currently always returns true
-        // instead of the promise, so we can't wait for it so instead we sleep
-        await sleep(20)
 
         // Second page should return items 6-10 (all with value 5, loaded from sync layer)
         results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
@@ -2747,10 +2741,12 @@ describe(`OrderBy with duplicate values`, () => {
           offset: 10,
           limit: 5,
         })
-        // expect(moveToThirdPage).toBeInstanceOf(Promise)
-        await moveToThirdPage
 
-        await sleep(20)
+        // Now it is `true` because we already have that page
+        // because when we loaded the 2nd page we loaded all the duplicate 5s and then we loaded
+        // values > 5 with limit 5 but since the entire 2nd page is filled with the duplicate 5s
+        // we in fact already loaded the third page so it is immediately available here
+        expect(moveToThirdPage).toBe(true)
 
         // Third page should return items 11-13 (the items after the duplicate 5s)
         // The bug would cause this to stall and return empty or get stuck
@@ -2772,7 +2768,3 @@ describe(`OrderBy with duplicate values`, () => {
 
   createOrderByBugTests(`eager`)
 })
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
