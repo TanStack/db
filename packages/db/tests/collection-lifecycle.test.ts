@@ -474,5 +474,52 @@ describe(`Collection Lifecycle Management`, () => {
 
       subscription.unsubscribe()
     })
+
+    it(`should fire status:change event with 'cleaned-up' status before clearing event handlers`, () => {
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `cleanup-event-test`,
+        getKey: (item) => item.id,
+        gcTime: 1000,
+        sync: {
+          sync: () => {},
+        },
+      })
+
+      // Track status changes
+      const statusChanges: Array<{ status: string; previousStatus: string }> =
+        []
+
+      // Add event listener for status changes
+      collection.on(`status:change`, ({ status, previousStatus }) => {
+        statusChanges.push({ status, previousStatus })
+      })
+
+      // Subscribe and unsubscribe to trigger GC
+      const subscription = collection.subscribeChanges(() => {})
+      subscription.unsubscribe()
+
+      expect(statusChanges).toHaveLength(1)
+      expect(statusChanges[0]).toEqual({
+        status: `loading`,
+        previousStatus: `idle`,
+      })
+
+      // Trigger GC timeout to schedule cleanup
+      const gcTimerId = mockSetTimeout.mock.results[0]?.value
+      if (gcTimerId) {
+        triggerTimeout(gcTimerId)
+      }
+
+      // Trigger all remaining timeouts to handle the idle callback
+      triggerAllTimeouts()
+
+      // Verify that the listener received the 'cleaned-up' status change event
+      expect(statusChanges).toHaveLength(2)
+      expect(statusChanges[1]).toEqual({
+        status: `cleaned-up`,
+        previousStatus: `loading`,
+      })
+      expect(collection.status).toBe(`cleaned-up`)
+    })
   })
 })
