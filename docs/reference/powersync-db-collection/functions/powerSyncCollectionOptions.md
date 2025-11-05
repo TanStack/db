@@ -13,7 +13,7 @@ Implementation of powerSyncCollectionOptions that handles both schema and non-sc
 function powerSyncCollectionOptions<TTable>(config): EnhancedPowerSyncCollectionConfig<TTable, OptionalExtractedTable<TTable>, never>;
 ```
 
-Defined in: [powersync.ts:71](https://github.com/powersync-ja/temp-tanstack-db/blob/main/packages/powersync-db-collection/src/powersync.ts#L71)
+Defined in: [powersync.ts:71](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L71)
 
 Creates a PowerSync collection configuration with basic default validation.
 Input and Output types are the SQLite column types.
@@ -32,7 +32,7 @@ Input and Output types are the SQLite column types.
 
 ### Returns
 
-[`EnhancedPowerSyncCollectionConfig`](../type-aliases/EnhancedPowerSyncCollectionConfig.md)\<`TTable`, `OptionalExtractedTable`\<`TTable`\>, `never`\>
+[`EnhancedPowerSyncCollectionConfig`](../../type-aliases/EnhancedPowerSyncCollectionConfig.md)\<`TTable`, `OptionalExtractedTable`\<`TTable`\>, `never`\>
 
 ### Example
 
@@ -66,7 +66,7 @@ const collection = createCollection(
 function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, UtilsRecord> & object & object;
 ```
 
-Defined in: [powersync.ts:128](https://github.com/powersync-ja/temp-tanstack-db/blob/main/packages/powersync-db-collection/src/powersync.ts#L128)
+Defined in: [powersync.ts:128](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L128)
 
 Creates a PowerSync collection configuration with schema validation.
 
@@ -92,11 +92,11 @@ serializer specifications. Partial column overrides can be supplied to `serializ
 
 #### config
 
-`Omit`\<`BaseCollectionConfig`\<`ExtractedTable`\<`TTable`\>, `string`, `TSchema`, `UtilsRecord`, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"getKey"`\> & `object` & [`SerializerConfig`](../type-aliases/SerializerConfig.md)\<`InferOutput`\<`TSchema`\>, `ExtractedTable`\<`TTable`\>\> & `object`
+`Omit`\<`BaseCollectionConfig`\<`ExtractedTable`\<`TTable`\>, `string`, `TSchema`, `UtilsRecord`, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"getKey"`\> & `object` & [`SerializerConfig`](../../type-aliases/SerializerConfig.md)\<`InferOutput`\<`TSchema`\>, `ExtractedTable`\<`TTable`\>\> & `object`
 
 ### Returns
 
-`CollectionConfig`\<[`InferPowerSyncOutputType`](../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
+`CollectionConfig`\<[`InferPowerSyncOutputType`](../../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
 
 ### Example
 
@@ -141,7 +141,7 @@ const collection = createCollection(
 function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, UtilsRecord> & object & object;
 ```
 
-Defined in: [powersync.ts:196](https://github.com/powersync-ja/temp-tanstack-db/blob/main/packages/powersync-db-collection/src/powersync.ts#L196)
+Defined in: [powersync.ts:196](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L196)
 
 Creates a PowerSync collection configuration with schema validation.
 
@@ -169,11 +169,11 @@ serializer specifications. Partial column overrides can be supplied to `serializ
 
 #### config
 
-`Omit`\<`BaseCollectionConfig`\<`ExtractedTable`\<`TTable`\>, `string`, `TSchema`, `UtilsRecord`, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"getKey"`\> & `object` & [`SerializerConfig`](../type-aliases/SerializerConfig.md)\<`InferOutput`\<`TSchema`\>, `ExtractedTable`\<`TTable`\>\> & `object`
+`Omit`\<`BaseCollectionConfig`\<`ExtractedTable`\<`TTable`\>, `string`, `TSchema`, `UtilsRecord`, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"getKey"`\> & `object` & [`SerializerConfig`](../../type-aliases/SerializerConfig.md)\<`InferOutput`\<`TSchema`\>, `ExtractedTable`\<`TTable`\>\> & `object`
 
 ### Returns
 
-`CollectionConfig`\<[`InferPowerSyncOutputType`](../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
+`CollectionConfig`\<[`InferPowerSyncOutputType`](../../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
 
 ### Example
 
