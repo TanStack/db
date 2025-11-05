@@ -45,7 +45,7 @@ import type { Transaction } from "../transactions"
  */
 export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
   const queuer = new AsyncQueuer<() => Transaction<any>>(
-    async (fn) => {
+    async (fn: () => Transaction<any>) => {
       const transaction = fn()
       // Wait for the transaction to be persisted before processing next item
       // Note: fn() already calls commit(), we just wait for it to complete
