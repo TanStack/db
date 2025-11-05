@@ -46,13 +46,12 @@ describe(`findOne() with joins`, () => {
           .findOne(),
     })
 
-    // Verify query result is properly typed (not never)
-    type QueryData = typeof query.toArray
-    type IsNever<T> = [T] extends [never] ? true : false
-    type DataIsNever = IsNever<QueryData>
-
-    expectTypeOf<DataIsNever>().toEqualTypeOf<false>()
-    expectTypeOf(query.toArray).not.toBeNever()
+    expectTypeOf(query.toArray).toEqualTypeOf<
+      Array<{
+        todo: Todo
+        todoOptions: TodoOption | undefined
+      }>
+    >()
   })
 
   test(`limit(1) should infer array type`, () => {
@@ -69,7 +68,11 @@ describe(`findOne() with joins`, () => {
           .limit(1),
     })
 
-    // Verify query result is properly typed as array
-    expectTypeOf(query.toArray).not.toBeNever()
+    expectTypeOf(query.toArray).toEqualTypeOf<
+      Array<{
+        todo: Todo
+        todoOptions: TodoOption | undefined
+      }>
+    >()
   })
 })
