@@ -15,4 +15,5 @@ title: "@tanstack/react-db"
 
 - [useLiveInfiniteQuery](../functions/useLiveInfiniteQuery.md)
 - [useLiveQuery](../functions/useLiveQuery.md)
+- [useLiveSuspenseQuery](../functions/useLiveSuspenseQuery.md)
 - [usePacedMutations](../functions/usePacedMutations.md)
