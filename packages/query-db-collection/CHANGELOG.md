@@ -1,5 +1,80 @@
 # @tanstack/query-db-collection
 
+## 0.3.0
+
+### Minor Changes
+
+- Add QueryObserver state utilities and convert error utils to getters ([#742](https://github.com/TanStack/db/pull/742))
+
+  Exposes TanStack Query's QueryObserver state through QueryCollectionUtils, providing visibility into sync status beyond just error states. Also converts existing error state utilities from methods to getters for consistency with TanStack DB/Query patterns.
+
+  **Breaking Changes:**
+  - `lastError()`, `isError()`, and `errorCount()` are now getters instead of methods
+    - Before: `collection.utils.lastError()`
+    - After: `collection.utils.lastError`
+
+  **New Utilities:**
+  - `isFetching` - Check if query is currently fetching (initial or background)
+  - `isRefetching` - Check if query is refetching in background
+  - `isLoading` - Check if query is loading for first time
+  - `dataUpdatedAt` - Get timestamp of last successful data update
+  - `fetchStatus` - Get current fetch status ('fetching' | 'paused' | 'idle')
+
+  **Use Cases:**
+  - Show loading indicators during background refetches
+  - Implement "Last updated X minutes ago" UI patterns
+  - Better understanding of query sync behavior
+
+  **Example Usage:**
+
+  ```ts
+  const collection = queryCollectionOptions({
+    // ... config
+  })
+
+  // Check sync status
+  if (collection.utils.isFetching) {
+    console.log("Syncing with server...")
+  }
+
+  if (collection.utils.isRefetching) {
+    console.log("Background refresh in progress")
+  }
+
+  // Show last update time
+  const lastUpdate = new Date(collection.utils.dataUpdatedAt)
+  console.log(`Last synced: ${lastUpdate.toLocaleTimeString()}`)
+
+  // Check error state (now using getters)
+  if (collection.utils.isError) {
+    console.error("Sync failed:", collection.utils.lastError)
+    console.log(`Failed ${collection.utils.errorCount} times`)
+  }
+  ```
+
+### Patch Changes
+
+- Fix dependency bundling issues by moving @tanstack/db to peerDependencies ([#766](https://github.com/TanStack/db/pull/766))
+
+  **What Changed:**
+
+  Moved `@tanstack/db` from regular dependencies to peerDependencies in:
+  - `@tanstack/offline-transactions`
+  - `@tanstack/query-db-collection`
+
+  Removed `@opentelemetry/api` dependency from `@tanstack/offline-transactions`.
+
+  **Why:**
+
+  These extension packages incorrectly declared `@tanstack/db` as both a regular dependency AND a peerDependency simultaneously. This caused lock files to develop conflicting versions, resulting in multiple instances of `@tanstack/db` being installed in consuming applications.
+
+  The fix removes `@tanstack/db` from regular dependencies and keeps it only as a peerDependency. This ensures only one version of `@tanstack/db` is installed in the dependency tree, preventing version conflicts.
+
+  For local development, `@tanstack/db` remains in devDependencies so the packages can be built and tested independently.
+
+- Updated dependencies [[`6c55e16`](https://github.com/TanStack/db/commit/6c55e16a2545b479b1d47f548b6846d362573d45), [`7805afb`](https://github.com/TanStack/db/commit/7805afb7286b680168b336e77dd4de7dd1b6f06a), [`1367756`](https://github.com/TanStack/db/commit/1367756d0a68447405c5f5c1a3cca30ab0558d74)]:
+  - @tanstack/db@0.4.20
+
 ## 0.2.42
 
 ### Patch Changes

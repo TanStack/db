@@ -1,5 +1,150 @@
 # @tanstack/db
 
+## 0.4.20
+
+### Patch Changes
+
+- Fix type inference for findOne() when used with join operations ([#749](https://github.com/TanStack/db/pull/749))
+
+  Previously, using `findOne()` with join operations (leftJoin, innerJoin, etc.) resulted in the query type being inferred as `never`, breaking TypeScript type checking:
+
+  ```typescript
+  const query = useLiveQuery(
+    (q) =>
+      q
+        .from({ todo: todoCollection })
+        .leftJoin({ todoOptions: todoOptionsCollection }, ...)
+        .findOne() // Type became 'never'
+  )
+  ```
+
+  **The Fix:**
+
+  Fixed the `MergeContextWithJoinType` type definition to conditionally include the `singleResult` property only when it's explicitly `true`, avoiding type conflicts when `findOne()` is called after joins:
+
+  ```typescript
+  // Before (buggy):
+  singleResult: TContext['singleResult'] extends true ? true : false
+
+  // After (fixed):
+  type PreserveSingleResultFlag<TFlag> = [TFlag] extends [true]
+    ? { singleResult: true }
+    : {}
+
+  // Used as:
+  } & PreserveSingleResultFlag<TContext['singleResult']>
+  ```
+
+  **Why This Works:**
+
+  By using a conditional intersection that omits the property entirely when not needed, we avoid type conflicts. Intersecting `{} & { singleResult: true }` cleanly results in `{ singleResult: true }`, whereas the previous approach created conflicting property types resulting in `never`. The tuple wrapper (`[TFlag]`) ensures robust behavior even if the flag type becomes a union in the future.
+
+  **Impact:**
+  - ✅ `findOne()` now works correctly with all join types
+  - ✅ Type inference works properly in `useLiveQuery` and other contexts
+  - ✅ Both `findOne()` before and after joins work correctly
+  - ✅ All tests pass with no breaking changes (8 new type tests added)
+
+- Improve error messages for custom getKey with joined queries ([#717](https://github.com/TanStack/db/pull/717))
+
+  Enhanced `DuplicateKeySyncError` to provide context-aware guidance when duplicate keys occur with custom `getKey` and joined queries.
+
+  **The Issue:**
+
+  When using custom `getKey` with joins, duplicate keys can occur if the join produces multiple rows with the same key value. This is valid for 1:1 relationships but problematic for 1:many relationships, and the previous error message didn't explain what went wrong or how to fix it.
+
+  **What's New:**
+
+  When a duplicate key error occurs in a live query collection that uses both custom `getKey` and joins, the error message now:
+  - Explains that joined queries can produce multiple rows with the same key
+  - Suggests using a composite key in your `getKey` function
+  - Provides concrete examples of solutions
+  - Helps distinguish between correctly structured 1:1 joins vs problematic 1:many joins
+
+  **Example:**
+
+  ```typescript
+  // ✅ Valid - 1:1 relationship with unique keys
+  const userProfiles = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ profile: profiles })
+        .join({ user: users }, ({ profile, user }) =>
+          eq(profile.userId, user.id)
+        ),
+    getKey: (profile) => profile.id, // Each profile has unique ID
+  })
+  ```
+
+  ```typescript
+  // ⚠️ Problematic - 1:many relationship with duplicate keys
+  const userComments = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ user: users })
+        .join({ comment: comments }, ({ user, comment }) =>
+          eq(user.id, comment.userId)
+        ),
+    getKey: (item) => item.userId, // Multiple comments share same userId!
+  })
+
+  // Enhanced error message:
+  // "Cannot insert document with key "user1" from sync because it already exists.
+  // This collection uses a custom getKey with joined queries. Joined queries can
+  // produce multiple rows with the same key when relationships are not 1:1.
+  // Consider: (1) using a composite key in your getKey function (e.g., `${item.key1}-${item.key2}`),
+  // (2) ensuring your join produces unique rows per key, or (3) removing the
+  // custom getKey to use the default composite key behavior."
+  ```
+
+- Add QueryObserver state utilities and convert error utils to getters ([#742](https://github.com/TanStack/db/pull/742))
+
+  Exposes TanStack Query's QueryObserver state through QueryCollectionUtils, providing visibility into sync status beyond just error states. Also converts existing error state utilities from methods to getters for consistency with TanStack DB/Query patterns.
+
+  **Breaking Changes:**
+  - `lastError()`, `isError()`, and `errorCount()` are now getters instead of methods
+    - Before: `collection.utils.lastError()`
+    - After: `collection.utils.lastError`
+
+  **New Utilities:**
+  - `isFetching` - Check if query is currently fetching (initial or background)
+  - `isRefetching` - Check if query is refetching in background
+  - `isLoading` - Check if query is loading for first time
+  - `dataUpdatedAt` - Get timestamp of last successful data update
+  - `fetchStatus` - Get current fetch status ('fetching' | 'paused' | 'idle')
+
+  **Use Cases:**
+  - Show loading indicators during background refetches
+  - Implement "Last updated X minutes ago" UI patterns
+  - Better understanding of query sync behavior
+
+  **Example Usage:**
+
+  ```ts
+  const collection = queryCollectionOptions({
+    // ... config
+  })
+
+  // Check sync status
+  if (collection.utils.isFetching) {
+    console.log("Syncing with server...")
+  }
+
+  if (collection.utils.isRefetching) {
+    console.log("Background refresh in progress")
+  }
+
+  // Show last update time
+  const lastUpdate = new Date(collection.utils.dataUpdatedAt)
+  console.log(`Last synced: ${lastUpdate.toLocaleTimeString()}`)
+
+  // Check error state (now using getters)
+  if (collection.utils.isError) {
+    console.error("Sync failed:", collection.utils.lastError)
+    console.log(`Failed ${collection.utils.errorCount} times`)
+  }
+  ```
+
 ## 0.4.19
 
 ### Patch Changes
