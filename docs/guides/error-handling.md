@@ -45,6 +45,32 @@ The error includes:
 - `issues`: Array of validation issues with messages and paths
 - `message`: A formatted error message listing all issues
 
+**When schema validation occurs:**
+
+Schema validation happens only for **client mutations** - when you explicitly insert or update data:
+
+1. **During inserts** - When `collection.insert()` is called
+2. **During updates** - When `collection.update()` is called
+
+Schemas do **not** validate data coming from your server or sync layer. That data is assumed to already be valid.
+
+```typescript
+const schema = z.object({
+  id: z.string(),
+  created_at: z.string().transform(val => new Date(val))
+  // TInput: string, TOutput: Date
+})
+
+// Validation happens here ✓
+collection.insert({
+  id: "1",
+  created_at: "2024-01-01"  // TInput: string
+})
+// If successful, stores: { created_at: Date }  // TOutput: Date
+```
+
+For more details on schema validation and type transformations, see the [Schemas guide](./schemas.md).
+
 ## Query Collection Error Tracking
 
 Query collections provide enhanced error tracking utilities through the `utils` object. These methods expose error state information and provide recovery mechanisms for failed queries:
@@ -122,6 +148,36 @@ Collection status values:
 - `ready` - Ready for use
 - `error` - In error state
 - `cleaned-up` - Cleaned up and no longer usable
+
+### Using Suspense and Error Boundaries (React)
+
+For React applications, you can handle loading and error states with `useLiveSuspenseQuery`, React Suspense, and Error Boundaries:
+
+```tsx
+import { useLiveSuspenseQuery } from "@tanstack/react-db"
+import { Suspense } from "react"
+import { ErrorBoundary } from "react-error-boundary"
+
+const TodoList = () => {
+  // No need to check status - Suspense and ErrorBoundary handle it
+  const { data } = useLiveSuspenseQuery(
+    (query) => query.from({ todos: todoCollection })
+  )
+
+  // data is always defined here
+  return <div>{data.map(todo => <div key={todo.id}>{todo.text}</div>)}</div>
+}
+
+const App = () => (
+  <ErrorBoundary fallback={<div>Failed to load todos</div>}>
+    <Suspense fallback={<div>Loading...</div>}>
+      <TodoList />
+    </Suspense>
+  </ErrorBoundary>
+)
+```
+
+With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](../live-queries#using-with-react-suspense) for more details.
 
 ## Transaction Error Handling
 

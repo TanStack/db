@@ -9,7 +9,7 @@ title: CustomSQLiteSerializer
 type CustomSQLiteSerializer<TOutput, TSQLite> = Partial<{ [Key in keyof TOutput]: (value: TOutput[Key]) => Key extends keyof TSQLite ? TSQLite[Key] : never }>;
 ```
 
-Defined in: [definitions.ts:52](https://github.com/powersync-ja/temp-tanstack-db/blob/main/packages/powersync-db-collection/src/definitions.ts#L52)
+Defined in: [definitions.ts:52](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L52)
 
 A mapping type for custom serialization of object properties to SQLite-compatible values.
 
