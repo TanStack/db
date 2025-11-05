@@ -17,11 +17,11 @@
   ],
   "packageManager": "pnpm@10.19.0",
   "dependencies": {
-    "@tanstack/db": "workspace:*",
     "use-sync-external-store": "^1.6.0"
   },
   "devDependencies": {
     "@electric-sql/client": "1.1.0",
+    "@tanstack/db": "workspace:*",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
@@ -50,6 +50,7 @@
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
   "peerDependencies": {
+    "@tanstack/db": "*",
     "react": ">=16.8.0"
   },
   "scripts": {

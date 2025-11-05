@@ -51,11 +51,11 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@opentelemetry/api": "^1.9.0",
-    "@tanstack/db": "workspace:*"
+    "@opentelemetry/api": "^1.9.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@tanstack/db": "workspace:*",
     "eslint": "^8.57.0",
     "typescript": "^5.5.4",
     "vitest": "^3.2.4"
