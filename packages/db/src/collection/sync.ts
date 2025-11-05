@@ -9,6 +9,7 @@ import {
   SyncTransactionAlreadyCommittedWriteError,
 } from "../errors"
 import { deepEquals } from "../utils"
+import { LIVE_QUERY_INTERNAL } from "../query/live/internal.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   ChangeMessage,
@@ -130,9 +131,10 @@ export class CollectionSyncManager<
                 } else {
                   const utils = this.config
                     .utils as Partial<LiveQueryCollectionUtils>
+                  const internal = utils[LIVE_QUERY_INTERNAL]
                   throw new DuplicateKeySyncError(key, this.id, {
-                    hasCustomGetKey: utils._hasCustomGetKey?.(),
-                    hasJoins: utils._hasJoins?.(),
+                    hasCustomGetKey: internal?.hasCustomGetKey ?? false,
+                    hasJoins: internal?.hasJoins ?? false,
                   })
                 }
               }

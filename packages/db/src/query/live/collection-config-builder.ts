@@ -9,6 +9,8 @@ import { transactionScopedScheduler } from "../../scheduler.js"
 import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
 import { getCollectionBuilder } from "./collection-registry.js"
+import { LIVE_QUERY_INTERNAL } from "./internal.js"
+import type { LiveQueryInternalUtils } from "./internal.js"
 import type { WindowOptions } from "../compiler/index.js"
 import type { SchedulerContextId } from "../../scheduler.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
@@ -35,7 +37,6 @@ import type { AllCollectionEvents } from "../../collection/events.js"
 
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
-  getBuilder: () => CollectionConfigBuilder<any, any>
   /**
    * Sets the offset and limit of an ordered query.
    * Is a no-op if the query is not ordered.
@@ -49,6 +50,7 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
    * @returns The current window settings, or `undefined` if the query is not windowed
    */
   getWindow: () => { offset: number; limit: number } | undefined
+  [LIVE_QUERY_INTERNAL]: LiveQueryInternalUtils
 }
 
 type PendingGraphRun = {
@@ -211,11 +213,13 @@ export class CollectionConfigBuilder<
       singleResult: this.query.singleResult,
       utils: {
         getRunCount: this.getRunCount.bind(this),
-        getBuilder: () => this,
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
-        _hasCustomGetKey: () => !!this.config.getKey,
-        _hasJoins: () => this.hasJoins(this.query),
+        [LIVE_QUERY_INTERNAL]: {
+          getBuilder: () => this,
+          hasCustomGetKey: !!this.config.getKey,
+          hasJoins: this.hasJoins(this.query),
+        },
       },
     }
   }
