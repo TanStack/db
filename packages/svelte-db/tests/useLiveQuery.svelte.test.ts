@@ -1346,6 +1346,91 @@ describe(`Query Collections`, () => {
         expect(query.status).toBe(`ready`)
       })
     })
+
+    it(`should reactively trigger effects when status changes`, () => {
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `reactive-status-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => gt(c.age, 30))
+            .select(({ collection: c }) => ({
+              id: c.id,
+              name: c.name,
+            }))
+        )
+
+        let readyEffectCount = 0
+        let loadingEffectCount = 0
+        let lastReadyValue: boolean | undefined
+        let lastLoadingValue: boolean | undefined
+
+        // This effect should re-run whenever query.isReady changes
+        $effect(() => {
+          readyEffectCount++
+          lastReadyValue = query.isReady
+        })
+
+        // This effect should re-run whenever query.isLoading changes
+        $effect(() => {
+          loadingEffectCount++
+          lastLoadingValue = query.isLoading
+        })
+
+        flushSync()
+
+        // Initial execution
+        expect(readyEffectCount).toBe(1)
+        expect(loadingEffectCount).toBe(1)
+        expect(lastReadyValue).toBe(false)
+        expect(lastLoadingValue).toBe(true)
+
+        // Start sync and mark ready
+        collection.preload()
+        if (beginFn && commitFn && markReadyFn) {
+          beginFn()
+          commitFn()
+          markReadyFn()
+        }
+
+        // Insert data
+        collection.insert({
+          id: `1`,
+          name: `John Doe`,
+          age: 35,
+          email: `john.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        })
+
+        flushSync()
+
+        // Effects should have re-executed due to reactive status change
+        expect(readyEffectCount).toBeGreaterThan(1)
+        expect(loadingEffectCount).toBeGreaterThan(1)
+        expect(lastReadyValue).toBe(true)
+        expect(lastLoadingValue).toBe(false)
+      })
+    })
   })
 
   it(`should accept config object with pre-built QueryBuilder instance`, async () => {
