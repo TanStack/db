@@ -27,6 +27,7 @@ import type {
   NonSingleResult,
   OperationConfig,
   SingleResult,
+  StringSortOpts,
   SubscribeChangesOptions,
   Transaction as TransactionType,
   UtilsRecord,
@@ -230,6 +231,8 @@ export class CollectionImpl<
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
+  private comparisonOpts: StringSortOpts
+
   /**
    * Creates a new Collection instance
    *
@@ -266,6 +269,8 @@ export class CollectionImpl<
     this._mutations = new CollectionMutationsManager(config, this.id)
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
+
+    this.comparisonOpts = buildCompareOptionsFromConfig(config)
 
     this._changes.setDeps({
       collection: this, // Required for passing to CollectionSubscription
@@ -506,6 +511,11 @@ export class CollectionImpl<
     key?: TKey
   ): TOutput | never {
     return this._mutations.validateData(data, type, key)
+  }
+
+  get compareOptions(): StringSortOpts {
+    // return a copy such that no one can mutate the internal comparison object
+    return { ...this.comparisonOpts }
   }
 
   /**
@@ -846,5 +856,23 @@ export class CollectionImpl<
   public async cleanup(): Promise<void> {
     this._lifecycle.cleanup()
     return Promise.resolve()
+  }
+}
+
+function buildCompareOptionsFromConfig(
+  config: CollectionConfig<any, any, any>
+): StringSortOpts {
+  if (config.compareOptions) {
+    const options = config.compareOptions
+    return {
+      stringSort: options.stringSort ?? `locale`,
+      locale: options.stringSort === `locale` ? options.locale : undefined,
+      localeOptions:
+        options.stringSort === `locale` ? options.localeOptions : undefined,
+    }
+  } else {
+    return {
+      stringSort: `locale`,
+    }
   }
 }

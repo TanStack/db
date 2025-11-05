@@ -4,6 +4,7 @@ import type {
   MutationFnParams,
   SyncConfig,
 } from "../src/index.js"
+import type { StringSortOpts } from "../src/types.js"
 
 // Index usage tracking utilities
 export interface IndexUsageStats {
@@ -179,6 +180,7 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   autoIndex?: `off` | `eager`
   sync?: SyncConfig<T>
   syncMode?: `eager` | `on-demand`
+  compareOptions?: StringSortOpts
 }
 
 export function mockSyncCollectionOptions<

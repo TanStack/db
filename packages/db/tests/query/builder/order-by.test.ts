@@ -40,7 +40,7 @@ describe(`QueryBuilder.orderBy`, () => {
     ])
     expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
     expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
-    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBeUndefined()
   })
 
   it(`supports descending order`, () => {
@@ -62,7 +62,7 @@ describe(`QueryBuilder.orderBy`, () => {
     ])
     expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`desc`)
     expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
-    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBeUndefined()
   })
 
   it(`supports ascending order explicitly`, () => {
@@ -94,7 +94,7 @@ describe(`QueryBuilder.orderBy`, () => {
     expect(builtQuery.orderBy).toHaveLength(1)
     expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
     expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`last`)
-    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBeUndefined()
   })
 
   it(`supports stringSort`, () => {
@@ -136,7 +136,7 @@ describe(`QueryBuilder.orderBy`, () => {
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.orderBy).toHaveLength(1)
     expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
-    expect(builtQuery.orderBy![0]!.compareOptions.locale).toBe(`de-DE`)
+    expect((builtQuery.orderBy![0]!.compareOptions as any).locale).toBe(`de-DE`)
     expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
     expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
   })
@@ -160,8 +160,8 @@ describe(`QueryBuilder.orderBy`, () => {
     expect(builtQuery.orderBy).toBeDefined()
     expect(builtQuery.orderBy).toHaveLength(1)
     expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
-    expect(builtQuery.orderBy![0]!.compareOptions.locale).toBe(`de-DE`)
-    expect(builtQuery.orderBy![0]!.compareOptions.localeOptions).toEqual({
+    expect((builtQuery.orderBy![0]!.compareOptions as any).locale).toBe(`de-DE`)
+    expect((builtQuery.orderBy![0]!.compareOptions as any).localeOptions).toEqual({
       sensitivity: `base`,
     })
     expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
@@ -202,7 +202,7 @@ describe(`QueryBuilder.orderBy`, () => {
     expect(orderByClause.expression.type).toBeDefined()
     expect(orderByClause.compareOptions.direction).toBe(`asc`)
     expect(orderByClause.compareOptions.nulls).toBe(`first`)
-    expect(orderByClause.compareOptions.stringSort).toBe(`locale`)
+    expect(orderByClause.compareOptions.stringSort).toBeUndefined()
   })
 
   it(`can be combined with other clauses`, () => {
@@ -241,14 +241,14 @@ describe(`QueryBuilder.orderBy`, () => {
     ])
     expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`asc`)
     expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
-    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
+    expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBeUndefined()
     expect((builtQuery.orderBy![1]!.expression as any).path).toEqual([
       `employees`,
       `salary`,
     ])
     expect(builtQuery.orderBy![1]!.compareOptions.direction).toBe(`desc`)
     expect(builtQuery.orderBy![1]!.compareOptions.nulls).toBe(`first`)
-    expect(builtQuery.orderBy![1]!.compareOptions.stringSort).toBe(`locale`)
+    expect(builtQuery.orderBy![1]!.compareOptions.stringSort).toBeUndefined()
   })
 
   it(`supports limit and offset with order by`, () => {

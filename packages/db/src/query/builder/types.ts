@@ -1,5 +1,5 @@
 import type { CollectionImpl } from "../../collection/index.js"
-import type { SingleResult } from "../../types.js"
+import type { SingleResult, StringSortOpts } from "../../types.js"
 import type {
   Aggregate,
   BasicExpression,
@@ -306,37 +306,15 @@ export type OrderByOptions = {
 } & StringSortOpts
 
 /**
- * StringSortOpts - Options for string sorting behavior
- *
- * This discriminated union allows for two types of string sorting:
- * - **Lexical**: Simple character-by-character comparison (default)
- * - **Locale**: Locale-aware sorting with optional customization
- *
- * The union ensures that locale options are only available when locale sorting is selected.
- */
-export type StringSortOpts =
-  | {
-      stringSort?: `lexical`
-    }
-  | {
-      stringSort?: `locale`
-      locale?: string
-      localeOptions?: object
-    }
-
-/**
  * CompareOptions - Final resolved options for comparison operations
  *
  * This is the internal type used after all orderBy options have been resolved
  * to their concrete values. Unlike OrderByOptions, all fields are required
  * since defaults have been applied.
  */
-export type CompareOptions = {
+export type CompareOptions = StringSortOpts & {
   direction: OrderByDirection
   nulls: `first` | `last`
-  stringSort: `lexical` | `locale`
-  locale?: string
-  localeOptions?: object
 }
 
 /**
