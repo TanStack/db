@@ -2097,7 +2097,7 @@ describe(`QueryCollection`, () => {
     const collection2 = createCollection(options2)
 
     await vi.waitFor(() => {
-      expect(collection1.utils.isError()).toBe(true)
+      expect(collection1.utils.isError).toBe(true)
       expect(collection2.status).toBe(`ready`)
     })
 
@@ -2134,7 +2134,7 @@ describe(`QueryCollection`, () => {
     )
 
     await vi.waitFor(() => {
-      expect(collection.utils.isError()).toBe(true)
+      expect(collection.utils.isError).toBe(true)
     })
 
     await expect(
@@ -2264,33 +2264,33 @@ describe(`QueryCollection`, () => {
       // Wait for initial success - no errors
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
-        expect(collection.utils.lastError()).toBeUndefined()
-        expect(collection.utils.isError()).toBe(false)
-        expect(collection.utils.errorCount()).toBe(0)
+        expect(collection.utils.lastError).toBeUndefined()
+        expect(collection.utils.isError).toBe(false)
+        expect(collection.utils.errorCount).toBe(0)
       })
 
       // First error - count increments
       await collection.utils.refetch()
       await vi.waitFor(() => {
-        expect(collection.utils.lastError()).toBe(errors[0])
-        expect(collection.utils.errorCount()).toBe(1)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.lastError).toBe(errors[0])
+        expect(collection.utils.errorCount).toBe(1)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Second error - count increments again
       await collection.utils.refetch()
       await vi.waitFor(() => {
-        expect(collection.utils.lastError()).toBe(errors[1])
-        expect(collection.utils.errorCount()).toBe(2)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.lastError).toBe(errors[1])
+        expect(collection.utils.errorCount).toBe(2)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Successful refetch resets error state
       await collection.utils.refetch()
       await vi.waitFor(() => {
-        expect(collection.utils.lastError()).toBeUndefined()
-        expect(collection.utils.isError()).toBe(false)
-        expect(collection.utils.errorCount()).toBe(0)
+        expect(collection.utils.lastError).toBeUndefined()
+        expect(collection.utils.isError).toBe(false)
+        expect(collection.utils.errorCount).toBe(0)
         expect(collection.get(`1`)).toEqual(updatedData[0])
       })
     })
@@ -2312,16 +2312,16 @@ describe(`QueryCollection`, () => {
 
       // Wait for initial error
       await vi.waitFor(() => {
-        expect(collection.utils.isError()).toBe(true)
-        expect(collection.utils.errorCount()).toBe(1)
+        expect(collection.utils.isError).toBe(true)
+        expect(collection.utils.errorCount).toBe(1)
       })
 
       // Manual error clearing triggers refetch
       await collection.utils.clearError()
 
-      expect(collection.utils.lastError()).toBeUndefined()
-      expect(collection.utils.isError()).toBe(false)
-      expect(collection.utils.errorCount()).toBe(0)
+      expect(collection.utils.lastError).toBeUndefined()
+      expect(collection.utils.isError).toBe(false)
+      expect(collection.utils.errorCount).toBe(0)
 
       await vi.waitFor(() => {
         expect(collection.get(`1`)).toEqual(recoveryData[0])
@@ -2329,9 +2329,9 @@ describe(`QueryCollection`, () => {
 
       // Refetch on rejection should throw an error
       await expect(collection.utils.clearError()).rejects.toThrow(testError)
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.isError()).toBe(true)
-      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.isError).toBe(true)
+      expect(collection.utils.errorCount).toBe(1)
     })
 
     it(`should maintain collection functionality despite errors and persist error state`, async () => {
@@ -2359,8 +2359,8 @@ describe(`QueryCollection`, () => {
       // Cause error
       await collection.utils.refetch()
       await vi.waitFor(() => {
-        expect(collection.utils.errorCount()).toBe(1)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.errorCount).toBe(1)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Collection operations still work with cached data
@@ -2377,25 +2377,25 @@ describe(`QueryCollection`, () => {
       await flushPromises()
 
       // Manual writes clear error state
-      expect(collection.utils.lastError()).toBeUndefined()
-      expect(collection.utils.isError()).toBe(false)
-      expect(collection.utils.errorCount()).toBe(0)
+      expect(collection.utils.lastError).toBeUndefined()
+      expect(collection.utils.isError).toBe(false)
+      expect(collection.utils.errorCount).toBe(0)
 
       // Create error state again for persistence test
       await collection.utils.refetch()
-      await vi.waitFor(() => expect(collection.utils.isError()).toBe(true))
+      await vi.waitFor(() => expect(collection.utils.isError).toBe(true))
 
-      const originalError = collection.utils.lastError()
-      const originalErrorCount = collection.utils.errorCount()
+      const originalError = collection.utils.lastError
+      const originalErrorCount = collection.utils.errorCount
 
       // Read-only operations don't affect error state
       expect(collection.has(`1`)).toBe(true)
       const changeHandler = vi.fn()
       const subscription = collection.subscribeChanges(changeHandler)
 
-      expect(collection.utils.lastError()).toBe(originalError)
-      expect(collection.utils.isError()).toBe(true)
-      expect(collection.utils.errorCount()).toBe(originalErrorCount)
+      expect(collection.utils.lastError).toBe(originalError)
+      expect(collection.utils.isError).toBe(true)
+      expect(collection.utils.errorCount).toBe(originalErrorCount)
 
       subscription.unsubscribe()
     })
@@ -2435,16 +2435,16 @@ describe(`QueryCollection`, () => {
       // Wait for collection to be ready (even with error)
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Verify custom error is accessible with all its properties
-      const lastError = collection.utils.lastError()
+      const lastError = collection.utils.lastError
       expect(lastError).toBe(customError)
       expect(lastError?.code).toBe(`NETWORK_ERROR`)
       expect(lastError?.message).toBe(`Failed to fetch data`)
       expect(lastError?.details?.retryAfter).toBe(5000)
-      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.errorCount).toBe(1)
     })
 
     it(`should persist error state after collection cleanup`, async () => {
@@ -2461,21 +2461,21 @@ describe(`QueryCollection`, () => {
       // Wait for collection to be ready (even with error)
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Verify error state before cleanup
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.errorCount).toBe(1)
 
       // Cleanup collection
       await collection.cleanup()
       expect(collection.status).toBe(`cleaned-up`)
 
       // Error state should persist after cleanup
-      expect(collection.utils.isError()).toBe(true)
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.isError).toBe(true)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.errorCount).toBe(1)
     })
 
     it(`should increment errorCount only after final failure when using Query retries`, async () => {
@@ -2506,16 +2506,16 @@ describe(`QueryCollection`, () => {
         () => {
           expect(collection.status).toBe(`ready`) // Should be ready even with error
           expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
-          expect(collection.utils.isError()).toBe(true)
+          expect(collection.utils.isError).toBe(true)
         },
         { timeout: 2000 }
       )
 
       // Error count should only increment once after all retries are exhausted
       // This ensures we track "consecutive post-retry failures," not per-attempt failures
-      expect(collection.utils.errorCount()).toBe(1)
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.isError()).toBe(true)
+      expect(collection.utils.errorCount).toBe(1)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.isError).toBe(true)
 
       // Reset attempt counter for second test
       queryFn.mockClear()
@@ -2532,9 +2532,9 @@ describe(`QueryCollection`, () => {
       )
 
       // Error count should now be 2 (two post-retry failures)
-      expect(collection.utils.errorCount()).toBe(2)
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.isError()).toBe(true)
+      expect(collection.utils.errorCount).toBe(2)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.isError).toBe(true)
     })
   })
 

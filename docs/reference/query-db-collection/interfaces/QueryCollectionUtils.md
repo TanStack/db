@@ -43,7 +43,7 @@ The type of errors that can occur during queries
 ## Indexable
 
 ```ts
-[key: string]: Fn
+[key: string]: any
 ```
 
 ## Properties
@@ -54,7 +54,7 @@ The type of errors that can occur during queries
 clearError: () => Promise<void>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:181](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L181)
+Defined in: [packages/query-db-collection/src/query.ts:194](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L194)
 
 Clear the error state and trigger a refetch of the query
 
@@ -70,52 +70,100 @@ Error if the refetch fails
 
 ***
 
-### errorCount()
+### dataUpdatedAt
 
 ```ts
-errorCount: () => number;
+dataUpdatedAt: number;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:175](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L175)
+Defined in: [packages/query-db-collection/src/query.ts:185](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L185)
+
+Get timestamp of last successful data update (in milliseconds)
+
+***
+
+### errorCount
+
+```ts
+errorCount: number;
+```
+
+Defined in: [packages/query-db-collection/src/query.ts:177](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L177)
 
 Get the number of consecutive sync failures.
 Incremented only when query fails completely (not per retry attempt); reset on success.
 
-#### Returns
+***
 
-`number`
+### fetchStatus
+
+```ts
+fetchStatus: "idle" | "fetching" | "paused";
+```
+
+Defined in: [packages/query-db-collection/src/query.ts:187](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L187)
+
+Get current fetch status
 
 ***
 
-### isError()
+### isError
 
 ```ts
-isError: () => boolean;
+isError: boolean;
+```
+
+Defined in: [packages/query-db-collection/src/query.ts:172](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L172)
+
+Check if the collection is in an error state
+
+***
+
+### isFetching
+
+```ts
+isFetching: boolean;
+```
+
+Defined in: [packages/query-db-collection/src/query.ts:179](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L179)
+
+Check if query is currently fetching (initial or background)
+
+***
+
+### isLoading
+
+```ts
+isLoading: boolean;
+```
+
+Defined in: [packages/query-db-collection/src/query.ts:183](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L183)
+
+Check if query is loading for the first time (no data yet)
+
+***
+
+### isRefetching
+
+```ts
+isRefetching: boolean;
+```
+
+Defined in: [packages/query-db-collection/src/query.ts:181](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L181)
+
+Check if query is refetching in background (not initial fetch)
+
+***
+
+### lastError
+
+```ts
+lastError: TError | undefined;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:170](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L170)
 
-Check if the collection is in an error state
-
-#### Returns
-
-`boolean`
-
-***
-
-### lastError()
-
-```ts
-lastError: () => TError | undefined;
-```
-
-Defined in: [packages/query-db-collection/src/query.ts:168](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L168)
-
 Get the last error encountered by the query (if any); reset on success
-
-#### Returns
-
-`TError` \| `undefined`
 
 ***
 
