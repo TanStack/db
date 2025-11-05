@@ -406,7 +406,8 @@ export function localStorageCollectionOptions(
     // Use lastKnownData (in-memory cache) instead of reading from storage
     // Add new items with version keys
     params.transaction.mutations.forEach((mutation) => {
-      const key = config.getKey(mutation.modified)
+      // Use the engine's pre-computed key for consistency
+      const key = mutation.key
       const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
@@ -440,7 +441,8 @@ export function localStorageCollectionOptions(
     // Use lastKnownData (in-memory cache) instead of reading from storage
     // Update items with new version keys
     params.transaction.mutations.forEach((mutation) => {
-      const key = config.getKey(mutation.modified)
+      // Use the engine's pre-computed key for consistency
+      const key = mutation.key
       const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
@@ -469,8 +471,8 @@ export function localStorageCollectionOptions(
     // Use lastKnownData (in-memory cache) instead of reading from storage
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
-      // For delete operations, mutation.original contains the full object
-      const key = config.getKey(mutation.original)
+      // Use the engine's pre-computed key for consistency
+      const key = mutation.key
       lastKnownData.delete(key)
     })
 
