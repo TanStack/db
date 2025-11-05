@@ -1,5 +1,13 @@
 # @tanstack/trailbase-db-collection
 
+## 0.1.43
+
+### Patch Changes
+
+- Trigger new release for trailbase-db-collection
+
+  Version 0.1.42 was already published to npm. This changeset bumps the version to 0.1.43 to allow for a new release.
+
 ## 0.1.42
 
 ### Patch Changes
