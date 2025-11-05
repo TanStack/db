@@ -2337,11 +2337,7 @@ describe(`OrderBy with collection-level StringSortOpts`, () => {
 
     // In lexical comparison, uppercase letters come before lowercase letters
     const firstResults = Array.from(firstQuery.values())
-    expect(firstResults.map((r) => r.name)).toEqual([
-      `Charlie`,
-      `alice`,
-      `bob`,
-    ])
+    expect(firstResults.map((r) => r.name)).toEqual([`Charlie`, `alice`, `bob`])
 
     // Second query with explicit locale stringSort should override collection's lexical default
     const secondQuery = createLiveQueryCollection((q) =>
@@ -2381,11 +2377,7 @@ describe(`OrderBy with collection-level StringSortOpts`, () => {
 
     // Should revert back to lexical sorting (collection default)
     const thirdResults = Array.from(thirdQuery.values())
-    expect(thirdResults.map((r) => r.name)).toEqual([
-      `bob`,
-      `alice`,
-      `Charlie`,
-    ])
+    expect(thirdResults.map((r) => r.name)).toEqual([`bob`, `alice`, `Charlie`])
   })
 })
 

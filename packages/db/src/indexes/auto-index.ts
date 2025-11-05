@@ -1,8 +1,8 @@
+import { DEFAULT_COMPARE_OPTIONS } from "../utils"
 import { BTreeIndex } from "./btree-index"
 import type { CompareOptions } from "../query/builder/types"
 import type { BasicExpression } from "../query/ir"
 import type { CollectionImpl } from "../collection/index.js"
-import { DEFAULT_COMPARE_OPTIONS } from "../utils"
 
 export interface AutoIndexConfig {
   autoIndex?: `off` | `eager`
@@ -33,7 +33,7 @@ export function ensureIndexForField<
 
   const compareOpts = compareOptions ?? {
     ...DEFAULT_COMPARE_OPTIONS,
-    ...collection.compareOptions
+    ...collection.compareOptions,
   }
 
   // Check if we already have an index for this field

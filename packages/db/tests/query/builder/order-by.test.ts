@@ -161,7 +161,9 @@ describe(`QueryBuilder.orderBy`, () => {
     expect(builtQuery.orderBy).toHaveLength(1)
     expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
     expect((builtQuery.orderBy![0]!.compareOptions as any).locale).toBe(`de-DE`)
-    expect((builtQuery.orderBy![0]!.compareOptions as any).localeOptions).toEqual({
+    expect(
+      (builtQuery.orderBy![0]!.compareOptions as any).localeOptions
+    ).toEqual({
       sensitivity: `base`,
     })
     expect(builtQuery.orderBy![0]!.compareOptions.nulls).toBe(`first`)
