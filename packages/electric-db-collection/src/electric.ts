@@ -723,13 +723,15 @@ function createElectricSync<T extends Row<unknown>>(
       const loadSubsetDedupe =
         syncMode === `eager`
           ? null
-          : new DeduplicatedLoadSubset(async (opts: LoadSubsetOptions) => {
-              // In progressive mode, stop requesting snapshots once full sync is complete
-              if (syncMode === `progressive` && hasReceivedUpToDate) {
-                return
-              }
-              const snapshotParams = compileSQL<T>(opts)
-              await stream.requestSnapshot(snapshotParams)
+          : new DeduplicatedLoadSubset({
+              loadSubset: async (opts: LoadSubsetOptions) => {
+                // In progressive mode, stop requesting snapshots once full sync is complete
+                if (syncMode === `progressive` && hasReceivedUpToDate) {
+                  return
+                }
+                const snapshotParams = compileSQL<T>(opts)
+                await stream.requestSnapshot(snapshotParams)
+              },
             })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
