@@ -16,7 +16,10 @@ Defined in: [packages/db/src/errors.ts:162](https://github.com/TanStack/db/blob/
 ### Constructor
 
 ```ts
-new DuplicateKeySyncError(key, collectionId): DuplicateKeySyncError;
+new DuplicateKeySyncError(
+   key, 
+   collectionId, 
+   options?): DuplicateKeySyncError;
 ```
 
 Defined in: [packages/db/src/errors.ts:163](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L163)
@@ -30,6 +33,16 @@ Defined in: [packages/db/src/errors.ts:163](https://github.com/TanStack/db/blob/
 ##### collectionId
 
 `string`
+
+##### options?
+
+###### hasCustomGetKey?
+
+`boolean`
+
+###### hasJoins?
+
+`boolean`
 
 #### Returns
 
