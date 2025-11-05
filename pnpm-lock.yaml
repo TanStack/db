@@ -594,7 +594,7 @@ importers:
         version: 0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11)
       express:
         specifier: ^4.21.2
         version: 4.21.2
@@ -773,14 +773,10 @@ importers:
         version: 3.2.4(vitest@3.2.4(@types/debug@4.1.12)(@types/node@24.7.0)(jiti@2.6.1)(jsdom@27.0.1(postcss@8.5.6))(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
 
   packages/offline-transactions:
-    dependencies:
-      '@opentelemetry/api':
-        specifier: ^1.9.0
-        version: 1.9.0
+    devDependencies:
       '@tanstack/db':
         specifier: workspace:*
         version: link:../db
-    devDependencies:
       '@types/node':
         specifier: ^20.0.0
         version: 20.19.24
@@ -830,13 +826,13 @@ importers:
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
-      '@tanstack/db':
-        specifier: workspace:*
-        version: link:../db
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
     devDependencies:
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
       '@tanstack/query-core':
         specifier: ^5.90.5
         version: 5.90.5
@@ -10878,7 +10874,8 @@ snapshots:
 
   '@oozcitak/util@8.3.8': {}
 
-  '@opentelemetry/api@1.9.0': {}
+  '@opentelemetry/api@1.9.0':
+    optional: true
 
   '@oxc-resolver/binding-android-arm-eabi@11.8.4':
     optional: true
@@ -13723,11 +13720,6 @@ snapshots:
       kysely: 0.28.5
       pg: 8.16.3
       postgres: 3.4.7
-
-  drizzle-zod@0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76):
-    dependencies:
-      drizzle-orm: 0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7)
-      zod: 3.25.76
 
   drizzle-zod@0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.5)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11):
     dependencies:
