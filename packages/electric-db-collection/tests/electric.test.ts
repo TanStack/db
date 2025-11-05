@@ -25,11 +25,14 @@ const mockStream = {
 
 vi.mock(`@electric-sql/client`, async () => {
   const actual = await vi.importActual(`@electric-sql/client`)
+
+  const MockShapeStream = vi.fn(function () {
+    return mockStream
+  })
+
   return {
     ...actual,
-    ShapeStream: vi.fn().mockImplementation(function () {
-      return mockStream
-    }),
+    ShapeStream: MockShapeStream,
   }
 })
 
@@ -1028,9 +1031,9 @@ describe(`Electric Integration`, () => {
       })
 
       // Mock AbortController
-      global.AbortController = vi
-        .fn()
-        .mockImplementation(() => mockAbortController)
+      global.AbortController = vi.fn(function () {
+        return mockAbortController
+      }) as any
     })
 
     it(`should call unsubscribe and abort when collection is cleaned up`, async () => {
