@@ -593,8 +593,9 @@ describe.each([
       // With deduplication, the expanded query (limit 6) is NOT a subset of the limited query (limit 2),
       // so it will trigger a new requestSnapshot call. However, some of the recursive
       // calls may be deduped if they're covered by the union of previous unlimited calls.
-      // We expect at least 2 calls: the initial limit 2 and the initial limit 6.
-      expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
+      // We expect at least 4 calls: 2x for the initial limit 2 and 2x for the initial limit 6.
+      // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this to 2 calls.
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(4)
 
       // Check that first it requested a limit of 2 users (from first query)
       expect(callArgs(0)).toMatchObject({
@@ -868,7 +869,8 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     // and subsequent calls for the same unlimited predicate may be deduped.
     // After receiving Bob and Charlie, we have 3 users total, which satisfies the limit of 3,
     // so no additional requests should be made.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this to 1 call.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
   })
 
   it(`should pass correct WHERE clause to requestSnapshot when live query has filters`, async () => {
@@ -1148,7 +1150,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this to 1 call.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
 
     // Simulate a must-refetch (which triggers truncate and reset)
     subscriber([{ headers: { control: `must-refetch` } }])
@@ -1158,7 +1161,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // The existing live query re-requests its data after truncate (call 2)
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
+    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this to 1 call.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(4)
 
     // Create the same live query again after reset
     // This should NOT be deduped because the reset cleared the deduplication state,
@@ -1176,8 +1180,9 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // Should have 3 calls - the different query triggered a new request
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
+    // Should have 5 calls - the different query triggered a new request
+    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this to <=3 calls.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(5)
   })
 
   it(`should deduplicate unlimited queries regardless of orderBy`, async () => {
