@@ -118,6 +118,33 @@ const todoSchema = z.object({
 
 The schema acts as a **boundary** that transforms TInput → TOutput.
 
+### Critical Design Principle: TInput Must Be a Superset of TOutput
+
+When using transformations, **TInput must accept all values that TOutput contains**. This is essential for updates to work correctly.
+
+Here's why: when you call `collection.update(id, (draft) => {...})`, the `draft` parameter is typed as `TInput` but contains data that's already been transformed to `TOutput`. For this to work without complex type gymnastics, your schema must accept both the input format AND the output format.
+
+```typescript
+// ❌ BAD: TInput only accepts strings
+const schema = z.object({
+  created_at: z.string().transform(val => new Date(val))
+})
+// TInput:  { created_at: string }
+// TOutput: { created_at: Date }
+// Problem: draft.created_at is a Date, but TInput only accepts string!
+
+// ✅ GOOD: TInput accepts both string and Date (superset of TOutput)
+const schema = z.object({
+  created_at: z.union([z.string(), z.date()])
+    .transform(val => typeof val === 'string' ? new Date(val) : val)
+})
+// TInput:  { created_at: string | Date }
+// TOutput: { created_at: Date }
+// Success: draft.created_at can be a Date because TInput accepts Date!
+```
+
+**Rule of thumb:** If your schema transforms type A to type B, use `z.union([A, B])` to ensure TInput accepts both.
+
 ### Why This Matters
 
 **All data in your collection is TOutput:**
@@ -541,39 +568,43 @@ collection.update("1", (draft) => {
 })
 ```
 
-### When You Need Union Types
+### Accepting Date Input from External Sources
 
-If you're accepting date input from external sources (forms, APIs), you may need to accept both strings and Date objects:
+If you're accepting date input from external sources (forms, APIs), you must use union types to accept both strings and Date objects. This ensures TInput is a superset of TOutput:
 
 ```typescript
 const eventSchema = z.object({
   id: z.string(),
   name: z.string(),
   scheduled_for: z.union([
-    z.string(),  // Accept ISO string from form input
-    z.date()     // Accept Date from existing data or programmatic input
+    z.string(),  // Accept ISO string from form input (part of TInput)
+    z.date()     // Accept Date from existing data (TOutput) or programmatic input
   ]).transform(val =>
     typeof val === 'string' ? new Date(val) : val
   )
 })
+// TInput:  { scheduled_for: string | Date }
+// TOutput: { scheduled_for: Date }
+// ✅ TInput is a superset of TOutput (accepts both string and Date)
 
-// Works with string input
+// Works with string input (new data)
 collection.insert({
   id: "1",
   name: "Meeting",
   scheduled_for: "2024-12-31T15:00:00Z"  // From form input
 })
 
-// Works with Date input
+// Works with Date input (programmatic)
 collection.insert({
   id: "2",
   name: "Workshop",
-  scheduled_for: new Date()  // Programmatic
+  scheduled_for: new Date()
 })
 
-// Updates work - scheduled_for is already a Date
+// Updates work - scheduled_for is already a Date, and TInput accepts Date
 collection.update("1", (draft) => {
   draft.name = "Updated Meeting"
+  // draft.scheduled_for is a Date and can be used or modified
 })
 ```
 
@@ -706,22 +737,29 @@ const schema = z.object({
 const processedData = expensiveParsingOperation(todo.data)
 ```
 
-### Use Union Types for Updates
+### Use Union Types for Transformations (Essential)
 
-Always use union types when transforming to different output types:
+When your schema transforms data to a different type, you **must** use union types to ensure TInput is a superset of TOutput. This is not optional - updates will fail without it.
 
 ```typescript
-// ✅ Good: Handles both input and existing data
+// ✅ REQUIRED: TInput accepts both string (new data) and Date (existing data)
 const schema = z.object({
   created_at: z.union([z.string(), z.date()])
     .transform(val => typeof val === 'string' ? new Date(val) : val)
 })
+// TInput: { created_at: string | Date }
+// TOutput: { created_at: Date }
 
-// ❌ Bad: Will fail on updates
+// ❌ WILL BREAK: Updates fail because draft contains Date but TInput only accepts string
 const schema = z.object({
   created_at: z.string().transform(val => new Date(val))
 })
+// TInput: { created_at: string }
+// TOutput: { created_at: Date }
+// Problem: collection.update() passes a Date to a schema expecting string!
 ```
+
+**Why this is required:** During `collection.update()`, the `draft` object contains TOutput data (already transformed). The schema must accept this data, which means TInput must be a superset of TOutput.
 
 ### Validate at the Boundary
 
