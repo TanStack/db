@@ -1,5 +1,5 @@
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { flushSync, untrack } from "svelte"
+import { untrack } from "svelte"
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from "svelte/reactivity"
 import { createLiveQueryCollection } from "@tanstack/db"
@@ -353,10 +353,9 @@ export function useLiveQuery(
     // Listen for the first ready event to catch status transitions
     // that might not trigger change events (fixes async status transition bug)
     currentCollection.onFirstReady(() => {
-      // Use flushSync to ensure Svelte reactivity updates properly
-      flushSync(() => {
-        status = currentCollection.status
-      })
+      // Update status directly - Svelte's reactivity system handles the update automatically
+      // Note: We cannot use flushSync here as it's disallowed inside effects in async mode
+      status = currentCollection.status
     })
 
     // Subscribe to collection changes with granular updates

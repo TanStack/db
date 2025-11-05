@@ -45,6 +45,32 @@ The error includes:
 - `issues`: Array of validation issues with messages and paths
 - `message`: A formatted error message listing all issues
 
+**When schema validation occurs:**
+
+Schema validation happens only for **client mutations** - when you explicitly insert or update data:
+
+1. **During inserts** - When `collection.insert()` is called
+2. **During updates** - When `collection.update()` is called
+
+Schemas do **not** validate data coming from your server or sync layer. That data is assumed to already be valid.
+
+```typescript
+const schema = z.object({
+  id: z.string(),
+  created_at: z.string().transform(val => new Date(val))
+  // TInput: string, TOutput: Date
+})
+
+// Validation happens here ✓
+collection.insert({
+  id: "1",
+  created_at: "2024-01-01"  // TInput: string
+})
+// If successful, stores: { created_at: Date }  // TOutput: Date
+```
+
+For more details on schema validation and type transformations, see the [Schemas guide](./schemas.md).
+
 ## Query Collection Error Tracking
 
 Query collections provide enhanced error tracking utilities through the `utils` object. These methods expose error state information and provide recovery mechanisms for failed queries:

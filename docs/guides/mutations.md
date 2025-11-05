@@ -486,6 +486,49 @@ const todoCollection = createCollection({
 })
 ```
 
+### Schema Validation in Mutation Handlers
+
+When a schema is configured for a collection, TanStack DB automatically validates and transforms data during mutations. The mutation handlers receive the **transformed data** (TOutput), not the raw input.
+
+```typescript
+const todoSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  created_at: z.string().transform(val => new Date(val))  // TInput: string, TOutput: Date
+})
+
+const collection = createCollection({
+  schema: todoSchema,
+  onInsert: async ({ transaction }) => {
+    const item = transaction.mutations[0].modified
+
+    // item.created_at is already a Date object (TOutput)
+    console.log(item.created_at instanceof Date)  // true
+
+    // If your API needs a string, serialize it
+    await api.todos.create({
+      ...item,
+      created_at: item.created_at.toISOString()  // Date → string
+    })
+  }
+})
+
+// User provides string (TInput)
+collection.insert({
+  id: "1",
+  text: "Task",
+  created_at: "2024-01-01T00:00:00Z"
+})
+```
+
+**Key points:**
+- Schema validation happens **before** mutation handlers are called
+- Handlers receive **TOutput** (transformed data)
+- If your backend needs a different format, serialize in the handler
+- Schema validation errors throw `SchemaValidationError` before handlers run
+
+For comprehensive documentation on schema validation and transformations, see the [Schemas guide](./schemas.md).
+
 ## Creating Custom Actions
 
 For more complex mutation patterns, use `createOptimisticAction` to create custom actions with full control over the mutation lifecycle.
