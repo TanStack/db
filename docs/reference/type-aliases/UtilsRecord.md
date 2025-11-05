@@ -9,6 +9,6 @@ title: UtilsRecord
 type UtilsRecord = Record<string, Fn>;
 ```
 
-Defined in: [packages/db/src/types.ts:40](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L40)
+Defined in: [packages/db/src/types.ts:71](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L71)
 
 A record of utility functions that can be attached to a collection
