@@ -21,5 +21,3 @@ These extension packages incorrectly declared `@tanstack/db` as both a regular d
 The fix removes `@tanstack/db` from regular dependencies and keeps it only as a peerDependency. This ensures only one version of `@tanstack/db` is installed in the dependency tree, preventing version conflicts.
 
 For local development, `@tanstack/db` remains in devDependencies so the packages can be built and tested independently.
-
-Note: `@tanstack/react-db` keeps `@tanstack/db` as a regular dependency - this is correct since it's a framework wrapper that pulls in everything needed. Users typically install the framework package (like `@tanstack/react-db`), not `@tanstack/db` directly.
