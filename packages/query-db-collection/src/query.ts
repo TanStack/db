@@ -207,8 +207,8 @@ interface QueryCollectionState {
 }
 
 /**
- * Implementation class for QueryCollectionUtils that maintains proper closure
- * and compatibility with testing frameworks
+ * Implementation class for QueryCollectionUtils with explicit dependency injection
+ * for better testability and architectural clarity
  */
 class QueryCollectionUtilsImpl {
   private state: QueryCollectionState
