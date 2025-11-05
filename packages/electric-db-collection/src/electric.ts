@@ -6,18 +6,22 @@ import {
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
+import { DeduplicatedLoadSubset } from "@tanstack/db"
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
   TimeoutWaitingForMatchError,
   TimeoutWaitingForTxIdError,
 } from "./errors"
+import { compileSQL } from "./sql-compiler"
 import type {
   BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetOptions,
   SyncConfig,
+  SyncMode,
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
@@ -73,6 +77,24 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
   : Record<string, unknown>
 
 /**
+ * The mode of sync to use for the collection.
+ * @default `eager`
+ * @description
+ * - `eager`:
+ *   - syncs all data immediately on preload
+ *   - collection will be marked as ready once the sync is complete
+ *   - there is no incremental sync
+ * - `on-demand`:
+ *   - syncs data in incremental snapshots when the collection is queried
+ *   - collection will be marked as ready immediately after the first snapshot is synced
+ * - `progressive`:
+ *   - syncs all data for the collection in the background
+ *   - uses incremental snapshots during the initial sync to provide a fast path to the data required for queries
+ *   - collection will be marked as ready once the full sync is complete
+ */
+export type ElectricSyncMode = SyncMode | `progressive`
+
+/**
  * Configuration interface for Electric collection options
  * @template T - The type of items in the collection
  * @template TSchema - The schema type for validation
@@ -82,12 +104,13 @@ export interface ElectricCollectionConfig<
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
     BaseCollectionConfig<T, string | number, TSchema, UtilsRecord, any>,
-    `onInsert` | `onUpdate` | `onDelete`
+    `onInsert` | `onUpdate` | `onDelete` | `syncMode`
   > {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>
+  syncMode?: ElectricSyncMode
 
   /**
    * Optional asynchronous handler function called before an insert operation
@@ -281,6 +304,9 @@ export function electricCollectionOptions(
 } {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
   const seenSnapshots = new Store<Array<PostgresSnapshot>>([])
+  const internalSyncMode = config.syncMode ?? `eager`
+  const finalSyncMode =
+    internalSyncMode === `progressive` ? `on-demand` : internalSyncMode
   const pendingMatches = new Store<
     Map<
       string,
@@ -331,6 +357,7 @@ export function electricCollectionOptions(
   const sync = createElectricSync<any>(config.shapeOptions, {
     seenTxids,
     seenSnapshots,
+    syncMode: internalSyncMode,
     pendingMatches,
     currentBatchMessages,
     removePendingMatches,
@@ -550,6 +577,7 @@ export function electricCollectionOptions(
 
   return {
     ...restConfig,
+    syncMode: finalSyncMode,
     sync,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
@@ -567,6 +595,7 @@ export function electricCollectionOptions(
 function createElectricSync<T extends Row<unknown>>(
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>,
   options: {
+    syncMode: ElectricSyncMode
     seenTxids: Store<Set<Txid>>
     seenSnapshots: Store<Array<PostgresSnapshot>>
     pendingMatches: Store<
@@ -590,6 +619,7 @@ function createElectricSync<T extends Row<unknown>>(
   const {
     seenTxids,
     seenSnapshots,
+    syncMode,
     pendingMatches,
     currentBatchMessages,
     removePendingMatches,
@@ -653,6 +683,12 @@ function createElectricSync<T extends Row<unknown>>(
 
       const stream = new ShapeStream({
         ...shapeOptions,
+        // In on-demand mode, we only want to sync changes, so we set the log to `changes_only`
+        log: syncMode === `on-demand` ? `changes_only` : undefined,
+        // In on-demand mode, we only need the changes from the point of time the collection was created
+        // so we default to `now` when there is no saved offset.
+        offset:
+          shapeOptions.offset ?? (syncMode === `on-demand` ? `now` : undefined),
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
@@ -679,9 +715,28 @@ function createElectricSync<T extends Row<unknown>>(
       let transactionStarted = false
       const newTxids = new Set<Txid>()
       const newSnapshots: Array<PostgresSnapshot> = []
+      let hasReceivedUpToDate = false // Track if we've completed initial sync in progressive mode
+
+      // Create deduplicated loadSubset wrapper for non-eager modes
+      // This prevents redundant snapshot requests when multiple concurrent
+      // live queries request overlapping or subset predicates
+      const loadSubsetDedupe =
+        syncMode === `eager`
+          ? null
+          : new DeduplicatedLoadSubset({
+              loadSubset: async (opts: LoadSubsetOptions) => {
+                // In progressive mode, stop requesting snapshots once full sync is complete
+                if (syncMode === `progressive` && hasReceivedUpToDate) {
+                  return
+                }
+                const snapshotParams = compileSQL<T>(opts)
+                await stream.requestSnapshot(snapshotParams)
+              },
+            })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
+        let hasSnapshotEnd = false
 
         for (const message of messages) {
           // Add message to current batch buffer (for race condition handling)
@@ -746,6 +801,7 @@ function createElectricSync<T extends Row<unknown>>(
             })
           } else if (isSnapshotEndMessage(message)) {
             newSnapshots.push(parseSnapshotMessage(message))
+            hasSnapshotEnd = true
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
@@ -761,12 +817,18 @@ function createElectricSync<T extends Row<unknown>>(
 
             truncate()
 
-            // Reset hasUpToDate so we continue accumulating changes until next up-to-date
+            // Reset the loadSubset deduplication state since we're starting fresh
+            // This ensures that previously loaded predicates don't prevent refetching after truncate
+            loadSubsetDedupe?.reset()
+
+            // Reset flags so we continue accumulating changes until next up-to-date
             hasUpToDate = false
+            hasSnapshotEnd = false
+            hasReceivedUpToDate = false // Reset for progressive mode - we're starting a new sync
           }
         }
 
-        if (hasUpToDate) {
+        if (hasUpToDate || hasSnapshotEnd) {
           // Clear the current batch buffer since we're now up-to-date
           currentBatchMessages.setState(() => [])
 
@@ -776,8 +838,15 @@ function createElectricSync<T extends Row<unknown>>(
             transactionStarted = false
           }
 
-          // Mark the collection as ready now that sync is up to date
-          markReady()
+          if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
+            // Mark the collection as ready now that sync is up to date
+            markReady()
+          }
+
+          // Track that we've received the first up-to-date for progressive mode
+          if (hasUpToDate) {
+            hasReceivedUpToDate = true
+          }
 
           // Always commit txids when we receive up-to-date, regardless of transaction state
           seenTxids.setState((currentTxids) => {
@@ -811,12 +880,16 @@ function createElectricSync<T extends Row<unknown>>(
         }
       })
 
-      // Return the unsubscribe function
-      return () => {
-        // Unsubscribe from the stream
-        unsubscribeStream()
-        // Abort the abort controller to stop the stream
-        abortController.abort()
+      // Return the deduplicated loadSubset if available (on-demand or progressive mode)
+      // The loadSubset method is auto-bound, so it can be safely returned directly
+      return {
+        loadSubset: loadSubsetDedupe?.loadSubset,
+        cleanup: () => {
+          // Unsubscribe from the stream
+          unsubscribeStream()
+          // Abort the abort controller to stop the stream
+          abortController.abort()
+        },
       }
     },
     // Expose the getSyncMetadata function
