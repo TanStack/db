@@ -1,4 +1,6 @@
 import { createTransaction } from "./transactions"
+import { OnMutateMustBeSynchronousError } from "./errors"
+import { isPromiseLike } from "./utils/type-guards"
 import type { CreateOptimisticActionsOptions, Transaction } from "./types"
 
 /**
@@ -67,8 +69,11 @@ export function createOptimisticAction<TVariables = unknown>(
     // Execute the transaction. The mutationFn is called once mutate()
     // is finished.
     transaction.mutate(() => {
-      // Call onMutate with variables to apply optimistic updates
-      onMutate(variables)
+      const maybePromise = onMutate(variables) as unknown
+
+      if (isPromiseLike(maybePromise)) {
+        throw new OnMutateMustBeSynchronousError()
+      }
     })
 
     return transaction
