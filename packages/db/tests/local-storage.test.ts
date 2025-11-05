@@ -1142,4 +1142,476 @@ describe(`localStorage collection`, () => {
       subscription.unsubscribe()
     })
   })
+
+  describe(`Performance optimizations (issue #755)`, () => {
+    describe(`Rapid sequential mutations`, () => {
+      it(`should handle multiple rapid mutations without data loss`, async () => {
+        const collection = createCollection(
+          localStorageCollectionOptions<Todo>({
+            storageKey: `todos`,
+            storage: mockStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (todo) => todo.id,
+          })
+        )
+
+        const subscription = collection.subscribeChanges(() => {})
+
+        // Simulate rapid text input: multiple mutations without awaiting
+        const tx1 = collection.insert({
+          id: `1`,
+          title: `First`,
+          completed: false,
+          createdAt: new Date(),
+        })
+
+        const tx2 = collection.update(`1`, (draft) => {
+          draft.title = `Second`
+        })
+
+        const tx3 = collection.insert({
+          id: `2`,
+          title: `Third`,
+          completed: false,
+          createdAt: new Date(),
+        })
+
+        const tx4 = collection.update(`1`, (draft) => {
+          draft.title = `Fourth`
+        })
+
+        const tx5 = collection.delete(`2`)
+
+        // Wait for all mutations to complete
+        await Promise.all([
+          tx1.isPersisted.promise,
+          tx2.isPersisted.promise,
+          tx3.isPersisted.promise,
+          tx4.isPersisted.promise,
+          tx5.isPersisted.promise,
+        ])
+
+        // Verify final state in storage
+        const storedData = mockStorage.getItem(`todos`)
+        expect(storedData).toBeDefined()
+        const parsed = JSON.parse(storedData!)
+
+        // Item 1 should have the last update
+        expect(parsed[`1`].data.title).toBe(`Fourth`)
+        // Item 2 should be deleted
+        expect(parsed[`2`]).toBeUndefined()
+
+        // Verify collection matches storage
+        expect(collection.get(`1`)?.title).toBe(`Fourth`)
+        expect(collection.has(`2`)).toBe(false)
+
+        subscription.unsubscribe()
+      })
+
+      it(`should handle rapid mutations with manual transactions`, async () => {
+        const collection = createCollection(
+          localStorageCollectionOptions<Todo>({
+            storageKey: `todos`,
+            storage: mockStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (todo) => todo.id,
+          })
+        )
+
+        const subscription = collection.subscribeChanges(() => {})
+
+        const tx = createTransaction({
+          mutationFn: async ({ transaction }: any) => {
+            await Promise.resolve()
+            collection.utils.acceptMutations(transaction)
+          },
+          autoCommit: false,
+        })
+
+        // Rapid mutations within a transaction
+        tx.mutate(() => {
+          collection.insert({
+            id: `1`,
+            title: `A`,
+            completed: false,
+            createdAt: new Date(),
+          })
+          collection.update(`1`, (draft) => {
+            draft.title = `B`
+          })
+          collection.update(`1`, (draft) => {
+            draft.title = `C`
+          })
+          collection.insert({
+            id: `2`,
+            title: `D`,
+            completed: false,
+            createdAt: new Date(),
+          })
+          collection.delete(`2`)
+        })
+
+        await tx.commit()
+
+        // Verify final state
+        const storedData = mockStorage.getItem(`todos`)
+        const parsed = JSON.parse(storedData!)
+
+        expect(parsed[`1`].data.title).toBe(`C`)
+        expect(parsed[`2`]).toBeUndefined()
+
+        subscription.unsubscribe()
+      })
+    })
+
+    describe(`Cross-tab sync during mutations`, () => {
+      it(`should correctly handle storage events during local mutations`, async () => {
+        const collection = createCollection(
+          localStorageCollectionOptions<Todo>({
+            storageKey: `todos`,
+            storage: mockStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (todo) => todo.id,
+          })
+        )
+
+        const subscription = collection.subscribeChanges(() => {})
+
+        // Start a local mutation (don't await)
+        const localTx = collection.insert({
+          id: `local`,
+          title: `Local Change`,
+          completed: false,
+          createdAt: new Date(),
+        })
+
+        // Simulate another tab making a change while local mutation is in progress
+        const remoteData = {
+          local: {
+            versionKey: `local-version`,
+            data: {
+              id: `local`,
+              title: `Local Change`,
+              completed: false,
+              createdAt: new Date(),
+            },
+          },
+          remote: {
+            versionKey: `remote-version`,
+            data: {
+              id: `remote`,
+              title: `Remote Change`,
+              completed: false,
+              createdAt: new Date(),
+            },
+          },
+        }
+
+        mockStorage.setItem(`todos`, JSON.stringify(remoteData))
+
+        const storageEvent = {
+          type: `storage`,
+          key: `todos`,
+          oldValue: null,
+          newValue: JSON.stringify(remoteData),
+          url: `http://localhost`,
+          storageArea: mockStorage,
+        } as unknown as StorageEvent
+
+        mockStorageEventApi.triggerStorageEvent(storageEvent)
+
+        // Wait for local mutation to complete
+        await localTx.isPersisted.promise
+
+        // Both items should exist
+        expect(collection.has(`local`)).toBe(true)
+        expect(collection.has(`remote`)).toBe(true)
+
+        subscription.unsubscribe()
+      })
+
+      it(`should maintain lastKnownData consistency after cross-tab updates`, async () => {
+        const collection = createCollection(
+          localStorageCollectionOptions<Todo>({
+            storageKey: `todos`,
+            storage: mockStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (todo) => todo.id,
+          })
+        )
+
+        const subscription = collection.subscribeChanges(() => {})
+
+        // Insert initial item
+        const tx1 = collection.insert({
+          id: `1`,
+          title: `Initial`,
+          completed: false,
+          createdAt: new Date(),
+        })
+        await tx1.isPersisted.promise
+
+        // Simulate another tab updating the item
+        const remoteData = {
+          "1": {
+            versionKey: `remote-version-1`,
+            data: {
+              id: `1`,
+              title: `Remote Update`,
+              completed: true,
+              createdAt: new Date(),
+            },
+          },
+        }
+
+        mockStorage.setItem(`todos`, JSON.stringify(remoteData))
+
+        const storageEvent = {
+          type: `storage`,
+          key: `todos`,
+          oldValue: null,
+          newValue: JSON.stringify(remoteData),
+          url: `http://localhost`,
+          storageArea: mockStorage,
+        } as unknown as StorageEvent
+
+        mockStorageEventApi.triggerStorageEvent(storageEvent)
+
+        // Now perform a local update - should work with updated lastKnownData
+        const tx2 = collection.update(`1`, (draft) => {
+          draft.title = `Local Update After Remote`
+        })
+        await tx2.isPersisted.promise
+
+        // Verify final state
+        const storedData = mockStorage.getItem(`todos`)
+        const parsed = JSON.parse(storedData!)
+
+        expect(parsed[`1`].data.title).toBe(`Local Update After Remote`)
+        expect(parsed[`1`].data.completed).toBe(true) // Should preserve remote's completed state
+
+        subscription.unsubscribe()
+      })
+    })
+
+    describe(`acceptMutations edge cases`, () => {
+      it(`should handle acceptMutations before collection is fully initialized`, async () => {
+        const collection = createCollection(
+          localStorageCollectionOptions<Todo>({
+            storageKey: `todos`,
+            storage: mockStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (todo) => todo.id,
+          })
+        )
+
+        // Don't subscribe - collection sync may not be initialized yet
+        const tx = createTransaction({
+          mutationFn: async ({ transaction }: any) => {
+            await Promise.resolve()
+            // This should handle the case where sync isn't ready
+            collection.utils.acceptMutations(transaction)
+          },
+          autoCommit: false,
+        })
+
+        tx.mutate(() => {
+          collection.insert({
+            id: `early`,
+            title: `Early Mutation`,
+            completed: false,
+            createdAt: new Date(),
+          })
+        })
+
+        // Commit before subscribing
+        await tx.commit()
+
+        // Now subscribe to initialize sync
+        const subscription = collection.subscribeChanges(() => {})
+
+        // Item should eventually be in collection
+        expect(collection.has(`early`)).toBe(true)
+
+        // And in storage
+        const storedData = mockStorage.getItem(`todos`)
+        expect(storedData).toBeDefined()
+        const parsed = JSON.parse(storedData!)
+        expect(parsed[`early`].data.title).toBe(`Early Mutation`)
+
+        subscription.unsubscribe()
+      })
+
+      it(`should handle mixing automatic mutations and manual transactions`, async () => {
+        const collection = createCollection(
+          localStorageCollectionOptions<Todo>({
+            storageKey: `todos`,
+            storage: mockStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (todo) => todo.id,
+          })
+        )
+
+        const subscription = collection.subscribeChanges(() => {})
+
+        // Automatic mutation
+        const auto1 = collection.insert({
+          id: `auto1`,
+          title: `Auto 1`,
+          completed: false,
+          createdAt: new Date(),
+        })
+        await auto1.isPersisted.promise
+
+        // Manual transaction
+        const tx = createTransaction({
+          mutationFn: async ({ transaction }: any) => {
+            await Promise.resolve()
+            collection.utils.acceptMutations(transaction)
+          },
+          autoCommit: false,
+        })
+
+        tx.mutate(() => {
+          collection.insert({
+            id: `manual1`,
+            title: `Manual 1`,
+            completed: false,
+            createdAt: new Date(),
+          })
+          collection.update(`auto1`, (draft) => {
+            draft.title = `Auto 1 Updated`
+          })
+        })
+
+        await tx.commit()
+
+        // Another automatic mutation
+        const auto2 = collection.insert({
+          id: `auto2`,
+          title: `Auto 2`,
+          completed: false,
+          createdAt: new Date(),
+        })
+        await auto2.isPersisted.promise
+
+        // Verify all items in storage
+        const storedData = mockStorage.getItem(`todos`)
+        const parsed = JSON.parse(storedData!)
+
+        expect(parsed[`auto1`].data.title).toBe(`Auto 1 Updated`)
+        expect(parsed[`manual1`].data.title).toBe(`Manual 1`)
+        expect(parsed[`auto2`].data.title).toBe(`Auto 2`)
+
+        subscription.unsubscribe()
+      })
+    })
+
+    describe(`Storage write failure scenarios`, () => {
+      it(`should handle storage.setItem failures gracefully`, async () => {
+        const failingStorage = new MockStorage()
+        const originalSetItem = failingStorage.setItem.bind(failingStorage)
+
+        // Make setItem fail once
+        let callCount = 0
+        failingStorage.setItem = vi.fn((key: string, value: string) => {
+          callCount++
+          if (callCount === 1) {
+            throw new Error(`QuotaExceededError: Storage full`)
+          }
+          originalSetItem(key, value)
+        })
+
+        const collection = createCollection(
+          localStorageCollectionOptions<Todo>({
+            storageKey: `todos`,
+            storage: failingStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (todo) => todo.id,
+          })
+        )
+
+        const subscription = collection.subscribeChanges(() => {})
+
+        // This insert should fail on storage write
+        const tx = collection.insert({
+          id: `1`,
+          title: `Test`,
+          completed: false,
+          createdAt: new Date(),
+        })
+
+        // The transaction should reject
+        await expect(tx.isPersisted.promise).rejects.toThrow()
+
+        subscription.unsubscribe()
+      })
+    })
+
+    describe(`lastKnownData consistency`, () => {
+      it(`should keep lastKnownData in sync with storage after every operation`, async () => {
+        const collection = createCollection(
+          localStorageCollectionOptions<Todo>({
+            storageKey: `todos`,
+            storage: mockStorage,
+            storageEventApi: mockStorageEventApi,
+            getKey: (todo) => todo.id,
+          })
+        )
+
+        const subscription = collection.subscribeChanges(() => {})
+
+        // Helper to verify lastKnownData matches storage
+        const verifyConsistency = () => {
+          const storedData = mockStorage.getItem(`todos`)
+          if (!storedData) return true
+
+          const parsed = JSON.parse(storedData)
+
+          // Check that collection has all items from storage
+          for (const key of Object.keys(parsed)) {
+            if (!collection.has(key)) {
+              return false
+            }
+          }
+
+          return true
+        }
+
+        // Insert
+        const tx1 = collection.insert({
+          id: `1`,
+          title: `First`,
+          completed: false,
+          createdAt: new Date(),
+        })
+        await tx1.isPersisted.promise
+        expect(verifyConsistency()).toBe(true)
+
+        // Update
+        const tx2 = collection.update(`1`, (draft) => {
+          draft.title = `Updated`
+        })
+        await tx2.isPersisted.promise
+        expect(verifyConsistency()).toBe(true)
+
+        // Insert another
+        const tx3 = collection.insert({
+          id: `2`,
+          title: `Second`,
+          completed: false,
+          createdAt: new Date(),
+        })
+        await tx3.isPersisted.promise
+        expect(verifyConsistency()).toBe(true)
+
+        // Delete
+        const tx4 = collection.delete(`1`)
+        await tx4.isPersisted.promise
+        expect(verifyConsistency()).toBe(true)
+
+        subscription.unsubscribe()
+      })
+    })
+  })
 })
