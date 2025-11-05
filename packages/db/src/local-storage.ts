@@ -533,13 +533,7 @@ export function localStorageCollectionOptions(
       }
     }
 
-    // Load current data from storage
-    const currentData = loadFromStorage<Record<string, unknown>>(
-      config.storageKey,
-      storage,
-      parser
-    )
-
+    // Use lastKnownData (in-memory cache) instead of reading from storage
     // Apply each mutation
     for (const mutation of collectionMutations) {
       // Use the engine's pre-computed key to avoid key derivation issues
@@ -552,18 +546,18 @@ export function localStorageCollectionOptions(
             versionKey: generateUuid(),
             data: mutation.modified,
           }
-          currentData.set(key, storedItem)
+          lastKnownData.set(key, storedItem)
           break
         }
         case `delete`: {
-          currentData.delete(key)
+          lastKnownData.delete(key)
           break
         }
       }
     }
 
     // Save to storage
-    saveToStorage(currentData)
+    saveToStorage(lastKnownData)
 
     // Confirm the mutations in the collection to move them from optimistic to synced state
     // This writes them through the sync interface to make them "synced" instead of "optimistic"
