@@ -195,6 +195,93 @@ export interface QueryCollectionUtils<
 }
 
 /**
+ * Internal state object for tracking query observer and errors
+ */
+interface QueryCollectionState {
+  lastError: any
+  errorCount: number
+  lastErrorUpdatedAt: number
+  queryObserver:
+    | QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
+    | undefined
+}
+
+/**
+ * Implementation class for QueryCollectionUtils that maintains proper closure
+ * and compatibility with testing frameworks
+ */
+class QueryCollectionUtilsImpl {
+  private state: QueryCollectionState
+  private refetchFn: RefetchFn
+
+  // Write methods
+  public refetch: RefetchFn
+  public writeInsert: any
+  public writeUpdate: any
+  public writeDelete: any
+  public writeUpsert: any
+  public writeBatch: any
+
+  constructor(
+    state: QueryCollectionState,
+    refetch: RefetchFn,
+    writeUtils: ReturnType<typeof createWriteUtils>
+  ) {
+    this.state = state
+    this.refetchFn = refetch
+
+    // Initialize methods to use passed dependencies
+    this.refetch = refetch
+    this.writeInsert = writeUtils.writeInsert
+    this.writeUpdate = writeUtils.writeUpdate
+    this.writeDelete = writeUtils.writeDelete
+    this.writeUpsert = writeUtils.writeUpsert
+    this.writeBatch = writeUtils.writeBatch
+  }
+
+  public async clearError() {
+    this.state.lastError = undefined
+    this.state.errorCount = 0
+    this.state.lastErrorUpdatedAt = 0
+    await this.refetchFn({ throwOnError: true })
+  }
+
+  // Getters for error state
+  public get lastError() {
+    return this.state.lastError
+  }
+
+  public get isError() {
+    return !!this.state.lastError
+  }
+
+  public get errorCount() {
+    return this.state.errorCount
+  }
+
+  // Getters for QueryObserver state
+  public get isFetching() {
+    return this.state.queryObserver?.getCurrentResult().isFetching ?? false
+  }
+
+  public get isRefetching() {
+    return this.state.queryObserver?.getCurrentResult().isRefetching ?? false
+  }
+
+  public get isLoading() {
+    return this.state.queryObserver?.getCurrentResult().isLoading ?? false
+  }
+
+  public get dataUpdatedAt() {
+    return this.state.queryObserver?.getCurrentResult().dataUpdatedAt ?? 0
+  }
+
+  public get fetchStatus() {
+    return this.state.queryObserver?.getCurrentResult().fetchStatus ?? `idle`
+  }
+}
+
+/**
  * Creates query collection options for use with a standard Collection.
  * This integrates TanStack Query with TanStack DB for automatic synchronization.
  *
@@ -457,13 +544,11 @@ export function queryCollectionOptions(
   }
 
   /** State object to hold error tracking and observer reference */
-  const state = {
+  const state: QueryCollectionState = {
     lastError: undefined as any,
     errorCount: 0,
     lastErrorUpdatedAt: 0,
-    queryObserver: undefined as
-      | QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
-      | undefined,
+    queryObserver: undefined,
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
@@ -749,72 +834,8 @@ export function queryCollectionOptions(
       }
     : undefined
 
-  // Create utils object with getters using a class pattern
-  // This ensures proper closure and compatibility with testing frameworks like vitest
-  class QueryCollectionUtilsImpl {
-    // Write methods
-    public refetch: RefetchFn
-    public writeInsert: any
-    public writeUpdate: any
-    public writeDelete: any
-    public writeUpsert: any
-    public writeBatch: any
-
-    constructor() {
-      // Initialize methods in constructor to capture correct scope
-      this.refetch = refetch
-      this.writeInsert = writeUtils.writeInsert
-      this.writeUpdate = writeUtils.writeUpdate
-      this.writeDelete = writeUtils.writeDelete
-      this.writeUpsert = writeUtils.writeUpsert
-      this.writeBatch = writeUtils.writeBatch
-    }
-
-    public async clearError() {
-      state.lastError = undefined
-      state.errorCount = 0
-      state.lastErrorUpdatedAt = 0
-      await refetch({ throwOnError: true })
-    }
-
-    // Getters for error state
-    public get lastError() {
-      return state.lastError
-    }
-
-    public get isError() {
-      return !!state.lastError
-    }
-
-    public get errorCount() {
-      return state.errorCount
-    }
-
-    // Getters for QueryObserver state
-    public get isFetching() {
-      return state.queryObserver?.getCurrentResult().isFetching ?? false
-    }
-
-    public get isRefetching() {
-      return state.queryObserver?.getCurrentResult().isRefetching ?? false
-    }
-
-    public get isLoading() {
-      return state.queryObserver?.getCurrentResult().isLoading ?? false
-    }
-
-    public get dataUpdatedAt() {
-      return state.queryObserver?.getCurrentResult().dataUpdatedAt ?? 0
-    }
-
-    public get fetchStatus() {
-      return state.queryObserver?.getCurrentResult().fetchStatus ?? `idle`
-    }
-  }
-
-  // Use class instance directly with getters
-  // createCollection now preserves the utils object instead of spreading it
-  const utils: any = new QueryCollectionUtilsImpl()
+  // Create utils instance with state and dependencies passed explicitly
+  const utils: any = new QueryCollectionUtilsImpl(state, refetch, writeUtils)
 
   return {
     ...baseCollectionConfig,
