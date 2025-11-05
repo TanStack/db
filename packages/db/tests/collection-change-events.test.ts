@@ -13,7 +13,7 @@ interface TestUser {
 }
 
 describe(`currentStateAsChanges`, () => {
-  let mockSync: ReturnType<typeof vi.fn>
+  let mockSync: any
 
   beforeEach(() => {
     mockSync = vi.fn()
@@ -45,7 +45,7 @@ describe(`currentStateAsChanges`, () => {
     })
 
     // Insert users via sync
-    mockSync.mockImplementation(({ begin, write, commit }) => {
+    mockSync.mockImplementation(({ begin, write, commit }: any) => {
       begin()
       users.forEach((user) => {
         write({

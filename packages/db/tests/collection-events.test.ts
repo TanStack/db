@@ -4,7 +4,7 @@ import type { Collection } from "../src/collection/index.js"
 
 describe(`Collection Events System`, () => {
   let collection: Collection
-  let mockSync: ReturnType<typeof vi.fn>
+  let mockSync: any
 
   beforeEach(() => {
     mockSync = vi.fn()

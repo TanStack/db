@@ -8,7 +8,7 @@ import {
 
 describe(`Collection Error Handling`, () => {
   let originalQueueMicrotask: typeof queueMicrotask
-  let mockQueueMicrotask: ReturnType<typeof vi.fn>
+  let mockQueueMicrotask: any
 
   beforeEach(() => {
     // Store original queueMicrotask
