@@ -160,10 +160,26 @@ export class DuplicateKeyError extends CollectionOperationError {
 }
 
 export class DuplicateKeySyncError extends CollectionOperationError {
-  constructor(key: string | number, collectionId: string) {
-    super(
-      `Cannot insert document with key "${key}" from sync because it already exists in the collection "${collectionId}"`
-    )
+  constructor(
+    key: string | number,
+    collectionId: string,
+    options?: { hasCustomGetKey?: boolean; hasJoins?: boolean }
+  ) {
+    const baseMessage = `Cannot insert document with key "${key}" from sync because it already exists in the collection "${collectionId}"`
+
+    // Provide enhanced guidance when custom getKey is used with joins
+    if (options?.hasCustomGetKey && options.hasJoins) {
+      super(
+        `${baseMessage}. ` +
+          `This collection uses a custom getKey with joined queries. ` +
+          `Joined queries can produce multiple rows with the same key when relationships are not 1:1. ` +
+          `Consider: (1) using a composite key in your getKey function (e.g., \`\${item.key1}-\${item.key2}\`), ` +
+          `(2) ensuring your join produces unique rows per key, or (3) removing the custom getKey ` +
+          `to use the default composite key behavior.`
+      )
+    } else {
+      super(baseMessage)
+    }
   }
 }
 
