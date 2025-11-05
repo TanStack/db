@@ -2,9 +2,9 @@ import { expect } from "vitest"
 import type {
   CollectionConfig,
   MutationFnParams,
+  StringSortOpts,
   SyncConfig,
 } from "../src/index.js"
-import type { StringSortOpts } from "../src/types.js"
 
 // Index usage tracking utilities
 export interface IndexUsageStats {
