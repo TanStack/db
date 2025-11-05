@@ -45,6 +45,32 @@ The error includes:
 - `issues`: Array of validation issues with messages and paths
 - `message`: A formatted error message listing all issues
 
+**When schema validation occurs:**
+
+Schema validation happens only for **client mutations** - when you explicitly insert or update data:
+
+1. **During inserts** - When `collection.insert()` is called
+2. **During updates** - When `collection.update()` is called
+
+Schemas do **not** validate data coming from your server or sync layer. That data is assumed to already be valid.
+
+```typescript
+const schema = z.object({
+  id: z.string(),
+  created_at: z.string().transform(val => new Date(val))
+  // TInput: string, TOutput: Date
+})
+
+// Validation happens here ✓
+collection.insert({
+  id: "1",
+  created_at: "2024-01-01"  // TInput: string
+})
+// If successful, stores: { created_at: Date }  // TOutput: Date
+```
+
+For more details on schema validation and type transformations, see the [Schemas guide](./schemas.md).
+
 ## Query Collection Error Tracking
 
 Query collections provide enhanced error tracking utilities through the `utils` object. These methods expose error state information and provide recovery mechanisms for failed queries:
@@ -122,6 +148,36 @@ Collection status values:
 - `ready` - Ready for use
 - `error` - In error state
 - `cleaned-up` - Cleaned up and no longer usable
+
+### Using Suspense and Error Boundaries (React)
+
+For React applications, you can handle loading and error states with `useLiveSuspenseQuery`, React Suspense, and Error Boundaries:
+
+```tsx
+import { useLiveSuspenseQuery } from "@tanstack/react-db"
+import { Suspense } from "react"
+import { ErrorBoundary } from "react-error-boundary"
+
+const TodoList = () => {
+  // No need to check status - Suspense and ErrorBoundary handle it
+  const { data } = useLiveSuspenseQuery(
+    (query) => query.from({ todos: todoCollection })
+  )
+
+  // data is always defined here
+  return <div>{data.map(todo => <div key={todo.id}>{todo.text}</div>)}</div>
+}
+
+const App = () => (
+  <ErrorBoundary fallback={<div>Failed to load todos</div>}>
+    <Suspense fallback={<div>Loading...</div>}>
+      <TodoList />
+    </Suspense>
+  </ErrorBoundary>
+)
+```
+
+With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](../live-queries#using-with-react-suspense) for more details.
 
 ## Transaction Error Handling
 
@@ -258,9 +314,11 @@ todoCollection.insert(newTodo)
 // Error: Collection.insert called directly (not within an explicit transaction) but no 'onInsert' handler is configured
 ```
 
-### Duplicate Key Errors
+### Insert Operation Errors
 
-Inserting items with existing keys will throw:
+#### DuplicateKeyError
+
+Thrown when inserting items with existing keys:
 
 ```ts
 import { DuplicateKeyError } from "@tanstack/db"
@@ -270,28 +328,90 @@ try {
 } catch (error) {
   if (error instanceof DuplicateKeyError) {
     console.log(`Duplicate key: ${error.message}`)
+    // Consider using update() instead, or check if item exists first
   }
 }
 ```
 
-### Schema Validation Errors
+#### UndefinedKeyError
 
-Schema validation must be synchronous:
+Thrown when an object is created without a defined key:
 
 ```ts
-const todoCollection = createCollection({
+import { UndefinedKeyError } from "@tanstack/db"
+
+const collection = createCollection({
   id: "todos",
-  getKey: (todo) => todo.id,
-  schema: {
-    "~standard": {
-      validate: async (data) => { // Async validation not allowed
-        // ...
-      }
-    }
-  }
+  getKey: (item) => item.id,
 })
 
-// Will throw: Schema validation must be synchronous
+try {
+  collection.insert({ text: "Todo" }) // Missing 'id' field
+} catch (error) {
+  if (error instanceof UndefinedKeyError) {
+    console.log("Item is missing required key field")
+    // Ensure your items have the key field defined by getKey
+  }
+}
+```
+
+### Update Operation Errors
+
+#### UpdateKeyNotFoundError
+
+Thrown when trying to update a key that doesn't exist in the collection:
+
+```ts
+import { UpdateKeyNotFoundError } from "@tanstack/db"
+
+try {
+  todoCollection.update("nonexistent-key", draft => {
+    draft.completed = true
+  })
+} catch (error) {
+  if (error instanceof UpdateKeyNotFoundError) {
+    console.log("Key not found - item may have been deleted")
+    // Consider using insert() if the item doesn't exist
+  }
+}
+```
+
+#### KeyUpdateNotAllowedError
+
+Thrown when attempting to change an item's key (not allowed - delete and re-insert instead):
+
+```ts
+import { KeyUpdateNotAllowedError } from "@tanstack/db"
+
+try {
+  todoCollection.update("todo-1", draft => {
+    draft.id = "todo-2" // Not allowed!
+  })
+} catch (error) {
+  if (error instanceof KeyUpdateNotAllowedError) {
+    console.log("Cannot change item keys")
+    // Instead, delete the old item and insert a new one
+  }
+}
+```
+
+### Delete Operation Errors
+
+#### DeleteKeyNotFoundError
+
+Thrown when trying to delete a key that doesn't exist:
+
+```ts
+import { DeleteKeyNotFoundError } from "@tanstack/db"
+
+try {
+  todoCollection.delete("nonexistent-key")
+} catch (error) {
+  if (error instanceof DeleteKeyNotFoundError) {
+    console.log("Key not found - item may have already been deleted")
+    // This may be acceptable in some scenarios (idempotent deletes)
+  }
+}
 ```
 
 ## Sync Error Handling
@@ -432,21 +552,138 @@ tx2.mutate(() => collection.update("1", draft => { draft.value = "B" })) // Same
 tx1.rollback() // tx2 is automatically rolled back
 ```
 
-### Handling Invalid State Errors
+### Transaction Lifecycle Errors
 
-Transactions validate their state before operations:
+Transactions validate their state before operations to prevent misuse. Here are the specific errors you may encounter:
+
+#### MissingMutationFunctionError
+
+Thrown when creating a transaction without a required `mutationFn`:
 
 ```ts
+import { MissingMutationFunctionError } from "@tanstack/db"
+
+try {
+  const tx = createTransaction({}) // Missing mutationFn
+} catch (error) {
+  if (error instanceof MissingMutationFunctionError) {
+    console.log("mutationFn is required when creating a transaction")
+  }
+}
+```
+
+#### TransactionNotPendingMutateError
+
+Thrown when calling `mutate()` after a transaction is no longer pending:
+
+```ts
+import { TransactionNotPendingMutateError } from "@tanstack/db"
+
 const tx = createTransaction({ mutationFn: async () => {} })
 
-// Complete the transaction
 await tx.commit()
 
-// These will throw:
-tx.mutate(() => {}) // Error: You can no longer call .mutate() as the transaction is no longer pending
-tx.commit() // Error: You can no longer call .commit() as the transaction is no longer pending
-tx.rollback() // Error: You can no longer call .rollback() as the transaction is already completed
+try {
+  tx.mutate(() => {
+    collection.insert({ id: "1", text: "Item" })
+  })
+} catch (error) {
+  if (error instanceof TransactionNotPendingMutateError) {
+    console.log("Cannot mutate - transaction is no longer pending")
+  }
+}
 ```
+
+#### TransactionNotPendingCommitError
+
+Thrown when calling `commit()` after a transaction is no longer pending:
+
+```ts
+import { TransactionNotPendingCommitError } from "@tanstack/db"
+
+const tx = createTransaction({ mutationFn: async () => {} })
+tx.mutate(() => collection.insert({ id: "1", text: "Item" }))
+
+await tx.commit()
+
+try {
+  await tx.commit() // Trying to commit again
+} catch (error) {
+  if (error instanceof TransactionNotPendingCommitError) {
+    console.log("Transaction already committed")
+  }
+}
+```
+
+#### TransactionAlreadyCompletedRollbackError
+
+Thrown when calling `rollback()` on a transaction that's already completed:
+
+```ts
+import { TransactionAlreadyCompletedRollbackError } from "@tanstack/db"
+
+const tx = createTransaction({ mutationFn: async () => {} })
+tx.mutate(() => collection.insert({ id: "1", text: "Item" }))
+
+await tx.commit()
+
+try {
+  tx.rollback() // Can't rollback after commit
+} catch (error) {
+  if (error instanceof TransactionAlreadyCompletedRollbackError) {
+    console.log("Cannot rollback - transaction already completed")
+  }
+}
+```
+
+### Sync Transaction Errors
+
+When working with sync transactions, these errors can occur:
+
+#### NoPendingSyncTransactionWriteError
+
+Thrown when calling `write()` without an active sync transaction:
+
+```ts
+const collection = createCollection({
+  id: "todos",
+  sync: {
+    sync: ({ write }) => {
+      // Calling write without begin() first
+      write({ type: "insert", value: { id: "1", text: "Todo" } })
+      // Error: No pending sync transaction to write to
+    }
+  }
+})
+```
+
+#### SyncTransactionAlreadyCommittedWriteError
+
+Thrown when calling `write()` after the sync transaction is already committed:
+
+```ts
+const collection = createCollection({
+  id: "todos",
+  sync: {
+    sync: ({ begin, write, commit }) => {
+      begin()
+      commit()
+
+      // Trying to write after commit
+      write({ type: "insert", value: { id: "1", text: "Todo" } })
+      // Error: The pending sync transaction is already committed
+    }
+  }
+})
+```
+
+#### NoPendingSyncTransactionCommitError
+
+Thrown when calling `commit()` without an active sync transaction.
+
+#### SyncTransactionAlreadyCommittedError
+
+Thrown when calling `commit()` on a sync transaction that's already committed.
 
 ## Best Practices
 
@@ -471,10 +708,13 @@ tx.rollback() // Error: You can no longer call .rollback() as the transaction is
 ## Example: Complete Error Handling
 
 ```tsx
-import { 
-  createCollection, 
+import {
+  createCollection,
   SchemaValidationError,
   DuplicateKeyError,
+  UpdateKeyNotFoundError,
+  DeleteKeyNotFoundError,
+  TransactionNotPendingCommitError,
   createTransaction
 } from "@tanstack/db"
 import { useLiveQuery } from "@tanstack/react-db"
