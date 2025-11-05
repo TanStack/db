@@ -4,6 +4,7 @@
 export {
   BaseQueryBuilder,
   Query,
+  getQueryIR,
   type InitialQueryBuilder,
   type QueryBuilder,
   type Context,

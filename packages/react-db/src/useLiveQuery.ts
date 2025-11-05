@@ -391,6 +391,11 @@ export function useLiveQuery(
               analysis.parameters
             ) {
               // Use pooling!
+              console.log(
+                `[TanStack DB Pooling] Using pooled query for collection: ${analysis.signature.collectionId}`,
+                `params:`,
+                analysis.parameters
+              )
               const { signature, parameters } = analysis
 
               // Get collection reference from QueryIR
@@ -430,6 +435,10 @@ export function useLiveQuery(
               collectionRef.current = wrappedInstance as any
             } else {
               // Fallback to regular live query collection
+              console.log(
+                `[TanStack DB] Query not poolable, using standard approach. Reason:`,
+                analysis.reason
+              )
               collectionRef.current = createLiveQueryCollection({
                 query: configOrQueryOrCollection,
                 startSync: true,

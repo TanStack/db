@@ -12,8 +12,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/query-db-collection": "0.2.39",
-    "@tanstack/react-db": "0.1.38",
+    "@tanstack/query-db-collection": "workspace:*",
+    "@tanstack/react-db": "workspace:*",
     "@tanstack/react-query": "5.90.6",
     "re-reselect": "4.0.1",
     "react": "^19.1.0",

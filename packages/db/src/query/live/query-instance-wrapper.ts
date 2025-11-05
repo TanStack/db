@@ -33,12 +33,12 @@ export class QueryInstanceWrapper<
    * Note: useLiveQuery doesn't use the changes parameter, it just triggers re-renders
    */
   subscribeChanges(
-    callback: (changes?: Array<any>) => void,
+    callback: (changes: Array<any>) => void,
     _options?: { includeInitialState?: boolean }
   ): any {
-    // Create a wrapper that calls callback without arguments
-    // useLiveQuery doesn't use the changes array, it just needs notification
-    const wrappedCallback = () => callback()
+    // Create a wrapper that calls callback with empty changes array
+    // useLiveQuery doesn't actually use the changes, but we need to match the signature
+    const wrappedCallback = () => callback([])
     this.changeCallbacks.add(wrappedCallback)
 
     // Initial notification if requested
