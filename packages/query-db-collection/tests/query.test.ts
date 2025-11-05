@@ -63,7 +63,7 @@ describe(`QueryCollection`, () => {
     }
 
     const options = queryCollectionOptions(config)
-    const collection = createCollection(options)
+    const collection = createCollection(options as any)
 
     // Wait for the query to complete and collection to update
     await vi.waitFor(
@@ -115,7 +115,7 @@ describe(`QueryCollection`, () => {
     }
 
     const options = queryCollectionOptions(config)
-    const collection = createCollection(options)
+    const collection = createCollection(options as any)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -194,7 +194,7 @@ describe(`QueryCollection`, () => {
       startSync: true,
       retry: 0, // Disable retries for this test case
     })
-    const collection = createCollection(options)
+    const collection = createCollection(options as any)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -246,7 +246,7 @@ describe(`QueryCollection`, () => {
       getKey,
       startSync: true,
     })
-    const collection = createCollection(options)
+    const collection = createCollection(options as any)
 
     // Wait for the query to execute
     await vi.waitFor(() => {
@@ -296,7 +296,7 @@ describe(`QueryCollection`, () => {
       getKey,
       startSync: true,
     })
-    const collection = createCollection(options)
+    const collection = createCollection(options as any)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -355,7 +355,7 @@ describe(`QueryCollection`, () => {
       getKey: getKeySpy,
       startSync: true,
     })
-    const collection = createCollection(options)
+    const collection = createCollection(options as any)
 
     // Wait for initial data to load
     await vi.waitFor(() => {
@@ -471,7 +471,7 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
       })
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       await vi.waitFor(() => {
         expect(queryFn).toHaveBeenCalledTimes(1)
@@ -503,7 +503,7 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
       })
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       await vi.waitFor(() => {
         expect(queryFn).toHaveBeenCalledTimes(1)
@@ -541,7 +541,7 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
       })
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       await vi.waitFor(() => {
         expect(queryFn).toHaveBeenCalledTimes(1)
@@ -761,7 +761,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for initial data to load
       await vi.waitFor(() => {
@@ -800,7 +800,7 @@ describe(`QueryCollection`, () => {
       const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for initial data to load
       await vi.waitFor(() => {
@@ -856,7 +856,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for initial data
       await vi.waitFor(() => {
@@ -902,7 +902,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for initial data
       await vi.waitFor(() => {
@@ -958,7 +958,7 @@ describe(`QueryCollection`, () => {
       const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for initial data
       await vi.waitFor(() => {
@@ -1013,7 +1013,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for initial data
       await vi.waitFor(() => {
@@ -1055,7 +1055,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for initial data
       await vi.waitFor(() => {
@@ -1092,7 +1092,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Initially loading
       expect(collection.status).toBe(`loading`)
@@ -1126,7 +1126,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for initial data
       await vi.waitFor(() => {
@@ -1204,7 +1204,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Collection should be in loading state
       expect(collection.status).toBe(`loading`)
@@ -1241,7 +1241,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for initial data
       await vi.waitFor(() => {
@@ -1351,7 +1351,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for collection to be ready
       await vi.waitFor(() => {
@@ -1455,7 +1455,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for collection to be ready
       await vi.waitFor(() => {
@@ -1488,7 +1488,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for collection to be ready
       await vi.waitFor(() => {
@@ -1537,7 +1537,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for collection to be ready
       await vi.waitFor(() => {
@@ -1660,7 +1660,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for collection to be ready
       await vi.waitFor(() => {
@@ -1715,7 +1715,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       await vi.waitFor(() => {
         expect(collection.size).toBe(1)
@@ -1748,7 +1748,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       await vi.waitFor(() => {
         expect(collection.size).toBe(1)
@@ -1857,7 +1857,7 @@ describe(`QueryCollection`, () => {
     }
 
     const options = queryCollectionOptions(config)
-    const collection = createCollection(options)
+    const collection = createCollection(options as any)
 
     // Wait for the query to complete
     await vi.waitFor(
@@ -1899,7 +1899,7 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
         staleTime: 60000, // uses the prefetched value without a refetch
-      })
+      }) as any
     )
     expect(collection.status).toBe(`ready`)
     expect(collection.size).toBe(2)
@@ -1924,7 +1924,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Give it time to potentially subscribe (it shouldn't)
       await flushPromises()
@@ -1949,7 +1949,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Should start unsubscribed
       expect(collection.subscriberCount).toBe(0)
@@ -2024,7 +2024,7 @@ describe(`QueryCollection`, () => {
     const options1 = queryCollectionOptions(config1)
     const options2 = queryCollectionOptions(config2)
 
-    const collection = createCollection(options)
+    const collection = createCollection(options as any)
     const collection1 = createCollection(options1)
     const collection2 = createCollection(options2)
 
@@ -2130,7 +2130,7 @@ describe(`QueryCollection`, () => {
         getKey,
         retry: false,
         startSync: true,
-      })
+      }) as any
     )
 
     await vi.waitFor(() => {
@@ -2160,7 +2160,7 @@ describe(`QueryCollection`, () => {
           queryFn,
           getKey,
           startSync: true,
-        })
+        }) as any
       )
 
       await vi.waitFor(() => {
@@ -2189,7 +2189,7 @@ describe(`QueryCollection`, () => {
           getKey,
           enabled: false,
           startSync: true,
-        })
+        }) as any
       )
 
       // Query should not auto-fetch due to enabled: false
@@ -2214,7 +2214,7 @@ describe(`QueryCollection`, () => {
           queryFn,
           getKey,
           startSync: false,
-        })
+        }) as any
       )
 
       // Refetch should be no-op because observer doesn't exist yet
@@ -2229,7 +2229,7 @@ describe(`QueryCollection`, () => {
     // Helper to create test collection with common configuration
     const createErrorHandlingTestCollection = (
       testId: string,
-      queryFn: ReturnType<typeof vi.fn>
+      queryFn: any
     ) => {
       const config: QueryCollectionConfig<TestItem> = {
         id: testId,
@@ -2241,7 +2241,7 @@ describe(`QueryCollection`, () => {
         retry: false,
       }
       const options = queryCollectionOptions(config)
-      return createCollection(options)
+      return createCollection(options as any)
     }
 
     it(`should track error state, count, and support recovery`, async () => {
@@ -2430,7 +2430,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for collection to be ready (even with error)
       await vi.waitFor(() => {
@@ -2499,7 +2499,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for all retry attempts to complete and final failure
       await vi.waitFor(
@@ -2558,7 +2558,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Collection should be idle initially
       expect(collection.status).toBe(`idle`)
@@ -2590,7 +2590,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Call preload() multiple times concurrently
       const promises = [
@@ -2634,7 +2634,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
@@ -2680,7 +2680,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
@@ -2724,7 +2724,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
@@ -2771,7 +2771,7 @@ describe(`QueryCollection`, () => {
       }
 
       const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
+      const collection = createCollection(options as any)
 
       // Wait for the query to eventually succeed (after retries)
       await vi.waitFor(
