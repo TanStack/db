@@ -6,7 +6,7 @@ import {
   UnknownHavingExpressionTypeError,
   UnsupportedAggregateFunctionError,
 } from "../../errors.js"
-import { compileExpression } from "./evaluators.js"
+import { compileExpression, toBooleanPredicate } from "./evaluators.js"
 import type {
   Aggregate,
   BasicExpression,
@@ -140,7 +140,7 @@ export function processGroupBy(
           filter(([, row]) => {
             // Create a namespaced row structure for HAVING evaluation
             const namespacedRow = { result: (row as any).__select_results }
-            return compiledHaving(namespacedRow)
+            return toBooleanPredicate(compiledHaving(namespacedRow))
           })
         )
       }
@@ -153,7 +153,7 @@ export function processGroupBy(
           filter(([, row]) => {
             // Create a namespaced row structure for functional HAVING evaluation
             const namespacedRow = { result: (row as any).__select_results }
-            return fnHaving(namespacedRow)
+            return toBooleanPredicate(fnHaving(namespacedRow))
           })
         )
       }
@@ -288,7 +288,7 @@ export function processGroupBy(
         filter(([, row]) => {
           // Create a namespaced row structure for functional HAVING evaluation
           const namespacedRow = { result: (row as any).__select_results }
-          return fnHaving(namespacedRow)
+          return toBooleanPredicate(fnHaving(namespacedRow))
         })
       )
     }

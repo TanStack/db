@@ -9,7 +9,7 @@ import {
   UnsupportedFromTypeError,
 } from "../../errors.js"
 import { PropRef, Value as ValClass, getWhereExpression } from "../ir.js"
-import { compileExpression } from "./evaluators.js"
+import { compileExpression, toBooleanPredicate } from "./evaluators.js"
 import { processJoins } from "./joins.js"
 import { processGroupBy } from "./group-by.js"
 import { processOrderBy } from "./order-by.js"
@@ -195,7 +195,7 @@ export function compileQuery(
       const compiledWhere = compileExpression(whereExpression)
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
-          return compiledWhere(namespacedRow)
+          return toBooleanPredicate(compiledWhere(namespacedRow))
         })
       )
     }
@@ -206,7 +206,7 @@ export function compileQuery(
     for (const fnWhere of query.fnWhere) {
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
-          return fnWhere(namespacedRow)
+          return toBooleanPredicate(fnWhere(namespacedRow))
         })
       )
     }
