@@ -1,4 +1,3 @@
-import { SpanStatusCode, context, trace } from "@opentelemetry/api"
 import { OnMutateMustBeSynchronousError } from "@tanstack/db"
 import { OfflineTransaction } from "./OfflineTransaction"
 import type { Transaction } from "@tanstack/db"
@@ -45,30 +44,15 @@ export function createOfflineAction<T>(
       }
     })
 
-    // Immediately commit with span instrumentation
-    const tracer = trace.getTracer(`@tanstack/offline-transactions`, `0.0.1`)
-    const span = tracer.startSpan(`offlineAction.${mutationFnName}`)
-    const ctx = trace.setSpan(context.active(), span)
-    console.log(`starting offlineAction span`, { tracer, span, ctx })
-
-    // Execute the commit within the span context
-    // The key is to return the promise synchronously from context.with() so context binds to it
-    const commitPromise = context.with(ctx, () => {
-      // Return the promise synchronously - this is critical for context propagation in browsers
-      return (async () => {
-        try {
-          await transaction.commit()
-          span.setStatus({ code: SpanStatusCode.OK })
-          span.end()
-          console.log(`ended offlineAction span - success`)
-        } catch (error) {
-          span.recordException(error as Error)
-          span.setStatus({ code: SpanStatusCode.ERROR })
-          span.end()
-          console.log(`ended offlineAction span - error`)
-        }
-      })()
-    })
+    // Immediately commit
+    const commitPromise = (async () => {
+      try {
+        await transaction.commit()
+        console.log(`offlineAction committed - success`)
+      } catch {
+        console.log(`offlineAction commit failed - error`)
+      }
+    })()
 
     // Don't await - this is fire-and-forget for optimistic actions
     // But catch to prevent unhandled rejection
