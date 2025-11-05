@@ -1,5 +1,30 @@
 # @tanstack/offline-transactions
 
+## 0.1.3
+
+### Patch Changes
+
+- Fix dependency bundling issues by moving @tanstack/db to peerDependencies ([#766](https://github.com/TanStack/db/pull/766))
+
+  **What Changed:**
+
+  Moved `@tanstack/db` from regular dependencies to peerDependencies in:
+  - `@tanstack/offline-transactions`
+  - `@tanstack/query-db-collection`
+
+  Removed `@opentelemetry/api` dependency from `@tanstack/offline-transactions`.
+
+  **Why:**
+
+  These extension packages incorrectly declared `@tanstack/db` as both a regular dependency AND a peerDependency simultaneously. This caused lock files to develop conflicting versions, resulting in multiple instances of `@tanstack/db` being installed in consuming applications.
+
+  The fix removes `@tanstack/db` from regular dependencies and keeps it only as a peerDependency. This ensures only one version of `@tanstack/db` is installed in the dependency tree, preventing version conflicts.
+
+  For local development, `@tanstack/db` remains in devDependencies so the packages can be built and tested independently.
+
+- Updated dependencies [[`6c55e16`](https://github.com/TanStack/db/commit/6c55e16a2545b479b1d47f548b6846d362573d45), [`7805afb`](https://github.com/TanStack/db/commit/7805afb7286b680168b336e77dd4de7dd1b6f06a), [`1367756`](https://github.com/TanStack/db/commit/1367756d0a68447405c5f5c1a3cca30ab0558d74)]:
+  - @tanstack/db@0.4.20
+
 ## 0.1.2
 
 ### Patch Changes
