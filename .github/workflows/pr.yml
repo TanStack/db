@@ -106,7 +106,13 @@ jobs:
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             echo "Error: Generated docs are out of sync!"
-            echo "Please run 'pnpm docs:generate' locally and commit the changes."
+            echo ""
+            echo "Please run the following commands locally and commit the changes:"
+            echo "  1. pnpm install"
+            echo "  2. pnpm build"
+            echo "  3. pnpm docs:generate"
+            echo "  4. git add docs/"
+            echo "  5. git commit -m 'docs: regenerate API documentation'"
             echo ""
             echo "Files that need to be updated:"
             git status --short

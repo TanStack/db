@@ -531,6 +531,20 @@ type WithoutRefBrand<T> =
   T extends Record<string, any> ? Omit<T, typeof RefBrand> : T
 
 /**
+ * PreserveSingleResultFlag - Conditionally includes the singleResult flag
+ *
+ * This helper type ensures the singleResult flag is only added to the context when it's
+ * explicitly true. It uses a non-distributive conditional (tuple wrapper) to prevent
+ * unexpected behavior when TFlag is a union type.
+ *
+ * @template TFlag - The singleResult flag value to check
+ * @returns { singleResult: true } if TFlag is true, otherwise {}
+ */
+type PreserveSingleResultFlag<TFlag> = [TFlag] extends [true]
+  ? { singleResult: true }
+  : {}
+
+/**
  * MergeContextWithJoinType - Creates a new context after a join operation
  *
  * This is the core type that handles the complex logic of merging schemas
@@ -551,6 +565,7 @@ type WithoutRefBrand<T> =
  * - `hasJoins`: Set to true
  * - `joinTypes`: Updated to track this join type
  * - `result`: Preserved from previous operations
+ * - `singleResult`: Preserved only if already true (via PreserveSingleResultFlag)
  */
 export type MergeContextWithJoinType<
   TContext extends Context,
@@ -574,8 +589,7 @@ export type MergeContextWithJoinType<
     [K in keyof TNewSchema & string]: TJoinType
   }
   result: TContext[`result`]
-  singleResult: TContext[`singleResult`] extends true ? true : false
-}
+} & PreserveSingleResultFlag<TContext[`singleResult`]>
 
 /**
  * ApplyJoinOptionalityToMergedSchema - Applies optionality rules when merging schemas
