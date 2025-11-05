@@ -158,3 +158,4 @@ packages/db/src/perf-utils.ts
 packages/db/benchmark-sync.ts
 packages/db/benchmark-pooling.ts
 packages/db/benchmark-pooling-simple.ts
+packages/db/benchmark-integrated-pooling.ts
