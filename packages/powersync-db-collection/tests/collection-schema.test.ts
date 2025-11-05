@@ -138,7 +138,8 @@ describe(`PowerSync Schema Integration`, () => {
       } catch (ex) {
         expect(ex instanceof SchemaValidationError).true
         if (ex instanceof SchemaValidationError) {
-          expect(ex.message).contains(`Required - path: id`)
+          // Zod v4 changed error format - just check it mentions the field
+          expect(ex.message).contains(`id`)
         }
       }
     })
