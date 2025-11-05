@@ -20,12 +20,14 @@ Optimizes localStorage collections to eliminate redundant storage reads, providi
 3. **Manual transactions** (`acceptMutations`) optimized to use in-memory cache
 
 **Before:** Each mutation performed 3 I/O operations:
+
 - `loadFromStorage()` - read + JSON parse
 - Modify data
 - `saveToStorage()` - JSON stringify + write
 - `processStorageChanges()` - another read + parse + diff
 
 **After:** Each mutation performs 1 I/O operation:
+
 - Modify in-memory data ✨ No I/O!
 - `saveToStorage()` - JSON stringify + write
 
@@ -37,6 +39,7 @@ Optimizes localStorage collections to eliminate redundant storage reads, providi
 - `lastKnownData` cache kept in sync with storage through initial load, mutations, and cross-tab events
 
 This optimization is particularly impactful for applications with:
+
 - Real-time text input with live query rendering
 - Frequent mutations to localStorage-backed collections
 - Multiple rapid sequential mutations
