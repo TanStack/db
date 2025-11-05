@@ -657,9 +657,18 @@ describe(`Collection with schema validation`, () => {
         .transform((val) => val.map((tag) => tag.toLowerCase())),
       metadata: z
         .union([
-          z.object({ source: z.string().optional(), role: z.string().optional() }).passthrough(),
           z
-            .object({ source: z.string().optional(), role: z.string().optional() }).passthrough()
+            .object({
+              source: z.string().optional(),
+              role: z.string().optional(),
+            })
+            .passthrough(),
+          z
+            .object({
+              source: z.string().optional(),
+              role: z.string().optional(),
+            })
+            .passthrough()
             .transform((val) => ({ ...val, processed: true })),
         ])
         .transform((val) => ({ ...val, processed: true })),
