@@ -1,34 +1,11 @@
-import { createTraceState } from "@opentelemetry/api"
 import { DefaultRetryPolicy } from "../retry/RetryPolicy"
 import { NonRetriableError } from "../types"
 import { withNestedSpan } from "../telemetry/tracer"
-import type { SpanContext } from "@opentelemetry/api"
 import type { KeyScheduler } from "./KeyScheduler"
 import type { OutboxManager } from "../outbox/OutboxManager"
-import type {
-  OfflineConfig,
-  OfflineTransaction,
-  SerializedSpanContext,
-} from "../types"
+import type { OfflineConfig, OfflineTransaction } from "../types"
 
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
-
-function toSpanContext(
-  serialized?: SerializedSpanContext
-): SpanContext | undefined {
-  if (!serialized) {
-    return undefined
-  }
-
-  return {
-    traceId: serialized.traceId,
-    spanId: serialized.spanId,
-    traceFlags: serialized.traceFlags,
-    traceState: serialized.traceState
-      ? createTraceState(serialized.traceState)
-      : undefined,
-  }
-}
 
 export class TransactionExecutor {
   private scheduler: KeyScheduler
@@ -131,9 +108,6 @@ export class TransactionExecutor {
             ;(err as any)[HANDLED_EXECUTION_ERROR] = true
             throw err
           }
-        },
-        {
-          parentContext: toSpanContext(transaction.spanContext),
         }
       )
     } catch (error) {
