@@ -50,9 +50,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src"
   },
-  "dependencies": {
-    "@opentelemetry/api": "^1.9.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@tanstack/db": "workspace:*",
