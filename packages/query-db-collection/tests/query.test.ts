@@ -2244,16 +2244,18 @@ describe(`QueryCollection`, () => {
     const createErrorHandlingTestCollection = (
       testId: string,
       queryFn: (context: QueryFunctionContext) => Promise<Array<TestItem>>
-    ) => {
-      return createQueryCollection<TestItem>({
-        id: testId,
-        queryClient,
-        queryKey: [testId],
-        queryFn,
-        getKey,
-        startSync: true,
-        retry: false,
-      })
+    ): QueryCollection<TestItem> => {
+      return createCollection(
+        queryCollectionOptions({
+          id: testId,
+          queryClient,
+          queryKey: [testId],
+          queryFn,
+          getKey,
+          startSync: true,
+          retry: false,
+        })
+      )
     }
 
     it(`should track error state, count, and support recovery`, async () => {
