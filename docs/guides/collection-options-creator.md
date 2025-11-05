@@ -219,7 +219,124 @@ parse: {
 }
 ```
 
-### 5. Mutation Handler Patterns
+### 5. Schemas and Type Transformations
+
+When building a custom collection, you need to decide how to handle the relationship between your backend's storage format and the client-side types users work with in their collections.
+
+#### Two Separate Concerns
+
+**Backend Format** - The types your storage layer uses (SQLite, Postgres, Firebase, etc.)
+- Examples: Unix timestamps, ISO strings, JSON strings, PostGIS geometries
+
+**Client Format** - The types users work with in their TanStack DB collections
+- Examples: Date objects, parsed JSON, GeoJSON
+
+Schemas in TanStack DB define the **client format** (TInput/TOutput for mutations). How you bridge between backend and client format depends on your integration design.
+
+#### Approach 1: Integration Provides Parse/Serialize Helpers
+
+For backends with specific storage formats, provide `parse`/`serialize` options that users configure:
+
+```typescript
+// TrailBase example: User specifies field conversions
+export function trailbaseCollectionOptions(config) {
+  return {
+    parse: config.parse,      // User provides field conversions
+    serialize: config.serialize,
+
+    onInsert: async ({ transaction }) => {
+      const serialized = transaction.mutations.map(m =>
+        serializeFields(m.modified, config.serialize)
+      )
+      await config.recordApi.createBulk(serialized)
+    }
+  }
+}
+
+// User explicitly configures conversions
+const collection = createCollection(
+  trailbaseCollectionOptions({
+    schema: todoSchema,
+    parse: {
+      created_at: (ts: number) => new Date(ts * 1000)  // Unix → Date
+    },
+    serialize: {
+      created_at: (date: Date) => Math.floor(date.valueOf() / 1000)  // Date → Unix
+    }
+  })
+)
+```
+
+**Benefits:** Explicit control over type conversions. Integration handles applying them consistently.
+
+#### Approach 2: User Handles Everything in QueryFn/Handlers
+
+For simple APIs or when users want full control, they handle parsing/serialization themselves:
+
+```typescript
+// Query Collection: User handles all transformations
+const collection = createCollection(
+  queryCollectionOptions({
+    schema: todoSchema,
+    queryFn: async () => {
+      const response = await fetch('/api/todos')
+      const todos = await response.json()
+      // User manually parses to match their schema's TOutput
+      return todos.map(todo => ({
+        ...todo,
+        created_at: new Date(todo.created_at)  // ISO string → Date
+      }))
+    },
+    onInsert: async ({ transaction }) => {
+      // User manually serializes for their backend
+      await fetch('/api/todos', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...transaction.mutations[0].modified,
+          created_at: transaction.mutations[0].modified.created_at.toISOString()  // Date → ISO string
+        })
+      })
+    }
+  })
+)
+```
+
+**Benefits:** Maximum flexibility, no abstraction overhead. Users see exactly what's happening.
+
+#### Approach 3: Automatic Serialization in Handlers
+
+If your backend has well-defined types, you can automatically serialize in mutation handlers:
+
+```typescript
+export function myCollectionOptions(config) {
+  return {
+    onInsert: async ({ transaction }) => {
+      // Automatically serialize known types for your backend
+      const serialized = transaction.mutations.map(m => ({
+        ...m.modified,
+        // Date objects → Unix timestamps for your backend
+        created_at: m.modified.created_at instanceof Date
+          ? Math.floor(m.modified.created_at.valueOf() / 1000)
+          : m.modified.created_at
+      }))
+      await backend.insert(serialized)
+    }
+  }
+}
+```
+
+**Benefits:** Least configuration for users. Integration handles backend format automatically.
+
+#### Key Design Principles
+
+1. **Schemas validate client mutations only** - They don't affect how backend data is parsed during sync
+2. **TOutput is the application-facing type** - This is what users work with in their app
+3. **Choose your approach based on backend constraints** - Fixed types → automatic serialization; varying types → user configuration
+4. **Document your backend format clearly** - Explain what types your storage uses and how to handle them
+
+For more on schemas from a user perspective, see the [Schemas guide](./schemas.md).
+
+### 6. Mutation Handler Patterns
 
 There are two distinct patterns for handling mutations in collection options creators:
 

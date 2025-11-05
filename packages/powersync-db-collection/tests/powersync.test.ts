@@ -201,7 +201,7 @@ describe(`PowerSync Integration`, () => {
       const _crudEntries = await db.getAll(`
         SELECT * FROM ps_crud ORDER BY id`)
 
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r as any))
+      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
 
       expect(crudEntries.length).toBe(6)
       // We can only group transactions for similar operations
@@ -248,7 +248,7 @@ describe(`PowerSync Integration`, () => {
       // There should be a crud entries for this
       const _crudEntries = await db.getAll(`
         SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r as any))
+      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
 
       const lastTransactionId =
         crudEntries[crudEntries.length - 1]?.transactionId
@@ -310,7 +310,7 @@ describe(`PowerSync Integration`, () => {
       // There should be a crud entries for this
       const _crudEntries = await db.getAll(`
         SELECT * FROM ps_crud ORDER BY id`)
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r as any))
+      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
 
       const lastTransactionId =
         crudEntries[crudEntries.length - 1]?.transactionId
@@ -408,7 +408,7 @@ describe(`PowerSync Integration`, () => {
       liveDocuments.subscribeChanges((changes) => {
         changes
           .map((change) => change.value.name)
-          .forEach((change) => bookNames.add(change!))
+          .forEach((change) => bookNames.add(change))
       })
 
       await collection.insert({

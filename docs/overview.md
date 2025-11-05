@@ -143,6 +143,8 @@ TanStack DB provides several built-in collection types for different data source
 
 - **[RxDBCollection](./collections/rxdb-collection.md)** &mdash; Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
 
+- **[PowerSyncCollection](./collections/powersync-collection.md)** &mdash; Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
+
 **Local Collections**
 
 - **[LocalStorageCollection](./collections/local-storage-collection.md)** &mdash; Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
@@ -153,12 +155,49 @@ TanStack DB provides several built-in collection types for different data source
 
 All collections optionally (though strongly recommended) support adding a `schema`.
 
-If provided, this must be a [Standard Schema](https://standardschema.dev) compatible schema instance, such as a [Zod](https://zod.dev) or [Effect](https://effect.website/docs/schema/introduction/) schema.
+If provided, this must be a [Standard Schema](https://standardschema.dev) compatible schema instance, such as [Zod](https://zod.dev), [Valibot](https://valibot.dev), [ArkType](https://arktype.io), or [Effect](https://effect.website/docs/schema/introduction/).
 
-The collection will use the schema to do client-side validation of optimistic mutations.
+**What schemas do:**
 
-The collection will use the schema for its type so if you provide a schema, you can't also pass in an explicit
-type (e.g. `createCollection<Todo>()`).
+1. **Runtime validation** - Ensures data meets your constraints before entering the collection
+2. **Type transformations** - Convert input types to rich output types (e.g., string → Date)
+3. **Default values** - Automatically populate missing fields
+4. **Type safety** - Infer TypeScript types from your schema
+
+**Example:**
+```typescript
+const todoSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  completed: z.boolean().default(false),
+  created_at: z.string().transform(val => new Date(val)),  // string → Date
+  priority: z.number().default(0)
+})
+
+const collection = createCollection(
+  queryCollectionOptions({
+    schema: todoSchema,
+    // ...
+  })
+)
+
+// Users provide simple inputs
+collection.insert({
+  id: "1",
+  text: "Buy groceries",
+  created_at: "2024-01-01T00:00:00Z"  // string
+  // completed and priority filled automatically
+})
+
+// Collection stores and returns rich types
+const todo = collection.get("1")
+console.log(todo.created_at.getFullYear())  // It's a Date!
+console.log(todo.completed)  // false (default)
+```
+
+The collection will use the schema for its type inference. If you provide a schema, you cannot also pass an explicit type parameter (e.g., `createCollection<Todo>()`).
+
+**Learn more:** See the [Schemas guide](./guides/schemas.md) for comprehensive documentation on schema validation, type transformations, and best practices.
 
 #### Creating Custom Collection Types
 
@@ -218,6 +257,34 @@ const Todos = () => {
   return <List items={ todos } />
 }
 ```
+
+#### `useLiveSuspenseQuery` hook
+
+For React Suspense support, use `useLiveSuspenseQuery`. This hook suspends rendering during initial data load and guarantees that `data` is always defined:
+
+```tsx
+import { useLiveSuspenseQuery } from '@tanstack/react-db'
+import { Suspense } from 'react'
+
+const Todos = () => {
+  // data is always defined - no need for optional chaining
+  const { data: todos } = useLiveSuspenseQuery((q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.completed, false))
+  )
+
+  return <List items={ todos } />
+}
+
+const App = () => (
+  <Suspense fallback={<div>Loading...</div>}>
+    <Todos />
+  </Suspense>
+)
+```
+
+See the [React Suspense section in Live Queries](../guides/live-queries#using-with-react-suspense) for detailed usage patterns and when to use `useLiveSuspenseQuery` vs `useLiveQuery`.
 
 #### `queryBuilder`
 

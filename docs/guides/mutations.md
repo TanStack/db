@@ -160,7 +160,7 @@ onUpdate: async ({ transaction }) => {
 
 ### Intent-Based Mutations with Custom Actions
 
-For more complex scenarios, use `createOptimisticAction` or `createTransaction` to create **intent-based mutations** that capture specific user actions.
+For more complex scenarios, use `createOptimisticAction` to create **intent-based mutations** that capture specific user actions.
 
 ```tsx
 // Intent: "like this post"
@@ -197,7 +197,45 @@ Custom actions provide the cleanest way to capture specific types of mutations a
 
 - **Collection-level mutations** (`collection.update`): Simple CRUD operations on a single collection
 - **`createOptimisticAction`**: Intent-based operations, multi-collection mutations, immediately committed
-- **`createTransaction`**: Fully custom transactions, delayed commits, multi-step workflows
+- **Bypass the mutation system**: Use your existing mutation logic without rewriting
+
+### Bypass the Mutation System
+
+If you already have mutation logic in an existing system and don't want to rewrite it, you can **completely bypass** TanStack DB's mutation system and use your existing patterns.
+
+With this approach, you write to the server like normal using your existing logic, then use your collection's mechanism for refetching or syncing data to await the server write. After the sync completes, the collection will have the updated server data and you can render the new state, hide loading indicators, show success messages, navigate to a new page, etc.
+
+```tsx
+// Call your backend directly with your existing logic
+const handleUpdateTodo = async (todoId, changes) => {
+  await api.todos.update(todoId, changes)
+
+  // Wait for the server change to load into the collection
+  await todoCollection.utils.refetch()
+
+  // Now you know the new data is loaded and can render it or hide loaders
+}
+
+// With Electric
+const handleUpdateTodo = async (todoId, changes) => {
+  const { txid } = await api.todos.update(todoId, changes)
+
+  // Wait for this specific transaction to sync into the collection
+  await todoCollection.utils.awaitTxId(txid)
+
+  // Now the server change is loaded and you can update UI accordingly
+}
+```
+
+Use this approach when:
+- You have existing mutation logic you don't want to rewrite
+- You're comfortable with your current mutation patterns
+- You want to use TanStack DB only for queries and state management
+
+How to sync changes back:
+- **QueryCollection**: Manually refetch with `collection.utils.refetch()` to reload data from the server
+- **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for a specific transaction to sync
+- **Other sync systems**: Wait for your sync mechanism to update the collection
 
 ## Mutation Lifecycle
 
@@ -447,6 +485,49 @@ const todoCollection = createCollection({
   onDelete: mutationFn,
 })
 ```
+
+### Schema Validation in Mutation Handlers
+
+When a schema is configured for a collection, TanStack DB automatically validates and transforms data during mutations. The mutation handlers receive the **transformed data** (TOutput), not the raw input.
+
+```typescript
+const todoSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  created_at: z.string().transform(val => new Date(val))  // TInput: string, TOutput: Date
+})
+
+const collection = createCollection({
+  schema: todoSchema,
+  onInsert: async ({ transaction }) => {
+    const item = transaction.mutations[0].modified
+
+    // item.created_at is already a Date object (TOutput)
+    console.log(item.created_at instanceof Date)  // true
+
+    // If your API needs a string, serialize it
+    await api.todos.create({
+      ...item,
+      created_at: item.created_at.toISOString()  // Date → string
+    })
+  }
+})
+
+// User provides string (TInput)
+collection.insert({
+  id: "1",
+  text: "Task",
+  created_at: "2024-01-01T00:00:00Z"
+})
+```
+
+**Key points:**
+- Schema validation happens **before** mutation handlers are called
+- Handlers receive **TOutput** (transformed data)
+- If your backend needs a different format, serialize in the handler
+- Schema validation errors throw `SchemaValidationError` before handlers run
+
+For comprehensive documentation on schema validation and transformations, see the [Schemas guide](./schemas.md).
 
 ## Creating Custom Actions
 

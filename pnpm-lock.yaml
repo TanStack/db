@@ -15,6 +15,10 @@ pnpmfileChecksum: sha256-PWDKLEtYr7WAzwKAKmFednYERF5OFDKcRonW93aOwc8=
 importers:
 
   .:
+    dependencies:
+      tsx:
+        specifier: ^4.20.6
+        version: 4.20.6
     devDependencies:
       '@changesets/cli':
         specifier: ^2.29.7
