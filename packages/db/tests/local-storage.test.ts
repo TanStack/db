@@ -1143,7 +1143,7 @@ describe(`localStorage collection`, () => {
     })
   })
 
-  describe(`Performance optimizations (issue #755)`, () => {
+  describe(`Rapid mutations and cache consistency`, () => {
     describe(`Rapid sequential mutations`, () => {
       it(`should handle multiple rapid mutations without data loss`, async () => {
         const collection = createCollection(
