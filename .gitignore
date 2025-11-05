@@ -156,3 +156,5 @@ package-lock.json
 packages/db/benchmark.ts
 packages/db/src/perf-utils.ts
 packages/db/benchmark-sync.ts
+packages/db/benchmark-pooling.ts
+packages/db/benchmark-pooling-simple.ts
