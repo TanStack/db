@@ -11,7 +11,7 @@ title: queryCollectionOptions
 function queryCollectionOptions<T, TQueryFn, TError, TQueryKey, TKey, TQueryData>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>> & object;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:370](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L370)
+Defined in: [packages/query-db-collection/src/query.ts:393](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L393)
 
 Creates query collection options for use with a standard Collection.
 This integrates TanStack Query with TanStack DB for automatic synchronization.
@@ -151,7 +151,7 @@ const todosCollection = createCollection(
 function queryCollectionOptions<T, TQueryFn, TError, TQueryKey, TKey, TQueryData>(config): CollectionConfig<T, TKey, never, QueryCollectionUtils<T, TKey, T, TError>> & object;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:405](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L405)
+Defined in: [packages/query-db-collection/src/query.ts:428](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L428)
 
 Creates query collection options for use with a standard Collection.
 This integrates TanStack Query with TanStack DB for automatic synchronization.
@@ -291,7 +291,7 @@ const todosCollection = createCollection(
 function queryCollectionOptions<T, TError, TQueryKey, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, QueryCollectionUtils<InferSchemaOutput<T>, TKey, InferSchemaInput<T>, TError>> & object;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:438](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L438)
+Defined in: [packages/query-db-collection/src/query.ts:461](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L461)
 
 Creates query collection options for use with a standard Collection.
 This integrates TanStack Query with TanStack DB for automatic synchronization.
@@ -423,7 +423,7 @@ const todosCollection = createCollection(
 function queryCollectionOptions<T, TError, TQueryKey, TKey>(config): CollectionConfig<T, TKey, never, QueryCollectionUtils<T, TKey, T, TError>> & object;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:472](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L472)
+Defined in: [packages/query-db-collection/src/query.ts:495](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L495)
 
 Creates query collection options for use with a standard Collection.
 This integrates TanStack Query with TanStack DB for automatic synchronization.

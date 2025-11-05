@@ -239,10 +239,5 @@ export class DeduplicatedLoadSubset {
  * would reflect the mutated values rather than what was actually loaded.
  */
 export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
-  return {
-    where: options.where,
-    orderBy: options.orderBy,
-    limit: options.limit,
-    // Note: We don't clone subscription as it's not part of predicate matching
-  }
+  return { ...options }
 }
