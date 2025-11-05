@@ -33,7 +33,7 @@ export class QueryInstance {
   readonly id: string
   readonly params: QueryParameters
   private data: Map<string | number, any> = new Map()
-  private onUpdate: () => void
+  private callbacks: Set<() => void> = new Set()
   private pool: PooledQuery
 
   constructor(
@@ -44,7 +44,7 @@ export class QueryInstance {
   ) {
     this.id = id
     this.params = params
-    this.onUpdate = onUpdate
+    this.callbacks.add(onUpdate)
     this.pool = pool
   }
 
@@ -76,10 +76,22 @@ export class QueryInstance {
   }
 
   /**
-   * Notify React that data changed (triggers re-render)
+   * Subscribe to updates
+   */
+  subscribe(callback: () => void): () => void {
+    this.callbacks.add(callback)
+    return () => {
+      this.callbacks.delete(callback)
+    }
+  }
+
+  /**
+   * Notify all subscribers that data changed
    */
   notifyUpdate() {
-    this.onUpdate()
+    for (const callback of this.callbacks) {
+      callback()
+    }
   }
 
   /**
@@ -87,6 +99,7 @@ export class QueryInstance {
    */
   dispose() {
     this.pool.unregister(this.id)
+    this.callbacks.clear()
   }
 }
 
@@ -125,20 +138,19 @@ export class PooledQuery {
   // Reference counting for cleanup
   private refCount = 0
 
-  // Parameter matching and key extraction
-  private readonly parameterMatcher: ParameterMatcher
+  // Parameter key extraction
   private readonly parameterKeyExtractor: ParameterKeyExtractor
 
   constructor(
     signature: QuerySignature,
     collection: Collection,
-    parameterMatcher: ParameterMatcher,
+    _parameterMatcher: ParameterMatcher, // Reserved for future use
     parameterKeyExtractor: ParameterKeyExtractor
   ) {
     this.signature = signature
     this.collection = collection
-    this.parameterMatcher = parameterMatcher
     this.parameterKeyExtractor = parameterKeyExtractor
+    // Note: _parameterMatcher is reserved for future filtering logic but not used yet
   }
 
   /**

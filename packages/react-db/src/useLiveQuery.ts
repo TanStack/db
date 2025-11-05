@@ -2,7 +2,13 @@ import { useRef, useSyncExternalStore } from "react"
 import {
   BaseQueryBuilder,
   CollectionImpl,
+  analyzeQuery,
   createLiveQueryCollection,
+  createParameterKeyExtractor,
+  createParameterMatcher,
+  getQueryIR,
+  queryPool,
+  wrapQueryInstance,
 } from "@tanstack/db"
 import type {
   Collection,
@@ -17,6 +23,8 @@ import type {
   QueryBuilder,
   SingleResult,
 } from "@tanstack/db"
+
+// Import pooling infrastructure
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
 
@@ -369,13 +377,77 @@ export function useLiveQuery(
           result.startSyncImmediate()
           collectionRef.current = result
         } else if (result instanceof BaseQueryBuilder) {
-          // Callback returned QueryBuilder - create live query collection using the original callback
-          // (not the result, since the result might be from a different query builder instance)
-          collectionRef.current = createLiveQueryCollection({
-            query: configOrQueryOrCollection,
-            startSync: true,
-            gcTime: DEFAULT_GC_TIME_MS,
-          })
+          // Callback returned QueryBuilder
+          // Try to use pooling if query is poolable
+
+          try {
+            // Get QueryIR and analyze for poolability
+            const queryIR = getQueryIR(result)
+            const analysis = analyzeQuery(queryIR)
+
+            if (
+              analysis.isPoolable &&
+              analysis.signature &&
+              analysis.parameters
+            ) {
+              // Use pooling!
+              const { signature, parameters } = analysis
+
+              // Get collection reference from QueryIR
+              const collection = (queryIR.from as any).collection
+
+              // Create parameter matcher and key extractor
+              const parameterMatcher = createParameterMatcher(parameters)
+              const parameterKeyExtractor =
+                createParameterKeyExtractor(parameters)
+
+              // Get or create pool
+              const pool = queryPool.getOrCreatePool(
+                signature,
+                collection,
+                parameterMatcher,
+                parameterKeyExtractor
+              )
+
+              // Register instance with pool
+              // Create a ref to track version for React updates
+              const instanceVersionRef = { current: 0 }
+              const instance = pool.register(parameters, () => {
+                instanceVersionRef.current++
+                // This will trigger useSyncExternalStore
+                versionRef.current++
+              })
+
+              // Wrap instance to look like a Collection
+              const wrappedInstance = wrapQueryInstance(
+                instance,
+                signature.collectionId
+              )
+
+              // Mark as ready
+              wrappedInstance.status = `ready`
+
+              collectionRef.current = wrappedInstance as any
+            } else {
+              // Fallback to regular live query collection
+              collectionRef.current = createLiveQueryCollection({
+                query: configOrQueryOrCollection,
+                startSync: true,
+                gcTime: DEFAULT_GC_TIME_MS,
+              })
+            }
+          } catch (error) {
+            // If pooling analysis fails, fall back to regular approach
+            console.warn(
+              `Query pooling analysis failed, falling back to regular approach:`,
+              error
+            )
+            collectionRef.current = createLiveQueryCollection({
+              query: configOrQueryOrCollection,
+              startSync: true,
+              gcTime: DEFAULT_GC_TIME_MS,
+            })
+          }
         } else if (result && typeof result === `object`) {
           // Assume it's a LiveQueryCollectionConfig
           collectionRef.current = createLiveQueryCollection({

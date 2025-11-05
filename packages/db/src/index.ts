@@ -22,6 +22,11 @@ export * from "./indexes/btree-index.js"
 export * from "./indexes/lazy-index.js"
 export { type IndexOptions } from "./indexes/index-options.js"
 
+// Query pooling system exports
+export * from "./query/live/query-pool.js"
+export * from "./query/live/query-analyzer.js"
+export * from "./query/live/query-instance-wrapper.js"
+
 // Re-export some stuff explicitly to ensure the type & value is exported
 export type { Collection } from "./collection/index.js"
 export { IR }
