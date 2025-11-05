@@ -5,7 +5,7 @@ title: LimitOffsetRequireOrderByError
 
 # Class: LimitOffsetRequireOrderByError
 
-Defined in: [packages/db/src/errors.ts:344](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L344)
+Defined in: [packages/db/src/errors.ts:379](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L379)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:344](https://github.com/TanStack/db/blob/
 new LimitOffsetRequireOrderByError(): LimitOffsetRequireOrderByError;
 ```
 
-Defined in: [packages/db/src/errors.ts:345](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L345)
+Defined in: [packages/db/src/errors.ts:380](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L380)
 
 #### Returns
 

@@ -5,7 +5,7 @@ title: QueryCompilationError
 
 # Class: QueryCompilationError
 
-Defined in: [packages/db/src/errors.ts:325](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L325)
+Defined in: [packages/db/src/errors.ts:360](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L360)
 
 ## Extends
 
@@ -17,6 +17,7 @@ Defined in: [packages/db/src/errors.ts:325](https://github.com/TanStack/db/blob/
 - [`HavingRequiresGroupByError`](../HavingRequiresGroupByError.md)
 - [`LimitOffsetRequireOrderByError`](../LimitOffsetRequireOrderByError.md)
 - [`CollectionInputNotFoundError`](../CollectionInputNotFoundError.md)
+- [`DuplicateAliasInSubqueryError`](../DuplicateAliasInSubqueryError.md)
 - [`UnsupportedFromTypeError`](../UnsupportedFromTypeError.md)
 - [`UnknownExpressionTypeError`](../UnknownExpressionTypeError.md)
 - [`EmptyReferencePathError`](../EmptyReferencePathError.md)
@@ -35,7 +36,7 @@ Defined in: [packages/db/src/errors.ts:325](https://github.com/TanStack/db/blob/
 new QueryCompilationError(message): QueryCompilationError;
 ```
 
-Defined in: [packages/db/src/errors.ts:326](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L326)
+Defined in: [packages/db/src/errors.ts:361](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L361)
 
 #### Parameters
 

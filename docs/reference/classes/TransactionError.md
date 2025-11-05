@@ -5,7 +5,7 @@ title: TransactionError
 
 # Class: TransactionError
 
-Defined in: [packages/db/src/errors.ts:219](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L219)
+Defined in: [packages/db/src/errors.ts:245](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L245)
 
 ## Extends
 
@@ -14,6 +14,7 @@ Defined in: [packages/db/src/errors.ts:219](https://github.com/TanStack/db/blob/
 ## Extended by
 
 - [`MissingMutationFunctionError`](../MissingMutationFunctionError.md)
+- [`OnMutateMustBeSynchronousError`](../OnMutateMustBeSynchronousError.md)
 - [`TransactionNotPendingMutateError`](../TransactionNotPendingMutateError.md)
 - [`TransactionAlreadyCompletedRollbackError`](../TransactionAlreadyCompletedRollbackError.md)
 - [`TransactionNotPendingCommitError`](../TransactionNotPendingCommitError.md)
@@ -30,7 +31,7 @@ Defined in: [packages/db/src/errors.ts:219](https://github.com/TanStack/db/blob/
 new TransactionError(message): TransactionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:220](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L220)
+Defined in: [packages/db/src/errors.ts:246](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L246)
 
 #### Parameters
 

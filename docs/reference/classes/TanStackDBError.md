@@ -15,6 +15,7 @@ Defined in: [packages/db/src/errors.ts:2](https://github.com/TanStack/db/blob/ma
 
 - [`NonRetriableError`](../NonRetriableError.md)
 - [`SchemaValidationError`](../SchemaValidationError.md)
+- [`DuplicateDbInstanceError`](../DuplicateDbInstanceError.md)
 - [`CollectionConfigurationError`](../CollectionConfigurationError.md)
 - [`CollectionStateError`](../CollectionStateError.md)
 - [`CollectionOperationError`](../CollectionOperationError.md)

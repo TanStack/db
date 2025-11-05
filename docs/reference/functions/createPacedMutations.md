@@ -67,7 +67,7 @@ const updateTodo = createPacedMutations<string>({
     // Apply optimistic update immediately
     collection.update(id, draft => { draft.text = text })
   },
-  mutationFn: async (text, { transaction }) => {
+  mutationFn: async ({ transaction }) => {
     await api.save(transaction.mutations)
   },
   strategy: debounceStrategy({ wait: 500 })
@@ -86,7 +86,7 @@ const addTodo = createPacedMutations<{ text: string }>({
   onMutate: ({ text }) => {
     collection.insert({ id: uuid(), text, completed: false })
   },
-  mutationFn: async ({ text }, { transaction }) => {
+  mutationFn: async ({ transaction }) => {
     await api.save(transaction.mutations)
   },
   strategy: queueStrategy({

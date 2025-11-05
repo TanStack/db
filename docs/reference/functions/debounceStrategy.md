@@ -9,7 +9,7 @@ title: debounceStrategy
 function debounceStrategy(options): DebounceStrategy;
 ```
 
-Defined in: [packages/db/src/strategies/debounceStrategy.ts:25](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/debounceStrategy.ts#L25)
+Defined in: [packages/db/src/strategies/debounceStrategy.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/debounceStrategy.ts#L28)
 
 Creates a debounce strategy that delays transaction execution until after
 a period of inactivity.
@@ -34,7 +34,10 @@ A debounce strategy instance
 ## Example
 
 ```ts
-const mutate = useSerializedTransaction({
+const mutate = usePacedMutations({
+  onMutate: (value) => {
+    collection.update(id, draft => { draft.value = value })
+  },
   mutationFn: async ({ transaction }) => {
     await api.save(transaction.mutations)
   },

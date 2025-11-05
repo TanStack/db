@@ -5,7 +5,7 @@ title: InvalidSchemaError
 
 # Class: InvalidSchemaError
 
-Defined in: [packages/db/src/errors.ts:64](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L64)
+Defined in: [packages/db/src/errors.ts:90](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L90)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:64](https://github.com/TanStack/db/blob/m
 new InvalidSchemaError(): InvalidSchemaError;
 ```
 
-Defined in: [packages/db/src/errors.ts:65](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L65)
+Defined in: [packages/db/src/errors.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L91)
 
 #### Returns
 

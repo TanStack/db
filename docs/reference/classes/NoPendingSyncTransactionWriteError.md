@@ -5,7 +5,7 @@ title: NoPendingSyncTransactionWriteError
 
 # Class: NoPendingSyncTransactionWriteError
 
-Defined in: [packages/db/src/errors.ts:256](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L256)
+Defined in: [packages/db/src/errors.ts:291](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L291)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:256](https://github.com/TanStack/db/blob/
 new NoPendingSyncTransactionWriteError(): NoPendingSyncTransactionWriteError;
 ```
 
-Defined in: [packages/db/src/errors.ts:257](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L257)
+Defined in: [packages/db/src/errors.ts:292](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L292)
 
 #### Returns
 

@@ -5,7 +5,7 @@ title: CollectionStateError
 
 # Class: CollectionStateError
 
-Defined in: [packages/db/src/errors.ts:77](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L77)
+Defined in: [packages/db/src/errors.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L103)
 
 ## Extends
 
@@ -26,7 +26,7 @@ Defined in: [packages/db/src/errors.ts:77](https://github.com/TanStack/db/blob/m
 new CollectionStateError(message): CollectionStateError;
 ```
 
-Defined in: [packages/db/src/errors.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L78)
+Defined in: [packages/db/src/errors.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L104)
 
 #### Parameters
 

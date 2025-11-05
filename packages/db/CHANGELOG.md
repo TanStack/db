@@ -1,5 +1,118 @@
 # @tanstack/db
 
+## 0.4.19
+
+### Patch Changes
+
+- Significantly improve localStorage collection performance during rapid mutations ([#760](https://github.com/TanStack/db/pull/760))
+
+  Optimizes localStorage collections to eliminate redundant storage reads, providing dramatic performance improvements for use cases with rapid mutations (e.g., text input with live query rendering).
+
+  **Performance Improvements:**
+  - **67% reduction in localStorage I/O operations** - from 3 reads + 1 write per mutation down to just 1 write
+  - Eliminated 2 JSON parse operations per mutation
+  - Eliminated 1 full collection diff operation per mutation
+  - Leverages in-memory cache (`lastKnownData`) instead of reading from storage on every mutation
+
+  **What Changed:**
+  1. **Mutation handlers** now use in-memory cache instead of loading from storage before mutations
+  2. **Post-mutation sync** eliminated - no longer triggers redundant storage reads after local mutations
+  3. **Manual transactions** (`acceptMutations`) optimized to use in-memory cache
+
+  **Before:** Each mutation performed 3 I/O operations:
+  - `loadFromStorage()` - read + JSON parse
+  - Modify data
+  - `saveToStorage()` - JSON stringify + write
+  - `processStorageChanges()` - another read + parse + diff
+
+  **After:** Each mutation performs 1 I/O operation:
+  - Modify in-memory data ✨ No I/O!
+  - `saveToStorage()` - JSON stringify + write
+
+  **Safety:**
+  - Cross-tab synchronization still works correctly via storage event listeners
+  - All 50 tests pass including 8 new tests specifically for rapid mutations and edge cases
+  - 92.3% code coverage on local-storage.ts
+  - `lastKnownData` cache kept in sync with storage through initial load, mutations, and cross-tab events
+
+  This optimization is particularly impactful for applications with:
+  - Real-time text input with live query rendering
+  - Frequent mutations to localStorage-backed collections
+  - Multiple rapid sequential mutations
+
+## 0.4.18
+
+### Patch Changes
+
+- Fix bug with orderBy that caused queries to skip duplicate values and/or stall on duplicate values. ([#713](https://github.com/TanStack/db/pull/713))
+
+- Validate against duplicate collection aliases in subqueries. Prevents a bug where using the same alias for a collection in both parent and subquery causes empty results or incorrect aggregation values. Now throws a clear `DuplicateAliasInSubqueryError` when this pattern is detected, guiding users to rename the conflicting alias. ([#719](https://github.com/TanStack/db/pull/719))
+
+## 0.4.17
+
+### Patch Changes
+
+- Add offline-transactions package with robust offline-first capabilities ([#559](https://github.com/TanStack/db/pull/559))
+
+  New package `@tanstack/offline-transactions` provides a comprehensive offline-first transaction system with:
+
+  **Core Features:**
+  - Persistent outbox pattern for reliable transaction processing
+  - Leader election for multi-tab coordination (Web Locks API with BroadcastChannel fallback)
+  - Automatic storage capability detection with graceful degradation
+  - Retry logic with exponential backoff and jitter
+  - Sequential transaction processing (FIFO ordering)
+
+  **Storage:**
+  - Automatic fallback chain: IndexedDB → localStorage → online-only
+  - Detects and handles private mode, SecurityError, QuotaExceededError
+  - Custom storage adapter support
+  - Diagnostic callbacks for storage failures
+
+  **Developer Experience:**
+  - TypeScript-first with full type safety
+  - Comprehensive test suite (25 tests covering leader failover, storage failures, e2e scenarios)
+  - Works in all modern browsers and server-side rendering environments
+
+  **@tanstack/db improvements:**
+  - Enhanced duplicate instance detection (dev-only, iframe-aware, with escape hatch)
+  - Better environment detection for SSR and worker contexts
+
+  Example usage:
+
+  ```typescript
+  import {
+    startOfflineExecutor,
+    IndexedDBAdapter,
+  } from "@tanstack/offline-transactions"
+
+  const executor = startOfflineExecutor({
+    collections: { todos: todoCollection },
+    storage: new IndexedDBAdapter(),
+    mutationFns: {
+      syncTodos: async ({ transaction, idempotencyKey }) => {
+        // Sync mutations to backend
+        await api.sync(transaction.mutations, idempotencyKey)
+      },
+    },
+    onStorageFailure: (diagnostic) => {
+      console.warn("Running in online-only mode:", diagnostic.message)
+    },
+  })
+
+  // Create offline transaction
+  const tx = executor.createOfflineTransaction({
+    mutationFnName: "syncTodos",
+    autoCommit: false,
+  })
+
+  tx.mutate(() => {
+    todoCollection.insert({ id: "1", text: "Buy milk", completed: false })
+  })
+
+  await tx.commit() // Persists to outbox and syncs when online
+  ```
+
 ## 0.4.16
 
 ### Patch Changes

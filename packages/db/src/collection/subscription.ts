@@ -1,5 +1,5 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and, gt, lt } from "../query/builder/functions.js"
+import { and, eq, gt, lt } from "../query/builder/functions.js"
 import { Value } from "../query/ir.js"
 import { EventEmitter } from "../event-emitter.js"
 import {
@@ -20,6 +20,7 @@ import type { CollectionImpl } from "./index.js"
 type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
   optimizedOnly?: boolean
+  trackLoadSubsetPromise?: boolean
 }
 
 type RequestLimitedSnapshotOptions = {
@@ -197,7 +198,10 @@ export class CollectionSubscription
       subscription: this,
     })
 
-    this.trackLoadSubsetPromise(syncResult)
+    const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
+    if (trackLoadSubsetPromise) {
+      this.trackLoadSubsetPromise(syncResult)
+    }
 
     // Also load data immediately from the collection
     const snapshot = this.collection.currentStateAsChanges(stateOpts)
@@ -218,10 +222,12 @@ export class CollectionSubscription
   }
 
   /**
-   * Sends a snapshot that is limited to the first `limit` rows that fulfill the `where` clause and are bigger than `minValue`.
+   * Sends a snapshot that fulfills the `where` clause and all rows are bigger or equal to `minValue`.
    * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
    * It uses that range index to load the items in the order of the index.
-   * Note: it does not send keys that have already been sent before.
+   * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to `minValue` + limit values greater than `minValue`.
+   *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
+   * Note 2: it does not send keys that have already been sent before.
    */
   requestLimitedSnapshot({
     orderBy,
@@ -257,12 +263,49 @@ export class CollectionSubscription
 
     let biggestObservedValue = minValue
     const changes: Array<ChangeMessage<any, string | number>> = []
-    let keys: Array<string | number> = index.take(limit, minValue, filterFn)
+
+    // If we have a minValue we need to handle the case
+    // where there might be duplicate values equal to minValue that we need to include
+    // because we can have data like this: [1, 2, 3, 3, 3, 4, 5]
+    // so if minValue is 3 then the previous snapshot may not have included all 3s
+    // e.g. if it was offset 0 and limit 3 it would only have loaded the first 3
+    //      so we load all rows equal to minValue first, to be sure we don't skip any duplicate values
+    let keys: Array<string | number> = []
+    if (minValue !== undefined) {
+      // First, get all items with the same value as minValue
+      const { expression } = orderBy[0]!
+      const allRowsWithMinValue = this.collection.currentStateAsChanges({
+        where: eq(expression, new Value(minValue)),
+      })
+
+      if (allRowsWithMinValue) {
+        const keysWithMinValue = allRowsWithMinValue
+          .map((change) => change.key)
+          .filter((key) => !this.sentKeys.has(key) && filterFn(key))
+
+        // Add items with the minValue first
+        keys.push(...keysWithMinValue)
+
+        // Then get items greater than minValue
+        const keysGreaterThanMin = index.take(
+          limit - keys.length,
+          minValue,
+          filterFn
+        )
+        keys.push(...keysGreaterThanMin)
+      } else {
+        keys = index.take(limit, minValue, filterFn)
+      }
+    } else {
+      keys = index.take(limit, minValue, filterFn)
+    }
 
     const valuesNeeded = () => Math.max(limit - changes.length, 0)
     const collectionExhausted = () => keys.length === 0
 
     while (valuesNeeded() > 0 && !collectionExhausted()) {
+      const insertedKeys = new Set<string | number>() // Track keys we add to `changes` in this iteration
+
       for (const key of keys) {
         const value = this.collection.get(key)!
         changes.push({
@@ -271,6 +314,7 @@ export class CollectionSubscription
           value,
         })
         biggestObservedValue = value
+        insertedKeys.add(key) // Track this key
       }
 
       keys = index.take(valuesNeeded(), biggestObservedValue, filterFn)
@@ -296,8 +340,40 @@ export class CollectionSubscription
       subscription: this,
     })
 
-    this.trackLoadSubsetPromise(syncResult)
+    // Make parallel loadSubset calls for values equal to minValue and values greater than minValue
+    const promises: Array<Promise<void>> = []
+
+    // First promise: load all values equal to minValue
+    if (typeof minValue !== `undefined`) {
+      const { expression } = orderBy[0]!
+      const exactValueFilter = eq(expression, new Value(minValue))
+
+      const equalValueResult = this.collection._sync.loadSubset({
+        where: exactValueFilter,
+        subscription: this,
+      })
+
+      if (equalValueResult instanceof Promise) {
+        promises.push(equalValueResult)
+      }
+    }
+
+    // Second promise: load values greater than minValue
+    if (syncResult instanceof Promise) {
+      promises.push(syncResult)
+    }
+
+    // Track the combined promise
+    if (promises.length > 0) {
+      const combinedPromise = Promise.all(promises).then(() => {})
+      this.trackLoadSubsetPromise(combinedPromise)
+    } else {
+      this.trackLoadSubsetPromise(syncResult)
+    }
   }
+
+  // TODO: also add similar test but that checks that it can also load it from the collection's loadSubset function
+  //       and that that also works properly (i.e. does not skip duplicate values)
 
   /**
    * Filters and flips changes for keys that have not been sent yet.

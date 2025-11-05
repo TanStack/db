@@ -9,7 +9,7 @@ title: throttleStrategy
 function throttleStrategy(options): ThrottleStrategy;
 ```
 
-Defined in: [packages/db/src/strategies/throttleStrategy.ts:42](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/throttleStrategy.ts#L42)
+Defined in: [packages/db/src/strategies/throttleStrategy.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/throttleStrategy.ts#L48)
 
 Creates a throttle strategy that ensures transactions are evenly spaced
 over time.
@@ -36,7 +36,10 @@ A throttle strategy instance
 
 ```ts
 // Throttle slider updates to every 200ms
-const mutate = useSerializedTransaction({
+const mutate = usePacedMutations({
+  onMutate: (volume) => {
+    settingsCollection.update('volume', draft => { draft.value = volume })
+  },
   mutationFn: async ({ transaction }) => {
     await api.updateVolume(transaction.mutations)
   },
@@ -46,7 +49,10 @@ const mutate = useSerializedTransaction({
 
 ```ts
 // Throttle with leading and trailing execution
-const mutate = useSerializedTransaction({
+const mutate = usePacedMutations({
+  onMutate: (data) => {
+    collection.update(id, draft => { Object.assign(draft, data) })
+  },
   mutationFn: async ({ transaction }) => {
     await api.save(transaction.mutations)
   },

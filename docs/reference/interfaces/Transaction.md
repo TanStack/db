@@ -5,7 +5,7 @@ title: Transaction
 
 # Interface: Transaction\<T\>
 
-Defined in: [packages/db/src/transactions.ts:207](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L207)
+Defined in: [packages/db/src/transactions.ts:208](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L208)
 
 ## Type Parameters
 
@@ -21,7 +21,7 @@ Defined in: [packages/db/src/transactions.ts:207](https://github.com/TanStack/db
 autoCommit: boolean;
 ```
 
-Defined in: [packages/db/src/transactions.ts:213](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L213)
+Defined in: [packages/db/src/transactions.ts:214](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L214)
 
 ***
 
@@ -31,7 +31,7 @@ Defined in: [packages/db/src/transactions.ts:213](https://github.com/TanStack/db
 createdAt: Date;
 ```
 
-Defined in: [packages/db/src/transactions.ts:214](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L214)
+Defined in: [packages/db/src/transactions.ts:215](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L215)
 
 ***
 
@@ -41,7 +41,7 @@ Defined in: [packages/db/src/transactions.ts:214](https://github.com/TanStack/db
 optional error: object;
 ```
 
-Defined in: [packages/db/src/transactions.ts:217](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L217)
+Defined in: [packages/db/src/transactions.ts:218](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L218)
 
 #### error
 
@@ -63,7 +63,7 @@ message: string;
 id: string;
 ```
 
-Defined in: [packages/db/src/transactions.ts:208](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L208)
+Defined in: [packages/db/src/transactions.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L209)
 
 ***
 
@@ -73,7 +73,7 @@ Defined in: [packages/db/src/transactions.ts:208](https://github.com/TanStack/db
 isPersisted: Deferred<Transaction<T>>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:212](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L212)
+Defined in: [packages/db/src/transactions.ts:213](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L213)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: [packages/db/src/transactions.ts:212](https://github.com/TanStack/db
 metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:216](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L216)
+Defined in: [packages/db/src/transactions.ts:217](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L217)
 
 ***
 
@@ -93,7 +93,7 @@ Defined in: [packages/db/src/transactions.ts:216](https://github.com/TanStack/db
 mutationFn: MutationFn<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:210](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L210)
+Defined in: [packages/db/src/transactions.ts:211](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L211)
 
 ***
 
@@ -103,7 +103,7 @@ Defined in: [packages/db/src/transactions.ts:210](https://github.com/TanStack/db
 mutations: PendingMutation<T, OperationType, Collection<T, any, any, any, any>>[];
 ```
 
-Defined in: [packages/db/src/transactions.ts:211](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L211)
+Defined in: [packages/db/src/transactions.ts:212](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L212)
 
 ***
 
@@ -113,7 +113,7 @@ Defined in: [packages/db/src/transactions.ts:211](https://github.com/TanStack/db
 sequenceNumber: number;
 ```
 
-Defined in: [packages/db/src/transactions.ts:215](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L215)
+Defined in: [packages/db/src/transactions.ts:216](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L216)
 
 ***
 
@@ -123,7 +123,7 @@ Defined in: [packages/db/src/transactions.ts:215](https://github.com/TanStack/db
 state: TransactionState;
 ```
 
-Defined in: [packages/db/src/transactions.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L209)
+Defined in: [packages/db/src/transactions.ts:210](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L210)
 
 ## Methods
 
@@ -133,7 +133,7 @@ Defined in: [packages/db/src/transactions.ts:209](https://github.com/TanStack/db
 applyMutations(mutations): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:323](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L323)
+Defined in: [packages/db/src/transactions.ts:327](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L327)
 
 Apply new mutations to this transaction, intelligently merging with existing mutations
 
@@ -169,7 +169,7 @@ Array of new mutations to apply
 commit(): Promise<Transaction<T>>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:468](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L468)
+Defined in: [packages/db/src/transactions.ts:472](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L472)
 
 Commit the transaction and execute the mutation function
 
@@ -228,7 +228,7 @@ console.log(tx.state) // "completed" or "failed"
 compareCreatedAt(other): number;
 ```
 
-Defined in: [packages/db/src/transactions.ts:522](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L522)
+Defined in: [packages/db/src/transactions.ts:526](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L526)
 
 Compare two transactions by their createdAt time and sequence number in order
 to sort them in the order they were created.
@@ -255,7 +255,7 @@ The other transaction to compare to
 mutate(callback): Transaction<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:284](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L284)
+Defined in: [packages/db/src/transactions.ts:287](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L287)
 
 Execute collection operations within this transaction
 
@@ -265,7 +265,9 @@ Execute collection operations within this transaction
 
 () => `void`
 
-Function containing collection operations to group together
+Function containing collection operations to group together. If the
+callback returns a Promise, the transaction context will remain active until the promise
+settles, allowing optimistic writes after `await` boundaries.
 
 #### Returns
 
@@ -321,7 +323,7 @@ await tx.commit()
 rollback(config?): Transaction<T>;
 ```
 
-Defined in: [packages/db/src/transactions.ts:385](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L385)
+Defined in: [packages/db/src/transactions.ts:389](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L389)
 
 Rollback the transaction and any conflicting transactions
 
@@ -388,7 +390,7 @@ try {
 setState(newState): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:237](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L237)
+Defined in: [packages/db/src/transactions.ts:238](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L238)
 
 #### Parameters
 
@@ -408,7 +410,7 @@ Defined in: [packages/db/src/transactions.ts:237](https://github.com/TanStack/db
 touchCollection(): void;
 ```
 
-Defined in: [packages/db/src/transactions.ts:413](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L413)
+Defined in: [packages/db/src/transactions.ts:417](https://github.com/TanStack/db/blob/main/packages/db/src/transactions.ts#L417)
 
 #### Returns
 
