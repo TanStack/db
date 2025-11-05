@@ -22,7 +22,7 @@ Electric collection utilities type
 ## Indexable
 
 ```ts
-[key: string]: Fn
+[key: string]: any
 ```
 
 ## Properties
