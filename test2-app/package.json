@@ -1,0 +1,53 @@
+{
+  "name": "test",
+  "version": "0.1.1",
+  "description": "Test",
+  "homepage": "/",
+  "/**type": "module",
+  "scripts": {
+    "start": "npm run dev",
+    "dev": "vite",
+    "build-silent": "tsc-silent -p tsconfig.json --suppress @ && vite build",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tanstack/query-db-collection": "0.2.39",
+    "@tanstack/react-db": "0.1.38",
+    "@tanstack/react-query": "5.90.6",
+    "re-reselect": "4.0.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-redux": "^9.2.0",
+    "redux": "^5.0.1",
+    "redux-actions": "^3.0.3",
+    "reselect": "^5.0.1",
+    "typesafe-actions": "5.1.0"
+  },
+  "devDependencies": {
+    "@redux-devtools/extension": "^3.3.0",
+    "@tanstack/react-query-devtools": "5.90.2",
+    "@types/node": "^20.14.9",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@typescript-eslint/eslint-plugin": "^8.33.0",
+    "@typescript-eslint/parser": "^8.33.0",
+    "@vitejs/plugin-react": "^4.5.1",
+    "sass": "1.77.7",
+    "ts-node": "10.9.2",
+    "typescript": "5.4.5",
+    "vite": "^4.5.14"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}

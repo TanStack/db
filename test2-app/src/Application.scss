@@ -1,0 +1,43 @@
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  user-select: none;
+}
+
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #ccc;
+
+  & > div {
+    padding: 12px 16px;
+    cursor: pointer;
+
+    &:hover {
+      background-color: #f0f0f0;
+    }
+  }
+}
+
+.grids {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+}
+
+.grid {
+  font-weight: bold;
+  display: grid;
+  grid-auto-flow: row;
+  grid-auto-columns: 1fr 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.row {
+  color: blue;
+  display: contents;
+}
