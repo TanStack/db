@@ -16,7 +16,10 @@ import type { Transaction } from "../transactions"
  * @example
  * ```ts
  * // Throttle slider updates to every 200ms
- * const mutate = useSerializedTransaction({
+ * const mutate = usePacedMutations({
+ *   onMutate: (volume) => {
+ *     settingsCollection.update('volume', draft => { draft.value = volume })
+ *   },
  *   mutationFn: async ({ transaction }) => {
  *     await api.updateVolume(transaction.mutations)
  *   },
@@ -27,7 +30,10 @@ import type { Transaction } from "../transactions"
  * @example
  * ```ts
  * // Throttle with leading and trailing execution
- * const mutate = useSerializedTransaction({
+ * const mutate = usePacedMutations({
+ *   onMutate: (data) => {
+ *     collection.update(id, draft => { Object.assign(draft, data) })
+ *   },
  *   mutationFn: async ({ transaction }) => {
  *     await api.save(transaction.mutations)
  *   },

@@ -1,5 +1,89 @@
 # @tanstack/react-db
 
+## 0.1.42
+
+### Patch Changes
+
+- Updated dependencies [[`75470a8`](https://github.com/TanStack/db/commit/75470a8297f316b4817601b2ea92cb9b21cc7829)]:
+  - @tanstack/db@0.4.19
+
+## 0.1.41
+
+### Patch Changes
+
+- Add `useLiveSuspenseQuery` hook for React Suspense support ([#697](https://github.com/TanStack/db/pull/697))
+
+  Introduces a new `useLiveSuspenseQuery` hook that integrates with React Suspense and Error Boundaries, following TanStack Query's `useSuspenseQuery` pattern.
+
+  **Key features:**
+  - React 18+ compatible using the throw promise pattern
+  - Type-safe API with guaranteed data (never undefined)
+  - Automatic error handling via Error Boundaries
+  - Reactive updates after initial load via useSyncExternalStore
+  - Support for dependency-based re-suspension
+  - Works with query functions, config objects, and pre-created collections
+
+  **Example usage:**
+
+  ```tsx
+  import { Suspense } from "react"
+  import { useLiveSuspenseQuery } from "@tanstack/react-db"
+
+  function TodoList() {
+    // Data is guaranteed to be defined - no isLoading needed
+    const { data } = useLiveSuspenseQuery((q) =>
+      q
+        .from({ todos: todosCollection })
+        .where(({ todos }) => eq(todos.completed, false))
+    )
+
+    return (
+      <ul>
+        {data.map((todo) => (
+          <li key={todo.id}>{todo.text}</li>
+        ))}
+      </ul>
+    )
+  }
+
+  function App() {
+    return (
+      <Suspense fallback={<div>Loading...</div>}>
+        <TodoList />
+      </Suspense>
+    )
+  }
+  ```
+
+  **Implementation details:**
+  - Throws promises when collection is loading (caught by Suspense)
+  - Throws errors when collection fails (caught by Error Boundary)
+  - Reuses promise across re-renders to prevent infinite loops
+  - Detects dependency changes and creates new collection/promise
+  - Same TypeScript overloads as useLiveQuery for consistency
+
+  **Documentation:**
+  - Comprehensive guide in live-queries.md covering usage patterns and when to use each hook
+  - Comparison with useLiveQuery showing different approaches to loading/error states
+  - Router loader pattern recommendation for React Router/TanStack Router users
+  - Error handling examples with Suspense and Error Boundaries
+
+  Resolves #692
+
+## 0.1.40
+
+### Patch Changes
+
+- Updated dependencies [[`f416231`](https://github.com/TanStack/db/commit/f41623180c862b58b4fa6415383dfdb034f84ee9), [`b1b8299`](https://github.com/TanStack/db/commit/b1b82994cb9765225129b5a19be06e9369e3158d)]:
+  - @tanstack/db@0.4.18
+
+## 0.1.39
+
+### Patch Changes
+
+- Updated dependencies [[`49bcaa5`](https://github.com/TanStack/db/commit/49bcaa5557ba8d647c947811ed6e0c2450159d84)]:
+  - @tanstack/db@0.4.17
+
 ## 0.1.38
 
 ### Patch Changes

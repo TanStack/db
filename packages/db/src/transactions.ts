@@ -1,4 +1,5 @@
 import { createDeferred } from "./deferred"
+import "./duplicate-instance-check"
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
@@ -244,7 +245,9 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   /**
    * Execute collection operations within this transaction
-   * @param callback - Function containing collection operations to group together
+   * @param callback - Function containing collection operations to group together. If the
+   * callback returns a Promise, the transaction context will remain active until the promise
+   * settles, allowing optimistic writes after `await` boundaries.
    * @returns This transaction for chaining
    * @example
    * // Group multiple operations
@@ -287,6 +290,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     registerTransaction(this)
+
     try {
       callback()
     } finally {
