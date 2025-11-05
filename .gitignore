@@ -155,3 +155,4 @@ package-lock.json
 *.cpuprofile
 packages/db/benchmark.ts
 packages/db/src/perf-utils.ts
+packages/db/benchmark-sync.ts
