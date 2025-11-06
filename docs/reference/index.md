@@ -194,7 +194,7 @@ title: "@tanstack/db"
 - [StorageEventApi](../type-aliases/StorageEventApi.md)
 - [Strategy](../type-aliases/Strategy.md)
 - [StrategyOptions](../type-aliases/StrategyOptions.md)
-- [StringSortOpts](../type-aliases/StringSortOpts.md)
+- [StringCollationConfig](../type-aliases/StringCollationConfig.md)
 - [SubscriptionEvents](../type-aliases/SubscriptionEvents.md)
 - [SubscriptionStatus](../type-aliases/SubscriptionStatus.md)
 - [SyncConfigRes](../type-aliases/SyncConfigRes.md)

@@ -1,12 +1,12 @@
 ---
-id: StringSortOpts
-title: StringSortOpts
+id: StringCollationConfig
+title: StringCollationConfig
 ---
 
-# Type Alias: StringSortOpts
+# Type Alias: StringCollationConfig
 
 ```ts
-type StringSortOpts = 
+type StringCollationConfig = 
   | {
   stringSort?: "lexical";
 }

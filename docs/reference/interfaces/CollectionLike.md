@@ -29,7 +29,7 @@ for the change events system to work
 ### compareOptions
 
 ```ts
-compareOptions: StringSortOpts;
+compareOptions: StringCollationConfig;
 ```
 
 Defined in: [packages/db/src/collection/index.ts:516](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L516)

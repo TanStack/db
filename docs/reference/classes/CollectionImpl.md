@@ -129,14 +129,14 @@ Defined in: [packages/db/src/collection/index.ts:215](https://github.com/TanStac
 #### Get Signature
 
 ```ts
-get compareOptions(): StringSortOpts;
+get compareOptions(): StringCollationConfig;
 ```
 
 Defined in: [packages/db/src/collection/index.ts:516](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L516)
 
 ##### Returns
 
-[`StringSortOpts`](../../type-aliases/StringSortOpts.md)
+[`StringCollationConfig`](../../type-aliases/StringCollationConfig.md)
 
 ***
 

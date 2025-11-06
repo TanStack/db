@@ -107,10 +107,10 @@ compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
 
 ***
 
-### compareOptions?
+### defaultStringCollation?
 
 ```ts
-optional compareOptions: StringSortOpts;
+optional defaultStringCollation: StringCollationConfig;
 ```
 
 Defined in: [packages/db/src/types.ts:622](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L622)
@@ -122,7 +122,7 @@ E.g., when using the Electric DB collection these options
 
 #### Inherited from
 
-[`BaseCollectionConfig`](../BaseCollectionConfig.md).[`compareOptions`](../BaseCollectionConfig.md#compareoptions)
+[`BaseCollectionConfig`](../BaseCollectionConfig.md).[`defaultStringCollation`](../BaseCollectionConfig.md#defaultstringcollation)
 
 ***
 
