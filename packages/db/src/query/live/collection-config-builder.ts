@@ -19,6 +19,7 @@ import type {
   CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
+  StringSortOpts,
   SyncConfig,
   UtilsRecord,
 } from "../../types.js"
@@ -81,6 +82,7 @@ export class CollectionConfigBuilder<
   private readonly orderByIndices = new WeakMap<object, string>()
 
   private readonly compare?: (val1: TResult, val2: TResult) => number
+  private readonly compareOptions?: StringSortOpts
 
   private isGraphRunning = false
   private runCount = 0
@@ -168,6 +170,8 @@ export class CollectionConfigBuilder<
       this.compare = createOrderByComparator<TResult>(this.orderByIndices)
     }
 
+    this.compareOptions = extractCollectionFromSource(this.query).compareOptions
+
     // Compile the base pipeline once initially
     // This is done to ensure that any errors are thrown immediately and synchronously
     this.compileBasePipeline()
@@ -183,6 +187,7 @@ export class CollectionConfigBuilder<
         ((item) => this.resultKeys.get(item) as string | number),
       sync: this.getSyncConfig(),
       compare: this.compare,
+      compareOptions: this.compareOptions,
       gcTime: this.config.gcTime || 5000, // 5 seconds by default for live queries
       schema: this.config.schema,
       onInsert: this.config.onInsert,
@@ -924,6 +929,25 @@ function extractCollectionsFromQuery(
   extractFromQuery(query)
 
   return collections
+}
+
+/**
+ * Helper function to extract the collection that is referenced in the query's FROM clause.
+ * The FROM clause may refer directly to a collection or indirectly to a subquery.
+ */
+function extractCollectionFromSource(query: any): Collection<any, any, any> {
+  const from = query.from
+
+  if (from.type === `collectionRef`) {
+    return from.collection
+  } else if (from.type === `queryRef`) {
+    // Recursively extract from subquery
+    return extractCollectionFromSource(from.query)
+  }
+
+  throw new Error(
+    `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}`
+  )
 }
 
 /**
