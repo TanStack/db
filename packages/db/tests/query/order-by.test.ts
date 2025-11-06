@@ -1350,7 +1350,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         expect(result1).toHaveLength(3)
         expect(result1.map((r) => r.age)).toEqual([14, 25, null])
 
-        // The default compare options defaults to nulls first
+        // With 3-valued logic, lt(null, 18) returns UNKNOWN (null), which excludes the row
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
@@ -1360,8 +1360,8 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
         const result2 = Array.from(query2.values())
         const ages = result2.map((r) => r.age)
-        expect(ages).toHaveLength(2)
-        expect(ages).toContain(null)
+        // null should NOT be included because lt(null, 18) returns UNKNOWN in 3-valued logic
+        expect(ages).toHaveLength(1)
         expect(ages).toContain(14)
 
         // The default compare options defaults to nulls first
