@@ -22,12 +22,12 @@
   },
   "private": true,
   "dependencies": {
-    "@angular/common": "^20.3.7",
-    "@angular/compiler": "^20.3.7",
-    "@angular/core": "^20.3.7",
-    "@angular/forms": "^20.3.7",
-    "@angular/platform-browser": "^20.3.7",
-    "@angular/router": "^20.3.7",
+    "@angular/common": "^20.3.10",
+    "@angular/compiler": "^20.3.10",
+    "@angular/core": "^20.3.10",
+    "@angular/forms": "^20.3.10",
+    "@angular/platform-browser": "^20.3.10",
+    "@angular/router": "^20.3.10",
     "@tanstack/angular-db": "workspace:*",
     "@tanstack/db": "workspace:*",
     "rxjs": "~7.8.2",
@@ -35,12 +35,12 @@
     "zone.js": "~0.15.1"
   },
   "devDependencies": {
-    "@angular/build": "^20.3.7",
-    "@angular/cli": "^20.3.7",
-    "@angular/compiler-cli": "^20.3.7",
+    "@angular/build": "^20.3.9",
+    "@angular/cli": "^20.3.9",
+    "@angular/compiler-cli": "^20.3.10",
     "@types/jasmine": "~5.1.12",
     "autoprefixer": "^10.4.21",
-    "jasmine-core": "~5.12.0",
+    "jasmine-core": "~5.12.1",
     "karma": "~6.4.4",
     "karma-chrome-launcher": "~3.2.0",
     "karma-coverage": "~2.2.1",
@@ -48,6 +48,6 @@
     "karma-jasmine-html-reporter": "~2.1.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.18",
-    "typescript": "~5.8.2"
+    "typescript": "~5.8.3"
   }
 }
