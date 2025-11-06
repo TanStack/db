@@ -5,10 +5,19 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
+  '@tanstack/angular-db': workspace:*
   '@tanstack/db': workspace:*
+  '@tanstack/db-ivm': workspace:*
+  '@tanstack/electric-db-collection': workspace:*
+  '@tanstack/offline-transactions': workspace:*
+  '@tanstack/powersync-db-collection': workspace:*
   '@tanstack/query-db-collection': workspace:*
   '@tanstack/react-db': workspace:*
-  '@tanstack/offline-transactions': workspace:*
+  '@tanstack/rxdb-db-collection': workspace:*
+  '@tanstack/solid-db': workspace:*
+  '@tanstack/svelte-db': workspace:*
+  '@tanstack/trailbase-db-collection': workspace:*
+  '@tanstack/vue-db': workspace:*
 
 pnpmfileChecksum: sha256-PWDKLEtYr7WAzwKAKmFednYERF5OFDKcRonW93aOwc8=
 
@@ -445,7 +454,7 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.5
@@ -463,7 +472,7 @@ importers:
         specifier: ^1.133.32
         version: 1.133.32(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@6.4.1(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@6.4.1(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.5
@@ -566,7 +575,7 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.1.38
+        specifier: workspace:*
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.5
@@ -575,7 +584,7 @@ importers:
         specifier: workspace:*
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
-        specifier: ^0.1.36
+        specifier: workspace:*
         version: link:../../../packages/solid-db
       '@tanstack/solid-router':
         specifier: ^1.133.31
@@ -584,7 +593,7 @@ importers:
         specifier: ^1.133.32
         version: 1.133.32(@tanstack/react-router@1.133.32(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(solid-js@1.9.9)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.9)(vite@7.1.12(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1)))(vite@7.1.12(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: ^0.1.36
+        specifier: workspace:*
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.5
