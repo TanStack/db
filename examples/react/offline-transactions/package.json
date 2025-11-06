@@ -9,9 +9,9 @@
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {
-    "@tanstack/offline-transactions": "workspace:*",
-    "@tanstack/query-db-collection": "workspace:*",
-    "@tanstack/react-db": "workspace:*",
+    "@tanstack/offline-transactions": "^0.0.0",
+    "@tanstack/query-db-collection": "^0.0.0",
+    "@tanstack/react-db": "^0.0.0",
     "@tanstack/react-query": "^5.89.0",
     "@tanstack/react-router": "^1.131.47",
     "@tanstack/react-router-devtools": "^1.131.47",
