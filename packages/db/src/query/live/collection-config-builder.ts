@@ -170,7 +170,10 @@ export class CollectionConfigBuilder<
       this.compare = createOrderByComparator<TResult>(this.orderByIndices)
     }
 
-    this.compareOptions = extractCollectionFromSource(this.query).compareOptions
+    // Use explicitly provided compareOptions if available, otherwise inherit from FROM collection
+    this.compareOptions =
+      this.config.compareOptions ??
+      extractCollectionFromSource(this.query).compareOptions
 
     // Compile the base pipeline once initially
     // This is done to ensure that any errors are thrown immediately and synchronously

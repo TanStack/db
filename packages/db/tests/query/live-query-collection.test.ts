@@ -196,6 +196,41 @@ describe(`createLiveQueryCollection`, () => {
         stringSort: `locale`,
       })
     })
+
+    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, async () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-lexical`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          compareOptions: {
+            stringSort: `lexical`,
+          },
+        })
+      )
+
+      // Create a live query collection with explicitly provided compareOptions
+      // that differ from the source collection's compareOptions
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ user: sourceCollection }),
+        compareOptions: {
+          stringSort: `locale`,
+          locale: `en-US`,
+        },
+      })
+
+      // The live query should use the explicitly provided compareOptions,
+      // not the inherited ones from the source collection
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `en-US`,
+      })
+      // The source collection should still have its original compareOptions
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+    })
   })
 
   it(`should call markReady when source collection returns empty array`, async () => {
