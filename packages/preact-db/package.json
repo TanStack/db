@@ -1,0 +1,61 @@
+{
+  "name": "@tanstack/preact-db",
+  "description": "Preact integration for @tanstack/db",
+  "version": "0.1.43",
+  "author": "Kyle Mathews",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/preact-db"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "optimistic",
+    "preact",
+    "typescript"
+  ],
+  "packageManager": "pnpm@10.19.0",
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  },
+  "devDependencies": {
+    "@electric-sql/client": "1.1.0",
+    "@preact/preset-vite": "^2.10.0",
+    "@testing-library/preact": "^3.2.4",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "preact": "^10.27.2"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "peerDependencies": {
+    "preact": ">=10.0.0"
+  },
+  "scripts": {
+    "build": "vite build",
+    "build:minified": "vite build --minify",
+    "dev": "vite build --watch",
+    "test": "npx vitest --run",
+    "lint": "eslint . --fix"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
+}
