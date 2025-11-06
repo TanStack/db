@@ -9,7 +9,7 @@ title: MutationFn
 type MutationFn<T> = (params) => Promise<any>;
 ```
 
-Defined in: [packages/db/src/types.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L95)
+Defined in: [packages/db/src/types.ts:126](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L126)
 
 ## Type Parameters
 

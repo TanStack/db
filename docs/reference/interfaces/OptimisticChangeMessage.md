@@ -5,7 +5,7 @@ title: OptimisticChangeMessage
 
 # Interface: OptimisticChangeMessage\<T\>
 
-Defined in: [packages/db/src/types.ts:272](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L272)
+Defined in: [packages/db/src/types.ts:303](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L303)
 
 ## Extends
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/types.ts:272](https://github.com/TanStack/db/blob/m
 optional isActive: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:276](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L276)
+Defined in: [packages/db/src/types.ts:307](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L307)
 
 ***
 
@@ -35,7 +35,7 @@ Defined in: [packages/db/src/types.ts:276](https://github.com/TanStack/db/blob/m
 key: string | number;
 ```
 
-Defined in: [packages/db/src/types.ts:265](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L265)
+Defined in: [packages/db/src/types.ts:296](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L296)
 
 #### Inherited from
 
@@ -49,7 +49,7 @@ Defined in: [packages/db/src/types.ts:265](https://github.com/TanStack/db/blob/m
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:269](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L269)
+Defined in: [packages/db/src/types.ts:300](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L300)
 
 #### Inherited from
 
@@ -63,7 +63,7 @@ Defined in: [packages/db/src/types.ts:269](https://github.com/TanStack/db/blob/m
 optional previousValue: T;
 ```
 
-Defined in: [packages/db/src/types.ts:267](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L267)
+Defined in: [packages/db/src/types.ts:298](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L298)
 
 #### Inherited from
 
@@ -77,7 +77,7 @@ Defined in: [packages/db/src/types.ts:267](https://github.com/TanStack/db/blob/m
 type: OperationType;
 ```
 
-Defined in: [packages/db/src/types.ts:268](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L268)
+Defined in: [packages/db/src/types.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L299)
 
 #### Inherited from
 
@@ -91,7 +91,7 @@ Defined in: [packages/db/src/types.ts:268](https://github.com/TanStack/db/blob/m
 value: T;
 ```
 
-Defined in: [packages/db/src/types.ts:266](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L266)
+Defined in: [packages/db/src/types.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L297)
 
 #### Inherited from
 
