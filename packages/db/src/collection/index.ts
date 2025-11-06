@@ -2,7 +2,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from "../errors"
-import { lazyInitForWorkers } from "../utils/lazy-init"
+import { lazyInitForCFWorkers } from "../utils/lazy-init-for-cf-workers"
 import { currentStateAsChanges } from "./change-events"
 
 import { CollectionStateManager } from "./state"
@@ -211,7 +211,7 @@ export function createCollection(
   // Without this, initializing a collection causes this error:
   //   Disallowed operation called within global scope.
   if (isCloudflareWorkers) {
-    return lazyInitForWorkers(() => {
+    return lazyInitForCFWorkers(() => {
       return _createCollection()
     })
   }

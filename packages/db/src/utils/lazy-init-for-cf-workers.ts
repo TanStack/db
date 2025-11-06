@@ -10,7 +10,7 @@
  *
  * @example
  * ```ts
- * export const myCollection = lazyInitForWorkers(() =>
+ * export const myCollection = lazyInitForCFWorkers(() =>
  *   createCollection(queryCollectionOptions({
  *     queryKey: ["myData"],
  *     queryFn: async () => fetchData(),
@@ -19,7 +19,7 @@
  * );
  * ```
  */
-export function lazyInitForWorkers<T extends object>(factory: () => T): T {
+export function lazyInitForCFWorkers<T extends object>(factory: () => T): T {
   // Closure: This variable is captured by getInstance() and the Proxy traps below.
   // It remains in memory as long as the returned Proxy is referenced, enabling singleton behavior.
   let instance: T | null = null
