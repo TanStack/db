@@ -44,7 +44,7 @@ export type FieldPath = Array<string | number>
 export interface SimpleComparison {
   field: FieldPath
   operator: string
-  value: any
+  value?: any // Optional for operators like isNull and isUndefined that don't have a value
 }
 
 /**
@@ -304,19 +304,23 @@ export function parseOrderByExpression(
  * Extracts all simple comparisons from a WHERE expression.
  * This is useful for simple APIs that only support basic filters.
  *
- * Note: This only works for simple AND-ed conditions. Throws an error if it encounters
- * unsupported operations like OR, NOT, or complex nested expressions.
+ * Note: This only works for simple AND-ed conditions and NOT-wrapped comparisons.
+ * Throws an error if it encounters unsupported operations like OR or complex nested expressions.
+ *
+ * NOT operators are flattened by prefixing the operator name (e.g., `not(eq(...))` becomes `not_eq`).
  *
  * @param expr - The WHERE expression to parse
  * @returns Array of simple comparisons
- * @throws Error if expression contains OR, NOT, or other unsupported operations
+ * @throws Error if expression contains OR or other unsupported operations
  *
  * @example
  * ```typescript
  * const comparisons = extractSimpleComparisons(where)
  * // Returns: [
  * //   { field: ['category'], operator: 'eq', value: 'electronics' },
- * //   { field: ['price'], operator: 'lt', value: 100 }
+ * //   { field: ['price'], operator: 'lt', value: 100 },
+ * //   { field: ['email'], operator: 'isNull' }, // No value for null checks
+ * //   { field: ['status'], operator: 'not_eq', value: 'archived' }
  * // ]
  * ```
  */
@@ -335,12 +339,65 @@ export function extractSimpleComparisons(
         return
       }
 
+      // Handle NOT - recurse into argument and prefix operator with 'not_'
+      if (e.name === `not`) {
+        const [arg] = e.args
+        if (!arg || arg.type !== `func`) {
+          throw new Error(
+            `extractSimpleComparisons requires a comparison or null check inside 'not' operator.`
+          )
+        }
+
+        // Handle NOT with null/undefined checks
+        const nullCheckOps = [`isNull`, `isUndefined`]
+        if (nullCheckOps.includes(arg.name)) {
+          const [fieldArg] = arg.args
+          const field = fieldArg?.type === `ref` ? fieldArg.path : null
+
+          if (field) {
+            comparisons.push({
+              field,
+              operator: `not_${arg.name}`,
+              // No value for null/undefined checks
+            })
+          } else {
+            throw new Error(
+              `extractSimpleComparisons requires a field reference for '${arg.name}' operator.`
+            )
+          }
+          return
+        }
+
+        // Handle NOT with comparison operators
+        const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `in`]
+        if (comparisonOps.includes(arg.name)) {
+          const [leftArg, rightArg] = arg.args
+          const field = leftArg?.type === `ref` ? leftArg.path : null
+          const value = rightArg?.type === `val` ? rightArg.value : null
+
+          if (field && value !== undefined) {
+            comparisons.push({
+              field,
+              operator: `not_${arg.name}`,
+              value,
+            })
+          } else {
+            throw new Error(
+              `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for 'not(${arg.name})' operator.`
+            )
+          }
+          return
+        }
+
+        // NOT can only wrap simple comparisons or null checks
+        throw new Error(
+          `extractSimpleComparisons does not support 'not(${arg.name})'. NOT can only wrap comparison operators (eq, gt, gte, lt, lte, in) or null checks (isNull, isUndefined).`
+        )
+      }
+
       // Throw on unsupported operations
       const unsupportedOps = [
         `or`,
-        `not`,
-        `isNull`,
-        `isUndefined`,
         `like`,
         `ilike`,
         `upper`,
@@ -359,6 +416,28 @@ export function extractSimpleComparisons(
         throw new Error(
           `extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions.`
         )
+      }
+
+      // Handle null/undefined check operators (single argument, no value)
+      const nullCheckOps = [`isNull`, `isUndefined`]
+      if (nullCheckOps.includes(e.name)) {
+        const [fieldArg] = e.args
+
+        // Extract field (must be a ref)
+        const field = fieldArg?.type === `ref` ? fieldArg.path : null
+
+        if (field) {
+          comparisons.push({
+            field,
+            operator: e.name,
+            // No value for null/undefined checks
+          })
+        } else {
+          throw new Error(
+            `extractSimpleComparisons requires a field reference for '${e.name}' operator.`
+          )
+        }
+        return
       }
 
       // Handle comparison operators

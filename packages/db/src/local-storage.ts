@@ -283,7 +283,12 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+): CollectionConfig<
+  InferSchemaOutput<T>,
+  TKey,
+  T,
+  LocalStorageCollectionUtils
+> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema: T
@@ -298,7 +303,7 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey> & {
+): CollectionConfig<T, TKey, never, LocalStorageCollectionUtils> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: never // no schema in the result
@@ -306,7 +311,10 @@ export function localStorageCollectionOptions<
 
 export function localStorageCollectionOptions(
   config: LocalStorageCollectionConfig<any, any, string | number>
-): Omit<CollectionConfig<any, string | number, any>, `id`> & {
+): Omit<
+  CollectionConfig<any, string | number, any, LocalStorageCollectionUtils>,
+  `id`
+> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: StandardSchemaV1

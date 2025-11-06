@@ -133,7 +133,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils> & {
     schema: T
     utils?: TUtils
   } & NonSingleResult
@@ -146,7 +146,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils> & {
     schema: T
     utils?: TUtils
   } & SingleResult
@@ -160,7 +160,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<T, TKey, never> & {
+  options: CollectionConfig<T, TKey, never, TUtils> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
   } & NonSingleResult
@@ -173,7 +173,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<T, TKey, never> & {
+  options: CollectionConfig<T, TKey, never, TUtils> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
   } & SingleResult
