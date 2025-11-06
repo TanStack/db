@@ -27,7 +27,7 @@ import type {
   NonSingleResult,
   OperationConfig,
   SingleResult,
-  StringSortOpts,
+  StringCollationConfig,
   SubscribeChangesOptions,
   Transaction as TransactionType,
   UtilsRecord,
@@ -231,7 +231,7 @@ export class CollectionImpl<
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
-  private comparisonOpts: StringSortOpts
+  private comparisonOpts: StringCollationConfig
 
   /**
    * Creates a new Collection instance
@@ -513,7 +513,7 @@ export class CollectionImpl<
     return this._mutations.validateData(data, type, key)
   }
 
-  get compareOptions(): StringSortOpts {
+  get compareOptions(): StringCollationConfig {
     // return a copy such that no one can mutate the internal comparison object
     return { ...this.comparisonOpts }
   }
@@ -861,9 +861,9 @@ export class CollectionImpl<
 
 function buildCompareOptionsFromConfig(
   config: CollectionConfig<any, any, any>
-): StringSortOpts {
-  if (config.compareOptions) {
-    const options = config.compareOptions
+): StringCollationConfig {
+  if (config.defaultStringCollation) {
+    const options = config.defaultStringCollation
     return {
       stringSort: options.stringSort ?? `locale`,
       locale: options.stringSort === `locale` ? options.locale : undefined,

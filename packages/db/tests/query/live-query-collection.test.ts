@@ -108,7 +108,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `source-with-lexical`,
           getKey: (user) => user.id,
           initialData: sampleUsers,
-          compareOptions: {
+          defaultStringCollation: {
             stringSort: `lexical`,
           },
         })
@@ -135,7 +135,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `source-with-locale`,
           getKey: (user) => user.id,
           initialData: sampleUsers,
-          compareOptions: {
+          defaultStringCollation: {
             stringSort: `locale`,
             locale: `de-DE`,
           },
@@ -204,7 +204,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `source-with-lexical`,
           getKey: (user) => user.id,
           initialData: sampleUsers,
-          compareOptions: {
+          defaultStringCollation: {
             stringSort: `lexical`,
           },
         })
@@ -214,7 +214,7 @@ describe(`createLiveQueryCollection`, () => {
       // that differ from the source collection's compareOptions
       const liveQuery = createLiveQueryCollection({
         query: (q) => q.from({ user: sourceCollection }),
-        compareOptions: {
+        defaultStringCollation: {
           stringSort: `locale`,
           locale: `en-US`,
         },

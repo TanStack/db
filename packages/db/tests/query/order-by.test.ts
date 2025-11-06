@@ -2245,7 +2245,7 @@ describe(`OrderBy with collection-level StringSortOpts`, () => {
         id: `test-lexical-collection`,
         getKey: (item) => item.id,
         initialData: stringItemsData,
-        compareOptions: {
+        defaultStringCollation: {
           stringSort: `lexical`,
         },
       })
@@ -2279,7 +2279,7 @@ describe(`OrderBy with collection-level StringSortOpts`, () => {
         id: `test-lexical-collection-override`,
         getKey: (item) => item.id,
         initialData: stringItemsData,
-        compareOptions: {
+        defaultStringCollation: {
           stringSort: `lexical`,
         },
       })
@@ -2317,7 +2317,7 @@ describe(`OrderBy with collection-level StringSortOpts`, () => {
         id: `test-lexical-collection-sequence`,
         getKey: (item) => item.id,
         initialData: stringItemsData,
-        compareOptions: {
+        defaultStringCollation: {
           stringSort: `lexical`,
         },
       })

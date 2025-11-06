@@ -2,7 +2,7 @@ import type { D2, RootStreamBuilder } from "@tanstack/db-ivm"
 import type {
   CollectionConfig,
   ResultStream,
-  StringSortOpts,
+  StringCollationConfig,
 } from "../../types.js"
 import type { InitialQueryBuilder, QueryBuilder } from "../builder/index.js"
 import type { Context, GetResult } from "../builder/types.js"
@@ -104,5 +104,5 @@ export interface LiveQueryCollectionConfig<
    * Optional compare options for string sorting.
    * If provided, these will be used instead of inheriting from the FROM collection.
    */
-  compareOptions?: StringSortOpts
+  defaultStringCollation?: StringCollationConfig
 }

@@ -1,5 +1,5 @@
 import type { CollectionImpl } from "../../collection/index.js"
-import type { SingleResult, StringSortOpts } from "../../types.js"
+import type { SingleResult, StringCollationConfig } from "../../types.js"
 import type {
   Aggregate,
   BasicExpression,
@@ -303,7 +303,7 @@ export type OrderByCallback<TContext extends Context> = (
 export type OrderByOptions = {
   direction?: OrderByDirection
   nulls?: `first` | `last`
-} & StringSortOpts
+} & StringCollationConfig
 
 /**
  * CompareOptions - Final resolved options for comparison operations
@@ -312,7 +312,7 @@ export type OrderByOptions = {
  * to their concrete values. Unlike OrderByOptions, all fields are required
  * since defaults have been applied.
  */
-export type CompareOptions = StringSortOpts & {
+export type CompareOptions = StringCollationConfig & {
   direction: OrderByDirection
   nulls: `first` | `last`
 }

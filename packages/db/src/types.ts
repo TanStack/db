@@ -26,7 +26,7 @@ export interface CollectionLike<
  *
  * The union ensures that locale options are only available when locale sorting is selected.
  */
-export type StringSortOpts =
+export type StringCollationConfig =
   | {
       stringSort?: `lexical`
     }
@@ -619,7 +619,7 @@ export interface BaseCollectionConfig<
    * E.g., when using the Electric DB collection these options
    *       should match the database's collation settings.
    */
-  compareOptions?: StringSortOpts
+  defaultStringCollation?: StringCollationConfig
 
   utils?: TUtils
 }

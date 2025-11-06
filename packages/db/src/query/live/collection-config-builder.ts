@@ -19,7 +19,7 @@ import type {
   CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
-  StringSortOpts,
+  StringCollationConfig,
   SyncConfig,
   UtilsRecord,
 } from "../../types.js"
@@ -82,7 +82,7 @@ export class CollectionConfigBuilder<
   private readonly orderByIndices = new WeakMap<object, string>()
 
   private readonly compare?: (val1: TResult, val2: TResult) => number
-  private readonly compareOptions?: StringSortOpts
+  private readonly compareOptions?: StringCollationConfig
 
   private isGraphRunning = false
   private runCount = 0
@@ -172,7 +172,7 @@ export class CollectionConfigBuilder<
 
     // Use explicitly provided compareOptions if available, otherwise inherit from FROM collection
     this.compareOptions =
-      this.config.compareOptions ??
+      this.config.defaultStringCollation ??
       extractCollectionFromSource(this.query).compareOptions
 
     // Compile the base pipeline once initially
@@ -190,7 +190,7 @@ export class CollectionConfigBuilder<
         ((item) => this.resultKeys.get(item) as string | number),
       sync: this.getSyncConfig(),
       compare: this.compare,
-      compareOptions: this.compareOptions,
+      defaultStringCollation: this.compareOptions,
       gcTime: this.config.gcTime || 5000, // 5 seconds by default for live queries
       schema: this.config.schema,
       onInsert: this.config.onInsert,

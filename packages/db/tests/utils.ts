@@ -2,7 +2,7 @@ import { expect } from "vitest"
 import type {
   CollectionConfig,
   MutationFnParams,
-  StringSortOpts,
+  StringCollationConfig,
   SyncConfig,
 } from "../src/index.js"
 
@@ -180,7 +180,7 @@ type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   autoIndex?: `off` | `eager`
   sync?: SyncConfig<T>
   syncMode?: `eager` | `on-demand`
-  compareOptions?: StringSortOpts
+  defaultStringCollation?: StringCollationConfig
 }
 
 export function mockSyncCollectionOptions<
