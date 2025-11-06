@@ -2,7 +2,10 @@ import {
   createSingleRowRefProxy,
   toExpression,
 } from "../query/builder/ref-proxy"
-import { compileSingleRowExpression } from "../query/compiler/evaluators.js"
+import {
+  compileSingleRowExpression,
+  toBooleanPredicate,
+} from "../query/compiler/evaluators.js"
 import {
   findIndexForField,
   optimizeExpressionWithIndexes,
@@ -199,7 +202,7 @@ export function createFilterFunction<T extends object>(
       const evaluator = compileSingleRowExpression(expression)
       const result = evaluator(item as Record<string, unknown>)
       // WHERE clauses should always evaluate to boolean predicates (Kevin's feedback)
-      return result
+      return toBooleanPredicate(result)
     } catch {
       // If RefProxy approach fails (e.g., arithmetic operations), fall back to direct evaluation
       try {
@@ -211,7 +214,7 @@ export function createFilterFunction<T extends object>(
         }) as SingleRowRefProxy<T>
 
         const result = whereCallback(simpleProxy)
-        return result
+        return toBooleanPredicate(result)
       } catch {
         // If both approaches fail, exclude the item
         return false
@@ -232,7 +235,7 @@ export function createFilterFunctionFromExpression<T extends object>(
     try {
       const evaluator = compileSingleRowExpression(expression)
       const result = evaluator(item as Record<string, unknown>)
-      return Boolean(result)
+      return toBooleanPredicate(result)
     } catch {
       // If evaluation fails, exclude the item
       return false

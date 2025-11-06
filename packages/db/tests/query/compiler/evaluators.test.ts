@@ -168,10 +168,32 @@ describe(`evaluators`, () => {
         })
 
         it(`handles in with array`, () => {
-          const func = new Func(`in`, [new Value(2), new Value([1, 2, 3])])
+          const func = new Func(`in`, [
+            new Value(2),
+            new Value([1, 2, 3, null]),
+          ])
           const compiled = compileExpression(func)
 
           expect(compiled({})).toBe(true)
+        })
+
+        it(`handles in with null value (3-valued logic)`, () => {
+          const func = new Func(`in`, [new Value(null), new Value([1, 2, 3])])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, null in array returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles in with undefined value (3-valued logic)`, () => {
+          const func = new Func(`in`, [
+            new Value(undefined),
+            new Value([1, 2, 3]),
+          ])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, undefined in array returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
         })
       })
 
@@ -257,6 +279,44 @@ describe(`evaluators`, () => {
           expect(compiled({})).toBe(true)
         })
 
+        it(`handles like with null value (3-valued logic)`, () => {
+          const func = new Func(`like`, [new Value(null), new Value(`hello%`)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, like with null value returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles like with undefined value (3-valued logic)`, () => {
+          const func = new Func(`like`, [
+            new Value(undefined),
+            new Value(`hello%`),
+          ])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, like with undefined value returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles like with null pattern (3-valued logic)`, () => {
+          const func = new Func(`like`, [new Value(`hello`), new Value(null)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, like with null pattern returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles like with undefined pattern (3-valued logic)`, () => {
+          const func = new Func(`like`, [
+            new Value(`hello`),
+            new Value(undefined),
+          ])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, like with undefined pattern returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
+        })
+
         it(`handles ilike (case insensitive)`, () => {
           const func = new Func(`ilike`, [
             new Value(`HELLO`),
@@ -276,6 +336,188 @@ describe(`evaluators`, () => {
 
           expect(compiled({})).toBe(true)
         })
+
+        it(`handles ilike with null value (3-valued logic)`, () => {
+          const func = new Func(`ilike`, [new Value(null), new Value(`hello%`)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, ilike with null value returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles ilike with undefined value (3-valued logic)`, () => {
+          const func = new Func(`ilike`, [
+            new Value(undefined),
+            new Value(`hello%`),
+          ])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, ilike with undefined value returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles ilike with null pattern (3-valued logic)`, () => {
+          const func = new Func(`ilike`, [new Value(`hello`), new Value(null)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, ilike with null pattern returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles ilike with undefined pattern (3-valued logic)`, () => {
+          const func = new Func(`ilike`, [
+            new Value(`hello`),
+            new Value(undefined),
+          ])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, ilike with undefined pattern returns UNKNOWN (null)
+          expect(compiled({})).toBe(null)
+        })
+      })
+
+      describe(`comparison operators`, () => {
+        describe(`eq (equality)`, () => {
+          it(`handles eq with null and null (3-valued logic)`, () => {
+            const func = new Func(`eq`, [new Value(null), new Value(null)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, null = null returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles eq with null and value (3-valued logic)`, () => {
+            const func = new Func(`eq`, [new Value(null), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, null = value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles eq with value and null (3-valued logic)`, () => {
+            const func = new Func(`eq`, [new Value(5), new Value(null)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, value = null returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles eq with undefined and value (3-valued logic)`, () => {
+            const func = new Func(`eq`, [new Value(undefined), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, undefined = value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles eq with matching values`, () => {
+            const func = new Func(`eq`, [new Value(5), new Value(5)])
+            const compiled = compileExpression(func)
+
+            expect(compiled({})).toBe(true)
+          })
+
+          it(`handles eq with non-matching values`, () => {
+            const func = new Func(`eq`, [new Value(5), new Value(10)])
+            const compiled = compileExpression(func)
+
+            expect(compiled({})).toBe(false)
+          })
+        })
+
+        describe(`gt (greater than)`, () => {
+          it(`handles gt with null and value (3-valued logic)`, () => {
+            const func = new Func(`gt`, [new Value(null), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, null > value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles gt with value and null (3-valued logic)`, () => {
+            const func = new Func(`gt`, [new Value(5), new Value(null)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, value > null returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles gt with undefined (3-valued logic)`, () => {
+            const func = new Func(`gt`, [new Value(undefined), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, undefined > value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles gt with valid values`, () => {
+            const func = new Func(`gt`, [new Value(10), new Value(5)])
+            const compiled = compileExpression(func)
+
+            expect(compiled({})).toBe(true)
+          })
+        })
+
+        describe(`gte (greater than or equal)`, () => {
+          it(`handles gte with null (3-valued logic)`, () => {
+            const func = new Func(`gte`, [new Value(null), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, null >= value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles gte with undefined (3-valued logic)`, () => {
+            const func = new Func(`gte`, [new Value(undefined), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, undefined >= value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+        })
+
+        describe(`lt (less than)`, () => {
+          it(`handles lt with null (3-valued logic)`, () => {
+            const func = new Func(`lt`, [new Value(null), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, null < value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles lt with undefined (3-valued logic)`, () => {
+            const func = new Func(`lt`, [new Value(undefined), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, undefined < value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles lt with valid values`, () => {
+            const func = new Func(`lt`, [new Value(3), new Value(5)])
+            const compiled = compileExpression(func)
+
+            expect(compiled({})).toBe(true)
+          })
+        })
+
+        describe(`lte (less than or equal)`, () => {
+          it(`handles lte with null (3-valued logic)`, () => {
+            const func = new Func(`lte`, [new Value(null), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, null <= value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+
+          it(`handles lte with undefined (3-valued logic)`, () => {
+            const func = new Func(`lte`, [new Value(undefined), new Value(5)])
+            const compiled = compileExpression(func)
+
+            // In 3-valued logic, undefined <= value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
+          })
+        })
       })
 
       describe(`boolean operators`, () => {
@@ -289,6 +531,37 @@ describe(`evaluators`, () => {
           expect(compiled({})).toBe(false)
         })
 
+        it(`handles and with null value (3-valued logic)`, () => {
+          const func = new Func(`and`, [new Value(true), new Value(null)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, true AND null = null (UNKNOWN)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles and with undefined value (3-valued logic)`, () => {
+          const func = new Func(`and`, [new Value(true), new Value(undefined)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, true AND undefined = null (UNKNOWN)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles and with null and false (3-valued logic)`, () => {
+          const func = new Func(`and`, [new Value(null), new Value(false)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, null AND false = false
+          expect(compiled({})).toBe(false)
+        })
+
+        it(`handles and with all true values`, () => {
+          const func = new Func(`and`, [new Value(true), new Value(true)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
         it(`handles or with short-circuit evaluation`, () => {
           const func = new Func(`or`, [
             new Value(true),
@@ -299,7 +572,7 @@ describe(`evaluators`, () => {
           expect(compiled({})).toBe(true)
         })
 
-        it(`handles or with all false values`, () => {
+        it(`handles or with null value (3-valued logic)`, () => {
           const func = new Func(`or`, [
             new Value(false),
             new Value(0),
@@ -307,7 +580,64 @@ describe(`evaluators`, () => {
           ])
           const compiled = compileExpression(func)
 
+          // In 3-valued logic, false OR null = null (UNKNOWN)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles or with undefined value (3-valued logic)`, () => {
+          const func = new Func(`or`, [
+            new Value(false),
+            new Value(0),
+            new Value(undefined),
+          ])
+          const compiled = compileExpression(func)
+          // In 3-valued logic, false OR undefined = null (UNKNOWN)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles or with null and true (3-valued logic)`, () => {
+          const func = new Func(`or`, [new Value(null), new Value(true)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, null OR true = true
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`handles or with all false values`, () => {
+          const func = new Func(`or`, [new Value(false), new Value(0)])
+          const compiled = compileExpression(func)
+
           expect(compiled({})).toBe(false)
+        })
+
+        it(`handles not with null value (3-valued logic)`, () => {
+          const func = new Func(`not`, [new Value(null)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, NOT null = null (UNKNOWN)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles not with undefined value (3-valued logic)`, () => {
+          const func = new Func(`not`, [new Value(undefined)])
+          const compiled = compileExpression(func)
+
+          // In 3-valued logic, NOT undefined = null (UNKNOWN)
+          expect(compiled({})).toBe(null)
+        })
+
+        it(`handles not with true value`, () => {
+          const func = new Func(`not`, [new Value(true)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(false)
+        })
+
+        it(`handles not with false value`, () => {
+          const func = new Func(`not`, [new Value(false)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
         })
       })
     })

@@ -794,13 +794,13 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
         employeesCollection = createEmployeesCollection()
       })
 
-      test(`null equality comparison`, () => {
+      test(`isNull check`, () => {
         const nullEmails = createLiveQueryCollection({
           startSync: true,
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => eq(emp.email, null))
+              .where(({ emp }) => isNull(emp.email))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
@@ -816,7 +816,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => eq(emp.department_id, null))
+              .where(({ emp }) => isNull(emp.department_id))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
@@ -828,13 +828,13 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
         expect(nullDepartments.get(6)?.department_id).toBeNull()
       })
 
-      test(`not null comparison`, () => {
+      test(`not isNull check`, () => {
         const hasEmail = createLiveQueryCollection({
           startSync: true,
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => not(eq(emp.email, null)))
+              .where(({ emp }) => not(isNull(emp.email)))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
@@ -850,7 +850,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => not(eq(emp.department_id, null)))
+              .where(({ emp }) => not(isNull(emp.department_id)))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
@@ -1156,7 +1156,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => eq(emp.email, null))
+              .where(({ emp }) => isNull(emp.email))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
@@ -1492,7 +1492,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
           query: (q) =>
             q
               .from({ emp: employeesCollection })
-              .where(({ emp }) => eq(emp.contact?.address, null))
+              .where(({ emp }) => isNull(emp.contact?.address))
               .select(({ emp }) => ({
                 id: emp.id,
                 name: emp.name,
