@@ -1,7 +1,6 @@
 /**
  * Wraps a factory function in a Proxy to defer initialization until first access.
- * This prevents async operations (like creating Tanstack DB Collections) from running
- * in Cloudflare Workers' global scope.
+ * This prevents async operations (Like creating Tanstack DB Collections) from running in Cloudflare Workers' global scope.
  *
  * @param factory - A function that creates and returns the resource.
  *                  Must be a callback to defer execution; passing the value directly
@@ -32,13 +31,13 @@ export function lazyInitForCFWorkers<T extends object>(factory: () => T): T {
   }
 
   return new Proxy({} as T, {
-    get(_target, prop, _receiver) {
+    get(_target, prop, receiver) {
       const inst = getInstance()
-      return Reflect.get(inst, prop, inst)
+      return Reflect.get(inst, prop, receiver)
     },
-    set(_target, prop, value, _receiver) {
+    set(_target, prop, value, receiver) {
       const inst = getInstance()
-      return Reflect.set(inst, prop, value, inst)
+      return Reflect.set(inst, prop, value, receiver)
     },
     deleteProperty(_target, prop) {
       const inst = getInstance()
@@ -56,6 +55,10 @@ export function lazyInitForCFWorkers<T extends object>(factory: () => T): T {
       const inst = getInstance()
       return Reflect.getOwnPropertyDescriptor(inst, prop)
     },
+    defineProperty(_target, prop, descriptor) {
+      const inst = getInstance()
+      return Reflect.defineProperty(inst, prop, descriptor)
+    },
     getPrototypeOf(_target) {
       const inst = getInstance()
       return Reflect.getPrototypeOf(inst)
@@ -72,17 +75,13 @@ export function lazyInitForCFWorkers<T extends object>(factory: () => T): T {
       const inst = getInstance()
       return Reflect.preventExtensions(inst)
     },
-    defineProperty(_target, prop, descriptor) {
+    apply(_target, thisArg, args) {
       const inst = getInstance()
-      return Reflect.defineProperty(inst, prop, descriptor)
+      return Reflect.apply(inst as any, thisArg, args)
     },
-    apply(_target, _thisArg, argumentsList) {
+    construct(_target, args, newTarget) {
       const inst = getInstance()
-      return Reflect.apply(inst as any, inst, argumentsList)
-    },
-    construct(_target, argumentsList, _newTarget) {
-      const inst = getInstance()
-      return Reflect.construct(inst as any, argumentsList, inst as any)
+      return Reflect.construct(inst as any, args, newTarget)
     },
   })
 }
