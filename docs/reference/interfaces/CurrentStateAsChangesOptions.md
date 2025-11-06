@@ -5,7 +5,7 @@ title: CurrentStateAsChangesOptions
 
 # Interface: CurrentStateAsChangesOptions
 
-Defined in: [packages/db/src/types.ts:678](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L678)
+Defined in: [packages/db/src/types.ts:717](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L717)
 
 Options for getting current state as changes
 
@@ -17,7 +17,7 @@ Options for getting current state as changes
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:682](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L682)
+Defined in: [packages/db/src/types.ts:721](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L721)
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/types.ts:682](https://github.com/TanStack/db/blob/m
 optional optimizedOnly: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:683](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L683)
+Defined in: [packages/db/src/types.ts:722](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L722)
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/types.ts:683](https://github.com/TanStack/db/blob/m
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:681](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L681)
+Defined in: [packages/db/src/types.ts:720](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L720)
 
 ***
 
@@ -47,6 +47,6 @@ Defined in: [packages/db/src/types.ts:681](https://github.com/TanStack/db/blob/m
 optional where: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:680](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L680)
+Defined in: [packages/db/src/types.ts:719](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L719)
 
 Pre-compiled expression for filtering the current state

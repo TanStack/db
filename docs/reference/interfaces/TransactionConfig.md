@@ -5,7 +5,7 @@ title: TransactionConfig
 
 # Interface: TransactionConfig\<T\>
 
-Defined in: [packages/db/src/types.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L115)
+Defined in: [packages/db/src/types.ts:146](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L146)
 
 ## Type Parameters
 
@@ -21,7 +21,7 @@ Defined in: [packages/db/src/types.ts:115](https://github.com/TanStack/db/blob/m
 optional autoCommit: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L119)
+Defined in: [packages/db/src/types.ts:150](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L150)
 
 ***
 
@@ -31,7 +31,7 @@ Defined in: [packages/db/src/types.ts:119](https://github.com/TanStack/db/blob/m
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L117)
+Defined in: [packages/db/src/types.ts:148](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L148)
 
 Unique identifier for the transaction
 
@@ -43,7 +43,7 @@ Unique identifier for the transaction
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L122)
+Defined in: [packages/db/src/types.ts:153](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L153)
 
 Custom metadata to associate with the transaction
 
@@ -55,4 +55,4 @@ Custom metadata to associate with the transaction
 mutationFn: MutationFn<T>;
 ```
 
-Defined in: [packages/db/src/types.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L120)
+Defined in: [packages/db/src/types.ts:151](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L151)

@@ -100,6 +100,139 @@ describe(`createLiveQueryCollection`, () => {
     expect(activeUsers2.size).toBe(2)
   })
 
+  describe(`compareOptions inheritance`, () => {
+    it(`should inherit compareOptions from FROM collection`, async () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-lexical`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          defaultStringCollation: {
+            stringSort: `lexical`,
+          },
+        })
+      )
+
+      // Create a live query collection from the source collection
+      const liveQuery = createLiveQueryCollection((q) =>
+        q.from({ user: sourceCollection })
+      )
+
+      // The live query should inherit the compareOptions from the source collection
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+    })
+
+    it(`should inherit compareOptions from FROM collection via subquery`, async () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-locale`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          defaultStringCollation: {
+            stringSort: `locale`,
+            locale: `de-DE`,
+          },
+        })
+      )
+
+      // Create a live query collection with a subquery
+      const liveQuery = createLiveQueryCollection((q) => {
+        // Build the subquery first
+        const filteredUsers = q
+          .from({ user: sourceCollection })
+          .where(({ user }) => eq(user.active, true))
+
+        // Use the subquery in the main query
+        return q.from({ filteredUser: filteredUsers })
+      })
+
+      // The live query should inherit the compareOptions from the source collection
+      // (which is the FROM collection of the subquery)
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `de-DE`,
+      })
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `de-DE`,
+      })
+    })
+
+    it(`should use default compareOptions when FROM collection has no compareOptions`, async () => {
+      // Create a collection without compareOptions (uses defaults)
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-defaults`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          // No compareOptions specified - uses defaults
+        })
+      )
+
+      // Create a live query collection with a subquery
+      const liveQuery = createLiveQueryCollection((q) => {
+        // Build the subquery first
+        const filteredUsers = q
+          .from({ user: sourceCollection })
+          .where(({ user }) => eq(user.active, true))
+
+        // Use the subquery in the main query
+        return q.from({ filteredUser: filteredUsers })
+      })
+
+      // The live query should use default compareOptions (locale)
+      // when the source collection doesn't specify compareOptions
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+      })
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `locale`,
+      })
+    })
+
+    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, async () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-lexical`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          defaultStringCollation: {
+            stringSort: `lexical`,
+          },
+        })
+      )
+
+      // Create a live query collection with explicitly provided compareOptions
+      // that differ from the source collection's compareOptions
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ user: sourceCollection }),
+        defaultStringCollation: {
+          stringSort: `locale`,
+          locale: `en-US`,
+        },
+      })
+
+      // The live query should use the explicitly provided compareOptions,
+      // not the inherited ones from the source collection
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `en-US`,
+      })
+      // The source collection should still have its original compareOptions
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+    })
+  })
+
   it(`should call markReady when source collection returns empty array`, async () => {
     // Create an empty source collection using the mock sync options
     const emptyUsersCollection = createCollection(

@@ -1,5 +1,9 @@
 import type { D2, RootStreamBuilder } from "@tanstack/db-ivm"
-import type { CollectionConfig, ResultStream } from "../../types.js"
+import type {
+  CollectionConfig,
+  ResultStream,
+  StringCollationConfig,
+} from "../../types.js"
 import type { InitialQueryBuilder, QueryBuilder } from "../builder/index.js"
 import type { Context, GetResult } from "../builder/types.js"
 
@@ -95,4 +99,10 @@ export interface LiveQueryCollectionConfig<
    * If enabled the collection will return a single object instead of an array
    */
   singleResult?: true
+
+  /**
+   * Optional compare options for string sorting.
+   * If provided, these will be used instead of inheriting from the FROM collection.
+   */
+  defaultStringCollation?: StringCollationConfig
 }
