@@ -9,7 +9,7 @@ title: InferSchemaOutput
 type InferSchemaOutput<T> = T extends StandardSchemaV1 ? StandardSchemaV1.InferOutput<T> extends object ? StandardSchemaV1.InferOutput<T> : Record<string, unknown> : Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:13](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L13)
+Defined in: [packages/db/src/types.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L44)
 
 **`Internal`**
 

@@ -5,7 +5,7 @@ title: LiveQueryCollectionConfig
 
 # Interface: LiveQueryCollectionConfig\<TContext, TResult\>
 
-Defined in: [packages/db/src/query/live/types.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L49)
+Defined in: [packages/db/src/query/live/types.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L53)
 
 Configuration interface for live query collection options
 
@@ -43,13 +43,26 @@ const config: LiveQueryCollectionConfig<any, any> = {
 
 ## Properties
 
+### defaultStringCollation?
+
+```ts
+optional defaultStringCollation: StringCollationConfig;
+```
+
+Defined in: [packages/db/src/query/live/types.ts:107](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L107)
+
+Optional compare options for string sorting.
+If provided, these will be used instead of inheriting from the FROM collection.
+
+***
+
 ### gcTime?
 
 ```ts
 optional gcTime: number;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L92)
+Defined in: [packages/db/src/query/live/types.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L96)
 
 GC time for the collection
 
@@ -61,7 +74,7 @@ GC time for the collection
 optional getKey: (item) => string | number;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L70)
+Defined in: [packages/db/src/query/live/types.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L74)
 
 Function to extract the key from result items
 If not provided, defaults to using the key from the D2 stream
@@ -84,7 +97,7 @@ If not provided, defaults to using the key from the D2 stream
 optional id: string;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:57](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L57)
+Defined in: [packages/db/src/query/live/types.ts:61](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L61)
 
 Unique identifier for the collection
 If not provided, defaults to `live-query-${number}` with auto-incrementing number
@@ -97,7 +110,7 @@ If not provided, defaults to `live-query-${number}` with auto-incrementing numbe
 optional onDelete: DeleteMutationFn<TResult, string | number, UtilsRecord, any>;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L82)
+Defined in: [packages/db/src/query/live/types.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L86)
 
 ***
 
@@ -107,7 +120,7 @@ Defined in: [packages/db/src/query/live/types.ts:82](https://github.com/TanStack
 optional onInsert: InsertMutationFn<TResult, string | number, UtilsRecord, any>;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L80)
+Defined in: [packages/db/src/query/live/types.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L84)
 
 Optional mutation handlers
 
@@ -119,7 +132,7 @@ Optional mutation handlers
 optional onUpdate: UpdateMutationFn<TResult, string | number, UtilsRecord, any>;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:81](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L81)
+Defined in: [packages/db/src/query/live/types.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L85)
 
 ***
 
@@ -131,7 +144,7 @@ query:
 | (q) => QueryBuilder<TContext>;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L62)
+Defined in: [packages/db/src/query/live/types.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L66)
 
 Query builder function that defines the live query
 
@@ -143,7 +156,7 @@ Query builder function that defines the live query
 optional schema: undefined;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:75](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L75)
+Defined in: [packages/db/src/query/live/types.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L79)
 
 Optional schema for validation
 
@@ -155,7 +168,7 @@ Optional schema for validation
 optional singleResult: true;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L97)
+Defined in: [packages/db/src/query/live/types.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L101)
 
 If enabled the collection will return a single object instead of an array
 
@@ -167,6 +180,6 @@ If enabled the collection will return a single object instead of an array
 optional startSync: boolean;
 ```
 
-Defined in: [packages/db/src/query/live/types.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L87)
+Defined in: [packages/db/src/query/live/types.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/query/live/types.ts#L91)
 
 Start sync / the query immediately

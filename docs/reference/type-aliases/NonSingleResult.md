@@ -9,7 +9,7 @@ title: NonSingleResult
 type NonSingleResult = object;
 ```
 
-Defined in: [packages/db/src/types.ts:601](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L601)
+Defined in: [packages/db/src/types.ts:640](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L640)
 
 ## Properties
 
@@ -19,4 +19,4 @@ Defined in: [packages/db/src/types.ts:601](https://github.com/TanStack/db/blob/m
 optional singleResult: never;
 ```
 
-Defined in: [packages/db/src/types.ts:602](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L602)
+Defined in: [packages/db/src/types.ts:641](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L641)

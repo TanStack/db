@@ -9,7 +9,7 @@ title: InferResultType
 type InferResultType<TContext> = TContext extends SingleResult ? GetResult<TContext> | undefined : GetResult<TContext>[];
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:645](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L645)
+Defined in: [packages/db/src/query/builder/types.ts:623](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L623)
 
 Utility type to infer the query result size (single row or an array)
 
