@@ -5,7 +5,7 @@ title: PacedMutationsConfig
 
 # Interface: PacedMutationsConfig\<TVariables, T\>
 
-Defined in: [packages/db/src/paced-mutations.ts:8](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L8)
+Defined in: packages/db/src/paced-mutations.ts:8
 
 Configuration for creating a paced mutations manager
 
@@ -27,7 +27,7 @@ Configuration for creating a paced mutations manager
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/paced-mutations.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L30)
+Defined in: packages/db/src/paced-mutations.ts:30
 
 Custom metadata to associate with transactions
 
@@ -39,7 +39,7 @@ Custom metadata to associate with transactions
 mutationFn: MutationFn<T>;
 ```
 
-Defined in: [packages/db/src/paced-mutations.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L21)
+Defined in: packages/db/src/paced-mutations.ts:21
 
 Function to execute the mutation on the server.
 Receives the transaction parameters containing all merged mutations.
@@ -52,7 +52,7 @@ Receives the transaction parameters containing all merged mutations.
 onMutate: (variables) => void;
 ```
 
-Defined in: [packages/db/src/paced-mutations.ts:16](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L16)
+Defined in: packages/db/src/paced-mutations.ts:16
 
 Callback to apply optimistic updates immediately.
 Receives the variables passed to the mutate function.
@@ -75,7 +75,7 @@ Receives the variables passed to the mutate function.
 strategy: Strategy;
 ```
 
-Defined in: [packages/db/src/paced-mutations.ts:26](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L26)
+Defined in: packages/db/src/paced-mutations.ts:26
 
 Strategy for controlling mutation execution timing
 Examples: debounceStrategy, queueStrategy, throttleStrategy

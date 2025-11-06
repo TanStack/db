@@ -5,7 +5,7 @@ title: SubscribeChangesOptions
 
 # Interface: SubscribeChangesOptions
 
-Defined in: [packages/db/src/types.ts:662](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L662)
+Defined in: packages/db/src/types.ts:662
 
 Options for subscribing to collection changes
 
@@ -17,7 +17,7 @@ Options for subscribing to collection changes
 optional includeInitialState: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:664](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L664)
+Defined in: packages/db/src/types.ts:664
 
 Whether to include the current state as initial changes
 
@@ -29,6 +29,6 @@ Whether to include the current state as initial changes
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:666](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L666)
+Defined in: packages/db/src/types.ts:666
 
 Pre-compiled expression for filtering changes

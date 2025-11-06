@@ -5,7 +5,7 @@ title: Parser
 
 # Interface: Parser
 
-Defined in: [packages/db/src/local-storage.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L47)
+Defined in: packages/db/src/local-storage.ts:47
 
 ## Properties
 
@@ -15,7 +15,7 @@ Defined in: [packages/db/src/local-storage.ts:47](https://github.com/TanStack/db
 parse: (data) => unknown;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:48](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L48)
+Defined in: packages/db/src/local-storage.ts:48
 
 #### Parameters
 
@@ -35,7 +35,7 @@ Defined in: [packages/db/src/local-storage.ts:48](https://github.com/TanStack/db
 stringify: (data) => string;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:49](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L49)
+Defined in: packages/db/src/local-storage.ts:49
 
 #### Parameters
 

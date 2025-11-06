@@ -11,7 +11,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn): object;
 ```
 
-Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L80)
+Defined in: useLiveQuery.ts:80
 
 Create a live query using a query function
 
@@ -153,7 +153,7 @@ return (
 function useLiveQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveQuery.ts:135](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L135)
+Defined in: useLiveQuery.ts:135
 
 Create a live query using configuration object
 
@@ -279,7 +279,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveQuery.ts:185](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L185)
+Defined in: useLiveQuery.ts:185
 
 Subscribe to an existing live query collection
 

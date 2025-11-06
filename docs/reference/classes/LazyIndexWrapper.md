@@ -5,7 +5,7 @@ title: LazyIndexWrapper
 
 # Class: LazyIndexWrapper\<TKey\>
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:39](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L39)
+Defined in: packages/db/src/indexes/lazy-index.ts:39
 
 Wrapper that defers index creation until first sync
 
@@ -29,7 +29,7 @@ new LazyIndexWrapper<TKey>(
 collectionEntries?): LazyIndexWrapper<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L43)
+Defined in: packages/db/src/indexes/lazy-index.ts:43
 
 #### Parameters
 
@@ -69,7 +69,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:43](https://github.com/TanSta
 getExpression(): BasicExpression;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:118](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L118)
+Defined in: packages/db/src/indexes/lazy-index.ts:118
 
 Get the index expression
 
@@ -85,7 +85,7 @@ Get the index expression
 getId(): number;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:104](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L104)
+Defined in: packages/db/src/indexes/lazy-index.ts:104
 
 Get the index ID
 
@@ -101,7 +101,7 @@ Get the index ID
 getName(): string | undefined;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:111](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L111)
+Defined in: packages/db/src/indexes/lazy-index.ts:111
 
 Get the index name
 
@@ -117,7 +117,7 @@ Get the index name
 getResolved(): BaseIndex<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L92)
+Defined in: packages/db/src/indexes/lazy-index.ts:92
 
 Get resolved index (throws if not ready)
 
@@ -133,7 +133,7 @@ Get resolved index (throws if not ready)
 isResolved(): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L85)
+Defined in: packages/db/src/indexes/lazy-index.ts:85
 
 Check if already resolved
 
@@ -149,7 +149,7 @@ Check if already resolved
 resolve(): Promise<BaseIndex<TKey>>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L69)
+Defined in: packages/db/src/indexes/lazy-index.ts:69
 
 Resolve the actual index
 

@@ -11,7 +11,7 @@ type IndexResolver<TKey> =
 | () => Promise<IndexConstructor<TKey>>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:212](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L212)
+Defined in: packages/db/src/indexes/base-index.ts:212
 
 Index resolver can be either a class constructor or async loader
 

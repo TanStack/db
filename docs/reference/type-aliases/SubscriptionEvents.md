@@ -9,7 +9,7 @@ title: SubscriptionEvents
 type SubscriptionEvents = object;
 ```
 
-Defined in: [packages/db/src/types.ts:190](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L190)
+Defined in: packages/db/src/types.ts:190
 
 All subscription events
 
@@ -21,7 +21,7 @@ All subscription events
 status:change: SubscriptionStatusChangeEvent;
 ```
 
-Defined in: [packages/db/src/types.ts:191](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L191)
+Defined in: packages/db/src/types.ts:191
 
 ***
 
@@ -31,7 +31,7 @@ Defined in: [packages/db/src/types.ts:191](https://github.com/TanStack/db/blob/m
 status:loadingSubset: SubscriptionStatusEvent<"loadingSubset">;
 ```
 
-Defined in: [packages/db/src/types.ts:193](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L193)
+Defined in: packages/db/src/types.ts:193
 
 ***
 
@@ -41,7 +41,7 @@ Defined in: [packages/db/src/types.ts:193](https://github.com/TanStack/db/blob/m
 status:ready: SubscriptionStatusEvent<"ready">;
 ```
 
-Defined in: [packages/db/src/types.ts:192](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L192)
+Defined in: packages/db/src/types.ts:192
 
 ***
 
@@ -51,4 +51,4 @@ Defined in: [packages/db/src/types.ts:192](https://github.com/TanStack/db/blob/m
 unsubscribed: SubscriptionUnsubscribedEvent;
 ```
 
-Defined in: [packages/db/src/types.ts:194](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L194)
+Defined in: packages/db/src/types.ts:194

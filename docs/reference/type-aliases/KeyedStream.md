@@ -9,7 +9,7 @@ title: KeyedStream
 type KeyedStream = IStreamBuilder<InputRow>;
 ```
 
-Defined in: [packages/db/src/types.ts:633](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L633)
+Defined in: packages/db/src/types.ts:633
 
 A keyed stream is a stream of rows
 This is used as the inputs from a collection to a query

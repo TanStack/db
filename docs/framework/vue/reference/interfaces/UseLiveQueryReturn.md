@@ -5,7 +5,7 @@ title: UseLiveQueryReturn
 
 # Interface: UseLiveQueryReturn\<T\>
 
-Defined in: [useLiveQuery.ts:36](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L36)
+Defined in: useLiveQuery.ts:36
 
 Return type for useLiveQuery hook
 
@@ -24,7 +24,7 @@ collection: ComputedRef<Collection<T, string | number, {
 }, StandardSchemaV1<unknown, unknown>, T>>;
 ```
 
-Defined in: [useLiveQuery.ts:39](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L39)
+Defined in: useLiveQuery.ts:39
 
 The underlying query collection instance
 
@@ -36,7 +36,7 @@ The underlying query collection instance
 data: ComputedRef<T[]>;
 ```
 
-Defined in: [useLiveQuery.ts:38](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L38)
+Defined in: useLiveQuery.ts:38
 
 Reactive array of query results in order
 
@@ -48,7 +48,7 @@ Reactive array of query results in order
 isCleanedUp: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:45](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L45)
+Defined in: useLiveQuery.ts:45
 
 True when query has been cleaned up
 
@@ -60,7 +60,7 @@ True when query has been cleaned up
 isError: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:44](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L44)
+Defined in: useLiveQuery.ts:44
 
 True when query encountered an error
 
@@ -72,7 +72,7 @@ True when query encountered an error
 isIdle: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:43](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L43)
+Defined in: useLiveQuery.ts:43
 
 True when query hasn't started yet
 
@@ -84,7 +84,7 @@ True when query hasn't started yet
 isLoading: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:41](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L41)
+Defined in: useLiveQuery.ts:41
 
 True while initial query data is loading
 
@@ -96,7 +96,7 @@ True while initial query data is loading
 isReady: ComputedRef<boolean>;
 ```
 
-Defined in: [useLiveQuery.ts:42](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L42)
+Defined in: useLiveQuery.ts:42
 
 True when query has received first data and is ready
 
@@ -108,7 +108,7 @@ True when query has received first data and is ready
 state: ComputedRef<Map<string | number, T>>;
 ```
 
-Defined in: [useLiveQuery.ts:37](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L37)
+Defined in: useLiveQuery.ts:37
 
 Reactive Map of query results (key → item)
 
@@ -120,6 +120,6 @@ Reactive Map of query results (key → item)
 status: ComputedRef<CollectionStatus>;
 ```
 
-Defined in: [useLiveQuery.ts:40](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L40)
+Defined in: useLiveQuery.ts:40
 
 Current query status

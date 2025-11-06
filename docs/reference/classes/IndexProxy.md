@@ -5,7 +5,7 @@ title: IndexProxy
 
 # Class: IndexProxy\<TKey\>
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:131](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L131)
+Defined in: packages/db/src/indexes/lazy-index.ts:131
 
 Proxy that provides synchronous interface while index loads asynchronously
 
@@ -23,7 +23,7 @@ Proxy that provides synchronous interface while index loads asynchronously
 new IndexProxy<TKey>(indexId, lazyIndex): IndexProxy<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L132)
+Defined in: packages/db/src/indexes/lazy-index.ts:132
 
 #### Parameters
 
@@ -49,7 +49,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:132](https://github.com/TanSt
 get expression(): BasicExpression;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:178](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L178)
+Defined in: packages/db/src/indexes/lazy-index.ts:178
 
 Get the index expression (available immediately)
 
@@ -67,7 +67,7 @@ Get the index expression (available immediately)
 get id(): number;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:161](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L161)
+Defined in: packages/db/src/indexes/lazy-index.ts:161
 
 Get the index ID
 
@@ -85,7 +85,7 @@ Get the index ID
 get index(): BaseIndex<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:140](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L140)
+Defined in: packages/db/src/indexes/lazy-index.ts:140
 
 Get the resolved index (throws if not ready)
 
@@ -103,7 +103,7 @@ Get the resolved index (throws if not ready)
 get indexedKeysSet(): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:216](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L216)
+Defined in: packages/db/src/indexes/lazy-index.ts:216
 
 ##### Returns
 
@@ -119,7 +119,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:216](https://github.com/TanSt
 get isReady(): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:147](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L147)
+Defined in: packages/db/src/indexes/lazy-index.ts:147
 
 Check if index is ready
 
@@ -137,7 +137,7 @@ Check if index is ready
 get keyCount(): number;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:211](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L211)
+Defined in: packages/db/src/indexes/lazy-index.ts:211
 
 Get the key count (throws if not ready)
 
@@ -155,7 +155,7 @@ Get the key count (throws if not ready)
 get name(): string | undefined;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L168)
+Defined in: packages/db/src/indexes/lazy-index.ts:168
 
 Get the index name (throws if not ready)
 
@@ -173,7 +173,7 @@ Get the index name (throws if not ready)
 get orderedEntriesArray(): [any, Set<TKey>][];
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:221](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L221)
+Defined in: packages/db/src/indexes/lazy-index.ts:221
 
 ##### Returns
 
@@ -189,7 +189,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:221](https://github.com/TanSt
 get valueMapData(): Map<any, Set<TKey>>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:226](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L226)
+Defined in: packages/db/src/indexes/lazy-index.ts:226
 
 ##### Returns
 
@@ -203,7 +203,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:226](https://github.com/TanSt
 _getLazyWrapper(): LazyIndexWrapper<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:248](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L248)
+Defined in: packages/db/src/indexes/lazy-index.ts:248
 
 #### Returns
 
@@ -217,7 +217,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:248](https://github.com/TanSt
 equalityLookup(value): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:232](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L232)
+Defined in: packages/db/src/indexes/lazy-index.ts:232
 
 #### Parameters
 
@@ -237,7 +237,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:232](https://github.com/TanSt
 getStats(): IndexStats;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:192](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L192)
+Defined in: packages/db/src/indexes/lazy-index.ts:192
 
 Get index statistics (throws if not ready)
 
@@ -253,7 +253,7 @@ Get index statistics (throws if not ready)
 inArrayLookup(values): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:242](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L242)
+Defined in: packages/db/src/indexes/lazy-index.ts:242
 
 #### Parameters
 
@@ -273,7 +273,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:242](https://github.com/TanSt
 matchesField(fieldPath): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:199](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L199)
+Defined in: packages/db/src/indexes/lazy-index.ts:199
 
 Check if index matches a field path (available immediately)
 
@@ -295,7 +295,7 @@ Check if index matches a field path (available immediately)
 rangeQuery(options): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:237](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L237)
+Defined in: packages/db/src/indexes/lazy-index.ts:237
 
 #### Parameters
 
@@ -315,7 +315,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:237](https://github.com/TanSt
 supports(operation): boolean;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:185](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L185)
+Defined in: packages/db/src/indexes/lazy-index.ts:185
 
 Check if index supports an operation (throws if not ready)
 
@@ -337,7 +337,7 @@ Check if index supports an operation (throws if not ready)
 whenReady(): Promise<BaseIndex<TKey>>;
 ```
 
-Defined in: [packages/db/src/indexes/lazy-index.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/lazy-index.ts#L154)
+Defined in: packages/db/src/indexes/lazy-index.ts:154
 
 Wait for index to be ready
 

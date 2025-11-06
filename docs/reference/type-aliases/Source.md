@@ -9,7 +9,7 @@ title: Source
 type Source = object;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:75](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L75)
+Defined in: packages/db/src/query/builder/types.ts:75
 
 Source - Input definition for query builder `from()` clause
 

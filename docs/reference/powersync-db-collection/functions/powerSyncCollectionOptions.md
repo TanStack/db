@@ -13,7 +13,7 @@ Implementation of powerSyncCollectionOptions that handles both schema and non-sc
 function powerSyncCollectionOptions<TTable>(config): EnhancedPowerSyncCollectionConfig<TTable, OptionalExtractedTable<TTable>, never>;
 ```
 
-Defined in: [powersync.ts:71](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L71)
+Defined in: powersync.ts:71
 
 Creates a PowerSync collection configuration with basic default validation.
 Input and Output types are the SQLite column types.
@@ -66,7 +66,7 @@ const collection = createCollection(
 function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, UtilsRecord> & object & object;
 ```
 
-Defined in: [powersync.ts:128](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L128)
+Defined in: powersync.ts:128
 
 Creates a PowerSync collection configuration with schema validation.
 
@@ -141,7 +141,7 @@ const collection = createCollection(
 function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, UtilsRecord> & object & object;
 ```
 
-Defined in: [powersync.ts:196](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L196)
+Defined in: powersync.ts:196
 
 Creates a PowerSync collection configuration with schema validation.
 

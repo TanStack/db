@@ -9,6 +9,6 @@ title: SubscriptionStatus
 type SubscriptionStatus = "ready" | "loadingSubset";
 ```
 
-Defined in: [packages/db/src/types.ts:157](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L157)
+Defined in: packages/db/src/types.ts:157
 
 Subscription status values

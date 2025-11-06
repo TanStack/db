@@ -11,7 +11,7 @@ title: electricCollectionOptions
 function electricCollectionOptions<T>(config): CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:254](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L254)
+Defined in: packages/electric-db-collection/src/electric.ts:254
 
 Creates Electric collection options for use with a standard Collection
 
@@ -43,7 +43,7 @@ Collection options with utilities
 function electricCollectionOptions<T>(config): CollectionConfig<T, string | number, never, UtilsRecord> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:265](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L265)
+Defined in: packages/electric-db-collection/src/electric.ts:265
 
 Creates Electric collection options for use with a standard Collection
 

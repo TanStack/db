@@ -5,7 +5,7 @@ title: LocalStorageCollectionUtils
 
 # Interface: LocalStorageCollectionUtils
 
-Defined in: [packages/db/src/local-storage.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L100)
+Defined in: packages/db/src/local-storage.ts:100
 
 LocalStorage collection utilities type
 
@@ -27,7 +27,7 @@ LocalStorage collection utilities type
 acceptMutations: (transaction) => void;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:120](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L120)
+Defined in: packages/db/src/local-storage.ts:120
 
 Accepts mutations from a transaction that belong to this collection and persists them to localStorage.
 This should be called in your transaction's mutationFn to persist local-storage data.
@@ -69,7 +69,7 @@ const tx = createTransaction({
 clearStorage: ClearStorageFn;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L101)
+Defined in: packages/db/src/local-storage.ts:101
 
 ***
 
@@ -79,4 +79,4 @@ Defined in: [packages/db/src/local-storage.ts:101](https://github.com/TanStack/d
 getStorageSize: GetStorageSizeFn;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:102](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L102)
+Defined in: packages/db/src/local-storage.ts:102

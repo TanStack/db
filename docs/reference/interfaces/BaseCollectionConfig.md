@@ -5,7 +5,7 @@ title: BaseCollectionConfig
 
 # Interface: BaseCollectionConfig\<T, TKey, TSchema, TUtils, TReturn\>
 
-Defined in: [packages/db/src/types.ts:385](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L385)
+Defined in: packages/db/src/types.ts:385
 
 ## Extended by
 
@@ -42,7 +42,7 @@ Defined in: [packages/db/src/types.ts:385](https://github.com/TanStack/db/blob/m
 optional autoIndex: "eager" | "off";
 ```
 
-Defined in: [packages/db/src/types.ts:434](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L434)
+Defined in: packages/db/src/types.ts:434
 
 Auto-indexing mode for the collection.
 When enabled, indexes will be automatically created for simple where expressions.
@@ -66,7 +66,7 @@ When enabled, indexes will be automatically created for simple where expressions
 optional compare: (x, y) => number;
 ```
 
-Defined in: [packages/db/src/types.ts:445](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L445)
+Defined in: packages/db/src/types.ts:445
 
 Optional function to compare two items.
 This is used to order the items in the collection.
@@ -106,7 +106,7 @@ compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
 optional gcTime: number;
 ```
 
-Defined in: [packages/db/src/types.ts:414](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L414)
+Defined in: packages/db/src/types.ts:414
 
 Time in milliseconds after which the collection will be garbage collected
 when it has no active subscribers. Defaults to 5 minutes (300000ms).
@@ -119,7 +119,7 @@ when it has no active subscribers. Defaults to 5 minutes (300000ms).
 getKey: (item) => TKey;
 ```
 
-Defined in: [packages/db/src/types.ts:409](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L409)
+Defined in: packages/db/src/types.ts:409
 
 Function to extract the ID from an object
 This is required for update/delete operations which now only accept IDs
@@ -153,7 +153,7 @@ getKey: (item) => item.uuid
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:398](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L398)
+Defined in: packages/db/src/types.ts:398
 
 ***
 
@@ -163,7 +163,7 @@ Defined in: [packages/db/src/types.ts:398](https://github.com/TanStack/db/blob/m
 optional onDelete: DeleteMutationFn<T, TKey, TUtils, TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:583](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L583)
+Defined in: packages/db/src/types.ts:583
 
 Optional asynchronous handler function called before a delete operation
 
@@ -227,7 +227,7 @@ onDelete: async ({ transaction, collection }) => {
 optional onInsert: InsertMutationFn<T, TKey, TUtils, TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:496](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L496)
+Defined in: packages/db/src/types.ts:496
 
 Optional asynchronous handler function called before an insert operation
 
@@ -290,7 +290,7 @@ onInsert: async ({ transaction, collection }) => {
 optional onUpdate: UpdateMutationFn<T, TKey, TUtils, TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:540](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L540)
+Defined in: packages/db/src/types.ts:540
 
 Optional asynchronous handler function called before an update operation
 
@@ -354,7 +354,7 @@ onUpdate: async ({ transaction, collection }) => {
 optional schema: TSchema;
 ```
 
-Defined in: [packages/db/src/types.ts:399](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L399)
+Defined in: packages/db/src/types.ts:399
 
 ***
 
@@ -364,7 +364,7 @@ Defined in: [packages/db/src/types.ts:399](https://github.com/TanStack/db/blob/m
 optional startSync: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L425)
+Defined in: packages/db/src/types.ts:425
 
 Whether to eagerly start syncing on collection creation.
 When true, syncing begins immediately. When false, syncing starts when the first subscriber attaches.
@@ -387,7 +387,7 @@ false
 optional syncMode: SyncMode;
 ```
 
-Defined in: [packages/db/src/types.ts:454](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L454)
+Defined in: packages/db/src/types.ts:454
 
 The mode of sync to use for the collection.
 
@@ -409,4 +409,4 @@ The exact implementation of the sync mode is up to the sync implementation.
 optional utils: TUtils;
 ```
 
-Defined in: [packages/db/src/types.ts:585](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L585)
+Defined in: packages/db/src/types.ts:585

@@ -5,7 +5,7 @@ title: ChangeMessage
 
 # Interface: ChangeMessage\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:261](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L261)
+Defined in: packages/db/src/types.ts:261
 
 ## Extended by
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/types.ts:261](https://github.com/TanStack/db/blob/m
 key: TKey;
 ```
 
-Defined in: [packages/db/src/types.ts:265](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L265)
+Defined in: packages/db/src/types.ts:265
 
 ***
 
@@ -39,7 +39,7 @@ Defined in: [packages/db/src/types.ts:265](https://github.com/TanStack/db/blob/m
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:269](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L269)
+Defined in: packages/db/src/types.ts:269
 
 ***
 
@@ -49,7 +49,7 @@ Defined in: [packages/db/src/types.ts:269](https://github.com/TanStack/db/blob/m
 optional previousValue: T;
 ```
 
-Defined in: [packages/db/src/types.ts:267](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L267)
+Defined in: packages/db/src/types.ts:267
 
 ***
 
@@ -59,7 +59,7 @@ Defined in: [packages/db/src/types.ts:267](https://github.com/TanStack/db/blob/m
 type: OperationType;
 ```
 
-Defined in: [packages/db/src/types.ts:268](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L268)
+Defined in: packages/db/src/types.ts:268
 
 ***
 
@@ -69,4 +69,4 @@ Defined in: [packages/db/src/types.ts:268](https://github.com/TanStack/db/blob/m
 value: T;
 ```
 
-Defined in: [packages/db/src/types.ts:266](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L266)
+Defined in: packages/db/src/types.ts:266

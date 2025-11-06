@@ -5,7 +5,7 @@ title: IndexInterface
 
 # Interface: IndexInterface\<TKey\>
 
-Defined in: [packages/db/src/indexes/base-index.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L28)
+Defined in: packages/db/src/indexes/base-index.ts:28
 
 ## Type Parameters
 
@@ -21,7 +21,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:28](https://github.com/TanSta
 add: (key, item) => void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:31](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L31)
+Defined in: packages/db/src/indexes/base-index.ts:31
 
 #### Parameters
 
@@ -45,7 +45,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:31](https://github.com/TanSta
 build: (entries) => void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L35)
+Defined in: packages/db/src/indexes/base-index.ts:35
 
 #### Parameters
 
@@ -65,7 +65,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:35](https://github.com/TanSta
 clear: () => void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:36](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L36)
+Defined in: packages/db/src/indexes/base-index.ts:36
 
 #### Returns
 
@@ -79,7 +79,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:36](https://github.com/TanSta
 equalityLookup: (value) => Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:40](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L40)
+Defined in: packages/db/src/indexes/base-index.ts:40
 
 #### Parameters
 
@@ -99,7 +99,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:40](https://github.com/TanSta
 getStats: () => IndexStats;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L70)
+Defined in: packages/db/src/indexes/base-index.ts:70
 
 #### Returns
 
@@ -113,7 +113,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:70](https://github.com/TanSta
 inArrayLookup: (values) => Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:41](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L41)
+Defined in: packages/db/src/indexes/base-index.ts:41
 
 #### Parameters
 
@@ -133,7 +133,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:41](https://github.com/TanSta
 lookup: (operation, value) => Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:38](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L38)
+Defined in: packages/db/src/indexes/base-index.ts:38
 
 #### Parameters
 
@@ -157,7 +157,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:38](https://github.com/TanSta
 matchesCompareOptions: (compareOptions) => boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L67)
+Defined in: packages/db/src/indexes/base-index.ts:67
 
 #### Parameters
 
@@ -177,7 +177,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:67](https://github.com/TanSta
 matchesDirection: (direction) => boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:68](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L68)
+Defined in: packages/db/src/indexes/base-index.ts:68
 
 #### Parameters
 
@@ -197,7 +197,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:68](https://github.com/TanSta
 matchesField: (fieldPath) => boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:66](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L66)
+Defined in: packages/db/src/indexes/base-index.ts:66
 
 #### Parameters
 
@@ -217,7 +217,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:66](https://github.com/TanSta
 rangeQuery: (options) => Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L43)
+Defined in: packages/db/src/indexes/base-index.ts:43
 
 #### Parameters
 
@@ -237,7 +237,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:43](https://github.com/TanSta
 rangeQueryReversed: (options) => Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L44)
+Defined in: packages/db/src/indexes/base-index.ts:44
 
 #### Parameters
 
@@ -257,7 +257,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:44](https://github.com/TanSta
 remove: (key, item) => void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:32](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L32)
+Defined in: packages/db/src/indexes/base-index.ts:32
 
 #### Parameters
 
@@ -281,7 +281,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:32](https://github.com/TanSta
 supports: (operation) => boolean;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:64](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L64)
+Defined in: packages/db/src/indexes/base-index.ts:64
 
 #### Parameters
 
@@ -301,7 +301,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:64](https://github.com/TanSta
 take: (n, from?, filterFn?) => TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L46)
+Defined in: packages/db/src/indexes/base-index.ts:46
 
 #### Parameters
 
@@ -329,7 +329,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:46](https://github.com/TanSta
 takeReversed: (n, from?, filterFn?) => TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L51)
+Defined in: packages/db/src/indexes/base-index.ts:51
 
 #### Parameters
 
@@ -357,7 +357,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:51](https://github.com/TanSta
 update: (key, oldItem, newItem) => void;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:33](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L33)
+Defined in: packages/db/src/indexes/base-index.ts:33
 
 #### Parameters
 
@@ -387,7 +387,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:33](https://github.com/TanSta
 get indexedKeysSet(): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:61](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L61)
+Defined in: packages/db/src/indexes/base-index.ts:61
 
 ##### Returns
 
@@ -403,7 +403,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:61](https://github.com/TanSta
 get keyCount(): number;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:57](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L57)
+Defined in: packages/db/src/indexes/base-index.ts:57
 
 ##### Returns
 
@@ -419,7 +419,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:57](https://github.com/TanSta
 get orderedEntriesArray(): [any, Set<TKey>][];
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:58](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L58)
+Defined in: packages/db/src/indexes/base-index.ts:58
 
 ##### Returns
 
@@ -435,7 +435,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:58](https://github.com/TanSta
 get orderedEntriesArrayReversed(): [any, Set<TKey>][];
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:59](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L59)
+Defined in: packages/db/src/indexes/base-index.ts:59
 
 ##### Returns
 
@@ -451,7 +451,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:59](https://github.com/TanSta
 get valueMapData(): Map<any, Set<TKey>>;
 ```
 
-Defined in: [packages/db/src/indexes/base-index.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/base-index.ts#L62)
+Defined in: packages/db/src/indexes/base-index.ts:62
 
 ##### Returns
 

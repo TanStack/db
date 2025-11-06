@@ -11,7 +11,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
 ```
 
-Defined in: [useLiveQuery.ts:114](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L114)
+Defined in: useLiveQuery.ts:114
 
 Create a live query using a query function
 
@@ -97,7 +97,7 @@ const { data, isLoading, isError, status } = useLiveQuery((q) =>
 function useLiveQuery<TContext>(config, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
 ```
 
-Defined in: [useLiveQuery.ts:152](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L152)
+Defined in: useLiveQuery.ts:152
 
 Create a live query using configuration object
 
@@ -165,7 +165,7 @@ const { data, isLoading, isReady, isError } = useLiveQuery({
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveQuery.ts:197](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L197)
+Defined in: useLiveQuery.ts:197
 
 Subscribe to an existing query collection (can be reactive)
 

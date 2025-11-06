@@ -5,7 +5,7 @@ title: CreateOptimisticActionsOptions
 
 # Interface: CreateOptimisticActionsOptions\<TVars, T\>
 
-Defined in: [packages/db/src/types.ts:128](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L128)
+Defined in: packages/db/src/types.ts:128
 
 Options for the createOptimisticAction helper
 
@@ -31,7 +31,7 @@ Options for the createOptimisticAction helper
 optional autoCommit: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:119](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L119)
+Defined in: packages/db/src/types.ts:119
 
 #### Inherited from
 
@@ -45,7 +45,7 @@ Defined in: [packages/db/src/types.ts:119](https://github.com/TanStack/db/blob/m
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:117](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L117)
+Defined in: packages/db/src/types.ts:117
 
 Unique identifier for the transaction
 
@@ -63,7 +63,7 @@ Omit.id
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L122)
+Defined in: packages/db/src/types.ts:122
 
 Custom metadata to associate with the transaction
 
@@ -81,7 +81,7 @@ Omit.metadata
 mutationFn: (vars, params) => Promise<any>;
 ```
 
-Defined in: [packages/db/src/types.ts:135](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L135)
+Defined in: packages/db/src/types.ts:135
 
 Function to execute the mutation on the server
 
@@ -107,7 +107,7 @@ Function to execute the mutation on the server
 onMutate: (vars) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L133)
+Defined in: packages/db/src/types.ts:133
 
 Function to apply optimistic updates locally before the mutation completes
 

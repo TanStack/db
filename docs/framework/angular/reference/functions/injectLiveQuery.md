@@ -11,7 +11,7 @@ title: injectLiveQuery
 function injectLiveQuery<TContext, TParams>(options): InjectLiveQueryResult<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
 ```
 
-Defined in: [index.ts:51](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L51)
+Defined in: index.ts:51
 
 ### Type Parameters
 
@@ -45,7 +45,7 @@ Defined in: [index.ts:51](https://github.com/TanStack/db/blob/main/packages/angu
 function injectLiveQuery<TContext>(queryFn): InjectLiveQueryResult<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
 ```
 
-Defined in: [index.ts:61](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L61)
+Defined in: index.ts:61
 
 ### Type Parameters
 
@@ -69,7 +69,7 @@ Defined in: [index.ts:61](https://github.com/TanStack/db/blob/main/packages/angu
 function injectLiveQuery<TContext>(config): InjectLiveQueryResult<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
 ```
 
-Defined in: [index.ts:64](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L64)
+Defined in: index.ts:64
 
 ### Type Parameters
 
@@ -93,7 +93,7 @@ Defined in: [index.ts:64](https://github.com/TanStack/db/blob/main/packages/angu
 function injectLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): InjectLiveQueryResult<TResult, TKey, TUtils>;
 ```
 
-Defined in: [index.ts:67](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L67)
+Defined in: index.ts:67
 
 ### Type Parameters
 

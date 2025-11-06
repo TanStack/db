@@ -5,7 +5,7 @@ title: LocalOnlyCollectionConfig
 
 # Interface: LocalOnlyCollectionConfig\<T, TSchema, TKey\>
 
-Defined in: [packages/db/src/local-only.ts:22](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L22)
+Defined in: packages/db/src/local-only.ts:22
 
 Configuration interface for Local-only collection options
 
@@ -41,7 +41,7 @@ The type of the key returned by `getKey`
 optional autoIndex: "eager" | "off";
 ```
 
-Defined in: [packages/db/src/types.ts:434](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L434)
+Defined in: packages/db/src/types.ts:434
 
 Auto-indexing mode for the collection.
 When enabled, indexes will be automatically created for simple where expressions.
@@ -69,7 +69,7 @@ When enabled, indexes will be automatically created for simple where expressions
 optional compare: (x, y) => number;
 ```
 
-Defined in: [packages/db/src/types.ts:445](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L445)
+Defined in: packages/db/src/types.ts:445
 
 Optional function to compare two items.
 This is used to order the items in the collection.
@@ -115,7 +115,7 @@ Omit.compare
 getKey: (item) => TKey;
 ```
 
-Defined in: [packages/db/src/types.ts:409](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L409)
+Defined in: packages/db/src/types.ts:409
 
 Function to extract the ID from an object
 This is required for update/delete operations which now only accept IDs
@@ -155,7 +155,7 @@ Omit.getKey
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:398](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L398)
+Defined in: packages/db/src/types.ts:398
 
 #### Inherited from
 
@@ -169,7 +169,7 @@ Defined in: [packages/db/src/types.ts:398](https://github.com/TanStack/db/blob/m
 optional initialData: T[];
 ```
 
-Defined in: [packages/db/src/local-only.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L34)
+Defined in: packages/db/src/local-only.ts:34
 
 Optional initial data to populate the collection with on creation
 This data will be applied during the initial sync process
@@ -182,7 +182,7 @@ This data will be applied during the initial sync process
 optional onDelete: DeleteMutationFn<T, TKey, LocalOnlyCollectionUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:583](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L583)
+Defined in: packages/db/src/types.ts:583
 
 Optional asynchronous handler function called before a delete operation
 
@@ -252,7 +252,7 @@ Omit.onDelete
 optional onInsert: InsertMutationFn<T, TKey, LocalOnlyCollectionUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:496](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L496)
+Defined in: packages/db/src/types.ts:496
 
 Optional asynchronous handler function called before an insert operation
 
@@ -321,7 +321,7 @@ Omit.onInsert
 optional onUpdate: UpdateMutationFn<T, TKey, LocalOnlyCollectionUtils, any>;
 ```
 
-Defined in: [packages/db/src/types.ts:540](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L540)
+Defined in: packages/db/src/types.ts:540
 
 Optional asynchronous handler function called before an update operation
 
@@ -391,7 +391,7 @@ Omit.onUpdate
 optional schema: TSchema;
 ```
 
-Defined in: [packages/db/src/types.ts:399](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L399)
+Defined in: packages/db/src/types.ts:399
 
 #### Inherited from
 
@@ -407,7 +407,7 @@ Omit.schema
 optional syncMode: SyncMode;
 ```
 
-Defined in: [packages/db/src/types.ts:454](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L454)
+Defined in: packages/db/src/types.ts:454
 
 The mode of sync to use for the collection.
 
@@ -433,7 +433,7 @@ The exact implementation of the sync mode is up to the sync implementation.
 optional utils: LocalOnlyCollectionUtils;
 ```
 
-Defined in: [packages/db/src/types.ts:585](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L585)
+Defined in: packages/db/src/types.ts:585
 
 #### Inherited from
 

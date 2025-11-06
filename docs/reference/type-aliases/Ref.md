@@ -9,7 +9,7 @@ title: Ref
 type Ref<T> = { [K in keyof T]: IsNonExactOptional<T[K]> extends true ? IsNonExactNullable<T[K]> extends true ? IsPlainObject<NonNullable<T[K]>> extends true ? Ref<NonNullable<T[K]>> | undefined : RefLeaf<NonNullable<T[K]>> | undefined : IsPlainObject<NonUndefined<T[K]>> extends true ? Ref<NonUndefined<T[K]>> | undefined : RefLeaf<NonUndefined<T[K]>> | undefined : IsNonExactNullable<T[K]> extends true ? IsPlainObject<NonNull<T[K]>> extends true ? Ref<NonNull<T[K]>> | null : RefLeaf<NonNull<T[K]>> | null : IsPlainObject<T[K]> extends true ? Ref<T[K]> : RefLeaf<T[K]> } & RefLeaf<T>;
 ```
 
-Defined in: [packages/db/src/query/builder/types.ts:493](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L493)
+Defined in: packages/db/src/query/builder/types.ts:493
 
 Ref - The user-facing ref interface for the query builder
 

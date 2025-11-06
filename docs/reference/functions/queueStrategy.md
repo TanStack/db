@@ -9,7 +9,7 @@ title: queueStrategy
 function queueStrategy(options?): QueueStrategy;
 ```
 
-Defined in: [packages/db/src/strategies/queueStrategy.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/queueStrategy.ts#L46)
+Defined in: packages/db/src/strategies/queueStrategy.ts:46
 
 Creates a queue strategy that processes all mutations in order with proper serialization.
 

@@ -9,7 +9,7 @@ title: Fn
 type Fn = (...args) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L35)
+Defined in: packages/db/src/types.ts:35
 
 Represents a utility function that can be attached to a collection
 
