@@ -181,7 +181,7 @@
           "to": "reference/powersync-db-collection/index"
         },
         {
-          "label": "powersyncCollectionOptions",
+          "label": "powerSyncCollectionOptions",
           "to": "reference/powersync-db-collection/functions/powerSyncCollectionOptions"
         }
       ],
