@@ -134,23 +134,23 @@
         },
         {
           "label": "createCollection",
-          "to": "reference/functions/createcollection"
+          "to": "reference/functions/createCollection"
         },
         {
           "label": "liveQueryCollectionOptions",
-          "to": "reference/functions/livequerycollectionoptions"
+          "to": "reference/functions/liveQueryCollectionOptions"
         },
         {
           "label": "createLiveQueryCollection",
-          "to": "reference/functions/createlivequerycollection"
+          "to": "reference/functions/createLiveQueryCollection"
         },
         {
           "label": "createOptimisticAction",
-          "to": "reference/functions/createoptimisticaction"
+          "to": "reference/functions/createOptimisticAction"
         },
         {
           "label": "createTransaction",
-          "to": "reference/functions/createtransaction"
+          "to": "reference/functions/createTransaction"
         },
         {
           "label": "Electric DB Collection",
@@ -158,7 +158,7 @@
         },
         {
           "label": "electricCollectionOptions",
-          "to": "reference/electric-db-collection/functions/electriccollectionoptions"
+          "to": "reference/electric-db-collection/functions/electricCollectionOptions"
         },
         {
           "label": "Query DB Collection",
@@ -166,7 +166,7 @@
         },
         {
           "label": "queryCollectionOptions",
-          "to": "reference/query-db-collection/functions/querycollectionoptions"
+          "to": "reference/query-db-collection/functions/queryCollectionOptions"
         },
         {
           "label": "RxDB DB Collection",
@@ -174,7 +174,7 @@
         },
         {
           "label": "rxdbCollectionOptions",
-          "to": "reference/rxdb-db-collection/functions/rxdbcollectionoptions"
+          "to": "reference/rxdb-db-collection/functions/rxdbCollectionOptions"
         },
         {
           "label": "PowerSync Collection",
@@ -195,7 +195,7 @@
             },
             {
               "label": "useLiveQuery",
-              "to": "framework/react/reference/functions/uselivequery"
+              "to": "framework/react/reference/functions/useLiveQuery"
             }
           ]
         },
@@ -208,7 +208,7 @@
             },
             {
               "label": "useLiveQuery",
-              "to": "framework/solid/reference/functions/uselivequery"
+              "to": "framework/solid/reference/functions/useLiveQuery"
             }
           ]
         },
@@ -221,15 +221,15 @@
             },
             {
               "label": "useLiveQuery",
-              "to": "framework/vue/reference/functions/uselivequery"
+              "to": "framework/vue/reference/functions/useLiveQuery"
             },
             {
               "label": "UseLiveQueryReturn",
-              "to": "framework/vue/reference/interfaces/uselivequeryreturn"
+              "to": "framework/vue/reference/interfaces/UseLiveQueryReturn"
             },
             {
               "label": "UseLiveQueryReturnWithCollection",
-              "to": "framework/vue/reference/interfaces/uselivequeryreturnwithcollection"
+              "to": "framework/vue/reference/interfaces/UseLiveQueryReturnWithCollection"
             }
           ]
         },
@@ -242,7 +242,7 @@
             },
             {
               "label": "injectLiveQuery",
-              "to": "framework/angular/reference/functions/injectlivequery"
+              "to": "framework/angular/reference/functions/injectLiveQuery"
             }
           ]
         }
