@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": major
+"@tanstack/db": minor
 ---
 
 Implement 3-valued logic (true/false/unknown) for all comparison and logical operators.
