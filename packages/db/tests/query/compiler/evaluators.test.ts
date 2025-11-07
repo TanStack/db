@@ -526,6 +526,32 @@ describe(`evaluators`, () => {
             // Empty arrays should be equal
             expect(compiled({})).toBe(true)
           })
+
+          it(`still handles eq with strings correctly`, () => {
+            const func1 = new Func(`eq`, [
+              new Value(`hello`),
+              new Value(`hello`),
+            ])
+            const compiled1 = compileExpression(func1)
+            expect(compiled1({})).toBe(true)
+
+            const func2 = new Func(`eq`, [
+              new Value(`hello`),
+              new Value(`world`),
+            ])
+            const compiled2 = compileExpression(func2)
+            expect(compiled2({})).toBe(false)
+          })
+
+          it(`still handles eq with numbers correctly`, () => {
+            const func1 = new Func(`eq`, [new Value(42), new Value(42)])
+            const compiled1 = compileExpression(func1)
+            expect(compiled1({})).toBe(true)
+
+            const func2 = new Func(`eq`, [new Value(42), new Value(43)])
+            const compiled2 = compileExpression(func2)
+            expect(compiled2({})).toBe(false)
+          })
         })
 
         describe(`gt (greater than)`, () => {
