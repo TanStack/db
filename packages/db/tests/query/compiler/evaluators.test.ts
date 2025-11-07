@@ -505,6 +505,27 @@ describe(`evaluators`, () => {
               expect(compiled({})).toBe(true)
             }
           })
+
+          it(`handles eq with Uint8Arrays created with length (repro case)`, () => {
+            // Reproduction of user's issue: new Uint8Array(5) creates [0,0,0,0,0]
+            const array1 = new Uint8Array(5) // Creates array of length 5, all zeros
+            const array2 = new Uint8Array(5) // Creates another array of length 5, all zeros
+            const func = new Func(`eq`, [new Value(array1), new Value(array2)])
+            const compiled = compileExpression(func)
+
+            // Should return true because both have same content (all zeros)
+            expect(compiled({})).toBe(true)
+          })
+
+          it(`handles eq with empty Uint8Arrays`, () => {
+            const array1 = new Uint8Array(0)
+            const array2 = new Uint8Array(0)
+            const func = new Func(`eq`, [new Value(array1), new Value(array2)])
+            const compiled = compileExpression(func)
+
+            // Empty arrays should be equal
+            expect(compiled({})).toBe(true)
+          })
         })
 
         describe(`gt (greater than)`, () => {
