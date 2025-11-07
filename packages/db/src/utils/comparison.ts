@@ -112,6 +112,21 @@ export const defaultComparator = makeComparator({
 })
 
 /**
+ * Compare two Uint8Arrays for content equality
+ */
+function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.byteLength !== b.byteLength) {
+    return false
+  }
+  for (let i = 0; i < a.byteLength; i++) {
+    if (a[i] !== b[i]) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
  * Normalize a value for comparison
  */
 export function normalizeValue(value: any): any {
@@ -119,4 +134,30 @@ export function normalizeValue(value: any): any {
     return value.getTime()
   }
   return value
+}
+
+/**
+ * Compare two values for equality, with special handling for Uint8Arrays and Buffers
+ */
+export function areValuesEqual(a: any, b: any): boolean {
+  // Fast path for reference equality
+  if (a === b) {
+    return true
+  }
+
+  // Check for Uint8Array/Buffer comparison
+  const aIsUint8Array =
+    (typeof Buffer !== `undefined` && a instanceof Buffer) ||
+    a instanceof Uint8Array
+  const bIsUint8Array =
+    (typeof Buffer !== `undefined` && b instanceof Buffer) ||
+    b instanceof Uint8Array
+
+  // If both are Uint8Arrays, compare by content
+  if (aIsUint8Array && bIsUint8Array) {
+    return areUint8ArraysEqual(a, b)
+  }
+
+  // Different types or not Uint8Arrays
+  return false
 }

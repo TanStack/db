@@ -423,6 +423,88 @@ describe(`evaluators`, () => {
 
             expect(compiled({})).toBe(false)
           })
+
+          it(`handles eq with matching Uint8Arrays (content equality)`, () => {
+            const array1 = new Uint8Array([1, 2, 3, 4, 5])
+            const array2 = new Uint8Array([1, 2, 3, 4, 5])
+            const func = new Func(`eq`, [new Value(array1), new Value(array2)])
+            const compiled = compileExpression(func)
+
+            // Should return true because content is the same
+            expect(compiled({})).toBe(true)
+          })
+
+          it(`handles eq with non-matching Uint8Arrays (different content)`, () => {
+            const array1 = new Uint8Array([1, 2, 3, 4, 5])
+            const array2 = new Uint8Array([1, 2, 3, 4, 6])
+            const func = new Func(`eq`, [new Value(array1), new Value(array2)])
+            const compiled = compileExpression(func)
+
+            // Should return false because content is different
+            expect(compiled({})).toBe(false)
+          })
+
+          it(`handles eq with Uint8Arrays of different lengths`, () => {
+            const array1 = new Uint8Array([1, 2, 3, 4])
+            const array2 = new Uint8Array([1, 2, 3, 4, 5])
+            const func = new Func(`eq`, [new Value(array1), new Value(array2)])
+            const compiled = compileExpression(func)
+
+            // Should return false because lengths are different
+            expect(compiled({})).toBe(false)
+          })
+
+          it(`handles eq with same Uint8Array reference`, () => {
+            const array = new Uint8Array([1, 2, 3, 4, 5])
+            const func = new Func(`eq`, [new Value(array), new Value(array)])
+            const compiled = compileExpression(func)
+
+            // Should return true (fast path for reference equality)
+            expect(compiled({})).toBe(true)
+          })
+
+          it(`handles eq with Uint8Array and non-Uint8Array`, () => {
+            const array = new Uint8Array([1, 2, 3])
+            const value = [1, 2, 3]
+            const func = new Func(`eq`, [new Value(array), new Value(value)])
+            const compiled = compileExpression(func)
+
+            // Should return false because types are different
+            expect(compiled({})).toBe(false)
+          })
+
+          it(`handles eq with ULIDs (16-byte Uint8Arrays)`, () => {
+            // Simulate ULID comparison - 16 bytes
+            const ulid1 = new Uint8Array(16)
+            const ulid2 = new Uint8Array(16)
+
+            // Fill with same values
+            for (let i = 0; i < 16; i++) {
+              ulid1[i] = i
+              ulid2[i] = i
+            }
+
+            const func = new Func(`eq`, [new Value(ulid1), new Value(ulid2)])
+            const compiled = compileExpression(func)
+
+            // Should return true because content is identical
+            expect(compiled({})).toBe(true)
+          })
+
+          it(`handles eq with Buffers (if available)`, () => {
+            if (typeof Buffer !== `undefined`) {
+              const buffer1 = Buffer.from([1, 2, 3, 4, 5])
+              const buffer2 = Buffer.from([1, 2, 3, 4, 5])
+              const func = new Func(`eq`, [
+                new Value(buffer1),
+                new Value(buffer2),
+              ])
+              const compiled = compileExpression(func)
+
+              // Should return true because content is the same
+              expect(compiled({})).toBe(true)
+            }
+          })
         })
 
         describe(`gt (greater than)`, () => {
