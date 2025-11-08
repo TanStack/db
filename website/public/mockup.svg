@@ -1,0 +1,100 @@
+<svg width="1200" height="3000" viewBox="0 0 1200 3000" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="1200" height="3000" fill="#0f0f23"/>
+
+  <!-- Navigation Bar -->
+  <rect width="1200" height="80" fill="#0f0f23" stroke="#2a2a3e" stroke-width="1"/>
+  <text x="60" y="50" font-size="24" font-weight="bold" fill="url(#gradient)">TanStack DB</text>
+  <text x="900" y="50" font-size="16" fill="#a8a8b3">Learn</text>
+  <text x="980" y="50" font-size="16" fill="#a8a8b3">Query-Driven Sync</text>
+
+  <!-- Hero Section -->
+  <text x="600" y="200" font-size="64" font-weight="bold" fill="url(#gradient)" text-anchor="middle">TanStack DB</text>
+  <text x="600" y="260" font-size="24" fill="#a8a8b3" text-anchor="middle">A client-side database for your API</text>
+  <text x="600" y="320" font-size="18" fill="#ffffff" text-anchor="middle">Colocated reactive queries, effortless optimistic mutations,</text>
+  <text x="600" y="350" font-size="18" fill="#ffffff" text-anchor="middle">and Collections that wrap your existing useQuery calls</text>
+
+  <!-- Buttons -->
+  <rect x="450" y="380" width="140" height="50" rx="8" fill="url(#gradient)"/>
+  <text x="520" y="412" font-size="18" font-weight="bold" fill="white" text-anchor="middle">Get Started</text>
+  <rect x="610" y="380" width="180" height="50" rx="8" fill="none" stroke="#e535ab" stroke-width="2"/>
+  <text x="700" y="412" font-size="18" font-weight="bold" fill="#e535ab" text-anchor="middle">Query-Driven Sync →</text>
+
+  <!-- Features Section -->
+  <text x="600" y="520" font-size="40" font-weight="bold" fill="white" text-anchor="middle">Why TanStack DB?</text>
+
+  <!-- Feature Cards Grid -->
+  <g transform="translate(100, 580)">
+    <!-- Card 1 -->
+    <rect width="320" height="200" rx="12" fill="#1a1a2e" stroke="#2a2a3e"/>
+    <text x="20" y="40" font-size="24" fill="#e535ab">⚡ Blazing Fast</text>
+    <text x="20" y="80" font-size="14" fill="#a8a8b3">Sub-millisecond live queries,</text>
+    <text x="20" y="100" font-size="14" fill="#a8a8b3">joins & aggregates powered</text>
+    <text x="20" y="120" font-size="14" fill="#a8a8b3">by differential dataflow.</text>
+
+    <!-- Card 2 -->
+    <g transform="translate(360, 0)">
+      <rect width="320" height="200" rx="12" fill="#1a1a2e" stroke="#2a2a3e"/>
+      <text x="20" y="40" font-size="24" fill="#e535ab">🎯 Fine-Grained</text>
+      <text x="20" y="80" font-size="14" fill="#a8a8b3">Minimize component</text>
+      <text x="20" y="100" font-size="14" fill="#a8a8b3">re-rendering with precise,</text>
+      <text x="20" y="120" font-size="14" fill="#a8a8b3">granular updates.</text>
+    </g>
+
+    <!-- Card 3 -->
+    <g transform="translate(720, 0)">
+      <rect width="320" height="200" rx="12" fill="#1a1a2e" stroke="#2a2a3e"/>
+      <text x="20" y="40" font-size="24" fill="#e535ab">🔄 Optimistic</text>
+      <text x="20" y="80" font-size="14" fill="#a8a8b3">Robust transaction</text>
+      <text x="20" y="100" font-size="14" fill="#a8a8b3">primitives for optimistic</text>
+      <text x="20" y="120" font-size="14" fill="#a8a8b3">updates with sync support.</text>
+    </g>
+  </g>
+
+  <!-- Code Section -->
+  <g transform="translate(0, 900)">
+    <text x="600" y="60" font-size="40" font-weight="bold" fill="white" text-anchor="middle">Simple, Powerful Queries</text>
+    <rect x="150" y="100" width="900" height="200" rx="12" fill="#1a1a2e" stroke="#2a2a3e"/>
+    <text x="180" y="140" font-family="monospace" font-size="14" fill="#c792ea">const</text>
+    <text x="230" y="140" font-family="monospace" font-size="14" fill="#e6e6e6">{ data: projectTodos } =</text>
+    <text x="180" y="165" font-family="monospace" font-size="14" fill="#82aaff">  useLiveQuery</text>
+    <text x="290" y="165" font-family="monospace" font-size="14" fill="#e6e6e6">((q) =></text>
+    <text x="180" y="190" font-family="monospace" font-size="14" fill="#e6e6e6">    q.</text>
+    <text x="220" y="190" font-family="monospace" font-size="14" fill="#82aaff">from</text>
+    <text x="270" y="190" font-family="monospace" font-size="14" fill="#e6e6e6">({ todos })</text>
+    <text x="180" y="215" font-family="monospace" font-size="14" fill="#e6e6e6">     .</text>
+    <text x="220" y="215" font-family="monospace" font-size="14" fill="#82aaff">join</text>
+    <text x="270" y="215" font-family="monospace" font-size="14" fill="#e6e6e6">({ projects })</text>
+    <text x="180" y="240" font-family="monospace" font-size="14" fill="#e6e6e6">  )</text>
+  </g>
+
+  <!-- Query-Driven Sync Highlight -->
+  <g transform="translate(0, 1250)">
+    <rect width="1200" height="300" fill="url(#highlight-gradient)" opacity="0.1"/>
+    <rect width="1200" height="1" fill="#2a2a3e"/>
+    <text x="600" y="80" font-size="48" font-weight="bold" fill="url(#gradient)" text-anchor="middle">Introducing Query-Driven Sync</text>
+    <text x="600" y="140" font-size="20" fill="#a8a8b3" text-anchor="middle">Your component's live query automatically becomes efficient API requests</text>
+    <text x="600" y="180" font-size="18" fill="white" text-anchor="middle">Load normalized collections on-demand with millisecond-level incremental joins</text>
+    <rect x="450" y="210" width="300" height="50" rx="8" fill="url(#gradient)"/>
+    <text x="600" y="242" font-size="18" font-weight="bold" fill="white" text-anchor="middle">Learn More →</text>
+  </g>
+
+  <!-- Footer -->
+  <g transform="translate(0, 2800)">
+    <rect width="1200" height="200" fill="#1a1a2e"/>
+    <rect width="1200" height="1" fill="#2a2a3e"/>
+    <text x="600" y="100" font-size="14" fill="#a8a8b3" text-anchor="middle">Copyright © 2024 TanStack. Released under the MIT License.</text>
+  </g>
+
+  <!-- Gradients -->
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e535ab"/>
+      <stop offset="100%" stop-color="#00d8ff"/>
+    </linearGradient>
+    <linearGradient id="highlight-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e535ab"/>
+      <stop offset="100%" stop-color="#00d8ff"/>
+    </linearGradient>
+  </defs>
+</svg>
