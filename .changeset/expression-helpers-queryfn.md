@@ -18,7 +18,7 @@ When using `syncMode: 'on-demand'`, query collections now provide helper functio
 import { parseLoadSubsetOptions } from '@tanstack/query-db-collection'
 
 queryFn: async (ctx) => {
-  const { where, orderBy, limit } = ctx.meta?.loadSubsetOptions ?? {}
+  const { where, orderBy, limit } = ctx.meta.loadSubsetOptions
 
   const parsed = parseLoadSubsetOptions({ where, orderBy, limit })
 

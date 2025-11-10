@@ -197,12 +197,12 @@ export function parseWhereExpression<T = any>(
 
   // Handle value expressions
   if (expr.type === `val`) {
-    return expr.value
+    return expr.value as unknown as T
   }
 
   // Handle property references
   if (expr.type === `ref`) {
-    return expr.path as any
+    return expr.path as unknown as T
   }
 
   // Handle function expressions

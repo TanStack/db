@@ -410,7 +410,7 @@ LoadSubsetOptions are passed to your `queryFn` via the query context's `meta` pr
 ```typescript
 queryFn: async (ctx) => {
   // Extract LoadSubsetOptions from the context
-  const { limit, where, orderBy } = ctx.meta?.loadSubsetOptions ?? {}
+  const { limit, where, orderBy } = ctx.meta.loadSubsetOptions
 
   // Use these to fetch only the data you need
   // ...
@@ -450,7 +450,7 @@ const productsCollection = createCollection(
     syncMode: 'on-demand', // Enable predicate push-down
 
     queryFn: async (ctx) => {
-      const { limit, where, orderBy } = ctx.meta?.loadSubsetOptions ?? {}
+      const { limit, where, orderBy } = ctx.meta.loadSubsetOptions
 
       // Parse the expressions into simple format
       const parsed = parseLoadSubsetOptions({ where, orderBy, limit })
@@ -515,7 +515,7 @@ For APIs with specific formats, use custom handlers:
 
 ```typescript
 queryFn: async (ctx) => {
-  const { where, orderBy, limit } = ctx.meta?.loadSubsetOptions ?? {}
+  const { where, orderBy, limit } = ctx.meta.loadSubsetOptions
 
   // Use custom handlers to match your API's format
   const filters = parseWhereExpression(where, {
@@ -558,7 +558,7 @@ queryFn: async (ctx) => {
 
 ```typescript
 queryFn: async (ctx) => {
-  const { where, orderBy, limit } = ctx.meta?.loadSubsetOptions ?? {}
+  const { where, orderBy, limit } = ctx.meta.loadSubsetOptions
 
   // Convert to a GraphQL where clause format
   const whereClause = parseWhereExpression(where, {

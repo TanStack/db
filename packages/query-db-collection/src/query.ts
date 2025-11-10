@@ -19,12 +19,12 @@ import type {
   UtilsRecord,
 } from "@tanstack/db"
 import type {
+  FetchStatus,
   QueryClient,
   QueryFunctionContext,
   QueryKey,
   QueryObserverOptions,
   QueryObserverResult,
-  FetchStatus,
 } from "@tanstack/query-core"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
@@ -623,7 +623,7 @@ export function queryCollectionOptions(
     let syncStarted = false
 
     const createQueryFromOpts = (
-      opts: LoadSubsetOptions,
+      opts: LoadSubsetOptions = {},
       queryFunction: typeof queryFn = queryFn
     ): true | Promise<void> => {
       // Push the predicates down to the queryKey and queryFn
