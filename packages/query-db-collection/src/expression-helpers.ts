@@ -27,7 +27,10 @@
  * ```
  */
 
-import type { BasicExpression, OrderBy } from "@tanstack/db"
+import type { IR } from "@tanstack/db"
+
+type BasicExpression<T = any> = IR.BasicExpression<T>
+type OrderBy = IR.OrderBy
 
 /**
  * Represents a simple field path extracted from an expression
@@ -138,14 +141,14 @@ export function extractValue(expr: BasicExpression): any {
  */
 export function walkExpression(
   expr: BasicExpression | undefined | null,
-  visitor: (expr: BasicExpression) => void
+  visitor: (node: BasicExpression) => void
 ): void {
   if (!expr) return
 
   visitor(expr)
 
   if (expr.type === `func`) {
-    expr.args.forEach((arg) => walkExpression(arg, visitor))
+    expr.args.forEach((arg: BasicExpression) => walkExpression(arg, visitor))
   }
 }
 
@@ -206,40 +209,34 @@ export function parseWhereExpression<T = any>(
   }
 
   // Handle function expressions
-  if (expr.type === `func`) {
-    const { name, args } = expr
-    const handler = handlers[name]
+  // After checking val and ref, expr must be func
+  const { name, args } = expr
+  const handler = handlers[name]
 
-    if (!handler) {
-      if (onUnknownOperator) {
-        return onUnknownOperator(name, args)
-      }
-      throw new Error(
-        `No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}`
-      )
+  if (!handler) {
+    if (onUnknownOperator) {
+      return onUnknownOperator(name, args)
     }
-
-    // Parse arguments recursively
-    const parsedArgs = args.map((arg) => {
-      // For refs, extract the field path
-      if (arg.type === `ref`) {
-        return arg.path
-      }
-      // For values, extract the value
-      if (arg.type === `val`) {
-        return arg.value
-      }
-      // For nested functions, recurse
-      if (arg.type === `func`) {
-        return parseWhereExpression(arg, options)
-      }
-      return arg
-    })
-
-    return handler(...parsedArgs)
+    throw new Error(
+      `No handler provided for operator: ${name}. Available handlers: ${Object.keys(handlers).join(`, `)}`
+    )
   }
 
-  return null
+  // Parse arguments recursively
+  const parsedArgs = args.map((arg: BasicExpression) => {
+    // For refs, extract the field path
+    if (arg.type === `ref`) {
+      return arg.path
+    }
+    // For values, extract the value
+    if (arg.type === `val`) {
+      return arg.value
+    }
+    // For nested functions, recurse (after checking ref and val, must be func)
+    return parseWhereExpression(arg, options)
+  })
+
+  return handler(...parsedArgs)
 }
 
 /**
@@ -264,7 +261,7 @@ export function parseOrderByExpression(
     return []
   }
 
-  return orderBy.map((clause) => {
+  return orderBy.map((clause: IR.OrderByClause) => {
     const field = extractFieldPath(clause.expression)
 
     if (!field) {
@@ -311,7 +308,7 @@ export function extractSimpleComparisons(
     if (e.type === `func`) {
       // Handle AND - recurse into both sides
       if (e.name === `and`) {
-        e.args.forEach((arg) => extract(arg as BasicExpression))
+        e.args.forEach((arg: BasicExpression) => extract(arg))
         return
       }
 
