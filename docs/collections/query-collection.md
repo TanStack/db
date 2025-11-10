@@ -702,4 +702,3 @@ const productsCollection = createCollection(
 2. **Use custom handlers** via `parseWhereExpression` for APIs with specific formats
 3. **Handle unsupported operators** with the `onUnknownOperator` callback
 4. **Log parsed results** during development to verify correctness
-5. **Reference Electric DB Collection** (`packages/electric-db-collection/src/sql-compiler.ts`) for a complete SQL compilation example
