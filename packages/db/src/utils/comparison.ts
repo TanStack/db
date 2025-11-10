@@ -127,12 +127,27 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
- * Normalize a value for comparison
+ * Normalize a value for comparison and Map key usage
+ * Converts values that can't be directly compared or used as Map keys
+ * into comparable primitive representations
  */
 export function normalizeValue(value: any): any {
   if (value instanceof Date) {
     return value.getTime()
   }
+
+  // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
+  // This enables content-based equality for binary data like ULIDs
+  const isUint8Array =
+    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
+    value instanceof Uint8Array
+
+  if (isUint8Array) {
+    // Convert to a string representation that can be used as a Map key
+    // Use a special prefix to avoid collisions with user strings
+    return `__u8__${Array.from(value).join(`,`)}`
+  }
+
   return value
 }
 

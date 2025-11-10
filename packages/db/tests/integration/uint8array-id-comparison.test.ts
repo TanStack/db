@@ -25,7 +25,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
         id: `uint8array-test`,
         getKey: (item) => item.id.toString(),
         initialData: data,
-        autoIndex: `off`, // Disable auto-indexing to force filter evaluation
+        autoIndex: `eager`, // Enable auto-indexing to test index lookups
       })
     )
 
