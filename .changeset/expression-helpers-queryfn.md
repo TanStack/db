@@ -15,7 +15,7 @@ When using `syncMode: 'on-demand'`, query collections now provide helper functio
 **Example:**
 
 ```typescript
-import { parseLoadSubsetOptions } from '@tanstack/query-db-collection'
+import { parseLoadSubsetOptions } from "@tanstack/query-db-collection"
 
 queryFn: async (ctx) => {
   const { where, orderBy, limit } = ctx.meta.loadSubsetOptions
@@ -25,12 +25,12 @@ queryFn: async (ctx) => {
   // Build API request from parsed filters
   const params = new URLSearchParams()
   parsed.filters.forEach(({ field, operator, value }) => {
-    if (operator === 'eq') {
-      params.set(field.join('.'), String(value))
+    if (operator === "eq") {
+      params.set(field.join("."), String(value))
     }
   })
 
-  return fetch(`/api/products?${params}`).then(r => r.json())
+  return fetch(`/api/products?${params}`).then((r) => r.json())
 }
 ```
 
