@@ -78,4 +78,62 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
     expect(resultByName).toBeDefined()
     expect(resultByName?.name).toBe(makeItemName(selectedItemIndex))
   })
+
+  it(`should use reference equality for large Uint8Arrays (> 128 bytes)`, async () => {
+    // Create a large Uint8Array (> 128 bytes) that should use reference equality
+    const largeId = new Uint8Array(200).fill(42)
+
+    interface LargeItem {
+      id: Uint8Array
+      name: string
+    }
+
+    const data: Array<LargeItem> = [
+      { id: largeId, name: `Large Item` },
+      { id: new Uint8Array(200).fill(99), name: `Other Large Item` },
+    ]
+
+    const collection = createCollection(
+      mockSyncCollectionOptions<LargeItem>({
+        id: `large-uint8array-test`,
+        getKey: (item) => item.name,
+        initialData: data,
+        autoIndex: `eager`,
+      })
+    )
+
+    // Query with the exact same reference - this should work
+    const queryWithSameRef = createLiveQueryCollection((q) =>
+      q
+        .from({ item: collection })
+        .where(({ item }) => eq(item.id, largeId))
+        .findOne()
+    )
+
+    await queryWithSameRef.preload()
+    const resultWithSameRef = Array.from(queryWithSameRef.entries())[0]?.[1]
+
+    // Should find the item because we're using the same reference
+    expect(resultWithSameRef).toBeDefined()
+    expect(resultWithSameRef?.name).toBe(`Large Item`)
+
+    // Query with a different instance but same content - this will NOT work
+    // because large arrays use reference equality
+    const differentInstance = new Uint8Array(200).fill(42)
+    const queryWithDifferentRef = createLiveQueryCollection((q) =>
+      q
+        .from({ item: collection })
+        .where(({ item }) => eq(item.id, differentInstance))
+        .findOne()
+    )
+
+    await queryWithDifferentRef.preload()
+    const resultWithDifferentRef = Array.from(
+      queryWithDifferentRef.entries()
+    )[0]?.[1]
+
+    // Should NOT find the item because large arrays use reference equality
+    // This is expected behavior to avoid memory overhead
+    expect(resultWithDifferentRef).toBeUndefined()
+  })
 })

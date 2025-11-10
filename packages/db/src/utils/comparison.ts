@@ -127,6 +127,14 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
+ * Threshold for normalizing Uint8Arrays to string representations.
+ * Arrays larger than this will use reference equality to avoid memory overhead.
+ * 128 bytes is enough for common ID formats (ULIDs are 16 bytes, UUIDs are 16 bytes)
+ * while avoiding excessive string allocation for large binary data.
+ */
+const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
+
+/**
  * Normalize a value for comparison and Map key usage
  * Converts values that can't be directly compared or used as Map keys
  * into comparable primitive representations
@@ -143,9 +151,14 @@ export function normalizeValue(value: any): any {
     value instanceof Uint8Array
 
   if (isUint8Array) {
-    // Convert to a string representation that can be used as a Map key
-    // Use a special prefix to avoid collisions with user strings
-    return `__u8__${Array.from(value).join(`,`)}`
+    // Only normalize small arrays to avoid memory overhead for large binary data
+    if (value.byteLength <= UINT8ARRAY_NORMALIZE_THRESHOLD) {
+      // Convert to a string representation that can be used as a Map key
+      // Use a special prefix to avoid collisions with user strings
+      return `__u8__${Array.from(value).join(`,`)}`
+    }
+    // For large arrays, fall back to reference equality
+    // Users working with large binary data should use a derived key if needed
   }
 
   return value
