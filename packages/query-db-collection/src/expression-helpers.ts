@@ -27,15 +27,16 @@
  * ```
  */
 
-import type { IR } from "@tanstack/db"
+import type { IR, OperatorName } from "@tanstack/db"
 
 type BasicExpression<T = any> = IR.BasicExpression<T>
 type OrderBy = IR.OrderBy
 
 /**
- * Represents a simple field path extracted from an expression
+ * Represents a simple field path extracted from an expression.
+ * Can include string keys for object properties and numbers for array indices.
  */
-export type FieldPath = Array<string>
+export type FieldPath = Array<string | number>
 
 /**
  * Represents a simple comparison operation
@@ -54,18 +55,19 @@ export interface ParseWhereOptions<T = any> {
    * Handler functions for different operators.
    * Each handler receives the parsed field path(s) and value(s) and returns your custom format.
    *
-   * Common operators:
-   * - eq: equality (=)
-   * - gt: greater than (>)
-   * - gte: greater than or equal (>=)
-   * - lt: less than (<)
-   * - lte: less than or equal (<=)
-   * - and: logical AND
-   * - or: logical OR
-   * - in: IN clause
+   * Supported operators from TanStack DB:
+   * - Comparison: eq, gt, gte, lt, lte, in, like, ilike
+   * - Logical: and, or, not
+   * - Null checking: isNull, isUndefined
+   * - String functions: upper, lower, length, concat
+   * - Numeric: add
+   * - Utility: coalesce
+   * - Aggregates: count, avg, sum, min, max
    */
   handlers: {
-    [operator: string]: (...args: Array<any>) => T
+    [K in OperatorName]?: (...args: Array<any>) => T
+  } & {
+    [key: string]: (...args: Array<any>) => T
   }
   /**
    * Optional handler for when an unknown operator is encountered.
@@ -80,7 +82,13 @@ export interface ParseWhereOptions<T = any> {
 export interface ParsedOrderBy {
   field: FieldPath
   direction: `asc` | `desc`
-  nulls?: `first` | `last`
+  nulls: `first` | `last`
+  /** String sorting method: 'lexical' (default) or 'locale' (locale-aware) */
+  stringSort?: `lexical` | `locale`
+  /** Locale for locale-aware string sorting (e.g., 'en-US') */
+  locale?: string
+  /** Additional options for locale-aware sorting */
+  localeOptions?: object
 }
 
 /**
@@ -270,10 +278,16 @@ export function parseOrderByExpression(
       )
     }
 
+    const { direction, nulls, stringSort, locale, localeOptions } =
+      clause.compareOptions
+
     return {
       field,
-      direction: clause.compareOptions.direction,
-      nulls: clause.compareOptions.nulls,
+      direction,
+      nulls,
+      ...(stringSort && { stringSort }),
+      ...(locale && { locale }),
+      ...(localeOptions && { localeOptions }),
     }
   })
 }
@@ -282,11 +296,12 @@ export function parseOrderByExpression(
  * Extracts all simple comparisons from a WHERE expression.
  * This is useful for simple APIs that only support basic filters.
  *
- * Note: This only works for simple AND-ed conditions. Complex OR/nested conditions
- * will require using parseWhereExpression with custom handlers.
+ * Note: This only works for simple AND-ed conditions. Throws an error if it encounters
+ * unsupported operations like OR, NOT, or complex nested expressions.
  *
  * @param expr - The WHERE expression to parse
  * @returns Array of simple comparisons
+ * @throws Error if expression contains OR, NOT, or other unsupported operations
  *
  * @example
  * ```typescript
@@ -312,6 +327,32 @@ export function extractSimpleComparisons(
         return
       }
 
+      // Throw on unsupported operations
+      const unsupportedOps = [
+        `or`,
+        `not`,
+        `isNull`,
+        `isUndefined`,
+        `like`,
+        `ilike`,
+        `upper`,
+        `lower`,
+        `length`,
+        `concat`,
+        `add`,
+        `coalesce`,
+        `count`,
+        `avg`,
+        `sum`,
+        `min`,
+        `max`,
+      ]
+      if (unsupportedOps.includes(e.name)) {
+        throw new Error(
+          `extractSimpleComparisons does not support '${e.name}' operator. Use parseWhereExpression with custom handlers for complex expressions.`
+        )
+      }
+
       // Handle comparison operators
       const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `in`]
       if (comparisonOps.includes(e.name)) {
@@ -327,7 +368,16 @@ export function extractSimpleComparisons(
             operator: e.name,
             value,
           })
+        } else {
+          throw new Error(
+            `extractSimpleComparisons requires simple field-value comparisons. Found complex expression for '${e.name}' operator.`
+          )
         }
+      } else {
+        // Unknown operator
+        throw new Error(
+          `extractSimpleComparisons encountered unknown operator: '${e.name}'`
+        )
       }
     }
   }

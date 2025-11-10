@@ -25,3 +25,4 @@ export { type IndexOptions } from "./indexes/index-options.js"
 // Re-export some stuff explicitly to ensure the type & value is exported
 export type { Collection } from "./collection/index.js"
 export { IR }
+export { operators, type OperatorName } from "./query/builder/functions.js"

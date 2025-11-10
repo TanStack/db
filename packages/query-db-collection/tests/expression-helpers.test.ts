@@ -414,16 +414,16 @@ describe(`Expression Helpers`, () => {
       expect(extractSimpleComparisons(undefined)).toEqual([])
     })
 
-    it(`should skip OR expressions (not simple)`, () => {
+    it(`should throw on OR expressions (not simple)`, () => {
       const expr = new Func(`or`, [
         new Func(`eq`, [new PropRef([`category`]), new Value(`electronics`)]),
         new Func(`eq`, [new PropRef([`category`]), new Value(`books`)]),
       ])
 
-      const result = extractSimpleComparisons(expr)
-
-      // OR is not handled by extractSimpleComparisons, so it returns empty
-      expect(result).toEqual([])
+      // OR is not supported by extractSimpleComparisons, so it throws
+      expect(() => extractSimpleComparisons(expr)).toThrow(
+        `extractSimpleComparisons does not support 'or' operator`
+      )
     })
 
     it(`should handle nested field paths`, () => {
