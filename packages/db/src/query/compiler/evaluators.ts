@@ -3,7 +3,7 @@ import {
   UnknownExpressionTypeError,
   UnknownFunctionError,
 } from "../../errors.js"
-import { normalizeValue } from "../../utils/comparison.js"
+import { areValuesEqual, normalizeValue } from "../../utils/comparison.js"
 import type { BasicExpression, Func, PropRef } from "../ir.js"
 import type { NamespacedRow } from "../../types.js"
 
@@ -172,7 +172,8 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (isUnknown(a) || isUnknown(b)) {
           return null
         }
-        return a === b
+        // Use areValuesEqual for proper Uint8Array/Buffer comparison
+        return areValuesEqual(a, b)
       }
     }
     case `gt`: {
