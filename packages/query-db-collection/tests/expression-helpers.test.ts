@@ -244,8 +244,6 @@ describe(`Expression Helpers`, () => {
           compareOptions: {
             direction: `asc`,
             nulls: `last`,
-            sensitivity: `base`,
-            locale: undefined,
           },
         },
       ]
@@ -264,8 +262,6 @@ describe(`Expression Helpers`, () => {
           compareOptions: {
             direction: `asc`,
             nulls: `last`,
-            sensitivity: `base`,
-            locale: undefined,
           },
         },
         {
@@ -273,8 +269,6 @@ describe(`Expression Helpers`, () => {
           compareOptions: {
             direction: `desc`,
             nulls: `first`,
-            sensitivity: `base`,
-            locale: undefined,
           },
         },
       ]
@@ -294,8 +288,6 @@ describe(`Expression Helpers`, () => {
           compareOptions: {
             direction: `desc`,
             nulls: `last`,
-            sensitivity: `base`,
-            locale: undefined,
           },
         },
       ]
@@ -327,8 +319,6 @@ describe(`Expression Helpers`, () => {
           compareOptions: {
             direction: `asc`,
             nulls: `last`,
-            sensitivity: `base`,
-            locale: undefined,
           },
         },
       ]
@@ -457,8 +447,6 @@ describe(`Expression Helpers`, () => {
           compareOptions: {
             direction: `asc`,
             nulls: `last`,
-            sensitivity: `base`,
-            locale: undefined,
           },
         },
       ]
@@ -524,8 +512,6 @@ describe(`Expression Helpers`, () => {
           compareOptions: {
             direction: `desc`,
             nulls: `first`,
-            sensitivity: `base`,
-            locale: undefined,
           },
         },
       ]
@@ -573,8 +559,6 @@ describe(`Expression Helpers`, () => {
           compareOptions: {
             direction: `asc`,
             nulls: `last`,
-            sensitivity: `base`,
-            locale: undefined,
           },
         },
         {
@@ -582,8 +566,6 @@ describe(`Expression Helpers`, () => {
           compareOptions: {
             direction: `desc`,
             nulls: `last`,
-            sensitivity: `base`,
-            locale: undefined,
           },
         },
       ]
