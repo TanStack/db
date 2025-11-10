@@ -9,7 +9,9 @@ import {
   walkExpression,
 } from "../src/expression-helpers"
 import { Func, PropRef, Value } from "../../db/src/query/ir.js"
-import type { OrderBy } from "@tanstack/db"
+import type { IR } from "@tanstack/db"
+
+type OrderBy = IR.OrderBy
 
 describe(`Expression Helpers`, () => {
   describe(`extractFieldPath`, () => {
@@ -207,7 +209,12 @@ describe(`Expression Helpers`, () => {
         ]),
       ])
 
-      const result = parseWhereExpression(expr, {
+      type FilterResult =
+        | { field: string; value: unknown }
+        | { AND: Array<FilterResult> }
+        | { OR: Array<FilterResult> }
+
+      const result = parseWhereExpression<FilterResult>(expr, {
         handlers: {
           eq: (field, value) => ({ field: field.join(`.`), value }),
           and: (...filters) => ({ AND: filters }),
