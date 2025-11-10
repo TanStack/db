@@ -560,7 +560,7 @@ queryFn: async (ctx) => {
 queryFn: async (ctx) => {
   const { where, orderBy, limit } = ctx.meta?.loadSubsetOptions ?? {}
 
-  // Convert to GraphQL where clause format
+  // Convert to a GraphQL where clause format
   const whereClause = parseWhereExpression(where, {
     handlers: {
       eq: (field, value) => ({
@@ -574,7 +574,7 @@ queryFn: async (ctx) => {
     }
   })
 
-  // Convert to GraphQL order_by format
+  // Convert to a GraphQL order_by format
   const sorts = parseOrderByExpression(orderBy)
   const orderByClause = sorts.map(s => ({
     [s.field.join('_')]: s.direction
