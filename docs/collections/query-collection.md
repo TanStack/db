@@ -554,13 +554,13 @@ queryFn: async (ctx) => {
 }
 ```
 
-### GraphQL Example (Hasura-Style)
+### GraphQL Example
 
 ```typescript
 queryFn: async (ctx) => {
   const { where, orderBy, limit } = ctx.meta?.loadSubsetOptions ?? {}
 
-  // Convert to Hasura where clause format
+  // Convert to GraphQL where clause format
   const whereClause = parseWhereExpression(where, {
     handlers: {
       eq: (field, value) => ({
@@ -574,7 +574,7 @@ queryFn: async (ctx) => {
     }
   })
 
-  // Convert to Hasura order_by format
+  // Convert to GraphQL order_by format
   const sorts = parseOrderByExpression(orderBy)
   const orderByClause = sorts.map(s => ({
     [s.field.join('_')]: s.direction
