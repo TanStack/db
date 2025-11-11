@@ -515,11 +515,14 @@ describe(`Electric Integration`, () => {
         id: `test-transaction`,
         mutations: [],
       } as unknown as TransactionWithMutations<Row, `insert`>
-      const mockParams: InsertMutationFnParams<Row> = {
+      const mockParams = {
         transaction: mockTransaction,
-        // @ts-expect-error not relevant to test
         collection: CollectionImpl,
-      }
+      } as unknown as InsertMutationFnParams<
+        Row,
+        string | number,
+        ElectricCollectionUtils<Row>
+      >
 
       // Create a handler that doesn't return a txid
       const onInsert = vi.fn().mockResolvedValue({})

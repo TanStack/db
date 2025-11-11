@@ -7,7 +7,10 @@ import {
   gt,
 } from "@tanstack/db"
 import { electricCollectionOptions } from "../src/electric"
-import type { ElectricCollectionConfig } from "../src/electric"
+import type {
+  ElectricCollectionConfig,
+  ElectricCollectionUtils,
+} from "../src/electric"
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -126,17 +129,35 @@ describe(`Electric collection type resolution tests`, () => {
       },
     })
 
-    // Verify that the handlers are properly typed
+    // Verify that the handlers are properly typed with ElectricCollectionUtils
     expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [InsertMutationFnParams<ExplicitType>]
+      [
+        InsertMutationFnParams<
+          ExplicitType,
+          string | number,
+          ElectricCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
 
     expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [UpdateMutationFnParams<ExplicitType>]
+      [
+        UpdateMutationFnParams<
+          ExplicitType,
+          string | number,
+          ElectricCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
 
     expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [DeleteMutationFnParams<ExplicitType>]
+      [
+        DeleteMutationFnParams<
+          ExplicitType,
+          string | number,
+          ElectricCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
   })
 
@@ -200,7 +221,7 @@ describe(`Electric collection type resolution tests`, () => {
       query: (q) =>
         q
           .from({ user: usersCollection })
-          .where(({ user }) => eq(user.active, true) && gt(user.age, 18))
+          .where(({ user }) => gt(user.age, 18))
           .select(({ user }) => ({
             id: user.id,
             name: user.name,
