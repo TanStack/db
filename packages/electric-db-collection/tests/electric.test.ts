@@ -683,7 +683,8 @@ describe(`Electric Integration`, () => {
       const onInsert = vi.fn(async (params: MutationFnParams<Row>) => {
         const txids = await fakeBackend.persist(params.transaction.mutations)
 
-        // Simulate server sending sync messages after a delay
+        // Simulate server sending sync messages on different ticks
+        // In the real world, multiple txids rarely arrive together
         setTimeout(() => {
           subscriber([
             {
@@ -694,6 +695,12 @@ describe(`Electric Integration`, () => {
                 txids: [txids[0]],
               },
             },
+            { headers: { control: `up-to-date` } },
+          ])
+        }, 50)
+
+        setTimeout(() => {
+          subscriber([
             {
               key: `2`,
               value: { id: 2, name: `Item 2` },
@@ -704,7 +711,7 @@ describe(`Electric Integration`, () => {
             },
             { headers: { control: `up-to-date` } },
           ])
-        }, 50)
+        }, 100)
 
         // Return array of txids - this is the pattern that's failing
         return { txid: txids }
