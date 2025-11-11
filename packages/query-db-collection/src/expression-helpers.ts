@@ -278,17 +278,25 @@ export function parseOrderByExpression(
       )
     }
 
-    const { direction, nulls, stringSort, locale, localeOptions } =
-      clause.compareOptions
-
-    return {
+    const { direction, nulls } = clause.compareOptions
+    const result: ParsedOrderBy = {
       field,
       direction,
       nulls,
-      ...(stringSort && { stringSort }),
-      ...(locale && { locale }),
-      ...(localeOptions && { localeOptions }),
     }
+
+    // Add string collation options if present (discriminated union)
+    if (`stringSort` in clause.compareOptions) {
+      result.stringSort = clause.compareOptions.stringSort
+    }
+    if (`locale` in clause.compareOptions) {
+      result.locale = clause.compareOptions.locale
+    }
+    if (`localeOptions` in clause.compareOptions) {
+      result.localeOptions = clause.compareOptions.localeOptions
+    }
+
+    return result
   })
 }
 
