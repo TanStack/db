@@ -697,7 +697,7 @@ describe(`Electric Integration`, () => {
             },
             { headers: { control: `up-to-date` } },
           ])
-        }, 50)
+        }, 1)
 
         setTimeout(() => {
           subscriber([
@@ -711,7 +711,7 @@ describe(`Electric Integration`, () => {
             },
             { headers: { control: `up-to-date` } },
           ])
-        }, 100)
+        }, 2)
 
         // Return array of txids - this is the pattern that's failing
         return { txid: txids }

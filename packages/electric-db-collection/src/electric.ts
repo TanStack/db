@@ -506,7 +506,8 @@ export function electricCollectionOptions(
     if (result && `txid` in result) {
       // Handle both single txid and array of txids
       if (Array.isArray(result.txid)) {
-        await Promise.all(result.txid.map(awaitTxId))
+        // Use arrow function to avoid passing map's index as timeout parameter
+        await Promise.all(result.txid.map((txid) => awaitTxId(txid)))
       } else {
         await awaitTxId(result.txid)
       }
