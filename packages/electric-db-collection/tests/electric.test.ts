@@ -692,7 +692,7 @@ describe(`Electric Integration`, () => {
               value: { id: 1, name: `Item 1` },
               headers: {
                 operation: `insert`,
-                txids: [txids[0]],
+                txids: [txids[0]!],
               },
             },
             { headers: { control: `up-to-date` } },
@@ -706,7 +706,7 @@ describe(`Electric Integration`, () => {
               value: { id: 2, name: `Item 2` },
               headers: {
                 operation: `insert`,
-                txids: [txids[1]],
+                txids: [txids[1]!],
               },
             },
             { headers: { control: `up-to-date` } },
