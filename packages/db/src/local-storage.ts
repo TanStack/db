@@ -59,7 +59,13 @@ export interface LocalStorageCollectionConfig<
   T extends object = object,
   TSchema extends StandardSchemaV1 = never,
   TKey extends string | number = string | number,
-> extends BaseCollectionConfig<T, TKey, TSchema> {
+> extends BaseCollectionConfig<
+    T,
+    TKey,
+    TSchema,
+    LocalStorageCollectionUtils,
+    any
+  > {
   /**
    * The key to use for storing the collection data in localStorage/sessionStorage
    */
@@ -283,7 +289,12 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+): CollectionConfig<
+  InferSchemaOutput<T>,
+  TKey,
+  T,
+  LocalStorageCollectionUtils
+> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema: T
@@ -298,7 +309,7 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey> & {
+): CollectionConfig<T, TKey, never, LocalStorageCollectionUtils> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: never // no schema in the result
