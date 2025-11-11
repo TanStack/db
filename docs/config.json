@@ -103,12 +103,24 @@
           "to": "collections/electric-collection"
         },
         {
+          "label": "TrailBase Collection",
+          "to": "collections/trailbase-collection"
+        },
+        {
           "label": "RxDB Collection",
           "to": "collections/rxdb-collection"
         },
         {
           "label": "PowerSync Collection",
           "to": "collections/powersync-collection"
+        },
+        {
+          "label": "LocalStorage Collection",
+          "to": "collections/local-storage-collection"
+        },
+        {
+          "label": "LocalOnly Collection",
+          "to": "collections/local-only-collection"
         }
       ]
     },
