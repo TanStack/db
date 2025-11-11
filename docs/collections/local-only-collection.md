@@ -41,7 +41,7 @@ const uiStateCollection = createCollection(
 
 **Important:** LocalOnly collections work differently than server-synced collections. With LocalOnly collections, you **directly mutate state** by calling methods like `collection.insert()`, `collection.update()`, and `collection.delete()` — that's all you need to do. The changes are immediately applied to your local in-memory data.
 
-This is different from collections that sync with a server (like `queryCollectionOptions`), where mutation handlers send data to a backend. With LocalOnly collections, everything stays local:
+This is different from collections that sync with a server (like Query Collection), where mutation handlers send data to a backend. With LocalOnly collections, everything stays local:
 
 ```typescript
 // Just call the methods directly - no server sync involved

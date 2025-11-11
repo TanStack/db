@@ -42,7 +42,7 @@ const userPreferencesCollection = createCollection(
 
 **Important:** LocalStorage collections work differently than server-synced collections. With LocalStorage collections, you **directly mutate state** by calling methods like `collection.insert()`, `collection.update()`, and `collection.delete()` — that's all you need to do. The changes are immediately applied to your local data and automatically persisted to localStorage.
 
-This is different from collections that sync with a server (like `queryCollectionOptions`), where mutation handlers send data to a backend. With LocalStorage collections, everything stays local:
+This is different from collections that sync with a server (like Query Collection), where mutation handlers send data to a backend. With LocalStorage collections, everything stays local:
 
 ```typescript
 // Just call the methods directly - automatically persisted to localStorage
