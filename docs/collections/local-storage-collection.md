@@ -51,8 +51,6 @@ userPreferencesCollection.update('theme', (draft) => { draft.mode = 'light' })
 userPreferencesCollection.delete('theme')
 ```
 
-No server sync, no network requests — just instant local state updates that persist across sessions and sync across browser tabs automatically.
-
 ## Configuration Options
 
 The `localStorageCollectionOptions` function accepts the following options:

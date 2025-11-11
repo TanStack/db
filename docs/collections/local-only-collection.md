@@ -50,8 +50,6 @@ uiStateCollection.update('theme', (draft) => { draft.mode = 'light' })
 uiStateCollection.delete('theme')
 ```
 
-No network requests, no external persistence — just instant local state updates.
-
 ## Configuration Options
 
 The `localOnlyCollectionOptions` function accepts the following options:
