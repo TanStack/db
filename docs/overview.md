@@ -64,7 +64,7 @@ Collections can be populated in many ways, including:
 
 - fetching data, for example [from API endpoints using TanStack Query](https://tanstack.com/query/latest)
 - syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/)
-- storing local data, for example [using localStorage for user preferences and settings](#localstoragecollection) or [in-memory client data or UI state](#localonlycollection)
+- storing local data, for example [using localStorage for user preferences and settings](./collections/local-storage-collection.md) or [in-memory client data or UI state](./collections/local-only-collection.md)
 - from live collection queries, creating [derived collections as materialised views](#using-live-queries)
 
 Once you have your data in collections, you can query across them using live queries in your components.
