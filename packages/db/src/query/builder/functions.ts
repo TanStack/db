@@ -337,3 +337,42 @@ export const comparisonFunctions = [
   `like`,
   `ilike`,
 ] as const
+
+/**
+ * All supported operator names in TanStack DB expressions
+ */
+export const operators = [
+  // Comparison operators
+  `eq`,
+  `gt`,
+  `gte`,
+  `lt`,
+  `lte`,
+  `in`,
+  `like`,
+  `ilike`,
+  // Logical operators
+  `and`,
+  `or`,
+  `not`,
+  // Null checking
+  `isNull`,
+  `isUndefined`,
+  // String functions
+  `upper`,
+  `lower`,
+  `length`,
+  `concat`,
+  // Numeric functions
+  `add`,
+  // Utility functions
+  `coalesce`,
+  // Aggregate functions
+  `count`,
+  `avg`,
+  `sum`,
+  `min`,
+  `max`,
+] as const
+
+export type OperatorName = (typeof operators)[number]

@@ -398,3 +398,309 @@ All direct write methods are available on `collection.utils`:
 - `writeUpsert(data)`: Insert or update one or more items directly
 - `writeBatch(callback)`: Perform multiple operations atomically
 - `refetch(opts?)`: Manually trigger a refetch of the query
+
+## QueryFn and Predicate Push-Down
+
+When using `syncMode: 'on-demand'`, the collection automatically pushes down query predicates (where clauses, orderBy, and limit) to your `queryFn`. This allows you to fetch only the data needed for each specific query, rather than fetching the entire dataset.
+
+### How LoadSubsetOptions Are Passed
+
+LoadSubsetOptions are passed to your `queryFn` via the query context's `meta` property:
+
+```typescript
+queryFn: async (ctx) => {
+  // Extract LoadSubsetOptions from the context
+  const { limit, where, orderBy } = ctx.meta.loadSubsetOptions
+
+  // Use these to fetch only the data you need
+  // ...
+}
+```
+
+The `where` and `orderBy` fields are expression trees (AST - Abstract Syntax Tree) that need to be parsed. TanStack DB provides helper functions to make this easy.
+
+### Expression Helpers
+
+```typescript
+import {
+  parseWhereExpression,
+  parseOrderByExpression,
+  extractSimpleComparisons,
+  parseLoadSubsetOptions,
+} from '@tanstack/db'
+// Or from '@tanstack/query-db-collection' (re-exported for convenience)
+```
+
+These helpers allow you to parse expression trees without manually traversing complex AST structures.
+
+### Quick Start: Simple REST API
+
+```typescript
+import { createCollection } from '@tanstack/react-db'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import { parseLoadSubsetOptions } from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
+
+const queryClient = new QueryClient()
+
+const productsCollection = createCollection(
+  queryCollectionOptions({
+    id: 'products',
+    queryKey: ['products'],
+    queryClient,
+    getKey: (item) => item.id,
+    syncMode: 'on-demand', // Enable predicate push-down
+
+    queryFn: async (ctx) => {
+      const { limit, where, orderBy } = ctx.meta.loadSubsetOptions
+
+      // Parse the expressions into simple format
+      const parsed = parseLoadSubsetOptions({ where, orderBy, limit })
+
+      // Build query parameters from parsed filters
+      const params = new URLSearchParams()
+
+      // Add filters
+      parsed.filters.forEach(({ field, operator, value }) => {
+        const fieldName = field.join('.')
+        if (operator === 'eq') {
+          params.set(fieldName, String(value))
+        } else if (operator === 'lt') {
+          params.set(`${fieldName}_lt`, String(value))
+        } else if (operator === 'gt') {
+          params.set(`${fieldName}_gt`, String(value))
+        }
+      })
+
+      // Add sorting
+      if (parsed.sorts.length > 0) {
+        const sortParam = parsed.sorts
+          .map(s => `${s.field.join('.')}:${s.direction}`)
+          .join(',')
+        params.set('sort', sortParam)
+      }
+
+      // Add limit
+      if (parsed.limit) {
+        params.set('limit', String(parsed.limit))
+      }
+
+      const response = await fetch(`/api/products?${params}`)
+      return response.json()
+    },
+  })
+)
+
+// Usage with live queries
+import { createLiveQueryCollection } from '@tanstack/react-db'
+import { eq, lt, and } from '@tanstack/db'
+
+const affordableElectronics = createLiveQueryCollection({
+  query: (q) =>
+    q.from({ product: productsCollection })
+     .where(({ product }) => and(
+       eq(product.category, 'electronics'),
+       lt(product.price, 100)
+     ))
+     .orderBy(({ product }) => product.price, 'asc')
+     .limit(10)
+     .select(({ product }) => product)
+})
+
+// This triggers a queryFn call with:
+// GET /api/products?category=electronics&price_lt=100&sort=price:asc&limit=10
+```
+
+### Custom Handlers for Complex APIs
+
+For APIs with specific formats, use custom handlers:
+
+```typescript
+queryFn: async (ctx) => {
+  const { where, orderBy, limit } = ctx.meta.loadSubsetOptions
+
+  // Use custom handlers to match your API's format
+  const filters = parseWhereExpression(where, {
+    handlers: {
+      eq: (field, value) => ({
+        field: field.join('.'),
+        op: 'equals',
+        value
+      }),
+      lt: (field, value) => ({
+        field: field.join('.'),
+        op: 'lessThan',
+        value
+      }),
+      and: (...conditions) => ({
+        operator: 'AND',
+        conditions
+      }),
+      or: (...conditions) => ({
+        operator: 'OR',
+        conditions
+      }),
+    }
+  })
+
+  const sorts = parseOrderByExpression(orderBy)
+
+  return api.query({
+    filters,
+    sort: sorts.map(s => ({
+      field: s.field.join('.'),
+      order: s.direction.toUpperCase()
+    })),
+    limit
+  })
+}
+```
+
+### GraphQL Example
+
+```typescript
+queryFn: async (ctx) => {
+  const { where, orderBy, limit } = ctx.meta.loadSubsetOptions
+
+  // Convert to a GraphQL where clause format
+  const whereClause = parseWhereExpression(where, {
+    handlers: {
+      eq: (field, value) => ({
+        [field.join('_')]: { _eq: value }
+      }),
+      lt: (field, value) => ({
+        [field.join('_')]: { _lt: value }
+      }),
+      and: (...conditions) => ({ _and: conditions }),
+      or: (...conditions) => ({ _or: conditions }),
+    }
+  })
+
+  // Convert to a GraphQL order_by format
+  const sorts = parseOrderByExpression(orderBy)
+  const orderByClause = sorts.map(s => ({
+    [s.field.join('_')]: s.direction
+  }))
+
+  const { data } = await graphqlClient.query({
+    query: gql`
+      query GetProducts($where: product_bool_exp, $orderBy: [product_order_by!], $limit: Int) {
+        product(where: $where, order_by: $orderBy, limit: $limit) {
+          id
+          name
+          category
+          price
+        }
+      }
+    `,
+    variables: {
+      where: whereClause,
+      orderBy: orderByClause,
+      limit
+    }
+  })
+
+  return data.product
+}
+```
+
+### Expression Helper API Reference
+
+#### `parseLoadSubsetOptions(options)`
+
+Convenience function that parses all LoadSubsetOptions at once. Good for simple use cases.
+
+```typescript
+const { filters, sorts, limit } = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
+// filters: [{ field: ['category'], operator: 'eq', value: 'electronics' }]
+// sorts: [{ field: ['price'], direction: 'asc', nulls: 'last' }]
+// limit: 10
+```
+
+#### `parseWhereExpression(expr, options)`
+
+Parses a WHERE expression using custom handlers for each operator. Use this for complete control over the output format.
+
+```typescript
+const filters = parseWhereExpression(where, {
+  handlers: {
+    eq: (field, value) => ({ [field.join('.')]: value }),
+    lt: (field, value) => ({ [`${field.join('.')}_lt`]: value }),
+    and: (...filters) => Object.assign({}, ...filters)
+  },
+  onUnknownOperator: (operator, args) => {
+    console.warn(`Unsupported operator: ${operator}`)
+    return null
+  }
+})
+```
+
+#### `parseOrderByExpression(orderBy)`
+
+Parses an ORDER BY expression into a simple array.
+
+```typescript
+const sorts = parseOrderByExpression(orderBy)
+// Returns: [{ field: ['price'], direction: 'asc', nulls: 'last' }]
+```
+
+#### `extractSimpleComparisons(expr)`
+
+Extracts simple AND-ed comparisons from a WHERE expression. Note: Only works for simple AND conditions.
+
+```typescript
+const comparisons = extractSimpleComparisons(where)
+// Returns: [
+//   { field: ['category'], operator: 'eq', value: 'electronics' },
+//   { field: ['price'], operator: 'lt', value: 100 }
+// ]
+```
+
+### Supported Operators
+
+- `eq` - Equality (=)
+- `gt` - Greater than (>)
+- `gte` - Greater than or equal (>=)
+- `lt` - Less than (<)
+- `lte` - Less than or equal (<=)
+- `and` - Logical AND
+- `or` - Logical OR
+- `in` - IN clause
+
+### Using Query Key Builders
+
+Create different cache entries for different filter combinations:
+
+```typescript
+const productsCollection = createCollection(
+  queryCollectionOptions({
+    id: 'products',
+    // Dynamic query key based on filters
+    queryKey: (opts) => {
+      const parsed = parseLoadSubsetOptions(opts)
+      const cacheKey = ['products']
+
+      parsed.filters.forEach(f => {
+        cacheKey.push(`${f.field.join('.')}-${f.operator}-${f.value}`)
+      })
+
+      if (parsed.limit) {
+        cacheKey.push(`limit-${parsed.limit}`)
+      }
+
+      return cacheKey
+    },
+    queryClient,
+    getKey: (item) => item.id,
+    syncMode: 'on-demand',
+    queryFn: async (ctx) => { /* ... */ },
+  })
+)
+```
+
+### Tips
+
+1. **Start with `parseLoadSubsetOptions`** for simple use cases
+2. **Use custom handlers** via `parseWhereExpression` for APIs with specific formats
+3. **Handle unsupported operators** with the `onUnknownOperator` callback
+4. **Log parsed results** during development to verify correctness
