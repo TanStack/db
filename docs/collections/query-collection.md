@@ -10,7 +10,7 @@ Query collections provide seamless integration between TanStack DB and TanStack 
 
 The `@tanstack/query-db-collection` package allows you to create collections that:
 
-- Automatically sync with remote data via TanStack Query
+- Automatically sync with remote data via TanStack Query (when using `liveQueryCollectionOptions`)
 - Support optimistic updates with automatic rollback on errors
 - Handle persistence through customizable mutation handlers
 - Provide direct write capabilities for directly writing to the sync store
@@ -58,7 +58,7 @@ The `queryCollectionOptions` function accepts the following options:
 
 - `select`: Function that lets extract array items when they're wrapped with metadata
 - `enabled`: Whether the query should automatically run (default: `true`)
-- `refetchInterval`: Refetch interval in milliseconds
+- `refetchInterval`: Refetch interval in milliseconds (has to be set to automatically sync when passing base `queryCollectionOptions`)
 - `retry`: Retry configuration for failed queries
 - `retryDelay`: Delay between retries
 - `staleTime`: How long data is considered fresh
