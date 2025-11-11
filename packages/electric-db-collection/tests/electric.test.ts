@@ -767,6 +767,90 @@ describe(`Electric Integration`, () => {
     })
   })
 
+  // Tests for array of txids
+  describe(`Array of txids matching strategy`, () => {
+    it(`should properly handle array of txids and wait for all to arrive`, async () => {
+      const txid1 = 1001
+      const txid2 = 1002
+      const txid3 = 1003
+
+      const onInsert = vi.fn(async () => {
+        // Simulate txids arriving at different times - schedule them before returning
+        // so that processMatchingStrategy can wait for them
+        setTimeout(() => {
+          subscriber([
+            {
+              key: `1`,
+              value: { id: 1, name: `Item 1` },
+              headers: {
+                operation: `insert`,
+                txids: [txid1],
+              },
+            },
+            { headers: { control: `up-to-date` } },
+          ])
+        }, 50)
+
+        setTimeout(() => {
+          subscriber([
+            {
+              key: `2`,
+              value: { id: 2, name: `Item 2` },
+              headers: {
+                operation: `insert`,
+                txids: [txid2],
+              },
+            },
+            { headers: { control: `up-to-date` } },
+          ])
+        }, 100)
+
+        setTimeout(() => {
+          subscriber([
+            {
+              key: `3`,
+              value: { id: 3, name: `Item 3` },
+              headers: {
+                operation: `insert`,
+                txids: [txid3],
+              },
+            },
+            { headers: { control: `up-to-date` } },
+          ])
+        }, 150)
+
+        // Return array of txids - processMatchingStrategy should use Promise.all()
+        // to wait for ALL txids, not just the first one
+        return { txid: [txid1, txid2, txid3] }
+      })
+
+      const config = {
+        id: `test-array-txids`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      const tx = testCollection.insert({ id: 1, name: `Test` })
+
+      // Should wait for all three txids to arrive
+      // If this times out, it means Promise.all() is not being used correctly
+      await expect(tx.isPersisted.promise).resolves.toBeDefined()
+      expect(onInsert).toHaveBeenCalled()
+
+      // Verify all items made it to the collection
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.has(3)).toBe(true)
+    })
+  })
+
   // Tests for matching strategies utilities
   describe(`Matching strategies utilities`, () => {
     it(`should export isChangeMessage helper for custom match functions`, () => {
