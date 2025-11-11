@@ -7,9 +7,9 @@ import {
   parseOrderByExpression,
   parseWhereExpression,
   walkExpression,
-} from "../src/expression-helpers"
-import { Func, PropRef, Value } from "../../db/src/query/ir.js"
-import type { IR } from "@tanstack/db"
+} from "../../src/query/expression-helpers"
+import { Func, PropRef, Value } from "../../src/query/ir.js"
+import type { IR } from "../../src/index.js"
 
 type OrderBy = IR.OrderBy
 

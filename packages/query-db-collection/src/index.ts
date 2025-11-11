@@ -7,6 +7,7 @@ export {
 
 export * from "./errors"
 
+// Re-export expression helpers from @tanstack/db
 export {
   parseWhereExpression,
   parseOrderByExpression,
@@ -19,4 +20,4 @@ export {
   type SimpleComparison,
   type ParseWhereOptions,
   type ParsedOrderBy,
-} from "./expression-helpers"
+} from "@tanstack/db"

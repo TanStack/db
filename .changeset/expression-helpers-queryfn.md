@@ -1,10 +1,11 @@
 ---
+"@tanstack/db": patch
 "@tanstack/query-db-collection": patch
 ---
 
 Add expression helper utilities for parsing LoadSubsetOptions in queryFn.
 
-When using `syncMode: 'on-demand'`, query collections now provide helper functions to easily parse where clauses, orderBy, and limit predicates into your API's format:
+When using `syncMode: 'on-demand'`, TanStack DB now provides helper functions to easily parse where clauses, orderBy, and limit predicates into your API's format:
 
 - `parseWhereExpression`: Parse where clauses with custom handlers for each operator
 - `parseOrderByExpression`: Parse order by into simple array format
@@ -15,7 +16,8 @@ When using `syncMode: 'on-demand'`, query collections now provide helper functio
 **Example:**
 
 ```typescript
-import { parseLoadSubsetOptions } from "@tanstack/query-db-collection"
+import { parseLoadSubsetOptions } from "@tanstack/db"
+// or from "@tanstack/query-db-collection" (re-exported for convenience)
 
 queryFn: async (ctx) => {
   const { where, orderBy, limit } = ctx.meta.loadSubsetOptions

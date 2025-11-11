@@ -1,5 +1,5 @@
 /**
- * Expression Helpers for Query Collections
+ * Expression Helpers for TanStack DB
  *
  * These utilities help parse LoadSubsetOptions (where, orderBy, limit) from TanStack DB
  * into formats suitable for your API backend. They provide a generic way to traverse
@@ -7,7 +7,7 @@
  *
  * @example
  * ```typescript
- * import { parseWhereExpression, parseOrderByExpression } from '@tanstack/query-db-collection'
+ * import { parseWhereExpression, parseOrderByExpression } from '@tanstack/db'
  *
  * queryFn: async (ctx) => {
  *   const { limit, where, orderBy } = ctx.meta?.loadSubsetOptions ?? {}
@@ -27,7 +27,7 @@
  * ```
  */
 
-import type { IR, OperatorName } from "@tanstack/db"
+import type { IR, OperatorName } from "../index.js"
 
 type BasicExpression<T = any> = IR.BasicExpression<T>
 type OrderBy = IR.OrderBy

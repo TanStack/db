@@ -417,7 +417,7 @@ queryFn: async (ctx) => {
 }
 ```
 
-The `where` and `orderBy` fields are expression trees (AST - Abstract Syntax Tree) that need to be parsed. The `@tanstack/query-db-collection` package provides helper functions to make this easy.
+The `where` and `orderBy` fields are expression trees (AST - Abstract Syntax Tree) that need to be parsed. TanStack DB provides helper functions to make this easy.
 
 ### Expression Helpers
 
@@ -427,7 +427,8 @@ import {
   parseOrderByExpression,
   extractSimpleComparisons,
   parseLoadSubsetOptions,
-} from '@tanstack/query-db-collection'
+} from '@tanstack/db'
+// Or from '@tanstack/query-db-collection' (re-exported for convenience)
 ```
 
 These helpers allow you to parse expression trees without manually traversing complex AST structures.
@@ -436,7 +437,8 @@ These helpers allow you to parse expression trees without manually traversing co
 
 ```typescript
 import { createCollection } from '@tanstack/react-db'
-import { queryCollectionOptions, parseLoadSubsetOptions } from '@tanstack/query-db-collection'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import { parseLoadSubsetOptions } from '@tanstack/db'
 import { QueryClient } from '@tanstack/query-core'
 
 const queryClient = new QueryClient()
