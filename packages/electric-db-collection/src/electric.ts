@@ -81,7 +81,13 @@ export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-    BaseCollectionConfig<T, string | number, TSchema, UtilsRecord, any>,
+    BaseCollectionConfig<
+      T,
+      string | number,
+      TSchema,
+      ElectricCollectionUtils<T>,
+      any
+    >,
     `onInsert` | `onUpdate` | `onDelete`
   > {
   /**
@@ -125,7 +131,13 @@ export interface ElectricCollectionConfig<
    *   )
    * }
    */
-  onInsert?: (params: InsertMutationFnParams<T>) => Promise<MatchingStrategy>
+  onInsert?: (
+    params: InsertMutationFnParams<
+      T,
+      string | number,
+      ElectricCollectionUtils<T>
+    >
+  ) => Promise<MatchingStrategy>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -154,7 +166,13 @@ export interface ElectricCollectionConfig<
    *   )
    * }
    */
-  onUpdate?: (params: UpdateMutationFnParams<T>) => Promise<MatchingStrategy>
+  onUpdate?: (
+    params: UpdateMutationFnParams<
+      T,
+      string | number,
+      ElectricCollectionUtils<T>
+    >
+  ) => Promise<MatchingStrategy>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -182,7 +200,13 @@ export interface ElectricCollectionConfig<
    *   )
    * }
    */
-  onDelete?: (params: DeleteMutationFnParams<T>) => Promise<MatchingStrategy>
+  onDelete?: (
+    params: DeleteMutationFnParams<
+      T,
+      string | number,
+      ElectricCollectionUtils<T>
+    >
+  ) => Promise<MatchingStrategy>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
@@ -255,7 +279,12 @@ export function electricCollectionOptions<T extends StandardSchemaV1>(
   config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, string | number, T> & {
+): CollectionConfig<
+  InferSchemaOutput<T>,
+  string | number,
+  T,
+  ElectricCollectionUtils<InferSchemaOutput<T>>
+> & {
   id?: string
   utils: ElectricCollectionUtils
   schema: T
@@ -266,7 +295,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, string | number> & {
+): CollectionConfig<T, string | number, never, ElectricCollectionUtils<T>> & {
   id?: string
   utils: ElectricCollectionUtils
   schema?: never // no schema in the result
@@ -274,7 +303,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 
 export function electricCollectionOptions(
   config: ElectricCollectionConfig<any, any>
-): CollectionConfig<any, string | number, any> & {
+): CollectionConfig<any, string | number, any, ElectricCollectionUtils<any>> & {
   id?: string
   utils: ElectricCollectionUtils
   schema?: any
@@ -516,7 +545,13 @@ export function electricCollectionOptions(
 
   // Create wrapper handlers for direct persistence operations that handle different matching strategies
   const wrappedOnInsert = config.onInsert
-    ? async (params: InsertMutationFnParams<any>) => {
+    ? async (
+        params: InsertMutationFnParams<
+          any,
+          string | number,
+          ElectricCollectionUtils<any>
+        >
+      ) => {
         const handlerResult = await config.onInsert!(params)
         await processMatchingStrategy(handlerResult)
         return handlerResult
@@ -524,7 +559,13 @@ export function electricCollectionOptions(
     : undefined
 
   const wrappedOnUpdate = config.onUpdate
-    ? async (params: UpdateMutationFnParams<any>) => {
+    ? async (
+        params: UpdateMutationFnParams<
+          any,
+          string | number,
+          ElectricCollectionUtils<any>
+        >
+      ) => {
         const handlerResult = await config.onUpdate!(params)
         await processMatchingStrategy(handlerResult)
         return handlerResult
@@ -532,7 +573,13 @@ export function electricCollectionOptions(
     : undefined
 
   const wrappedOnDelete = config.onDelete
-    ? async (params: DeleteMutationFnParams<any>) => {
+    ? async (
+        params: DeleteMutationFnParams<
+          any,
+          string | number,
+          ElectricCollectionUtils<any>
+        >
+      ) => {
         const handlerResult = await config.onDelete!(params)
         await processMatchingStrategy(handlerResult)
         return handlerResult
