@@ -1,5 +1,5 @@
 ---
-"@tanstack/query-db-collection": minor
+"@tanstack/query-db-collection": patch
 ---
 
 Automatically append predicates to static queryKey in on-demand mode.
