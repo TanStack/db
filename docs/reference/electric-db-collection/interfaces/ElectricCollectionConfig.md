@@ -5,7 +5,7 @@ title: ElectricCollectionConfig
 
 # Interface: ElectricCollectionConfig\<T, TSchema\>
 
-Defined in: [packages/electric-db-collection/src/electric.ts:102](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L102)
+Defined in: packages/electric-db-collection/src/electric.ts:108
 
 Configuration interface for Electric collection options
 
@@ -35,7 +35,7 @@ The schema type for validation
 optional onDelete: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:208](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L208)
+Defined in: packages/electric-db-collection/src/electric.ts:224
 
 Optional asynchronous handler function called before a delete operation
 
@@ -51,7 +51,7 @@ Object containing transaction and collection information
 
 `Promise`\<`MatchingStrategy`\>
 
-Promise resolving to { txid } or void
+Promise resolving to { txid, timeout? } or void
 
 #### Examples
 
@@ -87,7 +87,7 @@ onDelete: async ({ transaction, collection }) => {
 optional onInsert: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:151](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L151)
+Defined in: packages/electric-db-collection/src/electric.ts:167
 
 Optional asynchronous handler function called before an insert operation
 
@@ -103,7 +103,7 @@ Object containing transaction and collection information
 
 `Promise`\<`MatchingStrategy`\>
 
-Promise resolving to { txid } or void
+Promise resolving to { txid, timeout? } or void
 
 #### Examples
 
@@ -115,6 +115,17 @@ onInsert: async ({ transaction }) => {
     data: newItem
   })
   return { txid: result.txid }
+}
+```
+
+```ts
+// Insert handler with custom timeout
+onInsert: async ({ transaction }) => {
+  const newItem = transaction.mutations[0].modified
+  const result = await api.todos.create({
+    data: newItem
+  })
+  return { txid: result.txid, timeout: 10000 } // Wait up to 10 seconds
 }
 ```
 
@@ -150,7 +161,7 @@ onInsert: async ({ transaction, collection }) => {
 optional onUpdate: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:180](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L180)
+Defined in: packages/electric-db-collection/src/electric.ts:196
 
 Optional asynchronous handler function called before an update operation
 
@@ -166,7 +177,7 @@ Object containing transaction and collection information
 
 `Promise`\<`MatchingStrategy`\>
 
-Promise resolving to { txid } or void
+Promise resolving to { txid, timeout? } or void
 
 #### Examples
 
@@ -203,7 +214,7 @@ onUpdate: async ({ transaction, collection }) => {
 shapeOptions: ShapeStreamOptions<GetExtensions<T>>;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:112](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L112)
+Defined in: packages/electric-db-collection/src/electric.ts:118
 
 Configuration options for the ElectricSQL ShapeStream
 
@@ -215,4 +226,4 @@ Configuration options for the ElectricSQL ShapeStream
 optional syncMode: ElectricSyncMode;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:113](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L113)
+Defined in: packages/electric-db-collection/src/electric.ts:119
