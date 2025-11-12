@@ -9,13 +9,15 @@ title: extractSimpleComparisons
 function extractSimpleComparisons(expr): SimpleComparison[];
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:323](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L323)
+Defined in: [packages/db/src/query/expression-helpers.ts:327](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L327)
 
 Extracts all simple comparisons from a WHERE expression.
 This is useful for simple APIs that only support basic filters.
 
-Note: This only works for simple AND-ed conditions. Throws an error if it encounters
-unsupported operations like OR, NOT, or complex nested expressions.
+Note: This only works for simple AND-ed conditions and NOT-wrapped comparisons.
+Throws an error if it encounters unsupported operations like OR or complex nested expressions.
+
+NOT operators are flattened by prefixing the operator name (e.g., `not(eq(...))` becomes `not_eq`).
 
 ## Parameters
 
@@ -33,7 +35,7 @@ Array of simple comparisons
 
 ## Throws
 
-Error if expression contains OR, NOT, or other unsupported operations
+Error if expression contains OR or other unsupported operations
 
 ## Example
 
@@ -41,6 +43,8 @@ Error if expression contains OR, NOT, or other unsupported operations
 const comparisons = extractSimpleComparisons(where)
 // Returns: [
 //   { field: ['category'], operator: 'eq', value: 'electronics' },
-//   { field: ['price'], operator: 'lt', value: 100 }
+//   { field: ['price'], operator: 'lt', value: 100 },
+//   { field: ['email'], operator: 'isNull' }, // No value for null checks
+//   { field: ['status'], operator: 'not_eq', value: 'archived' }
 // ]
 ```

@@ -9,13 +9,13 @@ import {
 import { queryCollectionOptions } from "../src/query"
 import type { QueryFunctionContext } from "@tanstack/query-core"
 import type {
-  CollectionImpl,
+  Collection,
   DeleteMutationFnParams,
   InsertMutationFnParams,
   TransactionWithMutations,
   UpdateMutationFnParams,
 } from "@tanstack/db"
-import type { QueryCollectionConfig } from "../src/query"
+import type { QueryCollectionConfig, QueryCollectionUtils } from "../src/query"
 
 interface TestItem {
   id: string
@@ -620,21 +620,45 @@ describe(`QueryCollection`, () => {
         mutations: [] as any,
       } as TransactionWithMutations<TestItem, `delete`>
 
-      const insertMockParams: InsertMutationFnParams<TestItem> = {
+      const mockCollection = {
+        utils: {} as QueryCollectionUtils<
+          TestItem,
+          string | number,
+          TestItem,
+          unknown
+        >,
+      } as unknown as Collection<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>,
+        never,
+        TestItem
+      >
+
+      const insertMockParams = {
         transaction: insertTransaction,
-        // @ts-ignore not testing this
-        collection: {} as CollectionImpl,
-      }
-      const updateMockParams: UpdateMutationFnParams<TestItem> = {
+        collection: mockCollection,
+      } as InsertMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+      const updateMockParams = {
         transaction: updateTransaction,
-        // @ts-ignore not testing this
-        collection: {} as CollectionImpl,
-      }
-      const deleteMockParams: DeleteMutationFnParams<TestItem> = {
+        collection: mockCollection,
+      } as UpdateMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+      const deleteMockParams = {
         transaction: deleteTransaction,
-        // @ts-ignore not testing this
-        collection: {} as CollectionImpl,
-      }
+        collection: mockCollection,
+      } as DeleteMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
 
       // Create handlers
       const onInsert = vi.fn().mockResolvedValue(undefined)
@@ -671,12 +695,6 @@ describe(`QueryCollection`, () => {
         id: `test-transaction-insert`,
         mutations: [] as any,
       } as TransactionWithMutations<TestItem, `insert`>
-
-      const insertMockParams: InsertMutationFnParams<TestItem> = {
-        transaction: insertTransaction,
-        // @ts-ignore not testing this
-        collection: {} as CollectionImpl,
-      }
 
       // Create handlers with different return values
       const onInsertDefault = vi.fn().mockResolvedValue(undefined) // Default behavior should refetch
@@ -722,10 +740,19 @@ describe(`QueryCollection`, () => {
       // Clear initial call
       queryFnDefault.mockClear()
 
-      await optionsDefault.onInsert!(insertMockParams)
+      const insertParamsDefault = {
+        transaction: insertTransaction,
+        collection: collectionDefault,
+      } satisfies InsertMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+
+      await optionsDefault.onInsert!(insertParamsDefault)
 
       // Verify handler was called and refetch was triggered (queryFn called again)
-      expect(onInsertDefault).toHaveBeenCalledWith(insertMockParams)
+      expect(onInsertDefault).toHaveBeenCalledWith(insertParamsDefault)
       await vi.waitFor(() => {
         expect(queryFnDefault).toHaveBeenCalledTimes(1)
       })
@@ -742,10 +769,19 @@ describe(`QueryCollection`, () => {
       // Clear initial call
       queryFnFalse.mockClear()
 
-      await optionsFalse.onInsert!(insertMockParams)
+      const insertParamsFalse = {
+        transaction: insertTransaction,
+        collection: collectionFalse,
+      } satisfies InsertMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+
+      await optionsFalse.onInsert!(insertParamsFalse)
 
       // Verify handler was called but refetch was NOT triggered (queryFn not called)
-      expect(onInsertFalse).toHaveBeenCalledWith(insertMockParams)
+      expect(onInsertFalse).toHaveBeenCalledWith(insertParamsFalse)
       // Wait a bit to ensure no refetch happens
       await new Promise((resolve) => setTimeout(resolve, 50))
       expect(queryFnFalse).not.toHaveBeenCalled()
@@ -2912,8 +2948,6 @@ describe(`QueryCollection`, () => {
         const { meta } = context
         const loadSubsetOptions = meta?.loadSubsetOptions ?? {}
         const { where } = loadSubsetOptions
-
-        console.log(`In queryFn:\n`, JSON.stringify(where, null, 2))
 
         // Query 1: items 1, 2, 3 (where: { category: 'A' })
         if (isCategory(`A`, where)) {

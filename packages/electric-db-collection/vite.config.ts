@@ -5,10 +5,14 @@ import packageJson from "./package.json"
 const config = defineConfig({
   test: {
     name: packageJson.name,
-    dir: `./tests`,
+    include: [`tests/**/*.test.ts`],
+    exclude: [`e2e/**/*`],
     environment: `jsdom`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
-    typecheck: { enabled: true },
+    typecheck: {
+      enabled: true,
+      include: [`tests/**/*.test.ts`, `tests/**/*.test-d.ts`],
+    },
   },
 })
 

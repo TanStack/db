@@ -8,7 +8,7 @@ title: localStorageCollectionOptions
 ## Call Signature
 
 ```ts
-function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, UtilsRecord> & object;
+function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, LocalStorageCollectionUtils> & object;
 ```
 
 Defined in: [packages/db/src/local-storage.ts:279](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L279)
@@ -52,7 +52,7 @@ Configuration options for the localStorage collection
 
 ### Returns
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object`
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`LocalStorageCollectionUtils`](../../interfaces/LocalStorageCollectionUtils.md)\> & `object`
 
 Collection options with utilities including clearStorage, getStorageSize, and acceptMutations
 
@@ -123,10 +123,10 @@ await tx.commit()
 ## Call Signature
 
 ```ts
-function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, UtilsRecord> & object;
+function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, LocalStorageCollectionUtils> & object;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:294](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L294)
+Defined in: [packages/db/src/local-storage.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L299)
 
 Creates localStorage collection options for use with a standard Collection
 
@@ -167,7 +167,7 @@ Configuration options for the localStorage collection
 
 ### Returns
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object`
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`LocalStorageCollectionUtils`](../../interfaces/LocalStorageCollectionUtils.md)\> & `object`
 
 Collection options with utilities including clearStorage, getStorageSize, and acceptMutations
 

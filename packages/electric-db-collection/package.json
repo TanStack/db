@@ -11,7 +11,9 @@
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.2.4"
+    "@types/pg": "^8.11.10",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "pg": "^8.13.1"
   },
   "exports": {
     ".": {
@@ -51,7 +53,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "npx vitest --run"
+    "test": "npx vitest run",
+    "test:e2e": "npx vitest run --config vitest.e2e.config.ts"
   },
   "sideEffects": false,
   "type": "module",

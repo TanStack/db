@@ -53,7 +53,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "npx vitest --run"
+    "test": "npx vitest run",
+    "test:e2e": "npx vitest run --config vitest.e2e.config.ts"
   },
   "sideEffects": false,
   "type": "module",

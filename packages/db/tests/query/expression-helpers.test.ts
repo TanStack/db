@@ -432,6 +432,83 @@ describe(`Expression Helpers`, () => {
         },
       ])
     })
+
+    it(`should handle NOT with comparison operators`, () => {
+      const expr = new Func(`not`, [
+        new Func(`eq`, [new PropRef([`category`]), new Value(`electronics`)]),
+      ])
+
+      const result = extractSimpleComparisons(expr)
+
+      expect(result).toEqual([
+        { field: [`category`], operator: `not_eq`, value: `electronics` },
+      ])
+    })
+
+    it(`should handle NOT with all comparison operators`, () => {
+      const expr = new Func(`and`, [
+        new Func(`not`, [new Func(`eq`, [new PropRef([`a`]), new Value(1)])]),
+        new Func(`not`, [new Func(`gt`, [new PropRef([`b`]), new Value(2)])]),
+        new Func(`not`, [new Func(`lt`, [new PropRef([`c`]), new Value(3)])]),
+        new Func(`not`, [
+          new Func(`in`, [new PropRef([`d`]), new Value([4, 5])]),
+        ]),
+      ])
+
+      const result = extractSimpleComparisons(expr)
+
+      expect(result).toEqual([
+        { field: [`a`], operator: `not_eq`, value: 1 },
+        { field: [`b`], operator: `not_gt`, value: 2 },
+        { field: [`c`], operator: `not_lt`, value: 3 },
+        { field: [`d`], operator: `not_in`, value: [4, 5] },
+      ])
+    })
+
+    it(`should handle NOT with null checks`, () => {
+      const expr = new Func(`and`, [
+        new Func(`not`, [new Func(`isNull`, [new PropRef([`email`])])]),
+        new Func(`not`, [new Func(`isUndefined`, [new PropRef([`name`])])]),
+      ])
+
+      const result = extractSimpleComparisons(expr)
+
+      expect(result).toEqual([
+        { field: [`email`], operator: `not_isNull` },
+        { field: [`name`], operator: `not_isUndefined` },
+      ])
+    })
+
+    it(`should handle mixed NOT and regular comparisons`, () => {
+      const expr = new Func(`and`, [
+        new Func(`eq`, [new PropRef([`status`]), new Value(`active`)]),
+        new Func(`not`, [
+          new Func(`eq`, [new PropRef([`category`]), new Value(`archived`)]),
+        ]),
+        new Func(`gt`, [new PropRef([`age`]), new Value(18)]),
+      ])
+
+      const result = extractSimpleComparisons(expr)
+
+      expect(result).toEqual([
+        { field: [`status`], operator: `eq`, value: `active` },
+        { field: [`category`], operator: `not_eq`, value: `archived` },
+        { field: [`age`], operator: `gt`, value: 18 },
+      ])
+    })
+
+    it(`should throw on NOT wrapping AND/OR (complex)`, () => {
+      const expr = new Func(`not`, [
+        new Func(`and`, [
+          new Func(`eq`, [new PropRef([`a`]), new Value(1)]),
+          new Func(`eq`, [new PropRef([`b`]), new Value(2)]),
+        ]),
+      ])
+
+      expect(() => extractSimpleComparisons(expr)).toThrow(
+        `extractSimpleComparisons does not support 'not(and)'`
+      )
+    })
   })
 
   describe(`parseLoadSubsetOptions`, () => {

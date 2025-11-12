@@ -31,10 +31,10 @@ Defined in: [packages/db/src/query/expression-helpers.ts:46](https://github.com/
 
 ***
 
-### value
+### value?
 
 ```ts
-value: any;
+optional value: any;
 ```
 
 Defined in: [packages/db/src/query/expression-helpers.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L47)
