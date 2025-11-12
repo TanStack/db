@@ -1,5 +1,40 @@
 # @tanstack/electric-db-collection
 
+## 0.2.0
+
+### Minor Changes
+
+- Add timeout support to electricCollectionOptions matching strategies. You can now specify a custom timeout when returning txids from mutation handlers (onInsert, onUpdate, onDelete). ([#798](https://github.com/TanStack/db/pull/798))
+
+  Previously, users could only customize timeouts when manually calling `collection.utils.awaitTxId()`, but not when using the automatic txid matching strategy.
+
+  **Example:**
+
+  ```ts
+  const collection = createCollection(
+    electricCollectionOptions({
+      // ... other config
+      onInsert: async ({ transaction }) => {
+        const newItem = transaction.mutations[0].modified
+        const result = await api.todos.create({ data: newItem })
+        // Specify custom timeout (in milliseconds)
+        return { txid: result.txid, timeout: 10000 }
+      },
+    })
+  )
+  ```
+
+  The timeout parameter is optional and defaults to 5000ms when not specified. It works with both single txids and arrays of txids.
+
+### Patch Changes
+
+- Fix array txid handling in electric collection handlers. When returning `{ txid: [txid1, txid2] }` from an `onInsert`, `onUpdate`, or `onDelete` handler, the system would timeout with `TimeoutWaitingForTxIdError` instead of properly waiting for all txids. The bug was caused by passing array indices as timeout parameters when calling `awaitTxId` via `.map()`. ([#795](https://github.com/TanStack/db/pull/795))
+
+- Handle predicates that are pushed down. ([#763](https://github.com/TanStack/db/pull/763))
+
+- Updated dependencies [[`243a35a`](https://github.com/TanStack/db/commit/243a35a632ee0aca20c3ee12ee2ac2929d8be11d), [`f9d11fc`](https://github.com/TanStack/db/commit/f9d11fc3d7297c61feb3c6876cb2f436edbb5b34), [`7aedf12`](https://github.com/TanStack/db/commit/7aedf12996a67ef64010bca0d78d51c919dd384f), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`f6ac7ea`](https://github.com/TanStack/db/commit/f6ac7eac50ae1334ddb173786a68c9fc732848f9), [`01093a7`](https://github.com/TanStack/db/commit/01093a762cf2f5f308edec7f466d1c3dabb5ea9f)]:
+  - @tanstack/db@0.5.0
+
 ## 0.1.44
 
 ### Patch Changes

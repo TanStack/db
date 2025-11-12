@@ -1,5 +1,48 @@
 # @tanstack/query-db-collection
 
+## 1.0.0
+
+### Patch Changes
+
+- Add expression helper utilities for parsing LoadSubsetOptions in queryFn. ([#763](https://github.com/TanStack/db/pull/763))
+
+  When using `syncMode: 'on-demand'`, TanStack DB now provides helper functions to easily parse where clauses, orderBy, and limit predicates into your API's format:
+  - `parseWhereExpression`: Parse where clauses with custom handlers for each operator
+  - `parseOrderByExpression`: Parse order by into simple array format
+  - `extractSimpleComparisons`: Extract simple AND-ed filters
+  - `parseLoadSubsetOptions`: Convenience function to parse all options at once
+  - `walkExpression`, `extractFieldPath`, `extractValue`: Lower-level helpers
+
+  **Example:**
+
+  ```typescript
+  import { parseLoadSubsetOptions } from "@tanstack/db"
+  // or from "@tanstack/query-db-collection" (re-exported for convenience)
+
+  queryFn: async (ctx) => {
+    const { where, orderBy, limit } = ctx.meta.loadSubsetOptions
+
+    const parsed = parseLoadSubsetOptions({ where, orderBy, limit })
+
+    // Build API request from parsed filters
+    const params = new URLSearchParams()
+    parsed.filters.forEach(({ field, operator, value }) => {
+      if (operator === "eq") {
+        params.set(field.join("."), String(value))
+      }
+    })
+
+    return fetch(`/api/products?${params}`).then((r) => r.json())
+  }
+  ```
+
+  This eliminates the need to manually traverse expression AST trees when implementing predicate push-down.
+
+- Handle pushed-down predicates ([#763](https://github.com/TanStack/db/pull/763))
+
+- Updated dependencies [[`243a35a`](https://github.com/TanStack/db/commit/243a35a632ee0aca20c3ee12ee2ac2929d8be11d), [`f9d11fc`](https://github.com/TanStack/db/commit/f9d11fc3d7297c61feb3c6876cb2f436edbb5b34), [`7aedf12`](https://github.com/TanStack/db/commit/7aedf12996a67ef64010bca0d78d51c919dd384f), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`f6ac7ea`](https://github.com/TanStack/db/commit/f6ac7eac50ae1334ddb173786a68c9fc732848f9), [`01093a7`](https://github.com/TanStack/db/commit/01093a762cf2f5f308edec7f466d1c3dabb5ea9f)]:
+  - @tanstack/db@0.5.0
+
 ## 0.3.0
 
 ### Minor Changes
