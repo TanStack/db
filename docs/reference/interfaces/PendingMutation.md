@@ -5,7 +5,7 @@ title: PendingMutation
 
 # Interface: PendingMutation\<T, TOperation, TCollection\>
 
-Defined in: [packages/db/src/types.ts:57](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L57)
+Defined in: [packages/db/src/types.ts:88](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L88)
 
 Represents a pending mutation within a transaction
 Contains information about the original and modified data, as well as metadata
@@ -32,7 +32,7 @@ Contains information about the original and modified data, as well as metadata
 changes: ResolveTransactionChanges<T, TOperation>;
 ```
 
-Defined in: [packages/db/src/types.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L74)
+Defined in: [packages/db/src/types.ts:105](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L105)
 
 ***
 
@@ -42,7 +42,7 @@ Defined in: [packages/db/src/types.ts:74](https://github.com/TanStack/db/blob/ma
 collection: TCollection;
 ```
 
-Defined in: [packages/db/src/types.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L85)
+Defined in: [packages/db/src/types.ts:116](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L116)
 
 ***
 
@@ -52,7 +52,7 @@ Defined in: [packages/db/src/types.ts:85](https://github.com/TanStack/db/blob/ma
 createdAt: Date;
 ```
 
-Defined in: [packages/db/src/types.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L83)
+Defined in: [packages/db/src/types.ts:114](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L114)
 
 ***
 
@@ -62,7 +62,7 @@ Defined in: [packages/db/src/types.ts:83](https://github.com/TanStack/db/blob/ma
 globalKey: string;
 ```
 
-Defined in: [packages/db/src/types.ts:75](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L75)
+Defined in: [packages/db/src/types.ts:106](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L106)
 
 ***
 
@@ -72,7 +72,7 @@ Defined in: [packages/db/src/types.ts:75](https://github.com/TanStack/db/blob/ma
 key: any;
 ```
 
-Defined in: [packages/db/src/types.ts:77](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L77)
+Defined in: [packages/db/src/types.ts:108](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L108)
 
 ***
 
@@ -82,7 +82,7 @@ Defined in: [packages/db/src/types.ts:77](https://github.com/TanStack/db/blob/ma
 metadata: unknown;
 ```
 
-Defined in: [packages/db/src/types.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L79)
+Defined in: [packages/db/src/types.ts:110](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L110)
 
 ***
 
@@ -92,7 +92,7 @@ Defined in: [packages/db/src/types.ts:79](https://github.com/TanStack/db/blob/ma
 modified: T;
 ```
 
-Defined in: [packages/db/src/types.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L72)
+Defined in: [packages/db/src/types.ts:103](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L103)
 
 ***
 
@@ -102,7 +102,7 @@ Defined in: [packages/db/src/types.ts:72](https://github.com/TanStack/db/blob/ma
 mutationId: string;
 ```
 
-Defined in: [packages/db/src/types.ts:68](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L68)
+Defined in: [packages/db/src/types.ts:99](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L99)
 
 ***
 
@@ -112,7 +112,7 @@ Defined in: [packages/db/src/types.ts:68](https://github.com/TanStack/db/blob/ma
 optimistic: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L82)
+Defined in: [packages/db/src/types.ts:113](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L113)
 
 Whether this mutation should be applied optimistically (defaults to true)
 
@@ -124,7 +124,7 @@ Whether this mutation should be applied optimistically (defaults to true)
 original: TOperation extends "insert" ? object : T;
 ```
 
-Defined in: [packages/db/src/types.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L70)
+Defined in: [packages/db/src/types.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L101)
 
 ***
 
@@ -134,7 +134,7 @@ Defined in: [packages/db/src/types.ts:70](https://github.com/TanStack/db/blob/ma
 syncMetadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L80)
+Defined in: [packages/db/src/types.ts:111](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L111)
 
 ***
 
@@ -144,7 +144,7 @@ Defined in: [packages/db/src/types.ts:80](https://github.com/TanStack/db/blob/ma
 type: TOperation;
 ```
 
-Defined in: [packages/db/src/types.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L78)
+Defined in: [packages/db/src/types.ts:109](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L109)
 
 ***
 
@@ -154,4 +154,4 @@ Defined in: [packages/db/src/types.ts:78](https://github.com/TanStack/db/blob/ma
 updatedAt: Date;
 ```
 
-Defined in: [packages/db/src/types.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L84)
+Defined in: [packages/db/src/types.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L115)

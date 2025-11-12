@@ -7,10 +7,14 @@ import type {
 import type { Collection, PendingMutation } from "@tanstack/db"
 
 export class TransactionSerializer {
-  private collections: Record<string, Collection>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private collections: Record<string, Collection<any, any, any, any, any>>
   private collectionIdToKey: Map<string, string>
 
-  constructor(collections: Record<string, Collection>) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(
+    collections: Record<string, Collection<any, any, any, any, any>>
+  ) {
     this.collections = collections
     // Create reverse lookup from collection.id to registry key
     this.collectionIdToKey = new Map()

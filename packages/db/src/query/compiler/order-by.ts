@@ -5,10 +5,15 @@ import { ensureIndexForField } from "../../indexes/auto-index.js"
 import { findIndexForField } from "../../utils/index-optimization.js"
 import { compileExpression } from "./evaluators.js"
 import { replaceAggregatesByRefs } from "./group-by.js"
+import type { CompareOptions } from "../builder/types.js"
 import type { WindowOptions } from "./types.js"
 import type { CompiledSingleRowExpression } from "./evaluators.js"
 import type { OrderBy, OrderByClause, QueryIR, Select } from "../ir.js"
-import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
+import type {
+  CollectionLike,
+  NamespacedAndKeyedStream,
+  NamespacedRow,
+} from "../../types.js"
 import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
 import type { IndexInterface } from "../../indexes/base-index.js"
 import type { Collection } from "../../collection/index.js"
@@ -50,9 +55,10 @@ export function processOrderBy(
       selectClause,
       `__select_results`
     )
+
     return {
       compiledExpression: compileExpression(clauseWithoutAggregates),
-      compareOptions: clause.compareOptions,
+      compareOptions: buildCompareOptions(clause, collection),
     }
   })
 
@@ -87,7 +93,7 @@ export function processOrderBy(
       const arrayA = a as Array<unknown>
       const arrayB = b as Array<unknown>
       for (let i = 0; i < orderByClause.length; i++) {
-        const clause = orderByClause[i]!
+        const clause = compiledOrderBy[i]!
         const compareFn = makeComparator(clause.compareOptions)
         const result = compareFn(arrayA[i], arrayB[i])
         if (result !== 0) {
@@ -99,7 +105,7 @@ export function processOrderBy(
 
     // Single property comparison
     if (orderByClause.length === 1) {
-      const clause = orderByClause[0]!
+      const clause = compiledOrderBy[0]!
       const compareFn = makeComparator(clause.compareOptions)
       return compareFn(a, b)
     }
@@ -127,12 +133,13 @@ export function processOrderBy(
 
       const followRefCollection = followRefResult.collection
       const fieldName = followRefResult.path[0]
+      const compareOpts = buildCompareOptions(clause, followRefCollection)
       if (fieldName) {
         ensureIndexForField(
           fieldName,
           followRefResult.path,
           followRefCollection,
-          clause.compareOptions,
+          compareOpts,
           compare
         )
       }
@@ -153,9 +160,9 @@ export function processOrderBy(
 
       const index: IndexInterface<string | number> | undefined =
         findIndexForField(
-          followRefCollection.indexes,
+          followRefCollection,
           followRefResult.path,
-          clause.compareOptions
+          compareOpts
         )
 
       if (index && index.supports(`gt`)) {
@@ -216,4 +223,23 @@ export function processOrderBy(
     })
     // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
   )
+}
+
+/**
+ * Builds a comparison configuration object that uses the values provided in the orderBy clause.
+ * If no string sort configuration is provided it defaults to the collection's string sort configuration.
+ */
+export function buildCompareOptions(
+  clause: OrderByClause,
+  collection: CollectionLike<any, any>
+): CompareOptions {
+  if (clause.compareOptions.stringSort !== undefined) {
+    return clause.compareOptions
+  }
+
+  return {
+    ...collection.compareOptions,
+    direction: clause.compareOptions.direction,
+    nulls: clause.compareOptions.nulls,
+  }
 }

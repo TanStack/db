@@ -11,7 +11,7 @@ title: createCollection
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:130](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L130)
+Defined in: [packages/db/src/collection/index.ts:131](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L131)
 
 Creates a new Collection instance with the given configuration
 
@@ -39,7 +39,7 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
 
 Collection options with optional utilities
 
@@ -120,7 +120,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:143](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L143)
+Defined in: [packages/db/src/collection/index.ts:144](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L144)
 
 Creates a new Collection instance with the given configuration
 
@@ -148,7 +148,7 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
 
 Collection options with optional utilities
 
@@ -229,7 +229,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:157](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L157)
+Defined in: [packages/db/src/collection/index.ts:158](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L158)
 
 Creates a new Collection instance with the given configuration
 
@@ -257,7 +257,7 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
 
 Collection options with optional utilities
 
@@ -338,7 +338,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:170](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L170)
+Defined in: [packages/db/src/collection/index.ts:171](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L171)
 
 Creates a new Collection instance with the given configuration
 
@@ -366,7 +366,7 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
 
 Collection options with optional utilities
 

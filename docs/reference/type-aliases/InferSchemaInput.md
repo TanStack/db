@@ -9,7 +9,7 @@ title: InferSchemaInput
 type InferSchemaInput<T> = T extends StandardSchemaV1 ? StandardSchemaV1.InferInput<T> extends object ? StandardSchemaV1.InferInput<T> : Record<string, unknown> : Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:24](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L24)
+Defined in: [packages/db/src/types.ts:55](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L55)
 
 **`Internal`**
 

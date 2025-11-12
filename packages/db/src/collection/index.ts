@@ -27,6 +27,7 @@ import type {
   NonSingleResult,
   OperationConfig,
   SingleResult,
+  StringCollationConfig,
   SubscribeChangesOptions,
   Transaction as TransactionType,
   UtilsRecord,
@@ -132,7 +133,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils> & {
     schema: T
     utils?: TUtils
   } & NonSingleResult
@@ -145,7 +146,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils> & {
     schema: T
     utils?: TUtils
   } & SingleResult
@@ -159,7 +160,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<T, TKey, never> & {
+  options: CollectionConfig<T, TKey, never, TUtils> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
   } & NonSingleResult
@@ -172,7 +173,7 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<T, TKey, never> & {
+  options: CollectionConfig<T, TKey, never, TUtils> & {
     schema?: never // prohibit schema if an explicit type is provided
     utils?: TUtils
   } & SingleResult
@@ -230,6 +231,8 @@ export class CollectionImpl<
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
+  private comparisonOpts: StringCollationConfig
+
   /**
    * Creates a new Collection instance
    *
@@ -266,6 +269,8 @@ export class CollectionImpl<
     this._mutations = new CollectionMutationsManager(config, this.id)
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
+
+    this.comparisonOpts = buildCompareOptionsFromConfig(config)
 
     this._changes.setDeps({
       collection: this, // Required for passing to CollectionSubscription
@@ -506,6 +511,11 @@ export class CollectionImpl<
     key?: TKey
   ): TOutput | never {
     return this._mutations.validateData(data, type, key)
+  }
+
+  get compareOptions(): StringCollationConfig {
+    // return a copy such that no one can mutate the internal comparison object
+    return { ...this.comparisonOpts }
   }
 
   /**
@@ -846,5 +856,23 @@ export class CollectionImpl<
   public async cleanup(): Promise<void> {
     this._lifecycle.cleanup()
     return Promise.resolve()
+  }
+}
+
+function buildCompareOptionsFromConfig(
+  config: CollectionConfig<any, any, any>
+): StringCollationConfig {
+  if (config.defaultStringCollation) {
+    const options = config.defaultStringCollation
+    return {
+      stringSort: options.stringSort ?? `locale`,
+      locale: options.stringSort === `locale` ? options.locale : undefined,
+      localeOptions:
+        options.stringSort === `locale` ? options.localeOptions : undefined,
+    }
+  } else {
+    return {
+      stringSort: `locale`,
+    }
   }
 }

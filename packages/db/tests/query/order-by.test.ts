@@ -2226,6 +2226,161 @@ describe(`Query2 OrderBy Compiler`, () => {
   createOrderByTests(`eager`)
 })
 
+describe(`OrderBy with collection-level StringSortOpts`, () => {
+  type StringItem = {
+    id: number
+    name: string
+  }
+
+  const stringItemsData: Array<StringItem> = [
+    { id: 1, name: `Charlie` },
+    { id: 2, name: `alice` },
+    { id: 3, name: `bob` },
+  ]
+
+  it(`should use collection's compareOptions when query doesn't specify stringSort`, async () => {
+    // Create collection with lexical string sorting as default
+    const collectionWithLexical = createCollection(
+      mockSyncCollectionOptions<StringItem>({
+        id: `test-lexical-collection`,
+        getKey: (item) => item.id,
+        initialData: stringItemsData,
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      })
+    )
+
+    // Query without specifying stringSort should use collection's lexical default
+    const lexicalQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, `asc`)
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await lexicalQuery.preload()
+
+    // In lexical comparison, uppercase letters come before lowercase letters
+    const lexicalResults = Array.from(lexicalQuery.values())
+    expect(lexicalResults.map((r) => r.name)).toEqual([
+      `Charlie`,
+      `alice`,
+      `bob`,
+    ])
+  })
+
+  it(`should override collection's compareOptions when query specifies stringSort`, async () => {
+    // Create collection with lexical string sorting as default
+    const collectionWithLexical = createCollection(
+      mockSyncCollectionOptions<StringItem>({
+        id: `test-lexical-collection-override`,
+        getKey: (item) => item.id,
+        initialData: stringItemsData,
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      })
+    )
+
+    // Query with explicit locale stringSort should override collection's lexical default
+    const localeQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, {
+          direction: `asc`,
+          stringSort: `locale`,
+          locale: `en-US`,
+        })
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await localeQuery.preload()
+
+    // In locale comparison, case-insensitive sorting puts lowercase first
+    const localeResults = Array.from(localeQuery.values())
+    expect(localeResults.map((r) => r.name)).toEqual([
+      `alice`,
+      `bob`,
+      `Charlie`,
+    ])
+  })
+
+  it(`should use collection default and allow query overrides`, async () => {
+    // Create collection with lexical string sorting as default
+    const collectionWithLexical = createCollection(
+      mockSyncCollectionOptions<StringItem>({
+        id: `test-lexical-collection-sequence`,
+        getKey: (item) => item.id,
+        initialData: stringItemsData,
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      })
+    )
+
+    // First query without specifying stringSort should use collection's lexical default
+    const firstQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, `asc`)
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await firstQuery.preload()
+
+    // In lexical comparison, uppercase letters come before lowercase letters
+    const firstResults = Array.from(firstQuery.values())
+    expect(firstResults.map((r) => r.name)).toEqual([`Charlie`, `alice`, `bob`])
+
+    // Second query with explicit locale stringSort should override collection's lexical default
+    const secondQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, {
+          direction: `asc`,
+          stringSort: `locale`,
+          locale: `en-US`,
+        })
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await secondQuery.preload()
+
+    // Should use locale sorting (case-insensitive) for this query
+    const secondResults = Array.from(secondQuery.values())
+    expect(secondResults.map((r) => r.name)).toEqual([
+      `alice`,
+      `bob`,
+      `Charlie`,
+    ])
+
+    // Third query without specifying stringSort should use collection's lexical default again
+    const thirdQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, `desc`)
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await thirdQuery.preload()
+
+    // Should revert back to lexical sorting (collection default)
+    const thirdResults = Array.from(thirdQuery.values())
+    expect(thirdResults.map((r) => r.name)).toEqual([`bob`, `alice`, `Charlie`])
+  })
+})
+
 describe(`OrderBy with collection alias conflicts`, () => {
   type EmailSchema = {
     email: string
