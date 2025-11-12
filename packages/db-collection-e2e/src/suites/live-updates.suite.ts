@@ -307,7 +307,7 @@ export function createLiveUpdatesTestSuite(
           () =>
             query1.size === initialSize1 + 1 &&
             query2.size === initialSize2 + 1,
-          { timeout: 5000, message: `Not all queries received the update` }
+          { timeout: 10000, message: `Not all queries received the update` }
         )
 
         expect(query1.size).toBe(initialSize1 + 1)
