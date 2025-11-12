@@ -56,10 +56,16 @@ export type MatchFunction<T extends Row<unknown>> = (
 /**
  * Matching strategies for Electric synchronization
  * Handlers can return:
- * - Txid strategy: { txid: number | number[] } (recommended)
+ * - Txid strategy: { txid: number | number[], timeout?: number } (recommended)
  * - Void (no return value) - mutation completes without waiting
+ *
+ * The optional timeout property specifies how long to wait for the txid(s) in milliseconds.
+ * If not specified, defaults to 5000ms.
  */
-export type MatchingStrategy = { txid: Txid | Array<Txid> } | void
+export type MatchingStrategy = {
+  txid: Txid | Array<Txid>
+  timeout?: number
+} | void
 
 /**
  * Type representing a snapshot end message
@@ -115,7 +121,7 @@ export interface ElectricCollectionConfig<
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid } or void
+   * @returns Promise resolving to { txid, timeout? } or void
    * @example
    * // Basic Electric insert handler with txid (recommended)
    * onInsert: async ({ transaction }) => {
@@ -124,6 +130,16 @@ export interface ElectricCollectionConfig<
    *     data: newItem
    *   })
    *   return { txid: result.txid }
+   * }
+   *
+   * @example
+   * // Insert handler with custom timeout
+   * onInsert: async ({ transaction }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.todos.create({
+   *     data: newItem
+   *   })
+   *   return { txid: result.txid, timeout: 10000 } // Wait up to 10 seconds
    * }
    *
    * @example
@@ -153,7 +169,7 @@ export interface ElectricCollectionConfig<
   /**
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid } or void
+   * @returns Promise resolving to { txid, timeout? } or void
    * @example
    * // Basic Electric update handler with txid (recommended)
    * onUpdate: async ({ transaction }) => {
@@ -182,7 +198,7 @@ export interface ElectricCollectionConfig<
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid } or void
+   * @returns Promise resolving to { txid, timeout? } or void
    * @example
    * // Basic Electric delete handler with txid (recommended)
    * onDelete: async ({ transaction }) => {
@@ -531,11 +547,12 @@ export function electricCollectionOptions(
   ): Promise<void> => {
     // Only wait if result contains txid
     if (result && `txid` in result) {
+      const timeout = result.timeout
       // Handle both single txid and array of txids
       if (Array.isArray(result.txid)) {
-        await Promise.all(result.txid.map((txid) => awaitTxId(txid)))
+        await Promise.all(result.txid.map((txid) => awaitTxId(txid, timeout)))
       } else {
-        await awaitTxId(result.txid)
+        await awaitTxId(result.txid, timeout)
       }
     }
     // If result is void/undefined, don't wait - mutation completes immediately

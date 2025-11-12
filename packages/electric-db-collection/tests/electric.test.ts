@@ -672,6 +672,37 @@ describe(`Electric Integration`, () => {
       expect(onInsert).toHaveBeenCalled()
     })
 
+    it(`should support custom timeout in matching strategy`, async () => {
+      const onInsert = vi.fn(async () => {
+        // Return a txid that will never arrive with a very short timeout
+        return { txid: 999999, timeout: 100 }
+      })
+
+      const config = {
+        id: `test-custom-timeout`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Insert data - should timeout after 100ms
+      const tx = testCollection.insert({ id: 1, name: `Timeout Test` })
+
+      // Verify that our onInsert handler was called
+      expect(onInsert).toHaveBeenCalled()
+
+      // The transaction should reject due to timeout
+      await expect(tx.isPersisted.promise).rejects.toThrow(
+        `Timeout waiting for txId: 999999`
+      )
+    })
+
     it(`should handle array of txids returned from handler`, async () => {
       // Create a fake backend that returns multiple txids
       const fakeBackend = {
