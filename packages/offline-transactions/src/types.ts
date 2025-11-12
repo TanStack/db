@@ -88,7 +88,8 @@ export interface StorageDiagnostic {
 }
 
 export interface OfflineConfig {
-  collections: Record<string, Collection>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  collections: Record<string, Collection<any, any, any, any, any>>
   mutationFns: Record<string, OfflineMutationFn>
   storage?: StorageAdapter
   maxConcurrency?: number

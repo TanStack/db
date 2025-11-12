@@ -10,7 +10,8 @@ export class OutboxManager {
 
   constructor(
     storage: StorageAdapter,
-    collections: Record<string, Collection>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    collections: Record<string, Collection<any, any, any, any, any>>
   ) {
     this.storage = storage
     this.serializer = new TransactionSerializer(collections)
