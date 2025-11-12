@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/db",
   "description": "A reactive client store for building super fast apps on sync",
-  "version": "0.4.20",
+  "version": "0.5.0",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db-ivm": "workspace:*",

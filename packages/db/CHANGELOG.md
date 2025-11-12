@@ -1,5 +1,93 @@
 # @tanstack/db
 
+## 0.5.0
+
+### Minor Changes
+
+- Implement 3-valued logic (true/false/unknown) for all comparison and logical operators. ([#765](https://github.com/TanStack/db/pull/765))
+  Queries with null/undefined values now behave consistently with SQL databases, where UNKNOWN results exclude rows from WHERE clauses.
+
+  **Breaking Change**: This changes the behavior of `WHERE` and `HAVING` clauses when dealing with `null` and `undefined` values.
+
+  **Example 1: Equality checks with null**
+
+  Previously, this query would return all persons with `age = null`:
+
+  ```ts
+  q.from(...).where(({ person }) => eq(person.age, null))
+  ```
+
+  With 3-valued logic, `eq(anything, null)` evaluates to `null` (UNKNOWN) and is filtered out. Use `isNull()` instead:
+
+  ```ts
+  q.from(...).where(({ person }) => isNull(person.age))
+  ```
+
+  **Example 2: Comparisons with null values**
+
+  Previously, this query would return persons with `age < 18` OR `age = null`:
+
+  ```ts
+  q.from(...).where(({ person }) => lt(person.age, 18))
+  ```
+
+  With 3-valued logic, `lt(null, 18)` evaluates to `null` (UNKNOWN) and is filtered out. The same applies to `undefined` values. To include null values, combine with `isNull()`:
+
+  ```ts
+  q.from(...).where(({ person }) =>
+    or(lt(person.age, 18), isNull(person.age))
+  )
+  ```
+
+### Patch Changes
+
+- Add optional compareOptions to collection configuration. ([#763](https://github.com/TanStack/db/pull/763))
+
+- Add expression helper utilities for parsing LoadSubsetOptions in queryFn. ([#763](https://github.com/TanStack/db/pull/763))
+
+  When using `syncMode: 'on-demand'`, TanStack DB now provides helper functions to easily parse where clauses, orderBy, and limit predicates into your API's format:
+  - `parseWhereExpression`: Parse where clauses with custom handlers for each operator
+  - `parseOrderByExpression`: Parse order by into simple array format
+  - `extractSimpleComparisons`: Extract simple AND-ed filters
+  - `parseLoadSubsetOptions`: Convenience function to parse all options at once
+  - `walkExpression`, `extractFieldPath`, `extractValue`: Lower-level helpers
+
+  **Example:**
+
+  ```typescript
+  import { parseLoadSubsetOptions } from "@tanstack/db"
+  // or from "@tanstack/query-db-collection" (re-exported for convenience)
+
+  queryFn: async (ctx) => {
+    const { where, orderBy, limit } = ctx.meta.loadSubsetOptions
+
+    const parsed = parseLoadSubsetOptions({ where, orderBy, limit })
+
+    // Build API request from parsed filters
+    const params = new URLSearchParams()
+    parsed.filters.forEach(({ field, operator, value }) => {
+      if (operator === "eq") {
+        params.set(field.join("."), String(value))
+      }
+    })
+
+    return fetch(`/api/products?${params}`).then((r) => r.json())
+  }
+  ```
+
+  This eliminates the need to manually traverse expression AST trees when implementing predicate push-down.
+
+- Fix Uint8Array/Buffer comparison to work by content instead of reference. This enables proper equality checks for binary IDs like ULIDs in WHERE clauses using the `eq` function. ([#779](https://github.com/TanStack/db/pull/779))
+
+- Add predicate comparison and merging utilities (isWhereSubset, intersectWherePredicates, unionWherePredicates, and related functions) to support predicate push-down in collection sync operations, enabling efficient tracking of loaded data ranges and preventing redundant server requests. Includes performance optimizations for large primitive IN predicates and full support for Date objects in equality, range, and IN clause comparisons. ([#763](https://github.com/TanStack/db/pull/763))
+
+- Add support for orderBy and limit in currentStateAsChanges function ([#763](https://github.com/TanStack/db/pull/763))
+
+- Adds an onDeduplicate callback on the DeduplicatedLoadSubset class which is called when a loadSubset call is deduplicated ([#763](https://github.com/TanStack/db/pull/763))
+
+- Updated dependencies [[`7aedf12`](https://github.com/TanStack/db/commit/7aedf12996a67ef64010bca0d78d51c919dd384f), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb)]:
+  - @tanstack/db-ivm@0.1.13
+
 ## 0.4.20
 
 ### Patch Changes
