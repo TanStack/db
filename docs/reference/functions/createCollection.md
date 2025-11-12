@@ -39,7 +39,7 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
 
 Collection options with optional utilities
 
@@ -148,7 +148,7 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
 
 Collection options with optional utilities
 
@@ -257,7 +257,7 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
 
 Collection options with optional utilities
 
@@ -366,7 +366,7 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
 
 Collection options with optional utilities
 

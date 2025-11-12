@@ -889,6 +889,8 @@ function createElectricSync<T extends Row<unknown>>(
           unsubscribeStream()
           // Abort the abort controller to stop the stream
           abortController.abort()
+          // Reset deduplication tracking so collection can load fresh data if restarted
+          loadSubsetDedupe?.reset()
         },
       }
     },
