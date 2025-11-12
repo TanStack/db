@@ -703,6 +703,84 @@ describe(`Electric Integration`, () => {
       )
     })
 
+    it(`should handle array of txids returned from handler`, async () => {
+      // Create a fake backend that returns multiple txids
+      const fakeBackend = {
+        persist: (
+          mutations: Array<PendingMutation<Row>>
+        ): Promise<Array<number>> => {
+          // Simulate multiple items being persisted and each getting a txid
+          const txids = mutations.map(() => Math.floor(Math.random() * 10000))
+          return Promise.resolve(txids)
+        },
+      }
+
+      // Create handler that returns array of txids
+      const onInsert = vi.fn(async (params: MutationFnParams<Row>) => {
+        const txids = await fakeBackend.persist(params.transaction.mutations)
+
+        // Simulate server sending sync messages on different ticks
+        // In the real world, multiple txids rarely arrive together
+        setTimeout(() => {
+          subscriber([
+            {
+              key: `1`,
+              value: { id: 1, name: `Item 1` },
+              headers: {
+                operation: `insert`,
+                txids: [txids[0]!],
+              },
+            },
+            { headers: { control: `up-to-date` } },
+          ])
+        }, 1)
+
+        setTimeout(() => {
+          subscriber([
+            {
+              key: `2`,
+              value: { id: 2, name: `Item 2` },
+              headers: {
+                operation: `insert`,
+                txids: [txids[1]!],
+              },
+            },
+            { headers: { control: `up-to-date` } },
+          ])
+        }, 2)
+
+        // Return array of txids - this is the pattern that's failing
+        return { txid: txids }
+      })
+
+      const config = {
+        id: `test-array-txids`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Insert multiple items
+      const tx = testCollection.insert([
+        { id: 1, name: `Item 1` },
+        { id: 2, name: `Item 2` },
+      ])
+
+      // This should resolve when all txids are seen
+      await expect(tx.isPersisted.promise).resolves.toBeDefined()
+      expect(onInsert).toHaveBeenCalled()
+
+      // Verify both items were added
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(2)).toBe(true)
+    })
+
     it(`should support custom match function using awaitMatch utility`, async () => {
       let resolveCustomMatch: () => void
       const customMatchPromise = new Promise<void>((resolve) => {
