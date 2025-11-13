@@ -1,5 +1,5 @@
 ---
-"@tanstack/query-db-collection": minor
+"@tanstack/query-db-collection": patch
 ---
 
 Add `queryData` property to `collection.utils` for accessing full query response including metadata. This resolves the common use case of needing pagination info (total counts, page numbers, etc.) alongside the data array when using the `select` option.
