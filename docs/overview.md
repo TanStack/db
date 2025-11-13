@@ -16,6 +16,8 @@ It solves the architecture problem most teams face:
 
 TanStack DB enables **Option C**: load normalized collections, then perform sub-millisecond incremental joins in the client. Your queries adapt to what data loads, your components get instant updates, and your backend stays simple.
 
+**The end-user benefit:** Your app stays blazing fast no matter how much data you load. Apps can't get sluggish due to too much data—queries over 100,000+ rows complete in under a millisecond, making interactions feel truly instantaneous.
+
 It extends TanStack Query with collections, live queries and optimistic mutations, working seamlessly with REST APIs, sync engines, or any data source.
 
 ## Contents
