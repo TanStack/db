@@ -34,6 +34,10 @@ const getKey = (item: TestItem) => item.id
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
 
+// Helper to wait for query cleanup with delayed removal
+// Query removal is delayed by 50ms, so we wait 100ms to be safe
+const waitForGC = () => new Promise((resolve) => setTimeout(resolve, 100))
+
 describe(`QueryCollection`, () => {
   let queryClient: QueryClient
 
@@ -41,9 +45,10 @@ describe(`QueryCollection`, () => {
     queryClient = new QueryClient({
       defaultOptions: {
         queries: {
-          // Setting a low staleTime and cacheTime to ensure queries can be refetched easily in tests
+          // Setting a low staleTime and gcTime to ensure queries can be refetched easily in tests
           // and GC'd quickly if not observed.
           staleTime: 0,
+          gcTime: 100, // Short GC time for tests, but enough to allow quick remounts
           retry: false, // Disable retries for tests to avoid delays
         },
       },
@@ -3061,6 +3066,7 @@ describe(`QueryCollection`, () => {
       // GC query 1 (no predicates) - should only remove item 1 (unique to query 1)
       // Items 2 and 3 should remain because they're shared with other queries
       await query1.cleanup()
+      await waitForGC() // Wait for TanStack Query to GC the query
 
       expect(collection.size).toBe(4) // Should have items 2, 3, 4, 5
 
@@ -3076,6 +3082,7 @@ describe(`QueryCollection`, () => {
       // GC query 2 (where: { category: 'B' }) - should remove item 2
       // Items 3 and 4 should remain because they are shared with query 3
       await query2.cleanup()
+      await waitForGC() // Wait for TanStack Query to GC the query
 
       expect(collection.size).toBe(3) // Should have items 3, 4, 5
 
@@ -3089,6 +3096,7 @@ describe(`QueryCollection`, () => {
 
       // GC query 3 (where: { category: 'C' }) - should remove all remaining items
       await query3.cleanup()
+      await waitForGC() // Wait for TanStack Query to GC the query
 
       expect(collection.size).toBe(0)
 
@@ -3200,6 +3208,7 @@ describe(`QueryCollection`, () => {
 
       // GC query 3 - should remove all items (no more queries reference them)
       await query3.cleanup()
+      await waitForGC() // Wait for TanStack Query to GC the query
 
       expect(collection.size).toBe(0)
 
@@ -3288,6 +3297,7 @@ describe(`QueryCollection`, () => {
 
       // GC empty query 1 - should not affect the collection
       await query1.cleanup()
+      await waitForGC() // Wait for TanStack Query to GC the query
 
       // Collection should still have items from query 2
       expect(collection.size).toBe(2)
@@ -3296,10 +3306,9 @@ describe(`QueryCollection`, () => {
 
       // GC non-empty query 2 - should remove its items
       await query2.cleanup()
+      await waitForGC() // Wait for TanStack Query to GC the query
 
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0)
-      })
+      expect(collection.size).toBe(0)
 
       expect(collection.has(`1`)).toBe(false)
       expect(collection.has(`2`)).toBe(false)
@@ -3413,6 +3422,7 @@ describe(`QueryCollection`, () => {
       const queries = [query1, query2, query3]
       const proms = queries.map((query) => query.cleanup())
       await Promise.all(proms)
+      await waitForGC() // Wait for TanStack Query to GC the queries
 
       // Collection should be empty after all queries are GCed
       expect(collection.size).toBe(0)
@@ -3523,6 +3533,7 @@ describe(`QueryCollection`, () => {
 
       // GC the first query (all category A without limit)
       await query1.cleanup()
+      await waitForGC() // Wait for TanStack Query to GC the query
 
       expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
 
@@ -3533,9 +3544,67 @@ describe(`QueryCollection`, () => {
 
       // GC the second query (category A with limit 2)
       await query2.cleanup()
+      await waitForGC() // Wait for TanStack Query to GC the query
 
-      // Wait for final GC to process
       expect(collection.size).toBe(0)
+    })
+
+    it(`should return data on remount after unsubscribe in on-demand mode`, async () => {
+      const items = [
+        { id: `1`, name: `Alice` },
+        { id: `2`, name: `Bob` },
+        { id: `3`, name: `Charlie` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `todos-on-demand`,
+        queryClient,
+        queryKey: (opts) => [`todos-on-demand-remount`, opts.where ?? null],
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create a live query (simulating the user's component mount)
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ todo: collection }).where(({ todo }) => eq(todo.id, `1`)),
+      })
+
+      // First load - preload the data
+      await liveQuery.preload()
+      await flushPromises()
+
+      // Verify queryFn was called and data is loaded
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(liveQuery.size).toBe(1)
+      expect(liveQuery.get(`1`)).toEqual(items[0])
+
+      // Simulate navigating away - cleanup the live query
+      await liveQuery.cleanup()
+      await flushPromises()
+
+      // Simulate navigating back - create a new live query with the same query
+      const liveQuery2 = createLiveQueryCollection({
+        query: (q) =>
+          q.from({ todo: collection }).where(({ todo }) => eq(todo.id, `1`)),
+      })
+
+      // Subscribe to the new live query (simulating component remount)
+      await liveQuery2.preload()
+      await flushPromises()
+
+      // The data should still be available after remount
+      expect(liveQuery2.size).toBe(1)
+      expect(liveQuery2.get(`1`)).toEqual(items[0])
+
+      await liveQuery2.cleanup()
     })
   })
 })

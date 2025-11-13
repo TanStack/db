@@ -712,9 +712,12 @@ export function queryCollectionOptions(
 
       // Tell tanstack query to GC the query when the subscription is unsubscribed
       // The subscription is unsubscribed when the live query is GCed.
+      // Add a small delay to allow for quick remounts (e.g., navigation) while still cleaning up eventually
       const subscription = opts.subscription
       subscription?.once(`unsubscribed`, () => {
-        queryClient.removeQueries({ queryKey: key, exact: true })
+        setTimeout(() => {
+          queryClient.removeQueries({ queryKey: key, exact: true })
+        }, 50) // 50ms delay allows quick remounts while still cleaning up
       })
 
       return readyPromise
@@ -852,6 +855,13 @@ export function queryCollectionOptions(
         const handleQueryResult = makeQueryResultHandler(queryKey)
         const unsubscribeFn = observer.subscribe(handleQueryResult)
         unsubscribes.set(hashedQueryKey, unsubscribeFn)
+
+        // Process the current result immediately if it's successful to ensure data is synced on subscription
+        // This is critical for on-demand mode when an observer is created after data is already cached
+        const currentResult = observer.getCurrentResult()
+        if (currentResult.isSuccess || currentResult.isError) {
+          handleQueryResult(currentResult)
+        }
       }
     }
 
@@ -897,14 +907,8 @@ export function queryCollectionOptions(
 
     // Always subscribe when sync starts (this could be from preload(), startSync config, or first subscriber)
     // We'll dynamically unsubscribe/resubscribe based on subscriber count to maintain staleTime behavior
+    // subscribeToQuery now handles processing the initial state, so no need for the separate forEach
     subscribeToQueries()
-
-    // Ensure we process any existing query data (QueryObserver doesn't invoke its callback automatically with initial state)
-    state.observers.forEach((observer, hashedQueryKey) => {
-      const queryKey = hashToQueryKey.get(hashedQueryKey)!
-      const handleQueryResult = makeQueryResultHandler(queryKey)
-      handleQueryResult(observer.getCurrentResult())
-    })
 
     // Subscribe to the query client's cache to handle queries that are GCed by tanstack query
     const unsubscribeQueryCache = queryClient
