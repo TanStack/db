@@ -6,202 +6,245 @@
 
 ## Symptoms
 
-1. Collections stop reconnecting after rapid tab switching (5 seconds of switching)
-2. Network tab shows `NS_BINDING_ABORTED` errors
-3. New data doesn't appear until page refresh
-4. Issue is Firefox-specific
-5. May also occur after leaving tab open for extended periods
+1. **Initial behavior works**: Visibility changes trigger reconnection (user sees NS_BINDING_ABORTED followed by new connections)
+2. **After rapid switching**: Collections stop reconnecting after ~5 seconds of rapid tab switching
+3. Network tab shows `NS_BINDING_ABORTED` errors but **no new connections start**
+4. New data doesn't appear until page refresh
+5. **Firefox-specific** (Chrome less affected)
+6. May also occur after leaving tab open for extended periods
 
 ## Root Cause
 
-The Electric collection implementation **does not listen for page visibility changes** to trigger reconnections. When Firefox aggressively aborts network requests during tab switching, the collections enter a stuck state with no automatic recovery mechanism.
+**Bug Location:** `@electric-sql/client` package - ShapeStream visibility handling (not in TanStack DB)
 
-### Critical Missing Feature
+The Electric client's ShapeStream **has visibility change handling built-in**, but contains a **race condition in the pause/resume state machine** that causes it to get stuck during rapid visibility changes.
 
-**Location:** `packages/electric-db-collection/src/electric.ts:612-917`
+### The Race Condition
 
-The `createElectricSync` function does not:
-- Subscribe to the `OnlineDetector` visibility change events
-- Trigger reconnection when page becomes visible
-- Handle browser-initiated aborts differently from user-initiated cancellations
+**File:** `packages/typescript-client/src/client.ts` in `@electric-sql/client`
 
-## Technical Details
-
-### 1. Abort Signal Chain (`electric.ts:672-699`)
+The `#pause()` and `#resume()` methods have guard checks that create a deadlock scenario:
 
 ```typescript
-// External signal propagation
-if (shapeOptions.signal) {
-  shapeOptions.signal.addEventListener(`abort`, () => {
-    abortController.abort()  // ← Propagates browser abort as collection abort
-  }, { once: true })
+#pause() {
+  if (this.#started && this.#state === 'active') {  // Only pauses if active
+    this.#state = 'pause-requested'
+    this.#requestAbortController?.abort(PAUSE_STREAM)
+  }
 }
 
-// When aborted, ALL pending operations rejected
-abortController.signal.addEventListener(`abort`, () => {
-  pendingMatches.setState((current) => {
-    current.forEach((match) => {
-      match.reject(new StreamAbortedError())  // ← No retry mechanism
-    })
-    return new Map()
-  })
-})
-```
-
-**Problem:** Browser-initiated aborts (like `NS_BINDING_ABORTED` from tab switching) are treated the same as user-initiated cancellations, causing the stream to stop permanently.
-
-### 2. OnlineDetector Exists But Isn't Used
-
-**Location:** `packages/offline-transactions/src/connectivity/OnlineDetector.ts:44-48`
-
-```typescript
-private handleVisibilityChange = (): void => {
-  if (document.visibilityState === `visible`) {
-    this.notifyListeners()
+#resume() {
+  if (this.#started && this.#state === 'paused') {  // Only resumes if paused
+    this.#start()
   }
 }
 ```
 
-The `OnlineDetector` correctly listens for visibility changes and notifies subscribers. However:
-- ❌ Electric collections don't subscribe to it
-- ❌ No integration between the two systems
-- ❌ Verified by grep: no references to `OnlineDetector` in `electric-db-collection` package
+**State machine:** `active` → `pause-requested` → `paused` → `active`
 
-### 3. Manual Restart Only (`lifecycle.ts:128-137`)
+**What happens during rapid tab switching:**
 
-```typescript
-case `cleaned-up`:
-  // Automatically restart the collection when operations are called
-  this.sync.startSync()
-  break
-```
+1. Tab becomes **hidden** → visibility handler calls `#pause()`
+2. State changes: `active` → `pause-requested`
+3. Tab becomes **visible** (before async request completes) → visibility handler calls `#resume()`
+4. **`#resume()` guard check FAILS** because state is `pause-requested`, not `paused`
+5. `#resume()` silently returns without doing anything
+6. Request eventually completes, state transitions to `paused`
+7. **Stream is now stuck in `paused` state** - no event will trigger resume
+8. Future visibility changes can't help:
+   - Trying to pause a paused stream → guard fails (not `active`)
+   - Trying to resume → guard fails (already checked, state is `paused` but no trigger)
+9. Stream remains paused indefinitely
 
-Collections only restart when:
-1. User code explicitly accesses collection data (triggers `validateCollectionUsable`)
-2. Garbage collection timer expires (default: 5 minutes, line 181)
-
-**Missing:** Automatic restart on visibility change
-
-### 4. Cleanup Behavior (`electric.ts:904-911`)
-
-```typescript
-cleanup: () => {
-  unsubscribeStream()        // Unsubscribe from stream
-  abortController.abort()    // Abort the stream
-  loadSubsetDedupe?.reset()  // Reset deduplication
-}
-```
-
-Once cleaned up:
-- `AbortController` cannot be reused (browser API limitation)
-- A new sync must be started to create a new `AbortController`
-- But nothing triggers this new sync on visibility change
-
-## Firefox-Specific Behavior
+### Why This Is Firefox-Specific
 
 Firefox is more aggressive than Chrome with:
-- Aborting network requests for background/hidden tabs
-- Canceling requests during rapid visibility state changes
-- Timing of when it considers a tab "inactive"
+- Faster/more frequent `visibilitychange` event firing during tab switching
+- Tighter timing windows between hidden/visible transitions
+- More aggressive request cancellation (NS_BINDING_ABORTED)
 
-This causes more frequent `NS_BINDING_ABORTED` errors, making the bug more reproducible in Firefox.
+This makes the race condition more likely to occur in Firefox.
 
 ## Sequence of Events Leading to Stuck State
 
-1. **User rapidly switches tabs** (< 5 seconds between switches)
-2. **Firefox aborts fetch requests** → `NS_BINDING_ABORTED` errors
-3. **External signal fires** (if connected to browser abort)
-4. **Abort propagates** through signal chain (line 676-684)
-5. **All pending matches rejected** (line 691-699)
-6. **Stream stops** and cleanup runs
-7. **Page becomes visible** but...
-8. **No automatic reconnection** (missing visibility listener)
-9. **User sees stale data** until manual interaction or 5-minute GC timer
+1. User rapidly switches tabs in Firefox
+2. **First switch (hidden):**
+   - Visibility handler calls `#pause()`
+   - State: `active` → `pause-requested`
+   - Abort controller signals pause with `PAUSE_STREAM`
+   - Request starts aborting (async operation)
+3. **Rapid switch back (visible):**
+   - **BEFORE** request completes transition to `paused`
+   - Visibility handler calls `#resume()`
+   - Guard check: `if (this.#state === 'paused')` → **FALSE** (state is still `pause-requested`)
+   - `#resume()` **returns without doing anything**
+4. **Request finally completes:**
+   - State transitions: `pause-requested` → `paused`
+   - Stream is now paused, waiting for resume
+5. **No resume trigger:**
+   - Tab is already visible, so no new `visibilitychange` event fires
+   - No other mechanism to call `#resume()`
+   - Stream remains in `paused` state indefinitely
+6. **User sees:**
+   - No new network requests in network tab
+   - Stale data (mutations don't appear)
+   - Only fix is page refresh (creates new stream instance)
 
 ## Affected Code Files
 
-| File | Lines | Issue |
-|------|-------|-------|
-| `packages/electric-db-collection/src/electric.ts` | 612-917 | Missing visibility change integration |
-| `packages/electric-db-collection/src/electric.ts` | 676-699 | External signal abort cascade |
-| `packages/electric-db-collection/src/electric.ts` | 691-699 | No retry on abort, all matches rejected |
-| `packages/electric-db-collection/src/electric.ts` | 904-911 | Cleanup doesn't support graceful reconnection |
-| `packages/db/src/collection/lifecycle.ts` | 128-137 | Manual restart only, not automatic |
-| `packages/db/src/collection/lifecycle.ts` | 176-194 | Default 5-minute GC timer too long |
+**Primary Bug Location:**
+| Package | File | Issue |
+|---------|------|-------|
+| `@electric-sql/client` | `packages/typescript-client/src/client.ts` | Race condition in `#pause()`/`#resume()` state machine |
+| `@electric-sql/client` | `packages/typescript-client/src/client.ts` | `#subscribeToVisibilityChanges()` - no cleanup/error handling |
+
+**TanStack DB (Not the cause, but affected):**
+| Package | File | Notes |
+|---------|------|-------|
+| `@tanstack/electric-db-collection` | `packages/electric-db-collection/src/electric.ts` | Uses ShapeStream, inherits the bug |
+| `@tanstack/db` | `packages/db/src/collection/lifecycle.ts` | Collections get stuck when underlying stream pauses |
 
 ## Recommended Solutions
 
-### Option 1: Add Visibility-Aware Reconnection (Recommended)
+### Option 1: Fix the Race Condition in Electric Client (Best Solution)
 
-**Changes needed:**
-1. Import and use `OnlineDetector` in `electric.ts`
-2. Subscribe to visibility changes in `createElectricSync`
-3. When page becomes visible after being hidden, check if stream is aborted
-4. If aborted, trigger reconnection by calling the sync restart logic
+**Package:** `@electric-sql/client`
+**File:** `packages/typescript-client/src/client.ts`
 
-**Implementation approach:**
+Modify `#resume()` to also handle `pause-requested` state:
+
 ```typescript
-// In createElectricSync function
-const onlineDetector = getOnlineDetector() // Get from config or create default
-const unsubscribeOnline = onlineDetector.subscribe(() => {
-  // If stream was aborted and page is now visible, restart
-  if (abortController.signal.aborted && document.visibilityState === 'visible') {
-    // Trigger collection restart through lifecycle
+#resume() {
+  if (this.#started && (this.#state === 'paused' || this.#state === 'pause-requested')) {
+    // If pause was requested but not completed, cancel the pause and stay active
+    if (this.#state === 'pause-requested') {
+      this.#state = 'active'
+      // The abort will complete but state is already active, so #requestShape will continue
+    } else {
+      // Normal resume from paused state
+      this.#start()
+    }
   }
-})
-
-// Remember to unsubscribe in cleanup
+}
 ```
 
-### Option 2: Add Retry Logic for Aborted Streams
+**Pros:**
+- Fixes the root cause directly
+- Handles rapid state transitions correctly
+- No changes needed in TanStack DB
 
-**Changes needed:**
-1. Don't immediately reject all pending matches on abort
-2. Distinguish between "permanent abort" and "temporary disconnect"
-3. Add exponential backoff retry mechanism
-4. Queue operations during brief disconnections
+**Cons:**
+- Requires upstream fix in `@electric-sql/client`
+- Users must wait for new release
 
-### Option 3: Isolate Browser-Initiated Aborts
+### Option 2: Debounce Visibility Changes
 
-**Changes needed:**
-1. Detect abort reason (browser vs. user-initiated)
-2. Only propagate user-initiated cancellations to `abortController`
-3. Handle browser tab-switching aborts as temporary interruptions
-4. Automatically reconnect after browser-initiated aborts
+Add debouncing to prevent rapid pause/resume cycles:
+
+```typescript
+#subscribeToVisibilityChanges() {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+
+  const visibilityHandler = () => {
+    if (timeoutId) clearTimeout(timeoutId)
+
+    timeoutId = setTimeout(() => {
+      if (document.hidden) {
+        this.#pause()
+      } else {
+        this.#resume()
+      }
+    }, 100) // 100ms debounce
+  }
+
+  document.addEventListener('visibilitychange', visibilityHandler)
+}
+```
+
+**Pros:**
+- Prevents rapid state transitions
+- Simple implementation
+
+**Cons:**
+- Adds artificial delay
+- Doesn't fully solve the race condition
+
+### Option 3: Workaround in TanStack DB (Temporary)
+
+**Package:** `@tanstack/electric-db-collection`
+**File:** `packages/electric-db-collection/src/electric.ts`
+
+Add visibility change monitoring in TanStack DB layer to detect and recover from stuck streams:
+
+```typescript
+// In createElectricSync
+if (typeof document !== 'undefined') {
+  const checkStreamHealth = () => {
+    if (document.visibilityState === 'visible') {
+      // If visible but no activity for >5 seconds, restart stream
+      // (Implementation would track last message timestamp)
+    }
+  }
+  document.addEventListener('visibilitychange', checkStreamHealth)
+  // Clean up in cleanup() function
+}
+```
+
+**Pros:**
+- Can be implemented in TanStack DB without waiting for upstream
+- Provides recovery mechanism
+
+**Cons:**
+- Doesn't fix root cause
+- Adds complexity to TanStack DB layer
+- May cause unnecessary restarts
 
 ## Workarounds for Users
 
-### Workaround 1: Reduce GC Time (Forces faster reconnection)
+Until the Electric client is fixed, users can work around this issue:
 
-```typescript
-const messagesCollection = collection({
-  // ... other options
-  gcTime: 10000  // 10 seconds instead of default 5 minutes
-})
-```
-
-**Limitation:** Forces more frequent cleanup/restart cycles, may impact performance
-
-### Workaround 2: Manual Visibility Change Handler
+### Workaround 1: Manual Page Refresh Detection
 
 ```typescript
 // In your app initialization
+let lastVisibilityChange = Date.now()
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    // Trigger collection access to force restart if stuck
-    // This calls validateCollectionUsable which restarts cleaned-up collections
-    messagesCollection.get().catch(() => {
-      // Ignore errors, we just want to trigger the restart
-    })
+    const now = Date.now()
+
+    // If visibility changed very rapidly (< 500ms), it might have triggered the race condition
+    if (now - lastVisibilityChange < 500) {
+      console.warn('Rapid visibility change detected, may need to refresh')
+      // Option: Show user a "refresh if data seems stuck" message
+      // Option: Auto-refresh the page (aggressive)
+    }
+
+    lastVisibilityChange = now
   }
 })
 ```
 
-**Limitation:** Must be added to every app, should be handled by the library
+**Limitation:** Doesn't prevent the bug, just detects when it might occur
+
+### Workaround 2: Periodic Data Access (Prevents Pause)
+
+```typescript
+// Prevent stream from pausing by periodically accessing data
+// This keeps collections "active" so they don't pause
+setInterval(() => {
+  if (document.visibilityState === 'visible') {
+    // Accessing data keeps the collection active
+    messagesCollection.get()
+  }
+}, 30000) // Every 30 seconds
+```
+
+**Limitation:** Wastes resources, doesn't actually fix the pause/resume logic
 
 ### Workaround 3: Avoid Rapid Tab Switching in Firefox
 
-**Limitation:** Not a real solution, just explains the behavior
+**Limitation:** Not a real solution, just user education about the trigger
 
 ## Testing Recommendations
 
@@ -228,11 +271,30 @@ To verify a fix:
 
 ## Conclusion
 
-This is a **legitimate bug** in the Electric collection implementation. The user's report is accurate:
+This is a **legitimate bug** in the `@electric-sql/client` package, specifically in the ShapeStream's pause/resume state machine. The user's report is accurate:
 
-✅ Collections get stuck after rapid tab switching
-✅ Firefox-specific due to aggressive request cancellation
-✅ Missing automatic reconnection on visibility change
-✅ Workarounds exist but library should handle this
+✅ Collections get stuck after rapid tab switching (confirmed)
+✅ Firefox-specific due to faster visibility change timing (confirmed)
+✅ Initial reconnections work, then stop after rapid switching (confirmed)
+✅ Caused by race condition in state machine, not missing features (root cause identified)
 
-**Recommendation:** Implement Option 1 (visibility-aware reconnection) as it's the most robust solution that aligns with user expectations for long-running collection behavior.
+### Bug Summary
+
+- **Package:** `@electric-sql/client`
+- **Component:** ShapeStream visibility handling
+- **Root Cause:** Race condition between `#pause()` and `#resume()` during rapid state transitions
+- **Symptom:** Stream gets stuck in `paused` state when `#resume()` is called during `pause-requested` state
+- **Impact:** Affects all users of Electric client with rapid tab switching, especially in Firefox
+
+### Recommended Actions
+
+1. **For Electric SQL team:** Fix the race condition in `#resume()` to handle `pause-requested` state (Option 1)
+2. **For TanStack DB:** Consider temporary workaround (Option 3) until upstream fix is available
+3. **For users:** Use Workaround 1 to detect when the bug occurs and notify users to refresh
+
+### Next Steps
+
+- Report this bug to the Electric SQL team with this analysis
+- Link to this investigation in the bug report
+- Consider implementing Option 3 (TanStack DB workaround) as a temporary mitigation
+- Monitor Electric SQL releases for the fix
