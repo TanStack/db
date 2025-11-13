@@ -3,10 +3,10 @@ title: Quick Start
 id: quick-start
 ---
 
-TanStack DB is the reactive client-first store for your API. This example will show you how to:
+TanStack DB is the reactive client-first store for your API. Stop building custom endpoints for every view—query your data however your components need it. This example will show you how to:
 
 - **Load data** into collections using TanStack Query
-- **Query data** with blazing fast live queries
+- **Query data** with blazing-fast live queries
 - **Mutate data** with instant optimistic updates
 
 ```tsx

@@ -39,10 +39,12 @@
 
 The reactive client-first store for your API.
 
-- Blazing‑fast query engine for sub‑millisecond live queries, joins & aggregates
-- Fine‑grained reactivity to minimize component re‑rendering
-- Robust transaction primitives for optimistic mutations with sync & lifecycle support
-- Normalized data model that keeps backends simple and consistent
+Stop building custom endpoints for every view. TanStack DB lets you query your data however your components need it—with a blazing-fast local query engine, real-time reactivity, and instant optimistic updates:
+
+- Sub-millisecond live queries with joins & aggregates
+- Fine-grained reactivity to minimize re-rendering
+- Optimistic mutations with automatic rollback
+- Works with REST, sync engines, or any data source
 
 <a href="https://tanstack.com/db" style="font-weight:bold" >Read the docs →</a>
 <br />
