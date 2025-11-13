@@ -592,6 +592,10 @@ export function queryCollectionOptions(
   // queryKey → QueryObserver's unsubscribe function
   const unsubscribes = new Map<string, () => void>()
 
+  // Track row keys that were inserted via direct writes to prevent them from being purged
+  // when they don't appear in query results
+  const directWriteKeys = new Set<string | number>()
+
   // Helper function to add a row to the internal state
   const addRow = (rowKey: string | number, hashedQueryKey: string) => {
     const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
@@ -780,7 +784,9 @@ export function queryCollectionOptions(
             const newItem = newItemsMap.get(key)
             if (!newItem) {
               const needToRemove = removeRow(key, hashedQueryKey) // returns true if the row is no longer referenced by any queries
-              if (needToRemove) {
+              // Don't remove items that were inserted via direct writes
+              // They should only be removed via explicit writeDelete calls
+              if (needToRemove && !directWriteKeys.has(key)) {
                 write({ type: `delete`, value: oldItem })
               }
             } else if (
@@ -932,7 +938,8 @@ export function queryCollectionOptions(
             // Reference count dropped to 0, we can GC the row
             rowToQueries.delete(rowKey)
 
-            if (collection.has(rowKey)) {
+            // Don't remove items that were inserted via direct writes
+            if (collection.has(rowKey) && !directWriteKeys.has(rowKey)) {
               begin()
               write({ type: `delete`, value: collection.get(rowKey) })
               commit()
@@ -957,6 +964,7 @@ export function queryCollectionOptions(
       hashToQueryKey.clear()
       queryToRows.clear()
       rowToQueries.clear()
+      directWriteKeys.clear()
       state.observers.clear()
       unsubscribeQueryCache()
 
@@ -1024,6 +1032,7 @@ export function queryCollectionOptions(
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => void
+    directWriteKeys?: Set<string | number>
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
@@ -1039,6 +1048,7 @@ export function queryCollectionOptions(
       begin,
       write,
       commit,
+      directWriteKeys,
     }
 
     // Call the original internalSync logic

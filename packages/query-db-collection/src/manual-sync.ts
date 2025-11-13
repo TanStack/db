@@ -38,6 +38,7 @@ export interface SyncContext<
   begin: () => void
   write: (message: Omit<ChangeMessage<TRow>, `key`>) => void
   commit: () => void
+  directWriteKeys?: Set<TKey>
 }
 
 interface NormalizedOperation<
@@ -148,6 +149,8 @@ export function performWriteOperations<
           type: `insert`,
           value: resolved,
         })
+        // Track this key as a direct write
+        ctx.directWriteKeys?.add(op.key)
         break
       }
       case `update`: {
@@ -175,6 +178,8 @@ export function performWriteOperations<
           type: `delete`,
           value: currentItem,
         })
+        // Remove from direct write tracking when explicitly deleted
+        ctx.directWriteKeys?.delete(op.key)
         break
       }
       case `upsert`: {
@@ -195,6 +200,8 @@ export function performWriteOperations<
             type: `insert`,
             value: resolved,
           })
+          // Track this key as a direct write (only for new inserts)
+          ctx.directWriteKeys?.add(op.key)
         }
         break
       }
