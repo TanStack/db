@@ -7,7 +7,7 @@ id: overview
 
 Welcome to the TanStack DB documentation.
 
-TanStack DB is a reactive client store for building super fast apps on sync. It extends TanStack Query with collections, live queries and optimistic mutations.
+TanStack DB is the reactive client-first store for your API. It extends TanStack Query with collections, live queries and optimistic mutations.
 
 ## Contents
 
