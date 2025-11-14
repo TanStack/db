@@ -1,0 +1,65 @@
+{
+  "name": "@tanstack/graphql-db-collection",
+  "description": "GraphQL runtime for TanStack DB - query-driven sync with GraphQL backends",
+  "version": "0.1.0",
+  "dependencies": {
+    "@standard-schema/spec": "^1.0.0",
+    "graphql": "^16.8.0"
+  },
+  "devDependencies": {
+    "@tanstack/db": "workspace:*",
+    "@tanstack/query-core": "^5.90.5",
+    "@tanstack/query-db-collection": "workspace:*",
+    "@vitest/coverage-istanbul": "^3.2.4"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "packageManager": "pnpm@10.19.0",
+  "peerDependencies": {
+    "@tanstack/db": "*",
+    "@tanstack/query-core": "^5.0.0",
+    "@tanstack/query-db-collection": "*",
+    "typescript": ">=4.7"
+  },
+  "author": "TanStack",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/graphql-db-collection"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "graphql",
+    "tanstack",
+    "query-driven-sync",
+    "optimistic",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "npx vitest run"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
+}

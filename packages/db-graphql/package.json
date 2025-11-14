@@ -1,0 +1,67 @@
+{
+  "name": "@tanstack/db-graphql",
+  "description": "GraphQL schema compiler for TanStack DB - generates typed collections from GraphQL schemas",
+  "version": "0.1.0",
+  "dependencies": {
+    "@graphql-tools/schema": "^10.0.0",
+    "@graphql-tools/utils": "^10.0.0",
+    "graphql": "^16.8.0",
+    "commander": "^11.1.0",
+    "chalk": "^5.3.0",
+    "ora": "^8.0.0",
+    "zod-to-ts": "^1.2.0"
+  },
+  "devDependencies": {
+    "@tanstack/db": "workspace:*",
+    "@tanstack/graphql-db-collection": "workspace:*",
+    "@types/node": "^24.6.2",
+    "@vitest/coverage-istanbul": "^3.2.4"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "db-graphql": "./dist/esm/cli.js"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "packageManager": "pnpm@10.19.0",
+  "author": "TanStack",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/db-graphql"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "graphql",
+    "tanstack",
+    "codegen",
+    "typescript",
+    "query-driven-sync"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "npx vitest run"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
+}

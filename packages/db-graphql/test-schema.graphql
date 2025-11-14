@@ -1,0 +1,142 @@
+"""
+Example blog schema for testing db-graphql
+"""
+
+type Query {
+  posts(where: PostWhereInput, orderBy: [PostOrderBy!], limit: Int, offset: Int): [Post!]!
+  post(id: ID!): Post
+  users(where: UserWhereInput, orderBy: [UserOrderBy!], limit: Int, offset: Int): [User!]!
+  user(id: ID!): User
+}
+
+type Mutation {
+  insert_post(object: PostInsertInput!): Post!
+  update_post(pk_columns: PostPkColumns!, _set: PostSetInput!): Post!
+  delete_post(id: ID!): Post!
+
+  insert_user(object: UserInsertInput!): User!
+  update_user(pk_columns: UserPkColumns!, _set: UserSetInput!): User!
+  delete_user(id: ID!): User!
+}
+
+type Post {
+  """Unique identifier"""
+  id: ID!
+  """Post title"""
+  title: String!
+  """Post content"""
+  content: String
+  """Whether the post is published"""
+  published: Boolean!
+  """Author of the post"""
+  author: User!
+  """Author ID (foreign key)"""
+  authorId: ID!
+  """Creation timestamp"""
+  createdAt: String!
+  """Last update timestamp"""
+  updatedAt: String!
+}
+
+type User {
+  """Unique identifier"""
+  id: ID!
+  """User's email"""
+  email: String!
+  """User's display name"""
+  name: String
+  """Posts written by this user"""
+  posts: [Post!]!
+  """Account creation timestamp"""
+  createdAt: String!
+}
+
+input PostWhereInput {
+  id: ID_comparison_exp
+  title: String_comparison_exp
+  published: Boolean_comparison_exp
+  authorId: ID_comparison_exp
+  _and: [PostWhereInput!]
+  _or: [PostWhereInput!]
+}
+
+input UserWhereInput {
+  id: ID_comparison_exp
+  email: String_comparison_exp
+  name: String_comparison_exp
+  _and: [UserWhereInput!]
+  _or: [UserWhereInput!]
+}
+
+input ID_comparison_exp {
+  _eq: ID
+  _neq: ID
+  _in: [ID!]
+  _nin: [ID!]
+}
+
+input String_comparison_exp {
+  _eq: String
+  _neq: String
+  _in: [String!]
+  _nin: [String!]
+  _like: String
+  _ilike: String
+}
+
+input Boolean_comparison_exp {
+  _eq: Boolean
+  _neq: Boolean
+}
+
+enum PostOrderBy {
+  id_asc
+  id_desc
+  title_asc
+  title_desc
+  createdAt_asc
+  createdAt_desc
+}
+
+enum UserOrderBy {
+  id_asc
+  id_desc
+  email_asc
+  email_desc
+  name_asc
+  name_desc
+  createdAt_asc
+  createdAt_desc
+}
+
+input PostInsertInput {
+  title: String!
+  content: String
+  published: Boolean!
+  authorId: ID!
+}
+
+input UserInsertInput {
+  email: String!
+  name: String
+}
+
+input PostSetInput {
+  title: String
+  content: String
+  published: Boolean
+  authorId: ID
+}
+
+input UserSetInput {
+  email: String
+  name: String
+}
+
+input PostPkColumns {
+  id: ID!
+}
+
+input UserPkColumns {
+  id: ID!
+}
