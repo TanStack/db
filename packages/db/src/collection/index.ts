@@ -54,6 +54,7 @@ export interface Collection<
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
   readonly utils: TUtils
   readonly singleResult?: true
+  readonly compareOptions: StringCollationConfig
 }
 
 /**
