@@ -82,6 +82,10 @@
           "to": "guides/mutations"
         },
         {
+          "label": "Schemas",
+          "to": "guides/schemas"
+        },
+        {
           "label": "Error Handling",
           "to": "guides/error-handling"
         },
