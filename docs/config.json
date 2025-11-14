@@ -86,23 +86,23 @@
       "children": [
         {
           "label": "React",
-          "to": "framework/react/adapter"
+          "to": "framework/react/react"
         },
         {
           "label": "Vue",
-          "to": "framework/vue/adapter"
+          "to": "framework/vue/vue"
         },
         {
           "label": "Angular",
-          "to": "framework/angular/adapter"
+          "to": "framework/angular/angular"
         },
         {
           "label": "Solid",
-          "to": "framework/solid/adapter"
+          "to": "framework/solid/solid"
         },
         {
           "label": "Svelte",
-          "to": "framework/svelte/adapter"
+          "to": "framework/svelte/svelte"
         }
       ]
     },
