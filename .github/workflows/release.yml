@@ -30,6 +30,19 @@ jobs:
         uses: tanstack/config/.github/setup@main
       - name: Run Tests
         run: pnpm run lint && pnpm run build && pnpm run test
+      - name: Generate Docs
+        run: pnpm docs:generate
+      - name: Commit Generated Docs
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add docs/
+            git commit -m "docs: regenerate API documentation"
+            git push
+          else
+            echo "No changes in generated docs"
+          fi
       - name: Run Changesets (version or publish)
         id: changesets
         uses: changesets/action@v1.5.3
