@@ -1,5 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router"
-import { eq, useLiveQuery } from "@tanstack/react-db"
+import {
+  HydrationBoundary,
+  createServerContext,
+  dehydrate,
+  eq,
+  prefetchLiveQuery,
+  useLiveQuery,
+} from "@tanstack/react-db"
 import { useState } from "react"
 import type { Todo } from "@/db/schema"
 import { authClient } from "@/lib/auth-client"
@@ -10,50 +17,129 @@ import {
 } from "@/lib/collections"
 
 export const Route = createFileRoute(`/_authenticated/project/$projectId`)({
-  component: ProjectPage,
-  ssr: false,
-  loader: async () => {
-    await projectCollection.preload()
-    await todoCollection.preload()
-    return null
+  component: ProjectPageWithHydration,
+  ssr: true, // Enable SSR for this route
+
+  // Server-side loader runs during SSR to prefetch data
+  loader: async ({ params }) => {
+    // Step 1: Create a server context to collect prefetched query results
+    const serverContext = createServerContext()
+
+    // Step 2: Prefetch all live queries that the component will use
+    // Each query needs a unique `id` that matches the `id` used in useLiveQuery on the client
+
+    // Prefetch project details
+    await prefetchLiveQuery(serverContext, {
+      id: `project-${params.projectId}`,
+      query: (q) =>
+        q
+          .from({ p: projectCollection })
+          .where(({ p }) => eq(p.id, parseInt(params.projectId, 10))),
+    })
+
+    // Prefetch todos for this project
+    await prefetchLiveQuery(serverContext, {
+      id: `project-todos-${params.projectId}`,
+      query: (q) =>
+        q
+          .from({ todo: todoCollection })
+          .where(({ todo }) =>
+            eq(todo.project_id, parseInt(params.projectId, 10))
+          )
+          .orderBy(({ todo }) => todo.created_at),
+    })
+
+    // Prefetch all users (for member management)
+    await prefetchLiveQuery(serverContext, {
+      id: `all-users`,
+      query: (q) => q.from({ users: usersCollection }),
+    })
+
+    // Prefetch project membership info
+    await prefetchLiveQuery(serverContext, {
+      id: `project-users-${params.projectId}`,
+      query: (q) =>
+        q
+          .from({ projects: projectCollection })
+          .where(({ projects }) =>
+            eq(projects.id, parseInt(params.projectId, 10))
+          )
+          .fn.select(({ projects }) => ({
+            users: projects.shared_user_ids.concat(projects.owner_id),
+            owner: projects.owner_id,
+          })),
+    })
+
+    // Step 3: Dehydrate the server context to transfer query results to the client
+    return {
+      dehydratedState: dehydrate(serverContext),
+    }
   },
 })
+
+// Wrapper component that provides hydrated data to the page
+function ProjectPageWithHydration() {
+  const loaderData = Route.useLoaderData()
+
+  // HydrationBoundary makes the prefetched data available to useLiveQuery hooks
+  // Components will immediately render with server-fetched data, then transition to live updates
+  return (
+    <HydrationBoundary state={loaderData.dehydratedState}>
+      <ProjectPage />
+    </HydrationBoundary>
+  )
+}
 
 function ProjectPage() {
   const { projectId } = Route.useParams()
   const { data: session } = authClient.useSession()
   const [newTodoText, setNewTodoText] = useState(``)
 
+  // All useLiveQuery hooks below use the `id` option to match with server-prefetched data
+  // On initial render, they'll immediately have data from SSR
+  // After hydration, they automatically transition to live reactive updates
+
   const { data: todos } = useLiveQuery(
-    (q) =>
-      q
-        .from({ todo: todoCollection })
-        .where(({ todo }) => eq(todo.project_id, parseInt(projectId, 10)))
-        .orderBy(({ todo }) => todo.created_at),
+    {
+      id: `project-todos-${projectId}`,
+      query: (q) =>
+        q
+          .from({ todo: todoCollection })
+          .where(({ todo }) => eq(todo.project_id, parseInt(projectId, 10)))
+          .orderBy(({ todo }) => todo.created_at),
+    },
     [projectId]
   )
 
-  const { data: users } = useLiveQuery((q) =>
-    q.from({ users: usersCollection })
-  )
+  const { data: users } = useLiveQuery({
+    id: `all-users`,
+    query: (q) => q.from({ users: usersCollection }),
+  })
+
   const { data: usersInProjects } = useLiveQuery(
-    (q) =>
-      q
-        .from({ projects: projectCollection })
-        .where(({ projects }) => eq(projects.id, parseInt(projectId, 10)))
-        .fn.select(({ projects }) => ({
-          users: projects.shared_user_ids.concat(projects.owner_id),
-          owner: projects.owner_id,
-        })),
+    {
+      id: `project-users-${projectId}`,
+      query: (q) =>
+        q
+          .from({ projects: projectCollection })
+          .where(({ projects }) => eq(projects.id, parseInt(projectId, 10)))
+          .fn.select(({ projects }) => ({
+            users: projects.shared_user_ids.concat(projects.owner_id),
+            owner: projects.owner_id,
+          })),
+    },
     [projectId]
   )
   const usersInProject = usersInProjects[0]
 
   const { data: projects } = useLiveQuery(
-    (q) =>
-      q
-        .from({ p: projectCollection })
-        .where(({ p }) => eq(p.id, parseInt(projectId, 10))),
+    {
+      id: `project-${projectId}`,
+      query: (q) =>
+        q
+          .from({ p: projectCollection })
+          .where(({ p }) => eq(p.id, parseInt(projectId, 10))),
+    },
     [projectId]
   )
   const project = projects[0]
