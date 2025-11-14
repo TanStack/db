@@ -119,7 +119,12 @@ export class Scheduler {
         if (deps) {
           ready = true
           for (const dep of deps) {
-            if (dep !== jobId && !completed.has(dep)) {
+            // Ignore self-dependencies and dependencies that aren't jobs in this context
+            // A dependency that hasn't scheduled work in this context shouldn't block this job
+            if (dep === jobId || !jobs.has(dep)) {
+              continue
+            }
+            if (!completed.has(dep)) {
               ready = false
               break
             }
