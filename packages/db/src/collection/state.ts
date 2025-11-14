@@ -674,6 +674,17 @@ export class CollectionStateManager<
               this.isThisCollection(mutation.collection) &&
               mutation.optimistic
             ) {
+              // Skip re-applying optimistic state for persisting transactions
+              // if the mutation key was just synced (prevents overwriting fresh server data)
+              // EXCEPT during truncate operations where optimistic state should always be preserved
+              if (
+                !hasTruncateSync &&
+                transaction.state === `persisting` &&
+                changedKeys.has(mutation.key)
+              ) {
+                continue
+              }
+
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
