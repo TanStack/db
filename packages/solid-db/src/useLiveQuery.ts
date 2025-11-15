@@ -24,7 +24,7 @@ import type {
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
- * @returns Object with reactive data, state, and status information
+ * @returns Accessor that returns data with Suspense support, with state and status infomation as properties
  * @example
  * // Basic query with object syntax
  * const todosQuery = useLiveQuery((q) =>
@@ -76,7 +76,7 @@ import type {
  *   </Switch>
  * )
  *
- * * @example
+ * @example
  * // Use Suspense boundaries
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todoCollection })
@@ -107,7 +107,7 @@ export function useLiveQuery<TContext extends Context>(
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @returns Object with reactive data, state, and status information
+ * @returns Accessor that returns data with Suspense support, with state and status infomation as properties
  * @example
  * // Basic config object usage
  * const todosQuery = useLiveQuery(() => ({
@@ -161,7 +161,7 @@ export function useLiveQuery<TContext extends Context>(
 /**
  * Subscribe to an existing live query collection
  * @param liveQueryCollection - Pre-created live query collection to subscribe to
- * @returns Object with reactive data, state, and status information
+ * @returns Accessor that returns data with Suspense support, with state and status infomation as properties
  * @example
  * // Using pre-created live query collection
  * const myLiveQuery = createLiveQueryCollection((q) =>
