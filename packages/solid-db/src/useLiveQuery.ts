@@ -87,7 +87,7 @@ import type {
  *     <For each={todosQuery()}>
  *       {(todo) => <li key={todo.id}>{todo.text}</li>}
  *     </For>
- *   </Switch>
+ *   </Suspense>
  * )
  */
 // Overload 1: Accept just the query function
