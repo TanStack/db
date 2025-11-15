@@ -3538,4 +3538,90 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(0)
     })
   })
+
+  describe(`Direct Writes with dynamic query keys`, () => {
+    it(`should not purge Direct Write items when query results change`, async () => {
+      // Reproduces the issue reported on Discord:
+      // When using Direct Writes, items inserted via writeInsert get purged
+      // when a query result comes in that doesn't include those items
+
+      interface MachineEvent {
+        id: string
+        timestamp: string
+        message: string
+      }
+
+      const getEventKey = (item: MachineEvent) => item.id
+
+      // Simulate initial data - first response returns 2 items
+      let queryCallCount = 0
+      const initialEvents: Array<MachineEvent> = [
+        { id: `1`, timestamp: `2025-11-12T22:08:00Z`, message: `Event 1` },
+        { id: `2`, timestamp: `2025-11-12T22:08:30Z`, message: `Event 2` },
+      ]
+
+      const queryFn = vi.fn(async (): Promise<Array<MachineEvent>> => {
+        queryCallCount++
+        // First call returns 2 items
+        // Second call returns only 1 item (simulating filtered data)
+        if (queryCallCount === 1) {
+          return initialEvents
+        } else {
+          return [initialEvents[0]!] // Only return first item
+        }
+      })
+
+      const config: QueryCollectionConfig<MachineEvent> = {
+        id: `machine-events-test`,
+        queryClient,
+        queryKey: [`machineEvents`, `test`],
+        queryFn,
+        getKey: getEventKey,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await collection.preload()
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+
+      // Now perform a Direct Write to add a new event
+      // This simulates receiving an event from EventSource
+      const newEvent: MachineEvent = {
+        id: `4`,
+        timestamp: `2025-11-12T22:09:30Z`,
+        message: `Event 4`,
+      }
+
+      collection.utils.writeInsert(newEvent)
+
+      // Verify the new event was added
+      expect(collection.size).toBe(3)
+      expect(collection.has(`4`)).toBe(true)
+
+      // Now refetch - the query returns different data (only item 1)
+      // This simulates a situation where the query result changes
+      // (e.g., server-side filtering, pagination, time-based filters)
+      await collection.utils.refetch()
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      })
+
+      // After refetch, the query returns only item 1
+      // Item 2 should be removed (it's not in the result and not a direct write)
+      // BUT item 4 (the directly-written item) should still exist
+      expect(collection.has(`1`)).toBe(true) // In query result
+      expect(collection.has(`2`)).toBe(false) // Not in query result, should be removed
+      expect(collection.has(`4`)).toBe(true) // Direct write, should be protected
+      expect(collection.size).toBe(2) // Item 1 + Item 4
+    })
+  })
 })
