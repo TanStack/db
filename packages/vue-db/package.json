@@ -15,15 +15,15 @@
     "vue",
     "typescript"
   ],
-  "packageManager": "pnpm@10.19.0",
+  "packageManager": "pnpm@10.22.0",
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@electric-sql/client": "1.1.0",
+    "@electric-sql/client": "1.1.4",
     "@vitejs/plugin-vue": "^6.0.1",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "vue": "^3.5.22"
+    "vue": "^3.5.24"
   },
   "exports": {
     ".": {
