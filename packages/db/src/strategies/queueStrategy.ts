@@ -44,7 +44,7 @@ import type { Transaction } from "../transactions"
  * ```
  */
 export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
-  const queuer = new AsyncQueuer<() => Transaction<any>>(
+  const queuer = new AsyncQueuer<() => Transaction>(
     async (fn) => {
       const transaction = fn()
       // Wait for the transaction to be persisted before processing next item
@@ -68,7 +68,7 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
       fn: () => Transaction<T>
     ) => {
       // Add the transaction-creating function to the queue
-      queuer.addItem(fn)
+      queuer.addItem(fn as () => Transaction)
     },
     cleanup: () => {
       queuer.stop()
