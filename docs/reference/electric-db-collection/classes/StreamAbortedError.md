@@ -5,7 +5,7 @@ title: StreamAbortedError
 
 # Class: StreamAbortedError
 
-Defined in: packages/electric-db-collection/src/errors.ts:32
+Defined in: [packages/electric-db-collection/src/errors.ts:32](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L32)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/electric-db-collection/src/errors.ts:32
 new StreamAbortedError(collectionId?): StreamAbortedError;
 ```
 
-Defined in: packages/electric-db-collection/src/errors.ts:33
+Defined in: [packages/electric-db-collection/src/errors.ts:33](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L33)
 
 #### Parameters
 
