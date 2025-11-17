@@ -54,7 +54,6 @@ export interface Collection<
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
   readonly utils: TUtils
   readonly singleResult?: true
-  readonly compareOptions: StringCollationConfig
 }
 
 /**
@@ -232,7 +231,7 @@ export class CollectionImpl<
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
-  private comparisonOpts: StringCollationConfig
+  public readonly compareOptions: StringCollationConfig
 
   /**
    * Creates a new Collection instance
@@ -271,7 +270,8 @@ export class CollectionImpl<
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
 
-    this.comparisonOpts = buildCompareOptionsFromConfig(config)
+    // @ts-expect-error - we need to set readonly property in constructor
+    this.compareOptions = buildCompareOptionsFromConfig(config)
 
     this._changes.setDeps({
       collection: this, // Required for passing to CollectionSubscription
@@ -512,11 +512,6 @@ export class CollectionImpl<
     key?: TKey
   ): TOutput | never {
     return this._mutations.validateData(data, type, key)
-  }
-
-  get compareOptions(): StringCollationConfig {
-    // return a copy such that no one can mutate the internal comparison object
-    return { ...this.comparisonOpts }
   }
 
   /**

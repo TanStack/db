@@ -13,6 +13,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   UpdateMutationFnParams,
+  StringCollationConfig,
 } from "@tanstack/db"
 
 describe(`Query collection type resolution tests`, () => {
@@ -401,6 +402,81 @@ describe(`Query collection type resolution tests`, () => {
 
       // Should infer ResponseType as select parameter type
       expectTypeOf(selectUserData).parameters.toEqualTypeOf<[ResponseType]>()
+    })
+  })
+
+  describe(`compareOptions property access`, () => {
+    it(`should have compareOptions property accessible on collection created with queryCollectionOptions`, () => {
+      type TodoType = {
+        id: string
+        title: string
+        completed: boolean
+      }
+
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`todos`],
+        queryFn: async (): Promise<Array<TodoType>> => {
+          return [] as Array<TodoType>
+        },
+        getKey: (item) => item.id,
+      })
+
+      const collection = createCollection(options)
+
+      // This should not produce a type error - compareOptions should be accessible
+      expectTypeOf(
+        collection.compareOptions
+      ).toEqualTypeOf<StringCollationConfig>()
+    })
+
+    it(`should have compareOptions property accessible when using schema`, () => {
+      const todoSchema = z.object({
+        id: z.string(),
+        title: z.string(),
+        completed: z.boolean(),
+      })
+
+      type TodoType = z.infer<typeof todoSchema>
+
+      const options = queryCollectionOptions({
+        queryClient,
+        queryKey: [`todos`],
+        queryFn: async (): Promise<Array<TodoType>> => {
+          return [] as Array<TodoType>
+        },
+        schema: todoSchema,
+        getKey: (item) => item.id,
+      })
+
+      const collection = createCollection(options)
+
+      // This should not produce a type error - compareOptions should be accessible
+      expectTypeOf(
+        collection.compareOptions
+      ).toEqualTypeOf<StringCollationConfig>()
+    })
+
+    it(`should have compareOptions property accessible when using explicit type`, () => {
+      type TodoType = {
+        id: string
+        title: string
+        completed: boolean
+      }
+
+      const options = queryCollectionOptions<TodoType>({
+        queryClient,
+        queryKey: [`todos`],
+        queryFn: async () => [] as Array<TodoType>,
+        getKey: (item) => item.id,
+      })
+
+      const collection = createCollection(options)
+
+      // This should not produce a type error - compareOptions should be accessible
+      expectTypeOf(
+        collection.compareOptions
+      ).toEqualTypeOf<StringCollationConfig>()
     })
   })
 })
