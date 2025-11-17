@@ -19,7 +19,7 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ### useLiveQuery
 
-The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. All return values are reactive and should be called as functions:
+The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. It returns an object where `data` is a plain array and status fields (e.g. `isLoading()`, `status()`) are accessors:
 
 ```tsx
 import { useLiveQuery } from '@tanstack/solid-db'

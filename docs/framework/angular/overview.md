@@ -52,6 +52,8 @@ export class TodoListComponent {
 
 **Note:** All return values (`data`, `isLoading`, `status`, etc.) are Angular signals, so call them with `()` in your template: `query.data()`, `query.isLoading()`.
 
+> **Template Syntax:** Examples use Angular 17+ control flow (`@if`, `@for`). For Angular 16, use `*ngIf` and `*ngFor` instead.
+
 ### Reactive Parameters
 
 For queries that depend on reactive values, use the `params` option to re-run the query when those values change:
@@ -93,10 +95,10 @@ When any reactive value accessed in the `params` function changes, the query is 
 #### What Happens When Parameters Change
 
 When a parameter value changes:
-1. The previous live query collection is cleaned up
+1. The previous live-query collection is disposed
 2. A new query is created with the updated parameter values
-3. The component updates automatically through Angular's signals
-4. The `isLoading` signal becomes `true` until the new data is ready
+3. `status()`/`isLoading()` reflect the new query's lifecycle
+4. `data()` updates automatically when the new results arrive
 
 #### Best Practices
 
