@@ -7,8 +7,8 @@ on:
 jobs:
   claude:
     if: |
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && (github.event.comment.user.login == 'kevin-dp' || github.event.comment.user.login == 'KyleAMathews' || github.event.comment.user.login == 'samwillis')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && (github.event.comment.user.login == 'kevin-dp' || github.event.comment.user.login == 'KyleAMathews' || github.event.comment.user.login == 'samwillis'))
     runs-on: ubuntu-latest
     permissions:
       contents: write
