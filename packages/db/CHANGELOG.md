@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.5.1
+
+### Patch Changes
+
+- Upgrade @tanstack/pacer to v0.16.2 and fix AsyncQueuer API usage. The pacer package API changed significantly, requiring updates to how AsyncQueuer is constructed and items are queued in the queueStrategy implementation. ([#840](https://github.com/TanStack/db/pull/840))
+
 ## 0.5.0
 
 ### Minor Changes

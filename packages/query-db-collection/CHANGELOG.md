@@ -1,5 +1,14 @@
 # @tanstack/query-db-collection
 
+## 1.0.1
+
+### Patch Changes
+
+- Temporarily remove `loadSubset` call deduplication in query collection. We need to revisit our approach to deduplication to ensure correctness. See https://github.com/TanStack/db/issues/836 for discussion on the proper implementation strategy. ([#840](https://github.com/TanStack/db/pull/840))
+
+- Updated dependencies [[`a83a818`](https://github.com/TanStack/db/commit/a83a8189514d22ca2fcdf34b9cb97206d3c03c38)]:
+  - @tanstack/db@0.5.1
+
 ## 1.0.0
 
 ### Patch Changes
