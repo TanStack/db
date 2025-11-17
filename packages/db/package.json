@@ -5,7 +5,7 @@
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/pacer": "^0.1.0"
+    "@tanstack/pacer": "^0.16.2"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.2.4",
