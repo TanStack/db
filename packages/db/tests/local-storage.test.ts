@@ -1614,4 +1614,122 @@ describe(`localStorage collection`, () => {
       })
     })
   })
+
+  describe(`Bug #397: update/delete targeting wrong item`, () => {
+    it(`should update the correct item when multiple items exist (direct operations)`, async () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        })
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert multiple items
+      const tx1 = collection.insert({
+        id: `first`,
+        title: `First Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx1.isPersisted.promise
+
+      const tx2 = collection.insert({
+        id: `second`,
+        title: `Second Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx2.isPersisted.promise
+
+      const tx3 = collection.insert({
+        id: `third`,
+        title: `Third Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx3.isPersisted.promise
+
+      // Update the FIRST item specifically
+      const updateTx = collection.update(`first`, (draft) => {
+        draft.completed = true
+      })
+      await updateTx.isPersisted.promise
+
+      // Verify that the FIRST item was updated, not the last one
+      expect(collection.get(`first`)?.completed).toBe(true)
+      expect(collection.get(`second`)?.completed).toBe(false)
+      expect(collection.get(`third`)?.completed).toBe(false)
+
+      // Verify in storage
+      const storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`first`].data.completed).toBe(true)
+      expect(parsed[`second`].data.completed).toBe(false)
+      expect(parsed[`third`].data.completed).toBe(false)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should delete the correct item when multiple items exist`, async () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        })
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert multiple items
+      const tx1 = collection.insert({
+        id: `first`,
+        title: `First Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx1.isPersisted.promise
+
+      const tx2 = collection.insert({
+        id: `second`,
+        title: `Second Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx2.isPersisted.promise
+
+      const tx3 = collection.insert({
+        id: `third`,
+        title: `Third Todo`,
+        completed: false,
+        createdAt: new Date(),
+      })
+      await tx3.isPersisted.promise
+
+      // Delete the FIRST item specifically
+      const deleteTx = collection.delete(`first`)
+      await deleteTx.isPersisted.promise
+
+      // Verify that the FIRST item was deleted, not the last one
+      expect(collection.has(`first`)).toBe(false)
+      expect(collection.has(`second`)).toBe(true)
+      expect(collection.has(`third`)).toBe(true)
+
+      // Verify in storage
+      const storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`first`]).toBeUndefined()
+      expect(parsed[`second`]).toBeDefined()
+      expect(parsed[`third`]).toBeDefined()
+
+      subscription.unsubscribe()
+    })
+  })
 })
