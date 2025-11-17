@@ -19,30 +19,32 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ### useLiveQuery
 
-The `useLiveQuery` utility creates a live query that automatically updates your component when data changes:
+The `useLiveQuery` utility creates a live query that automatically updates your component when data changes. It returns reactive values powered by Svelte 5 runes:
 
 ```svelte
 <script>
   import { useLiveQuery } from '@tanstack/svelte-db'
   import { eq } from '@tanstack/db'
 
-  const { data, isLoading } = useLiveQuery((q) =>
+  const query = useLiveQuery((q) =>
     q.from({ todos: todosCollection })
      .where(({ todos }) => eq(todos.completed, false))
      .select(({ todos }) => ({ id: todos.id, text: todos.text }))
   )
 </script>
 
-{#if $isLoading}
+{#if query.isLoading}
   <div>Loading...</div>
 {:else}
   <ul>
-    {#each $data as todo (todo.id)}
+    {#each query.data as todo (todo.id)}
       <li>{todo.text}</li>
     {/each}
   </ul>
 {/if}
 ```
+
+**Note:** With Svelte 5, `useLiveQuery` returns reactive values through getters. Access `query.data` and `query.isLoading` directly (no `$` prefix needed).
 
 ### Dependency Arrays
 
@@ -59,14 +61,14 @@ Use dependency arrays when your query depends on external reactive values (props
 
   let { minPriority } = $props()
 
-  const { data } = useLiveQuery(
+  const query = useLiveQuery(
     (q) => q.from({ todos: todosCollection })
            .where(({ todos }) => gt(todos.priority, minPriority)),
     [() => minPriority] // Re-run when minPriority changes
   )
 </script>
 
-<div>{$data.length} high-priority todos</div>
+<div>{query.data.length} high-priority todos</div>
 ```
 
 **Note:** When using props or reactive state in the query, wrap them in a function for the dependency array.
@@ -92,7 +94,7 @@ When a dependency value changes:
   let status = $state('active')
 
   // Good - all external values in deps
-  const { data } = useLiveQuery(
+  const query = useLiveQuery(
     (q) => q.from({ todos: todosCollection })
            .where(({ todos }) => and(
              eq(todos.userId, userId),
@@ -102,14 +104,14 @@ When a dependency value changes:
   )
 
   // Bad - missing dependencies
-  const { data: badData } = useLiveQuery(
+  const badQuery = useLiveQuery(
     (q) => q.from({ todos: todosCollection })
            .where(({ todos }) => eq(todos.userId, userId)),
     [] // Missing userId!
   )
 </script>
 
-<div>{$data.length} todos</div>
+<div>{query.data.length} todos</div>
 ```
 
 **Empty array for static queries:**
@@ -119,13 +121,13 @@ When a dependency value changes:
   import { useLiveQuery } from '@tanstack/svelte-db'
 
   // No external dependencies - query never changes
-  const { data } = useLiveQuery(
+  const query = useLiveQuery(
     (q) => q.from({ todos: todosCollection }),
     []
   )
 </script>
 
-<div>{$data.length} todos</div>
+<div>{query.data.length} todos</div>
 ```
 
 **Omit the array for queries with no external dependencies:**
@@ -135,10 +137,33 @@ When a dependency value changes:
   import { useLiveQuery } from '@tanstack/svelte-db'
 
   // Same as above - no deps needed
-  const { data } = useLiveQuery(
+  const query = useLiveQuery(
     (q) => q.from({ todos: todosCollection })
   )
 </script>
 
-<div>{$data.length} todos</div>
+<div>{query.data.length} todos</div>
+```
+
+### Accessing Multiple Properties
+
+You can access all status properties directly on the query result:
+
+```svelte
+<script>
+  import { useLiveQuery } from '@tanstack/svelte-db'
+  import { eq } from '@tanstack/db'
+
+  const query = useLiveQuery((q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => eq(todos.active, true))
+  )
+</script>
+
+<div>
+  <div>Status: {query.status}</div>
+  <div>Loading: {query.isLoading}</div>
+  <div>Ready: {query.isReady}</div>
+  <div>Total: {query.data.length}</div>
+</div>
 ```
