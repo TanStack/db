@@ -270,7 +270,6 @@ export class CollectionImpl<
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
 
-    // @ts-expect-error - we need to set readonly property in constructor
     this.compareOptions = buildCompareOptionsFromConfig(config)
 
     this._changes.setDeps({
