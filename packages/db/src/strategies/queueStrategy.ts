@@ -44,14 +44,22 @@ import type { Transaction } from "../transactions"
  * ```
  */
 export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
-  const queuer = new AsyncQueuer<void>({
-    concurrency: 1, // Process one at a time to ensure serialization
-    wait: options?.wait,
-    maxSize: options?.maxSize,
-    addItemsTo: options?.addItemsTo ?? `back`, // Default FIFO: add to back
-    getItemsFrom: options?.getItemsFrom ?? `front`, // Default FIFO: get from front
-    started: true, // Start processing immediately
-  })
+  const queuer = new AsyncQueuer<() => Transaction>(
+    async (fn) => {
+      const transaction = fn()
+      // Wait for the transaction to be persisted before processing next item
+      // Note: fn() already calls commit(), we just wait for it to complete
+      await transaction.isPersisted.promise
+    },
+    {
+      concurrency: 1, // Process one at a time to ensure serialization
+      wait: options?.wait,
+      maxSize: options?.maxSize,
+      addItemsTo: options?.addItemsTo ?? `back`, // Default FIFO: add to back
+      getItemsFrom: options?.getItemsFrom ?? `front`, // Default FIFO: get from front
+      started: true, // Start processing immediately
+    }
+  )
 
   return {
     _type: `queue`,
@@ -59,13 +67,8 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>
     ) => {
-      // Wrap the callback in an async function that waits for persistence
-      queuer.addItem(async () => {
-        const transaction = fn()
-        // Wait for the transaction to be persisted before processing next item
-        // Note: fn() already calls commit(), we just wait for it to complete
-        await transaction.isPersisted.promise
-      })
+      // Add the transaction-creating function to the queue
+      queuer.addItem(fn as () => Transaction)
     },
     cleanup: () => {
       queuer.stop()
