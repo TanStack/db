@@ -457,6 +457,38 @@ describe(`Query collection type resolution tests`, () => {
       ).toEqualTypeOf<StringCollationConfig>()
     })
 
+    it(`should have compareOptions property accessible with schema transform`, () => {
+      // Reproduces the exact scenario from Discord bug report
+      const schema = z
+        .object({
+          name: z.string().min(1),
+        })
+        .transform((item) => ({ ...item, id: -1, blubb: `blubb` }))
+
+      const options = queryCollectionOptions({
+        queryKey: [`local-test-array`],
+        schema,
+        queryFn: async () => {
+          return [
+            {
+              name: `test`,
+              id: 0,
+            },
+          ]
+        },
+        getKey: (item) => item.id,
+        queryClient,
+      })
+
+      const collection = createCollection(options)
+
+      // This should not produce a type error - compareOptions should be accessible
+      // This was the exact error reported: "missing properties: comparisonOpts, compareOptions"
+      expectTypeOf(
+        collection.compareOptions
+      ).toEqualTypeOf<StringCollationConfig>()
+    })
+
     it(`should have compareOptions property accessible when using explicit type`, () => {
       type TodoType = {
         id: string
