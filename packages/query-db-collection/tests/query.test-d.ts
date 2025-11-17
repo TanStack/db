@@ -12,8 +12,8 @@ import { queryCollectionOptions } from "../src/query"
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
-  UpdateMutationFnParams,
   StringCollationConfig,
+  UpdateMutationFnParams,
 } from "@tanstack/db"
 
 describe(`Query collection type resolution tests`, () => {
@@ -459,20 +459,23 @@ describe(`Query collection type resolution tests`, () => {
 
     it(`should have compareOptions property accessible with schema transform`, () => {
       // Reproduces the exact scenario from Discord bug report
-      const schema = z
+      const _schema = z
         .object({
           name: z.string().min(1),
         })
         .transform((item) => ({ ...item, id: -1, blubb: `blubb` }))
 
+      type SchemaOutput = z.infer<typeof _schema>
+
       const options = queryCollectionOptions({
         queryKey: [`local-test-array`],
-        schema,
-        queryFn: async () => {
+        // When using schema with transform, we need to provide the explicit type
+        queryFn: async (): Promise<Array<SchemaOutput>> => {
           return [
             {
               name: `test`,
               id: 0,
+              blubb: `blubb`,
             },
           ]
         },
