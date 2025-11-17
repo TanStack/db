@@ -7,16 +7,28 @@ id: overview
 
 Welcome to the TanStack DB documentation.
 
-TanStack DB is the reactive client-first store for your API. **Stop building custom endpoints for every view**—TanStack DB lets you query your data however your components need it, with a blazing-fast local query engine, real-time reactivity, and instant optimistic updates.
+TanStack DB is the reactive client store for your API. It solves the problems of building fast, modern apps, helping you:
 
-It solves the architecture problem most teams face:
+- avoid endpoint sprawl and network waterfalls by loading data into normalized collections
+- optimise client performance with sub-millisecond live queries and real-time reactivity
+- take the network off the interaction path with instant optimistic writes
 
-- **View-specific APIs** = endpoint sprawl and network waterfalls
-- **Load-everything-and-filter** = sluggish client performance
+Data loading is optimized. Interactions feel instantaneous. Your backend stays simple and your app stays blazing fast. No matter how much data you load.
 
-TanStack DB enables **Option C**: load normalized collections, then perform sub-millisecond incremental joins in the client. Your queries adapt to what data loads, your components get instant updates, and your backend stays simple.
+## Remove the complexity from building fast, modern apps
 
-**The end-user benefit:** Your app stays blazing fast no matter how much data you load. Apps can't get sluggish due to too much data—queries over 100,000+ rows complete in under a millisecond, making interactions feel truly instantaneous.
+TanStack DB lets you query your data however your components need it, with a blazing-fast local query engine, real-time reactivity and instant optimistic updates.
+
+Instead of choosing between the least of two evils:
+
+1. **view-specific APIs** - complicating your backend and leading to network waterfalls
+2. **load everything and filter** - leading to slow loads and sluggish client performance
+
+TanStack DB enables a new way:
+
+3. **normalized collections** - keep your backend simple
+4. **query-driven sync** - optimizes your data loading
+5. **sub-millisecond live queries** - keep your app fast and responsive
 
 It extends TanStack Query with collections, live queries and optimistic mutations, working seamlessly with REST APIs, sync engines, or any data source.
 
