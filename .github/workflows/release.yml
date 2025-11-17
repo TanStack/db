@@ -37,12 +37,25 @@ jobs:
           if [ -n "$(git status --porcelain)" ]; then
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            BRANCH="docs/auto-update-$(date +%s)"
+            git checkout -b "$BRANCH"
             git add docs/
             git commit -m "docs: regenerate API documentation"
-            git push
+            git push origin "$BRANCH"
+
+            gh pr create \
+              --title "docs: regenerate API documentation" \
+              --body "Automated documentation update from release" \
+              --base main \
+              --head "$BRANCH"
+
+            gh pr merge "$BRANCH" --auto --squash
           else
             echo "No changes in generated docs"
           fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Run Changesets (version or publish)
         id: changesets
         uses: changesets/action@v1.5.3
