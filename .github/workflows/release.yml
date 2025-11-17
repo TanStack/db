@@ -30,9 +30,22 @@ jobs:
         uses: tanstack/config/.github/setup@main
       - name: Run Tests
         run: pnpm run lint && pnpm run build && pnpm run test
+      - name: Run Changesets (version or publish)
+        id: changesets
+        uses: changesets/action@v1.5.3
+        with:
+          version: pnpm run changeset:version
+          publish: pnpm run changeset:publish
+          commit: "ci: Version Packages"
+          title: "ci: Version Packages"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Generate Docs
+        if: steps.changesets.outputs.published == 'true'
         run: pnpm docs:generate
       - name: Commit Generated Docs
+        if: steps.changesets.outputs.published == 'true'
         run: |
           if [ -n "$(git status --porcelain)" ]; then
             git config user.name "github-actions[bot]"
@@ -56,17 +69,6 @@ jobs:
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Run Changesets (version or publish)
-        id: changesets
-        uses: changesets/action@v1.5.3
-        with:
-          version: pnpm run changeset:version
-          publish: pnpm run changeset:publish
-          commit: "ci: Version Packages"
-          title: "ci: Version Packages"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Comment on PRs about release
         if: steps.changesets.outputs.published == 'true'
         uses: tanstack/config/.github/comment-on-release@main
