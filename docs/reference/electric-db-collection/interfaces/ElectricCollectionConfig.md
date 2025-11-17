@@ -5,7 +5,7 @@ title: ElectricCollectionConfig
 
 # Interface: ElectricCollectionConfig\<T, TSchema\>
 
-Defined in: packages/electric-db-collection/src/electric.ts:108
+Defined in: [packages/electric-db-collection/src/electric.ts:108](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L108)
 
 Configuration interface for Electric collection options
 
@@ -35,7 +35,7 @@ The schema type for validation
 optional onDelete: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: packages/electric-db-collection/src/electric.ts:224
+Defined in: [packages/electric-db-collection/src/electric.ts:224](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L224)
 
 Optional asynchronous handler function called before a delete operation
 
@@ -87,7 +87,7 @@ onDelete: async ({ transaction, collection }) => {
 optional onInsert: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: packages/electric-db-collection/src/electric.ts:167
+Defined in: [packages/electric-db-collection/src/electric.ts:167](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L167)
 
 Optional asynchronous handler function called before an insert operation
 
@@ -161,7 +161,7 @@ onInsert: async ({ transaction, collection }) => {
 optional onUpdate: (params) => Promise<MatchingStrategy>;
 ```
 
-Defined in: packages/electric-db-collection/src/electric.ts:196
+Defined in: [packages/electric-db-collection/src/electric.ts:196](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L196)
 
 Optional asynchronous handler function called before an update operation
 
@@ -214,7 +214,7 @@ onUpdate: async ({ transaction, collection }) => {
 shapeOptions: ShapeStreamOptions<GetExtensions<T>>;
 ```
 
-Defined in: packages/electric-db-collection/src/electric.ts:118
+Defined in: [packages/electric-db-collection/src/electric.ts:118](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L118)
 
 Configuration options for the ElectricSQL ShapeStream
 
@@ -226,4 +226,4 @@ Configuration options for the ElectricSQL ShapeStream
 optional syncMode: ElectricSyncMode;
 ```
 
-Defined in: packages/electric-db-collection/src/electric.ts:119
+Defined in: [packages/electric-db-collection/src/electric.ts:119](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L119)

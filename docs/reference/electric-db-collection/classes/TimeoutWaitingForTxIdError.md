@@ -5,7 +5,7 @@ title: TimeoutWaitingForTxIdError
 
 # Class: TimeoutWaitingForTxIdError
 
-Defined in: packages/electric-db-collection/src/errors.ts:18
+Defined in: [packages/electric-db-collection/src/errors.ts:18](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L18)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/electric-db-collection/src/errors.ts:18
 new TimeoutWaitingForTxIdError(txId, collectionId?): TimeoutWaitingForTxIdError;
 ```
 
-Defined in: packages/electric-db-collection/src/errors.ts:19
+Defined in: [packages/electric-db-collection/src/errors.ts:19](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L19)
 
 #### Parameters
 
