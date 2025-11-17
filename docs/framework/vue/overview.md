@@ -19,7 +19,7 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ### useLiveQuery
 
-The `useLiveQuery` composable creates a live query that automatically updates your component when data changes:
+The `useLiveQuery` composable creates a live query that automatically updates your component when data changes. It returns reactive computed refs:
 
 ```vue
 <script setup>
@@ -41,25 +41,28 @@ const { data, isLoading } = useLiveQuery((q) =>
 </template>
 ```
 
+**Note:** All return values (`data`, `isLoading`, `status`, etc.) are computed refs, so access them with `.value` in `<script>` but directly in `<template>`.
+
 ### Dependency Arrays
 
-The `useLiveQuery` composable accepts an optional dependency array as its last parameter. This array works similarly to Vue's `watchEffect` dependencies - when any value in the array changes, the query is recreated and re-executed.
+The `useLiveQuery` composable accepts an optional dependency array as its last parameter. When any reactive value in the array changes, the query is recreated and re-executed.
 
 #### When to Use Dependency Arrays
 
-Use dependency arrays when your query depends on external reactive values (props, refs, or other composables):
+Use dependency arrays when your query depends on external reactive values (refs, props, or reactive objects):
 
 ```vue
 <script setup>
+import { ref } from 'vue'
 import { useLiveQuery } from '@tanstack/vue-db'
 import { gt } from '@tanstack/db'
 
-const props = defineProps<{ minPriority: number }>()
+const minPriority = ref(5)
 
 const { data } = useLiveQuery(
   (q) => q.from({ todos: todosCollection })
-         .where(({ todos }) => gt(todos.priority, props.minPriority)),
-  [() => props.minPriority] // Re-run when minPriority changes
+         .where(({ todos }) => gt(todos.priority, minPriority.value)),
+  [minPriority] // Pass the ref directly, it will be unwrapped automatically
 )
 </script>
 
@@ -68,7 +71,7 @@ const { data } = useLiveQuery(
 </template>
 ```
 
-**Note:** When using props or refs in the query, wrap them in a function for the dependency array.
+**Important:** Pass refs directly in the dependency array, not as functions. Vue will automatically track them.
 
 #### What Happens When Dependencies Change
 
@@ -80,7 +83,7 @@ When a dependency value changes:
 
 #### Best Practices
 
-**Include all external values used in the query:**
+**Include all external refs used in the query:**
 
 ```vue
 <script setup>
@@ -91,14 +94,14 @@ import { eq, and } from '@tanstack/db'
 const userId = ref(1)
 const status = ref('active')
 
-// Good - all external values in deps
+// Good - all refs in deps array
 const { data } = useLiveQuery(
   (q) => q.from({ todos: todosCollection })
          .where(({ todos }) => and(
            eq(todos.userId, userId.value),
            eq(todos.status, status.value)
          )),
-  [() => userId.value, () => status.value]
+  [userId, status] // Pass refs directly
 )
 
 // Bad - missing dependencies
@@ -108,6 +111,41 @@ const { data: badData } = useLiveQuery(
   [] // Missing userId!
 )
 </script>
+
+<template>
+  <div>{{ data.length }} todos</div>
+</template>
+```
+
+**Using with props:**
+
+```vue
+<script setup>
+import { toRef } from 'vue'
+import { useLiveQuery } from '@tanstack/vue-db'
+import { eq } from '@tanstack/db'
+
+const props = defineProps<{ userId: number }>()
+
+// Option 1: Convert prop to ref
+const userIdRef = toRef(props, 'userId')
+const { data } = useLiveQuery(
+  (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => eq(todos.userId, userIdRef.value)),
+  [userIdRef]
+)
+
+// Option 2: Use a getter function for the prop
+const { data: data2 } = useLiveQuery(
+  (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => eq(todos.userId, props.userId)),
+  [() => props.userId] // Getter function for non-ref values
+)
+</script>
+
+<template>
+  <div>{{ data.length }} todos</div>
+</template>
 ```
 
 **Empty array for static queries:**
@@ -122,6 +160,10 @@ const { data } = useLiveQuery(
   []
 )
 </script>
+
+<template>
+  <div>{{ data.length }} todos</div>
+</template>
 ```
 
 **Omit the array for queries with no external dependencies:**
@@ -135,4 +177,39 @@ const { data } = useLiveQuery(
   (q) => q.from({ todos: todosCollection })
 )
 </script>
+
+<template>
+  <div>{{ data.length }} todos</div>
+</template>
+```
+
+### Using Pre-created Collections
+
+You can also pass an existing collection to `useLiveQuery`. This is useful for sharing queries across components:
+
+```vue
+<script setup>
+import { ref } from 'vue'
+import { createLiveQueryCollection } from '@tanstack/db'
+import { useLiveQuery } from '@tanstack/vue-db'
+import { eq } from '@tanstack/db'
+
+// Create collection outside component or in a composable
+const todosQuery = createLiveQueryCollection({
+  query: (q) => q.from({ todos: todosCollection })
+               .where(({ todos }) => eq(todos.active, true)),
+  startSync: true
+})
+
+// Use the pre-created collection
+const { data, collection } = useLiveQuery(todosQuery)
+
+// Or use a reactive ref to switch between collections
+const currentQuery = ref(todosQuery)
+const { data: reactiveData } = useLiveQuery(currentQuery)
+</script>
+
+<template>
+  <div>{{ data.length }} todos</div>
+</template>
 ```

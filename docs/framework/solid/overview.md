@@ -19,7 +19,7 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 
 ### useLiveQuery
 
-The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes:
+The `useLiveQuery` primitive creates a live query that automatically updates your component when data changes. All return values are reactive and should be called as functions:
 
 ```tsx
 import { useLiveQuery } from '@tanstack/solid-db'
@@ -27,16 +27,16 @@ import { eq } from '@tanstack/db'
 import { Show, For } from 'solid-js'
 
 function TodoList() {
-  const { data, isLoading } = useLiveQuery((q) =>
+  const query = useLiveQuery((q) =>
     q.from({ todos: todosCollection })
      .where(({ todos }) => eq(todos.completed, false))
      .select(({ todos }) => ({ id: todos.id, text: todos.text }))
   )
 
   return (
-    <Show when={!isLoading()} fallback={<div>Loading...</div>}>
+    <Show when={!query.isLoading()} fallback={<div>Loading...</div>}>
       <ul>
-        <For each={data()}>
+        <For each={query.data}>
           {(todo) => <li>{todo.text}</li>}
         </For>
       </ul>
@@ -45,42 +45,34 @@ function TodoList() {
 }
 ```
 
-### Dependency Arrays
+**Note:** `query.data` returns an array directly (not a function), but status fields like `isLoading()`, `status()`, etc. are accessor functions.
 
-The `useLiveQuery` primitive accepts an optional dependency array as its last parameter. This array works similarly to Solid's `createEffect` dependencies - when any value in the array changes, the query is recreated and re-executed.
+### Reactive Queries with Signals
 
-#### When to Use Dependency Arrays
-
-Use dependency arrays when your query depends on external reactive values (props or signals):
+Solid uses fine-grained reactivity, which means queries automatically track and respond to signal changes. Simply call signals inside your query function, and Solid will automatically recompute when they change:
 
 ```tsx
+import { createSignal } from 'solid-js'
 import { useLiveQuery } from '@tanstack/solid-db'
 import { gt } from '@tanstack/db'
 
 function FilteredTodos(props: { minPriority: number }) {
-  const { data } = useLiveQuery(
-    (q) => q.from({ todos: todosCollection })
-           .where(({ todos }) => gt(todos.priority, props.minPriority)),
-    [() => props.minPriority] // Re-run when minPriority changes
+  const query = useLiveQuery((q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => gt(todos.priority, props.minPriority))
   )
 
-  return <div>{data().length} high-priority todos</div>
+  return <div>{query.data.length} high-priority todos</div>
 }
 ```
 
-**Note:** When using props or signals in the query, wrap them in a function for the dependency array.
+When `props.minPriority` changes, Solid's reactivity system automatically:
+1. Detects the prop access inside the query function
+2. Cleans up the previous live query collection
+3. Creates a new query with the updated value
+4. Updates the component with the new data
 
-#### What Happens When Dependencies Change
-
-When a dependency value changes:
-1. The previous live query collection is cleaned up
-2. A new query is created with the updated values
-3. The component re-renders with the new data
-4. The primitive shows loading state again
-
-#### Best Practices
-
-**Include all external values used in the query:**
+#### Using Signals from Component State
 
 ```tsx
 import { createSignal } from 'solid-js'
@@ -91,54 +83,107 @@ function TodoList() {
   const [userId, setUserId] = createSignal(1)
   const [status, setStatus] = createSignal('active')
 
-  // Good - all external values in deps
-  const { data } = useLiveQuery(
-    (q) => q.from({ todos: todosCollection })
-           .where(({ todos }) => and(
-             eq(todos.userId, userId()),
-             eq(todos.status, status())
-           )),
-    [userId, status]
+  // Solid automatically tracks userId() and status() calls
+  const query = useLiveQuery((q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => and(
+       eq(todos.userId, userId()),
+       eq(todos.status, status())
+     ))
   )
 
-  // Bad - missing dependencies
-  const { data: badData } = useLiveQuery(
-    (q) => q.from({ todos: todosCollection })
-           .where(({ todos }) => eq(todos.userId, userId())),
-    [] // Missing userId!
+  return (
+    <div>
+      <select onChange={(e) => setStatus(e.currentTarget.value)}>
+        <option value="active">Active</option>
+        <option value="completed">Completed</option>
+      </select>
+      <div>{query.data.length} todos</div>
+    </div>
   )
-
-  return <div>{data().length} todos</div>
 }
 ```
 
-**Empty array for static queries:**
+**Key Point:** Unlike React, you don't need dependency arrays. Solid's reactive system automatically tracks any signals, props, or stores accessed during query execution.
+
+#### Best Practices
+
+**Access signals inside the query function:**
+
+```tsx
+import { createSignal } from 'solid-js'
+import { useLiveQuery } from '@tanstack/solid-db'
+import { gt } from '@tanstack/db'
+
+function TodoList() {
+  const [minPriority, setMinPriority] = createSignal(5)
+
+  // Good - signal accessed inside query function
+  const query = useLiveQuery((q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => gt(todos.priority, minPriority()))
+  )
+
+  // Solid automatically tracks minPriority() and recomputes when it changes
+  return <div>{query.data.length} todos</div>
+}
+```
+
+**Don't read signals outside the query function:**
+
+```tsx
+import { createSignal } from 'solid-js'
+import { useLiveQuery } from '@tanstack/solid-db'
+import { gt } from '@tanstack/db'
+
+function TodoList() {
+  const [minPriority, setMinPriority] = createSignal(5)
+
+  // Bad - reading signal outside query function
+  const currentPriority = minPriority()
+  const query = useLiveQuery((q) =>
+    q.from({ todos: todosCollection })
+     .where(({ todos }) => gt(todos.priority, currentPriority))
+  )
+  // Won't update when minPriority changes!
+
+  return <div>{query.data.length} todos</div>
+}
+```
+
+**Static queries need no special handling:**
 
 ```tsx
 import { useLiveQuery } from '@tanstack/solid-db'
 
 function AllTodos() {
-  // No external dependencies - query never changes
-  const { data } = useLiveQuery(
-    (q) => q.from({ todos: todosCollection }),
-    []
+  // No signals accessed - query never changes
+  const query = useLiveQuery((q) =>
+    q.from({ todos: todosCollection })
   )
 
-  return <div>{data().length} todos</div>
+  return <div>{query.data.length} todos</div>
 }
 ```
 
-**Omit the array for queries with no external dependencies:**
+### Using Pre-created Collections
+
+You can also pass an existing collection to `useLiveQuery`. This is useful for sharing queries across components:
 
 ```tsx
+import { createLiveQueryCollection } from '@tanstack/db'
 import { useLiveQuery } from '@tanstack/solid-db'
 
-function AllTodos() {
-  // Same as above - no deps needed
-  const { data } = useLiveQuery(
-    (q) => q.from({ todos: todosCollection })
-  )
+// Create collection outside component
+const todosQuery = createLiveQueryCollection((q) =>
+  q.from({ todos: todosCollection })
+   .where(({ todos }) => eq(todos.active, true))
+)
 
-  return <div>{data().length} todos</div>
+function TodoList() {
+  // Pass existing collection
+  const query = useLiveQuery(() => todosQuery)
+
+  return <div>{query.data.length} todos</div>
 }
 ```
