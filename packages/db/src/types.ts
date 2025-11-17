@@ -445,21 +445,21 @@ export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = any,
+  TReturn = void,
 > = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = any,
+  TReturn = void,
 > = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = any,
+  TReturn = void,
 > = (params: DeleteMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
 /**
@@ -564,7 +564,11 @@ export interface BaseCollectionConfig<
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
+   * @returns Promise that should resolve to void
+   * @deprecated Returning values from this handler is deprecated. Use collection utilities for manual refetch/sync.
+   * For Query Collections, use `await collection.utils.refetch()` after your operation.
+   * For Electric Collections, use the txid-based matching with `collection.utils.awaitTxId()`.
+   *
    * @example
    * // Basic insert handler
    * onInsert: async ({ transaction, collection }) => {
@@ -573,10 +577,21 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
+   * // Insert handler with manual refetch (Query Collection)
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   await api.createTodo(newItem)
+   *   // Manually trigger refetch to sync server state
+   *   await collection.utils.refetch()
+   * }
+   *
+   * @example
    * // Insert handler with multiple items
    * onInsert: async ({ transaction, collection }) => {
    *   const items = transaction.mutations.map(m => m.modified)
    *   await api.createTodos(items)
+   *   // Refetch to get updated data from server
+   *   await collection.utils.refetch()
    * }
    *
    * @example
@@ -584,22 +599,11 @@ export interface BaseCollectionConfig<
    * onInsert: async ({ transaction, collection }) => {
    *   try {
    *     const newItem = transaction.mutations[0].modified
-   *     const result = await api.createTodo(newItem)
-   *     return result
+   *     await api.createTodo(newItem)
    *   } catch (error) {
    *     console.error('Insert failed:', error)
-   *     throw error // This will cause the transaction to fail
+   *     throw error // This will cause the transaction to rollback
    *   }
-   * }
-   *
-   * @example
-   * // Insert handler with metadata
-   * onInsert: async ({ transaction, collection }) => {
-   *   const mutation = transaction.mutations[0]
-   *   await api.createTodo(mutation.modified, {
-   *     source: mutation.metadata?.source,
-   *     timestamp: mutation.createdAt
-   *   })
    * }
    */
   onInsert?: InsertMutationFn<T, TKey, TUtils, TReturn>
@@ -607,7 +611,11 @@ export interface BaseCollectionConfig<
   /**
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
+   * @returns Promise that should resolve to void
+   * @deprecated Returning values from this handler is deprecated. Use collection utilities for manual refetch/sync.
+   * For Query Collections, use `await collection.utils.refetch()` after your operation.
+   * For Electric Collections, use the txid-based matching with `collection.utils.awaitTxId()`.
+   *
    * @example
    * // Basic update handler
    * onUpdate: async ({ transaction, collection }) => {
@@ -616,11 +624,13 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
-   * // Update handler with partial updates
+   * // Update handler with manual refetch (Query Collection)
    * onUpdate: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const changes = mutation.changes // Only the changed fields
    *   await api.updateTodo(mutation.original.id, changes)
+   *   // Manually trigger refetch to sync server state
+   *   await collection.utils.refetch()
    * }
    *
    * @example
@@ -631,6 +641,7 @@ export interface BaseCollectionConfig<
    *     changes: m.changes
    *   }))
    *   await api.updateTodos(updates)
+   *   await collection.utils.refetch()
    * }
    *
    * @example
@@ -650,7 +661,11 @@ export interface BaseCollectionConfig<
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to any value
+   * @returns Promise that should resolve to void
+   * @deprecated Returning values from this handler is deprecated. Use collection utilities for manual refetch/sync.
+   * For Query Collections, use `await collection.utils.refetch()` after your operation.
+   * For Electric Collections, use the txid-based matching with `collection.utils.awaitTxId()`.
+   *
    * @example
    * // Basic delete handler
    * onDelete: async ({ transaction, collection }) => {
@@ -659,10 +674,12 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
-   * // Delete handler with multiple items
+   * // Delete handler with manual refetch (Query Collection)
    * onDelete: async ({ transaction, collection }) => {
    *   const keysToDelete = transaction.mutations.map(m => m.key)
    *   await api.deleteTodos(keysToDelete)
+   *   // Manually trigger refetch to sync server state
+   *   await collection.utils.refetch()
    * }
    *
    * @example

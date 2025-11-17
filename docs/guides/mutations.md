@@ -437,15 +437,16 @@ const todoCollection = createCollection({
 
 Different collection types have specific patterns for their handlers:
 
-**QueryCollection** - automatically refetches after handler completes:
+**QueryCollection** - manually refetch after persisting changes:
 ```typescript
-onUpdate: async ({ transaction }) => {
+onUpdate: async ({ transaction, collection }) => {
   await Promise.all(
     transaction.mutations.map((mutation) =>
       api.todos.update(mutation.original.id, mutation.changes)
     )
   )
-  // Automatic refetch happens after handler completes
+  // Manually trigger refetch to sync server state
+  await collection.utils.refetch()
 }
 ```
 
@@ -458,6 +459,7 @@ onUpdate: async ({ transaction }) => {
       return response.txid
     })
   )
+  // Return txid to wait for Electric sync
   return { txid: txids }
 }
 ```
