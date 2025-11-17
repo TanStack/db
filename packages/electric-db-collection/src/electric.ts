@@ -168,21 +168,21 @@ export interface ElectricCollectionConfig<
    * **IMPORTANT - Electric Synchronization:**
    * Electric collections require explicit synchronization coordination to ensure changes have synced
    * from the server before dropping optimistic state. Use one of these patterns:
-   * 1. Manually call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
-   * 2. Manually call `await collection.utils.awaitMatch()` for custom matching logic
+   * 1. Call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. Call `await collection.utils.awaitMatch()` for custom matching logic
    *
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve to void
    * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
    *
    * @example
-   * // Recommended: Manually wait for txid to sync
+   * // Recommended: Wait for txid to sync
    * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
    *     data: newItem
    *   })
-   *   // Manually wait for txid to sync before handler completes
+   *   // Wait for txid to sync before handler completes
    *   await collection.utils.awaitTxId(result.txid)
    * }
    *
@@ -215,7 +215,7 @@ export interface ElectricCollectionConfig<
    * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   await api.todos.create({ data: newItem })
-   *   // Manually wait for specific change to appear in sync stream
+   *   // Wait for specific change to appear in sync stream
    *   await collection.utils.awaitMatch(
    *     (message) => isChangeMessage(message) &&
    *                  message.headers.operation === 'insert' &&
@@ -237,22 +237,22 @@ export interface ElectricCollectionConfig<
    * **IMPORTANT - Electric Synchronization:**
    * Electric collections require explicit synchronization coordination to ensure changes have synced
    * from the server before dropping optimistic state. Use one of these patterns:
-   * 1. Manually call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
-   * 2. Manually call `await collection.utils.awaitMatch()` for custom matching logic
+   * 1. Call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. Call `await collection.utils.awaitMatch()` for custom matching logic
    *
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve to void
    * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
    *
    * @example
-   * // Recommended: Manually wait for txid to sync
+   * // Recommended: Wait for txid to sync
    * onUpdate: async ({ transaction, collection }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   const result = await api.todos.update({
    *     where: { id: original.id },
    *     data: changes
    *   })
-   *   // Manually wait for txid to sync before handler completes
+   *   // Wait for txid to sync before handler completes
    *   await collection.utils.awaitTxId(result.txid)
    * }
    *
@@ -261,7 +261,7 @@ export interface ElectricCollectionConfig<
    * onUpdate: async ({ transaction, collection }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   await api.todos.update({ where: { id: original.id }, data: changes })
-   *   // Manually wait for specific change to appear in sync stream
+   *   // Wait for specific change to appear in sync stream
    *   await collection.utils.awaitMatch(
    *     (message) => isChangeMessage(message) &&
    *                  message.headers.operation === 'update' &&
@@ -283,21 +283,21 @@ export interface ElectricCollectionConfig<
    * **IMPORTANT - Electric Synchronization:**
    * Electric collections require explicit synchronization coordination to ensure changes have synced
    * from the server before dropping optimistic state. Use one of these patterns:
-   * 1. Manually call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
-   * 2. Manually call `await collection.utils.awaitMatch()` for custom matching logic
+   * 1. Call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. Call `await collection.utils.awaitMatch()` for custom matching logic
    *
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve to void
    * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
    *
    * @example
-   * // Recommended: Manually wait for txid to sync
+   * // Recommended: Wait for txid to sync
    * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.todos.delete({
    *     id: mutation.original.id
    *   })
-   *   // Manually wait for txid to sync before handler completes
+   *   // Wait for txid to sync before handler completes
    *   await collection.utils.awaitTxId(result.txid)
    * }
    *
@@ -306,7 +306,7 @@ export interface ElectricCollectionConfig<
    * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   await api.todos.delete({ id: mutation.original.id })
-   *   // Manually wait for specific change to appear in sync stream
+   *   // Wait for specific change to appear in sync stream
    *   await collection.utils.awaitMatch(
    *     (message) => isChangeMessage(message) &&
    *                  message.headers.operation === 'delete' &&

@@ -344,7 +344,7 @@ There are two distinct patterns for handling mutations in collection options cre
 
 The user provides mutation handlers in the config. Your collection creator passes them through.
 
-**Note:** Handler return values are deprecated. Users should manually trigger refetch/sync within their handlers.
+**Note:** Handler return values are deprecated. Users should trigger refetch/sync within their handlers.
 
 ```typescript
 interface MyCollectionConfig<TItem extends object> {
@@ -867,9 +867,9 @@ const waitForSync = (afterTime: number): Promise<void> => {
 }
 ```
 
-### Strategy 5: Manual Refetch (Query Collection)
+### Strategy 5: Refetch (Query Collection)
 
-The query collection pattern has users manually refetch after mutations:
+The query collection pattern has users refetch after mutations:
 
 ```typescript
 // Pattern A: User provides handlers and manages refetch
@@ -891,7 +891,7 @@ export function queryCollectionOptions<TItem>(config) {
   }
 }
 
-// Usage: User manually refetches in their handler
+// Usage: User refetches in their handler
 const collection = createCollection(
   queryCollectionOptions({
     onInsert: async ({ transaction, collection }) => {

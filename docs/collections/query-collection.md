@@ -199,7 +199,7 @@ const productsCollection = createCollection(
 
 ## Persistence Handlers
 
-You can define handlers that are called when mutations occur. These handlers persist changes to your backend and can manually trigger refetches when needed:
+You can define handlers that are called when mutations occur. These handlers persist changes to your backend and trigger refetches when needed:
 
 ```typescript
 const todosCollection = createCollection(
@@ -212,7 +212,7 @@ const todosCollection = createCollection(
     onInsert: async ({ transaction, collection }) => {
       const newItems = transaction.mutations.map((m) => m.modified)
       await api.createTodos(newItems)
-      // Manually trigger refetch to sync server state
+      // Trigger refetch to sync server state
       await collection.utils.refetch()
     },
 
@@ -222,7 +222,7 @@ const todosCollection = createCollection(
         changes: m.changes,
       }))
       await api.updateTodos(updates)
-      // Manually refetch after persisting changes
+      // Refetch after persisting changes
       await collection.utils.refetch()
     },
 
@@ -237,13 +237,13 @@ const todosCollection = createCollection(
 
 ### Controlling Refetch Behavior
 
-After persisting mutations to your backend, you should manually call `collection.utils.refetch()` to sync the server state back to your collection. This ensures the local state matches the server state after server-side processing.
+After persisting mutations to your backend, call `collection.utils.refetch()` to sync the server state back to your collection. This ensures the local state matches the server state after server-side processing.
 
 ```typescript
 onInsert: async ({ transaction, collection }) => {
   await api.createTodos(transaction.mutations.map((m) => m.modified))
 
-  // Manually trigger refetch to sync server state
+  // Trigger refetch to sync server state
   await collection.utils.refetch()
 }
 ```
@@ -269,7 +269,7 @@ onInsert: async ({ transaction }) => {
 
 The collection provides these utility methods via `collection.utils`:
 
-- `refetch(opts?)`: Manually trigger a refetch of the query
+- `refetch(opts?)`: Trigger a refetch of the query
   - `opts.throwOnError`: Whether to throw an error if the refetch fails (default: `false`)
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
   - Returns `QueryObserverResult` for inspecting the result
@@ -528,7 +528,7 @@ All direct write methods are available on `collection.utils`:
 - `writeDelete(keys)`: Delete one or more items directly
 - `writeUpsert(data)`: Insert or update one or more items directly
 - `writeBatch(callback)`: Perform multiple operations atomically
-- `refetch(opts?)`: Manually trigger a refetch of the query
+- `refetch(opts?)`: Trigger a refetch of the query
 
 ## QueryFn and Predicate Push-Down
 

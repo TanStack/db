@@ -60,7 +60,7 @@ Handlers are called before mutations to persist changes to your backend:
 - `onUpdate`: Handler called before update operations
 - `onDelete`: Handler called before delete operations
 
-Each handler should manually call `await collection.utils.awaitTxId(txid)` to wait for synchronization. For cases where your API cannot return txids, use the `awaitMatch` utility function.
+Each handler should call `await collection.utils.awaitTxId(txid)` to wait for synchronization. For cases where your API cannot return txids, use the `awaitMatch` utility function.
 
 ## Persistence Handlers & Synchronization
 
@@ -68,7 +68,7 @@ Handlers persist mutations to the backend and wait for Electric to sync the chan
 
 ### 1. Using Txid (Recommended)
 
-The recommended approach uses PostgreSQL transaction IDs (txids) for precise matching. The backend returns a txid, and the client manually waits for that specific txid to appear in the Electric stream.
+The recommended approach uses PostgreSQL transaction IDs (txids) for precise matching. The backend returns a txid, and the client waits for that specific txid to appear in the Electric stream.
 
 ```typescript
 const todosCollection = createCollection(
@@ -85,7 +85,7 @@ const todosCollection = createCollection(
       const newItem = transaction.mutations[0].modified
       const response = await api.todos.create(newItem)
 
-      // Manually wait for txid to sync
+      // Wait for txid to sync
       await collection.utils.awaitTxId(response.txid)
     },
 
@@ -96,7 +96,7 @@ const todosCollection = createCollection(
         data: changes
       })
 
-      // Manually wait for txid to sync
+      // Wait for txid to sync
       await collection.utils.awaitTxId(response.txid)
     }
   })
@@ -306,7 +306,7 @@ The collection provides these utility methods via `collection.utils`:
 
 ### `awaitTxId(txid, timeout?)`
 
-Manually wait for a specific transaction ID to be synchronized:
+Wait for a specific transaction ID to be synchronized:
 
 ```typescript
 // Wait for specific txid
@@ -320,7 +320,7 @@ This is useful when you need to ensure a mutation has been synchronized before p
 
 ### `awaitMatch(matchFn, timeout?)`
 
-Manually wait for a custom match function to find a matching message:
+Wait for a custom match function to find a matching message:
 
 ```typescript
 import { isChangeMessage } from '@tanstack/electric-db-collection'

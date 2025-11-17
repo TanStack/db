@@ -565,7 +565,7 @@ export interface BaseCollectionConfig<
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve to void
-   * @deprecated Returning values from this handler is deprecated. Use collection utilities for manual refetch/sync.
+   * @deprecated Returning values from this handler is deprecated. Use collection utilities to refetch/sync.
    *
    * @example
    * // Basic insert handler
@@ -575,20 +575,20 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
-   * // Insert handler with manual refetch (Query Collection)
+   * // Insert handler with refetch (Query Collection)
    * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   await api.createTodo(newItem)
-   *   // Manually trigger refetch to sync server state
+   *   // Trigger refetch to sync server state
    *   await collection.utils.refetch()
    * }
    *
    * @example
-   * // Insert handler with manual sync wait (Electric Collection)
+   * // Insert handler with sync wait (Electric Collection)
    * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.createTodo(newItem)
-   *   // Manually wait for txid to sync
+   *   // Wait for txid to sync
    *   await collection.utils.awaitTxId(result.txid)
    * }
    *
@@ -619,7 +619,7 @@ export interface BaseCollectionConfig<
    * Optional asynchronous handler function called before an update operation
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve to void
-   * @deprecated Returning values from this handler is deprecated. Use collection utilities for manual refetch/sync.
+   * @deprecated Returning values from this handler is deprecated. Use collection utilities to refetch/sync.
    *
    * @example
    * // Basic update handler
@@ -629,21 +629,21 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
-   * // Update handler with manual refetch (Query Collection)
+   * // Update handler with refetch (Query Collection)
    * onUpdate: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const changes = mutation.changes // Only the changed fields
    *   await api.updateTodo(mutation.original.id, changes)
-   *   // Manually trigger refetch to sync server state
+   *   // Trigger refetch to sync server state
    *   await collection.utils.refetch()
    * }
    *
    * @example
-   * // Update handler with manual sync wait (Electric Collection)
+   * // Update handler with sync wait (Electric Collection)
    * onUpdate: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.updateTodo(mutation.original.id, mutation.changes)
-   *   // Manually wait for txid to sync
+   *   // Wait for txid to sync
    *   await collection.utils.awaitTxId(result.txid)
    * }
    *
@@ -676,7 +676,7 @@ export interface BaseCollectionConfig<
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and collection information
    * @returns Promise that should resolve to void
-   * @deprecated Returning values from this handler is deprecated. Use collection utilities for manual refetch/sync.
+   * @deprecated Returning values from this handler is deprecated. Use collection utilities to refetch/sync.
    *
    * @example
    * // Basic delete handler
@@ -686,20 +686,20 @@ export interface BaseCollectionConfig<
    * }
    *
    * @example
-   * // Delete handler with manual refetch (Query Collection)
+   * // Delete handler with refetch (Query Collection)
    * onDelete: async ({ transaction, collection }) => {
    *   const keysToDelete = transaction.mutations.map(m => m.key)
    *   await api.deleteTodos(keysToDelete)
-   *   // Manually trigger refetch to sync server state
+   *   // Trigger refetch to sync server state
    *   await collection.utils.refetch()
    * }
    *
    * @example
-   * // Delete handler with manual sync wait (Electric Collection)
+   * // Delete handler with sync wait (Electric Collection)
    * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.deleteTodo(mutation.original.id)
-   *   // Manually wait for txid to sync
+   *   // Wait for txid to sync
    *   await collection.utils.awaitTxId(result.txid)
    * }
    *
