@@ -3424,7 +3424,7 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`4`)).toBe(false)
     })
 
-    it(`should deduplicate queries and handle GC correctly when queries are ordered and have a LIMIT`, async () => {
+    it(`should handle GC correctly when queries are ordered and have a LIMIT`, async () => {
       const baseQueryKey = [`deduplication-gc-test`]
 
       // Mock queryFn to return different data based on predicates
@@ -3434,12 +3434,14 @@ describe(`QueryCollection`, () => {
         const { where, limit } = loadSubsetOptions
 
         // Query 1: all items with category A (no limit)
-        if (isCategory(`A`, where) && !limit) {
-          return Promise.resolve([
+        if (isCategory(`A`, where)) {
+          const items = [
             { id: `1`, name: `Item 1`, category: `A` },
             { id: `2`, name: `Item 2`, category: `A` },
             { id: `3`, name: `Item 3`, category: `A` },
-          ])
+          ]
+          // Slice to limit if provided
+          return Promise.resolve(limit ? items.slice(0, limit) : items)
         }
 
         return Promise.resolve([])
@@ -3510,10 +3512,9 @@ describe(`QueryCollection`, () => {
 
       await flushPromises()
 
-      // Second query should still only have been called once
-      // since query2 is deduplicated so it is executed against the local collection
-      // and not via queryFn
-      expect(queryFn).toHaveBeenCalledTimes(1)
+      // queryFn should have been called twice
+      // because we do not dedupe the 2nd query
+      expect(queryFn).toHaveBeenCalledTimes(2)
 
       // Collection should still have all 3 items (deduplication doesn't remove data)
       expect(collection.size).toBe(3)
