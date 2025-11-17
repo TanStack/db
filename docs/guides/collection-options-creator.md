@@ -372,7 +372,6 @@ export function myCollectionOptions<TItem extends object>(
 }
 ```
 
-**Electric-Specific Exception:** Electric collections have a special pattern where handlers should return `{ txid }` for sync coordination. This is Electric-specific and not the general pattern.
 
 #### Pattern B: Built-in Handlers (Trailbase, WebSocket, Firebase)
 
@@ -928,7 +927,7 @@ const collection = createCollection(
 5. **Race Conditions** - Start listeners before initial fetch and buffer events
 6. **Type safety** - Use TypeScript generics to maintain type safety throughout
 7. **Provide utilities** - Export sync-engine-specific utilities for advanced use cases
-8. **Handler return values are deprecated** - Mutation handlers should coordinate sync internally (via `await`) rather than returning values. The only exception is Electric collections which return `{ txid }` for their specific sync protocol
+8. **Handler return values are deprecated** - Mutation handlers should coordinate sync internally (via `await`) rather than returning values. For Electric collections, use `await collection.utils.awaitTxId(txid)` instead of returning the txid
 
 ## Testing Your Collection
 

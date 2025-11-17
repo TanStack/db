@@ -60,7 +60,7 @@ Handlers are called before mutations to persist changes to your backend:
 - `onUpdate`: Handler called before update operations
 - `onDelete`: Handler called before delete operations
 
-Each handler should return `{ txid }` to wait for synchronization. For cases where your API can not return txids, use the `awaitMatch` utility function.
+Each handler should manually call `await collection.utils.awaitTxId(txid)` to wait for synchronization. For cases where your API cannot return txids, use the `awaitMatch` utility function.
 
 ## Persistence Handlers & Synchronization
 
@@ -68,7 +68,7 @@ Handlers persist mutations to the backend and wait for Electric to sync the chan
 
 ### 1. Using Txid (Recommended)
 
-The recommended approach uses PostgreSQL transaction IDs (txids) for precise matching. The backend returns a txid, and the client waits for that specific txid to appear in the Electric stream.
+The recommended approach uses PostgreSQL transaction IDs (txids) for precise matching. The backend returns a txid, and the client manually waits for that specific txid to appear in the Electric stream.
 
 ```typescript
 const todosCollection = createCollection(
@@ -81,22 +81,23 @@ const todosCollection = createCollection(
       params: { table: 'todos' },
     },
 
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const newItem = transaction.mutations[0].modified
       const response = await api.todos.create(newItem)
 
-      // Return txid to wait for sync
-      return { txid: response.txid }
+      // Manually wait for txid to sync
+      await collection.utils.awaitTxId(response.txid)
     },
 
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       const { original, changes } = transaction.mutations[0]
       const response = await api.todos.update({
         where: { id: original.id },
         data: changes
       })
 
-      return { txid: response.txid }
+      // Manually wait for txid to sync
+      await collection.utils.awaitTxId(response.txid)
     }
   })
 )

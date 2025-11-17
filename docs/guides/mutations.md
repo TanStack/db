@@ -450,17 +450,17 @@ onUpdate: async ({ transaction, collection }) => {
 }
 ```
 
-**ElectricCollection** - return txid(s) to track sync:
+**ElectricCollection** - manually wait for txid(s) to sync:
 ```typescript
-onUpdate: async ({ transaction }) => {
+onUpdate: async ({ transaction, collection }) => {
   const txids = await Promise.all(
     transaction.mutations.map(async (mutation) => {
       const response = await api.todos.update(mutation.original.id, mutation.changes)
       return response.txid
     })
   )
-  // Return txid to wait for Electric sync
-  return { txid: txids }
+  // Manually wait for all txids to sync
+  await Promise.all(txids.map(txid => collection.utils.awaitTxId(txid)))
 }
 ```
 

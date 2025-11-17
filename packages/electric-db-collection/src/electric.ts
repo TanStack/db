@@ -165,45 +165,49 @@ export interface ElectricCollectionConfig<
   /**
    * Optional asynchronous handler function called before an insert operation
    *
-   * **IMPORTANT - Electric-Specific Pattern:**
-   * Electric collections require explicit synchronization coordination. You have two options:
-   * 1. Return `{ txid }` from the handler (recommended for most cases)
+   * **IMPORTANT - Electric Synchronization:**
+   * Electric collections require explicit synchronization coordination to ensure changes have synced
+   * from the server before dropping optimistic state. Use one of these patterns:
+   * 1. Manually call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
    * 2. Manually call `await collection.utils.awaitMatch()` for custom matching logic
    *
-   * Unlike standard collections, Electric handlers should NOT just return void, as this would
-   * complete the mutation without ensuring the change has synced from the server.
-   *
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid, timeout? } or void
+   * @returns Promise that should resolve to void
+   * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
    *
    * @example
-   * // Recommended: Return txid for automatic sync matching
-   * onInsert: async ({ transaction }) => {
+   * // Recommended: Manually wait for txid to sync
+   * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
    *     data: newItem
    *   })
-   *   return { txid: result.txid } // Handler waits for this txid to sync
+   *   // Manually wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
    * // Insert handler with custom timeout
-   * onInsert: async ({ transaction }) => {
+   * onInsert: async ({ transaction, collection }) => {
    *   const newItem = transaction.mutations[0].modified
    *   const result = await api.todos.create({
    *     data: newItem
    *   })
-   *   return { txid: result.txid, timeout: 10000 } // Wait up to 10 seconds
+   *   // Wait up to 10 seconds for txid
+   *   await collection.utils.awaitTxId(result.txid, 10000)
    * }
    *
    * @example
-   * // Insert handler with multiple items - return array of txids
-   * onInsert: async ({ transaction }) => {
+   * // Insert handler with multiple items
+   * onInsert: async ({ transaction, collection }) => {
    *   const items = transaction.mutations.map(m => m.modified)
    *   const results = await Promise.all(
    *     items.map(item => api.todos.create({ data: item }))
    *   )
-   *   return { txid: results.map(r => r.txid) }
+   *   // Wait for all txids to sync
+   *   await Promise.all(
+   *     results.map(r => collection.utils.awaitTxId(r.txid))
+   *   )
    * }
    *
    * @example
@@ -230,26 +234,26 @@ export interface ElectricCollectionConfig<
   /**
    * Optional asynchronous handler function called before an update operation
    *
-   * **IMPORTANT - Electric-Specific Pattern:**
-   * Electric collections require explicit synchronization coordination. You have two options:
-   * 1. Return `{ txid }` from the handler (recommended for most cases)
+   * **IMPORTANT - Electric Synchronization:**
+   * Electric collections require explicit synchronization coordination to ensure changes have synced
+   * from the server before dropping optimistic state. Use one of these patterns:
+   * 1. Manually call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
    * 2. Manually call `await collection.utils.awaitMatch()` for custom matching logic
    *
-   * Unlike standard collections, Electric handlers should NOT just return void, as this would
-   * complete the mutation without ensuring the change has synced from the server.
-   *
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid, timeout? } or void
+   * @returns Promise that should resolve to void
+   * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
    *
    * @example
-   * // Recommended: Return txid for automatic sync matching
-   * onUpdate: async ({ transaction }) => {
+   * // Recommended: Manually wait for txid to sync
+   * onUpdate: async ({ transaction, collection }) => {
    *   const { original, changes } = transaction.mutations[0]
    *   const result = await api.todos.update({
    *     where: { id: original.id },
    *     data: changes
    *   })
-   *   return { txid: result.txid } // Handler waits for this txid to sync
+   *   // Manually wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
@@ -276,25 +280,25 @@ export interface ElectricCollectionConfig<
   /**
    * Optional asynchronous handler function called before a delete operation
    *
-   * **IMPORTANT - Electric-Specific Pattern:**
-   * Electric collections require explicit synchronization coordination. You have two options:
-   * 1. Return `{ txid }` from the handler (recommended for most cases)
+   * **IMPORTANT - Electric Synchronization:**
+   * Electric collections require explicit synchronization coordination to ensure changes have synced
+   * from the server before dropping optimistic state. Use one of these patterns:
+   * 1. Manually call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
    * 2. Manually call `await collection.utils.awaitMatch()` for custom matching logic
    *
-   * Unlike standard collections, Electric handlers should NOT just return void, as this would
-   * complete the mutation without ensuring the change has synced from the server.
-   *
    * @param params Object containing transaction and collection information
-   * @returns Promise resolving to { txid, timeout? } or void
+   * @returns Promise that should resolve to void
+   * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
    *
    * @example
-   * // Recommended: Return txid for automatic sync matching
-   * onDelete: async ({ transaction }) => {
+   * // Recommended: Manually wait for txid to sync
+   * onDelete: async ({ transaction, collection }) => {
    *   const mutation = transaction.mutations[0]
    *   const result = await api.todos.delete({
    *     id: mutation.original.id
    *   })
-   *   return { txid: result.txid } // Handler waits for this txid to sync
+   *   // Manually wait for txid to sync before handler completes
+   *   await collection.utils.awaitTxId(result.txid)
    * }
    *
    * @example
