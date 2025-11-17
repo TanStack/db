@@ -340,14 +340,16 @@ For more on schemas from a user perspective, see the [Schemas guide](./schemas.m
 
 There are two distinct patterns for handling mutations in collection options creators:
 
-#### Pattern A: User-Provided Handlers (ElectricSQL, Query)
+#### Pattern A: User-Provided Handlers (Query, Standard)
 
-The user provides mutation handlers in the config. Your collection creator passes them through:
+The user provides mutation handlers in the config. Your collection creator passes them through.
+
+**Note:** Handler return values are deprecated. Users should manually trigger refetch/sync within their handlers.
 
 ```typescript
 interface MyCollectionConfig<TItem extends object> {
   // ... other config
-  
+
   // User provides these handlers
   onInsert?: InsertMutationFn<TItem>
   onUpdate?: UpdateMutationFn<TItem>
@@ -360,23 +362,24 @@ export function myCollectionOptions<TItem extends object>(
   return {
     // ... other options
     rowUpdateMode: config.rowUpdateMode || 'partial',
-    
-    // Pass through user-provided handlers (possibly with additional logic)
-    onInsert: config.onInsert ? async (params) => {
-      const result = await config.onInsert!(params)
-      // Additional sync coordination logic
-      return result
-    } : undefined
+
+    // Pass through user-provided handlers
+    // Users handle sync coordination in their own handlers
+    onInsert: config.onInsert,
+    onUpdate: config.onUpdate,
+    onDelete: config.onDelete
   }
 }
 ```
+
+**Electric-Specific Exception:** Electric collections have a special pattern where handlers should return `{ txid }` for sync coordination. This is Electric-specific and not the general pattern.
 
 #### Pattern B: Built-in Handlers (Trailbase, WebSocket, Firebase)
 
 Your collection creator implements the handlers directly using the sync engine's APIs:
 
 ```typescript
-interface MyCollectionConfig<TItem extends object> 
+interface MyCollectionConfig<TItem extends object>
   extends Omit<CollectionConfig<TItem>, 'onInsert' | 'onUpdate' | 'onDelete'> {
   // ... sync engine specific config
   // Note: onInsert/onUpdate/onDelete are NOT in the config
@@ -388,33 +391,34 @@ export function myCollectionOptions<TItem extends object>(
   return {
     // ... other options
     rowUpdateMode: config.rowUpdateMode || 'partial',
-    
+
     // Implement handlers using sync engine APIs
     onInsert: async ({ transaction }) => {
       // Handle provider-specific batch limits (e.g., Firestore's 500 limit)
       const chunks = chunkArray(transaction.mutations, PROVIDER_BATCH_LIMIT)
-      
+
       for (const chunk of chunks) {
         const ids = await config.recordApi.createBulk(
           chunk.map(m => serialize(m.modified))
         )
+        // Wait for these IDs to sync back before completing
         await awaitIds(ids)
       }
-      
-      return transaction.mutations.map(m => m.key)
+      // Handler completes after sync coordination
     },
-    
+
     onUpdate: async ({ transaction }) => {
       const chunks = chunkArray(transaction.mutations, PROVIDER_BATCH_LIMIT)
-      
+
       for (const chunk of chunks) {
         await Promise.all(
-          chunk.map(m => 
+          chunk.map(m =>
             config.recordApi.update(m.key, serialize(m.changes))
           )
         )
       }
-      
+
+      // Wait for mutations to sync back
       await awaitIds(transaction.mutations.map(m => String(m.key)))
     }
   }
@@ -422,6 +426,8 @@ export function myCollectionOptions<TItem extends object>(
 ```
 
 Many providers have batch size limits (Firestore: 500, DynamoDB: 25, etc.) so chunk large transactions accordingly.
+
+**Key Principle:** Built-in handlers should coordinate sync internally (using `awaitIds`, `awaitTxId`, or similar) and not rely on return values. The handler completes only after sync coordination is done.
 
 Choose Pattern A when users need to provide their own APIs, and Pattern B when your sync engine handles writes directly.
 
@@ -675,15 +681,17 @@ export function webSocketCollectionOptions<TItem extends object>(
   }
   
   // All mutation handlers use the same transaction sender
-  const onInsert = async (params: InsertMutationFnParams<TItem>) => {
+  // Handlers wait for server acknowledgment before completing
+  const onInsert = async (params: InsertMutationFnParams<TItem>): Promise<void> => {
+    await sendTransaction(params)
+    // Handler completes after server confirms the transaction
+  }
+
+  const onUpdate = async (params: UpdateMutationFnParams<TItem>): Promise<void> => {
     await sendTransaction(params)
   }
-  
-  const onUpdate = async (params: UpdateMutationFnParams<TItem>) => {
-    await sendTransaction(params)
-  }
-  
-  const onDelete = async (params: DeleteMutationFnParams<TItem>) => {
+
+  const onDelete = async (params: DeleteMutationFnParams<TItem>): Promise<void> => {
     await sendTransaction(params)
   }
   
@@ -768,16 +776,15 @@ if (message.headers.txids) {
   })
 }
 
-// Mutation handlers return txids and wait for them
+// Electric-specific: Wrap user handlers to coordinate txid-based sync
 const wrappedOnInsert = async (params) => {
+  // User handler returns { txid } for Electric collections
   const result = await config.onInsert!(params)
-  
-  // Wait for the txid to appear in synced data
-  if (result.txid) {
+
+  // Electric-specific: Wait for the txid to appear in synced data
+  if (result?.txid) {
     await awaitTxId(result.txid)
   }
-  
-  return result
 }
 
 // Utility function to wait for a txid
@@ -810,8 +817,8 @@ seenIds.setState(prev => new Map(prev).set(item.id, Date.now()))
 // Wait for specific IDs after mutations
 const wrappedOnInsert = async (params) => {
   const ids = await config.recordApi.createBulk(items)
-  
-  // Wait for all IDs to be synced back
+
+  // Wait for all IDs to be synced back before handler completes
   await awaitIds(ids)
 }
 
@@ -842,8 +849,8 @@ let lastSyncTime = 0
 const wrappedOnUpdate = async (params) => {
   const mutationTime = Date.now()
   await config.onUpdate(params)
-  
-  // Wait for sync to catch up
+
+  // Wait for sync to catch up before handler completes
   await waitForSync(mutationTime)
 }
 
@@ -861,21 +868,40 @@ const waitForSync = (afterTime: number): Promise<void> => {
 }
 ```
 
-### Strategy 5: Full Refetch (Query Collection)
+### Strategy 5: Manual Refetch (Query Collection)
 
-The query collection simply refetches all data after mutations:
+The query collection pattern has users manually refetch after mutations:
 
 ```typescript
-const wrappedOnInsert = async (params) => {
-  // Perform the mutation
-  await config.onInsert(params)
-  
-  // Refetch the entire collection
-  await refetch()
-  
-  // The refetch will trigger sync with fresh data,
-  // automatically dropping optimistic state
+// Pattern A: User provides handlers and manages refetch
+export function queryCollectionOptions<TItem>(config) {
+  return {
+    // ... other options
+
+    // User provides handlers and they handle refetch themselves
+    onInsert: config.onInsert,  // User calls collection.utils.refetch() in their handler
+    onUpdate: config.onUpdate,
+    onDelete: config.onDelete,
+
+    utils: {
+      refetch: () => {
+        // Refetch implementation that syncs fresh data
+        // automatically dropping optimistic state
+      }
+    }
+  }
 }
+
+// Usage: User manually refetches in their handler
+const collection = createCollection(
+  queryCollectionOptions({
+    onInsert: async ({ transaction, collection }) => {
+      await api.createTodos(transaction.mutations.map(m => m.modified))
+      // User explicitly triggers refetch
+      await collection.utils.refetch()
+    }
+  })
+)
 ```
 
 ### Choosing a Strategy
@@ -902,6 +928,7 @@ const wrappedOnInsert = async (params) => {
 5. **Race Conditions** - Start listeners before initial fetch and buffer events
 6. **Type safety** - Use TypeScript generics to maintain type safety throughout
 7. **Provide utilities** - Export sync-engine-specific utilities for advanced use cases
+8. **Handler return values are deprecated** - Mutation handlers should coordinate sync internally (via `await`) rather than returning values. The only exception is Electric collections which return `{ txid }` for their specific sync protocol
 
 ## Testing Your Collection
 
