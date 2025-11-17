@@ -13,8 +13,8 @@
     "@powersync/common": "^1.41.0"
   },
   "devDependencies": {
-    "@powersync/common": "^1.41.0",
-    "@powersync/node": "^0.13.0",
+    "@powersync/common": "^1.42.0",
+    "@powersync/node": "^0.14.1",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4"
   },
@@ -37,7 +37,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.17.0",
+  "packageManager": "pnpm@10.22.0",
   "author": "POWERSYNC",
   "license": "MIT",
   "repository": {
