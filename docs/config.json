@@ -96,6 +96,31 @@
       ]
     },
     {
+      "label": "Framework",
+      "children": [
+        {
+          "label": "React",
+          "to": "framework/react/adapter"
+        },
+        {
+          "label": "Solid",
+          "to": "framework/solid/adapter"
+        },
+        {
+          "label": "Vue",
+          "to": "framework/vue/adapter"
+        },
+        {
+          "label": "Svelte",
+          "to": "framework/svelte/adapter"
+        },
+        {
+          "label": "Angular",
+          "to": "framework/angular/adapter"
+        }
+      ]
+    },
+    {
       "label": "Collections",
       "children": [
         {
@@ -212,6 +237,30 @@
             {
               "label": "useLiveQuery",
               "to": "framework/react/reference/functions/useLiveQuery"
+            },
+            {
+              "label": "useLiveInfiniteQuery",
+              "to": "framework/react/reference/functions/useLiveInfiniteQuery"
+            },
+            {
+              "label": "useLiveSuspenseQuery",
+              "to": "framework/react/reference/functions/useLiveSuspenseQuery"
+            },
+            {
+              "label": "usePacedMutations",
+              "to": "framework/react/reference/functions/usePacedMutations"
+            },
+            {
+              "label": "UseLiveInfiniteQueryConfig",
+              "to": "framework/react/reference/type-aliases/UseLiveInfiniteQueryConfig"
+            },
+            {
+              "label": "UseLiveInfiniteQueryReturn",
+              "to": "framework/react/reference/type-aliases/UseLiveInfiniteQueryReturn"
+            },
+            {
+              "label": "UseLiveQueryStatus",
+              "to": "framework/react/reference/type-aliases/UseLiveQueryStatus"
             }
           ]
         },

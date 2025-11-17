@@ -1,5 +1,5 @@
 ---
-title: TanStack DB React Adapter
+title: React
 id: adapter
 ---
 
@@ -11,7 +11,7 @@ npm install @tanstack/react-db
 
 ## React Hooks
 
-See the [React Functions Reference](../reference/index.md) to see the full list of hooks available in the React Adapter.
+See the [React Functions Reference](../reference/index.md) to see the full list of hooks available for React.
 
 For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../../guides/live-queries).
 
