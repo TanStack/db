@@ -869,8 +869,8 @@ describe(`localStorage collection`, () => {
       const storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`tx-1`].data.title).toBe(`Manual Tx Insert`)
-      expect(parsed[`tx-2`].data.title).toBe(`Manual Tx Insert 2`)
+      expect(parsed[`s:tx-1`].data.title).toBe(`Manual Tx Insert`)
+      expect(parsed[`s:tx-2`].data.title).toBe(`Manual Tx Insert 2`)
 
       subscription.unsubscribe()
     })
@@ -927,7 +927,7 @@ describe(`localStorage collection`, () => {
       const stored1 = mockStorage.getItem(`todos-1`)
       expect(stored1).toBeDefined()
       const parsed1 = JSON.parse(stored1!)
-      expect(parsed1[`c1-item`].data.title).toBe(`Collection 1`)
+      expect(parsed1[`s:c1-item`].data.title).toBe(`Collection 1`)
 
       // Second collection mutations should NOT be in storage (remains optimistic)
       const stored2 = mockStorage.getItem(`todos-2`)
@@ -988,9 +988,9 @@ describe(`localStorage collection`, () => {
       const parsed = JSON.parse(storedData!)
 
       // Updated item should be in storage with new title
-      expect(parsed[`existing`].data.title).toBe(`Updated Item`)
+      expect(parsed[`s:existing`].data.title).toBe(`Updated Item`)
       // Deleted item should not be in storage
-      expect(parsed[`new`]).toBeUndefined()
+      expect(parsed[`s:new`]).toBeUndefined()
 
       subscription.unsubscribe()
     })
@@ -1035,7 +1035,7 @@ describe(`localStorage collection`, () => {
       const storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`to-delete`]).toBeUndefined()
+      expect(parsed[`s:to-delete`]).toBeUndefined()
 
       // Collection should also not have the item
       expect(collection.has(`to-delete`)).toBe(false)
@@ -1137,7 +1137,7 @@ describe(`localStorage collection`, () => {
       const storedData = mockStorage.getItem(`todos`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`after-api`].data.title).toBe(`After API`)
+      expect(parsed[`s:after-api`].data.title).toBe(`After API`)
 
       subscription.unsubscribe()
     })
@@ -1437,7 +1437,7 @@ describe(`localStorage collection`, () => {
         const storedData = mockStorage.getItem(`todos`)
         expect(storedData).toBeDefined()
         const parsed = JSON.parse(storedData!)
-        expect(parsed[`early`].data.title).toBe(`Early Mutation`)
+        expect(parsed[`s:early`].data.title).toBe(`Early Mutation`)
 
         subscription.unsubscribe()
       })
@@ -1499,9 +1499,9 @@ describe(`localStorage collection`, () => {
         const storedData = mockStorage.getItem(`todos`)
         const parsed = JSON.parse(storedData!)
 
-        expect(parsed[`auto1`].data.title).toBe(`Auto 1 Updated`)
-        expect(parsed[`manual1`].data.title).toBe(`Manual 1`)
-        expect(parsed[`auto2`].data.title).toBe(`Auto 2`)
+        expect(parsed[`s:auto1`].data.title).toBe(`Auto 1 Updated`)
+        expect(parsed[`s:manual1`].data.title).toBe(`Manual 1`)
+        expect(parsed[`s:auto2`].data.title).toBe(`Auto 2`)
 
         subscription.unsubscribe()
       })
