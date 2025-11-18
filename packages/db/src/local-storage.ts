@@ -153,6 +153,43 @@ function generateUuid(): string {
 }
 
 /**
+ * Encodes a key (string or number) into a storage-safe string format.
+ * This prevents collisions between numeric and string keys by prefixing with type information.
+ *
+ * Examples:
+ *   - number 1 → "n:1"
+ *   - string "1" → "s:1"
+ *   - string "n:1" → "s:n:1"
+ *
+ * @param key - The key to encode (string or number)
+ * @returns Type-prefixed string that is safe for storage
+ */
+function encodeStorageKey(key: string | number): string {
+  if (typeof key === `number`) {
+    return `n:${key}`
+  }
+  return `s:${key}`
+}
+
+/**
+ * Decodes a storage key back to its original form.
+ * This is the inverse of encodeStorageKey.
+ *
+ * @param encodedKey - The encoded key from storage
+ * @returns The original key (string or number)
+ */
+function decodeStorageKey(encodedKey: string): string | number {
+  if (encodedKey.startsWith(`n:`)) {
+    return Number(encodedKey.slice(2))
+  }
+  if (encodedKey.startsWith(`s:`)) {
+    return encodedKey.slice(2)
+  }
+  // Fallback for legacy data without encoding
+  return encodedKey
+}
+
+/**
  * Creates an in-memory storage implementation that mimics the StorageApi interface
  * Used as a fallback when localStorage is not available (e.g., server-side rendering)
  * @returns An object implementing the StorageApi interface using an in-memory Map
@@ -365,7 +402,7 @@ export function localStorageCollectionOptions(
       // Convert Map to object format for storage
       const objectData: Record<string, StoredItem<any>> = {}
       dataMap.forEach((storedItem, key) => {
-        objectData[String(key)] = storedItem
+        objectData[encodeStorageKey(key)] = storedItem
       })
       const serialized = parser.stringify(objectData)
       storage.setItem(config.storageKey, serialized)
@@ -415,12 +452,11 @@ export function localStorageCollectionOptions(
     // Add new items with version keys
     params.transaction.mutations.forEach((mutation) => {
       // Use the engine's pre-computed key for consistency
-      const key = mutation.key
       const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
       }
-      lastKnownData.set(key, storedItem)
+      lastKnownData.set(mutation.key, storedItem)
     })
 
     // Save to storage
@@ -450,12 +486,11 @@ export function localStorageCollectionOptions(
     // Update items with new version keys
     params.transaction.mutations.forEach((mutation) => {
       // Use the engine's pre-computed key for consistency
-      const key = mutation.key
       const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
       }
-      lastKnownData.set(key, storedItem)
+      lastKnownData.set(mutation.key, storedItem)
     })
 
     // Save to storage
@@ -480,8 +515,7 @@ export function localStorageCollectionOptions(
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
       // Use the engine's pre-computed key for consistency
-      const key = mutation.key
-      lastKnownData.delete(key)
+      lastKnownData.delete(mutation.key)
     })
 
     // Save to storage
@@ -547,8 +581,6 @@ export function localStorageCollectionOptions(
     // Apply each mutation
     for (const mutation of collectionMutations) {
       // Use the engine's pre-computed key to avoid key derivation issues
-      const key = mutation.key
-
       switch (mutation.type) {
         case `insert`:
         case `update`: {
@@ -556,11 +588,11 @@ export function localStorageCollectionOptions(
             versionKey: generateUuid(),
             data: mutation.modified,
           }
-          lastKnownData.set(key, storedItem)
+          lastKnownData.set(mutation.key, storedItem)
           break
         }
         case `delete`: {
-          lastKnownData.delete(key)
+          lastKnownData.delete(mutation.key)
           break
         }
       }
@@ -616,7 +648,7 @@ function loadFromStorage<T extends object>(
       parsed !== null &&
       !Array.isArray(parsed)
     ) {
-      Object.entries(parsed).forEach(([key, value]) => {
+      Object.entries(parsed).forEach(([encodedKey, value]) => {
         // Runtime check to ensure the value has the expected StoredItem structure
         if (
           value &&
@@ -625,9 +657,10 @@ function loadFromStorage<T extends object>(
           `data` in value
         ) {
           const storedItem = value as StoredItem<T>
-          dataMap.set(key, storedItem)
+          const decodedKey = decodeStorageKey(encodedKey)
+          dataMap.set(decodedKey, storedItem)
         } else {
-          throw new InvalidStorageDataFormatError(storageKey, key)
+          throw new InvalidStorageDataFormatError(storageKey, encodedKey)
         }
       })
     } else {
