@@ -1731,5 +1731,256 @@ describe(`localStorage collection`, () => {
 
       subscription.unsubscribe()
     })
+
+    it(`should update the correct item when using numeric IDs`, async () => {
+      interface NumericTodo {
+        id: number
+        title: string
+        completed: boolean
+      }
+
+      const collection = createCollection(
+        localStorageCollectionOptions<NumericTodo>({
+          storageKey: `numeric-todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        })
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert multiple items with numeric IDs
+      const tx1 = collection.insert({
+        id: 1,
+        title: `First Todo`,
+        completed: false,
+      })
+      await tx1.isPersisted.promise
+
+      const tx2 = collection.insert({
+        id: 2,
+        title: `Second Todo`,
+        completed: false,
+      })
+      await tx2.isPersisted.promise
+
+      const tx3 = collection.insert({
+        id: 3,
+        title: `Third Todo`,
+        completed: false,
+      })
+      await tx3.isPersisted.promise
+
+      // Update the FIRST item (id: 1) specifically
+      const updateTx = collection.update(1, (draft) => {
+        draft.completed = true
+      })
+      await updateTx.isPersisted.promise
+
+      // Verify that item with id:1 was updated, not the last one
+      expect(collection.get(1)?.completed).toBe(true)
+      expect(collection.get(2)?.completed).toBe(false)
+      expect(collection.get(3)?.completed).toBe(false)
+
+      // Verify in storage
+      const storedData = mockStorage.getItem(`numeric-todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`1`].data.completed).toBe(true)
+      expect(parsed[`2`].data.completed).toBe(false)
+      expect(parsed[`3`].data.completed).toBe(false)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should delete the correct item when using numeric IDs`, async () => {
+      interface NumericTodo {
+        id: number
+        title: string
+        completed: boolean
+      }
+
+      const collection = createCollection(
+        localStorageCollectionOptions<NumericTodo>({
+          storageKey: `numeric-todos-delete`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        })
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert multiple items with numeric IDs
+      const tx1 = collection.insert({
+        id: 1,
+        title: `First Todo`,
+        completed: false,
+      })
+      await tx1.isPersisted.promise
+
+      const tx2 = collection.insert({
+        id: 2,
+        title: `Second Todo`,
+        completed: false,
+      })
+      await tx2.isPersisted.promise
+
+      const tx3 = collection.insert({
+        id: 3,
+        title: `Third Todo`,
+        completed: false,
+      })
+      await tx3.isPersisted.promise
+
+      // Delete the FIRST item (id: 1) specifically
+      const deleteTx = collection.delete(1)
+      await deleteTx.isPersisted.promise
+
+      // Verify that item with id:1 was deleted, not the last one
+      expect(collection.has(1)).toBe(false)
+      expect(collection.has(2)).toBe(true)
+      expect(collection.has(3)).toBe(true)
+
+      // Verify in storage
+      const storedData = mockStorage.getItem(`numeric-todos-delete`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`1`]).toBeUndefined()
+      expect(parsed[`2`]).toBeDefined()
+      expect(parsed[`3`]).toBeDefined()
+
+      subscription.unsubscribe()
+    })
+
+    it(`should update items with numeric IDs after loading from storage`, async () => {
+      interface NumericTodo {
+        id: number
+        title: string
+        completed: boolean
+      }
+
+      // Pre-populate storage with numeric IDs (simulating existing data)
+      const existingData = {
+        "1": {
+          versionKey: `version-1`,
+          data: { id: 1, title: `First Todo`, completed: false },
+        },
+        "2": {
+          versionKey: `version-2`,
+          data: { id: 2, title: `Second Todo`, completed: false },
+        },
+        "3": {
+          versionKey: `version-3`,
+          data: { id: 3, title: `Third Todo`, completed: false },
+        },
+      }
+      mockStorage.setItem(`numeric-todos-reload`, JSON.stringify(existingData))
+
+      // Create collection - this will load the existing data
+      const collection = createCollection(
+        localStorageCollectionOptions<NumericTodo>({
+          storageKey: `numeric-todos-reload`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        })
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Wait for initial sync
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Verify items were loaded
+      expect(collection.size).toBe(3)
+
+      // Now try to update item with numeric id 1
+      const updateTx = collection.update(1, (draft) => {
+        draft.completed = true
+      })
+      await updateTx.isPersisted.promise
+
+      // Verify the correct item was updated
+      expect(collection.get(1)?.completed).toBe(true)
+      expect(collection.get(2)?.completed).toBe(false)
+      expect(collection.get(3)?.completed).toBe(false)
+
+      // Verify in storage
+      const storedData = mockStorage.getItem(`numeric-todos-reload`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`1`].data.completed).toBe(true)
+      expect(parsed[`2`].data.completed).toBe(false)
+      expect(parsed[`3`].data.completed).toBe(false)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should delete items with numeric IDs after loading from storage`, async () => {
+      interface NumericTodo {
+        id: number
+        title: string
+        completed: boolean
+      }
+
+      // Pre-populate storage with numeric IDs (simulating existing data)
+      const existingData = {
+        "1": {
+          versionKey: `version-1`,
+          data: { id: 1, title: `First Todo`, completed: false },
+        },
+        "2": {
+          versionKey: `version-2`,
+          data: { id: 2, title: `Second Todo`, completed: false },
+        },
+        "3": {
+          versionKey: `version-3`,
+          data: { id: 3, title: `Third Todo`, completed: false },
+        },
+      }
+      mockStorage.setItem(
+        `numeric-todos-reload-delete`,
+        JSON.stringify(existingData)
+      )
+
+      // Create collection - this will load the existing data
+      const collection = createCollection(
+        localStorageCollectionOptions<NumericTodo>({
+          storageKey: `numeric-todos-reload-delete`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        })
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Wait for initial sync
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Verify items were loaded
+      expect(collection.size).toBe(3)
+
+      // Now try to delete item with numeric id 1
+      const deleteTx = collection.delete(1)
+      await deleteTx.isPersisted.promise
+
+      // Verify the correct item was deleted
+      expect(collection.has(1)).toBe(false)
+      expect(collection.has(2)).toBe(true)
+      expect(collection.has(3)).toBe(true)
+
+      // Verify in storage
+      const storedData = mockStorage.getItem(`numeric-todos-reload-delete`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`1`]).toBeUndefined()
+      expect(parsed[`2`]).toBeDefined()
+      expect(parsed[`3`]).toBeDefined()
+
+      subscription.unsubscribe()
+    })
   })
 })

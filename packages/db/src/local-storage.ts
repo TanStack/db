@@ -415,7 +415,8 @@ export function localStorageCollectionOptions(
     // Add new items with version keys
     params.transaction.mutations.forEach((mutation) => {
       // Use the engine's pre-computed key for consistency
-      const key = mutation.key
+      // Convert to string since localStorage keys are always strings
+      const key = String(mutation.key)
       const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
@@ -450,7 +451,8 @@ export function localStorageCollectionOptions(
     // Update items with new version keys
     params.transaction.mutations.forEach((mutation) => {
       // Use the engine's pre-computed key for consistency
-      const key = mutation.key
+      // Convert to string since localStorage keys are always strings
+      const key = String(mutation.key)
       const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
@@ -480,7 +482,8 @@ export function localStorageCollectionOptions(
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
       // Use the engine's pre-computed key for consistency
-      const key = mutation.key
+      // Convert to string since localStorage keys are always strings
+      const key = String(mutation.key)
       lastKnownData.delete(key)
     })
 
@@ -547,7 +550,8 @@ export function localStorageCollectionOptions(
     // Apply each mutation
     for (const mutation of collectionMutations) {
       // Use the engine's pre-computed key to avoid key derivation issues
-      const key = mutation.key
+      // Convert to string since localStorage keys are always strings
+      const key = String(mutation.key)
 
       switch (mutation.type) {
         case `insert`:
