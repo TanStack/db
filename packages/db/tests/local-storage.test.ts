@@ -1615,7 +1615,7 @@ describe(`localStorage collection`, () => {
     })
   })
 
-  describe(`Bug #397: update/delete targeting wrong item`, () => {
+  describe(`numeric and string ID handling`, () => {
     it(`should update the correct item when multiple items exist (direct operations)`, async () => {
       const collection = createCollection(
         localStorageCollectionOptions<Todo>({
