@@ -980,16 +980,24 @@ export function queryCollectionOptions(
    * - utils.refetch() - for explicit user-triggered refetches
    * - Internal handlers (onInsert/onUpdate/onDelete) - after mutations to get fresh data
    *
+   * Only refetches queries with active subscriptions to avoid unnecessary network requests
+   * and prevent data loss in on-demand mode with time-based queries.
+   *
    * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
    */
   const refetch: RefetchFn = async (opts) => {
     const queryKeys = [...hashToQueryKey.values()]
-    const refetchPromises = queryKeys.map((queryKey) => {
-      const queryObserver = state.observers.get(hashKey(queryKey))!
-      return queryObserver.refetch({
-        throwOnError: opts?.throwOnError,
+    const refetchPromises = queryKeys
+      .filter((queryKey) => {
+        const hashedKey = hashKey(queryKey)
+        return unsubscribes.has(hashedKey)
       })
-    })
+      .map((queryKey) => {
+        const queryObserver = state.observers.get(hashKey(queryKey))!
+        return queryObserver.refetch({
+          throwOnError: opts?.throwOnError,
+        })
+      })
 
     await Promise.all(refetchPromises)
   }
