@@ -1982,5 +1982,57 @@ describe(`localStorage collection`, () => {
 
       subscription.unsubscribe()
     })
+
+    it(`should handle numeric and string keys as distinct (no collision)`, async () => {
+      interface MixedIdTodo {
+        id: string | number
+        title: string
+      }
+
+      const collection = createCollection(
+        localStorageCollectionOptions<MixedIdTodo>({
+          storageKey: `mixed-id-todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        })
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert item with numeric ID
+      const tx1 = collection.insert({
+        id: 1,
+        title: `Numeric ID`,
+      })
+      await tx1.isPersisted.promise
+
+      // Try to insert item with string ID "1"
+      // This should work in the collection state, but in localStorage they will clash
+      // because JSON object keys are always strings
+      const tx2 = collection.insert({
+        id: `1`,
+        title: `String ID`,
+      })
+      await tx2.isPersisted.promise
+
+      // In collection state, both should exist (different types)
+      expect(collection.has(1)).toBe(true)
+      expect(collection.has(`1`)).toBe(true)
+
+      // But in localStorage, "1" (from numeric 1) and "1" (from string "1") are the same key
+      // So the second insert will overwrite the first
+      const storedData = mockStorage.getItem(`mixed-id-todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+
+      // There should only be one entry in storage with key "1"
+      expect(Object.keys(parsed).length).toBe(1)
+      expect(parsed[`1`]).toBeDefined()
+      // The last write wins, so it should be the string ID item
+      expect(parsed[`1`].data.title).toBe(`String ID`)
+
+      subscription.unsubscribe()
+    })
   })
 })
