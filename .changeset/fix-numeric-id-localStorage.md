@@ -2,4 +2,4 @@
 "@tanstack/db": patch
 ---
 
-Fix localStorage collections failing to update/delete items with numeric IDs. Previously, operations would target the wrong item or fail entirely when using numeric IDs (e.g., `id: 1`, `id: 2`) after the page reloaded, due to a type mismatch between numeric keys in memory and stringified keys from localStorage. Numeric keys are now prefixed with `__number__` in storage to ensure consistent lookups.
+Fix localStorage collections to properly handle numeric and string IDs without collisions. Previously, operations could target the wrong item when using numeric IDs (e.g., `id: 1`, `id: 2`) after the page reloaded, due to a type mismatch between numeric keys in memory and stringified keys from localStorage. Keys are now encoded with type prefixes (`n:` for numbers, `s:` for strings) to prevent all possible collisions between different key types.

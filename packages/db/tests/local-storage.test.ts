@@ -1783,13 +1783,13 @@ describe(`localStorage collection`, () => {
       expect(collection.get(2)?.completed).toBe(false)
       expect(collection.get(3)?.completed).toBe(false)
 
-      // Verify in storage - numeric keys are prefixed with "__number__"
+      // Verify in storage - numeric keys are encoded with "n:" prefix
       const storedData = mockStorage.getItem(`numeric-todos`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`__number__1`].data.completed).toBe(true)
-      expect(parsed[`__number__2`].data.completed).toBe(false)
-      expect(parsed[`__number__3`].data.completed).toBe(false)
+      expect(parsed[`n:1`].data.completed).toBe(true)
+      expect(parsed[`n:2`].data.completed).toBe(false)
+      expect(parsed[`n:3`].data.completed).toBe(false)
 
       subscription.unsubscribe()
     })
@@ -1843,13 +1843,13 @@ describe(`localStorage collection`, () => {
       expect(collection.has(2)).toBe(true)
       expect(collection.has(3)).toBe(true)
 
-      // Verify in storage - numeric keys are prefixed with "__number__"
+      // Verify in storage - numeric keys are encoded with "n:" prefix
       const storedData = mockStorage.getItem(`numeric-todos-delete`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`__number__1`]).toBeUndefined()
-      expect(parsed[`__number__2`]).toBeDefined()
-      expect(parsed[`__number__3`]).toBeDefined()
+      expect(parsed[`n:1`]).toBeUndefined()
+      expect(parsed[`n:2`]).toBeDefined()
+      expect(parsed[`n:3`]).toBeDefined()
 
       subscription.unsubscribe()
     })
@@ -1862,17 +1862,17 @@ describe(`localStorage collection`, () => {
       }
 
       // Pre-populate storage with numeric IDs (simulating existing data)
-      // Numeric keys are stored with "__number__" prefix
+      // Numeric keys are stored with "n:" prefix
       const existingData = {
-        __number__1: {
+        "n:1": {
           versionKey: `version-1`,
           data: { id: 1, title: `First Todo`, completed: false },
         },
-        __number__2: {
+        "n:2": {
           versionKey: `version-2`,
           data: { id: 2, title: `Second Todo`, completed: false },
         },
-        __number__3: {
+        "n:3": {
           versionKey: `version-3`,
           data: { id: 3, title: `Third Todo`, completed: false },
         },
@@ -1908,13 +1908,13 @@ describe(`localStorage collection`, () => {
       expect(collection.get(2)?.completed).toBe(false)
       expect(collection.get(3)?.completed).toBe(false)
 
-      // Verify in storage - numeric keys are prefixed with "__number__"
+      // Verify in storage - numeric keys are encoded with "n:" prefix
       const storedData = mockStorage.getItem(`numeric-todos-reload`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`__number__1`].data.completed).toBe(true)
-      expect(parsed[`__number__2`].data.completed).toBe(false)
-      expect(parsed[`__number__3`].data.completed).toBe(false)
+      expect(parsed[`n:1`].data.completed).toBe(true)
+      expect(parsed[`n:2`].data.completed).toBe(false)
+      expect(parsed[`n:3`].data.completed).toBe(false)
 
       subscription.unsubscribe()
     })
@@ -1927,17 +1927,17 @@ describe(`localStorage collection`, () => {
       }
 
       // Pre-populate storage with numeric IDs (simulating existing data)
-      // Numeric keys are stored with "__number__" prefix
+      // Numeric keys are stored with "n:" prefix
       const existingData = {
-        __number__1: {
+        "n:1": {
           versionKey: `version-1`,
           data: { id: 1, title: `First Todo`, completed: false },
         },
-        __number__2: {
+        "n:2": {
           versionKey: `version-2`,
           data: { id: 2, title: `Second Todo`, completed: false },
         },
-        __number__3: {
+        "n:3": {
           versionKey: `version-3`,
           data: { id: 3, title: `Third Todo`, completed: false },
         },
@@ -1974,13 +1974,13 @@ describe(`localStorage collection`, () => {
       expect(collection.has(2)).toBe(true)
       expect(collection.has(3)).toBe(true)
 
-      // Verify in storage - numeric keys are prefixed with "__number__"
+      // Verify in storage - numeric keys are encoded with "n:" prefix
       const storedData = mockStorage.getItem(`numeric-todos-reload-delete`)
       expect(storedData).toBeDefined()
       const parsed = JSON.parse(storedData!)
-      expect(parsed[`__number__1`]).toBeUndefined()
-      expect(parsed[`__number__2`]).toBeDefined()
-      expect(parsed[`__number__3`]).toBeDefined()
+      expect(parsed[`n:1`]).toBeUndefined()
+      expect(parsed[`n:2`]).toBeDefined()
+      expect(parsed[`n:3`]).toBeDefined()
 
       subscription.unsubscribe()
     })
@@ -2030,12 +2030,66 @@ describe(`localStorage collection`, () => {
 
       // There should be TWO entries in storage
       expect(Object.keys(parsed).length).toBe(2)
-      // Numeric ID 1 is stored with key "__number__1"
-      expect(parsed[`__number__1`]).toBeDefined()
-      expect(parsed[`__number__1`].data.title).toBe(`Numeric ID`)
-      // String ID "1" is stored with key "1"
-      expect(parsed[`1`]).toBeDefined()
-      expect(parsed[`1`].data.title).toBe(`String ID`)
+      // Numeric ID 1 is stored with key "n:1"
+      expect(parsed[`n:1`]).toBeDefined()
+      expect(parsed[`n:1`].data.title).toBe(`Numeric ID`)
+      // String ID "1" is stored with key "s:1"
+      expect(parsed[`s:1`]).toBeDefined()
+      expect(parsed[`s:1`].data.title).toBe(`String ID`)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should prevent collision between numeric key and string key that matches the encoding pattern`, async () => {
+      interface MixedIdTodo {
+        id: string | number
+        title: string
+      }
+
+      const collection = createCollection(
+        localStorageCollectionOptions<MixedIdTodo>({
+          storageKey: `collision-test-todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        })
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Insert item with numeric ID 1
+      const tx1 = collection.insert({
+        id: 1,
+        title: `Numeric 1`,
+      })
+      await tx1.isPersisted.promise
+
+      // Insert item with string ID "n:1" (which would collide with old "__number__1" approach)
+      const tx2 = collection.insert({
+        id: `n:1`,
+        title: `String n:1`,
+      })
+      await tx2.isPersisted.promise
+
+      // Both should exist in collection
+      expect(collection.has(1)).toBe(true)
+      expect(collection.has(`n:1`)).toBe(true)
+      expect(collection.get(1)?.title).toBe(`Numeric 1`)
+      expect(collection.get(`n:1`)?.title).toBe(`String n:1`)
+
+      // Verify in storage - they should have different encoded keys
+      const storedData = mockStorage.getItem(`collision-test-todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+
+      // There should be TWO distinct entries
+      expect(Object.keys(parsed).length).toBe(2)
+      // Numeric 1 → "n:1"
+      expect(parsed[`n:1`]).toBeDefined()
+      expect(parsed[`n:1`].data.title).toBe(`Numeric 1`)
+      // String "n:1" → "s:n:1"
+      expect(parsed[`s:n:1`]).toBeDefined()
+      expect(parsed[`s:n:1`].data.title).toBe(`String n:1`)
 
       subscription.unsubscribe()
     })
