@@ -140,6 +140,7 @@ export interface QueryCollectionConfig<
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
+  mutatedKeys?: Array<string | number>
 }) => Promise<QueryObserverResult<any, any> | void>
 
 /**
@@ -967,21 +968,18 @@ export function queryCollectionOptions(
   /**
    * Refetch the query data
    *
-   * Uses queryObserver.refetch() because:
-   * - Bypasses `enabled: false` to support manual/imperative refetch patterns (e.g., button-triggered fetch)
-   * - Ensures clearError() works even when enabled: false
-   * - Always refetches THIS specific collection (exact targeting via observer)
-   * - Respects retry, retryDelay, and other observer options
+   * Uses queryObserver.refetch() for manual refetches to:
+   * - Bypass `enabled: false` to support manual/imperative refetch patterns (e.g., button-triggered fetch)
+   * - Ensure clearError() works even when enabled: false
+   * - Always refetch THIS specific collection (exact targeting via observer)
+   * - Respect retry, retryDelay, and other observer options
    *
    * This matches TanStack Query's hook behavior where refetch() bypasses enabled: false.
    * See: https://tanstack.com/query/latest/docs/framework/react/guides/disabling-queries
    *
-   * Used by both:
-   * - utils.refetch() - for explicit user-triggered refetches
-   * - Internal handlers (onInsert/onUpdate/onDelete) - after mutations to get fresh data
-   *
-   * Only refetches queries with active subscriptions to avoid unnecessary network requests
-   * and prevent data loss in on-demand mode with time-based queries.
+   * For mutation-triggered refetches with mutatedKeys, calls each active query in parallel
+   * with a targeted WHERE clause for only the mutated item keys, avoiding unnecessary network
+   * requests and preventing data loss in on-demand mode with time-based queries.
    *
    * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
    */
@@ -990,10 +988,42 @@ export function queryCollectionOptions(
     const refetchPromises = queryKeys
       .filter((queryKey) => {
         const hashedKey = hashKey(queryKey)
-        return unsubscribes.has(hashedKey)
+        // For mutation-triggered refetches, only refetch active queries
+        // For manual refetches, refetch all queries
+        return opts?.mutatedKeys ? unsubscribes.has(hashedKey) : true
       })
       .map((queryKey) => {
         const queryObserver = state.observers.get(hashKey(queryKey))!
+
+        // For mutation refetches, we need to call each active query with modified parameters
+        // (WHERE clause for mutated keys only, no orderBy/limit) to avoid data loss
+        if (opts?.mutatedKeys && opts.mutatedKeys.length > 0) {
+          // Build WHERE clause for the mutated keys
+          // Note: The exact WHERE clause syntax depends on the query implementation
+          // For now, we'll pass the keys in meta so queryFn can build the appropriate filter
+          const mutatedKeysWhere = { keys: opts.mutatedKeys }
+
+          // Create temporary query options with targeted WHERE clause
+          const refetchOpts = {
+            where: mutatedKeysWhere,
+            // Explicitly no orderBy or limit to fetch targeted items only
+          }
+
+          // Build the query key with refetch options (if queryKey is a function)
+          const refetchQueryKey =
+            typeof queryKey === `function` ? queryKey(refetchOpts) : queryKey
+          const refetchMeta = { ...meta, loadSubsetOptions: refetchOpts }
+
+          // Use fetchQuery for a one-off fetch with modified parameters
+          return queryClient.fetchQuery({
+            queryKey: refetchQueryKey,
+            queryFn: (context) => queryFn({ ...context, meta: refetchMeta }),
+            // Don't cache this refetch query
+            staleTime: 0,
+          })
+        }
+
+        // For manual refetches, use the standard observer refetch with original parameters
         return queryObserver.refetch({
           throwOnError: opts?.throwOnError,
         })
@@ -1045,7 +1075,9 @@ export function queryCollectionOptions(
           (handlerResult as { refetch?: boolean }).refetch !== false
 
         if (shouldRefetch) {
-          await refetch()
+          // Extract mutated keys from transaction for targeted refetch
+          const mutatedKeys = params.transaction.mutations.map((m) => m.key)
+          await refetch({ mutatedKeys })
         }
 
         return handlerResult
@@ -1059,7 +1091,9 @@ export function queryCollectionOptions(
           (handlerResult as { refetch?: boolean }).refetch !== false
 
         if (shouldRefetch) {
-          await refetch()
+          // Extract mutated keys from transaction for targeted refetch
+          const mutatedKeys = params.transaction.mutations.map((m) => m.key)
+          await refetch({ mutatedKeys })
         }
 
         return handlerResult
@@ -1073,7 +1107,9 @@ export function queryCollectionOptions(
           (handlerResult as { refetch?: boolean }).refetch !== false
 
         if (shouldRefetch) {
-          await refetch()
+          // Extract mutated keys from transaction for targeted refetch
+          const mutatedKeys = params.transaction.mutations.map((m) => m.key)
+          await refetch({ mutatedKeys })
         }
 
         return handlerResult
