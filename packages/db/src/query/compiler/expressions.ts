@@ -15,6 +15,9 @@ export const SUPPORTED_COLLECTION_FUNCS = new Set([
   `and`,
   `or`,
   `in`,
+  `isNull`,
+  `isUndefined`,
+  `not`,
 ])
 
 /**

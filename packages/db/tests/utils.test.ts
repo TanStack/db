@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { Temporal } from "temporal-polyfill"
 import { deepEquals } from "../src/utils"
+import { isPromiseLike } from "../src/utils/type-guards"
 
 describe(`deepEquals`, () => {
   describe(`primitives`, () => {
@@ -339,5 +340,67 @@ describe(`deepEquals`, () => {
       expect(deepEquals(new Map(), new Set())).toBe(false)
       expect(deepEquals(new Date(), /regex/)).toBe(false)
     })
+  })
+})
+
+describe(`isPromiseLike`, () => {
+  it(`should return true for native Promises`, () => {
+    const promise = Promise.resolve(42)
+    expect(isPromiseLike(promise)).toBe(true)
+  })
+
+  it(`should return true for objects with a then method`, () => {
+    const thenable = {
+      then: (onFulfilled?: any, _onRejected?: any) => {
+        onFulfilled?.(42)
+      },
+    }
+    expect(isPromiseLike(thenable)).toBe(true)
+  })
+
+  it(`should return true for functions with a then method`, () => {
+    const thenableFunction: any = function () {}
+    thenableFunction.then = (onFulfilled?: any) => {
+      onFulfilled?.(42)
+    }
+    expect(isPromiseLike(thenableFunction)).toBe(true)
+  })
+
+  it(`should return false for null`, () => {
+    expect(isPromiseLike(null)).toBe(false)
+  })
+
+  it(`should return false for undefined`, () => {
+    expect(isPromiseLike(undefined)).toBe(false)
+  })
+
+  it(`should return false for primitives`, () => {
+    expect(isPromiseLike(42)).toBe(false)
+    expect(isPromiseLike(`string`)).toBe(false)
+    expect(isPromiseLike(true)).toBe(false)
+    expect(isPromiseLike(false)).toBe(false)
+  })
+
+  it(`should return false for objects without a then method`, () => {
+    expect(isPromiseLike({})).toBe(false)
+    expect(isPromiseLike({ value: 42 })).toBe(false)
+    expect(isPromiseLike([])).toBe(false)
+    expect(isPromiseLike(new Map())).toBe(false)
+  })
+
+  it(`should return false for objects with a non-function then property`, () => {
+    const obj = { then: 42 }
+    expect(isPromiseLike(obj)).toBe(false)
+  })
+
+  it(`should return false for functions without a then method`, () => {
+    const fn = () => 42
+    expect(isPromiseLike(fn)).toBe(false)
+  })
+
+  it(`should handle async functions (which return promises)`, () => {
+    const asyncFn = () => Promise.resolve(42)
+    const result = asyncFn()
+    expect(isPromiseLike(result)).toBe(true)
   })
 })

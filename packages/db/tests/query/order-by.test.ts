@@ -10,6 +10,7 @@ import {
   max,
   not,
 } from "../../src/query/builder/functions.js"
+import { createFilterFunctionFromExpression } from "../../src/collection/change-events.js"
 
 type Person = {
   id: string
@@ -1349,7 +1350,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         expect(result1).toHaveLength(3)
         expect(result1.map((r) => r.age)).toEqual([14, 25, null])
 
-        // The default compare options defaults to nulls first
+        // With 3-valued logic, lt(null, 18) returns UNKNOWN (null), which excludes the row
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
@@ -1359,8 +1360,8 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
         const result2 = Array.from(query2.values())
         const ages = result2.map((r) => r.age)
-        expect(ages).toHaveLength(2)
-        expect(ages).toContain(null)
+        // null should NOT be included because lt(null, 18) returns UNKNOWN in 3-valued logic
+        expect(ages).toHaveLength(1)
         expect(ages).toContain(14)
 
         // The default compare options defaults to nulls first
@@ -2225,6 +2226,161 @@ describe(`Query2 OrderBy Compiler`, () => {
   createOrderByTests(`eager`)
 })
 
+describe(`OrderBy with collection-level StringSortOpts`, () => {
+  type StringItem = {
+    id: number
+    name: string
+  }
+
+  const stringItemsData: Array<StringItem> = [
+    { id: 1, name: `Charlie` },
+    { id: 2, name: `alice` },
+    { id: 3, name: `bob` },
+  ]
+
+  it(`should use collection's compareOptions when query doesn't specify stringSort`, async () => {
+    // Create collection with lexical string sorting as default
+    const collectionWithLexical = createCollection(
+      mockSyncCollectionOptions<StringItem>({
+        id: `test-lexical-collection`,
+        getKey: (item) => item.id,
+        initialData: stringItemsData,
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      })
+    )
+
+    // Query without specifying stringSort should use collection's lexical default
+    const lexicalQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, `asc`)
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await lexicalQuery.preload()
+
+    // In lexical comparison, uppercase letters come before lowercase letters
+    const lexicalResults = Array.from(lexicalQuery.values())
+    expect(lexicalResults.map((r) => r.name)).toEqual([
+      `Charlie`,
+      `alice`,
+      `bob`,
+    ])
+  })
+
+  it(`should override collection's compareOptions when query specifies stringSort`, async () => {
+    // Create collection with lexical string sorting as default
+    const collectionWithLexical = createCollection(
+      mockSyncCollectionOptions<StringItem>({
+        id: `test-lexical-collection-override`,
+        getKey: (item) => item.id,
+        initialData: stringItemsData,
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      })
+    )
+
+    // Query with explicit locale stringSort should override collection's lexical default
+    const localeQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, {
+          direction: `asc`,
+          stringSort: `locale`,
+          locale: `en-US`,
+        })
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await localeQuery.preload()
+
+    // In locale comparison, case-insensitive sorting puts lowercase first
+    const localeResults = Array.from(localeQuery.values())
+    expect(localeResults.map((r) => r.name)).toEqual([
+      `alice`,
+      `bob`,
+      `Charlie`,
+    ])
+  })
+
+  it(`should use collection default and allow query overrides`, async () => {
+    // Create collection with lexical string sorting as default
+    const collectionWithLexical = createCollection(
+      mockSyncCollectionOptions<StringItem>({
+        id: `test-lexical-collection-sequence`,
+        getKey: (item) => item.id,
+        initialData: stringItemsData,
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      })
+    )
+
+    // First query without specifying stringSort should use collection's lexical default
+    const firstQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, `asc`)
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await firstQuery.preload()
+
+    // In lexical comparison, uppercase letters come before lowercase letters
+    const firstResults = Array.from(firstQuery.values())
+    expect(firstResults.map((r) => r.name)).toEqual([`Charlie`, `alice`, `bob`])
+
+    // Second query with explicit locale stringSort should override collection's lexical default
+    const secondQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, {
+          direction: `asc`,
+          stringSort: `locale`,
+          locale: `en-US`,
+        })
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await secondQuery.preload()
+
+    // Should use locale sorting (case-insensitive) for this query
+    const secondResults = Array.from(secondQuery.values())
+    expect(secondResults.map((r) => r.name)).toEqual([
+      `alice`,
+      `bob`,
+      `Charlie`,
+    ])
+
+    // Third query without specifying stringSort should use collection's lexical default again
+    const thirdQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, `desc`)
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        }))
+    )
+    await thirdQuery.preload()
+
+    // Should revert back to lexical sorting (collection default)
+    const thirdResults = Array.from(thirdQuery.values())
+    expect(thirdResults.map((r) => r.name)).toEqual([`bob`, `alice`, `Charlie`])
+  })
+})
+
 describe(`OrderBy with collection alias conflicts`, () => {
   type EmailSchema = {
     email: string
@@ -2300,4 +2456,470 @@ describe(`OrderBy with collection alias conflicts`, () => {
     expect(result[1]?.email).toBe(`second@test.com`)
     expect(result[2]?.email).toBe(`third@test.com`)
   })
+})
+
+describe(`OrderBy with duplicate values`, () => {
+  type TestItem = {
+    id: number
+    a: number
+    keep: boolean
+  }
+
+  function createOrderByBugTests(autoIndex: `off` | `eager`): void {
+    describe(`with autoIndex ${autoIndex}`, () => {
+      it(`should correctly advance window when there are duplicate values`, async () => {
+        // Create test data that reproduces the specific bug described:
+        // Items with many duplicates at value 5, then normal progression
+        const duplicateTestData: Array<TestItem> = [
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+          { id: 16, a: 16, keep: true },
+        ]
+
+        const duplicateCollection = createCollection(
+          mockSyncCollectionOptions<TestItem>({
+            id: `test-duplicate-window-bug`,
+            getKey: (item) => item.id,
+            initialData: duplicateTestData,
+            autoIndex,
+          })
+        )
+
+        // Create a live query with offset 0, limit 5 (first page)
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ items: duplicateCollection })
+            .where(({ items }) => eq(items.keep, true))
+            .orderBy(({ items }) => items.a, `asc`)
+            .offset(0)
+            .limit(5)
+            .select(({ items }) => ({
+              id: items.id,
+              a: items.a,
+              keep: items.keep,
+            }))
+        )
+        await collection.preload()
+
+        // First page should return items 1-5
+        let results = Array.from(collection.values()).sort(
+          (a, b) => a.id - b.id
+        )
+        expect(results).toEqual([
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+        ])
+
+        // Now move to next page (offset 5, limit 5)
+        collection.utils.setWindow({ offset: 5, limit: 5 })
+        await collection.stateWhenReady()
+
+        // Second page should return items 6-10 (all with value 5)
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+        ])
+
+        // Now move to third page (offset 10, limit 5)
+        // It should advance past the duplicate 5s
+        collection.utils.setWindow({ offset: 10, limit: 5 })
+        await collection.stateWhenReady()
+
+        // Third page should return items 11-13 (the items after the duplicate 5s)
+        // The bug would cause this to stall and return empty or get stuck
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+        ])
+
+        // Verify we can continue to next page
+        collection.utils.setWindow({ offset: 15, limit: 5 })
+        await collection.stateWhenReady()
+
+        // Should be empty since we've exhausted all items
+        results = Array.from(collection.values())
+        expect(results).toEqual([{ id: 16, a: 16, keep: true }])
+      })
+
+      it(`should correctly advance window when there are duplicate values loaded from sync layer`, async () => {
+        // Create test data that reproduces the specific bug described:
+        // Items with many duplicates at value 5, then normal progression
+        const allTestData: Array<TestItem> = [
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+          { id: 16, a: 16, keep: true },
+        ]
+
+        // Start with only the first 5 items in the local collection
+        const initialData = allTestData.slice(0, 5)
+        let loadSubsetCallCount = 0
+
+        const duplicateCollection = createCollection(
+          mockSyncCollectionOptions<TestItem>({
+            id: `test-duplicate-sync-layer-bug`,
+            getKey: (item) => item.id,
+            initialData,
+            autoIndex,
+            syncMode: `on-demand`,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                // Load initial data
+                begin()
+                initialData.forEach((item) => {
+                  write({
+                    type: `insert`,
+                    value: item,
+                  })
+                })
+                commit()
+                markReady()
+
+                return {
+                  loadSubset: (options) => {
+                    loadSubsetCallCount++
+
+                    // Simulate async loading from remote source
+                    return new Promise<void>((resolve) => {
+                      setTimeout(() => {
+                        begin()
+
+                        // Order all test data by field 'a' in ascending order
+                        const sortedData = [...allTestData].sort(
+                          (a, b) => a.a - b.a
+                        )
+
+                        // Apply where clause filter if present
+                        let filteredData = sortedData
+                        if (options.where) {
+                          try {
+                            const filterFn = createFilterFunctionFromExpression(
+                              options.where
+                            )
+                            filteredData = sortedData.filter(filterFn)
+                          } catch (error) {
+                            console.log(`Error compiling where clause:`, error)
+                            // If compilation fails, use all data
+                            filteredData = sortedData
+                          }
+                        }
+
+                        // Return a slice from 0 to limit
+                        const { limit } = options
+                        const dataToLoad = limit
+                          ? filteredData.slice(0, limit)
+                          : filteredData
+
+                        dataToLoad.forEach((item) => {
+                          write({
+                            type: `insert`,
+                            value: item,
+                          })
+                        })
+
+                        commit()
+                        resolve()
+                      }, 10) // Small delay to simulate network
+                    })
+                  },
+                }
+              },
+            },
+          })
+        )
+
+        // Create a live query with offset 0, limit 5 (first page)
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ items: duplicateCollection })
+            .where(({ items }) => eq(items.keep, true))
+            .orderBy(({ items }) => items.a, `asc`)
+            .offset(0)
+            .limit(5)
+            .select(({ items }) => ({
+              id: items.id,
+              a: items.a,
+              keep: items.keep,
+            }))
+        )
+        await collection.preload()
+
+        // First page should return items 1-5 (all local data)
+        let results = Array.from(collection.values()).sort(
+          (a, b) => a.id - b.id
+        )
+        expect(results).toEqual([
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+        ])
+        expect(loadSubsetCallCount).toBe(1)
+
+        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset
+        const moveToSecondPage = collection.utils.setWindow({
+          offset: 5,
+          limit: 5,
+        })
+        expect(moveToSecondPage).toBeInstanceOf(Promise)
+        await moveToSecondPage
+
+        // Second page should return items 6-10 (all with value 5, loaded from sync layer)
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+        ])
+        // we expect 2 new loadSubset calls (1 for data equal to max value and one for data greater than max value)
+        expect(loadSubsetCallCount).toBe(3)
+
+        // Now move to third page (offset 10, limit 5)
+        // It should advance past the duplicate 5s
+        const moveToThirdPage = collection.utils.setWindow({
+          offset: 10,
+          limit: 5,
+        })
+
+        // Now it is `true` because we already have that page
+        // because when we loaded the 2nd page we loaded all the duplicate 5s and then we loaded
+        // values > 5 with limit 5 but since the entire 2nd page is filled with the duplicate 5s
+        // we in fact already loaded the third page so it is immediately available here
+        expect(moveToThirdPage).toBe(true)
+
+        // Third page should return items 11-13 (the items after the duplicate 5s)
+        // The bug would cause this to stall and return empty or get stuck
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+        ])
+        // We expect no more loadSubset calls because when we loaded the previous page
+        // we asked for all data equal to max value and LIMIT values greater than max value
+        // and the LIMIT values greater than max value already loaded the next page
+        expect(loadSubsetCallCount).toBe(3)
+      })
+
+      it(`should correctly advance window when there are duplicate values loaded from both local collection and sync layer`, async () => {
+        // Create test data that reproduces the specific bug described:
+        // Items with many duplicates at value 5, then normal progression
+        const allTestData: Array<TestItem> = [
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+          { id: 16, a: 16, keep: true },
+        ]
+
+        // Start with only the first 5 items in the local collection
+        const initialData = allTestData.slice(0, 10)
+        let loadSubsetCallCount = 0
+
+        const duplicateCollection = createCollection(
+          mockSyncCollectionOptions<TestItem>({
+            id: `test-duplicate-sync-layer-bug`,
+            getKey: (item) => item.id,
+            initialData,
+            autoIndex,
+            syncMode: `on-demand`,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                // Load initial data
+                begin()
+                initialData.forEach((item) => {
+                  write({
+                    type: `insert`,
+                    value: item,
+                  })
+                })
+                commit()
+                markReady()
+
+                return {
+                  loadSubset: (options) => {
+                    loadSubsetCallCount++
+
+                    // Simulate async loading from remote source
+                    return new Promise<void>((resolve) => {
+                      setTimeout(() => {
+                        begin()
+
+                        // Order all test data by field 'a' in ascending order
+                        const sortedData = [...allTestData].sort(
+                          (a, b) => a.a - b.a
+                        )
+
+                        // Apply where clause filter if present
+                        let filteredData = sortedData
+                        if (options.where) {
+                          try {
+                            const filterFn = createFilterFunctionFromExpression(
+                              options.where
+                            )
+                            filteredData = sortedData.filter(filterFn)
+                          } catch (error) {
+                            console.log(`Error compiling where clause:`, error)
+                            // If compilation fails, use all data
+                            filteredData = sortedData
+                          }
+                        }
+
+                        // Return a slice from 0 to limit
+                        const { limit } = options
+                        const dataToLoad = limit
+                          ? filteredData.slice(0, limit)
+                          : filteredData
+
+                        dataToLoad.forEach((item) => {
+                          write({
+                            type: `insert`,
+                            value: item,
+                          })
+                        })
+
+                        commit()
+                        resolve()
+                      }, 10) // Small delay to simulate network
+                    })
+                  },
+                }
+              },
+            },
+          })
+        )
+
+        // Create a live query with offset 0, limit 5 (first page)
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ items: duplicateCollection })
+            .where(({ items }) => eq(items.keep, true))
+            .orderBy(({ items }) => items.a, `asc`)
+            .offset(0)
+            .limit(5)
+            .select(({ items }) => ({
+              id: items.id,
+              a: items.a,
+              keep: items.keep,
+            }))
+        )
+        await collection.preload()
+
+        // First page should return items 1-5 (all local data)
+        let results = Array.from(collection.values()).sort(
+          (a, b) => a.id - b.id
+        )
+        expect(results).toEqual([
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+        ])
+        expect(loadSubsetCallCount).toBe(1)
+
+        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset
+        const moveToSecondPage = collection.utils.setWindow({
+          offset: 5,
+          limit: 5,
+        })
+        expect(moveToSecondPage).toBeInstanceOf(Promise)
+        await moveToSecondPage
+
+        // Second page should return items 6-10 (all with value 5, loaded from sync layer)
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+        ])
+        // we expect 2 new loadSubset calls (1 for data equal to max value and one for data greater than max value)
+        expect(loadSubsetCallCount).toBe(3)
+
+        // Now move to third page (offset 10, limit 5)
+        // It should advance past the duplicate 5s
+        const moveToThirdPage = collection.utils.setWindow({
+          offset: 10,
+          limit: 5,
+        })
+
+        // Now it is `true` because we already have that page
+        // because when we loaded the 2nd page we loaded all the duplicate 5s and then we loaded
+        // values > 5 with limit 5 but since the entire 2nd page is filled with the duplicate 5s
+        // we in fact already loaded the third page so it is immediately available here
+        expect(moveToThirdPage).toBe(true)
+
+        // Third page should return items 11-13 (the items after the duplicate 5s)
+        // The bug would cause this to stall and return empty or get stuck
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+        ])
+        // We expect no more loadSubset calls because when we loaded the previous page
+        // we asked for all data equal to max value and LIMIT values greater than max value
+        // and the LIMIT values greater than max value already loaded the next page
+        expect(loadSubsetCallCount).toBe(3)
+      })
+    })
+  }
+
+  createOrderByBugTests(`eager`)
 })

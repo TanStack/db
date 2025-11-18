@@ -1,0 +1,27 @@
+{
+  "name": "@tanstack/db-collection-e2e",
+  "version": "0.0.4",
+  "private": true,
+  "description": "End-to-end test suite for TanStack DB collections",
+  "type": "module",
+  "scripts": {
+    "test": "echo 'This package contains shared test suites. Run tests from electric-db-collection or query-db-collection packages.'",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.yml down --volumes",
+    "docker:logs": "docker compose -f docker/docker-compose.yml logs -f"
+  },
+  "dependencies": {
+    "@tanstack/db": "workspace:*",
+    "@tanstack/electric-db-collection": "workspace:*",
+    "@tanstack/query-db-collection": "workspace:*",
+    "pg": "^8.16.3"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.6",
+    "@vitest/ui": "^3.2.4",
+    "typescript": "^5.9.2",
+    "vite": "^7.2.2",
+    "vitest": "^3.2.4"
+  },
+  "packageManager": "pnpm@10.22.0"
+}

@@ -1,5 +1,19 @@
 # @tanstack/db-ivm
 
+## 0.1.13
+
+### Patch Changes
+
+- Fix Uint8Array/Buffer comparison to work by content instead of reference. This enables proper equality checks for binary IDs like ULIDs in WHERE clauses using the `eq` function. ([#779](https://github.com/TanStack/db/pull/779))
+
+- Fix bug with setWindow on ordered queries that have no limit. ([#763](https://github.com/TanStack/db/pull/763))
+
+## 0.1.12
+
+### Patch Changes
+
+- Fix bug with setWindow on ordered queries that have no limit. ([#701](https://github.com/TanStack/db/pull/701))
+
 ## 0.1.11
 
 ### Patch Changes

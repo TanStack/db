@@ -29,7 +29,7 @@ jobs:
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
       - name: Get base and head commits for `nx affected`
-        uses: nrwl/nx-set-shas@v4.3.3
+        uses: nrwl/nx-set-shas@v4.4.0
         with:
           main-branch-name: main
       - name: Run Checks
@@ -54,12 +54,14 @@ jobs:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           pattern: "./packages/db/dist/**/*.{js,mjs}"
           comment-key: "db-package-size"
+          build-script: "build:minified"
       - name: Compressed Size Action - React DB Package
         uses: preactjs/compressed-size-action@v2
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           pattern: "./packages/react-db/dist/**/*.{js,mjs}"
           comment-key: "react-db-package-size"
+          build-script: "build:minified"
   build-example:
     name: Build Example Site
     runs-on: ubuntu-latest

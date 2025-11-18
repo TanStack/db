@@ -9,6 +9,8 @@ import { transactionScopedScheduler } from "../../scheduler.js"
 import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
 import { getCollectionBuilder } from "./collection-registry.js"
+import { LIVE_QUERY_INTERNAL } from "./internal.js"
+import type { LiveQueryInternalUtils } from "./internal.js"
 import type { WindowOptions } from "../compiler/index.js"
 import type { SchedulerContextId } from "../../scheduler.js"
 import type { CollectionSubscription } from "../../collection/subscription.js"
@@ -19,6 +21,7 @@ import type {
   CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
+  StringCollationConfig,
   SyncConfig,
   UtilsRecord,
 } from "../../types.js"
@@ -35,7 +38,6 @@ import type { AllCollectionEvents } from "../../collection/events.js"
 
 export type LiveQueryCollectionUtils = UtilsRecord & {
   getRunCount: () => number
-  getBuilder: () => CollectionConfigBuilder<any, any>
   /**
    * Sets the offset and limit of an ordered query.
    * Is a no-op if the query is not ordered.
@@ -49,6 +51,7 @@ export type LiveQueryCollectionUtils = UtilsRecord & {
    * @returns The current window settings, or `undefined` if the query is not windowed
    */
   getWindow: () => { offset: number; limit: number } | undefined
+  [LIVE_QUERY_INTERNAL]: LiveQueryInternalUtils
 }
 
 type PendingGraphRun = {
@@ -81,6 +84,7 @@ export class CollectionConfigBuilder<
   private readonly orderByIndices = new WeakMap<object, string>()
 
   private readonly compare?: (val1: TResult, val2: TResult) => number
+  private readonly compareOptions?: StringCollationConfig
 
   private isGraphRunning = false
   private runCount = 0
@@ -168,9 +172,33 @@ export class CollectionConfigBuilder<
       this.compare = createOrderByComparator<TResult>(this.orderByIndices)
     }
 
+    // Use explicitly provided compareOptions if available, otherwise inherit from FROM collection
+    this.compareOptions =
+      this.config.defaultStringCollation ??
+      extractCollectionFromSource(this.query).compareOptions
+
     // Compile the base pipeline once initially
     // This is done to ensure that any errors are thrown immediately and synchronously
     this.compileBasePipeline()
+  }
+
+  /**
+   * Recursively checks if a query or any of its subqueries contains joins
+   */
+  private hasJoins(query: QueryIR): boolean {
+    // Check if this query has joins
+    if (query.join && query.join.length > 0) {
+      return true
+    }
+
+    // Recursively check subqueries in the from clause
+    if (query.from.type === `queryRef`) {
+      if (this.hasJoins(query.from.query)) {
+        return true
+      }
+    }
+
+    return false
   }
 
   getConfig(): CollectionConfigSingleRowOption<TResult> & {
@@ -183,6 +211,7 @@ export class CollectionConfigBuilder<
         ((item) => this.resultKeys.get(item) as string | number),
       sync: this.getSyncConfig(),
       compare: this.compare,
+      defaultStringCollation: this.compareOptions,
       gcTime: this.config.gcTime || 5000, // 5 seconds by default for live queries
       schema: this.config.schema,
       onInsert: this.config.onInsert,
@@ -192,9 +221,13 @@ export class CollectionConfigBuilder<
       singleResult: this.query.singleResult,
       utils: {
         getRunCount: this.getRunCount.bind(this),
-        getBuilder: () => this,
         setWindow: this.setWindow.bind(this),
         getWindow: this.getWindow.bind(this),
+        [LIVE_QUERY_INTERNAL]: {
+          getBuilder: () => this,
+          hasCustomGetKey: !!this.config.getKey,
+          hasJoins: this.hasJoins(this.query),
+        },
       },
     }
   }
@@ -924,6 +957,25 @@ function extractCollectionsFromQuery(
   extractFromQuery(query)
 
   return collections
+}
+
+/**
+ * Helper function to extract the collection that is referenced in the query's FROM clause.
+ * The FROM clause may refer directly to a collection or indirectly to a subquery.
+ */
+function extractCollectionFromSource(query: any): Collection<any, any, any> {
+  const from = query.from
+
+  if (from.type === `collectionRef`) {
+    return from.collection
+  } else if (from.type === `queryRef`) {
+    // Recursively extract from subquery
+    return extractCollectionFromSource(from.query)
+  }
+
+  throw new Error(
+    `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}`
+  )
 }
 
 /**

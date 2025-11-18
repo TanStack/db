@@ -1,0 +1,71 @@
+{
+  "name": "@tanstack/powersync-db-collection",
+  "description": "PowerSync collection for TanStack DB",
+  "version": "0.1.6",
+  "dependencies": {
+    "@standard-schema/spec": "^1.0.0",
+    "@tanstack/db": "workspace:*",
+    "@tanstack/store": "^0.8.0",
+    "debug": "^4.4.3",
+    "p-defer": "^4.0.1"
+  },
+  "peerDependencies": {
+    "@powersync/common": "^1.41.0"
+  },
+  "devDependencies": {
+    "@powersync/common": "^1.42.0",
+    "@powersync/node": "^0.14.1",
+    "@types/debug": "^4.1.12",
+    "@vitest/coverage-istanbul": "^3.2.4"
+  },
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "packageManager": "pnpm@10.22.0",
+  "author": "POWERSYNC",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TanStack/db.git",
+    "directory": "packages/powersync-db-collection"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "powersync",
+    "realtime",
+    "local-first",
+    "sync-engine",
+    "sync",
+    "replication",
+    "opfs",
+    "indexeddb",
+    "localstorage",
+    "optimistic",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "npx vitest --run"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "dist/esm/index.d.ts"
+}

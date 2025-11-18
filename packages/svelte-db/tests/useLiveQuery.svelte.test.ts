@@ -116,6 +116,96 @@ describe(`Query Collections`, () => {
     })
   })
 
+  it(`should maintain reactivity when destructuring return values with $derived`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-destructure`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      })
+    )
+
+    cleanup = $effect.root(() => {
+      // IMPORTANT: In Svelte 5, destructuring breaks reactivity unless wrapped in $derived
+      // This is the correct pattern for destructuring (Issue #414)
+      const query = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+            age: persons.age,
+          }))
+      )
+
+      // Destructure using $derived to maintain reactivity
+      const { data, state, isReady, isLoading } = $derived(query)
+
+      flushSync()
+
+      // Initial state checks
+      expect(isReady).toBe(true)
+      expect(isLoading).toBe(false)
+      expect(state.size).toBe(1)
+      expect(data).toHaveLength(1)
+      expect(data[0]).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+        age: 35,
+      })
+
+      // Add a new person that matches the filter
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `4`,
+          name: `Alice Johnson`,
+          age: 40,
+          email: `alice.johnson@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      flushSync()
+
+      // Verify destructured values are still reactive after collection change
+      expect(state.size).toBe(2)
+      expect(data).toHaveLength(2)
+      expect(data.some((p) => p.id === `4`)).toBe(true)
+      expect(data.some((p) => p.id === `3`)).toBe(true)
+
+      // Remove a person
+      collection.utils.begin()
+      collection.utils.write({
+        type: `delete`,
+        value: {
+          id: `3`,
+          name: `John Smith`,
+          age: 35,
+          email: `john.smith@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      flushSync()
+
+      // Verify destructured values still track changes
+      expect(state.size).toBe(1)
+      expect(data).toHaveLength(1)
+      expect(data[0]).toMatchObject({
+        id: `4`,
+        name: `Alice Johnson`,
+        age: 40,
+      })
+    })
+  })
+
   it(`should be able to query a collection with live updates`, () => {
     const collection = createCollection(
       mockSyncCollectionOptions<Person>({
@@ -1254,6 +1344,91 @@ describe(`Query Collections`, () => {
         expect(query.isLoading).toBe(false)
         expect(query.isReady).toBe(true)
         expect(query.status).toBe(`ready`)
+      })
+    })
+
+    it(`should reactively trigger effects when status changes`, () => {
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `reactive-status-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => gt(c.age, 30))
+            .select(({ collection: c }) => ({
+              id: c.id,
+              name: c.name,
+            }))
+        )
+
+        let readyEffectCount = 0
+        let loadingEffectCount = 0
+        let lastReadyValue: boolean | undefined
+        let lastLoadingValue: boolean | undefined
+
+        // This effect should re-run whenever query.isReady changes
+        $effect(() => {
+          readyEffectCount++
+          lastReadyValue = query.isReady
+        })
+
+        // This effect should re-run whenever query.isLoading changes
+        $effect(() => {
+          loadingEffectCount++
+          lastLoadingValue = query.isLoading
+        })
+
+        flushSync()
+
+        // Initial execution
+        expect(readyEffectCount).toBe(1)
+        expect(loadingEffectCount).toBe(1)
+        expect(lastReadyValue).toBe(false)
+        expect(lastLoadingValue).toBe(true)
+
+        // Start sync and mark ready
+        collection.preload()
+        if (beginFn && commitFn && markReadyFn) {
+          beginFn()
+          commitFn()
+          markReadyFn()
+        }
+
+        // Insert data
+        collection.insert({
+          id: `1`,
+          name: `John Doe`,
+          age: 35,
+          email: `john.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        })
+
+        flushSync()
+
+        // Effects should have re-executed due to reactive status change
+        expect(readyEffectCount).toBeGreaterThan(1)
+        expect(loadingEffectCount).toBeGreaterThan(1)
+        expect(lastReadyValue).toBe(true)
+        expect(lastLoadingValue).toBe(false)
       })
     })
   })

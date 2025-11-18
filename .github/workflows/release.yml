@@ -41,6 +41,34 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Generate Docs
+        if: steps.changesets.outputs.published == 'true'
+        run: pnpm docs:generate
+      - name: Commit Generated Docs
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            BRANCH="docs/auto-update-$(date +%s)"
+            git checkout -b "$BRANCH"
+            git add docs/
+            git commit -m "docs: regenerate API documentation"
+            git push origin "$BRANCH"
+
+            gh pr create \
+              --title "docs: regenerate API documentation" \
+              --body "Automated documentation update from release" \
+              --base main \
+              --head "$BRANCH"
+
+            gh pr merge "$BRANCH" --auto --squash
+          else
+            echo "No changes in generated docs"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Comment on PRs about release
         if: steps.changesets.outputs.published == 'true'
         uses: tanstack/config/.github/comment-on-release@main

@@ -44,6 +44,11 @@ interface StoredItem<T> {
   data: T
 }
 
+export interface Parser {
+  parse: (data: string) => unknown
+  stringify: (data: unknown) => string
+}
+
 /**
  * Configuration interface for localStorage collection options
  * @template T - The type of items in the collection
@@ -71,6 +76,12 @@ export interface LocalStorageCollectionConfig<
    * Can be any object that implements addEventListener/removeEventListener for storage events
    */
   storageEventApi?: StorageEventApi
+
+  /**
+   * Parser to use for serializing and deserializing data to and from storage
+   * Defaults to JSON
+   */
+  parser?: Parser
 }
 
 /**
@@ -113,13 +124,18 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
 
 /**
  * Validates that a value can be JSON serialized
+ * @param parser - The parser to use for serialization
  * @param value - The value to validate for JSON serialization
  * @param operation - The operation type being performed (for error messages)
  * @throws Error if the value cannot be JSON serialized
  */
-function validateJsonSerializable(value: any, operation: string): void {
+function validateJsonSerializable(
+  parser: Parser,
+  value: any,
+  operation: string
+): void {
   try {
-    JSON.stringify(value)
+    parser.stringify(value)
   } catch (error) {
     throw new SerializationError(
       operation,
@@ -134,6 +150,43 @@ function validateJsonSerializable(value: any, operation: string): void {
  */
 function generateUuid(): string {
   return crypto.randomUUID()
+}
+
+/**
+ * Encodes a key (string or number) into a storage-safe string format.
+ * This prevents collisions between numeric and string keys by prefixing with type information.
+ *
+ * Examples:
+ *   - number 1 → "n:1"
+ *   - string "1" → "s:1"
+ *   - string "n:1" → "s:n:1"
+ *
+ * @param key - The key to encode (string or number)
+ * @returns Type-prefixed string that is safe for storage
+ */
+function encodeStorageKey(key: string | number): string {
+  if (typeof key === `number`) {
+    return `n:${key}`
+  }
+  return `s:${key}`
+}
+
+/**
+ * Decodes a storage key back to its original form.
+ * This is the inverse of encodeStorageKey.
+ *
+ * @param encodedKey - The encoded key from storage
+ * @returns The original key (string or number)
+ */
+function decodeStorageKey(encodedKey: string): string | number {
+  if (encodedKey.startsWith(`n:`)) {
+    return Number(encodedKey.slice(2))
+  }
+  if (encodedKey.startsWith(`s:`)) {
+    return encodedKey.slice(2)
+  }
+  // Fallback for legacy data without encoding
+  return encodedKey
 }
 
 /**
@@ -267,7 +320,12 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+): CollectionConfig<
+  InferSchemaOutput<T>,
+  TKey,
+  T,
+  LocalStorageCollectionUtils
+> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema: T
@@ -282,7 +340,7 @@ export function localStorageCollectionOptions<
   config: LocalStorageCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, TKey> & {
+): CollectionConfig<T, TKey, never, LocalStorageCollectionUtils> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: never // no schema in the result
@@ -290,7 +348,10 @@ export function localStorageCollectionOptions<
 
 export function localStorageCollectionOptions(
   config: LocalStorageCollectionConfig<any, any, string | number>
-): Omit<CollectionConfig<any, string | number, any>, `id`> & {
+): Omit<
+  CollectionConfig<any, string | number, any, LocalStorageCollectionUtils>,
+  `id`
+> & {
   id: string
   utils: LocalStorageCollectionUtils
   schema?: StandardSchemaV1
@@ -314,6 +375,9 @@ export function localStorageCollectionOptions(
     (typeof window !== `undefined` ? window : null) ||
     createNoOpStorageEventApi()
 
+  // Default to JSON parser if no parser is provided
+  const parser = config.parser || JSON
+
   // Track the last known state to detect changes
   const lastKnownData = new Map<string | number, StoredItem<any>>()
 
@@ -322,19 +386,10 @@ export function localStorageCollectionOptions(
     config.storageKey,
     storage,
     storageEventApi,
+    parser,
     config.getKey,
     lastKnownData
   )
-
-  /**
-   * Manual trigger function for local sync updates
-   * Forces a check for storage changes and updates the collection if needed
-   */
-  const triggerLocalSync = () => {
-    if (sync.manualTrigger) {
-      sync.manualTrigger()
-    }
-  }
 
   /**
    * Save data to storage
@@ -347,9 +402,9 @@ export function localStorageCollectionOptions(
       // Convert Map to object format for storage
       const objectData: Record<string, StoredItem<any>> = {}
       dataMap.forEach((storedItem, key) => {
-        objectData[String(key)] = storedItem
+        objectData[encodeStorageKey(key)] = storedItem
       })
-      const serialized = JSON.stringify(objectData)
+      const serialized = parser.stringify(objectData)
       storage.setItem(config.storageKey, serialized)
     } catch (error) {
       console.error(
@@ -383,7 +438,7 @@ export function localStorageCollectionOptions(
   const wrappedOnInsert = async (params: InsertMutationFnParams<any>) => {
     // Validate that all values in the transaction can be JSON serialized
     params.transaction.mutations.forEach((mutation) => {
-      validateJsonSerializable(mutation.modified, `insert`)
+      validateJsonSerializable(parser, mutation.modified, `insert`)
     })
 
     // Call the user handler BEFORE persisting changes (if provided)
@@ -393,24 +448,23 @@ export function localStorageCollectionOptions(
     }
 
     // Always persist to storage
-    // Load current data from storage
-    const currentData = loadFromStorage<any>(config.storageKey, storage)
-
+    // Use lastKnownData (in-memory cache) instead of reading from storage
     // Add new items with version keys
     params.transaction.mutations.forEach((mutation) => {
-      const key = config.getKey(mutation.modified)
+      // Use the engine's pre-computed key for consistency
       const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
       }
-      currentData.set(key, storedItem)
+      lastKnownData.set(mutation.key, storedItem)
     })
 
     // Save to storage
-    saveToStorage(currentData)
+    saveToStorage(lastKnownData)
 
-    // Manually trigger local sync since storage events don't fire for current tab
-    triggerLocalSync()
+    // Confirm mutations through sync interface (moves from optimistic to synced state)
+    // without reloading from storage
+    sync.confirmOperationsSync(params.transaction.mutations)
 
     return handlerResult
   }
@@ -418,7 +472,7 @@ export function localStorageCollectionOptions(
   const wrappedOnUpdate = async (params: UpdateMutationFnParams<any>) => {
     // Validate that all values in the transaction can be JSON serialized
     params.transaction.mutations.forEach((mutation) => {
-      validateJsonSerializable(mutation.modified, `update`)
+      validateJsonSerializable(parser, mutation.modified, `update`)
     })
 
     // Call the user handler BEFORE persisting changes (if provided)
@@ -428,24 +482,23 @@ export function localStorageCollectionOptions(
     }
 
     // Always persist to storage
-    // Load current data from storage
-    const currentData = loadFromStorage<any>(config.storageKey, storage)
-
+    // Use lastKnownData (in-memory cache) instead of reading from storage
     // Update items with new version keys
     params.transaction.mutations.forEach((mutation) => {
-      const key = config.getKey(mutation.modified)
+      // Use the engine's pre-computed key for consistency
       const storedItem: StoredItem<any> = {
         versionKey: generateUuid(),
         data: mutation.modified,
       }
-      currentData.set(key, storedItem)
+      lastKnownData.set(mutation.key, storedItem)
     })
 
     // Save to storage
-    saveToStorage(currentData)
+    saveToStorage(lastKnownData)
 
-    // Manually trigger local sync since storage events don't fire for current tab
-    triggerLocalSync()
+    // Confirm mutations through sync interface (moves from optimistic to synced state)
+    // without reloading from storage
+    sync.confirmOperationsSync(params.transaction.mutations)
 
     return handlerResult
   }
@@ -458,21 +511,19 @@ export function localStorageCollectionOptions(
     }
 
     // Always persist to storage
-    // Load current data from storage
-    const currentData = loadFromStorage<any>(config.storageKey, storage)
-
+    // Use lastKnownData (in-memory cache) instead of reading from storage
     // Remove items
     params.transaction.mutations.forEach((mutation) => {
-      // For delete operations, mutation.original contains the full object
-      const key = config.getKey(mutation.original)
-      currentData.delete(key)
+      // Use the engine's pre-computed key for consistency
+      lastKnownData.delete(mutation.key)
     })
 
     // Save to storage
-    saveToStorage(currentData)
+    saveToStorage(lastKnownData)
 
-    // Manually trigger local sync since storage events don't fire for current tab
-    triggerLocalSync()
+    // Confirm mutations through sync interface (moves from optimistic to synced state)
+    // without reloading from storage
+    sync.confirmOperationsSync(params.transaction.mutations)
 
     return handlerResult
   }
@@ -518,25 +569,18 @@ export function localStorageCollectionOptions(
       switch (mutation.type) {
         case `insert`:
         case `update`:
-          validateJsonSerializable(mutation.modified, mutation.type)
+          validateJsonSerializable(parser, mutation.modified, mutation.type)
           break
         case `delete`:
-          validateJsonSerializable(mutation.original, mutation.type)
+          validateJsonSerializable(parser, mutation.original, mutation.type)
           break
       }
     }
 
-    // Load current data from storage
-    const currentData = loadFromStorage<Record<string, unknown>>(
-      config.storageKey,
-      storage
-    )
-
+    // Use lastKnownData (in-memory cache) instead of reading from storage
     // Apply each mutation
     for (const mutation of collectionMutations) {
       // Use the engine's pre-computed key to avoid key derivation issues
-      const key = mutation.key
-
       switch (mutation.type) {
         case `insert`:
         case `update`: {
@@ -544,18 +588,18 @@ export function localStorageCollectionOptions(
             versionKey: generateUuid(),
             data: mutation.modified,
           }
-          currentData.set(key, storedItem)
+          lastKnownData.set(mutation.key, storedItem)
           break
         }
         case `delete`: {
-          currentData.delete(key)
+          lastKnownData.delete(mutation.key)
           break
         }
       }
     }
 
     // Save to storage
-    saveToStorage(currentData)
+    saveToStorage(lastKnownData)
 
     // Confirm the mutations in the collection to move them from optimistic to synced state
     // This writes them through the sync interface to make them "synced" instead of "optimistic"
@@ -579,13 +623,15 @@ export function localStorageCollectionOptions(
 
 /**
  * Load data from storage and return as a Map
+ * @param parser - The parser to use for deserializing the data
  * @param storageKey - The key used to store data in the storage API
  * @param storage - The storage API to load from (localStorage, sessionStorage, etc.)
  * @returns Map of stored items with version tracking, or empty Map if loading fails
  */
 function loadFromStorage<T extends object>(
   storageKey: string,
-  storage: StorageApi
+  storage: StorageApi,
+  parser: Parser
 ): Map<string | number, StoredItem<T>> {
   try {
     const rawData = storage.getItem(storageKey)
@@ -593,7 +639,7 @@ function loadFromStorage<T extends object>(
       return new Map()
     }
 
-    const parsed = JSON.parse(rawData)
+    const parsed = parser.parse(rawData)
     const dataMap = new Map<string | number, StoredItem<T>>()
 
     // Handle object format where keys map to StoredItem values
@@ -602,7 +648,7 @@ function loadFromStorage<T extends object>(
       parsed !== null &&
       !Array.isArray(parsed)
     ) {
-      Object.entries(parsed).forEach(([key, value]) => {
+      Object.entries(parsed).forEach(([encodedKey, value]) => {
         // Runtime check to ensure the value has the expected StoredItem structure
         if (
           value &&
@@ -611,9 +657,10 @@ function loadFromStorage<T extends object>(
           `data` in value
         ) {
           const storedItem = value as StoredItem<T>
-          dataMap.set(key, storedItem)
+          const decodedKey = decodeStorageKey(encodedKey)
+          dataMap.set(decodedKey, storedItem)
         } else {
-          throw new InvalidStorageDataFormatError(storageKey, key)
+          throw new InvalidStorageDataFormatError(storageKey, encodedKey)
         }
       })
     } else {
@@ -644,6 +691,7 @@ function createLocalStorageSync<T extends object>(
   storageKey: string,
   storage: StorageApi,
   storageEventApi: StorageEventApi,
+  parser: Parser,
   _getKey: (item: T) => string | number,
   lastKnownData: Map<string | number, StoredItem<T>>
 ): SyncConfig<T> & {
@@ -704,7 +752,7 @@ function createLocalStorageSync<T extends object>(
     const { begin, write, commit } = syncParams
 
     // Load the new data
-    const newData = loadFromStorage<T>(storageKey, storage)
+    const newData = loadFromStorage<T>(storageKey, storage, parser)
 
     // Find the specific changes
     const changes = findChanges(lastKnownData, newData)
@@ -713,7 +761,7 @@ function createLocalStorageSync<T extends object>(
       begin()
       changes.forEach(({ type, value }) => {
         if (value) {
-          validateJsonSerializable(value, type)
+          validateJsonSerializable(parser, value, type)
           write({ type, value })
         }
       })
@@ -739,11 +787,11 @@ function createLocalStorageSync<T extends object>(
       collection = params.collection
 
       // Initial load
-      const initialData = loadFromStorage<T>(storageKey, storage)
+      const initialData = loadFromStorage<T>(storageKey, storage, parser)
       if (initialData.size > 0) {
         begin()
         initialData.forEach((storedItem) => {
-          validateJsonSerializable(storedItem.data, `load`)
+          validateJsonSerializable(parser, storedItem.data, `load`)
           write({ type: `insert`, value: storedItem.data })
         })
         commit()

@@ -3,6 +3,8 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { createCollection, createLiveQueryCollection, eq } from "@tanstack/db"
 import { useLiveInfiniteQuery } from "../src/useLiveInfiniteQuery"
 import { mockSyncCollectionOptions } from "../../db/tests/utils"
+import { createFilterFunctionFromExpression } from "../../db/src/collection/change-events"
+import type { LoadSubsetOptions } from "@tanstack/db"
 
 type Post = {
   id: string
@@ -855,7 +857,8 @@ describe(`useLiveInfiniteQuery`, () => {
   })
 
   it(`should track isFetchingNextPage when async loading is triggered`, async () => {
-    let loadSubsetCallCount = 0
+    // Define all data upfront
+    const allPosts = createMockPosts(30)
 
     const collection = createCollection<Post>({
       id: `async-loading-test`,
@@ -864,49 +867,55 @@ describe(`useLiveInfiniteQuery`, () => {
       startSync: true,
       sync: {
         sync: ({ markReady, begin, write, commit }) => {
-          // Provide initial data
+          // Provide initial data by slicing the first 15 elements
           begin()
-          for (let i = 1; i <= 15; i++) {
+          const initialPosts = allPosts.slice(0, 15)
+          for (const post of initialPosts) {
             write({
               type: `insert`,
-              value: {
-                id: `${i}`,
-                title: `Post ${i}`,
-                content: `Content ${i}`,
-                createdAt: 1000000 - i * 1000,
-                category: i % 2 === 0 ? `tech` : `life`,
-              },
+              value: post,
             })
           }
           commit()
           markReady()
 
           return {
-            loadSubset: () => {
-              loadSubsetCallCount++
+            loadSubset: (opts: LoadSubsetOptions) => {
+              // Filter the data array based on opts
+              let filtered = allPosts
 
-              // First few calls return true (initial load + window setup)
-              if (loadSubsetCallCount <= 2) {
-                return true
+              // Apply where clause if provided
+              if (opts.where) {
+                const filterFn = createFilterFunctionFromExpression(opts.where)
+                filtered = filtered.filter(filterFn)
+              }
+
+              // Sort by createdAt descending if orderBy is provided
+              if (opts.orderBy && opts.orderBy.length > 0) {
+                filtered = filtered.sort((a, b) => {
+                  // We know ordering is always by createdAt descending
+                  return b.createdAt - a.createdAt
+                })
+              }
+
+              // Apply limit if provided
+              if (opts.limit !== undefined) {
+                filtered = filtered.slice(0, opts.limit)
               }
 
               // Subsequent calls simulate async loading with a real timeout
               const loadPromise = new Promise<void>((resolve) => {
                 setTimeout(() => {
                   begin()
-                  // Load more data
-                  for (let i = 16; i <= 30; i++) {
+
+                  // Insert the requested posts
+                  for (const post of filtered) {
                     write({
                       type: `insert`,
-                      value: {
-                        id: `${i}`,
-                        title: `Post ${i}`,
-                        content: `Content ${i}`,
-                        createdAt: 1000000 - i * 1000,
-                        category: i % 2 === 0 ? `tech` : `life`,
-                      },
+                      value: post,
                     })
                   }
+
                   commit()
                   resolve()
                 }, 50)

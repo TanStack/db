@@ -1,5 +1,194 @@
 # @tanstack/react-db
 
+## 0.1.46
+
+### Patch Changes
+
+- Updated dependencies [[`99a3716`](https://github.com/TanStack/db/commit/99a371630b9f4632db86c43357c64701ecb53b0e)]:
+  - @tanstack/db@0.5.2
+
+## 0.1.45
+
+### Patch Changes
+
+- Updated dependencies [[`a83a818`](https://github.com/TanStack/db/commit/a83a8189514d22ca2fcdf34b9cb97206d3c03c38)]:
+  - @tanstack/db@0.5.1
+
+## 0.1.44
+
+### Patch Changes
+
+- Updated dependencies [[`243a35a`](https://github.com/TanStack/db/commit/243a35a632ee0aca20c3ee12ee2ac2929d8be11d), [`f9d11fc`](https://github.com/TanStack/db/commit/f9d11fc3d7297c61feb3c6876cb2f436edbb5b34), [`7aedf12`](https://github.com/TanStack/db/commit/7aedf12996a67ef64010bca0d78d51c919dd384f), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`f6ac7ea`](https://github.com/TanStack/db/commit/f6ac7eac50ae1334ddb173786a68c9fc732848f9), [`01093a7`](https://github.com/TanStack/db/commit/01093a762cf2f5f308edec7f466d1c3dabb5ea9f)]:
+  - @tanstack/db@0.5.0
+
+## 0.1.43
+
+### Patch Changes
+
+- Updated dependencies [[`6c55e16`](https://github.com/TanStack/db/commit/6c55e16a2545b479b1d47f548b6846d362573d45), [`7805afb`](https://github.com/TanStack/db/commit/7805afb7286b680168b336e77dd4de7dd1b6f06a), [`1367756`](https://github.com/TanStack/db/commit/1367756d0a68447405c5f5c1a3cca30ab0558d74)]:
+  - @tanstack/db@0.4.20
+
+## 0.1.42
+
+### Patch Changes
+
+- Updated dependencies [[`75470a8`](https://github.com/TanStack/db/commit/75470a8297f316b4817601b2ea92cb9b21cc7829)]:
+  - @tanstack/db@0.4.19
+
+## 0.1.41
+
+### Patch Changes
+
+- Add `useLiveSuspenseQuery` hook for React Suspense support ([#697](https://github.com/TanStack/db/pull/697))
+
+  Introduces a new `useLiveSuspenseQuery` hook that integrates with React Suspense and Error Boundaries, following TanStack Query's `useSuspenseQuery` pattern.
+
+  **Key features:**
+  - React 18+ compatible using the throw promise pattern
+  - Type-safe API with guaranteed data (never undefined)
+  - Automatic error handling via Error Boundaries
+  - Reactive updates after initial load via useSyncExternalStore
+  - Support for dependency-based re-suspension
+  - Works with query functions, config objects, and pre-created collections
+
+  **Example usage:**
+
+  ```tsx
+  import { Suspense } from "react"
+  import { useLiveSuspenseQuery } from "@tanstack/react-db"
+
+  function TodoList() {
+    // Data is guaranteed to be defined - no isLoading needed
+    const { data } = useLiveSuspenseQuery((q) =>
+      q
+        .from({ todos: todosCollection })
+        .where(({ todos }) => eq(todos.completed, false))
+    )
+
+    return (
+      <ul>
+        {data.map((todo) => (
+          <li key={todo.id}>{todo.text}</li>
+        ))}
+      </ul>
+    )
+  }
+
+  function App() {
+    return (
+      <Suspense fallback={<div>Loading...</div>}>
+        <TodoList />
+      </Suspense>
+    )
+  }
+  ```
+
+  **Implementation details:**
+  - Throws promises when collection is loading (caught by Suspense)
+  - Throws errors when collection fails (caught by Error Boundary)
+  - Reuses promise across re-renders to prevent infinite loops
+  - Detects dependency changes and creates new collection/promise
+  - Same TypeScript overloads as useLiveQuery for consistency
+
+  **Documentation:**
+  - Comprehensive guide in live-queries.md covering usage patterns and when to use each hook
+  - Comparison with useLiveQuery showing different approaches to loading/error states
+  - Router loader pattern recommendation for React Router/TanStack Router users
+  - Error handling examples with Suspense and Error Boundaries
+
+  Resolves #692
+
+## 0.1.40
+
+### Patch Changes
+
+- Updated dependencies [[`f416231`](https://github.com/TanStack/db/commit/f41623180c862b58b4fa6415383dfdb034f84ee9), [`b1b8299`](https://github.com/TanStack/db/commit/b1b82994cb9765225129b5a19be06e9369e3158d)]:
+  - @tanstack/db@0.4.18
+
+## 0.1.39
+
+### Patch Changes
+
+- Updated dependencies [[`49bcaa5`](https://github.com/TanStack/db/commit/49bcaa5557ba8d647c947811ed6e0c2450159d84)]:
+  - @tanstack/db@0.4.17
+
+## 0.1.38
+
+### Patch Changes
+
+- Add paced mutations with pluggable timing strategies ([#704](https://github.com/TanStack/db/pull/704))
+
+  Introduces a new paced mutations system that enables optimistic mutations with pluggable timing strategies. This provides fine-grained control over when and how mutations are persisted to the backend. Powered by [TanStack Pacer](https://github.com/TanStack/pacer).
+
+  **Key Design:**
+  - **Debounce/Throttle**: Only one pending transaction (collecting mutations) and one persisting transaction (writing to backend) at a time. Multiple rapid mutations automatically merge together.
+  - **Queue**: Each mutation creates a separate transaction, guaranteed to run in the order they're made (FIFO by default, configurable to LIFO).
+
+  **Core Features:**
+  - **Pluggable Strategy System**: Choose from debounce, queue, or throttle strategies to control mutation timing
+  - **Auto-merging Mutations**: Multiple rapid mutations on the same item automatically merge for efficiency (debounce/throttle only)
+  - **Transaction Management**: Full transaction lifecycle tracking (pending → persisting → completed/failed)
+  - **React Hook**: `usePacedMutations` for easy integration in React applications
+
+  **Available Strategies:**
+  - `debounceStrategy`: Wait for inactivity before persisting. Only final state is saved. (ideal for auto-save, search-as-you-type)
+  - `queueStrategy`: Each mutation becomes a separate transaction, processed sequentially in order (defaults to FIFO, configurable to LIFO). All mutations are guaranteed to persist. (ideal for sequential workflows, rate-limited APIs)
+  - `throttleStrategy`: Ensure minimum spacing between executions. Mutations between executions are merged. (ideal for analytics, progress updates)
+
+  **Example Usage:**
+
+  ```ts
+  import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
+
+  const mutate = usePacedMutations({
+    mutationFn: async ({ transaction }) => {
+      await api.save(transaction.mutations)
+    },
+    strategy: debounceStrategy({ wait: 500 }),
+  })
+
+  // Trigger a mutation
+  const tx = mutate(() => {
+    collection.update(id, (draft) => {
+      draft.value = newValue
+    })
+  })
+
+  // Optionally await persistence
+  await tx.isPersisted.promise
+  ```
+
+- Updated dependencies [[`979a66f`](https://github.com/TanStack/db/commit/979a66f2f6eff0ffe44dfde7c67feea933ee6110), [`f8a979b`](https://github.com/TanStack/db/commit/f8a979ba3aa90ac7e85f7a065fc050bda6589b4b), [`cb25623`](https://github.com/TanStack/db/commit/cb256234c9cd8df7771808b147e5afc2be56f51f)]:
+  - @tanstack/db@0.4.16
+
+## 0.1.37
+
+### Patch Changes
+
+- Updated dependencies [[`6738247`](https://github.com/TanStack/db/commit/673824791bcfae04acf42fc35e5d6d8755adceb2)]:
+  - @tanstack/db@0.4.15
+
+## 0.1.36
+
+### Patch Changes
+
+- Updated dependencies [[`970616b`](https://github.com/TanStack/db/commit/970616b6db723d1716eecd5076417de5d6e9a884)]:
+  - @tanstack/db@0.4.14
+
+## 0.1.35
+
+### Patch Changes
+
+- Updated dependencies [[`3c9526c`](https://github.com/TanStack/db/commit/3c9526cd1fd80032ddddff32cf4a23dfa8376888)]:
+  - @tanstack/db@0.4.13
+
+## 0.1.34
+
+### Patch Changes
+
+- Updated dependencies [[`8b29841`](https://github.com/TanStack/db/commit/8b298417964340bbac5ad08a831766f8f1497477), [`8187c6d`](https://github.com/TanStack/db/commit/8187c6d69c4b498e306ac2eb5fc7115e4f8193a5)]:
+  - @tanstack/db@0.4.12
+
 ## 0.1.33
 
 ### Patch Changes

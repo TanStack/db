@@ -100,6 +100,139 @@ describe(`createLiveQueryCollection`, () => {
     expect(activeUsers2.size).toBe(2)
   })
 
+  describe(`compareOptions inheritance`, () => {
+    it(`should inherit compareOptions from FROM collection`, async () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-lexical`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          defaultStringCollation: {
+            stringSort: `lexical`,
+          },
+        })
+      )
+
+      // Create a live query collection from the source collection
+      const liveQuery = createLiveQueryCollection((q) =>
+        q.from({ user: sourceCollection })
+      )
+
+      // The live query should inherit the compareOptions from the source collection
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+    })
+
+    it(`should inherit compareOptions from FROM collection via subquery`, async () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-locale`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          defaultStringCollation: {
+            stringSort: `locale`,
+            locale: `de-DE`,
+          },
+        })
+      )
+
+      // Create a live query collection with a subquery
+      const liveQuery = createLiveQueryCollection((q) => {
+        // Build the subquery first
+        const filteredUsers = q
+          .from({ user: sourceCollection })
+          .where(({ user }) => eq(user.active, true))
+
+        // Use the subquery in the main query
+        return q.from({ filteredUser: filteredUsers })
+      })
+
+      // The live query should inherit the compareOptions from the source collection
+      // (which is the FROM collection of the subquery)
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `de-DE`,
+      })
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `de-DE`,
+      })
+    })
+
+    it(`should use default compareOptions when FROM collection has no compareOptions`, async () => {
+      // Create a collection without compareOptions (uses defaults)
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-defaults`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          // No compareOptions specified - uses defaults
+        })
+      )
+
+      // Create a live query collection with a subquery
+      const liveQuery = createLiveQueryCollection((q) => {
+        // Build the subquery first
+        const filteredUsers = q
+          .from({ user: sourceCollection })
+          .where(({ user }) => eq(user.active, true))
+
+        // Use the subquery in the main query
+        return q.from({ filteredUser: filteredUsers })
+      })
+
+      // The live query should use default compareOptions (locale)
+      // when the source collection doesn't specify compareOptions
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+      })
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `locale`,
+      })
+    })
+
+    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, async () => {
+      // Create a collection with non-default compareOptions
+      const sourceCollection = createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `source-with-lexical`,
+          getKey: (user) => user.id,
+          initialData: sampleUsers,
+          defaultStringCollation: {
+            stringSort: `lexical`,
+          },
+        })
+      )
+
+      // Create a live query collection with explicitly provided compareOptions
+      // that differ from the source collection's compareOptions
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ user: sourceCollection }),
+        defaultStringCollation: {
+          stringSort: `locale`,
+          locale: `en-US`,
+        },
+      })
+
+      // The live query should use the explicitly provided compareOptions,
+      // not the inherited ones from the source collection
+      expect(liveQuery.compareOptions).toEqual({
+        stringSort: `locale`,
+        locale: `en-US`,
+      })
+      // The source collection should still have its original compareOptions
+      expect(sourceCollection.compareOptions).toEqual({
+        stringSort: `lexical`,
+      })
+    })
+  })
+
   it(`should call markReady when source collection returns empty array`, async () => {
     // Create an empty source collection using the mock sync options
     const emptyUsersCollection = createCollection(
@@ -1704,6 +1837,106 @@ describe(`createLiveQueryCollection`, () => {
       } finally {
         vi.useRealTimers()
       }
+    })
+  })
+
+  describe(`custom getKey with joins error handling`, () => {
+    it(`should allow custom getKey with joins (1:1 relationships)`, async () => {
+      // Custom getKey with joins is allowed for 1:1 relationships
+      // where the join produces unique keys per row
+      const base = createCollection(
+        mockSyncCollectionOptions<{ id: string; name: string }>({
+          id: `base-with-custom-key`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, name: `Item 1` }],
+        })
+      )
+
+      const related = createCollection(
+        mockSyncCollectionOptions<{ id: string; value: number }>({
+          id: `related-with-custom-key`,
+          getKey: (item) => item.id,
+          initialData: [{ id: `1`, value: 100 }],
+        })
+      )
+
+      // Custom getKey is allowed - error only occurs if actual duplicates happen
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ base })
+            .join({ related }, ({ base: b, related: r }) => eq(b.id, r.id))
+            .select(({ base: b, related: r }) => ({
+              id: b.id,
+              name: b.name,
+              value: r?.value,
+            })),
+        getKey: (item) => item.id, // Valid for 1:1 joins with unique keys
+      })
+
+      await liveQuery.preload()
+      expect(liveQuery.size).toBe(1)
+    })
+
+    it(`should throw enhanced error when duplicate keys occur with custom getKey + joins`, async () => {
+      const usersOptions = mockSyncCollectionOptions<{
+        id: string
+        name: string
+      }>({
+        id: `users-duplicate-test`,
+        getKey: (item) => item.id,
+        initialData: [{ id: `user1`, name: `User 1` }],
+      })
+      const users = createCollection(usersOptions)
+
+      const commentsOptions = mockSyncCollectionOptions<{
+        id: string
+        userId: string
+        text: string
+      }>({
+        id: `comments-duplicate-test`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `comment1`, userId: `user1`, text: `First comment` },
+        ],
+      })
+      const comments = createCollection(commentsOptions)
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ comments })
+            .join({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id))
+            .select(({ comments: c, users: u }) => ({
+              id: c.id,
+              userId: u?.id ?? c.userId,
+              text: c.text,
+              userName: u?.name,
+            })),
+        getKey: (item) => item.userId,
+        startSync: true,
+      })
+
+      await liveQuery.preload()
+      expect(liveQuery.size).toBe(1)
+
+      try {
+        commentsOptions.utils.begin()
+        commentsOptions.utils.write({
+          type: `insert`,
+          value: { id: `comment2`, userId: `user1`, text: `Second comment` },
+        })
+        commentsOptions.utils.commit()
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      } catch (error: any) {
+        expect(error.message).toContain(`already exists in the collection`)
+        expect(error.message).toContain(`custom getKey`)
+        expect(error.message).toContain(`joined queries`)
+        expect(error.message).toContain(`composite key`)
+        return
+      }
+
+      throw new Error(`Expected DuplicateKeySyncError to be thrown`)
     })
   })
 })

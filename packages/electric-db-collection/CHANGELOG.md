@@ -1,5 +1,117 @@
 # @tanstack/electric-db-collection
 
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [[`99a3716`](https://github.com/TanStack/db/commit/99a371630b9f4632db86c43357c64701ecb53b0e)]:
+  - @tanstack/db@0.5.2
+
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`a83a818`](https://github.com/TanStack/db/commit/a83a8189514d22ca2fcdf34b9cb97206d3c03c38)]:
+  - @tanstack/db@0.5.1
+
+## 0.2.0
+
+### Minor Changes
+
+- Add timeout support to electricCollectionOptions matching strategies. You can now specify a custom timeout when returning txids from mutation handlers (onInsert, onUpdate, onDelete). ([#798](https://github.com/TanStack/db/pull/798))
+
+  Previously, users could only customize timeouts when manually calling `collection.utils.awaitTxId()`, but not when using the automatic txid matching strategy.
+
+  **Example:**
+
+  ```ts
+  const collection = createCollection(
+    electricCollectionOptions({
+      // ... other config
+      onInsert: async ({ transaction }) => {
+        const newItem = transaction.mutations[0].modified
+        const result = await api.todos.create({ data: newItem })
+        // Specify custom timeout (in milliseconds)
+        return { txid: result.txid, timeout: 10000 }
+      },
+    })
+  )
+  ```
+
+  The timeout parameter is optional and defaults to 5000ms when not specified. It works with both single txids and arrays of txids.
+
+### Patch Changes
+
+- Fix array txid handling in electric collection handlers. When returning `{ txid: [txid1, txid2] }` from an `onInsert`, `onUpdate`, or `onDelete` handler, the system would timeout with `TimeoutWaitingForTxIdError` instead of properly waiting for all txids. The bug was caused by passing array indices as timeout parameters when calling `awaitTxId` via `.map()`. ([#795](https://github.com/TanStack/db/pull/795))
+
+- Handle predicates that are pushed down. ([#763](https://github.com/TanStack/db/pull/763))
+
+- Updated dependencies [[`243a35a`](https://github.com/TanStack/db/commit/243a35a632ee0aca20c3ee12ee2ac2929d8be11d), [`f9d11fc`](https://github.com/TanStack/db/commit/f9d11fc3d7297c61feb3c6876cb2f436edbb5b34), [`7aedf12`](https://github.com/TanStack/db/commit/7aedf12996a67ef64010bca0d78d51c919dd384f), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`f6ac7ea`](https://github.com/TanStack/db/commit/f6ac7eac50ae1334ddb173786a68c9fc732848f9), [`01093a7`](https://github.com/TanStack/db/commit/01093a762cf2f5f308edec7f466d1c3dabb5ea9f)]:
+  - @tanstack/db@0.5.0
+
+## 0.1.44
+
+### Patch Changes
+
+- Updated dependencies [[`6c55e16`](https://github.com/TanStack/db/commit/6c55e16a2545b479b1d47f548b6846d362573d45), [`7805afb`](https://github.com/TanStack/db/commit/7805afb7286b680168b336e77dd4de7dd1b6f06a), [`1367756`](https://github.com/TanStack/db/commit/1367756d0a68447405c5f5c1a3cca30ab0558d74)]:
+  - @tanstack/db@0.4.20
+
+## 0.1.43
+
+### Patch Changes
+
+- Updated dependencies [[`75470a8`](https://github.com/TanStack/db/commit/75470a8297f316b4817601b2ea92cb9b21cc7829)]:
+  - @tanstack/db@0.4.19
+
+## 0.1.42
+
+### Patch Changes
+
+- Updated dependencies [[`f416231`](https://github.com/TanStack/db/commit/f41623180c862b58b4fa6415383dfdb034f84ee9), [`b1b8299`](https://github.com/TanStack/db/commit/b1b82994cb9765225129b5a19be06e9369e3158d)]:
+  - @tanstack/db@0.4.18
+
+## 0.1.41
+
+### Patch Changes
+
+- Updated dependencies [[`49bcaa5`](https://github.com/TanStack/db/commit/49bcaa5557ba8d647c947811ed6e0c2450159d84)]:
+  - @tanstack/db@0.4.17
+
+## 0.1.40
+
+### Patch Changes
+
+- Updated dependencies [[`979a66f`](https://github.com/TanStack/db/commit/979a66f2f6eff0ffe44dfde7c67feea933ee6110), [`f8a979b`](https://github.com/TanStack/db/commit/f8a979ba3aa90ac7e85f7a065fc050bda6589b4b), [`cb25623`](https://github.com/TanStack/db/commit/cb256234c9cd8df7771808b147e5afc2be56f51f)]:
+  - @tanstack/db@0.4.16
+
+## 0.1.39
+
+### Patch Changes
+
+- Updated dependencies [[`6738247`](https://github.com/TanStack/db/commit/673824791bcfae04acf42fc35e5d6d8755adceb2)]:
+  - @tanstack/db@0.4.15
+
+## 0.1.38
+
+### Patch Changes
+
+- Updated dependencies [[`970616b`](https://github.com/TanStack/db/commit/970616b6db723d1716eecd5076417de5d6e9a884)]:
+  - @tanstack/db@0.4.14
+
+## 0.1.37
+
+### Patch Changes
+
+- Updated dependencies [[`3c9526c`](https://github.com/TanStack/db/commit/3c9526cd1fd80032ddddff32cf4a23dfa8376888)]:
+  - @tanstack/db@0.4.13
+
+## 0.1.36
+
+### Patch Changes
+
+- Updated dependencies [[`8b29841`](https://github.com/TanStack/db/commit/8b298417964340bbac5ad08a831766f8f1497477), [`8187c6d`](https://github.com/TanStack/db/commit/8187c6d69c4b498e306ac2eb5fc7115e4f8193a5)]:
+  - @tanstack/db@0.4.12
+
 ## 0.1.35
 
 ### Patch Changes

@@ -87,12 +87,25 @@ class TopKArray<V> implements TopK<V> {
   }): TopKMoveChanges<V> {
     const oldOffset = this.#topKStart
     const oldLimit = this.#topKEnd - this.#topKStart
-    const oldRange: HRange = [this.#topKStart, this.#topKEnd]
+
+    // `this.#topKEnd` can be `Infinity` if it has no limit
+    // but `diffHalfOpen` expects a finite range
+    // so we restrict it to the size of the topK if topKEnd is infinite
+    const oldRange: HRange = [
+      this.#topKStart,
+      this.#topKEnd === Infinity ? this.#topKStart + this.size : this.#topKEnd,
+    ]
 
     this.#topKStart = offset ?? oldOffset
-    this.#topKEnd = this.#topKStart + (limit ?? oldLimit)
+    this.#topKEnd = this.#topKStart + (limit ?? oldLimit) // can be `Infinity` if limit is `Infinity`
 
-    const newRange: HRange = [this.#topKStart, this.#topKEnd]
+    // Also handle `Infinity` in the newRange
+    const newRange: HRange = [
+      this.#topKStart,
+      this.#topKEnd === Infinity
+        ? Math.max(this.#topKStart + this.size, oldRange[1]) // since the new limit is Infinity we need to take everything (so we need to take the biggest (finite) topKEnd)
+        : this.#topKEnd,
+    ]
     const { onlyInA, onlyInB } = diffHalfOpen(oldRange, newRange)
 
     const moveIns: Array<IndexedValue<V>> = []
