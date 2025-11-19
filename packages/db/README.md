@@ -1,8 +1,8 @@
 # @tanstack/db
 
-**A reactive client store for building super fast apps on sync**
+**The reactive client-first store for your API**
 
-TanStack DB extends TanStack Query with collections, live queries and optimistic mutations that keep your UI reactive, consistent and blazing fast 🔥
+Stop building custom endpoints for every view. TanStack DB extends TanStack Query with collections, live queries and optimistic mutations that keep your UI reactive, consistent and blazing fast 🔥
 
 <p>
   <a href="https://x.com/intent/post?text=TanStack%20DB&url=https://tanstack.com/db">
