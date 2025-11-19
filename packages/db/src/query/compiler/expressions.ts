@@ -2,30 +2,6 @@ import { Func, PropRef, Value } from "../ir.js"
 import type { BasicExpression, OrderBy } from "../ir.js"
 
 /**
- * Determines if a WHERE clause is a valid BasicExpression that can be normalized
- * and used for collection subscriptions.
- *
- * This function validates that the expression has a valid BasicExpression structure
- * (values, references, or functions with valid arguments). All operators are allowed
- * since downstream systems (filtering, indexing) handle unsupported operators gracefully.
- *
- * @param whereClause - The WHERE clause to check
- * @returns True if the clause is a valid BasicExpression structure
- */
-export function isConvertibleToCollectionFilter(
-  whereClause: BasicExpression<boolean>
-): boolean {
-  const tpe = whereClause.type
-  if (tpe === `func`) {
-    // Recursively check all arguments are valid BasicExpressions
-    return whereClause.args.every((arg) =>
-      isConvertibleToCollectionFilter(arg as BasicExpression<boolean>)
-    )
-  }
-  return [`val`, `ref`].includes(tpe)
-}
-
-/**
  * Normalizes a WHERE clause expression by removing table aliases from property references.
  *
  * This function recursively traverses an expression tree and creates new BasicExpression
