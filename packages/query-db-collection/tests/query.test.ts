@@ -4,6 +4,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   eq,
+  ilike,
   or,
 } from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
@@ -12,6 +13,7 @@ import type {
   Collection,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetOptions,
   TransactionWithMutations,
   UpdateMutationFnParams,
 } from "@tanstack/db"
@@ -445,6 +447,132 @@ describe(`QueryCollection`, () => {
     expect(queryFn).toHaveBeenCalledWith(
       expect.objectContaining({ meta: { ...meta, loadSubsetOptions: {} } })
     )
+  })
+
+  describe(`loadSubsetOptions passed to queryFn`, () => {
+    it(`should pass eq where clause to queryFn via loadSubsetOptions`, async () => {
+      const queryKey = [`loadSubsetTest`]
+      const queryFn = vi
+        .fn()
+        .mockImplementation((ctx: QueryFunctionContext<any>) => {
+          const loadSubsetOptions = ctx.meta?.loadSubsetOptions as
+            | LoadSubsetOptions
+            | undefined
+          // Verify where clause is present
+          expect(loadSubsetOptions?.where).toBeDefined()
+          expect(loadSubsetOptions?.where).not.toBeNull()
+          if (loadSubsetOptions?.where?.type === `func`) {
+            expect(loadSubsetOptions.where.name).toBe(`eq`)
+          }
+          return Promise.resolve([])
+        })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `loadSubsetTest`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+        // startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create a live query with an eq where clause
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.id, `1`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await liveQuery.preload()
+
+      // Wait for queryFn to be called
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalled()
+      })
+
+      // Verify queryFn was called with loadSubsetOptions containing the where clause
+      expect(queryFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          meta: expect.objectContaining({
+            loadSubsetOptions: expect.objectContaining({
+              where: expect.objectContaining({
+                type: `func`,
+                name: `eq`,
+              }),
+            }),
+          }),
+        })
+      )
+    })
+
+    it(`should pass ilike where clause to queryFn via loadSubsetOptions`, async () => {
+      const queryFn = vi
+        .fn()
+        .mockImplementation((ctx: QueryFunctionContext<any>) => {
+          const loadSubsetOptions = ctx.meta?.loadSubsetOptions as
+            | LoadSubsetOptions
+            | undefined
+          // Verify where clause is present (this was the bug - it was undefined/null before the fix)
+          expect(loadSubsetOptions?.where).toBeDefined()
+          expect(loadSubsetOptions?.where).not.toBeNull()
+          if (loadSubsetOptions?.where?.type === `func`) {
+            expect(loadSubsetOptions.where.name).toBe(`ilike`)
+          }
+          return Promise.resolve([])
+        })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `loadSubsetIlikeTest`,
+        queryClient,
+        queryKey: [`loadSubsetIlikeTest`],
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+        // startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create a live query with an ilike where clause
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => ilike(item.name, `%test%`))
+            .orderBy(({ item }) => item.name)
+            .limit(10),
+      })
+
+      await liveQuery.preload()
+
+      // Wait for queryFn to be called
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalled()
+      })
+
+      // Verify queryFn was called with loadSubsetOptions containing the ilike where clause
+      // Without the fix: where would be undefined/null
+      // With the fix: where should be defined with the ilike expression
+      expect(queryFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          meta: expect.objectContaining({
+            loadSubsetOptions: expect.objectContaining({
+              where: expect.objectContaining({
+                type: `func`,
+                name: `ilike`,
+              }),
+            }),
+          }),
+        })
+      )
+    })
   })
 
   describe(`Select method testing`, () => {

@@ -5,15 +5,17 @@ import {
   and,
   createLiveQueryCollection,
   eq,
+  ilike,
   liveQueryCollectionOptions,
 } from "../../src/query/index.js"
 import { Query } from "../../src/query/builder/index.js"
 import {
+  flushPromises,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from "../utils.js"
 import { createDeferred } from "../../src/deferred"
-import type { ChangeMessage } from "../../src/types.js"
+import type { ChangeMessage, LoadSubsetOptions } from "../../src/types.js"
 
 // Sample user type for tests
 type User = {
@@ -1937,6 +1939,107 @@ describe(`createLiveQueryCollection`, () => {
       }
 
       throw new Error(`Expected DuplicateKeySyncError to be thrown`)
+    })
+  })
+
+  describe(`where clauses passed to loadSubset`, () => {
+    it(`passes eq where clause to loadSubset`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const baseCollection = createCollection<{ id: number; name: string }>({
+        id: `test-base`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with a where clause
+      // This will go through convertToBasicExpression
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q.from({ item: baseCollection }).where(({ item }) => eq(item.id, 2))
+      )
+
+      // Trigger sync which will call loadSubset
+      await liveQueryCollection.preload()
+      await flushPromises()
+
+      expect(capturedOptions.length).toBeGreaterThan(0)
+      const lastCall = capturedOptions[capturedOptions.length - 1]
+      expect(lastCall?.where).toBeDefined()
+      // The where clause should be normalized (alias removed), so it should be eq(ref(['id']), 2)
+      expect(lastCall?.where?.type).toBe(`func`)
+      if (lastCall?.where?.type === `func`) {
+        expect(lastCall.where.name).toBe(`eq`)
+      }
+
+      resolveLoadSubset!()
+      await flushPromises()
+    })
+
+    it(`passes ilike where clause to loadSubset`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const baseCollection = createCollection<{ id: number; name: string }>({
+        id: `test-base`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with an ilike where clause
+      // This will go through convertToBasicExpression
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q
+          .from({ item: baseCollection })
+          .where(({ item }) => ilike(item.name, `%test%`))
+      )
+
+      // Trigger sync which will call loadSubset
+      await liveQueryCollection.preload()
+      await flushPromises()
+
+      expect(capturedOptions.length).toBeGreaterThan(0)
+      const lastCall = capturedOptions[capturedOptions.length - 1]
+      // Without the fix: where would be undefined/null
+      // With the fix: where should be defined with the ilike expression
+      expect(lastCall?.where).toBeDefined()
+      expect(lastCall?.where).not.toBeNull()
+      // The where clause should be normalized (alias removed), so it should be ilike(ref(['name']), '%test%')
+      expect(lastCall?.where?.type).toBe(`func`)
+      if (lastCall?.where?.type === `func`) {
+        expect(lastCall.where.name).toBe(`ilike`)
+      }
+
+      resolveLoadSubset!()
+      await flushPromises()
     })
   })
 })
