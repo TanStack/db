@@ -669,22 +669,20 @@ export class CollectionStateManager<
       // after the truncate snapshot are preserved.
       for (const transaction of this.transactions.values()) {
         if (![`completed`, `failed`].includes(transaction.state)) {
+          // Skip re-applying optimistic state for persisting transactions entirely
+          // (not just for changed keys). When a transaction is persisting, its mutation
+          // handler may write server data via sync functions. That synced data should be
+          // visible immediately, not masked by stale optimistic state.
+          // EXCEPT during truncate operations where optimistic state should always be preserved.
+          if (!hasTruncateSync && transaction.state === `persisting`) {
+            continue
+          }
+
           for (const mutation of transaction.mutations) {
             if (
               this.isThisCollection(mutation.collection) &&
               mutation.optimistic
             ) {
-              // Skip re-applying optimistic state for persisting transactions
-              // if the mutation key was just synced (prevents overwriting fresh server data)
-              // EXCEPT during truncate operations where optimistic state should always be preserved
-              if (
-                !hasTruncateSync &&
-                transaction.state === `persisting` &&
-                changedKeys.has(mutation.key)
-              ) {
-                continue
-              }
-
               switch (mutation.type) {
                 case `insert`:
                 case `update`:
