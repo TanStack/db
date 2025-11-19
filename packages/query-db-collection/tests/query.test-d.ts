@@ -302,6 +302,56 @@ describe(`Query collection type resolution tests`, () => {
     })
   })
 
+  describe(`no schema with type inference from queryFn`, () => {
+    it(`should work without schema when queryFn has explicit return type`, () => {
+      interface Todo {
+        id: string
+        title: string
+        completed: boolean
+      }
+
+      const options = queryCollectionOptions({
+        queryKey: [`todos-no-schema`],
+        queryFn: async (): Promise<Array<Todo>> => {
+          return [] as Array<Todo>
+        },
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      const collection = createCollection(options)
+
+      // Verify types are correctly inferred
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[Todo]>()
+      expectTypeOf(collection.toArray).toEqualTypeOf<Array<Todo>>()
+    })
+
+    it(`should work without schema when queryFn return type is inferred`, () => {
+      interface Todo {
+        id: string
+        title: string
+        completed: boolean
+      }
+
+      const fetchTodos = async (): Promise<Array<Todo>> => {
+        return [] as Array<Todo>
+      }
+
+      const options = queryCollectionOptions({
+        queryKey: [`todos-no-schema-inferred`],
+        queryFn: fetchTodos,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      const collection = createCollection(options)
+
+      // Verify types are correctly inferred
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[Todo]>()
+      expectTypeOf(collection.toArray).toEqualTypeOf<Array<Todo>>()
+    })
+  })
+
   describe(`select type inference`, () => {
     it(`queryFn type inference`, () => {
       const dataSchema = z.object({
