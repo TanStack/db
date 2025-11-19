@@ -72,6 +72,38 @@ import type {
  *   )
  * }
  *
+ * @remarks
+ * **Important:** This hook does NOT support disabled queries (returning undefined/null).
+ * Following TanStack Query's useSuspenseQuery design, the query callback must always
+ * return a valid query, collection, or config object.
+ *
+ * ❌ **This will cause a type error:**
+ * ```ts
+ * useLiveSuspenseQuery(
+ *   (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+ * )
+ * ```
+ *
+ * ✅ **Use conditional rendering instead:**
+ * ```ts
+ * function Profile({ userId }: { userId: string }) {
+ *   const { data } = useLiveSuspenseQuery(
+ *     (q) => q.from({ users }).where(({ users }) => eq(users.id, userId))
+ *   )
+ *   return <div>{data.name}</div>
+ * }
+ *
+ * // In parent component:
+ * {userId ? <Profile userId={userId} /> : <div>No user</div>}
+ * ```
+ *
+ * ✅ **Or use useLiveQuery for conditional queries:**
+ * ```ts
+ * const { data, isEnabled } = useLiveQuery(
+ *   (q) => userId ? q.from({ users }) : undefined,  // ✅ Supported!
+ *   [userId]
+ * )
+ * ```
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveSuspenseQuery<TContext extends Context>(
