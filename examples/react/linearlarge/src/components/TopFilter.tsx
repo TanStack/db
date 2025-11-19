@@ -4,7 +4,7 @@ import { useFilterState, type FilterState } from '@/utils/filterState'
 
 interface TopFilterProps {
   hideSort?: boolean
-  issueCount?: number
+  issueCount?: number | undefined
   title?: string
 }
 
@@ -26,7 +26,7 @@ const StatusDisplay: Record<string, string> = {
 
 export function TopFilter({
   hideSort,
-  issueCount = 0,
+  issueCount,
   title: titleProp = 'All issues',
 }: TopFilterProps) {
   const [filterState, setFilterState] = useFilterState()
@@ -56,7 +56,7 @@ export function TopFilter({
         {/* left section */}
         <div className="flex items-center">
           <div className="p-1 font-semibold me-1">{title}</div>
-          <span>{issueCount.toLocaleString()}</span>
+          <span>{issueCount !== undefined ? issueCount.toLocaleString() : ''}</span>
           <FilterMenu
             button={
               <button

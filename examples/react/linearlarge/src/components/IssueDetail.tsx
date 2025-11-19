@@ -1,4 +1,4 @@
-import { eq, useLiveQuery } from '@tanstack/react-db'
+import { eq, useLiveQuery, usePacedMutations, debounceStrategy } from '@tanstack/react-db'
 import { useEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
@@ -6,7 +6,6 @@ import { Editor } from './Editor'
 import { Comments } from './Comments'
 import type { Priority, Status } from '@/db/schema'
 import { cn } from '@/lib/utils'
-import { useDebounce } from '@/hooks/useDebounce'
 import { useMode } from '@/lib/mode-context'
 import { useUser } from '@/lib/user-context'
 
@@ -30,9 +29,6 @@ export function IssueDetail({ issueId }: IssueDetailProps) {
   const [title, setTitle] = useState(issue?.title ?? ``)
   const [description, setDescription] = useState(issue?.description ?? ``)
 
-  const debouncedTitle = useDebounce(title, 500)
-  const debouncedDescription = useDebounce(description, 500)
-
   useEffect(() => {
     if (issue) {
       setTitle(issue.title)
@@ -40,28 +36,62 @@ export function IssueDetail({ issueId }: IssueDetailProps) {
     }
   }, [issue?.id])
 
-  useEffect(() => {
-    if (!issue) return
-
-    if (debouncedTitle !== issue.title && debouncedTitle.trim()) {
-      issuesCollection.update(issue.id, (draft) => {
-        draft.title = debouncedTitle
+  const mutateTitle = usePacedMutations<{ issueId: string; title: string }>({
+    onMutate: ({ issueId, title }) => {
+      if (!title.trim()) return
+      issuesCollection.update(issueId, (draft) => {
+        draft.title = title
         draft.modified = new Date()
       })
-    }
-  }, [debouncedTitle, issue, issuesCollection])
+    },
+    mutationFn: async ({ transaction }) => {
+      if (!user) return
+      const mutations = transaction.mutations
+      const latest = mutations[mutations.length - 1].modified
 
-  useEffect(() => {
-    if (!issue) return
+      await fetch('/api/issues/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id,
+          'x-user-name': user.username,
+        },
+        body: JSON.stringify({
+          id: latest.id,
+          title: latest.title,
+        }),
+      })
+    },
+    strategy: debounceStrategy({ wait: 500 }),
+  })
 
-    if (debouncedDescription !== issue.description) {
-      issuesCollection.update(issue.id, (draft) => {
-        console.log({ draft })
-        draft.description = debouncedDescription
+  const mutateDescription = usePacedMutations<{ issueId: string; description: string }>({
+    onMutate: ({ issueId, description }) => {
+      issuesCollection.update(issueId, (draft) => {
+        draft.description = description
         draft.modified = new Date()
       })
-    }
-  }, [debouncedDescription, issue, issuesCollection])
+    },
+    mutationFn: async ({ transaction }) => {
+      if (!user) return
+      const mutations = transaction.mutations
+      const latest = mutations[mutations.length - 1].modified
+
+      await fetch('/api/issues/update', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-id': user.id,
+          'x-user-name': user.username,
+        },
+        body: JSON.stringify({
+          id: latest.issueId,
+          description: latest.description,
+        }),
+      })
+    },
+    strategy: debounceStrategy({ wait: 500 }),
+  })
 
   const handleStatusChange = (newStatus: Status) => {
     if (!issue) return
@@ -90,7 +120,7 @@ export function IssueDetail({ issueId }: IssueDetailProps) {
   return (
     <div className="max-w-4xl mx-auto p-8">
       <Link
-        to="/issues"
+        to="/"
         search={(prev) => prev}
         className={cn(
           `inline-flex items-center gap-2 text-sm text-gray-600`,
@@ -104,11 +134,22 @@ export function IssueDetail({ issueId }: IssueDetailProps) {
       <input
         type="text"
         value={title}
-        onChange={(e) => setTitle(e.target.value)}
+        onChange={(e) => {
+          const newTitle = e.target.value
+          setTitle(newTitle)
+          if (issue && user && isOwner) {
+            mutateTitle({
+              issueId: issue.id,
+              title: newTitle,
+            })
+          }
+        }}
+        disabled={!isOwner}
         className={cn(
           `text-3xl font-bold w-full mb-4`,
           `border-none outline-none focus:ring-0`,
-          `placeholder-gray-400`
+          `placeholder-gray-400`,
+          !isOwner && `opacity-60 cursor-not-allowed`
         )}
         placeholder="Issue title"
       />
@@ -117,9 +158,11 @@ export function IssueDetail({ issueId }: IssueDetailProps) {
         <select
           value={issue.status}
           onChange={(e) => handleStatusChange(e.target.value as Status)}
+          disabled={!isOwner}
           className={cn(
             `px-3 py-1.5 border border-gray-300 rounded-md text-sm`,
-            `focus:outline-none focus:ring-2 focus:ring-blue-500`
+            `focus:outline-none focus:ring-2 focus:ring-blue-500`,
+            !isOwner && `opacity-60 cursor-not-allowed`
           )}
         >
           <option value="backlog">Backlog</option>
@@ -132,9 +175,11 @@ export function IssueDetail({ issueId }: IssueDetailProps) {
         <select
           value={issue.priority}
           onChange={(e) => handlePriorityChange(e.target.value as Priority)}
+          disabled={!isOwner}
           className={cn(
             `px-3 py-1.5 border border-gray-300 rounded-md text-sm`,
-            `focus:outline-none focus:ring-2 focus:ring-blue-500`
+            `focus:outline-none focus:ring-2 focus:ring-blue-500`,
+            !isOwner && `opacity-60 cursor-not-allowed`
           )}
         >
           <option value="none">No Priority</option>
@@ -148,7 +193,18 @@ export function IssueDetail({ issueId }: IssueDetailProps) {
       <div className="mb-8">
         <h3 className="text-lg font-semibold mb-3">Description</h3>
         {isOwner ? (
-          <Editor content={description} onChange={setDescription} />
+          <Editor
+            content={description}
+            onChange={(newDescription) => {
+              setDescription(newDescription)
+              if (issue && user) {
+                mutateDescription({
+                  issueId: issue.id,
+                  description: newDescription,
+                })
+              }
+            }}
+          />
         ) : (
           <div className="prose max-w-none p-4 bg-gray-50 rounded-lg border border-gray-200">
             {description || (

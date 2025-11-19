@@ -1,4 +1,5 @@
-import { createContext, useContext, useState, type ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
+import { useNavigate, useSearch } from '@tanstack/react-router'
 import type { Collection } from '@tanstack/db'
 import type { Issue, Comment } from '@/db/schema'
 import {
@@ -22,7 +23,17 @@ interface ModeContextValue {
 const ModeContext = createContext<ModeContextValue | null>(null)
 
 export function ModeProvider({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<SyncMode>('query')
+  const navigate = useNavigate()
+  const search = useSearch({ strict: false })
+
+  // Read mode from query param, default to 'query'
+  const mode = (search.mode === 'electric' ? 'electric' : 'query') as SyncMode
+
+  const setMode = (newMode: SyncMode) => {
+    navigate({
+      search: (prev) => ({ ...prev, mode: newMode }),
+    })
+  }
 
   const issuesCollection =
     mode === 'query' ? issuesQueryCollection : issuesElectricCollection

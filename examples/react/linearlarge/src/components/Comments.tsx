@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { eq, useLiveQuery } from '@tanstack/react-db'
 import { Send } from 'lucide-react'
+import Avatar from './Avatar'
 import { useMode } from '@/lib/mode-context'
 import { useUser } from '@/lib/user-context'
 import { cn } from '@/lib/utils'
-import Avatar from './Avatar'
 
 interface CommentsProps {
   issueId: string
@@ -13,57 +13,34 @@ interface CommentsProps {
 export function Comments({ issueId }: CommentsProps) {
   const { commentsCollection } = useMode()
   const { user } = useUser()
-  const [draftCommentId, setDraftCommentId] = useState<string | null>(null)
+  const [commentBody, setCommentBody] = useState(``)
 
-  // Get all comments for this issue including draft
-  const { data: allComments } = useLiveQuery((q) =>
+  // Get all comments for this issue
+  const { data: comments } = useLiveQuery((q) =>
     q
       .from({ comment: commentsCollection })
       .where(({ comment }) => eq(comment.issue_id, issueId))
       .orderBy(({ comment }) => comment.created_at, `asc`)
+      .limit(1000)
   )
-
-  // Filter out the draft comment for display
-  const comments = allComments?.filter((c) => c.id !== draftCommentId)
-  const draft = allComments?.find((c) => c.id === draftCommentId)
-
-  // Initialize draft
-  useEffect(() => {
-    if (!draftCommentId && user) {
-      const newDraftId = `draft-${issueId}-${crypto.randomUUID()}`
-      setDraftCommentId(newDraftId)
-
-      // Insert draft directly into collection
-      commentsCollection.insert({
-        id: newDraftId,
-        body: '',
-        issue_id: issueId,
-        user_id: user.id,
-        username: user.username,
-        created_at: new Date(),
-        modified: new Date(),
-      })
-    }
-  }, [draftCommentId, user, issueId, commentsCollection])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!draft || !draft.body.trim() || !user) return
+    if (!commentBody.trim() || !user) return
 
-    // Draft is already in collection and will persist automatically
-    // Create a new draft for the next comment
-    const newDraftId = `draft-${issueId}-${crypto.randomUUID()}`
-    setDraftCommentId(newDraftId)
-
+    // Insert the new comment into the collection
     commentsCollection.insert({
-      id: newDraftId,
-      body: '',
+      id: crypto.randomUUID(),
+      body: commentBody.trim(),
       issue_id: issueId,
       user_id: user.id,
       username: user.username,
       created_at: new Date(),
       modified: new Date(),
     })
+
+    // Clear the input
+    setCommentBody(``)
   }
 
   return (
@@ -71,7 +48,7 @@ export function Comments({ issueId }: CommentsProps) {
       <h3 className="text-lg font-semibold">Comments</h3>
 
       <div className="space-y-3">
-        {comments?.map((comment) => (
+        {comments.map((comment) => (
           <div
             key={comment.id}
             className="bg-gray-50 rounded-lg p-4 border border-gray-200"
@@ -95,15 +72,8 @@ export function Comments({ issueId }: CommentsProps) {
       <form onSubmit={handleSubmit} className="flex gap-2">
         <input
           type="text"
-          value={draft?.body ?? ''}
-          onChange={(e) => {
-            const value = e.target.value
-            if (draft) {
-              commentsCollection.update(draft.id, (d) => {
-                d.body = value
-              })
-            }
-          }}
+          value={commentBody}
+          onChange={(e) => setCommentBody(e.target.value)}
           placeholder="Add a comment..."
           className={cn(
             `flex-1 px-4 py-2 border border-gray-300 rounded-lg`,
@@ -112,7 +82,7 @@ export function Comments({ issueId }: CommentsProps) {
         />
         <button
           type="submit"
-          disabled={!draft?.body.trim()}
+          disabled={!commentBody.trim()}
           className={cn(
             `px-4 py-2 bg-primary text-white rounded-lg`,
             `hover:opacity-90 transition-opacity`,

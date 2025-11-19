@@ -194,6 +194,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   // Adjust window when pagination changes
   useEffect(() => {
     const utils = queryResult.collection.utils
+    // For query collections that fetch from API, we want to fetch all loaded pages
+    // Set offset to 0 and limit to cover all loaded pages plus one for peek ahead
     const expectedOffset = 0
     const expectedLimit = loadedPageCount * pageSize + 1 // +1 for peek ahead
 

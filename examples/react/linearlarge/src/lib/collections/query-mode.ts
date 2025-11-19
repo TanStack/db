@@ -1,19 +1,111 @@
 import { createCollection } from '@tanstack/react-db'
-import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import {
+  queryCollectionOptions,
+  parseLoadSubsetOptions,
+} from '@tanstack/query-db-collection'
 import { QueryClient } from '@tanstack/query-core'
 import { selectIssueSchema, selectCommentSchema } from '@/db/schema'
 
 export const queryClient = new QueryClient()
 
+// Helper function to create stable query keys from predicates
+const serializePredicates = (opts: any) => {
+  if (!opts || (!opts.where && !opts.orderBy && !opts.limit && !opts.offset)) {
+    return null
+  }
+  return JSON.stringify({
+    where: opts.where,
+    orderBy: opts.orderBy,
+    limit: opts.limit,
+    offset: opts.offset,
+  })
+}
+
 export const issuesQueryCollection = createCollection(
   queryCollectionOptions({
     id: 'issues-query',
-    queryKey: ['issues'],
-    refetchInterval: 3000, // Poll every 3 seconds
+    queryKey: (opts) => ['issues', serializePredicates(opts)],
+    syncMode: 'on-demand',
     queryClient,
+    staleTime: 5 * 60 * 1000, // 5 minutes
 
-    queryFn: async () => {
-      const response = await fetch('/api/issues')
+    queryFn: async (ctx) => {
+      // Parse predicates from loadSubsetOptions
+      const { limit, where, orderBy, offset } = ctx.meta?.loadSubsetOptions || {}
+      const parsed = parseLoadSubsetOptions({ where, orderBy, limit, offset })
+
+      // Build query parameters from parsed filters
+      const params = new URLSearchParams()
+
+      // Handle pagination - for query collections, pageParam takes precedence
+      // (useLiveInfiniteQuery sets offset=0 via setWindow, but we need actual page offsets)
+      console.log('🔍 Issues Pagination:', {
+        offsetFromSetWindow: offset,
+        pageParam: ctx.pageParam,
+        parsedLimit: parsed.limit,
+        parsedOffset: parsed.offset,
+      })
+
+      if (ctx.pageParam !== undefined && parsed.limit) {
+        const calculatedOffset = ctx.pageParam * parsed.limit
+        params.set('offset', String(calculatedOffset))
+        console.log('✅ Using pageParam offset:', calculatedOffset)
+      } else if (offset !== undefined && offset !== 0) {
+        params.set('offset', String(offset))
+        console.log('✅ Using setWindow offset:', offset)
+      }
+
+      // Add filters
+      parsed.filters.forEach(({ field, operator, value }) => {
+        const fieldName = field.join('.')
+
+        // Serialize value properly (dates to ISO, etc.)
+        const serializeValue = (val: any) => {
+          if (val instanceof Date) {
+            return val.toISOString()
+          }
+          return String(val)
+        }
+
+        if (operator === 'eq') {
+          params.set(fieldName, serializeValue(value))
+        } else if (operator === 'lt') {
+          params.set(`${fieldName}_lt`, serializeValue(value))
+        } else if (operator === 'lte') {
+          params.set(`${fieldName}_lte`, serializeValue(value))
+        } else if (operator === 'gt') {
+          params.set(`${fieldName}_gt`, serializeValue(value))
+        } else if (operator === 'gte') {
+          params.set(`${fieldName}_gte`, serializeValue(value))
+        } else if (operator === 'in') {
+          params.set(`${fieldName}_in`, JSON.stringify(value))
+        }
+      })
+
+      // Add sorting
+      if (parsed.sorts.length > 0) {
+        const sortParam = parsed.sorts
+          .map((s) => `${s.field.join('.')}:${s.direction}`)
+          .join(',')
+        params.set('sort', sortParam)
+      }
+
+      // Add limit
+      if (parsed.limit) {
+        params.set('limit', String(parsed.limit))
+      }
+
+      const url = params.toString() ? `/api/issues?${params}` : '/api/issues'
+      const response = await fetch(url)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Failed to fetch issues:', response.status, errorText)
+        throw new Error(
+          `Failed to fetch issues: ${response.status} ${errorText}`
+        )
+      }
+
       const issues = await response.json()
       return issues.map((issue) => ({
         ...issue,
@@ -88,12 +180,81 @@ export const issuesQueryCollection = createCollection(
 export const commentsQueryCollection = createCollection(
   queryCollectionOptions({
     id: 'comments-query',
-    queryKey: ['comments'],
-    refetchInterval: 3000,
+    queryKey: (opts) => ['comments', serializePredicates(opts)],
+    syncMode: 'on-demand',
     queryClient,
+    staleTime: 5 * 60 * 1000, // 5 minutes
 
-    queryFn: async () => {
-      const response = await fetch('/api/comments')
+    queryFn: async (ctx) => {
+      // Parse predicates from loadSubsetOptions
+      const { limit, where, orderBy, offset } = ctx.meta?.loadSubsetOptions || {}
+      const parsed = parseLoadSubsetOptions({ where, orderBy, limit })
+
+      // Build query parameters from parsed filters
+      const params = new URLSearchParams()
+
+      // Handle pagination - for query collections, pageParam takes precedence
+      // (useLiveInfiniteQuery sets offset=0 via setWindow, but we need actual page offsets)
+      if (ctx.pageParam !== undefined && parsed.limit) {
+        const calculatedOffset = ctx.pageParam * parsed.limit
+        params.set('offset', String(calculatedOffset))
+      } else if (offset !== undefined && offset !== 0) {
+        params.set('offset', String(offset))
+      }
+
+      // Add filters
+      parsed.filters.forEach(({ field, operator, value }) => {
+        const fieldName = field.join('.')
+
+        // Serialize value properly (dates to ISO, etc.)
+        const serializeValue = (val: any) => {
+          if (val instanceof Date) {
+            return val.toISOString()
+          }
+          return String(val)
+        }
+
+        if (operator === 'eq') {
+          params.set(fieldName, serializeValue(value))
+        } else if (operator === 'lt') {
+          params.set(`${fieldName}_lt`, serializeValue(value))
+        } else if (operator === 'lte') {
+          params.set(`${fieldName}_lte`, serializeValue(value))
+        } else if (operator === 'gt') {
+          params.set(`${fieldName}_gt`, serializeValue(value))
+        } else if (operator === 'gte') {
+          params.set(`${fieldName}_gte`, serializeValue(value))
+        } else if (operator === 'in') {
+          params.set(`${fieldName}_in`, JSON.stringify(value))
+        }
+      })
+
+      // Add sorting
+      if (parsed.sorts.length > 0) {
+        const sortParam = parsed.sorts
+          .map((s) => `${s.field.join('.')}:${s.direction}`)
+          .join(',')
+        params.set('sort', sortParam)
+      }
+
+      // Add limit
+      if (parsed.limit) {
+        params.set('limit', String(parsed.limit))
+      }
+
+      const url = params.toString()
+        ? `/api/comments?${params}`
+        : '/api/comments'
+      const response = await fetch(url)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Failed to fetch comments:', response.status, errorText)
+        throw new Error(
+          `Failed to fetch comments: ${response.status} ${errorText}`
+        )
+      }
+
       const comments = await response.json()
       return comments.map((comment) => ({
         ...comment,

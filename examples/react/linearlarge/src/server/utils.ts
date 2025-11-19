@@ -6,6 +6,7 @@ export async function getServerContext(headers: Headers) {
   // Get user from custom headers
   const userId = headers.get('x-user-id')
   const username = headers.get('x-user-name')
+  console.log({ userId, username })
 
   if (!userId || !username) {
     throw new Error('Unauthorized - No user headers provided')
@@ -31,6 +32,7 @@ export async function getServerContext(headers: Headers) {
 
     user = newUser
   }
+  console.log({ user })
 
   const session = {
     userId: user.id,

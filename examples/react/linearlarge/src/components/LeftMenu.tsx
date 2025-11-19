@@ -3,7 +3,6 @@ import { useState } from 'react'
 import {
   BsPencilSquare as AddIcon,
   BsSearch as SearchIcon,
-  BsFillGrid3X3GapFill as BoardIcon,
   BsCollectionFill as IssuesIcon,
   BsFillCaretDownFill,
   BsFillCaretRightFill,
@@ -51,7 +50,7 @@ export function LeftMenu() {
         <div className="flex items-center justify-between">
           {/* Project selection */}
           <Link
-            to="/issues"
+            to="/"
             search={(prev) => prev}
             className="flex items-center p-2 pr-3 rounded cursor-pointer hover:bg-gray-100"
           >
@@ -133,7 +132,7 @@ export function LeftMenu() {
             <AddIcon className="mr-2.5 w-3.5 h-3.5" /> New Issue
           </button>
           <Link
-            to="/issues"
+            to="/"
             search={(prev) => ({ ...prev, q: '' })}
             className="inline-flex ms-2 items-center px-2 py-2 mt-3 bg-white border border-gray-300 rounded hover:bg-gray-100 h-7"
           >
@@ -145,7 +144,7 @@ export function LeftMenu() {
       <div className="flex flex-col flex-shrink flex-grow overflow-y-auto mb-0.5 px-2">
         <ItemGroup title="Your Issues">
           <Link
-            to="/issues"
+            to="/"
             search={(prev) => prev}
             className="flex items-center pl-6 rounded cursor-pointer group h-7 hover:bg-gray-100"
           >
@@ -153,7 +152,7 @@ export function LeftMenu() {
             <span>All Issues</span>
           </Link>
           <Link
-            to="/issues"
+            to="/"
             search={(prev) => ({ ...prev, status: 'todo,in_progress' })}
             className="flex items-center pl-6 rounded cursor-pointer h-7 hover:bg-gray-100"
           >
@@ -163,7 +162,7 @@ export function LeftMenu() {
             <span>Active</span>
           </Link>
           <Link
-            to="/issues"
+            to="/"
             search={(prev) => ({ ...prev, status: 'backlog' })}
             className="flex items-center pl-6 rounded cursor-pointer h-7 hover:bg-gray-100"
           >
@@ -176,14 +175,6 @@ export function LeftMenu() {
               <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" />
             </svg>
             <span>Backlog</span>
-          </Link>
-          <Link
-            to="/board"
-            search={(prev) => prev}
-            className="flex items-center pl-6 rounded cursor-pointer h-7 hover:bg-gray-100"
-          >
-            <BoardIcon className="w-3.5 h-3.5 mr-2" />
-            <span>Board</span>
           </Link>
         </ItemGroup>
 

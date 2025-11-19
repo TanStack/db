@@ -3,11 +3,12 @@ import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import { selectCommentSchema, selectIssueSchema } from '@/db/schema'
 
 const ELECTRIC_URL =
-  import.meta.env.VITE_ELECTRIC_URL || `http://localhost:3000`
+  import.meta.env.VITE_ELECTRIC_URL || `http://localhost:3001`
 
 export const issuesElectricCollection = createCollection(
   electricCollectionOptions({
     id: `issues-electric`,
+    syncMode: `on-demand`,
 
     shapeOptions: {
       url: `${ELECTRIC_URL}/v1/shape`,
@@ -91,6 +92,7 @@ export const issuesElectricCollection = createCollection(
 export const commentsElectricCollection = createCollection(
   electricCollectionOptions({
     id: `comments-electric`,
+    syncMode: `on-demand`,
 
     shapeOptions: {
       url: `${ELECTRIC_URL}/v1/shape`,

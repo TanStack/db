@@ -10,14 +10,13 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
-import { Route as IndexRouteImport } from './routes/index'
+import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as ApiIssuesRouteImport } from './routes/api/issues'
 import { Route as ApiCommentsRouteImport } from './routes/api/comments'
-import { Route as AuthenticatedIssuesRouteImport } from './routes/_authenticated/issues'
-import { Route as AuthenticatedBoardRouteImport } from './routes/_authenticated/board'
 import { Route as ApiIssuesUpdateRouteImport } from './routes/api/issues/update'
 import { Route as ApiIssuesDeleteRouteImport } from './routes/api/issues/delete'
 import { Route as ApiIssuesCreateRouteImport } from './routes/api/issues/create'
+import { Route as ApiIssuesCountRouteImport } from './routes/api/issues/count'
 import { Route as ApiCommentsDeleteRouteImport } from './routes/api/comments/delete'
 import { Route as ApiCommentsCreateRouteImport } from './routes/api/comments/create'
 import { Route as ApiCommentsByIssueRouteImport } from './routes/api/comments/by-issue'
@@ -27,10 +26,10 @@ const AuthenticatedRoute = AuthenticatedRouteImport.update({
   id: '/_authenticated',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
+const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
+  getParentRoute: () => AuthenticatedRoute,
 } as any)
 const ApiIssuesRoute = ApiIssuesRouteImport.update({
   id: '/api/issues',
@@ -41,16 +40,6 @@ const ApiCommentsRoute = ApiCommentsRouteImport.update({
   id: '/api/comments',
   path: '/api/comments',
   getParentRoute: () => rootRouteImport,
-} as any)
-const AuthenticatedIssuesRoute = AuthenticatedIssuesRouteImport.update({
-  id: '/issues',
-  path: '/issues',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
-const AuthenticatedBoardRoute = AuthenticatedBoardRouteImport.update({
-  id: '/board',
-  path: '/board',
-  getParentRoute: () => AuthenticatedRoute,
 } as any)
 const ApiIssuesUpdateRoute = ApiIssuesUpdateRouteImport.update({
   id: '/update',
@@ -65,6 +54,11 @@ const ApiIssuesDeleteRoute = ApiIssuesDeleteRouteImport.update({
 const ApiIssuesCreateRoute = ApiIssuesCreateRouteImport.update({
   id: '/create',
   path: '/create',
+  getParentRoute: () => ApiIssuesRoute,
+} as any)
+const ApiIssuesCountRoute = ApiIssuesCountRouteImport.update({
+  id: '/count',
+  path: '/count',
   getParentRoute: () => ApiIssuesRoute,
 } as any)
 const ApiCommentsDeleteRoute = ApiCommentsDeleteRouteImport.update({
@@ -90,45 +84,42 @@ const AuthenticatedIssueIssueIdRoute =
   } as any)
 
 export interface FileRoutesByFullPath {
-  '/': typeof IndexRoute
-  '/board': typeof AuthenticatedBoardRoute
-  '/issues': typeof AuthenticatedIssuesRoute
   '/api/comments': typeof ApiCommentsRouteWithChildren
   '/api/issues': typeof ApiIssuesRouteWithChildren
+  '/': typeof AuthenticatedIndexRoute
   '/issue/$issueId': typeof AuthenticatedIssueIssueIdRoute
   '/api/comments/by-issue': typeof ApiCommentsByIssueRoute
   '/api/comments/create': typeof ApiCommentsCreateRoute
   '/api/comments/delete': typeof ApiCommentsDeleteRoute
+  '/api/issues/count': typeof ApiIssuesCountRoute
   '/api/issues/create': typeof ApiIssuesCreateRoute
   '/api/issues/delete': typeof ApiIssuesDeleteRoute
   '/api/issues/update': typeof ApiIssuesUpdateRoute
 }
 export interface FileRoutesByTo {
-  '/': typeof IndexRoute
-  '/board': typeof AuthenticatedBoardRoute
-  '/issues': typeof AuthenticatedIssuesRoute
   '/api/comments': typeof ApiCommentsRouteWithChildren
   '/api/issues': typeof ApiIssuesRouteWithChildren
+  '/': typeof AuthenticatedIndexRoute
   '/issue/$issueId': typeof AuthenticatedIssueIssueIdRoute
   '/api/comments/by-issue': typeof ApiCommentsByIssueRoute
   '/api/comments/create': typeof ApiCommentsCreateRoute
   '/api/comments/delete': typeof ApiCommentsDeleteRoute
+  '/api/issues/count': typeof ApiIssuesCountRoute
   '/api/issues/create': typeof ApiIssuesCreateRoute
   '/api/issues/delete': typeof ApiIssuesDeleteRoute
   '/api/issues/update': typeof ApiIssuesUpdateRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
-  '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteWithChildren
-  '/_authenticated/board': typeof AuthenticatedBoardRoute
-  '/_authenticated/issues': typeof AuthenticatedIssuesRoute
   '/api/comments': typeof ApiCommentsRouteWithChildren
   '/api/issues': typeof ApiIssuesRouteWithChildren
+  '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/issue/$issueId': typeof AuthenticatedIssueIssueIdRoute
   '/api/comments/by-issue': typeof ApiCommentsByIssueRoute
   '/api/comments/create': typeof ApiCommentsCreateRoute
   '/api/comments/delete': typeof ApiCommentsDeleteRoute
+  '/api/issues/count': typeof ApiIssuesCountRoute
   '/api/issues/create': typeof ApiIssuesCreateRoute
   '/api/issues/delete': typeof ApiIssuesDeleteRoute
   '/api/issues/update': typeof ApiIssuesUpdateRoute
@@ -136,51 +127,47 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
-    | '/board'
-    | '/issues'
     | '/api/comments'
     | '/api/issues'
+    | '/'
     | '/issue/$issueId'
     | '/api/comments/by-issue'
     | '/api/comments/create'
     | '/api/comments/delete'
+    | '/api/issues/count'
     | '/api/issues/create'
     | '/api/issues/delete'
     | '/api/issues/update'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/'
-    | '/board'
-    | '/issues'
     | '/api/comments'
     | '/api/issues'
+    | '/'
     | '/issue/$issueId'
     | '/api/comments/by-issue'
     | '/api/comments/create'
     | '/api/comments/delete'
+    | '/api/issues/count'
     | '/api/issues/create'
     | '/api/issues/delete'
     | '/api/issues/update'
   id:
     | '__root__'
-    | '/'
     | '/_authenticated'
-    | '/_authenticated/board'
-    | '/_authenticated/issues'
     | '/api/comments'
     | '/api/issues'
+    | '/_authenticated/'
     | '/_authenticated/issue/$issueId'
     | '/api/comments/by-issue'
     | '/api/comments/create'
     | '/api/comments/delete'
+    | '/api/issues/count'
     | '/api/issues/create'
     | '/api/issues/delete'
     | '/api/issues/update'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
-  IndexRoute: typeof IndexRoute
   AuthenticatedRoute: typeof AuthenticatedRouteWithChildren
   ApiCommentsRoute: typeof ApiCommentsRouteWithChildren
   ApiIssuesRoute: typeof ApiIssuesRouteWithChildren
@@ -195,12 +182,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
+    '/_authenticated/': {
+      id: '/_authenticated/'
       path: '/'
       fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
+      preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
     }
     '/api/issues': {
       id: '/api/issues'
@@ -215,20 +202,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/api/comments'
       preLoaderRoute: typeof ApiCommentsRouteImport
       parentRoute: typeof rootRouteImport
-    }
-    '/_authenticated/issues': {
-      id: '/_authenticated/issues'
-      path: '/issues'
-      fullPath: '/issues'
-      preLoaderRoute: typeof AuthenticatedIssuesRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/board': {
-      id: '/_authenticated/board'
-      path: '/board'
-      fullPath: '/board'
-      preLoaderRoute: typeof AuthenticatedBoardRouteImport
-      parentRoute: typeof AuthenticatedRoute
     }
     '/api/issues/update': {
       id: '/api/issues/update'
@@ -249,6 +222,13 @@ declare module '@tanstack/react-router' {
       path: '/create'
       fullPath: '/api/issues/create'
       preLoaderRoute: typeof ApiIssuesCreateRouteImport
+      parentRoute: typeof ApiIssuesRoute
+    }
+    '/api/issues/count': {
+      id: '/api/issues/count'
+      path: '/count'
+      fullPath: '/api/issues/count'
+      preLoaderRoute: typeof ApiIssuesCountRouteImport
       parentRoute: typeof ApiIssuesRoute
     }
     '/api/comments/delete': {
@@ -283,14 +263,12 @@ declare module '@tanstack/react-router' {
 }
 
 interface AuthenticatedRouteChildren {
-  AuthenticatedBoardRoute: typeof AuthenticatedBoardRoute
-  AuthenticatedIssuesRoute: typeof AuthenticatedIssuesRoute
+  AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedIssueIssueIdRoute: typeof AuthenticatedIssueIssueIdRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
-  AuthenticatedBoardRoute: AuthenticatedBoardRoute,
-  AuthenticatedIssuesRoute: AuthenticatedIssuesRoute,
+  AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedIssueIssueIdRoute: AuthenticatedIssueIssueIdRoute,
 }
 
@@ -315,12 +293,14 @@ const ApiCommentsRouteWithChildren = ApiCommentsRoute._addFileChildren(
 )
 
 interface ApiIssuesRouteChildren {
+  ApiIssuesCountRoute: typeof ApiIssuesCountRoute
   ApiIssuesCreateRoute: typeof ApiIssuesCreateRoute
   ApiIssuesDeleteRoute: typeof ApiIssuesDeleteRoute
   ApiIssuesUpdateRoute: typeof ApiIssuesUpdateRoute
 }
 
 const ApiIssuesRouteChildren: ApiIssuesRouteChildren = {
+  ApiIssuesCountRoute: ApiIssuesCountRoute,
   ApiIssuesCreateRoute: ApiIssuesCreateRoute,
   ApiIssuesDeleteRoute: ApiIssuesDeleteRoute,
   ApiIssuesUpdateRoute: ApiIssuesUpdateRoute,
@@ -331,7 +311,6 @@ const ApiIssuesRouteWithChildren = ApiIssuesRoute._addFileChildren(
 )
 
 const rootRouteChildren: RootRouteChildren = {
-  IndexRoute: IndexRoute,
   AuthenticatedRoute: AuthenticatedRouteWithChildren,
   ApiCommentsRoute: ApiCommentsRouteWithChildren,
   ApiIssuesRoute: ApiIssuesRouteWithChildren,
