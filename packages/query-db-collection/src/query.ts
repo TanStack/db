@@ -31,6 +31,35 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 // Re-export for external use
 export type { SyncOperation } from "./manual-sync"
 
+/**
+ * Base type for Query Collection meta properties.
+ * Users can extend this type when augmenting the @tanstack/query-core module
+ * to add their own custom properties while preserving loadSubsetOptions.
+ *
+ * @example
+ * ```typescript
+ * declare module "@tanstack/query-core" {
+ *   interface Register {
+ *     queryMeta: QueryCollectionMeta & {
+ *       myCustomProperty: string
+ *     }
+ *   }
+ * }
+ * ```
+ */
+export type QueryCollectionMeta = Record<string, unknown> & {
+  loadSubsetOptions: LoadSubsetOptions
+}
+
+// Module augmentation to extend TanStack Query's Register interface
+// This ensures that ctx.meta always includes loadSubsetOptions
+// We extend Record<string, unknown> to preserve the ability to add other meta properties
+declare module "@tanstack/query-core" {
+  interface Register {
+    queryMeta: QueryCollectionMeta
+  }
+}
+
 // Schema output type inference helper (matches electric.ts pattern)
 type InferSchemaOutput<T> = T extends StandardSchemaV1
   ? StandardSchemaV1.InferOutput<T> extends object
