@@ -63,9 +63,7 @@ export const issuesTable = pgTable(
     // Composite index for common query pattern: filter by user, status, priority and order by created_at
     userStatusPriorityCreatedIdx: index(
       `issues_user_status_priority_created_idx`
-    )
-      .on()
-      .on(table.user_id, table.status, table.priority, table.created_at),
+    ).on(table.user_id, table.status, table.priority, table.created_at),
   })
 )
 
