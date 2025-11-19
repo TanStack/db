@@ -5,7 +5,7 @@ title: Subscription
 
 # Interface: Subscription
 
-Defined in: [packages/db/src/types.ts:232](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L232)
+Defined in: [packages/db/src/types.ts:251](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L251)
 
 Public interface for a collection subscription
 Used by sync implementations to track subscription lifecycle
@@ -22,7 +22,7 @@ Used by sync implementations to track subscription lifecycle
 readonly status: SubscriptionStatus;
 ```
 
-Defined in: [packages/db/src/types.ts:234](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L234)
+Defined in: [packages/db/src/types.ts:253](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L253)
 
 Current status of the subscription
 
