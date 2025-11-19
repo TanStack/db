@@ -131,7 +131,6 @@ import {
   getWhereExpression,
   isResidualWhere,
 } from "./ir.js"
-import { isConvertibleToCollectionFilter } from "./compiler/expressions.js"
 import type { BasicExpression, From, QueryIR, Select, Where } from "./ir.js"
 
 /**
@@ -248,14 +247,10 @@ function extractSourceWhereClauses(
   const groupedClauses = groupWhereClauses(analyzedClauses)
 
   // Only include single-source clauses that reference collections directly
-  // and can be converted to BasicExpression format for collection indexes
   for (const [sourceAlias, whereClause] of groupedClauses.singleSource) {
     // Check if this source alias corresponds to a collection reference
     if (isCollectionReference(query, sourceAlias)) {
-      // Check if the WHERE clause can be converted to collection-compatible format
-      if (isConvertibleToCollectionFilter(whereClause)) {
-        sourceWhereClauses.set(sourceAlias, whereClause)
-      }
+      sourceWhereClauses.set(sourceAlias, whereClause)
     }
   }
 

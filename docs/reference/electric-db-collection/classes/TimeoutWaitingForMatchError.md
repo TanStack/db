@@ -5,7 +5,7 @@ title: TimeoutWaitingForMatchError
 
 # Class: TimeoutWaitingForMatchError
 
-Defined in: packages/electric-db-collection/src/errors.ts:25
+Defined in: [packages/electric-db-collection/src/errors.ts:25](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L25)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/electric-db-collection/src/errors.ts:25
 new TimeoutWaitingForMatchError(collectionId?): TimeoutWaitingForMatchError;
 ```
 
-Defined in: packages/electric-db-collection/src/errors.ts:26
+Defined in: [packages/electric-db-collection/src/errors.ts:26](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L26)
 
 #### Parameters
 

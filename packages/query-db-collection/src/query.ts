@@ -1,5 +1,4 @@
 import { QueryObserver, hashKey } from "@tanstack/query-core"
-import { DeduplicatedLoadSubset } from "@tanstack/db"
 import {
   GetKeyRequiredError,
   QueryClientRequiredError,
@@ -824,21 +823,6 @@ export function queryCollectionOptions(
       return handleQueryResult
     }
 
-    // This function is called when a loadSubset call is deduplicated
-    // meaning that we have all the data locally available to answer the query
-    // so we execute the query locally
-    const createLocalQuery = (opts: LoadSubsetOptions) => {
-      const queryFn = ({ meta }: QueryFunctionContext<any>) => {
-        const inserts = collection.currentStateAsChanges(
-          meta!.loadSubsetOptions as LoadSubsetOptions
-        )!
-        const data = inserts.map(({ value }) => value)
-        return Promise.resolve(data)
-      }
-
-      createQueryFromOpts(opts, queryFn)
-    }
-
     const isSubscribed = (hashedQueryKey: string) => {
       return unsubscribes.has(hashedQueryKey)
     }
@@ -972,15 +956,10 @@ export function queryCollectionOptions(
     // This prevents redundant snapshot requests when multiple concurrent
     // live queries request overlapping or subset predicates
     const loadSubsetDedupe =
-      syncMode === `eager`
-        ? undefined
-        : new DeduplicatedLoadSubset({
-            loadSubset: createQueryFromOpts,
-            onDeduplicate: createLocalQuery,
-          })
+      syncMode === `eager` ? undefined : createQueryFromOpts
 
     return {
-      loadSubset: loadSubsetDedupe?.loadSubset,
+      loadSubset: loadSubsetDedupe,
       cleanup,
     }
   }

@@ -1,13 +1,13 @@
 {
   "name": "@tanstack/query-db-collection",
   "description": "TanStack Query collection for TanStack DB",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0"
   },
   "devDependencies": {
     "@tanstack/db": "workspace:*",
-    "@tanstack/query-core": "^5.90.5",
+    "@tanstack/query-core": "^5.90.10",
     "@vitest/coverage-istanbul": "^3.2.4"
   },
   "exports": {
@@ -29,7 +29,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.19.0",
+  "packageManager": "pnpm@10.22.0",
   "peerDependencies": {
     "@tanstack/db": "*",
     "@tanstack/query-core": "^5.0.0",

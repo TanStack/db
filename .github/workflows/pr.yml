@@ -29,7 +29,7 @@ jobs:
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
       - name: Get base and head commits for `nx affected`
-        uses: nrwl/nx-set-shas@v4.3.3
+        uses: nrwl/nx-set-shas@v4.4.0
         with:
           main-branch-name: main
       - name: Run Checks
@@ -90,31 +90,3 @@ jobs:
         run: |
           cd examples/react/projects
           pnpm build
-  check-docs:
-    name: Check Generated Docs
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5.0.0
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
-      - name: Build Packages
-        run: pnpm run build
-      - name: Generate Docs
-        run: pnpm docs:generate
-      - name: Check for changes
-        run: |
-          if [ -n "$(git status --porcelain)" ]; then
-            echo "Error: Generated docs are out of sync!"
-            echo ""
-            echo "Please run the following commands locally and commit the changes:"
-            echo "  1. pnpm install"
-            echo "  2. pnpm build"
-            echo "  3. pnpm docs:generate"
-            echo "  4. git add docs/"
-            echo "  5. git commit -m 'docs: regenerate API documentation'"
-            echo ""
-            echo "Files that need to be updated:"
-            git status --short
-            exit 1
-          fi

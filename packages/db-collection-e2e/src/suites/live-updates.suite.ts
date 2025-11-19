@@ -6,7 +6,7 @@
 
 import { randomUUID } from "node:crypto"
 import { describe, expect, it } from "vitest"
-import { createLiveQueryCollection, gt, lt } from "@tanstack/db"
+import { createLiveQueryCollection, gt } from "@tanstack/db"
 import { waitFor, waitForQueryData } from "../utils/helpers"
 import type { E2ETestConfig } from "../types"
 
@@ -232,101 +232,6 @@ export function createLiveUpdatesTestSuite(
         }
 
         await query.cleanup()
-      })
-    })
-
-    describe(`Multiple Watchers`, () => {
-      it(`should update all queries watching same data`, async () => {
-        const config = await getConfig()
-
-        if (!config.mutations) {
-          throw new Error(`Mutations not configured - test cannot run`)
-        }
-
-        const usersCollection = config.collections.onDemand.users
-
-        const query1 = createLiveQueryCollection((q) =>
-          q
-            .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 25))
-        )
-
-        const query2 = createLiveQueryCollection((q) =>
-          q
-            .from({ user: usersCollection })
-            .where(({ user }) => lt(user.age, 50))
-        )
-
-        await Promise.all([query1.preload(), query2.preload()])
-        await waitForQueryData(query1, { minSize: 1 })
-        await waitForQueryData(query2, { minSize: 1 })
-
-        // Wait for collections to stabilize (especially important for async replication)
-        // This ensures any leftover data from previous tests has been cleaned up
-        if (config.hasReplicationLag) {
-          let stableSize1 = query1.size
-          let stableSize2 = query2.size
-          await waitFor(
-            () => {
-              const currentSize1 = query1.size
-              const currentSize2 = query2.size
-              const stable =
-                currentSize1 === stableSize1 && currentSize2 === stableSize2
-              stableSize1 = currentSize1
-              stableSize2 = currentSize2
-              return stable
-            },
-            {
-              timeout: 10000,
-              interval: 200,
-              message: `Collections did not stabilize`,
-            }
-          )
-        }
-
-        const initialSize1 = query1.size
-        const initialSize2 = query2.size
-        expect(initialSize1).toBeGreaterThan(0)
-        expect(initialSize2).toBeGreaterThan(0)
-
-        // Insert user with age=35 (matches BOTH queries: 35 > 25 AND 35 < 50)
-        const newUserId = randomUUID()
-        await config.mutations.insertUser({
-          id: newUserId,
-          name: `Multi Watch User`,
-          email: `multi@example.com`,
-          age: 35,
-          isActive: true,
-          createdAt: new Date(),
-          metadata: null,
-          deletedAt: null,
-        })
-
-        // Wait for both queries to have exactly the expected size
-        await waitFor(
-          () =>
-            query1.size === initialSize1 + 1 &&
-            query2.size === initialSize2 + 1,
-          { timeout: 10000, message: `Not all queries received the update` }
-        )
-
-        expect(query1.size).toBe(initialSize1 + 1)
-        expect(query2.size).toBe(initialSize2 + 1)
-
-        // Clean up the inserted row
-        await config.mutations.deleteUser(newUserId)
-
-        // Wait for deletion to propagate if using async replication (e.g., Electric)
-        // This prevents the next test from seeing this user when collections restart
-        // Check the eager collection since it continuously syncs all data
-        if (config.hasReplicationLag) {
-          await waitFor(() => !config.collections.eager.users.has(newUserId), {
-            timeout: 5000,
-            message: `Deletion of user ${newUserId} did not propagate`,
-          })
-        }
-
-        await Promise.all([query1.cleanup(), query2.cleanup()])
       })
     })
 

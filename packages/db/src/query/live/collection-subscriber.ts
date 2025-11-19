@@ -1,9 +1,8 @@
 import { MultiSet } from "@tanstack/db-ivm"
 import {
-  convertOrderByToBasicExpression,
-  convertToBasicExpression,
+  normalizeExpressionPaths,
+  normalizeOrderByPaths,
 } from "../compiler/expressions.js"
-import { WhereClauseConversionError } from "../../errors.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection/index.js"
 import type { ChangeMessage } from "../../types.js"
@@ -41,13 +40,8 @@ export class CollectionSubscriber<
     const whereClause = this.getWhereClauseForAlias()
 
     if (whereClause) {
-      const whereExpression = convertToBasicExpression(whereClause, this.alias)
-
-      if (whereExpression) {
-        return this.subscribeToChanges(whereExpression)
-      }
-
-      throw new WhereClauseConversionError(this.collectionId, this.alias)
+      const whereExpression = normalizeExpressionPaths(whereClause, this.alias)
+      return this.subscribeToChanges(whereExpression)
     }
 
     return this.subscribeToChanges()
@@ -199,10 +193,7 @@ export class CollectionSubscriber<
     subscription.setOrderByIndex(index)
 
     // Normalize the orderBy clauses such that the references are relative to the collection
-    const normalizedOrderBy = convertOrderByToBasicExpression(
-      orderBy,
-      this.alias
-    )
+    const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
     // Load the first `offset + limit` values from the index
     // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
@@ -289,10 +280,7 @@ export class CollectionSubscriber<
       : biggestSentRow
 
     // Normalize the orderBy clauses such that the references are relative to the collection
-    const normalizedOrderBy = convertOrderByToBasicExpression(
-      orderBy,
-      this.alias
-    )
+    const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
     // Take the `n` items after the biggest sent value
     subscription.requestLimitedSnapshot({
