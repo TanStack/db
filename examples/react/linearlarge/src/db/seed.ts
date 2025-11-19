@@ -1,3 +1,15 @@
+/**
+ * Database seeding script
+ *
+ * Usage:
+ *   pnpm db:seed                         # Creates 500 issues (default)
+ *   SEED_ISSUE_COUNT=100000 pnpm db:seed  # Creates 100,000 issues
+ *
+ * The script will automatically:
+ * - Use larger batch sizes for better performance with large datasets
+ * - Show progress with ETA for long-running seeds
+ * - Generate proportional comments (40% of issues get 1-4 comments each)
+ */
 import * as dotenv from 'dotenv'
 dotenv.config()
 
@@ -148,8 +160,10 @@ async function seed() {
     createdUsers.map((u) => u.username).join(', ')
   )
 
-  // Generate 500 issues
-  const ISSUE_COUNT = 500
+  // Generate issues - configurable via SEED_ISSUE_COUNT env variable
+  const ISSUE_COUNT = process.env.SEED_ISSUE_COUNT
+    ? parseInt(process.env.SEED_ISSUE_COUNT, 10)
+    : 500
   console.log(`Generating ${ISSUE_COUNT} issues...`)
 
   let kanbanorder = generateKeyBetween(null, null)
@@ -170,13 +184,24 @@ async function seed() {
   }
 
   // Insert issues in batches for better performance
-  const BATCH_SIZE = 100
+  // Use larger batch size for bigger datasets
+  const BATCH_SIZE = ISSUE_COUNT > 10000 ? 1000 : 100
   const createdIssues = []
+  const startTime = Date.now()
+
   for (let i = 0; i < issues.length; i += BATCH_SIZE) {
     const batch = issues.slice(i, i + BATCH_SIZE)
     const batchResult = await db.insert(issuesTable).values(batch).returning()
     createdIssues.push(...batchResult)
-    console.log(`Inserted ${createdIssues.length}/${ISSUE_COUNT} issues...`)
+
+    // Progress reporting
+    const progress = ((createdIssues.length / ISSUE_COUNT) * 100).toFixed(1)
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
+    const rate = (createdIssues.length / (Date.now() - startTime)) * 1000
+    const eta = ((ISSUE_COUNT - createdIssues.length) / rate).toFixed(0)
+    console.log(
+      `Inserted ${createdIssues.length}/${ISSUE_COUNT} issues (${progress}%) - ${elapsed}s elapsed, ~${eta}s remaining`
+    )
   }
 
   console.log(`Created ${createdIssues.length} issues`)
