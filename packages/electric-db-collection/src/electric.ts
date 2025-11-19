@@ -41,6 +41,22 @@ export { isChangeMessage, isControlMessage } from "@electric-sql/client"
 const debug = DebugModule.debug(`ts/db:electric`)
 
 /**
+ * Symbol for internal test hooks (hidden from public API)
+ */
+export const ELECTRIC_TEST_HOOKS = Symbol(`electricTestHooks`)
+
+/**
+ * Internal test hooks interface (for testing only)
+ */
+export interface ElectricTestHooks {
+  /**
+   * Called before marking collection ready after first up-to-date in progressive mode
+   * Allows tests to pause and validate snapshot phase before atomic swap completes
+   */
+  beforeMarkingReady?: () => Promise<void>
+}
+
+/**
  * Type representing a transaction ID in ElectricSQL
  */
 export type Txid = number
@@ -117,6 +133,12 @@ export interface ElectricCollectionConfig<
    */
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>
   syncMode?: ElectricSyncMode
+
+  /**
+   * Internal test hooks (for testing only)
+   * Hidden via Symbol to prevent accidental usage in production
+   */
+  [ELECTRIC_TEST_HOOKS]?: ElectricTestHooks
 
   /**
    * Optional asynchronous handler function called before an insert operation
@@ -379,6 +401,7 @@ export function electricCollectionOptions(
     removePendingMatches,
     resolveMatchedPendingMatches,
     collectionId: config.id,
+    testHooks: config[ELECTRIC_TEST_HOOKS],
   })
 
   /**
@@ -631,6 +654,7 @@ function createElectricSync<T extends Row<unknown>>(
     removePendingMatches: (matchIds: Array<string>) => void
     resolveMatchedPendingMatches: () => void
     collectionId?: string
+    testHooks?: ElectricTestHooks
   }
 ): SyncConfig<T> {
   const {
@@ -642,6 +666,7 @@ function createElectricSync<T extends Row<unknown>>(
     removePendingMatches,
     resolveMatchedPendingMatches,
     collectionId,
+    testHooks,
   } = options
   const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
 
@@ -668,6 +693,26 @@ function createElectricSync<T extends Row<unknown>>(
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady, truncate, collection } = params
+
+      // Wrap markReady to wait for test hook in progressive mode
+      let progressiveReadyGate: Promise<void> | null = null
+      const wrappedMarkReady = () => {
+        // Only create gate if we're in buffering phase (first up-to-date)
+        if (
+          isBufferingInitialSync &&
+          syncMode === `progressive` &&
+          testHooks?.beforeMarkingReady
+        ) {
+          // Create a new gate promise for this sync cycle
+          progressiveReadyGate = testHooks.beforeMarkingReady()
+          progressiveReadyGate.then(() => {
+            markReady()
+          })
+        } else {
+          // No hook, not buffering, or already past first up-to-date
+          markReady()
+        }
+      }
 
       // Abort controller for the stream - wraps the signal if provided
       const abortController = new AbortController()
@@ -956,7 +1001,7 @@ function createElectricSync<T extends Row<unknown>>(
 
           if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
             // Mark the collection as ready now that sync is up to date
-            markReady()
+            wrappedMarkReady()
           }
 
           // Track that we've received the first up-to-date for progressive mode

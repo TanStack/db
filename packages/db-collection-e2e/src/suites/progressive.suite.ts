@@ -18,14 +18,35 @@ export function createProgressiveTestSuite(
 ) {
   describe(`Progressive Mode Suite (Electric only)`, () => {
     describe(`Basic Progressive Mode`, () => {
-      it(`should validate snapshot phase behavior and atomic swap with status transition`, async () => {
+      it(`should explicitly validate snapshot phase and atomic swap transition`, async () => {
         const config = await getConfig()
-        if (!config.collections.progressive) {
-          return // Skip if progressive collections not available
+        if (!config.collections.progressive || !config.progressiveTestControl) {
+          return // Skip if progressive collections or test control not available
         }
         const progressiveUsers = config.collections.progressive.users
 
-        // Create a query - this will trigger a snapshot fetch if still in snapshot phase
+        // Start sync for this test
+        progressiveUsers.startSyncImmediate()
+
+        // === PHASE 1: SNAPSHOT PHASE ===
+        // Collection might already be ready from a previous test
+        // (progressive collections are shared and not cleaned up between tests)
+        await new Promise((resolve) => setTimeout(resolve, 50))
+
+        const initialStatus = progressiveUsers.status
+
+        // If already ready, we can't test the explicit transition
+        if (initialStatus === `ready`) {
+          console.log(
+            `Progressive collection already ready, skipping explicit transition test`
+          )
+          return
+        }
+
+        // Should be loading or idle (hook prevents marking ready)
+        expect([`idle`, `loading`]).toContain(initialStatus)
+
+        // Create a query - this triggers fetchSnapshot
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: progressiveUsers })
@@ -35,49 +56,47 @@ export function createProgressiveTestSuite(
         await query.preload()
         await waitForQueryData(query, { minSize: 1, timeout: 10000 })
 
-        const querySize = query.size
-        const queryItems = Array.from(query.values())
+        // Validate snapshot data
+        const snapshotQuerySize = query.size
+        const snapshotItems = Array.from(query.values())
 
-        // Validate query data
-        expect(querySize).toBeGreaterThan(0)
-        queryItems.forEach((user) => {
+        expect(snapshotQuerySize).toBeGreaterThan(0)
+        snapshotItems.forEach((user) => {
           expect(user.age).toBe(25)
           expect(user.id).toBeDefined()
+          expect(user.name).toBeDefined()
         })
 
-        // If we're still loading, we should be in snapshot phase
-        // Base collection should have data from snapshot (query subset)
-        const statusDuringQuery = progressiveUsers.status
-        if (statusDuringQuery === `loading`) {
-          // We're in snapshot phase! Validate snapshot behavior
-          // Collection should have the snapshot data
-          expect(progressiveUsers.size).toBeGreaterThan(0)
+        // Collection should STILL be loading (paused before atomic swap)
+        expect(progressiveUsers.status).toBe(`loading`)
 
-          // But collection size should be <= query size (only snapshot loaded)
-          // Actually it might have multiple snapshots if other tests ran, so just verify we have data
-          expect(progressiveUsers.size).toBeGreaterThan(0)
-        }
+        // Collection has snapshot data
+        const snapshotCollectionSize = progressiveUsers.size
+        expect(snapshotCollectionSize).toBeGreaterThan(0)
 
-        // Wait for full sync to complete
+        // === PHASE 2: TRIGGER ATOMIC SWAP ===
+        config.progressiveTestControl.releaseInitialSync()
+
+        // === PHASE 3: POST-SWAP (FULLY SYNCED) ===
+        // Wait for ready (atomic swap complete)
         await waitFor(() => progressiveUsers.status === `ready`, {
           timeout: 30000,
           message: `Progressive collection did not complete sync`,
         })
 
-        // After atomic swap to full synced state
-        // Collection should have ALL users (not just age=25)
+        // Collection now has full dataset (more than just snapshot)
         const finalCollectionSize = progressiveUsers.size
-        expect(finalCollectionSize).toBeGreaterThan(querySize) // More than just our query subset
+        expect(finalCollectionSize).toBeGreaterThan(snapshotQuerySize)
 
-        // Query should still work with consistent data
+        // Query still works with consistent data
         const finalQueryItems = Array.from(query.values())
         finalQueryItems.forEach((user) => {
           expect(user.age).toBe(25) // Still matches predicate
           expect(user.id).toBeDefined()
         })
 
-        // Verify some of the original snapshot items are still present
-        queryItems.forEach((originalUser) => {
+        // Verify original snapshot items are still present after swap
+        snapshotItems.forEach((originalUser) => {
           const foundInCollection = progressiveUsers.get(originalUser.id)
           expect(foundInCollection).toBeDefined()
           expect(foundInCollection?.age).toBe(25)
@@ -93,11 +112,10 @@ export function createProgressiveTestSuite(
         }
         const progressiveUsers = config.collections.progressive.users
 
-        // Progressive collections should only be marked ready AFTER first up-to-date
-        // If already ready, the full sync completed very fast - we can still test the end state
-        const wasStillLoading = progressiveUsers.status === `loading`
+        // Start sync for this test
+        progressiveUsers.startSyncImmediate()
 
-        // Query a subset
+        // Query a subset (triggers snapshot fetch)
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: progressiveUsers })
@@ -106,8 +124,16 @@ export function createProgressiveTestSuite(
 
         await query.preload()
 
-        // Wait for query to have data (either from snapshot during loading, or from final state if already ready)
+        // Wait for query to have snapshot data
         await waitForQueryData(query, { minSize: 1, timeout: 10000 })
+
+        // Collection should still be loading if test control is active
+        const wasStillLoading = progressiveUsers.status === `loading`
+
+        // Release the initial sync to allow atomic swap
+        if (config.progressiveTestControl) {
+          config.progressiveTestControl.releaseInitialSync()
+        }
 
         const beforeSwapSize = query.size
         const beforeSwapItems = Array.from(query.values())
@@ -158,6 +184,9 @@ export function createProgressiveTestSuite(
         }
         const progressiveUsers = config.collections.progressive.users
 
+        // Start sync for this test
+        progressiveUsers.startSyncImmediate()
+
         // Create multiple queries with different predicates
         const query1 = createLiveQueryCollection((q) =>
           q
@@ -178,6 +207,11 @@ export function createProgressiveTestSuite(
           waitForQueryData(query1, { minSize: 1, timeout: 10000 }),
           waitForQueryData(query2, { minSize: 1, timeout: 10000 }),
         ])
+
+        // Release initial sync to allow atomic swap
+        if (config.progressiveTestControl) {
+          config.progressiveTestControl.releaseInitialSync()
+        }
 
         expect(query1.size).toBeGreaterThan(0)
         expect(query2.size).toBeGreaterThan(0)
@@ -223,7 +257,12 @@ export function createProgressiveTestSuite(
         }
         const progressiveUsers = config.collections.progressive.users
 
-        // Wait for full sync first
+        // Release initial sync immediately (we don't care about snapshot phase for this test)
+        if (config.progressiveTestControl) {
+          config.progressiveTestControl.releaseInitialSync()
+        }
+
+        // Wait for full sync
         await waitFor(() => progressiveUsers.status === `ready`, {
           timeout: 30000,
           message: `Progressive collection did not complete sync`,
@@ -287,6 +326,11 @@ export function createProgressiveTestSuite(
 
         const snapshotPhaseSize = query.size
 
+        // Release initial sync to allow atomic swap
+        if (config.progressiveTestControl) {
+          config.progressiveTestControl.releaseInitialSync()
+        }
+
         // Wait for atomic swap
         await waitFor(() => progressiveUsers.status === `ready`, {
           timeout: 30000,
@@ -337,6 +381,11 @@ export function createProgressiveTestSuite(
           )
         )
 
+        // Release initial sync to allow completion
+        if (config.progressiveTestControl) {
+          config.progressiveTestControl.releaseInitialSync()
+        }
+
         // All should have the same size and same data
         const sizes = queries.map((q) => q.size)
         expect(new Set(sizes).size).toBe(1) // All sizes are identical
@@ -366,8 +415,6 @@ export function createProgressiveTestSuite(
         const progressiveUsers = config.collections.progressive.users
 
         // This test verifies the collection can be cleaned up even during snapshot phase
-        // and that the atomic swap doesn't cause issues
-
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: progressiveUsers })
@@ -375,6 +422,11 @@ export function createProgressiveTestSuite(
         )
 
         await query.preload()
+
+        // Release initial sync
+        if (config.progressiveTestControl) {
+          config.progressiveTestControl.releaseInitialSync()
+        }
 
         // Don't wait for data, just cleanup immediately
         await query.cleanup()

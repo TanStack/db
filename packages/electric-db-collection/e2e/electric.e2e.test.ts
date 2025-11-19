@@ -6,7 +6,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, inject } from "vitest"
 import { createCollection } from "@tanstack/db"
-import { electricCollectionOptions } from "../src/electric"
+import { ELECTRIC_TEST_HOOKS, electricCollectionOptions } from "../src/electric"
 import { makePgClient } from "../../db-collection-e2e/support/global-setup"
 import {
   createCollationTestSuite,
@@ -312,6 +312,31 @@ describe(`Electric Collection E2E Tests`, () => {
       })
     )
 
+    // Create control mechanisms for progressive collections
+    // These allow tests to explicitly control when the atomic swap happens
+    // We use a ref object so each test can get a fresh promise
+    const usersUpToDateControl = {
+      current: null as (() => void) | null,
+      createPromise: () =>
+        new Promise<void>((resolve) => {
+          usersUpToDateControl.current = resolve
+        }),
+    }
+    const postsUpToDateControl = {
+      current: null as (() => void) | null,
+      createPromise: () =>
+        new Promise<void>((resolve) => {
+          postsUpToDateControl.current = resolve
+        }),
+    }
+    const commentsUpToDateControl = {
+      current: null as (() => void) | null,
+      createPromise: () =>
+        new Promise<void>((resolve) => {
+          commentsUpToDateControl.current = resolve
+        }),
+    }
+
     const progressiveUsers = createCollection(
       electricCollectionOptions({
         id: `electric-e2e-users-progressive-${testId}`,
@@ -323,7 +348,10 @@ describe(`Electric Collection E2E Tests`, () => {
         },
         syncMode: `progressive`,
         getKey: (item: any) => item.id,
-        startSync: true,
+        startSync: false, // Don't start immediately - tests will start when ready
+        [ELECTRIC_TEST_HOOKS]: {
+          beforeMarkingReady: () => usersUpToDateControl.createPromise(),
+        },
       })
     )
 
@@ -338,7 +366,10 @@ describe(`Electric Collection E2E Tests`, () => {
         },
         syncMode: `progressive`,
         getKey: (item: any) => item.id,
-        startSync: true,
+        startSync: false, // Don't start immediately - tests will start when ready
+        [ELECTRIC_TEST_HOOKS]: {
+          beforeMarkingReady: () => postsUpToDateControl.createPromise(),
+        },
       })
     )
 
@@ -353,7 +384,10 @@ describe(`Electric Collection E2E Tests`, () => {
         },
         syncMode: `progressive`,
         getKey: (item: any) => item.id,
-        startSync: true,
+        startSync: false, // Don't start immediately - tests will start when ready
+        [ELECTRIC_TEST_HOOKS]: {
+          beforeMarkingReady: () => commentsUpToDateControl.createPromise(),
+        },
       })
     )
 
@@ -367,10 +401,9 @@ describe(`Electric Collection E2E Tests`, () => {
     await onDemandPosts.preload()
     await onDemandComments.preload()
 
-    // Progressive collections start syncing in background, just preload to get started
-    await progressiveUsers.preload()
-    await progressivePosts.preload()
-    await progressiveComments.preload()
+    // Progressive collections start syncing in background
+    // Note: We DON'T call preload() here because the test hooks will block
+    // Individual progressive tests will handle preload and release as needed
 
     config = {
       collections: {
@@ -391,6 +424,13 @@ describe(`Electric Collection E2E Tests`, () => {
         },
       },
       hasReplicationLag: true, // Electric has async replication lag
+      progressiveTestControl: {
+        releaseInitialSync: () => {
+          usersUpToDateControl.current?.()
+          postsUpToDateControl.current?.()
+          commentsUpToDateControl.current?.()
+        },
+      },
       mutations: {
         // Use direct SQL for Electric tests (simulates external changes)
         // This tests that Electric sync picks up database changes

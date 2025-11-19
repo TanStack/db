@@ -80,6 +80,12 @@ export interface E2ETestConfig {
   // When true, tests will wait for mutations to propagate before proceeding
   hasReplicationLag?: boolean
 
+  // Test control for progressive mode (Electric only)
+  // Allows explicit control over when initial sync completes for deterministic testing
+  progressiveTestControl?: {
+    releaseInitialSync: () => void
+  }
+
   // Lifecycle hooks
   setup: () => Promise<void>
   teardown: () => Promise<void>
