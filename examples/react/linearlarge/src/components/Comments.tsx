@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { eq, useLiveQuery } from '@tanstack/react-db'
+import { useLiveQuery } from '@tanstack/react-db'
 import { Send } from 'lucide-react'
 import Avatar from './Avatar'
 import { useMode } from '@/lib/mode-context'
 import { useUser } from '@/lib/user-context'
 import { cn } from '@/lib/utils'
+import { getCommentsByIssueQuery } from '@/lib/queries'
 
 interface CommentsProps {
   issueId: string
@@ -16,13 +17,8 @@ export function Comments({ issueId }: CommentsProps) {
   const [commentBody, setCommentBody] = useState(``)
 
   // Get all comments for this issue
-  const { data: comments } = useLiveQuery((q) =>
-    q
-      .from({ comment: commentsCollection })
-      .where(({ comment }) => eq(comment.issue_id, issueId))
-      .orderBy(({ comment }) => comment.created_at, `asc`)
-      .limit(1000)
-  )
+  const commentsQuery = getCommentsByIssueQuery(issueId, commentsCollection)
+  const { data: comments } = useLiveQuery(() => commentsQuery)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()

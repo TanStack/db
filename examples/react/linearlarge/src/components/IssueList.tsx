@@ -78,17 +78,19 @@ export function IssueList() {
     [search]
   )
 
+  console.log(`render`, { issues })
+
   const virtualizer = useVirtualizer({
     count: totalCount ?? issues.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 36,
-    overscan: 50,
+    overscan: 100,
   })
 
   // Reset virtualizer to top when filters change
-  useEffect(() => {
-    virtualizer.scrollToIndex(0, { align: 'start' })
-  }, [search, virtualizer])
+  // useEffect(() => {
+  //   virtualizer.scrollToIndex(0, { align: 'start' })
+  // }, [search, virtualizer])
 
   // Fetch total count for current filters
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { eq, useLiveQuery, usePacedMutations, debounceStrategy } from '@tanstack/react-db'
+import { useLiveQuery, usePacedMutations, debounceStrategy } from '@tanstack/react-db'
 import { useEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { Link } from '@tanstack/react-router'
@@ -8,6 +8,7 @@ import type { Priority, Status } from '@/db/schema'
 import { cn } from '@/lib/utils'
 import { useMode } from '@/lib/mode-context'
 import { useUser } from '@/lib/user-context'
+import { getIssueByIdQuery } from '@/lib/queries'
 
 interface IssueDetailProps {
   issueId: string
@@ -17,13 +18,10 @@ export function IssueDetail({ issueId }: IssueDetailProps) {
   const { issuesCollection } = useMode()
   const { user } = useUser()
 
-  const { data: issues } = useLiveQuery((q) =>
-    q
-      .from({ issue: issuesCollection })
-      .where(({ issue }) => eq(issue.id, issueId))
-  )
+  const issueQuery = getIssueByIdQuery(issueId, issuesCollection)
+  const { data: issues } = useLiveQuery(() => issueQuery)
 
-  const issue = issues?.[0]
+  const issue = issues[0]
   const isOwner = user && issue && issue.user_id === user.id
 
   const [title, setTitle] = useState(issue?.title ?? ``)

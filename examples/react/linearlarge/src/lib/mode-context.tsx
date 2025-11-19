@@ -3,13 +3,11 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import type { Collection } from '@tanstack/db'
 import type { Issue, Comment } from '@/db/schema'
 import {
-  issuesQueryCollection,
-  commentsQueryCollection,
-} from './collections/query-mode'
-import {
-  issuesElectricCollection,
-  commentsElectricCollection,
-} from './collections/electric-mode'
+  getIssuesQueryCollection,
+  getCommentsQueryCollection,
+  getIssuesElectricCollection,
+  getCommentsElectricCollection,
+} from './collections'
 
 export type SyncMode = 'query' | 'electric'
 
@@ -36,9 +34,9 @@ export function ModeProvider({ children }: { children: ReactNode }) {
   }
 
   const issuesCollection =
-    mode === 'query' ? issuesQueryCollection : issuesElectricCollection
+    mode === 'query' ? getIssuesQueryCollection() : getIssuesElectricCollection()
   const commentsCollection =
-    mode === 'query' ? commentsQueryCollection : commentsElectricCollection
+    mode === 'query' ? getCommentsQueryCollection() : getCommentsElectricCollection()
 
   return (
     <ModeContext.Provider

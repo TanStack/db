@@ -1,4 +1,4 @@
-import { BsSortUp, BsPlus, BsX } from 'react-icons/bs'
+import { BsSortUp, BsSortDown, BsPlus, BsX } from 'react-icons/bs'
 import FilterMenu from './contextmenu/FilterMenu'
 import { useFilterState, type FilterState } from '@/utils/filterState'
 
@@ -76,8 +76,18 @@ export function TopFilter({
             <button
               type="button"
               className="p-2 rounded hover:bg-gray-100"
+              onClick={() => {
+                setFilterState({
+                  ...filterState,
+                  orderDirection: filterState.orderDirection === 'asc' ? 'desc' : 'asc',
+                })
+              }}
             >
-              <BsSortUp size="16" className="inline" />
+              {filterState.orderDirection === 'asc' ? (
+                <BsSortUp size="16" className="inline" />
+              ) : (
+                <BsSortDown size="16" className="inline" />
+              )}
             </button>
           )}
         </div>
