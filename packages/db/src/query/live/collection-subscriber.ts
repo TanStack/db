@@ -3,7 +3,6 @@ import {
   convertOrderByToBasicExpression,
   convertToBasicExpression,
 } from "../compiler/expressions.js"
-import { WhereClauseConversionError } from "../../errors.js"
 import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "../../collection/index.js"
 import type { ChangeMessage } from "../../types.js"
@@ -42,12 +41,7 @@ export class CollectionSubscriber<
 
     if (whereClause) {
       const whereExpression = convertToBasicExpression(whereClause, this.alias)
-
-      if (whereExpression) {
-        return this.subscribeToChanges(whereExpression)
-      }
-
-      throw new WhereClauseConversionError(this.collectionId, this.alias)
+      return this.subscribeToChanges(whereExpression)
     }
 
     return this.subscribeToChanges()
