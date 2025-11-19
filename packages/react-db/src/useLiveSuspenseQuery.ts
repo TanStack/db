@@ -12,6 +12,14 @@ import type {
   SingleResult,
 } from "@tanstack/db"
 
+// Unique symbol for type-level error messages
+declare const TypeException: unique symbol
+
+// Custom compile-time error for disabled queries
+type DisabledQueryError = {
+  [TypeException]: `❌ useLiveSuspenseQuery does not support disabled queries (returning undefined/null).\n\n✅ Solution 1: Use conditional rendering\n   Don't render this component until data is ready:\n   {userId ? <Profile userId={userId} /> : <div>No user</div>}\n\n✅ Solution 2: Use useLiveQuery instead\n   It supports the 'isEnabled' flag for conditional queries:\n   useLiveQuery((q) => userId ? q.from(...) : undefined, [userId])`
+}
+
 /**
  * Create a live query with React Suspense support
  * @param queryFn - Query function that defines what data to fetch
@@ -105,6 +113,32 @@ import type {
  * )
  * ```
  */
+// "Poison pill" overloads - catch disabled queries and show custom compile-time error
+export function useLiveSuspenseQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => QueryBuilder<TContext> | undefined | null,
+  deps?: Array<unknown>
+): DisabledQueryError
+
+export function useLiveSuspenseQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => LiveQueryCollectionConfig<TContext> | undefined | null,
+  deps?: Array<unknown>
+): DisabledQueryError
+
+export function useLiveSuspenseQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => Collection<TResult, TKey, TUtils> | undefined | null,
+  deps?: Array<unknown>
+): DisabledQueryError
+
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveSuspenseQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
