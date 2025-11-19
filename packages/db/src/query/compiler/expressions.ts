@@ -18,7 +18,7 @@ import type { BasicExpression, OrderBy } from "../ir.js"
  * // Input: ref with path ['user', 'id'] where collectionAlias is 'user'
  * // Output: ref with path ['id']
  */
-export function convertToBasicExpression(
+export function normalizeExpressionPaths(
   whereClause: BasicExpression<boolean>,
   collectionAlias: string
 ): BasicExpression<boolean> {
@@ -42,7 +42,7 @@ export function convertToBasicExpression(
     // Recursively convert all arguments
     const args: Array<BasicExpression> = []
     for (const arg of whereClause.args) {
-      const convertedArg = convertToBasicExpression(
+      const convertedArg = normalizeExpressionPaths(
         arg as BasicExpression<boolean>,
         collectionAlias
       )
@@ -52,12 +52,12 @@ export function convertToBasicExpression(
   }
 }
 
-export function convertOrderByToBasicExpression(
+export function normalizeOrderByPaths(
   orderBy: OrderBy,
   collectionAlias: string
 ): OrderBy {
   const normalizedOrderBy = orderBy.map((clause) => {
-    const basicExp = convertToBasicExpression(
+    const basicExp = normalizeExpressionPaths(
       clause.expression,
       collectionAlias
     )
