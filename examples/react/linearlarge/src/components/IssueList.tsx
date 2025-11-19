@@ -79,10 +79,10 @@ export function IssueList() {
   )
 
   const virtualizer = useVirtualizer({
-    count: totalCount ?? issues?.length ?? 0,
+    count: totalCount ?? issues.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 36,
-    overscan: 5,
+    overscan: 50,
   })
 
   // Reset virtualizer to top when filters change
@@ -119,7 +119,7 @@ export function IssueList() {
 
     if (!lastItem) return
 
-    const loadedCount = issues?.length ?? 0
+    const loadedCount = issues.length
     const shouldFetch =
       lastItem.index >= loadedCount - 5 && hasNextPage && !isFetchingNextPage
 
@@ -132,7 +132,7 @@ export function IssueList() {
         hasNextPage,
         isFetchingNextPage,
         shouldFetch,
-        pagesCount: pages?.length,
+        pagesCount: pages.length,
       })
     }
 
@@ -145,9 +145,9 @@ export function IssueList() {
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-    issues?.length,
+    issues.length,
     totalCount,
-    pages?.length,
+    pages.length,
     virtualizer.getVirtualItems(),
   ])
 
@@ -159,7 +159,7 @@ export function IssueList() {
     )
   }
 
-  if (status !== `loading` && (!issues || issues.length === 0)) {
+  if (status !== `loading` && issues.length === 0) {
     return (
       <>
         <TopFilter issueCount={totalCount} />
@@ -187,7 +187,7 @@ export function IssueList() {
           }}
         >
           {virtualizer.getVirtualItems().map((virtualItem) => {
-            const issue = issues?.[virtualItem.index]
+            const issue = issues[virtualItem.index]
 
             // If issue hasn't loaded yet, render a loading skeleton
             if (!issue) {
