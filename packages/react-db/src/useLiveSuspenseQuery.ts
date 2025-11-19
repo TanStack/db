@@ -72,20 +72,6 @@ import type {
  *   )
  * }
  *
- * @example
- * // Conditional query - return undefined to disable
- * function UserProfile({ userId }: { userId?: string }) {
- *   const { data } = useLiveSuspenseQuery(
- *     (q) => userId ? q.from({ users: usersCollection })
- *                      .where(({ users }) => eq(users.id, userId))
- *                      .findOne()
- *                   : undefined,
- *     [userId]
- *   )
- *
- *   if (!data) return <div>No user selected</div>
- *   return <div>{data.name}</div>
- * }
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveSuspenseQuery<TContext extends Context>(
@@ -97,75 +83,7 @@ export function useLiveSuspenseQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}>
 }
 
-// Overload 2: Accept query function that can return undefined/null
-export function useLiveSuspenseQuery<TContext extends Context>(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) => QueryBuilder<TContext> | undefined | null,
-  deps?: Array<unknown>
-): {
-  state: Map<string | number, GetResult<TContext>> | undefined
-  data: InferResultType<TContext> | undefined
-  collection: Collection<GetResult<TContext>, string | number, {}> | undefined
-}
-
-// Overload 3: Accept query function that can return LiveQueryCollectionConfig
-export function useLiveSuspenseQuery<TContext extends Context>(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) => LiveQueryCollectionConfig<TContext> | undefined | null,
-  deps?: Array<unknown>
-): {
-  state: Map<string | number, GetResult<TContext>> | undefined
-  data: InferResultType<TContext> | undefined
-  collection: Collection<GetResult<TContext>, string | number, {}> | undefined
-}
-
-// Overload 4: Accept query function that can return Collection
-export function useLiveSuspenseQuery<
-  TResult extends object,
-  TKey extends string | number,
-  TUtils extends Record<string, any>,
->(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) => Collection<TResult, TKey, TUtils> | undefined | null,
-  deps?: Array<unknown>
-): {
-  state: Map<TKey, TResult> | undefined
-  data: Array<TResult> | undefined
-  collection: Collection<TResult, TKey, TUtils> | undefined
-}
-
-// Overload 5: Accept query function that can return all types
-export function useLiveSuspenseQuery<
-  TContext extends Context,
-  TResult extends object,
-  TKey extends string | number,
-  TUtils extends Record<string, any>,
->(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) =>
-    | QueryBuilder<TContext>
-    | LiveQueryCollectionConfig<TContext>
-    | Collection<TResult, TKey, TUtils>
-    | undefined
-    | null,
-  deps?: Array<unknown>
-): {
-  state:
-    | Map<string | number, GetResult<TContext>>
-    | Map<TKey, TResult>
-    | undefined
-  data: InferResultType<TContext> | Array<TResult> | undefined
-  collection:
-    | Collection<GetResult<TContext>, string | number, {}>
-    | Collection<TResult, TKey, TUtils>
-    | undefined
-}
-
-// Overload 6: Accept config object
+// Overload 2: Accept config object
 export function useLiveSuspenseQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
   deps?: Array<unknown>
@@ -175,7 +93,7 @@ export function useLiveSuspenseQuery<TContext extends Context>(
   collection: Collection<GetResult<TContext>, string | number, {}>
 }
 
-// Overload 7: Accept pre-created live query collection
+// Overload 3: Accept pre-created live query collection
 export function useLiveSuspenseQuery<
   TResult extends object,
   TKey extends string | number,
@@ -188,7 +106,7 @@ export function useLiveSuspenseQuery<
   collection: Collection<TResult, TKey, TUtils>
 }
 
-// Overload 8: Accept pre-created live query collection with singleResult: true
+// Overload 4: Accept pre-created live query collection with singleResult: true
 export function useLiveSuspenseQuery<
   TResult extends object,
   TKey extends string | number,
@@ -229,12 +147,14 @@ export function useLiveSuspenseQuery(
   // SUSPENSE LOGIC: Throw promise or error based on collection status
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!result.isEnabled) {
-    // Query is disabled (callback returned undefined/null) - return undefined values without suspending
-    return {
-      state: undefined,
-      data: undefined,
-      collection: undefined,
-    }
+    // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior
+    throw new Error(
+      `useLiveSuspenseQuery does not support disabled queries (callback returned undefined/null). ` +
+        `The Suspense pattern requires data to always be defined (T, not T | undefined). ` +
+        `Solutions: ` +
+        `1) Use conditional rendering - don't render the component until the condition is met. ` +
+        `2) Use useLiveQuery instead, which supports disabled queries with the 'isEnabled' flag.`
+    )
   }
 
   // Only throw errors during initial load (before first ready)

@@ -262,74 +262,17 @@ describe(`useLiveSuspenseQuery`, () => {
     })
   })
 
-  it(`should return undefined values when query function returns undefined`, async () => {
-    const { result } = renderHook(
-      () => {
-        return useLiveSuspenseQuery(() => undefined as any)
-      },
-      {
-        wrapper: SuspenseWrapper,
-      }
-    )
-
-    // Should not suspend, just return undefined immediately
-    expect(result.current.data).toBeUndefined()
-    expect(result.current.state).toBeUndefined()
-    expect(result.current.collection).toBeUndefined()
-  })
-
-  it(`should support conditional queries with undefined`, async () => {
-    const collection = createCollection(
-      mockSyncCollectionOptions<Person>({
-        id: `test-persons-conditional-suspense`,
-        getKey: (person: Person) => person.id,
-        initialData: initialPersons,
-      })
-    )
-
-    const { result, rerender } = renderHook(
-      ({ userId }: { userId?: string }) => {
-        return useLiveSuspenseQuery(
-          (q) =>
-            userId
-              ? q
-                  .from({ persons: collection })
-                  .where(({ persons }) => eq(persons.id, userId))
-                  .findOne()
-              : undefined,
-          [userId]
-        )
-      },
-      {
-        wrapper: SuspenseWrapper,
-        initialProps: { userId: undefined },
-      }
-    )
-
-    // When userId is undefined, should return undefined without suspending
-    expect(result.current.data).toBeUndefined()
-    expect(result.current.state).toBeUndefined()
-    expect(result.current.collection).toBeUndefined()
-
-    // Change to valid userId - should suspend and load data
-    rerender({ userId: `1` })
-
-    await waitFor(() => {
-      expect(result.current.data).toBeDefined()
-    })
-
-    expect(result.current.data).toMatchObject({
-      id: `1`,
-      name: `John Doe`,
-      age: 30,
-    })
-
-    // Change back to undefined - should return undefined again
-    rerender({ userId: undefined })
-
-    expect(result.current.data).toBeUndefined()
-    expect(result.current.state).toBeUndefined()
-    expect(result.current.collection).toBeUndefined()
+  it(`should throw error when query function returns undefined`, () => {
+    expect(() => {
+      renderHook(
+        () => {
+          return useLiveSuspenseQuery(() => undefined as any)
+        },
+        {
+          wrapper: SuspenseWrapper,
+        }
+      )
+    }).toThrow(/does not support disabled queries/)
   })
 
   it(`should work with config object`, async () => {
