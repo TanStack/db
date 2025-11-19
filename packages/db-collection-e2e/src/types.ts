@@ -60,6 +60,11 @@ export interface E2ETestConfig {
       posts: Collection<Post>
       comments: Collection<Comment>
     }
+    progressive?: {
+      users: Collection<User>
+      posts: Collection<Post>
+      comments: Collection<Comment>
+    }
   }
 
   // Mutation helpers using collection APIs (works for both Electric and Query)

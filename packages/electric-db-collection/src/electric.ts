@@ -734,6 +734,10 @@ function createElectricSync<T extends Row<unknown>>(
       const newSnapshots: Array<PostgresSnapshot> = []
       let hasReceivedUpToDate = false // Track if we've completed initial sync in progressive mode
 
+      // Progressive mode state
+      let isBufferingInitialSync = syncMode === `progressive` // True until first up-to-date in progressive mode
+      const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
+
       // Create deduplicated loadSubset wrapper for non-eager modes
       // This prevents redundant snapshot requests when multiple concurrent
       // live queries request overlapping or subset predicates
@@ -742,12 +746,48 @@ function createElectricSync<T extends Row<unknown>>(
           ? null
           : new DeduplicatedLoadSubset({
               loadSubset: async (opts: LoadSubsetOptions) => {
-                // In progressive mode, stop requesting snapshots once full sync is complete
-                if (syncMode === `progressive` && hasReceivedUpToDate) {
-                  return
+                // In progressive mode, use fetchSnapshot during snapshot phase
+                if (syncMode === `progressive`) {
+                  if (hasReceivedUpToDate) {
+                    // Full sync complete, no need to load more
+                    return
+                  }
+                  // Snapshot phase: fetch and apply immediately
+                  const snapshotParams = compileSQL<T>(opts)
+                  try {
+                    const snapshot = await stream.fetchSnapshot(snapshotParams)
+                    const rows = snapshot.data
+
+                    // Apply snapshot data in a sync transaction (only if we have data)
+                    if (rows.length > 0) {
+                      begin()
+                      for (const row of rows) {
+                        write({
+                          type: `insert`,
+                          value: row.value,
+                          metadata: {
+                            ...row.headers,
+                          },
+                        })
+                      }
+                      commit()
+
+                      debug(
+                        `${collectionId ? `[${collectionId}] ` : ``}Applied snapshot with ${rows.length} rows`
+                      )
+                    }
+                  } catch (error) {
+                    debug(
+                      `${collectionId ? `[${collectionId}] ` : ``}Error fetching snapshot: %o`,
+                      error
+                    )
+                    throw error
+                  }
+                } else {
+                  // On-demand mode: use requestSnapshot
+                  const snapshotParams = compileSQL<T>(opts)
+                  await stream.requestSnapshot(snapshotParams)
                 }
-                const snapshotParams = compileSQL<T>(opts)
-                await stream.requestSnapshot(snapshotParams)
               },
             })
 
@@ -769,7 +809,8 @@ function createElectricSync<T extends Row<unknown>>(
           }
 
           // Check for txids in the message and add them to our store
-          if (hasTxids(message)) {
+          // Skip during buffered initial sync in progressive mode (txids will be extracted during atomic swap)
+          if (hasTxids(message) && !isBufferingInitialSync) {
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
           }
 
@@ -803,21 +844,30 @@ function createElectricSync<T extends Row<unknown>>(
               relationSchema.setState(() => schema)
             }
 
-            if (!transactionStarted) {
-              begin()
-              transactionStarted = true
-            }
+            // In buffered initial sync of progressive mode, buffer messages instead of writing
+            if (isBufferingInitialSync) {
+              bufferedMessages.push(message)
+            } else {
+              // Normal processing: write changes immediately
+              if (!transactionStarted) {
+                begin()
+                transactionStarted = true
+              }
 
-            write({
-              type: message.headers.operation,
-              value: message.value,
-              // Include the primary key and relation info in the metadata
-              metadata: {
-                ...message.headers,
-              },
-            })
+              write({
+                type: message.headers.operation,
+                value: message.value,
+                // Include the primary key and relation info in the metadata
+                metadata: {
+                  ...message.headers,
+                },
+              })
+            }
           } else if (isSnapshotEndMessage(message)) {
-            newSnapshots.push(parseSnapshotMessage(message))
+            // Skip snapshot-end tracking during buffered initial sync (will be extracted during atomic swap)
+            if (!isBufferingInitialSync) {
+              newSnapshots.push(parseSnapshotMessage(message))
+            }
             hasSnapshotEnd = true
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
@@ -842,18 +892,67 @@ function createElectricSync<T extends Row<unknown>>(
             hasUpToDate = false
             hasSnapshotEnd = false
             hasReceivedUpToDate = false // Reset for progressive mode - we're starting a new sync
+            isBufferingInitialSync = syncMode === `progressive` // Reset buffering state
+            bufferedMessages.length = 0 // Clear buffered messages
           }
         }
 
         if (hasUpToDate || hasSnapshotEnd) {
+          // PROGRESSIVE MODE: Atomic swap on first up-to-date
+          if (isBufferingInitialSync && hasUpToDate) {
+            debug(
+              `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`
+            )
+
+            // Start atomic swap transaction
+            begin()
+
+            // Truncate to clear all snapshot data
+            truncate()
+
+            // Apply all buffered change messages and extract txids/snapshots
+            for (const bufferedMsg of bufferedMessages) {
+              if (isChangeMessage(bufferedMsg)) {
+                write({
+                  type: bufferedMsg.headers.operation,
+                  value: bufferedMsg.value,
+                  metadata: {
+                    ...bufferedMsg.headers,
+                  },
+                })
+
+                // Extract txids from buffered messages (will be committed to store after transaction)
+                if (hasTxids(bufferedMsg)) {
+                  bufferedMsg.headers.txids?.forEach((txid) =>
+                    newTxids.add(txid)
+                  )
+                }
+              } else if (isSnapshotEndMessage(bufferedMsg)) {
+                // Extract snapshots from buffered messages (will be committed to store after transaction)
+                newSnapshots.push(parseSnapshotMessage(bufferedMsg))
+              }
+            }
+
+            // Commit the atomic swap
+            commit()
+
+            // Exit buffering phase - now in normal sync mode
+            isBufferingInitialSync = false
+            bufferedMessages.length = 0
+
+            debug(
+              `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Atomic swap complete, now in normal sync mode`
+            )
+          } else {
+            // Normal mode or on-demand: commit transaction if one was started
+            if (transactionStarted) {
+              commit()
+              transactionStarted = false
+            }
+          }
+
           // Clear the current batch buffer since we're now up-to-date
           currentBatchMessages.setState(() => [])
-
-          // Commit transaction if one was started
-          if (transactionStarted) {
-            commit()
-            transactionStarted = false
-          }
 
           if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
             // Mark the collection as ready now that sync is up to date
