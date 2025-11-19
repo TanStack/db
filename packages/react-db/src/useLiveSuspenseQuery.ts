@@ -189,7 +189,7 @@ export function useLiveSuspenseQuery<
 export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
   deps: Array<unknown> = []
-) {
+): DisabledQueryError | { state: any; data: any; collection: any } {
   const promiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const hasBeenReadyRef = useRef(false)
