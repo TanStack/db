@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import {
+  and,
   concat,
   createLiveQueryCollection,
   eq,
@@ -1725,6 +1726,46 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
     expect(result.join2!.other).toBe(30)
   })
 }
+
+test(`should handle compound join conditions with and()`, () => {
+  // Tests issue #593: joining on multiple fields simultaneously
+  const productsCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-products-canary`,
+      getKey: (p: any) => p.productId,
+      initialData: [
+        { productId: 1, region: `A`, sku: `sku1`, title: `A1` },
+        { productId: 3, region: `C`, sku: `sku2`, title: `C2` },
+      ],
+    })
+  )
+
+  const inventoriesCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-inventories-canary`,
+      getKey: (i: any) => i.inventoryId,
+      initialData: [
+        { inventoryId: 1, region: `A`, sku: `sku1`, quantity: 10 },
+        { inventoryId: 2, region: `C`, sku: `sku2`, quantity: 30 },
+      ],
+    })
+  )
+
+  const joinQuery = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ product: productsCollection })
+        .join({ inventory: inventoriesCollection }, ({ product, inventory }) =>
+          and(
+            eq(product.region, inventory.region),
+            eq(product.sku, inventory.sku)
+          )
+        ),
+  })
+
+  expect(joinQuery.size).toBe(2)
+})
 
 describe(`Query JOIN Operations`, () => {
   createJoinTests(`off`)
