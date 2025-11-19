@@ -796,6 +796,11 @@ export class CollectionStateManager<
       // Mark that we've received the first commit (for tracking purposes)
       if (!this.hasReceivedFirstCommit) {
         this.hasReceivedFirstCommit = true
+
+        // Call any registered first commit callbacks
+        const callbacks = [...this.lifecycle.onFirstCommitCallbacks]
+        this.lifecycle.onFirstCommitCallbacks = []
+        callbacks.forEach((callback) => callback())
       }
     }
   }

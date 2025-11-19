@@ -705,13 +705,25 @@ export class CollectionImpl<
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, TOutput>> {
-    // If we already have data or collection is ready, resolve immediately
-    if (this.size > 0 || this.isReady()) {
+    // If we already have data, resolve immediately
+    if (this.size > 0) {
       return Promise.resolve(this.state)
     }
 
-    // Use preload to ensure the collection starts loading, then return the state
-    return this.preload().then(() => this.state)
+    // If ready AND has received first commit, resolve immediately
+    if (this.isReady() && this._state.hasReceivedFirstCommit) {
+      return Promise.resolve(this.state)
+    }
+
+    // Wait for first commit using the callback system
+    return new Promise<Map<TKey, TOutput>>((resolve) => {
+      this._lifecycle.onFirstCommit(() => {
+        resolve(this.state)
+      })
+
+      // Also ensure sync is started
+      this.preload()
+    })
   }
 
   /**
@@ -730,13 +742,25 @@ export class CollectionImpl<
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<TOutput>> {
-    // If we already have data or collection is ready, resolve immediately
-    if (this.size > 0 || this.isReady()) {
+    // If we already have data, resolve immediately
+    if (this.size > 0) {
       return Promise.resolve(this.toArray)
     }
 
-    // Use preload to ensure the collection starts loading, then return the array
-    return this.preload().then(() => this.toArray)
+    // If ready AND has received first commit, resolve immediately
+    if (this.isReady() && this._state.hasReceivedFirstCommit) {
+      return Promise.resolve(this.toArray)
+    }
+
+    // Wait for first commit using the callback system
+    return new Promise<Array<TOutput>>((resolve) => {
+      this._lifecycle.onFirstCommit(() => {
+        resolve(this.toArray)
+      })
+
+      // Also ensure sync is started
+      this.preload()
+    })
   }
 
   /**

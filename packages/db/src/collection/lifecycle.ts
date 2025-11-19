@@ -34,6 +34,7 @@ export class CollectionLifecycleManager<
   public hasBeenReady = false
   public hasReceivedFirstCommit = false
   public onFirstReadyCallbacks: Array<() => void> = []
+  public onFirstCommitCallbacks: Array<() => void> = []
   public gcTimeoutId: ReturnType<typeof setTimeout> | null = null
   private idleCallbackId: number | null = null
 
@@ -160,6 +161,22 @@ export class CollectionLifecycleManager<
         const callbacks = [...this.onFirstReadyCallbacks]
         this.onFirstReadyCallbacks = []
         callbacks.forEach((callback) => callback())
+
+        // If there are onFirstCommit callbacks waiting, and there are no pending
+        // sync transactions, fire them now. This handles cases where markReady()
+        // is called without any data to commit (e.g., on-demand query collections).
+        if (
+          this.onFirstCommitCallbacks.length > 0 &&
+          this.state.pendingSyncedTransactions.length === 0 &&
+          !this.state.hasReceivedFirstCommit
+        ) {
+          // Mark as having received first commit since there's nothing to commit
+          this.state.hasReceivedFirstCommit = true
+
+          const commitCallbacks = [...this.onFirstCommitCallbacks]
+          this.onFirstCommitCallbacks = []
+          commitCallbacks.forEach((callback) => callback())
+        }
       }
       // Notify dependents when markReady is called, after status is set
       // This ensures live queries get notified when their dependencies become ready
@@ -292,6 +309,17 @@ export class CollectionLifecycleManager<
     }
 
     this.onFirstReadyCallbacks.push(callback)
+  }
+
+  public onFirstCommit(callback: () => void): void {
+    // If already received first commit, call immediately
+    // Check the state manager's flag, not the lifecycle's flag
+    if (this.state.hasReceivedFirstCommit) {
+      callback()
+      return
+    }
+
+    this.onFirstCommitCallbacks.push(callback)
   }
 
   public cleanup(): void {

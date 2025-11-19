@@ -519,5 +519,111 @@ describe(`Collection getters`, () => {
       expect(Array.isArray(array)).toBe(true)
       expect(array).toContainEqual({ id: `delayed-item`, name: `Delayed Item` })
     })
+
+    it(`BUG: returns empty array when markReady is called before commit`, async () => {
+      // Reproduce the bug: markReady is called before commit
+      let commitFn: () => void
+      let markReadyFn: () => void
+
+      const buggyOrderSyncMock = {
+        sync: vi.fn(({ begin, write, commit, markReady }) => {
+          // Start sync
+          begin()
+          write({
+            type: `insert`,
+            id: `buggy-item`,
+            value: { id: `buggy-item`, name: `Buggy Item` },
+          })
+          // Save the commit and markReady functions for later
+          commitFn = commit
+          markReadyFn = markReady
+        }),
+      }
+
+      const buggyCollection = createCollection({
+        id: `buggy-collection`,
+        getKey: (val: Item) => val.id,
+        startSync: true,
+        sync: buggyOrderSyncMock,
+      })
+
+      // Subscribe to see what events are emitted
+      const eventLog: Array<string> = []
+      buggyCollection.subscribeChanges((changes) => {
+        eventLog.push(`changes event: ${changes.length} changes`)
+      })
+
+      // Start the toArrayWhenReady promise
+      const arrayPromise = buggyCollection.toArrayWhenReady()
+
+      // Call markReady BEFORE commit (wrong order - reproduces the bug)
+      setTimeout(() => {
+        eventLog.push(`calling markReady`)
+        markReadyFn() // Called FIRST (bug!)
+        setTimeout(() => {
+          eventLog.push(`calling commit`)
+          commitFn() // Called SECOND
+          eventLog.push(
+            `after commit, hasReceivedFirstCommit: ${buggyCollection._state.hasReceivedFirstCommit}`
+          )
+        }, 5)
+      }, 10)
+
+      // The promise should resolve when commit is called
+      const array = await arrayPromise
+
+      console.log(`Event log:`, eventLog)
+
+      // This should now work with the fix
+      expect(Array.isArray(array)).toBe(true)
+      expect(array).toContainEqual({ id: `buggy-item`, name: `Buggy Item` })
+    }, 10000)
+
+    it(`waits indefinitely when markReady is called without any commit`, async () => {
+      // When markReady is called but no data is ever committed,
+      // toArrayWhenReady should wait for a commit (not resolve with empty array)
+      let markReadyFn: () => void
+      let commitFn: () => void
+
+      const noCommitSyncMock = {
+        sync: vi.fn(({ begin, write, commit, markReady }) => {
+          // Save functions but don't call anything initially
+          begin()
+          write({
+            type: `insert`,
+            id: `item-1`,
+            value: { id: `item-1`, name: `Item 1` },
+          })
+          commitFn = commit
+          markReadyFn = markReady
+        }),
+      }
+
+      const noCommitCollection = createCollection({
+        id: `no-commit-collection`,
+        getKey: (val: Item) => val.id,
+        startSync: true,
+        sync: noCommitSyncMock,
+      })
+
+      // Start the toArrayWhenReady promise
+      const arrayPromise = noCommitCollection.toArrayWhenReady()
+
+      // Call markReady without committing
+      setTimeout(() => {
+        markReadyFn()
+        // Wait a bit, then commit
+        setTimeout(() => {
+          commitFn()
+        }, 20)
+      }, 10)
+
+      // The promise should only resolve after commit is called
+      const array = await arrayPromise
+
+      // Should have data from the commit
+      expect(Array.isArray(array)).toBe(true)
+      expect(array).toContainEqual({ id: `item-1`, name: `Item 1` })
+    })
   })
 })
