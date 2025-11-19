@@ -166,13 +166,15 @@ export interface ElectricCollectionConfig<
    * Optional asynchronous handler function called before an insert operation
    *
    * **IMPORTANT - Electric Synchronization:**
-   * Electric collections require explicit synchronization coordination to ensure changes have synced
-   * from the server before dropping optimistic state. Use one of these patterns:
-   * 1. Call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
-   * 2. Call `await collection.utils.awaitMatch()` for custom matching logic
+   * This handler returns `Promise<void>`, but **must not resolve** until synchronization is confirmed.
+   * You must await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
    *
    * @param params Object containing transaction and collection information
-   * @returns Promise that should resolve to void
+   * @returns Promise<void> - Must not resolve until synchronization is complete
    * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
    *
    * @example
@@ -195,6 +197,26 @@ export interface ElectricCollectionConfig<
    *   })
    *   // Wait up to 10 seconds for txid
    *   await collection.utils.awaitTxId(result.txid, 10000)
+   * }
+   *
+   * @example
+   * // Insert handler with timeout error handling
+   * onInsert: async ({ transaction, collection }) => {
+   *   const newItem = transaction.mutations[0].modified
+   *   const result = await api.todos.create({
+   *     data: newItem
+   *   })
+   *
+   *   try {
+   *     await collection.utils.awaitTxId(result.txid, 5000)
+   *   } catch (error) {
+   *     // Decide sync timeout policy:
+   *     // - Throw to rollback optimistic state
+   *     // - Catch to keep optimistic state (eventual consistency)
+   *     // - Schedule background retry
+   *     console.warn('Sync timeout, keeping optimistic state:', error)
+   *     // Don't throw - allow optimistic state to persist
+   *   }
    * }
    *
    * @example
@@ -235,13 +257,15 @@ export interface ElectricCollectionConfig<
    * Optional asynchronous handler function called before an update operation
    *
    * **IMPORTANT - Electric Synchronization:**
-   * Electric collections require explicit synchronization coordination to ensure changes have synced
-   * from the server before dropping optimistic state. Use one of these patterns:
-   * 1. Call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
-   * 2. Call `await collection.utils.awaitMatch()` for custom matching logic
+   * This handler returns `Promise<void>`, but **must not resolve** until synchronization is confirmed.
+   * You must await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
    *
    * @param params Object containing transaction and collection information
-   * @returns Promise that should resolve to void
+   * @returns Promise<void> - Must not resolve until synchronization is complete
    * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
    *
    * @example
@@ -281,13 +305,15 @@ export interface ElectricCollectionConfig<
    * Optional asynchronous handler function called before a delete operation
    *
    * **IMPORTANT - Electric Synchronization:**
-   * Electric collections require explicit synchronization coordination to ensure changes have synced
-   * from the server before dropping optimistic state. Use one of these patterns:
-   * 1. Call `await collection.utils.awaitTxId(txid)` (recommended for most cases)
-   * 2. Call `await collection.utils.awaitMatch()` for custom matching logic
+   * This handler returns `Promise<void>`, but **must not resolve** until synchronization is confirmed.
+   * You must await one of these synchronization utilities before the handler completes:
+   * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
+   * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
+   *
+   * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
    *
    * @param params Object containing transaction and collection information
-   * @returns Promise that should resolve to void
+   * @returns Promise<void> - Must not resolve until synchronization is complete
    * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
    *
    * @example
@@ -810,6 +836,13 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   ): Promise<void> => {
     // Only wait if result contains txid
     if (result && `txid` in result) {
+      // Warn about deprecated return value pattern
+      console.warn(
+        '[TanStack DB] DEPRECATED: Returning { txid } from mutation handlers is deprecated and will be removed in v1.0. ' +
+        'Use `await collection.utils.awaitTxId(txid)` instead of returning { txid }. ' +
+        'See migration guide: https://tanstack.com/db/latest/docs/collections/electric-collection#persistence-handlers--synchronization'
+      )
+
       const timeout = result.timeout
       // Handle both single txid and array of txids
       if (Array.isArray(result.txid)) {

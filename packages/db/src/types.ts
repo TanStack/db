@@ -441,6 +441,9 @@ export type DeleteMutationFnParams<
   collection: Collection<T, TKey, TUtils>
 }
 
+/**
+ * @typeParam TReturn - @internal DEPRECATED: Defaults to void. Only kept for backward compatibility. Will be removed in v1.0.
+ */
 export type InsertMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -448,6 +451,9 @@ export type InsertMutationFn<
   TReturn = void,
 > = (params: InsertMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
+/**
+ * @typeParam TReturn - @internal DEPRECATED: Defaults to void. Only kept for backward compatibility. Will be removed in v1.0.
+ */
 export type UpdateMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -455,6 +461,9 @@ export type UpdateMutationFn<
   TReturn = void,
 > = (params: UpdateMutationFnParams<T, TKey, TUtils>) => Promise<TReturn>
 
+/**
+ * @typeParam TReturn - @internal DEPRECATED: Defaults to void. Only kept for backward compatibility. Will be removed in v1.0.
+ */
 export type DeleteMutationFn<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -491,6 +500,11 @@ export type CollectionStatus =
 
 export type SyncMode = `eager` | `on-demand`
 
+/**
+ * @typeParam TReturn - @internal DEPRECATED: This generic parameter exists for backward compatibility only.
+ * Mutation handlers should not return values. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination.
+ * This parameter will be removed in v1.0.
+ */
 export interface BaseCollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
