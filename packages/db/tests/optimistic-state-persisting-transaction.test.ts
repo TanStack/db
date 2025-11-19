@@ -250,4 +250,98 @@ describe(`Optimistic state with persisting transactions`, () => {
       title: `Optimistic Task`,
     })
   })
+
+  it(`should preserve optimistic state when concurrent server update arrives during persisting transaction`, async () => {
+    type Todo = { id: number; title: string; completed: boolean }
+
+    let syncFunctions: any = null
+    let serverCallResolver: ((value: Todo) => void) | null = null
+    const serverPromise = new Promise<Todo>((resolve) => {
+      serverCallResolver = resolve
+    })
+
+    const collection = createCollection<Todo>({
+      id: `todos-concurrent-update`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          // Start with an existing item
+          write({
+            type: `insert`,
+            value: { id: 1, title: `Original Task`, completed: false },
+          })
+          commit()
+          markReady()
+          syncFunctions = { begin, write, commit }
+        },
+      },
+      onUpdate: async ({ transaction }: { transaction: Transaction<any> }) => {
+        const updatedItem = transaction.mutations[0]!.modified as Todo
+        const serverItem = await serverPromise
+
+        expect(transaction.state).toBe(`persisting`)
+
+        // Write server response back
+        if (syncFunctions) {
+          syncFunctions.begin()
+          syncFunctions.write({
+            type: `update`,
+            value: serverItem,
+          })
+          syncFunctions.commit()
+        }
+
+        return { refetch: false }
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Verify initial state
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      title: `Original Task`,
+      completed: false,
+    })
+
+    // User updates the item (marks as completed)
+    const updateTx = collection.update(1, (draft) => {
+      draft.completed = true
+      draft.title = `Updated Task`
+    })
+
+    // At this point, transaction is persisting and optimistic state shows the update
+    // Simulate a concurrent server update that arrives with STALE data
+    // (from before our mutation, e.g., someone else changed the title earlier)
+    if (syncFunctions) {
+      syncFunctions.begin()
+      syncFunctions.write({
+        type: `update`,
+        value: { id: 1, title: `Task edited by someone else`, completed: false },
+      })
+      syncFunctions.commit()
+    }
+
+    // CRITICAL: Even though server data arrived, optimistic state should still show
+    // the user's update because the transaction is still persisting
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      title: `Updated Task`,
+      completed: true,
+    })
+
+    // Now resolve the server call with successful response
+    serverCallResolver!({ id: 1, title: `Updated Task`, completed: true })
+
+    await updateTx.isPersisted.promise
+
+    // After transaction completes, should show the final server data
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      title: `Updated Task`,
+      completed: true,
+    })
+  })
 })
