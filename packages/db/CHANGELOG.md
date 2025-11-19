@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.5.3
+
+### Patch Changes
+
+- Pass all operators in where clauses to the collection's loadSubset function ([#851](https://github.com/TanStack/db/pull/851))
+
+- Improve type of mutations in transactions ([#854](https://github.com/TanStack/db/pull/854))
+
 ## 0.5.2
 
 ### Patch Changes
