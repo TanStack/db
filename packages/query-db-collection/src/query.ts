@@ -6,6 +6,7 @@ import {
   QueryKeyRequiredError,
 } from "./errors"
 import { createWriteUtils } from "./manual-sync"
+import { serializeLoadSubsetOptions } from "./serialization"
 import type {
   BaseCollectionConfig,
   ChangeMessage,
@@ -626,7 +627,19 @@ export function queryCollectionOptions(
       queryFunction: typeof queryFn = queryFn
     ): true | Promise<void> => {
       // Push the predicates down to the queryKey and queryFn
-      const key = typeof queryKey === `function` ? queryKey(opts) : queryKey
+      let key: QueryKey
+      if (typeof queryKey === `function`) {
+        // Function-based queryKey: use it to build the key from opts
+        key = queryKey(opts)
+      } else if (syncMode === `on-demand`) {
+        // Static queryKey in on-demand mode: automatically append serialized predicates
+        // to create separate cache entries for different predicate combinations
+        const serialized = serializeLoadSubsetOptions(opts)
+        key = serialized !== undefined ? [...queryKey, serialized] : queryKey
+      } else {
+        // Static queryKey in eager mode: use as-is
+        key = queryKey
+      }
       const hashedQueryKey = hashKey(key)
       const extendedMeta = { ...meta, loadSubsetOptions: opts }
 
