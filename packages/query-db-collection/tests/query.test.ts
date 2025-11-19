@@ -13,7 +13,6 @@ import type {
   Collection,
   DeleteMutationFnParams,
   InsertMutationFnParams,
-  LoadSubsetOptions,
   TransactionWithMutations,
   UpdateMutationFnParams,
 } from "@tanstack/db"
@@ -455,9 +454,7 @@ describe(`QueryCollection`, () => {
       const queryFn = vi
         .fn()
         .mockImplementation((ctx: QueryFunctionContext<any>) => {
-          const loadSubsetOptions = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const loadSubsetOptions = ctx.meta?.loadSubsetOptions
           // Verify where clause is present
           expect(loadSubsetOptions?.where).toBeDefined()
           expect(loadSubsetOptions?.where).not.toBeNull()
@@ -515,9 +512,7 @@ describe(`QueryCollection`, () => {
       const queryFn = vi
         .fn()
         .mockImplementation((ctx: QueryFunctionContext<any>) => {
-          const loadSubsetOptions = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const loadSubsetOptions = ctx.meta?.loadSubsetOptions
           // Verify where clause is present (this was the bug - it was undefined/null before the fix)
           expect(loadSubsetOptions?.where).toBeDefined()
           expect(loadSubsetOptions?.where).not.toBeNull()
