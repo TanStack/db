@@ -1,5 +1,5 @@
 /**
- * Progressive Mode Test Suite (Electric only)
+ * Progressive Mode Test Suite
  *
  * Tests progressive sync mode behavior including:
  * - Snapshot loading during initial sync
@@ -11,12 +11,14 @@
 import { describe, expect, it } from "vitest"
 import { createLiveQueryCollection, eq, gt } from "@tanstack/db"
 import { waitFor, waitForQueryData } from "../utils/helpers"
-import type { E2ETestConfig } from "../types"
+import type { E2ETestConfig, User } from "../types"
+import type { Collection } from "@tanstack/db"
+import type { ElectricCollectionUtils } from "@tanstack/electric-db-collection"
 
 export function createProgressiveTestSuite(
   getConfig: () => Promise<E2ETestConfig>
 ) {
-  describe(`Progressive Mode Suite (Electric only)`, () => {
+  describe(`Progressive Mode Suite`, () => {
     describe(`Basic Progressive Mode`, () => {
       it(`should explicitly validate snapshot phase and atomic swap transition`, async () => {
         const config = await getConfig()
@@ -403,6 +405,145 @@ export function createProgressiveTestSuite(
         })
 
         await Promise.all(queries.map((q) => q.cleanup()))
+      })
+    })
+
+    describe(`Txid Tracking Behavior (Electric only)`, () => {
+      it(`should not track txids during snapshot phase but track them after atomic swap`, async () => {
+        const config = await getConfig()
+        if (
+          !config.collections.progressive ||
+          !config.mutations?.insertUser ||
+          !config.getTxid
+        ) {
+          return // Skip if progressive collections, mutations, or getTxid not available
+        }
+        const progressiveUsers = config.collections.progressive
+          .users as Collection<User, string, ElectricCollectionUtils>
+
+        // awaitTxId is guaranteed to exist on ElectricCollectionUtils
+        // This test is Electric-only via the describe block name
+
+        // Start sync but don't release yet (stay in snapshot phase)
+        progressiveUsers.startSyncImmediate()
+        await new Promise((resolve) => setTimeout(resolve, 100))
+
+        // Should be in loading state (snapshot phase)
+        if (progressiveUsers.status !== `loading`) {
+          console.log(
+            `Collection already ready, cannot test snapshot phase txid behavior`
+          )
+          return
+        }
+
+        // === PHASE 1: INSERT DURING SNAPSHOT PHASE ===
+        const snapshotPhaseUser = {
+          id: crypto.randomUUID(),
+          name: `Snapshot Phase User`,
+          email: `snapshot@test.com`,
+          age: 28,
+          isActive: true,
+          createdAt: new Date(),
+          metadata: null,
+          deletedAt: null,
+        }
+
+        // Insert user and track when awaitTxId completes
+        let txidResolved = false
+
+        // Start the insert
+        await config.mutations.insertUser(snapshotPhaseUser)
+
+        // Get the txid from postgres
+        const txid = await config.getTxid()
+
+        if (!txid) {
+          console.log(`Could not get txid, skipping txid tracking validation`)
+          config.progressiveTestControl?.releaseInitialSync()
+          return
+        }
+
+        // Start awaiting the txid (should NOT resolve during snapshot phase)
+        progressiveUsers.utils.awaitTxId(txid, 60000).then(() => {
+          txidResolved = true
+        })
+
+        // Wait a moment for sync to process
+        await new Promise((resolve) => setTimeout(resolve, 500))
+
+        // Txid should NOT have resolved yet (snapshot phase, txids not tracked)
+        expect(txidResolved).toBe(false)
+
+        // Query for the user (triggers fetchSnapshot with this user)
+        const query = createLiveQueryCollection((q) =>
+          q
+            .from({ user: progressiveUsers })
+            .where(({ user }) => eq(user.id, snapshotPhaseUser.id))
+        )
+
+        await query.preload()
+        await waitForQueryData(query, { minSize: 1, timeout: 10000 })
+
+        // User should be in snapshot data
+        expect(query.size).toBe(1)
+        expect(query.get(snapshotPhaseUser.id)).toBeDefined()
+
+        // But collection is still in snapshot phase
+        expect(progressiveUsers.status).toBe(`loading`)
+
+        // Txid should STILL not have resolved (snapshot doesn't track txids)
+        expect(txidResolved).toBe(false)
+
+        // === PHASE 2: TRIGGER ATOMIC SWAP ===
+        if (config.progressiveTestControl) {
+          config.progressiveTestControl.releaseInitialSync()
+        }
+
+        // Wait for atomic swap to complete
+        await waitFor(() => progressiveUsers.status === `ready`, {
+          timeout: 30000,
+          message: `Progressive collection did not complete sync`,
+        })
+
+        // NOW txid should resolve (buffered messages include txids)
+        await waitFor(() => txidResolved, {
+          timeout: 5000,
+          message: `Txid did not resolve after atomic swap`,
+        })
+
+        expect(txidResolved).toBe(true)
+
+        // === PHASE 3: VERIFY TXID TRACKING POST-SWAP ===
+        // User should still be present after atomic swap
+        expect(progressiveUsers.get(snapshotPhaseUser.id)).toBeDefined()
+
+        // Now insert another user and verify txid tracking works
+        const postSwapUser = {
+          id: crypto.randomUUID(),
+          name: `Post Swap User`,
+          email: `postswap@test.com`,
+          age: 29,
+          isActive: true,
+          createdAt: new Date(),
+          metadata: null,
+          deletedAt: null,
+        }
+
+        await config.mutations.insertUser(postSwapUser)
+
+        // Wait for incremental update (txid tracking should work now)
+        if (config.hasReplicationLag) {
+          await waitFor(() => progressiveUsers.has(postSwapUser.id), {
+            timeout: 10000,
+            message: `Post-swap user not synced via incremental update`,
+          })
+        }
+
+        // Both users should be present
+        expect(progressiveUsers.get(snapshotPhaseUser.id)).toBeDefined()
+        expect(progressiveUsers.get(postSwapUser.id)).toBeDefined()
+
+        await query.cleanup()
       })
     })
 

@@ -431,6 +431,16 @@ describe(`Electric Collection E2E Tests`, () => {
           commentsUpToDateControl.current?.()
         },
       },
+      getTxid: async () => {
+        // Get the current transaction ID from the last operation
+        // This uses pg_current_xact_id_if_assigned() which returns the txid
+        // Note: This gets the CURRENT transaction's ID, so must be called
+        // immediately after an insert in the same transaction context
+        const result = await dbClient.query(
+          `SELECT pg_current_xact_id_if_assigned()::text::bigint as txid`
+        )
+        return result.rows[0]?.txid || null
+      },
       mutations: {
         // Use direct SQL for Electric tests (simulates external changes)
         // This tests that Electric sync picks up database changes
