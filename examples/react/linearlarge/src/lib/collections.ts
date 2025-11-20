@@ -8,7 +8,16 @@ import { QueryClient } from '@tanstack/query-core'
 import { selectIssueSchema, selectCommentSchema } from '@/db/schema'
 
 // Query client singleton
-export const queryClient = new QueryClient()
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Keep queries in cache for 10 minutes after they become unused
+      gcTime: 10 * 60 * 1000,
+      // Data is considered fresh for 5 minutes
+      staleTime: 5 * 60 * 1000,
+    },
+  },
+})
 
 const ELECTRIC_URL =
   import.meta.env.VITE_ELECTRIC_URL || `http://localhost:3001`

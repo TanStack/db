@@ -65,6 +65,7 @@ export function IssueList() {
     {
       pageSize: PAGE_SIZE,
       staleTime: 5 * 60 * 1000, // 5 minutes
+      gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
       getNextPageParam: (lastPage, allPages) => {
         // Continue fetching as long as the last page was full
         // This is the standard infinite scroll pattern
@@ -84,13 +85,18 @@ export function IssueList() {
     count: totalCount ?? issues.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 36,
-    overscan: 100,
+    overscan: 50,
   })
 
   // Reset virtualizer to top when filters change
-  // useEffect(() => {
-  //   virtualizer.scrollToIndex(0, { align: 'start' })
-  // }, [search, virtualizer])
+  useEffect(() => {
+    virtualizer.scrollToIndex(0, { align: 'start' })
+  }, [
+    filterState.status,
+    filterState.priority,
+    filterState.orderBy,
+    filterState.orderDirection,
+  ])
 
   // Fetch total count for current filters
   useEffect(() => {
@@ -122,10 +128,12 @@ export function IssueList() {
     if (!lastItem) return
 
     const loadedCount = issues.length
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     const shouldFetch =
       lastItem.index >= loadedCount - 5 && hasNextPage && !isFetchingNextPage
 
     // Debug logging
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
     if (lastItem.index >= loadedCount - 10) {
       console.log('Scroll position:', {
         lastVisibleIndex: lastItem.index,
@@ -168,9 +176,7 @@ export function IssueList() {
         <div className="flex items-center justify-center flex-1">
           <div className="text-center">
             <p className="text-gray-500 mb-2">No issues found</p>
-            <p className="text-sm text-gray-400">
-              Try adjusting your filters
-            </p>
+            <p className="text-sm text-gray-400">Try adjusting your filters</p>
           </div>
         </div>
       </>
@@ -192,6 +198,7 @@ export function IssueList() {
             const issue = issues[virtualItem.index]
 
             // If issue hasn't loaded yet, render a loading skeleton
+            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
             if (!issue) {
               return (
                 <div

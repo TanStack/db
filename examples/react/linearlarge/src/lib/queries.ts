@@ -122,8 +122,49 @@ export const preloadComments = async (issueId: string, mode: 'query' | 'electric
   await query.preload()
 }
 
-export const preloadIssuesList = async (mode: 'query' | 'electric' = 'query') => {
+export const preloadIssuesList = async (
+  filters?: {
+    status?: string[]
+    priority?: string[]
+    orderBy?: string
+    orderDirection?: 'asc' | 'desc'
+  },
+  mode: 'query' | 'electric' = 'query'
+) => {
   const issuesCollection =
     mode === 'query' ? getIssuesQueryCollection() : getIssuesElectricCollection()
-  await issuesCollection.preload()
+
+  // Preload with the exact same filters that will be used in the component
+  // This ensures the cache key matches and data is instantly available
+  const { eq, inArray, and } = await import('@tanstack/react-db')
+
+  await issuesCollection.preload({
+    where: (filters?.status?.length || filters?.priority?.length) ? ({ issue }) => {
+      const conditions = []
+
+      if (filters.status?.length) {
+        if (filters.status.length === 1) {
+          conditions.push(eq(issue.status, filters.status[0]))
+        } else {
+          conditions.push(inArray(issue.status, filters.status))
+        }
+      }
+
+      if (filters.priority?.length) {
+        if (filters.priority.length === 1) {
+          conditions.push(eq(issue.priority, filters.priority[0]))
+        } else {
+          conditions.push(inArray(issue.priority, filters.priority))
+        }
+      }
+
+      return conditions.length === 1 ? conditions[0] : and(...conditions)
+    } : undefined,
+    orderBy: ({ issue }) => {
+      const orderField = filters?.orderBy === 'created_at' ? 'created_at' : 'modified'
+      return issue[orderField]
+    },
+    orderDirection: filters?.orderDirection || 'desc',
+    limit: 50, // Match the PAGE_SIZE in IssueList
+  })
 }
