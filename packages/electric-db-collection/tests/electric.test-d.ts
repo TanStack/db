@@ -117,7 +117,6 @@ describe(`Electric collection type resolution tests`, () => {
         params: { table: `todos` },
       },
       schema: todoSchema,
-      /*
       onInsert: async ({ collection }) => {
         const testCollectionUtils: ElectricCollectionUtils<TodoType> =
           collection.utils
@@ -125,7 +124,6 @@ describe(`Electric collection type resolution tests`, () => {
         expectTypeOf(collection.utils.awaitTxId).toBeFunction
         return Promise.resolve({ txid: 1 })
       },
-      */
     })
 
     // ✅ Test that options.utils is typed as ElectricCollectionUtils<TodoType>

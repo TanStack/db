@@ -109,7 +109,13 @@ export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-    BaseCollectionConfig<T, string | number, TSchema, UtilsRecord, any>,
+    BaseCollectionConfig<
+      T,
+      string | number,
+      TSchema,
+      ElectricCollectionUtils<T>,
+      any
+    >,
     `onInsert` | `onUpdate` | `onDelete` | `syncMode`
   > {
   /**
@@ -164,7 +170,13 @@ export interface ElectricCollectionConfig<
    *   )
    * }
    */
-  onInsert?: (params: InsertMutationFnParams<T>) => Promise<MatchingStrategy>
+  onInsert?: (
+    params: InsertMutationFnParams<
+      T,
+      string | number,
+      ElectricCollectionUtils<T>
+    >
+  ) => Promise<MatchingStrategy>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -193,7 +205,13 @@ export interface ElectricCollectionConfig<
    *   )
    * }
    */
-  onUpdate?: (params: UpdateMutationFnParams<T>) => Promise<MatchingStrategy>
+  onUpdate?: (
+    params: UpdateMutationFnParams<
+      T,
+      string | number,
+      ElectricCollectionUtils<T>
+    >
+  ) => Promise<MatchingStrategy>
 
   /**
    * Optional asynchronous handler function called before a delete operation
@@ -221,7 +239,13 @@ export interface ElectricCollectionConfig<
    *   )
    * }
    */
-  onDelete?: (params: DeleteMutationFnParams<T>) => Promise<MatchingStrategy>
+  onDelete?: (
+    params: DeleteMutationFnParams<
+      T,
+      string | number,
+      ElectricCollectionUtils<T>
+    >
+  ) => Promise<MatchingStrategy>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
