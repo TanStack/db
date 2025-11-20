@@ -404,9 +404,9 @@ export function electricCollectionOptions<T extends StandardSchemaV1>(
   config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
     schema: T
   }
-): CollectionConfig<InferSchemaOutput<T>, string | number, T> & {
+): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T>, `utils`> & {
   id?: string
-  utils: ElectricCollectionUtils
+  utils: ElectricCollectionUtils<InferSchemaOutput<T>>
   schema: T
 }
 
@@ -415,15 +415,15 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T> & {
     schema?: never // prohibit schema
   }
-): CollectionConfig<T, string | number> & {
+): Omit<CollectionConfig<T, string | number>, `utils`> & {
   id?: string
-  utils: ElectricCollectionUtils
+  utils: ElectricCollectionUtils<T>
   schema?: never // no schema in the result
 }
 
 export function electricCollectionOptions(
   config: ElectricCollectionConfig<any, any>
-): CollectionConfig<any, string | number, any> & {
+): Omit<CollectionConfig<any, string | number>, `utils`> & {
   id?: string
   utils: ElectricCollectionUtils
   schema?: any
