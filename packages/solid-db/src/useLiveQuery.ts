@@ -94,6 +94,11 @@ import type {
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
 ): Accessor<Array<GetResult<TContext>>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
+  data: Array<GetResult<TContext>>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
@@ -148,6 +153,11 @@ export function useLiveQuery<TContext extends Context>(
 export function useLiveQuery<TContext extends Context>(
   config: Accessor<LiveQueryCollectionConfig<TContext>>
 ): Accessor<Array<GetResult<TContext>>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
+  data: Array<GetResult<TContext>>
   state: ReactiveMap<string | number, GetResult<TContext>>
   collection: Collection<GetResult<TContext>, string | number, {}>
   status: CollectionStatus
@@ -201,6 +211,11 @@ export function useLiveQuery<
 >(
   liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>
 ): Accessor<Array<TResult>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
+  data: Array<TResult>
   state: ReactiveMap<TKey, TResult>
   collection: Collection<TResult, TKey, TUtils>
   status: CollectionStatus
@@ -325,6 +340,11 @@ export function useLiveQuery(
   }
 
   Object.defineProperties(getData, {
+    data: {
+      get() {
+        return getData()
+      },
+    },
     status: {
       get() {
         return status()
