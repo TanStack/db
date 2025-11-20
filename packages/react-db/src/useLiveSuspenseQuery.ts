@@ -113,32 +113,6 @@ type DisabledQueryError = {
  * )
  * ```
  */
-// "Poison pill" overloads - catch disabled queries and show custom compile-time error
-export function useLiveSuspenseQuery<TContext extends Context>(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) => QueryBuilder<TContext> | undefined | null,
-  deps?: Array<unknown>
-): DisabledQueryError
-
-export function useLiveSuspenseQuery<TContext extends Context>(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) => LiveQueryCollectionConfig<TContext> | undefined | null,
-  deps?: Array<unknown>
-): DisabledQueryError
-
-export function useLiveSuspenseQuery<
-  TResult extends object,
-  TKey extends string | number,
-  TUtils extends Record<string, any>,
->(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) => Collection<TResult, TKey, TUtils> | undefined | null,
-  deps?: Array<unknown>
-): DisabledQueryError
-
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveSuspenseQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
@@ -184,6 +158,33 @@ export function useLiveSuspenseQuery<
   data: TResult | undefined
   collection: Collection<TResult, TKey, TUtils> & SingleResult
 }
+
+// "Poison pill" overloads - catch disabled queries and show custom compile-time error
+// These MUST come AFTER the specific overloads so TypeScript tries them last
+export function useLiveSuspenseQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => QueryBuilder<TContext> | undefined | null,
+  deps?: Array<unknown>
+): DisabledQueryError
+
+export function useLiveSuspenseQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => LiveQueryCollectionConfig<TContext> | undefined | null,
+  deps?: Array<unknown>
+): DisabledQueryError
+
+export function useLiveSuspenseQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => Collection<TResult, TKey, TUtils> | undefined | null,
+  deps?: Array<unknown>
+): DisabledQueryError
 
 // Implementation - uses useLiveQuery internally and adds Suspense logic
 export function useLiveSuspenseQuery(
