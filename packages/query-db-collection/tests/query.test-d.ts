@@ -510,15 +510,12 @@ describe(`Query collection type resolution tests`, () => {
       // This test validates that users can extend QueryCollectionMeta to add custom properties
       // by augmenting the @tanstack/query-db-collection module
 
-      // Simulate user augmentation (normally in their own type definition file)
-      interface ExtendedMeta {
-        customUserId: number
-        customContext?: string
-      }
-
       // In reality, users would do:
       // declare module "@tanstack/query-db-collection" {
-      //   interface QueryCollectionMeta extends ExtendedMeta {}
+      //   interface QueryCollectionMeta {
+      //     customUserId: number
+      //     customContext?: string
+      //   }
       // }
 
       const config: QueryCollectionConfig<TestItem> = {

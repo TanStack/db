@@ -1,4 +1,5 @@
-/// <reference path="./global.d.ts" />
+// Import global.d.ts to ensure module augmentation is loaded
+import type {} from "./global"
 
 export {
   queryCollectionOptions,
