@@ -19,7 +19,6 @@ import {
   generateSeedData,
 } from "../../db-collection-e2e/src/index"
 import { applyPredicates, buildQueryKey } from "./query-filter"
-import type { LoadSubsetOptions } from "@tanstack/db"
 import type {
   Comment as E2EComment,
   Post as E2EPost,
@@ -94,9 +93,7 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: (opts) => buildQueryKey(`users`, opts),
         syncMode: `on-demand`,
         queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.users, options)
           return Promise.resolve(filtered)
         },
@@ -112,9 +109,7 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: (opts) => buildQueryKey(`posts`, opts),
         syncMode: `on-demand`,
         queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.posts, options)
           return Promise.resolve(filtered)
         },
@@ -130,9 +125,7 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: (opts) => buildQueryKey(`comments`, opts),
         syncMode: `on-demand`,
         queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.comments, options)
           return Promise.resolve(filtered)
         },
