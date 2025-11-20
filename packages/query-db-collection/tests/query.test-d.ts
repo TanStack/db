@@ -470,5 +470,40 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions(config)
       createCollection(options)
     })
+
+    it(`should have loadSubsetOptions typed automatically without explicit QueryCollectionMeta import`, () => {
+      // This test validates that the module augmentation works automatically
+      // Note: We are NOT importing QueryCollectionMeta, yet ctx.meta.loadSubsetOptions
+      // should still be properly typed as LoadSubsetOptions
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `autoTypeTest`,
+        queryClient,
+        queryKey: [`autoTypeTest`],
+        queryFn: (ctx) => {
+          // This should compile without errors because the module augmentation
+          // in global.d.ts is automatically loaded via the triple-slash reference
+          // in index.ts
+          const options = ctx.meta?.loadSubsetOptions
+
+          // Verify the type is correct
+          expectTypeOf(options).toMatchTypeOf<LoadSubsetOptions | undefined>()
+
+          // Verify it can be passed to parseLoadSubsetOptions without type errors
+          const parsed = parseLoadSubsetOptions(options)
+          expectTypeOf(parsed).toMatchTypeOf<{
+            filters: Array<any>
+            sorts: Array<any>
+            limit?: number
+          }>()
+
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
+    })
   })
 })

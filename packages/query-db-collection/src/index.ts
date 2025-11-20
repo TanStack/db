@@ -1,10 +1,14 @@
+/// <reference path="./global.d.ts" />
+
 export {
   queryCollectionOptions,
   type QueryCollectionConfig,
-  type QueryCollectionMeta,
   type QueryCollectionUtils,
   type SyncOperation,
 } from "./query"
+
+// Export QueryCollectionMeta from global.d.ts
+export type { QueryCollectionMeta } from "./global"
 
 export * from "./errors"
 
