@@ -3673,9 +3673,7 @@ describe(`QueryCollection`, () => {
       ]
 
       const queryFn = vi.fn((ctx: QueryFunctionContext) => {
-        const loadSubsetOptions = ctx.meta?.loadSubsetOptions as
-          | LoadSubsetOptions
-          | undefined
+        const loadSubsetOptions = ctx.meta?.loadSubsetOptions
         // Filter items based on the where clause if present
         if (loadSubsetOptions?.where) {
           // Simple mock filtering - in real use, you'd use parseLoadSubsetOptions
