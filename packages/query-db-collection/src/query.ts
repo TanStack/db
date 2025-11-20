@@ -20,6 +20,7 @@ import type {
 import type {
   FetchStatus,
   QueryClient,
+  QueryFunction,
   QueryFunctionContext,
   QueryKey,
   QueryObserverOptions,
@@ -32,17 +33,13 @@ export type { SyncOperation } from "./manual-sync"
 
 /**
  * Base type for Query Collection meta properties.
- * Users can extend this type when augmenting the @tanstack/query-core module
- * to add their own custom properties while preserving loadSubsetOptions.
+ * This type defines the structure of meta that is always passed to queryFn.
+ * Users can extend this type to add their own custom properties.
  *
  * @example
  * ```typescript
- * declare module "@tanstack/query-core" {
- *   interface Register {
- *     queryMeta: QueryCollectionMeta & {
- *       myCustomProperty: string
- *     }
- *   }
+ * type MyCustomMeta = QueryCollectionMeta & {
+ *   myCustomProperty: string
  * }
  * ```
  */
@@ -50,13 +47,26 @@ export type QueryCollectionMeta = Record<string, unknown> & {
   loadSubsetOptions: LoadSubsetOptions
 }
 
-// Module augmentation to extend TanStack Query's Register interface
-// This ensures that ctx.meta always includes loadSubsetOptions
-// We extend Record<string, unknown> to preserve the ability to add other meta properties
-declare module "@tanstack/query-core" {
-  interface Register {
-    queryMeta: QueryCollectionMeta
-  }
+/**
+ * Extended QueryFunctionContext for Query Collections.
+ * This type extends QueryFunctionContext but ensures that:
+ * 1. The `meta` property is always defined (not optional)
+ * 2. The `meta` property always includes `loadSubsetOptions`
+ * 3. The `meta` property can be extended with additional properties
+ *
+ * @template TQueryKey - The type of the query key
+ * @template TMeta - Optional custom meta type that extends QueryCollectionMeta
+ */
+export type QueryCollectionFunctionContext<
+  TQueryKey extends QueryKey = QueryKey,
+  TMeta extends QueryCollectionMeta = QueryCollectionMeta
+> = Omit<QueryFunctionContext<TQueryKey>, "meta"> & {
+  /**
+   * Meta property that is always defined in Query Collections.
+   * Always contains loadSubsetOptions, and may contain additional properties
+   * if a custom meta type is provided.
+   */
+  meta: TMeta
 }
 
 // Schema output type inference helper (matches electric.ts pattern)
@@ -86,8 +96,10 @@ type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
  */
 export interface QueryCollectionConfig<
   T extends object = object,
-  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
-    context: QueryFunctionContext<any>
+  TQueryFn extends (
+    context: QueryCollectionFunctionContext<any>
+  ) => Promise<any> = (
+    context: QueryCollectionFunctionContext<any>
   ) => Promise<any>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
@@ -99,9 +111,9 @@ export interface QueryCollectionConfig<
   queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>
   /** Function that fetches data from the server. Must return the complete collection state */
   queryFn: TQueryFn extends (
-    context: QueryFunctionContext<TQueryKey>
+    context: QueryCollectionFunctionContext<TQueryKey>
   ) => Promise<Array<any>>
-    ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>>
+    ? (context: QueryCollectionFunctionContext<TQueryKey>) => Promise<Array<T>>
     : TQueryFn
   /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
   select?: (data: TQueryData) => Array<T>
@@ -420,7 +432,9 @@ class QueryCollectionUtilsImpl {
 // Overload for when schema is provided and select present
 export function queryCollectionOptions<
   T extends StandardSchemaV1,
-  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any>,
+  TQueryFn extends (
+    context: QueryCollectionFunctionContext<any>
+  ) => Promise<any>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
@@ -455,8 +469,10 @@ export function queryCollectionOptions<
 // Overload for when no schema is provided and select present
 export function queryCollectionOptions<
   T extends object,
-  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
-    context: QueryFunctionContext<any>
+  TQueryFn extends (
+    context: QueryCollectionFunctionContext<any>
+  ) => Promise<any> = (
+    context: QueryCollectionFunctionContext<any>
   ) => Promise<any>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
@@ -495,7 +511,7 @@ export function queryCollectionOptions<
   config: QueryCollectionConfig<
     InferSchemaOutput<T>,
     (
-      context: QueryFunctionContext<any>
+      context: QueryCollectionFunctionContext<any>
     ) => Promise<Array<InferSchemaOutput<T>>>,
     TError,
     TQueryKey,
@@ -528,7 +544,7 @@ export function queryCollectionOptions<
 >(
   config: QueryCollectionConfig<
     T,
-    (context: QueryFunctionContext<any>) => Promise<Array<T>>,
+    (context: QueryCollectionFunctionContext<any>) => Promise<Array<T>>,
     TError,
     TQueryKey,
     TKey
@@ -687,6 +703,28 @@ export function queryCollectionOptions(
         }
       }
 
+      /*
+      // Wrap the queryFn to ensure meta is always defined when calling it
+      // TanStack Query passes QueryFunctionContext (with optional meta),
+      // but our queryFn expects QueryCollectionFunctionContext (with required meta)
+      // Since we always pass meta via extendedMeta, we can safely ensure it's defined
+      const wrappedQueryFn: QueryFunction<Array<any>, any> = (
+        ctx: QueryFunctionContext<any>
+      ) => {
+        // Ensure meta is always defined (it should be since we pass extendedMeta)
+        if (!ctx.meta) {
+          throw new Error(
+            `Query Collection: meta is required but was not provided. This should not happen.`
+          )
+        }
+        // Call the user's queryFn with the properly typed context
+        return queryFunction({
+          ...ctx,
+          meta: ctx.meta as QueryCollectionMeta,
+        } as QueryCollectionFunctionContext<any>)
+      }
+      */
+
       const observerOptions: QueryObserverOptions<
         Array<any>,
         any,
@@ -695,7 +733,8 @@ export function queryCollectionOptions(
         any
       > = {
         queryKey: key,
-        queryFn: queryFunction,
+        //queryFn: wrappedQueryFn,
+        queryFn: queryFunction as QueryFunction<any[], any, never>,
         meta: extendedMeta,
         structuralSharing: true,
         notifyOnChangeProps: `all`,

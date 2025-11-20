@@ -1,6 +1,7 @@
 export {
   queryCollectionOptions,
   type QueryCollectionConfig,
+  type QueryCollectionFunctionContext,
   type QueryCollectionMeta,
   type QueryCollectionUtils,
   type SyncOperation,

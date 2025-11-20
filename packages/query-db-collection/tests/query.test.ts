@@ -8,7 +8,6 @@ import {
   or,
 } from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
-import type { QueryFunctionContext } from "@tanstack/query-core"
 import type {
   Collection,
   DeleteMutationFnParams,
@@ -16,7 +15,7 @@ import type {
   TransactionWithMutations,
   UpdateMutationFnParams,
 } from "@tanstack/db"
-import type { QueryCollectionConfig, QueryCollectionUtils } from "../src/query"
+import type { QueryCollectionConfig, QueryCollectionFunctionContext, QueryCollectionUtils } from "../src/query"
 
 interface TestItem {
   id: string
@@ -191,7 +190,7 @@ describe(`QueryCollection`, () => {
       .mockImplementation(() => {})
 
     const queryFn: (
-      context: QueryFunctionContext<any>
+      context: QueryCollectionFunctionContext
     ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValueOnce([initialItem])
@@ -245,7 +244,7 @@ describe(`QueryCollection`, () => {
 
     // Mock queryFn to return invalid data (not an array of objects)
     const queryFn: (
-      context: QueryFunctionContext<any>
+      context: QueryCollectionFunctionContext
     ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValue(`not an array` as any)
@@ -290,7 +289,7 @@ describe(`QueryCollection`, () => {
     // Second query returns a new object with the same properties (different reference)
     // Third query returns an object with an actual change
     const queryFn: (
-      context: QueryFunctionContext<any>
+      context: QueryCollectionFunctionContext
     ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValueOnce([initialItem])
@@ -453,7 +452,7 @@ describe(`QueryCollection`, () => {
       const queryKey = [`loadSubsetTest`]
       const queryFn = vi
         .fn()
-        .mockImplementation((ctx: QueryFunctionContext<any>) => {
+        .mockImplementation((ctx: QueryCollectionFunctionContext) => {
           const loadSubsetOptions = ctx.meta?.loadSubsetOptions
           // Verify where clause is present
           expect(loadSubsetOptions?.where).toBeDefined()
@@ -511,7 +510,7 @@ describe(`QueryCollection`, () => {
     it(`should pass ilike where clause to queryFn via loadSubsetOptions`, async () => {
       const queryFn = vi
         .fn()
-        .mockImplementation((ctx: QueryFunctionContext<any>) => {
+        .mockImplementation((ctx: QueryCollectionFunctionContext) => {
           const loadSubsetOptions = ctx.meta?.loadSubsetOptions
           // Verify where clause is present (this was the bug - it was undefined/null before the fix)
           expect(loadSubsetOptions?.where).toBeDefined()
@@ -2057,7 +2056,7 @@ describe(`QueryCollection`, () => {
       { id: `2`, name: `Cached Item 2` },
     ]
     const queryFn: (
-      context: QueryFunctionContext<any>
+      context: QueryCollectionFunctionContext
     ) => Promise<Array<TestItem>> = vi.fn().mockReturnValue(initialItems)
     await queryClient.prefetchQuery({ queryKey, queryFn })
 
