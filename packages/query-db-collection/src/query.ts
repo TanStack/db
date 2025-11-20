@@ -709,13 +709,6 @@ export function queryCollectionOptions(
         subscribeToQuery(localObserver, hashedQueryKey)
       }
 
-      // Tell tanstack query to GC the query when the subscription is unsubscribed
-      // The subscription is unsubscribed when the live query is GCed.
-      const subscription = opts.subscription
-      subscription?.once(`unsubscribed`, () => {
-        queryClient.removeQueries({ queryKey: key, exact: true })
-      })
-
       return readyPromise
     }
 
@@ -836,6 +829,13 @@ export function queryCollectionOptions(
         const handleQueryResult = makeQueryResultHandler(queryKey)
         const unsubscribeFn = observer.subscribe(handleQueryResult)
         unsubscribes.set(hashedQueryKey, unsubscribeFn)
+
+        // Process the current result immediately if available
+        // This ensures data is synced when resubscribing to a query with cached data
+        const currentResult = observer.getCurrentResult()
+        if (currentResult.isSuccess || currentResult.isError) {
+          handleQueryResult(currentResult)
+        }
       }
     }
 
