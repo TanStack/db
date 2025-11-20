@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/query-db-collection",
   "description": "TanStack Query collection for TanStack DB",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0"
   },

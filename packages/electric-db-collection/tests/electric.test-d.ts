@@ -141,6 +141,88 @@ describe(`Electric collection type resolution tests`, () => {
     >()
   })
 
+  it(`should correctly type mutations in transaction handlers when mapping over mutations array`, () => {
+    const schema = z.object({
+      id: z.string(),
+      title: z.string(),
+      completed: z.boolean(),
+    })
+
+    type TodoType = z.infer<typeof schema>
+
+    const options = electricCollectionOptions({
+      id: `todos`,
+      schema,
+      getKey: (item) => item.id,
+      shapeOptions: {
+        url: `/api/todos`,
+        params: { table: `todos` },
+      },
+      onDelete: (params) => {
+        // Direct index access should be correctly typed
+        expectTypeOf(
+          params.transaction.mutations[0].original
+        ).toEqualTypeOf<TodoType>()
+
+        // Non-null assertion on second element should be correctly typed
+        expectTypeOf(
+          params.transaction.mutations[1]!.original
+        ).toEqualTypeOf<TodoType>()
+
+        // When mapping over mutations, each mutation.original should be correctly typed
+        params.transaction.mutations.map((mutation) => {
+          expectTypeOf(mutation.original).toEqualTypeOf<TodoType>()
+          return mutation.original.id
+        })
+
+        return Promise.resolve({ txid: 1 })
+      },
+      onInsert: (params) => {
+        // Direct index access should be correctly typed
+        expectTypeOf(
+          params.transaction.mutations[0].modified
+        ).toEqualTypeOf<TodoType>()
+
+        // When mapping over mutations, each mutation.modified should be correctly typed
+        params.transaction.mutations.map((mutation) => {
+          expectTypeOf(mutation.modified).toEqualTypeOf<TodoType>()
+          return mutation.modified.id
+        })
+
+        return Promise.resolve({ txid: 1 })
+      },
+      onUpdate: (params) => {
+        // Direct index access should be correctly typed
+        expectTypeOf(
+          params.transaction.mutations[0].original
+        ).toEqualTypeOf<TodoType>()
+        expectTypeOf(
+          params.transaction.mutations[0].modified
+        ).toEqualTypeOf<TodoType>()
+
+        // When mapping over mutations, each mutation should be correctly typed
+        params.transaction.mutations.map((mutation) => {
+          expectTypeOf(mutation.original).toEqualTypeOf<TodoType>()
+          expectTypeOf(mutation.modified).toEqualTypeOf<TodoType>()
+          return mutation.modified.id
+        })
+
+        return Promise.resolve({ txid: 1 })
+      },
+    })
+
+    // Verify that the handlers are properly typed
+    expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
+      [DeleteMutationFnParams<TodoType>]
+    >()
+    expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
+      [InsertMutationFnParams<TodoType>]
+    >()
+    expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
+      [UpdateMutationFnParams<TodoType>]
+    >()
+  })
+
   it(`should infer types from Zod schema through electric collection options to live query`, () => {
     // Define a Zod schema for a user with basic field types
     const userSchema = z.object({

@@ -4,6 +4,7 @@ import {
   createCollection,
   createLiveQueryCollection,
   eq,
+  ilike,
   or,
 } from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
@@ -12,6 +13,7 @@ import type {
   Collection,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetOptions,
   TransactionWithMutations,
   UpdateMutationFnParams,
 } from "@tanstack/db"
@@ -445,6 +447,132 @@ describe(`QueryCollection`, () => {
     expect(queryFn).toHaveBeenCalledWith(
       expect.objectContaining({ meta: { ...meta, loadSubsetOptions: {} } })
     )
+  })
+
+  describe(`loadSubsetOptions passed to queryFn`, () => {
+    it(`should pass eq where clause to queryFn via loadSubsetOptions`, async () => {
+      const queryKey = [`loadSubsetTest`]
+      const queryFn = vi
+        .fn()
+        .mockImplementation((ctx: QueryFunctionContext<any>) => {
+          const loadSubsetOptions = ctx.meta?.loadSubsetOptions as
+            | LoadSubsetOptions
+            | undefined
+          // Verify where clause is present
+          expect(loadSubsetOptions?.where).toBeDefined()
+          expect(loadSubsetOptions?.where).not.toBeNull()
+          if (loadSubsetOptions?.where?.type === `func`) {
+            expect(loadSubsetOptions.where.name).toBe(`eq`)
+          }
+          return Promise.resolve([])
+        })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `loadSubsetTest`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+        // startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create a live query with an eq where clause
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.id, `1`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await liveQuery.preload()
+
+      // Wait for queryFn to be called
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalled()
+      })
+
+      // Verify queryFn was called with loadSubsetOptions containing the where clause
+      expect(queryFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          meta: expect.objectContaining({
+            loadSubsetOptions: expect.objectContaining({
+              where: expect.objectContaining({
+                type: `func`,
+                name: `eq`,
+              }),
+            }),
+          }),
+        })
+      )
+    })
+
+    it(`should pass ilike where clause to queryFn via loadSubsetOptions`, async () => {
+      const queryFn = vi
+        .fn()
+        .mockImplementation((ctx: QueryFunctionContext<any>) => {
+          const loadSubsetOptions = ctx.meta?.loadSubsetOptions as
+            | LoadSubsetOptions
+            | undefined
+          // Verify where clause is present (this was the bug - it was undefined/null before the fix)
+          expect(loadSubsetOptions?.where).toBeDefined()
+          expect(loadSubsetOptions?.where).not.toBeNull()
+          if (loadSubsetOptions?.where?.type === `func`) {
+            expect(loadSubsetOptions.where.name).toBe(`ilike`)
+          }
+          return Promise.resolve([])
+        })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `loadSubsetIlikeTest`,
+        queryClient,
+        queryKey: [`loadSubsetIlikeTest`],
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+        // startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create a live query with an ilike where clause
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => ilike(item.name, `%test%`))
+            .orderBy(({ item }) => item.name)
+            .limit(10),
+      })
+
+      await liveQuery.preload()
+
+      // Wait for queryFn to be called
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalled()
+      })
+
+      // Verify queryFn was called with loadSubsetOptions containing the ilike where clause
+      // Without the fix: where would be undefined/null
+      // With the fix: where should be defined with the ilike expression
+      expect(queryFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          meta: expect.objectContaining({
+            loadSubsetOptions: expect.objectContaining({
+              where: expect.objectContaining({
+                type: `func`,
+                name: `ilike`,
+              }),
+            }),
+          }),
+        })
+      )
+    })
   })
 
   describe(`Select method testing`, () => {
@@ -3537,6 +3665,182 @@ describe(`QueryCollection`, () => {
 
       // Wait for final GC to process
       expect(collection.size).toBe(0)
+    })
+  })
+
+  describe(`Static queryKey with on-demand mode`, () => {
+    it(`should automatically append serialized predicates to static queryKey in on-demand mode`, async () => {
+      const items: Array<CategorisedItem> = [
+        { id: `1`, name: `Item 1`, category: `A` },
+        { id: `2`, name: `Item 2`, category: `A` },
+        { id: `3`, name: `Item 3`, category: `B` },
+        { id: `4`, name: `Item 4`, category: `B` },
+      ]
+
+      const queryFn = vi.fn((ctx: QueryFunctionContext) => {
+        const loadSubsetOptions = ctx.meta?.loadSubsetOptions as
+          | LoadSubsetOptions
+          | undefined
+        // Filter items based on the where clause if present
+        if (loadSubsetOptions?.where) {
+          // Simple mock filtering - in real use, you'd use parseLoadSubsetOptions
+          return Promise.resolve(items)
+        }
+        return Promise.resolve(items)
+      })
+
+      const staticQueryKey = [`static-on-demand-test`]
+
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `static-on-demand-test`,
+        queryClient,
+        queryKey: staticQueryKey, // Static queryKey (not a function)
+        queryFn,
+        getKey: (item: CategorisedItem) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Create first live query with category A filter
+      const queryA = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => item),
+      })
+
+      await queryA.preload()
+
+      // Wait for first query to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBeGreaterThan(0)
+      })
+
+      // Verify queryFn was called
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      const firstCall = queryFn.mock.calls[0]?.[0]
+      expect(firstCall?.meta?.loadSubsetOptions).toBeDefined()
+
+      // Create second live query with category B filter
+      const queryB = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `B`))
+            .select(({ item }) => item),
+      })
+
+      await queryB.preload()
+
+      // Wait for second query to trigger another queryFn call
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(2)
+      })
+
+      // Verify the second call has different loadSubsetOptions
+      const secondCall = queryFn.mock.calls[1]?.[0]
+      expect(secondCall?.meta?.loadSubsetOptions).toBeDefined()
+
+      // The two queries should have triggered separate cache entries
+      // because the static queryKey was automatically extended with serialized predicates
+      expect(queryFn).toHaveBeenCalledTimes(2)
+
+      // Cleanup
+      await queryA.cleanup()
+      await queryB.cleanup()
+    })
+
+    it(`should create same cache key for identical predicates with static queryKey`, async () => {
+      const items: Array<CategorisedItem> = [
+        { id: `1`, name: `Item 1`, category: `A` },
+        { id: `2`, name: `Item 2`, category: `A` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `static-identical-predicates-test`,
+        queryClient,
+        queryKey: [`identical-test`],
+        queryFn,
+        getKey: (item: CategorisedItem) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create two live queries with identical predicates
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => item),
+      })
+
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => item),
+      })
+
+      await query1.preload()
+      await query2.preload()
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBeGreaterThan(0)
+      })
+
+      // Should only call queryFn once because identical predicates
+      // should produce the same serialized cache key
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // Cleanup
+      await query1.cleanup()
+      await query2.cleanup()
+    })
+
+    it(`should work correctly in eager mode with static queryKey (no automatic serialization)`, async () => {
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `static-eager-test`,
+        queryClient,
+        queryKey: [`eager-test`],
+        queryFn,
+        getKey,
+        syncMode: `eager`, // Eager mode should NOT append predicates
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(items.length)
+      })
+
+      // Should call queryFn once with empty predicates
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      const call = queryFn.mock.calls[0]?.[0]
+      expect(call?.meta?.loadSubsetOptions).toEqual({})
     })
   })
 })
