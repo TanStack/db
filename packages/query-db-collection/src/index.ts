@@ -1,6 +1,7 @@
 export {
   queryCollectionOptions,
   type QueryCollectionConfig,
+  type QueryCollectionMeta,
   type QueryCollectionUtils,
   type SyncOperation,
 } from "./query"
