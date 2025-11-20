@@ -22,19 +22,6 @@ export const queryClient = new QueryClient({
 const ELECTRIC_URL =
   import.meta.env.VITE_ELECTRIC_URL || `http://localhost:3001`
 
-// Helper function to create stable query keys from predicates
-const serializePredicates = (opts: any) => {
-  if (!opts || (!opts.where && !opts.orderBy && !opts.limit && !opts.offset)) {
-    return null
-  }
-  return JSON.stringify({
-    where: opts.where,
-    orderBy: opts.orderBy,
-    limit: opts.limit,
-    offset: opts.offset,
-  })
-}
-
 // ============================================================================
 // QUERY MODE COLLECTIONS
 // ============================================================================
@@ -44,7 +31,7 @@ const createIssuesQueryCollection = () => {
   return createCollection(
     queryCollectionOptions({
       id: 'issues-query',
-      queryKey: (opts) => ['issues', serializePredicates(opts)],
+      queryKey: ['issues'],
       syncMode: 'on-demand',
       queryClient,
       staleTime: 5 * 60 * 1000, // 5 minutes
@@ -198,12 +185,65 @@ const createIssuesQueryCollection = () => {
   )
 }
 
+// Factory function for issue count query collection
+const createIssueCountQueryCollection = (filters?: {
+  status?: string[]
+  priority?: string[]
+}) => {
+  // Build stable key from filters
+  const filterKey = JSON.stringify({
+    status: filters?.status?.sort(),
+    priority: filters?.priority?.sort(),
+  })
+
+  return createCollection(
+    queryCollectionOptions({
+      id: 'issue-count-query',
+      queryKey: () => ['issue-count', filterKey],
+      syncMode: 'on-demand',
+      queryClient,
+      staleTime: 5 * 60 * 1000, // 5 minutes
+
+      queryFn: async () => {
+        // Build query parameters from filters
+        const params = new URLSearchParams()
+
+        if (filters?.status?.length) {
+          params.set('status_in', JSON.stringify(filters.status))
+        }
+
+        if (filters?.priority?.length) {
+          params.set('priority_in', JSON.stringify(filters.priority))
+        }
+
+        const url = params.toString() ? `/api/issues/count?${params}` : '/api/issues/count'
+        const response = await fetch(url)
+
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error('Failed to fetch issue count:', response.status, errorText)
+          throw new Error(
+            `Failed to fetch issue count: ${response.status} ${errorText}`
+          )
+        }
+
+        const data = await response.json()
+        // Return as single-item array with a synthetic ID
+        return [{ id: 'count', count: data.count }]
+      },
+
+      getKey: (item) => item.id,
+      schema: null,
+    })
+  )
+}
+
 // Factory function for comments query collection
 const createCommentsQueryCollection = () => {
   return createCollection(
     queryCollectionOptions({
       id: 'comments-query',
-      queryKey: (opts) => ['comments', serializePredicates(opts)],
+      queryKey: ['comments'],
       syncMode: 'on-demand',
       queryClient,
       staleTime: 5 * 60 * 1000, // 5 minutes
@@ -318,10 +358,12 @@ const createCommentsQueryCollection = () => {
 
 // Extract types from factory functions
 type IssuesQueryCollection = ReturnType<typeof createIssuesQueryCollection>
+type IssueCountQueryCollection = ReturnType<typeof createIssueCountQueryCollection>
 type CommentsQueryCollection = ReturnType<typeof createCommentsQueryCollection>
 
 // Caches for query collections
 let issuesQueryCollectionCache: IssuesQueryCollection | null = null
+const issueCountQueryCollectionCache = new Map<string, IssueCountQueryCollection>()
 let commentsQueryCollectionCache: CommentsQueryCollection | null = null
 
 // Getter functions with caching
@@ -338,6 +380,32 @@ export const getIssuesQueryCollection = (): IssuesQueryCollection => {
   }
 
   return issuesQueryCollectionCache
+}
+
+export const getIssueCountQueryCollection = (filters?: {
+  status?: string[]
+  priority?: string[]
+}): IssueCountQueryCollection => {
+  // Create a stable cache key from the filters
+  const cacheKey = JSON.stringify({
+    status: filters?.status?.sort(),
+    priority: filters?.priority?.sort(),
+  })
+
+  if (!issueCountQueryCollectionCache.has(cacheKey)) {
+    const collection = createIssueCountQueryCollection(filters)
+
+    // Auto-cleanup when collection is disposed
+    collection.on('status:change', ({ status }) => {
+      if (status === 'cleaned-up') {
+        issueCountQueryCollectionCache.delete(cacheKey)
+      }
+    })
+
+    issueCountQueryCollectionCache.set(cacheKey, collection)
+  }
+
+  return issueCountQueryCollectionCache.get(cacheKey)!
 }
 
 export const getCommentsQueryCollection = (): CommentsQueryCollection => {

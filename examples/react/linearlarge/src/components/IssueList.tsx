@@ -1,11 +1,18 @@
-import { useLiveInfiniteQuery, and, eq, inArray } from '@tanstack/react-db'
+import {
+  useLiveInfiniteQuery,
+  useLiveQuery,
+  and,
+  eq,
+  inArray,
+} from '@tanstack/react-db'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useRef, useEffect, useState } from 'react'
+import { useRef, useEffect, useMemo, useCallback } from 'react'
 import { useSearch } from '@tanstack/react-router'
 import IssueRow from './IssueRow'
 import { useMode } from '@/lib/mode-context'
 import { getFilterStateFromSearch } from '@/utils/filterState'
 import { TopFilter } from './TopFilter'
+import { getIssueCountQuery } from '@/lib/queries'
 
 const PAGE_SIZE = 50
 
@@ -13,8 +20,16 @@ export function IssueList() {
   const { issuesCollection } = useMode()
   const parentRef = useRef<HTMLDivElement>(null)
   const search = useSearch({ strict: false })
-  const filterState = getFilterStateFromSearch(search)
-  const [totalCount, setTotalCount] = useState<number | undefined>(undefined)
+  const filterState = useMemo(() => getFilterStateFromSearch(search), [search])
+
+  const issueCountQuery = getIssueCountQuery({
+    status: filterState.status,
+    priority: filterState.priority,
+  })
+
+  const { data: countData } = useLiveQuery(() => issueCountQuery, [search])
+
+  const totalCount = countData?.[0]?.count
 
   const {
     data: issues,
@@ -81,9 +96,12 @@ export function IssueList() {
 
   console.log(`render`, { issues })
 
+  // Memoize getScrollElement to avoid recreating virtualizer
+  const getScrollElement = useCallback(() => parentRef.current, [])
+
   const virtualizer = useVirtualizer({
     count: totalCount ?? issues.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement,
     estimateSize: () => 36,
     overscan: 50,
   })
@@ -98,67 +116,31 @@ export function IssueList() {
     filterState.orderDirection,
   ])
 
-  // Fetch total count for current filters
-  useEffect(() => {
-    const fetchCount = async () => {
-      const params = new URLSearchParams()
-
-      // Add status filters
-      if (filterState.status?.length) {
-        params.set('status_in', JSON.stringify(filterState.status))
-      }
-
-      // Add priority filters
-      if (filterState.priority?.length) {
-        params.set('priority_in', JSON.stringify(filterState.priority))
-      }
-
-      const response = await fetch(`/api/issues/count?${params}`)
-      const data = await response.json()
-      setTotalCount(data.count)
-    }
-
-    fetchCount()
-  }, [search])
-
   // Detect when user scrolls near bottom and load more
-  useEffect(() => {
-    const [lastItem] = [...virtualizer.getVirtualItems()].reverse()
+  // Memoize virtual items to avoid unnecessary re-renders
+  const virtualItems = virtualizer.getVirtualItems()
+  const lastVirtualItem = virtualItems[virtualItems.length - 1]
 
-    if (!lastItem) return
+  useEffect(() => {
+    if (!lastVirtualItem) return
 
     const loadedCount = issues.length
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    const shouldFetch =
-      lastItem.index >= loadedCount - 5 && hasNextPage && !isFetchingNextPage
 
-    // Debug logging
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    if (lastItem.index >= loadedCount - 10) {
-      console.log('Scroll position:', {
-        lastVisibleIndex: lastItem.index,
-        loadedCount,
-        totalCount,
-        hasNextPage,
-        isFetchingNextPage,
-        shouldFetch,
-        pagesCount: pages.length,
-      })
-    }
-
-    // Load more when last visible item is within 5 items of the end
-    if (shouldFetch) {
-      console.log('🔄 Fetching next page...')
+    if (
+      lastVirtualItem.index >= loadedCount - 5 &&
+      hasNextPage &&
+      !isFetchingNextPage
+    ) {
       fetchNextPage()
     }
   }, [
+    lastVirtualItem,
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
     issues.length,
     totalCount,
     pages.length,
-    virtualizer.getVirtualItems(),
   ])
 
   if (status === `loading`) {
@@ -194,11 +176,11 @@ export function IssueList() {
             position: `relative`,
           }}
         >
-          {virtualizer.getVirtualItems().map((virtualItem) => {
+          {virtualItems.map((virtualItem) => {
             const issue = issues[virtualItem.index]
 
             // If issue hasn't loaded yet, render a loading skeleton
-            // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+
             if (!issue) {
               return (
                 <div

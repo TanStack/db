@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { LeftMenu } from '@/components/LeftMenu'
 import { IssueList } from '@/components/IssueList'
-import { preloadIssuesList } from '@/lib/queries'
+import { preloadIssuesList, preloadIssueCount } from '@/lib/queries'
 import { getFilterStateFromSearch } from '@/utils/filterState'
 
 export const Route = createFileRoute(`/_authenticated/`)({
@@ -9,15 +9,21 @@ export const Route = createFileRoute(`/_authenticated/`)({
     const mode = context.search?.mode === 'electric' ? 'electric' : 'query'
     const filterState = getFilterStateFromSearch(context.search || {})
 
-    await preloadIssuesList(
-      {
+    await Promise.all([
+      preloadIssuesList(
+        {
+          status: filterState.status,
+          priority: filterState.priority,
+          orderBy: filterState.orderBy,
+          orderDirection: filterState.orderDirection,
+        },
+        mode
+      ),
+      preloadIssueCount({
         status: filterState.status,
         priority: filterState.priority,
-        orderBy: filterState.orderBy,
-        orderDirection: filterState.orderDirection,
-      },
-      mode
-    )
+      }),
+    ])
   },
   component: IssuesPage,
 })
