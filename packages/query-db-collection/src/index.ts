@@ -7,7 +7,7 @@ export {
   type SyncOperation,
 } from "./query"
 
-// Export QueryCollectionMeta from global.d.ts
+// Export QueryCollectionMeta from global.d.ts (the only source)
 export type { QueryCollectionMeta } from "./global"
 
 export * from "./errors"

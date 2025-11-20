@@ -12,22 +12,21 @@
 import type { LoadSubsetOptions } from "@tanstack/db"
 
 /**
- * Base type for Query Collection meta properties.
- * Users can extend this type when augmenting the @tanstack/query-core module
- * to add their own custom properties while preserving loadSubsetOptions.
+ * Base interface for Query Collection meta properties.
+ * Users can extend this interface to add their own custom properties while
+ * preserving loadSubsetOptions.
  *
  * @example
  * ```typescript
- * declare module "@tanstack/query-core" {
- *   interface Register {
- *     queryMeta: import("@tanstack/query-db-collection").QueryCollectionMeta & {
- *       myCustomProperty: string
- *     }
+ * declare module "@tanstack/query-db-collection" {
+ *   interface QueryCollectionMeta {
+ *     myCustomProperty: string
+ *     userId?: number
  *   }
  * }
  * ```
  */
-export type QueryCollectionMeta = Record<string, unknown> & {
+export interface QueryCollectionMeta extends Record<string, unknown> {
   loadSubsetOptions: LoadSubsetOptions
 }
 

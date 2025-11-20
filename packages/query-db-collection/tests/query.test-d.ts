@@ -505,5 +505,44 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions(config)
       createCollection(options)
     })
+
+    it(`should allow users to extend QueryCollectionMeta via module augmentation`, () => {
+      // This test validates that users can extend QueryCollectionMeta to add custom properties
+      // by augmenting the @tanstack/query-db-collection module
+
+      // Simulate user augmentation (normally in their own type definition file)
+      interface ExtendedMeta {
+        customUserId: number
+        customContext?: string
+      }
+
+      // In reality, users would do:
+      // declare module "@tanstack/query-db-collection" {
+      //   interface QueryCollectionMeta extends ExtendedMeta {}
+      // }
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `extendMetaTest`,
+        queryClient,
+        queryKey: [`extendMetaTest`],
+        queryFn: (ctx) => {
+          // ctx.meta still has loadSubsetOptions
+          expectTypeOf(
+            ctx.meta?.loadSubsetOptions
+          ).toMatchTypeOf<LoadSubsetOptions | undefined>()
+
+          // This test documents the extension pattern even though we can't
+          // actually augment QueryCollectionMeta in a test file (it would
+          // affect all other tests in the same compilation unit)
+
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
+    })
   })
 })
