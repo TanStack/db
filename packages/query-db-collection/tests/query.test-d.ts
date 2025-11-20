@@ -527,9 +527,9 @@ describe(`Query collection type resolution tests`, () => {
         queryKey: [`extendMetaTest`],
         queryFn: (ctx) => {
           // ctx.meta still has loadSubsetOptions
-          expectTypeOf(
-            ctx.meta?.loadSubsetOptions
-          ).toMatchTypeOf<LoadSubsetOptions | undefined>()
+          expectTypeOf(ctx.meta?.loadSubsetOptions).toMatchTypeOf<
+            LoadSubsetOptions | undefined
+          >()
 
           // This test documents the extension pattern even though we can't
           // actually augment QueryCollectionMeta in a test file (it would
