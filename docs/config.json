@@ -124,7 +124,7 @@
         },
         {
           "label": "Collection",
-          "to": "reference/interfaces/collection"
+          "to": "reference/interfaces/Collection"
         },
         {
           "label": "createCollection",

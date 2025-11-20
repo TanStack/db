@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/rxdb-db-collection",
   "description": "RxDB collection for TanStack DB",
-  "version": "0.1.32",
+  "version": "0.1.35",
   "dependencies": {
     "rxdb": "16.20.0",
     "@standard-schema/spec": "^1.0.0",
@@ -32,7 +32,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.19.0",
+  "packageManager": "pnpm@10.22.0",
   "peerDependencies": {
     "rxdb": ">=16.17.2",
     "rxjs": ">=7.8.2",

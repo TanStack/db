@@ -1,5 +1,4 @@
 import { QueryObserver, hashKey } from "@tanstack/query-core"
-import { DeduplicatedLoadSubset } from "@tanstack/db"
 import {
   GetKeyRequiredError,
   QueryClientRequiredError,
@@ -7,6 +6,7 @@ import {
   QueryKeyRequiredError,
 } from "./errors"
 import { createWriteUtils } from "./manual-sync"
+import { serializeLoadSubsetOptions } from "./serialization"
 import type {
   BaseCollectionConfig,
   ChangeMessage,
@@ -627,7 +627,19 @@ export function queryCollectionOptions(
       queryFunction: typeof queryFn = queryFn
     ): true | Promise<void> => {
       // Push the predicates down to the queryKey and queryFn
-      const key = typeof queryKey === `function` ? queryKey(opts) : queryKey
+      let key: QueryKey
+      if (typeof queryKey === `function`) {
+        // Function-based queryKey: use it to build the key from opts
+        key = queryKey(opts)
+      } else if (syncMode === `on-demand`) {
+        // Static queryKey in on-demand mode: automatically append serialized predicates
+        // to create separate cache entries for different predicate combinations
+        const serialized = serializeLoadSubsetOptions(opts)
+        key = serialized !== undefined ? [...queryKey, serialized] : queryKey
+      } else {
+        // Static queryKey in eager mode: use as-is
+        key = queryKey
+      }
       const hashedQueryKey = hashKey(key)
       const extendedMeta = { ...meta, loadSubsetOptions: opts }
 
@@ -824,21 +836,6 @@ export function queryCollectionOptions(
       return handleQueryResult
     }
 
-    // This function is called when a loadSubset call is deduplicated
-    // meaning that we have all the data locally available to answer the query
-    // so we execute the query locally
-    const createLocalQuery = (opts: LoadSubsetOptions) => {
-      const queryFn = ({ meta }: QueryFunctionContext<any>) => {
-        const inserts = collection.currentStateAsChanges(
-          meta!.loadSubsetOptions as LoadSubsetOptions
-        )!
-        const data = inserts.map(({ value }) => value)
-        return Promise.resolve(data)
-      }
-
-      createQueryFromOpts(opts, queryFn)
-    }
-
     const isSubscribed = (hashedQueryKey: string) => {
       return unsubscribes.has(hashedQueryKey)
     }
@@ -972,15 +969,10 @@ export function queryCollectionOptions(
     // This prevents redundant snapshot requests when multiple concurrent
     // live queries request overlapping or subset predicates
     const loadSubsetDedupe =
-      syncMode === `eager`
-        ? undefined
-        : new DeduplicatedLoadSubset({
-            loadSubset: createQueryFromOpts,
-            onDeduplicate: createLocalQuery,
-          })
+      syncMode === `eager` ? undefined : createQueryFromOpts
 
     return {
-      loadSubset: loadSubsetDedupe?.loadSubset,
+      loadSubset: loadSubsetDedupe,
       cleanup,
     }
   }
