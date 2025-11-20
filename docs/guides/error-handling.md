@@ -93,7 +93,7 @@ const syncedCollection = createCollection(
 function DataList() {
   const { data } = useLiveQuery((q) => q.from({ item: syncedCollection }))
   const isError = syncedCollection.utils.isError
-  const errorCount = syncedCollection.utils.errorCount()
+  const errorCount = syncedCollection.utils.errorCount
   
   return (
     <>
