@@ -231,6 +231,16 @@ export class CollectionSyncManager<
       return this.preloadPromise
     }
 
+    // Warn when calling preload on an on-demand collection
+    if (this.syncMode === `on-demand`) {
+      console.warn(
+        `${this.id ? `[${this.id}] ` : ``}Calling .preload() on a collection with syncMode "on-demand" is a no-op. ` +
+          `In on-demand mode, data is only loaded when queries request it. ` +
+          `Instead, create a live query and call .preload() on that to load the specific data you need. ` +
+          `See https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync for more details.`
+      )
+    }
+
     this.preloadPromise = new Promise<void>((resolve, reject) => {
       if (this.lifecycle.status === `ready`) {
         resolve()
