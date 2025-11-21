@@ -1,4 +1,4 @@
-import { Debouncer } from "@tanstack/pacer/debouncer"
+import { LiteDebouncer } from "@tanstack/pacer-lite/lite-debouncer"
 import type { DebounceStrategy, DebounceStrategyOptions } from "./types"
 import type { Transaction } from "../transactions"
 
@@ -28,7 +28,7 @@ import type { Transaction } from "../transactions"
 export function debounceStrategy(
   options: DebounceStrategyOptions
 ): DebounceStrategy {
-  const debouncer = new Debouncer(
+  const debouncer = new LiteDebouncer(
     (callback: () => Transaction) => callback(),
     options
   )
