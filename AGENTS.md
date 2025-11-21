@@ -20,27 +20,30 @@ This guide provides principles and patterns for AI agents contributing to the Ta
 ### Avoid `any` Types
 
 **❌ Bad:**
+
 ```typescript
 function processData(data: any) {
-  return data.value;
+  return data.value
 }
 
-const result: any = someOperation();
+const result: any = someOperation()
 ```
 
 **✅ Good:**
+
 ```typescript
 function processData(data: unknown) {
   if (isDataObject(data)) {
-    return data.value;
+    return data.value
   }
-  throw new Error('Invalid data');
+  throw new Error("Invalid data")
 }
 
-const result: TQueryData = someOperation();
+const result: TQueryData = someOperation()
 ```
 
 **Key Principles:**
+
 - Use `unknown` instead of `any` when the type is truly unknown
 - Provide proper type annotations for return values
 - Use type guards to narrow `unknown` types safely
@@ -51,32 +54,34 @@ const result: TQueryData = someOperation();
 ### Extract Common Logic
 
 **❌ Bad:**
+
 ```typescript
 // Duplicated logic in multiple places
 function processA() {
-  const key = typeof value === 'number' ? `__number__${value}` : String(value);
+  const key = typeof value === "number" ? `__number__${value}` : String(value)
   // ...
 }
 
 function processB() {
-  const key = typeof value === 'number' ? `__number__${value}` : String(value);
+  const key = typeof value === "number" ? `__number__${value}` : String(value)
   // ...
 }
 ```
 
 **✅ Good:**
+
 ```typescript
 function serializeKey(value: string | number): string {
-  return typeof value === 'number' ? `__number__${value}` : String(value);
+  return typeof value === "number" ? `__number__${value}` : String(value)
 }
 
 function processA() {
-  const key = serializeKey(value);
+  const key = serializeKey(value)
   // ...
 }
 
 function processB() {
-  const key = serializeKey(value);
+  const key = serializeKey(value)
   // ...
 }
 ```
@@ -84,6 +89,7 @@ function processB() {
 ### Organize Utilities
 
 **Key Principles:**
+
 - Extract serialization/deserialization logic into utility files
 - When you see identical or near-identical code blocks, extract to a helper function
 - Prefer small, focused utility functions over large inline implementations
@@ -92,6 +98,7 @@ function processB() {
 ### Function Size and Complexity
 
 **❌ Bad:**
+
 ```typescript
 function syncData() {
   // 200+ lines of logic handling multiple concerns
@@ -104,12 +111,13 @@ function syncData() {
 ```
 
 **✅ Good:**
+
 ```typescript
 function syncData() {
-  handleSnapshotPhase();
-  manageBuffering();
-  updateSyncState();
-  handleErrors();
+  handleSnapshotPhase()
+  manageBuffering()
+  updateSyncState()
+  handleErrors()
 }
 
 function handleSnapshotPhase() {
@@ -124,48 +132,53 @@ function handleSnapshotPhase() {
 ### Be Mindful of Time Complexity
 
 **❌ Bad: O(n²) Queue Processing:**
+
 ```typescript
 // Processes elements in queue, but elements may need multiple passes
 while (queue.length > 0) {
-  const job = queue.shift();
+  const job = queue.shift()
   if (hasUnmetDependencies(job)) {
-    queue.push(job); // Re-queue, causing O(n²) behavior
+    queue.push(job) // Re-queue, causing O(n²) behavior
   } else {
-    processJob(job);
+    processJob(job)
   }
 }
 ```
 
 **✅ Good: Dependency-Aware Processing:**
+
 ```typescript
 // Use a data structure that respects dependencies
 // Process only jobs with no unmet dependencies
 // Consider topological sort for DAG-like structures
-const readyJobs = jobs.filter(job => !hasUnmetDependencies(job));
-readyJobs.forEach(processJob);
+const readyJobs = jobs.filter((job) => !hasUnmetDependencies(job))
+readyJobs.forEach(processJob)
 ```
 
 ### Use Appropriate Data Structures
 
 **❌ Bad:**
+
 ```typescript
 // O(n) lookup for each check
-const items = ['foo', 'bar', 'baz', /* hundreds more */];
+const items = ["foo", "bar", "baz" /* hundreds more */]
 if (items.includes(searchValue)) {
   // ...
 }
 ```
 
 **✅ Good:**
+
 ```typescript
 // O(1) lookup
-const items = new Set(['foo', 'bar', 'baz', /* hundreds more */]);
+const items = new Set(["foo", "bar", "baz" /* hundreds more */])
 if (items.has(searchValue)) {
   // ...
 }
 ```
 
 **Key Principles:**
+
 - For membership checks on large collections, use `Set` instead of `Array.includes()`
 - Be aware of nested loops and their complexity implications
 - Consider the worst-case scenario, especially for operations that could process many items
@@ -176,20 +189,28 @@ if (items.has(searchValue)) {
 ### Ensure Logic Matches Intent
 
 **❌ Bad:**
+
 ```typescript
 // Intending to check if subset limit is more restrictive than superset
-function isLimitSubset(subset: number | undefined, superset: number | undefined) {
-  return subset === undefined || superset === undefined || subset <= superset;
+function isLimitSubset(
+  subset: number | undefined,
+  superset: number | undefined
+) {
+  return subset === undefined || superset === undefined || subset <= superset
 }
 
 // Problem: If subset has no limit but superset does, returns true (incorrect)
 ```
 
 **✅ Good:**
+
 ```typescript
-function isLimitSubset(subset: number | undefined, superset: number | undefined) {
+function isLimitSubset(
+  subset: number | undefined,
+  superset: number | undefined
+) {
   // Subset with no limit cannot be a subset of one with a limit
-  return superset === undefined || (subset !== undefined && subset <= superset);
+  return superset === undefined || (subset !== undefined && subset <= superset)
 }
 ```
 
@@ -198,6 +219,7 @@ function isLimitSubset(subset: number | undefined, superset: number | undefined)
 When merging predicates or combining queries, ensure the semantics are correct:
 
 **Example Problem:**
+
 ```sql
 -- Query 1: WHERE age >= 18 LIMIT 1
 -- Query 2: WHERE age >= 20 LIMIT 3
@@ -212,36 +234,41 @@ When merging predicates or combining queries, ensure the semantics are correct:
 ### Avoid Leaky Abstractions
 
 **❌ Bad:**
+
 ```typescript
 class Collection {
   getViewKey(key: TKey): string {
     // Caller needs to know internal representation
-    return `${this._state.viewKeyPrefix}${key}`;
+    return `${this._state.viewKeyPrefix}${key}`
   }
 }
 
 // Usage exposes internals
-const viewKey = collection.getViewKey(key);
-if (viewKey.startsWith(PREFIX)) { /* ... */ }
+const viewKey = collection.getViewKey(key)
+if (viewKey.startsWith(PREFIX)) {
+  /* ... */
+}
 ```
 
 **✅ Good:**
+
 ```typescript
 class Collection {
   getViewKey(key: TKey): string {
     // Delegate to state manager, hiding implementation
-    return this._state.getViewKey(key);
+    return this._state.getViewKey(key)
   }
 }
 
 class CollectionStateManager {
   getViewKey(key: TKey): string {
-    return `${this.viewKeyPrefix}${key}`;
+    return `${this.viewKeyPrefix}${key}`
   }
 }
 ```
 
 **Key Principles:**
+
 - Encapsulate implementation details within the responsible class
 - Don't expose internal data structures or representations
 - Use delegation to maintain clean boundaries between components
@@ -256,6 +283,7 @@ class CollectionStateManager {
 ### Prefer Positive Predicates
 
 **❌ Bad:**
+
 ```typescript
 if (!refs.some((ref) => ref.path[0] === outerAlias)) {
   // treat as safe
@@ -263,6 +291,7 @@ if (!refs.some((ref) => ref.path[0] === outerAlias)) {
 ```
 
 **✅ Good:**
+
 ```typescript
 if (refs.every((ref) => ref.path[0] !== outerAlias)) {
   // treat as safe
@@ -274,18 +303,20 @@ if (refs.every((ref) => ref.path[0] !== outerAlias)) {
 ### Simplify Complex Conditions
 
 **❌ Bad:**
+
 ```typescript
-const isLoadingNow = this.pendingLoadSubsetPromises.size > 0;
+const isLoadingNow = this.pendingLoadSubsetPromises.size > 0
 if (isLoadingNow && !isLoadingNow) {
   // Confusing logic
 }
 ```
 
 **✅ Good:**
+
 ```typescript
-const wasLoading = this.pendingLoadSubsetPromises.size > 0;
-this.pendingLoadSubsetPromises.add(promise);
-const isLoadingNow = this.pendingLoadSubsetPromises.size === 1;
+const wasLoading = this.pendingLoadSubsetPromises.size > 0
+this.pendingLoadSubsetPromises.add(promise)
+const isLoadingNow = this.pendingLoadSubsetPromises.size === 1
 
 if (isLoadingNow) {
   // Started loading
@@ -295,18 +326,21 @@ if (isLoadingNow) {
 ### Use Descriptive Names
 
 **❌ Bad:**
+
 ```typescript
-const viewKeysMap = new Map(); // Type in name is redundant
-const dependencyBuilders = []; // Sounds like functions that build
+const viewKeysMap = new Map() // Type in name is redundant
+const dependencyBuilders = [] // Sounds like functions that build
 ```
 
 **✅ Good:**
+
 ```typescript
-const viewKeys = new Map(); // Data structure not in name
-const dependentBuilders = []; // Accurately describes dependents
+const viewKeys = new Map() // Data structure not in name
+const dependentBuilders = [] // Accurately describes dependents
 ```
 
 **Key Principles:**
+
 - Avoid Hungarian notation (encoding type in variable name)
 - Use names that describe the role or purpose, not the data structure
 - Choose names that make the code read like prose
@@ -317,23 +351,26 @@ const dependentBuilders = []; // Accurately describes dependents
 ### Always Add Tests for Bugs
 
 **Key Principle:** If you're fixing a bug, add a unit test that reproduces the bug before fixing it. This ensures:
+
 - The bug is actually fixed
 - The bug doesn't regress in the future
 - The fix is validated
 
 **Example:**
+
 ```typescript
 // Found a bug with fetchSnapshot resolving after up-to-date message
 // Should add a test:
-test('ignores snapshot that resolves after up-to-date message', async () => {
+test("ignores snapshot that resolves after up-to-date message", async () => {
   // Reproduce the corner case
   // Verify it's handled correctly
-});
+})
 ```
 
 ### Test Corner Cases
 
 Common corner cases to consider:
+
 - Empty arrays or sets
 - Single-element collections
 - `undefined` vs `null` values
@@ -347,39 +384,42 @@ Common corner cases to consider:
 ### Prefer Explicit Parameters Over Closures
 
 **❌ Bad:**
+
 ```typescript
 function outer() {
-  const config = getConfig();
-  const state = getState();
+  const config = getConfig()
+  const state = getState()
 
   const updateFn = () => {
     // Closes over config and state
-    applyUpdate(config, state);
-  };
+    applyUpdate(config, state)
+  }
 
-  scheduler.schedule(updateFn);
+  scheduler.schedule(updateFn)
 }
 ```
 
 **✅ Good:**
+
 ```typescript
 function updateEntry(entry: Entry, config: Config, state: State) {
-  applyUpdate(entry, config, state);
+  applyUpdate(entry, config, state)
 }
 
 function outer() {
-  const config = getConfig();
-  const state = getState();
+  const config = getConfig()
+  const state = getState()
 
   scheduler.schedule({
     config,
     state,
-    update: updateEntry
-  });
+    update: updateEntry,
+  })
 }
 ```
 
 **Key Principles:**
+
 - Functions that take dependencies as arguments are easier to test
 - Explicit parameters make data flow clearer
 - Closures can hide dependencies and make code harder to follow
@@ -388,16 +428,18 @@ function outer() {
 ### Return Type Precision
 
 **❌ Bad:**
+
 ```typescript
 function serializeKey(key: string | number): unknown {
-  return String(key);
+  return String(key)
 }
 ```
 
 **✅ Good:**
+
 ```typescript
 function serializeKey(key: string | number): string {
-  return String(key);
+  return String(key)
 }
 ```
 
@@ -408,60 +450,66 @@ function serializeKey(key: string | number): string {
 ### Use Modern Operators
 
 **❌ Bad:**
+
 ```typescript
 if (firstError === undefined) {
-  firstError = error;
+  firstError = error
 }
 
-const value = cached !== null && cached !== undefined ? cached : defaultValue;
+const value = cached !== null && cached !== undefined ? cached : defaultValue
 
 if (obj[key] === undefined) {
-  obj[key] = value;
+  obj[key] = value
 }
 ```
 
 **✅ Good:**
+
 ```typescript
-firstError ??= error;
+firstError ??= error
 
-const value = cached ?? defaultValue;
+const value = cached ?? defaultValue
 
-obj[key] ??= value;
+obj[key] ??= value
 ```
 
 ### Use Spread Operator
 
 **❌ Bad:**
+
 ```typescript
-const combined = [];
+const combined = []
 for (const item of currentItems) {
-  combined.push(item);
+  combined.push(item)
 }
 for (const item of newItems) {
-  combined.push(item);
+  combined.push(item)
 }
 ```
 
 **✅ Good:**
+
 ```typescript
-const combined = [...currentItems, ...newItems];
+const combined = [...currentItems, ...newItems]
 ```
 
 ### Simplify Array Operations
 
 **❌ Bad:**
+
 ```typescript
-const filtered = [];
+const filtered = []
 for (const item of items) {
   if (item.value > 0) {
-    filtered.push(item);
+    filtered.push(item)
   }
 }
 ```
 
 **✅ Good:**
+
 ```typescript
-const filtered = items.filter(item => item.value > 0);
+const filtered = items.filter((item) => item.value > 0)
 ```
 
 ## Edge Cases and Corner Cases
@@ -469,15 +517,17 @@ const filtered = items.filter(item => item.value > 0);
 ### Common Patterns to Consider
 
 1. **Key Encoding**: When converting keys to strings, ensure no collisions
+
    ```typescript
    // ❌ Bad: numeric 1 and string "__number__1" collide
-   const key = typeof val === 'number' ? `__number__${val}` : String(val);
+   const key = typeof val === "number" ? `__number__${val}` : String(val)
 
    // ✅ Good: proper encoding with type prefix
-   const key = `${typeof val}_${String(val)}`;
+   const key = `${typeof val}_${String(val)}`
    ```
 
 2. **Subset/Superset Logic**: Consider all cases
+
    ```typescript
    // Consider: IN with 0, 1, or many elements
    // Consider: EQ vs IN predicates
@@ -485,6 +535,7 @@ const filtered = items.filter(item => item.value > 0);
    ```
 
 3. **Limit and Offset**: Handle undefined, 0, and edge values
+
    ```typescript
    // What happens when limit is 0?
    // What happens when offset exceeds data length?
@@ -492,15 +543,16 @@ const filtered = items.filter(item => item.value > 0);
    ```
 
 4. **Optional vs Required**: Be explicit about optionality
+
    ```typescript
    // ❌ Why is this optional?
    interface Config {
-     collection?: Collection;
+     collection?: Collection
    }
 
    // ✅ Document or make required if always needed
    interface Config {
-     collection: Collection; // Always required for query collections
+     collection: Collection // Always required for query collections
    }
    ```
 
@@ -516,6 +568,7 @@ const filtered = items.filter(item => item.value > 0);
 ### Understand Semantic Versioning
 
 **Common Mistake:**
+
 ```json
 {
   "dependencies": {
@@ -527,9 +580,11 @@ const filtered = items.filter(item => item.value > 0);
 **Problem:** `^0.0.0` restricts to exactly `0.0.0`, not "latest 0.0.x" as you might expect.
 
 From [npm semver docs](https://github.com/npm/node-semver):
+
 > Caret Ranges allow changes that do not modify the left-most non-zero element. For versions `0.0.X`, this means no updates.
 
 **Solutions:**
+
 - Use `*` for any version
 - Use `latest` for the latest version
 - Use a proper range like `^0.1.0` if that's what you mean
@@ -539,12 +594,14 @@ From [npm semver docs](https://github.com/npm/node-semver):
 ### Keep Useful Comments
 
 **Good Comment:**
+
 ```typescript
 // Returning false signals that callers should schedule another pass
-return allDone;
+return allDone
 ```
 
 **Good Comment:**
+
 ```typescript
 // This step is necessary because the query function has captured
 // the old subscription instance in its closure
@@ -579,6 +636,7 @@ return allDone;
 ## When in Doubt
 
 If you're unsure about an implementation decision:
+
 1. Look for similar patterns in the existing codebase
 2. Consider the worst-case scenario for performance
 3. Think about edge cases and corner cases
