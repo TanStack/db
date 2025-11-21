@@ -56,8 +56,10 @@ const sampleUsers: Array<User> = [
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
 const mockRequestSnapshot = vi.fn()
+const mockFetchSnapshot = vi.fn()
 const mockStream = {
   subscribe: mockSubscribe,
+  fetchSnapshot: mockFetchSnapshot,
   requestSnapshot: async (...args: any) => {
     const result = await mockRequestSnapshot(...args)
     const subscribers = mockSubscribe.mock.calls.map((call) => call[0])
@@ -85,6 +87,14 @@ const mockStream = {
 // to return an empty array of data
 // since most tests don't use it
 mockRequestSnapshot.mockResolvedValue({
+  data: [],
+})
+
+// Mock the fetchSnapshot method
+// to return empty data with metadata
+// since most tests don't use it
+mockFetchSnapshot.mockResolvedValue({
+  metadata: {},
   data: [],
 })
 
@@ -135,7 +145,13 @@ describe.each([
     return createCollection({
       ...options,
       startSync: true,
-    })
+    }) as unknown as Collection<
+      User,
+      string | number,
+      ElectricCollectionUtils,
+      StandardSchemaV1<unknown, unknown>,
+      User
+    >
   }
 
   function simulateInitialSync(users: Array<User> = sampleUsers) {
@@ -726,12 +742,12 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     expect(liveQuery.size).toBeGreaterThan(2)
   })
 
-  it(`should trigger requestSnapshot in progressive mode when live query needs more data`, async () => {
+  it(`should trigger fetchSnapshot in progressive mode when live query needs more data`, async () => {
     const electricCollection =
       createElectricCollectionWithSyncMode(`progressive`)
 
-    // Send initial snapshot with limited data (using snapshot-end, not up-to-date)
-    // This keeps the collection in "loading" state, simulating progressive mode still syncing
+    // In progressive mode, stream messages are buffered until up-to-date
+    // So collection starts empty even though we send data
     subscriber([
       {
         key: sampleUsers[0]!.id.toString(),
@@ -743,25 +759,19 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
         value: sampleUsers[1]!,
         headers: { operation: `insert` },
       },
-      {
-        headers: {
-          control: `snapshot-end`,
-          xmin: `100`,
-          xmax: `110`,
-          xip_list: [],
-        },
-      },
     ])
 
     expect(electricCollection.status).toBe(`loading`) // Still syncing in progressive mode
-    expect(electricCollection.size).toBe(2)
+    // Messages are buffered, so size is 0 until up-to-date
+    expect(electricCollection.size).toBe(0)
 
-    // Mock requestSnapshot to return additional data
-    mockRequestSnapshot.mockResolvedValueOnce({
+    // Mock fetchSnapshot to return data
+    mockFetchSnapshot.mockResolvedValueOnce({
+      metadata: {},
       data: [
         {
           headers: { operation: `insert` },
-          key: 3,
+          key: sampleUsers[2]!.id.toString(),
           value: sampleUsers[2]!, // Charlie
         },
       ],
@@ -781,15 +791,16 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     // Wait for the live query to process
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // Should have requested more data from Electric with correct parameters
-    // First request asks for the full limit
-    expect(mockRequestSnapshot).toHaveBeenCalledWith(
+    // Should have fetched more data from Electric with correct parameters
+    // Progressive mode uses fetchSnapshot, not requestSnapshot
+    expect(mockFetchSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         limit: 3, // Requests full limit from Electric
         orderBy: `"id" NULLS FIRST`,
         params: {},
       })
     )
+    expect(mockRequestSnapshot).not.toHaveBeenCalled()
   })
 
   it(`should NOT trigger requestSnapshot in eager mode even when live query needs more data`, async () => {
@@ -904,21 +915,9 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     )
   })
 
-  it(`should handle complex filters in requestSnapshot`, async () => {
+  it(`should handle complex filters in fetchSnapshot`, async () => {
     const electricCollection =
       createElectricCollectionWithSyncMode(`progressive`)
-
-    // Send snapshot-end (not up-to-date) to keep collection in loading state
-    subscriber([
-      {
-        headers: {
-          control: `snapshot-end`,
-          xmin: `100`,
-          xmax: `110`,
-          xip_list: [],
-        },
-      },
-    ])
 
     expect(electricCollection.status).toBe(`loading`) // Still syncing in progressive mode
 
@@ -936,8 +935,8 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // Should have requested snapshot with complex WHERE clause
-    expect(mockRequestSnapshot).toHaveBeenCalledWith(
+    // Should have called fetchSnapshot with complex WHERE clause (not requestSnapshot)
+    expect(mockFetchSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         where: `"age" > $1`,
         params: { "1": `20` },
@@ -945,6 +944,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
         limit: 5,
       })
     )
+    expect(mockRequestSnapshot).not.toHaveBeenCalled()
   })
 })
 

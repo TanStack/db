@@ -1,4 +1,4 @@
-import { AsyncQueuer } from "@tanstack/pacer/async-queuer"
+import { LiteQueuer } from "@tanstack/pacer-lite/lite-queuer"
 import type { QueueStrategy, QueueStrategyOptions } from "./types"
 import type { Transaction } from "../transactions"
 
@@ -44,16 +44,29 @@ import type { Transaction } from "../transactions"
  * ```
  */
 export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
-  const queuer = new AsyncQueuer<() => Transaction>(
-    async (fn) => {
-      const transaction = fn()
-      // Wait for the transaction to be persisted before processing next item
-      // Note: fn() already calls commit(), we just wait for it to complete
-      await transaction.isPersisted.promise
+  // Manual promise chaining to ensure async serialization
+  // LiteQueuer (unlike AsyncQueuer from @tanstack/pacer) lacks built-in async queue
+  // primitives and concurrency control. We compensate by manually chaining promises
+  // to ensure each transaction completes before the next one starts.
+  let processingChain = Promise.resolve()
+
+  const queuer = new LiteQueuer<() => Transaction>(
+    (fn) => {
+      // Chain each transaction to the previous one's completion
+      processingChain = processingChain
+        .then(async () => {
+          const transaction = fn()
+          // Wait for the transaction to be persisted before processing next item
+          await transaction.isPersisted.promise
+        })
+        .catch(() => {
+          // Errors are handled via transaction.isPersisted.promise and surfaced there.
+          // This catch prevents unhandled promise rejections from breaking the chain,
+          // ensuring subsequent transactions can still execute even if one fails.
+        })
     },
     {
-      concurrency: 1, // Process one at a time to ensure serialization
-      wait: options?.wait,
+      wait: options?.wait ?? 0,
       maxSize: options?.maxSize,
       addItemsTo: options?.addItemsTo ?? `back`, // Default FIFO: add to back
       getItemsFrom: options?.getItemsFrom ?? `front`, // Default FIFO: get from front

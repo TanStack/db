@@ -1,4 +1,4 @@
-import { Throttler } from "@tanstack/pacer/throttler"
+import { LiteThrottler } from "@tanstack/pacer-lite/lite-throttler"
 import type { ThrottleStrategy, ThrottleStrategyOptions } from "./types"
 import type { Transaction } from "../transactions"
 
@@ -48,7 +48,7 @@ import type { Transaction } from "../transactions"
 export function throttleStrategy(
   options: ThrottleStrategyOptions
 ): ThrottleStrategy {
-  const throttler = new Throttler(
+  const throttler = new LiteThrottler(
     (callback: () => Transaction) => callback(),
     options
   )

@@ -603,7 +603,7 @@ importers:
         version: 0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11)
       express:
         specifier: ^4.21.2
         version: 4.21.2
@@ -717,9 +717,9 @@ importers:
       '@tanstack/db-ivm':
         specifier: workspace:*
         version: link:../db-ivm
-      '@tanstack/pacer':
-        specifier: ^0.16.3
-        version: 0.16.3
+      '@tanstack/pacer-lite':
+        specifier: ^0.1.0
+        version: 0.1.0
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
@@ -790,8 +790,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: ^1.1.4
-        version: 1.1.4
+        specifier: ^1.1.5
+        version: 1.1.5
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
@@ -1594,6 +1594,9 @@ packages:
 
   '@electric-sql/client@1.1.4':
     resolution: {integrity: sha512-88M2iEg5LYSE388wNWjrQMpsIgLzwge60cCN5znQSDEnUEprJZ13vB3r+S8IRNYbmOtUSNVEODuXn+nlqEhEGw==}
+
+  '@electric-sql/client@1.1.5':
+    resolution: {integrity: sha512-5QXmdXkl6AtDX89TRNwV2AVX0+ZJXRcA8/F55iIaifOKWq4sZaXiI9+Rb6iMhAl/S3MSw9abZucaLHBL+hScQg==}
 
   '@emnapi/core@1.5.0':
     resolution: {integrity: sha512-sbP8GzB1WDzacS8fgNPpHlp6C9VZe+SJP3F90W9rLemaQj2PzIuTEl1qDOYQf58YIpyjViI24y9aPWCjEzY2cg==}
@@ -3644,10 +3647,6 @@ packages:
     resolution: {integrity: sha512-7Wwfw6wBv2Kc+OBNIJQzBSJ6q7GABtwVT+VOQ/7/Gl7z8z1rtEYUZrxUrNvbbrHY+J5/WNZNZjJjTWDf8nTUBw==}
     engines: {node: '>=18'}
 
-  '@tanstack/devtools-event-client@0.3.5':
-    resolution: {integrity: sha512-RL1f5ZlfZMpghrCIdzl6mLOFLTuhqmPNblZgBaeKfdtk5rfbjykurv+VfYydOFXj0vxVIoA2d/zT7xfD7Ph8fw==}
-    engines: {node: '>=18'}
-
   '@tanstack/directive-functions-plugin@1.134.5':
     resolution: {integrity: sha512-J3oawV8uBRBbPoLgMdyHt+LxzTNuWRKNJJuCLWsm/yq6v0IQSvIVCgfD2+liIiSnDPxGZ8ExduPXy8IzS70eXw==}
     engines: {node: '>=12'}
@@ -3662,8 +3661,8 @@ packages:
     resolution: {integrity: sha512-B7+x7eP2FFvi3fgd3rNH9o/Eixt+pp0zCIdGhnQbAJjFrlwIKGjGnwyJjhWJ5fMQlGks/E2LdDTqEV4W9Plx7g==}
     engines: {node: '>=12'}
 
-  '@tanstack/pacer@0.16.3':
-    resolution: {integrity: sha512-hJGPODkjuUEncwHsFacLY6W5E7lmEU2FMf4Mh0kuxqUx3UsuneQX6ctRpoHBLlgdb7sqDieIaslQnivG3OAZ+A==}
+  '@tanstack/pacer-lite@0.1.0':
+    resolution: {integrity: sha512-a5A0PI0H4npUy7u3VOjOhdynXnRBna+mDvpt8ghDCVzS3Tgn8DlGzHlRqS2rKJP8ZcLuVO2qxlIIblhcoaiv8Q==}
     engines: {node: '>=18'}
 
   '@tanstack/publish-config@0.2.1':
@@ -9727,6 +9726,12 @@ snapshots:
     optionalDependencies:
       '@rollup/rollup-darwin-arm64': 4.52.5
 
+  '@electric-sql/client@1.1.5':
+    dependencies:
+      '@microsoft/fetch-event-source': 2.0.1
+    optionalDependencies:
+      '@rollup/rollup-darwin-arm64': 4.52.5
+
   '@emnapi/core@1.5.0':
     dependencies:
       '@emnapi/wasi-threads': 1.1.0
@@ -11633,8 +11638,6 @@ snapshots:
       - typescript
       - vite
 
-  '@tanstack/devtools-event-client@0.3.5': {}
-
   '@tanstack/directive-functions-plugin@1.134.5(vite@6.4.1(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.20.6)(yaml@2.8.1))':
     dependencies:
       '@babel/code-frame': 7.27.1
@@ -11681,10 +11684,7 @@ snapshots:
 
   '@tanstack/history@1.133.28': {}
 
-  '@tanstack/pacer@0.16.3':
-    dependencies:
-      '@tanstack/devtools-event-client': 0.3.5
-      '@tanstack/store': 0.8.0
+  '@tanstack/pacer-lite@0.1.0': {}
 
   '@tanstack/publish-config@0.2.1':
     dependencies:
@@ -13709,11 +13709,6 @@ snapshots:
       kysely: 0.28.5
       pg: 8.16.3
       postgres: 3.4.7
-
-  drizzle-zod@0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76):
-    dependencies:
-      drizzle-orm: 0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7)
-      zod: 3.25.76
 
   drizzle-zod@0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.5)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11):
     dependencies:

@@ -1,5 +1,16 @@
 # @tanstack/query-db-collection
 
+## 1.0.3
+
+### Patch Changes
+
+- Improved the type of the queryFn's ctx.meta property of the Query Collection to include the loadSubsetOptions ([#857](https://github.com/TanStack/db/pull/857))
+
+- Fixed bug where optimistic state leaked into syncedData when using writeInsert inside onInsert handlers. Previously, when syncing server-generated fields (like IDs or timestamps) using writeInsert within an onInsert handler, the QueryClient cache was updated with combined visible state (including optimistic changes), which triggered the query observer to write optimistic values back to syncedData. Now the cache is correctly updated with only server-confirmed state, ensuring syncedData maintains separation from optimistic state. ([#879](https://github.com/TanStack/db/pull/879))
+
+- Updated dependencies [[`acb3e4f`](https://github.com/TanStack/db/commit/acb3e4f1441e6872ca577e74d92ae2d77deb5938), [`464805d`](https://github.com/TanStack/db/commit/464805d96bad6d0fd741e48fbfc98e90dc58bebe), [`2c2e4db`](https://github.com/TanStack/db/commit/2c2e4dbd781d278347d73373f66d3c51c6388116), [`15c772f`](https://github.com/TanStack/db/commit/15c772f5e42e49000a2d775fd8e4cfda3418243f)]:
+  - @tanstack/db@0.5.4
+
 ## 1.0.2
 
 ### Patch Changes
