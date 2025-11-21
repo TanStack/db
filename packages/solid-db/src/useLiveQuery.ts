@@ -80,7 +80,7 @@ import type {
  *   </Switch>
  * )
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
 ): {
@@ -88,6 +88,25 @@ export function useLiveQuery<TContext extends Context>(
   data: Array<GetResult<TContext>>
   collection: Accessor<Collection<GetResult<TContext>, string | number, {}>>
   status: Accessor<CollectionStatus>
+  isLoading: Accessor<boolean>
+  isReady: Accessor<boolean>
+  isIdle: Accessor<boolean>
+  isError: Accessor<boolean>
+  isCleanedUp: Accessor<boolean>
+}
+
+// Overload 1b: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext> | undefined | null
+): {
+  state: ReactiveMap<string | number, GetResult<TContext>>
+  data: Array<GetResult<TContext>>
+  collection: Accessor<Collection<
+    GetResult<TContext>,
+    string | number,
+    {}
+  > | null>
+  status: Accessor<CollectionStatus | `disabled`>
   isLoading: Accessor<boolean>
   isReady: Accessor<boolean>
   isIdle: Accessor<boolean>

@@ -110,9 +110,17 @@ export interface UseLiveQueryReturnWithCollection<
  * //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
  * // </ul>
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
+  deps?: Array<MaybeRefOrGetter<unknown>>
+): UseLiveQueryReturn<GetResult<TContext>>
+
+// Overload 1b: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => QueryBuilder<TContext> | undefined | null,
   deps?: Array<MaybeRefOrGetter<unknown>>
 ): UseLiveQueryReturn<GetResult<TContext>>
 
