@@ -1070,6 +1070,16 @@ export function queryCollectionOptions(
       if (newCount <= 0) {
         // 5. GC rows where count reaches 0
 
+        // Safety check: Don't cleanup if observer still has active listeners
+        // This prevents premature cleanup when refcount tracking gets out of sync
+        const observer = state.observers.get(hashedQueryKey)
+        if (observer?.hasListeners()) {
+          // Observer still has active listeners, keep it around
+          // Reset refcount to 1 to prevent further premature cleanup attempts
+          queryRefCounts.set(hashedQueryKey, 1)
+          return
+        }
+
         // 3. Use existing machinery to find rows this query loaded
         const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
         const rowsToCheck = Array.from(queryToRowsSet)
