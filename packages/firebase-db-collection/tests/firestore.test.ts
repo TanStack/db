@@ -56,7 +56,7 @@ describe("Firebase Collection Integration", () => {
       await collection.preload()
 
       // Collection should be empty initially
-      expect(collection.getAll()).toEqual([])
+      expect(collection.toArray).toEqual([])
     })
 
     it("should insert items and sync them", async () => {
@@ -78,10 +78,11 @@ describe("Firebase Collection Integration", () => {
         completed: false,
       }
 
-      await collection.insert(todo)
+      const insertTx = collection.insert(todo)
+      await insertTx.isPersisted.promise
 
       // Item should be in the collection
-      const items = collection.getAll()
+      const items = collection.toArray
       expect(items).toHaveLength(1)
       expect(items[0]).toMatchObject({
         id: "1",
@@ -108,13 +109,17 @@ describe("Firebase Collection Integration", () => {
         text: "Test todo",
         completed: false,
       }
-      await collection.insert(todo)
+      const insertTx = collection.insert(todo)
+      await insertTx.isPersisted.promise
 
       // Update the item
-      await collection.update("1", { completed: true })
+      const updateTx = collection.update("1", (draft) => {
+        draft.completed = true
+      })
+      await updateTx.isPersisted.promise
 
       // Check the update
-      const updated = collection.getById("1")
+      const updated = collection.get("1")
       expect(updated?.completed).toBe(true)
     })
 
@@ -136,13 +141,15 @@ describe("Firebase Collection Integration", () => {
         text: "Test todo",
         completed: false,
       }
-      await collection.insert(todo)
+      const insertTx = collection.insert(todo)
+      await insertTx.isPersisted.promise
 
       // Delete the item
-      await collection.delete("1")
+      const deleteTx = collection.delete("1")
+      await deleteTx.isPersisted.promise
 
       // Item should be gone
-      expect(collection.getAll()).toEqual([])
+      expect(collection.toArray).toEqual([])
     })
   })
 
@@ -175,13 +182,14 @@ describe("Firebase Collection Integration", () => {
         text: "Synced todo",
         completed: false,
       }
-      await collection1.insert(todo)
+      const insertTx = collection1.insert(todo)
+      await insertTx.isPersisted.promise
 
       // Wait for sync
       await collection1.utils.waitForSync?.()
 
       // Should appear in collection2
-      const items = collection2.getAll()
+      const items = collection2.toArray
       expect(items).toHaveLength(1)
       expect(items[0]).toMatchObject({
         id: "1",
@@ -212,12 +220,11 @@ describe("Firebase Collection Integration", () => {
       }))
 
       // Insert all at once
-      await collection.transaction.run(async (tx) => {
-        todos.forEach((todo) => tx.insert(todo))
-      })
+      const insertTx = collection.insert(todos)
+      await insertTx.isPersisted.promise
 
       // All should be inserted
-      expect(collection.getAll()).toHaveLength(100)
+      expect(collection.toArray).toHaveLength(100)
     })
 
     it("should handle batch operations exceeding Firestore limit", async () => {
@@ -240,12 +247,11 @@ describe("Firebase Collection Integration", () => {
       }))
 
       // Insert all at once - should be split into multiple batches
-      await collection.transaction.run(async (tx) => {
-        todos.forEach((todo) => tx.insert(todo))
-      })
+      const insertTx = collection.insert(todos)
+      await insertTx.isPersisted.promise
 
       // All should be inserted
-      expect(collection.getAll()).toHaveLength(600)
+      expect(collection.toArray).toHaveLength(600)
     })
   })
 
@@ -273,9 +279,9 @@ describe("Firebase Collection Integration", () => {
         createdAt: new Date(),
       }
 
-      await collection.insert(todo)
+      collection.insert(todo)
 
-      const retrieved = collection.getById("1")
+      const retrieved = collection.get("1")
       expect(retrieved?.createdAt).toBeInstanceOf(Date)
     })
   })
@@ -296,9 +302,12 @@ describe("Firebase Collection Integration", () => {
       await collection.preload()
 
       // Try to update non-existent item
-      await expect(
-        collection.update("non-existent", { completed: true })
-      ).rejects.toThrow()
+      await expect(async () => {
+        const updateTx = collection.update("non-existent", (draft) => {
+          draft.completed = true
+        })
+        await updateTx.isPersisted.promise
+      }).rejects.toThrow()
     })
   })
 
@@ -326,11 +335,9 @@ describe("Firebase Collection Integration", () => {
       }
 
       // This should work (optimistic update)
-      collection.transaction.run((tx) => {
-        tx.insert(todo)
-      })
-
-      expect(collection.getAll()).toHaveLength(1)
+      collection.insert(todo)
+      
+      expect(collection.toArray).toHaveLength(1)
     })
   })
 })

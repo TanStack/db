@@ -398,6 +398,10 @@ export function firebaseCollectionOptions<
             }
           },
           (error) => {
+            if (error.code === "aborted") {
+              console.warn("Firestore listener aborted", error)
+              return
+            }
             console.error("Firestore listener error:", error)
             handleFirestoreError(error, "real-time sync")
           }
