@@ -2013,6 +2013,95 @@ describe(`QueryCollection`, () => {
       expect(collection2.has(`a`)).toBe(true)
       expect(collection2.has(`b`)).toBe(true)
     })
+
+    it(`should replace optimistic state with server state when writeInsert is called in onInsert handler`, async () => {
+      // Reproduces bug where optimistic client data overwrites server data in syncedData
+      // When writeInsert is called inside onInsert handler to sync server-generated fields
+      const queryKey = [`todos-writeinsert-bug`]
+      const queryFn = vi.fn().mockResolvedValue([])
+
+      type Todo = {
+        id: number
+        slug: string
+        title: string
+        checked: boolean
+        createdAt: string
+      }
+
+      let nextServerId = 1
+      const serverTodos: Array<Todo> = []
+
+      async function sleep(timeMs: number) {
+        return new Promise((resolve) => setTimeout(resolve, timeMs))
+      }
+
+      async function createTodos(newTodos: Array<Todo>) {
+        await sleep(50)
+        const savedTodos = newTodos.map((todo) => ({
+          ...todo,
+          id: nextServerId++,
+          createdAt: new Date().toISOString(),
+        }))
+        serverTodos.push(...savedTodos)
+        return savedTodos
+      }
+
+      const todosCollection = createCollection(
+        queryCollectionOptions<Todo>({
+          id: `writeinsert-bug-test`,
+          queryKey,
+          queryFn,
+          queryClient,
+          getKey: (item: Todo) => item.slug,
+          startSync: true,
+          onInsert: async ({ transaction }) => {
+            const newItems = transaction.mutations.map((m) => m.modified)
+            const serverItems = await createTodos(newItems)
+
+            // Write server data with server-generated IDs to synced store
+            todosCollection.utils.writeBatch(() => {
+              serverItems.forEach((serverItem) => {
+                todosCollection.utils.writeInsert(serverItem)
+              })
+            })
+
+            return { refetch: false }
+          },
+        })
+      )
+
+      await vi.waitFor(() => {
+        expect(todosCollection.status).toBe(`ready`)
+      })
+
+      // Insert with client-side negative ID
+      const clientId = -999
+      const slug = `test-slug-${Date.now()}`
+
+      todosCollection.insert({
+        id: clientId,
+        title: `Task`,
+        slug,
+        checked: false,
+        createdAt: new Date().toISOString(),
+      })
+
+      // Wait for mutation to complete
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
+      // Verify syncedData has server ID, not client ID
+      const syncedTodo = todosCollection._state.syncedData.get(slug)
+      expect(syncedTodo).toBeDefined()
+      expect(syncedTodo?.id).toBe(1) // Server-generated ID
+      expect(syncedTodo?.id).not.toBe(clientId) // Not client optimistic ID
+
+      // Verify visible state also shows server ID
+      const todo = todosCollection.get(slug)
+      expect(todo).toBeDefined()
+      expect(todo?.id).toBe(1)
+      expect(todo?.id).not.toBe(clientId)
+    })
   })
 
   it(`should call markReady when queryFn returns an empty array`, async () => {
