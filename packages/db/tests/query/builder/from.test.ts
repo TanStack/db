@@ -3,8 +3,8 @@ import { CollectionImpl } from "../../../src/collection/index.js"
 import { Query, getQueryIR } from "../../../src/query/builder/index.js"
 import { eq } from "../../../src/query/builder/functions.js"
 import {
+  InvalidSourceTypeError,
   OnlyOneSourceAllowedError,
-  QueryBuilderError,
   QueryMustHaveFromClauseError,
 } from "../../../src/errors"
 
@@ -115,7 +115,7 @@ describe(`QueryBuilder.from`, () => {
 
     expect(() => {
       builder.from(`employees` as any)
-    }).toThrow(QueryBuilderError)
+    }).toThrow(InvalidSourceTypeError)
 
     expect(() => {
       builder.from(`employees` as any)
@@ -129,6 +129,10 @@ describe(`QueryBuilder.from`, () => {
 
     expect(() => {
       builder.from(null as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from(null as any)
     }).toThrow(
       /Invalid source for from clause: Expected an object with a single key-value pair/
     )
@@ -139,6 +143,10 @@ describe(`QueryBuilder.from`, () => {
 
     expect(() => {
       builder.from([employeesCollection] as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from([employeesCollection] as any)
     }).toThrow(
       /Invalid source for from clause: Expected an object with a single key-value pair/
     )
@@ -146,6 +154,10 @@ describe(`QueryBuilder.from`, () => {
 
   it(`throws helpful error when passing undefined`, () => {
     const builder = new Query()
+
+    expect(() => {
+      builder.from(undefined as any)
+    }).toThrow(InvalidSourceTypeError)
 
     expect(() => {
       builder.from(undefined as any)

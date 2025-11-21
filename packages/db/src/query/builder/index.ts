@@ -10,9 +10,9 @@ import {
 } from "../ir.js"
 import {
   InvalidSourceError,
+  InvalidSourceTypeError,
   JoinConditionMustBeEqualityError,
   OnlyOneSourceAllowedError,
-  QueryBuilderError,
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from "../../errors.js"
@@ -67,35 +67,24 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     try {
       keys = Object.keys(source)
     } catch {
-      throw new QueryBuilderError(
-        `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          `For example: .from({ todos: todosCollection }). Got: ${source === null ? `null` : `undefined`}`
-      )
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      const type = source === null ? `null` : `undefined`
+      throw new InvalidSourceTypeError(context, type)
     }
 
     // Check if it's an array (arrays pass Object.keys but aren't valid sources)
     if (Array.isArray(source)) {
-      throw new QueryBuilderError(
-        `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
-          `For example: .from({ todos: todosCollection }). Got: array`
-      )
+      throw new InvalidSourceTypeError(context, `array`)
     }
 
     // Validate exactly one key
     if (keys.length !== 1) {
       if (keys.length === 0) {
-        throw new QueryBuilderError(
-          `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
-            `For example: .from({ todos: todosCollection }). Got: empty object`
-        )
+        throw new InvalidSourceTypeError(context, `empty object`)
       }
       // Check if it looks like a string was passed (has numeric keys)
       if (keys.every((k) => !isNaN(Number(k)))) {
-        throw new QueryBuilderError(
-          `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
-            `For example: .from({ todos: todosCollection }). Got: string`
-        )
+        throw new InvalidSourceTypeError(context, `string`)
       }
       throw new OnlyOneSourceAllowedError(context)
     }
