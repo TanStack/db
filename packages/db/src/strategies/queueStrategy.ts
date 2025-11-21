@@ -44,12 +44,15 @@ import type { Transaction } from "../transactions"
  * ```
  */
 export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
-  // Track the current promise chain to ensure serialization
+  // Manual promise chaining to ensure async serialization
+  // LiteQueuer (unlike AsyncQueuer from @tanstack/pacer) lacks built-in async queue
+  // primitives and concurrency control. We compensate by manually chaining promises
+  // to ensure each transaction completes before the next one starts.
   let processingChain = Promise.resolve()
 
   const queuer = new LiteQueuer<() => Transaction>(
     (fn) => {
-      // Chain each transaction processing to ensure serialization
+      // Chain each transaction to the previous one's completion
       processingChain = processingChain
         .then(async () => {
           const transaction = fn()
@@ -57,8 +60,9 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
           await transaction.isPersisted.promise
         })
         .catch(() => {
-          // Errors are handled via transaction.isPersisted.promise
-          // This catch prevents unhandled promise rejections
+          // Errors are handled via transaction.isPersisted.promise and surfaced there.
+          // This catch prevents unhandled promise rejections from breaking the chain,
+          // ensuring subsequent transactions can still execute even if one fails.
         })
     },
     {

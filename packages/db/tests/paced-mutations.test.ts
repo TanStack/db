@@ -13,24 +13,36 @@ type Item = {
   value: number
 }
 
+/**
+ * Helper to create a collection that's ready for testing.
+ * Handles all the boilerplate setup: preload, begin, commit, markReady.
+ */
+async function createReadyCollection<T extends object>(opts: {
+  id: string
+  getKey: (item: T) => string | number
+}) {
+  const collection = createCollection(
+    mockSyncCollectionOptionsNoInitialState<T>(opts)
+  )
+
+  const preloadPromise = collection.preload()
+  collection.utils.begin()
+  collection.utils.commit()
+  collection.utils.markReady()
+  await preloadPromise
+
+  return collection
+}
+
 describe(`createPacedMutations`, () => {
   describe(`with debounce strategy`, () => {
     it(`should batch multiple rapid mutations into a single transaction`, async () => {
       const mutationFn = vi.fn(async () => {})
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      // Setup collection
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       let insertCount = 0
       const mutate = createPacedMutations<{ id: number; value: number }>({
@@ -90,18 +102,10 @@ describe(`createPacedMutations`, () => {
     it(`should reset debounce timer on each new mutation`, async () => {
       const mutationFn = vi.fn(async () => {})
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       let insertCount = 0
       const mutate = createPacedMutations<{ id: number; value: number }>({
@@ -149,18 +153,10 @@ describe(`createPacedMutations`, () => {
     it(`should execute on leading edge when leading: true`, async () => {
       const mutationFn = vi.fn(async () => {})
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       const mutate = createPacedMutations<Item>({
         onMutate: (item) => {
@@ -186,19 +182,10 @@ describe(`createPacedMutations`, () => {
     it(`should throttle mutations with leading and trailing execution`, async () => {
       const mutationFn = vi.fn(async () => {})
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      // Setup collection
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       const mutate = createPacedMutations<Item>({
         onMutate: (item) => {
@@ -248,18 +235,10 @@ describe(`createPacedMutations`, () => {
     it(`should respect leading: false option`, async () => {
       const mutationFn = vi.fn(async () => {})
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       const mutate = createPacedMutations<Item>({
         onMutate: (item) => {
@@ -293,19 +272,10 @@ describe(`createPacedMutations`, () => {
         await new Promise((resolve) => setTimeout(resolve, 5))
       })
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      // Setup collection
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       const mutate = createPacedMutations<Item>({
         onMutate: (item) => {
@@ -358,18 +328,10 @@ describe(`createPacedMutations`, () => {
         currentlyExecuting = false
       })
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       const mutate = createPacedMutations<Item>({
         onMutate: (item) => {
@@ -405,18 +367,10 @@ describe(`createPacedMutations`, () => {
         await new Promise((resolve) => setTimeout(resolve, 5))
       })
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       const mutate = createPacedMutations<Item>({
         onMutate: (item) => {
@@ -449,6 +403,56 @@ describe(`createPacedMutations`, () => {
       expect(tx2.mutations).toHaveLength(1)
       expect(tx3.mutations).toHaveLength(1)
     })
+
+    it(`should work with zero or no wait option`, async () => {
+      const mutationFn = vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      })
+
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
+
+      // Test with explicit wait: 0
+      const mutateExplicitZero = createPacedMutations<Item>({
+        onMutate: (item) => {
+          collection.insert(item)
+        },
+        mutationFn,
+        strategy: queueStrategy({ wait: 0 }),
+      })
+
+      const tx1 = mutateExplicitZero({ id: 1, value: 1 })
+      const tx2 = mutateExplicitZero({ id: 2, value: 2 })
+
+      // Should still process sequentially even with zero wait
+      await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+
+      expect(mutationFn).toHaveBeenCalledTimes(2)
+      expect(tx1.state).toBe(`completed`)
+      expect(tx2.state).toBe(`completed`)
+
+      mutationFn.mockClear()
+
+      // Test with no wait option (defaults to 0)
+      const mutateNoWait = createPacedMutations<Item>({
+        onMutate: (item) => {
+          collection.insert(item)
+        },
+        mutationFn,
+        strategy: queueStrategy(),
+      })
+
+      const tx3 = mutateNoWait({ id: 3, value: 3 })
+      const tx4 = mutateNoWait({ id: 4, value: 4 })
+
+      await Promise.all([tx3.isPersisted.promise, tx4.isPersisted.promise])
+
+      expect(mutationFn).toHaveBeenCalledTimes(2)
+      expect(tx3.state).toBe(`completed`)
+      expect(tx4.state).toBe(`completed`)
+    })
   })
 
   describe(`error handling`, () => {
@@ -458,18 +462,10 @@ describe(`createPacedMutations`, () => {
         throw error
       })
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       const mutate = createPacedMutations<Item>({
         onMutate: (item) => {
@@ -496,18 +492,10 @@ describe(`createPacedMutations`, () => {
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce(undefined)
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       const mutate = createPacedMutations<Item>({
         onMutate: (item) => {
@@ -542,18 +530,10 @@ describe(`createPacedMutations`, () => {
     it(`should merge mutations on the same key`, async () => {
       const mutationFn = vi.fn(async () => {})
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       let insertCount = 0
       const mutate = createPacedMutations<Item>({
@@ -590,18 +570,10 @@ describe(`createPacedMutations`, () => {
     it(`should batch mutations on different keys`, async () => {
       const mutationFn = vi.fn(async () => {})
 
-      const collection = createCollection(
-        mockSyncCollectionOptionsNoInitialState<Item>({
-          id: `test`,
-          getKey: (item) => item.id,
-        })
-      )
-
-      const preloadPromise = collection.preload()
-      collection.utils.begin()
-      collection.utils.commit()
-      collection.utils.markReady()
-      await preloadPromise
+      const collection = await createReadyCollection<Item>({
+        id: `test`,
+        getKey: (item) => item.id,
+      })
 
       const mutate = createPacedMutations<Item>({
         onMutate: (item) => {
