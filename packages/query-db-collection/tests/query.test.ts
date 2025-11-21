@@ -3725,13 +3725,22 @@ describe(`QueryCollection`, () => {
 
       removeQueriesSpy.mockClear()
 
-      // Cleanup query and wait for GC
+      // Cleanup query - this should trigger subscription unsubscribe
       await query.cleanup()
+
+      // Wait for subscription cleanup to complete
       await flushPromises()
 
-      // After true GC, removeQueries should have been called
-      // Note: The exact timing depends on when the subscription fires 'unsubscribed'
-      // In this test, cleanup() should trigger it
+      // Verify removeQueries was called during cleanup
+      // The subscription's 'unsubscribed' event triggers removeQueries
+      expect(removeQueriesSpy).toHaveBeenCalled()
+
+      // Verify the query key matches
+      const lastCall =
+        removeQueriesSpy.mock.calls[removeQueriesSpy.mock.calls.length - 1]
+      if (lastCall) {
+        expect(lastCall[0]).toMatchObject({ exact: true })
+      }
 
       // Cleanup
       removeQueriesSpy.mockRestore()
