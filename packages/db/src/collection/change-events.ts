@@ -75,6 +75,10 @@ export function currentStateAsChanges<
           value,
         })
       }
+      // For single result collections (from findOne()), only return the first result
+      if ((collection as any).singleResult && result.length > 0) {
+        break
+      }
     }
     return result
   }
@@ -116,6 +120,10 @@ export function currentStateAsChanges<
           value,
         })
       }
+      // For single result collections (from findOne()), only return the first result
+      if ((collection as any).singleResult && result.length > 0) {
+        break
+      }
     }
     return result
   }
@@ -147,6 +155,10 @@ export function currentStateAsChanges<
             key,
             value,
           })
+        }
+        // For single result collections (from findOne()), only return the first result
+        if ((collection as any).singleResult && result.length > 0) {
+          break
         }
       }
       return result

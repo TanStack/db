@@ -102,4 +102,45 @@ describe(`findOne() should return single result, not array`, () => {
     // Should return the single object, not a Map
     expect(state).toEqual({ epochNumber: 2, timestamp: 2000 })
   })
+
+  test(`subscribeChanges should emit single result with includeInitialState`, async () => {
+    const epochInfoCollection = createCollection(
+      mockSyncCollectionOptions<EpochInfo>({
+        id: `test-epoch-info-subscribe`,
+        getKey: (epoch) => epoch.epochNumber,
+        initialData: [
+          { epochNumber: 1, timestamp: 1000 },
+          { epochNumber: 2, timestamp: 2000 },
+          { epochNumber: 3, timestamp: 3000 },
+        ],
+      })
+    )
+
+    const latestEpochCollection = createLiveQueryCollection((q) =>
+      q
+        .from({ e: epochInfoCollection })
+        .orderBy(({ e }) => e.epochNumber, "desc")
+        .select(({ e }) => ({ epochNumber: e.epochNumber }))
+        .findOne()
+    )
+
+    await latestEpochCollection.preload()
+
+    const changes: Array<any> = []
+    const subscription = latestEpochCollection.subscribeChanges(
+      (changeMessages) => {
+        changes.push(...changeMessages)
+      },
+      { includeInitialState: true }
+    )
+
+    // Should only receive one change for the single result
+    expect(changes).toHaveLength(1)
+    expect(changes[0]).toMatchObject({
+      type: "insert",
+      value: { epochNumber: 3 },
+    })
+
+    subscription.unsubscribe()
+  })
 })
