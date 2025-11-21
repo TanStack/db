@@ -61,29 +61,49 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     source: TSource,
     context: string
   ): [string, CollectionRef | QueryRef] {
-    // Check if source is a plain object (not null, array, string, etc.)
-    // We need this check at runtime even though TypeScript knows the type,
-    // because callers can bypass type checks with `as any`
-    if (
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      source === null ||
-      typeof source !== `object` ||
-      Array.isArray(source) ||
-      typeof source === `string`
-    ) {
+    // Validate source is a plain object (not null, array, string, etc.)
+    // We use try-catch to handle null/undefined gracefully
+    let keys: Array<string>
+    try {
+      keys = Object.keys(source)
+    } catch {
       throw new QueryBuilderError(
         `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
-          `For example: .from({ todos: todosCollection }). Got: ${typeof source === `string` ? `string "${source}"` : typeof source}`
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          `For example: .from({ todos: todosCollection }). Got: ${source === null ? `null` : `undefined`}`
       )
     }
 
-    if (Object.keys(source).length !== 1) {
+    // Check if it's an array (arrays pass Object.keys but aren't valid sources)
+    if (Array.isArray(source)) {
+      throw new QueryBuilderError(
+        `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
+          `For example: .from({ todos: todosCollection }). Got: array`
+      )
+    }
+
+    // Validate exactly one key
+    if (keys.length !== 1) {
+      if (keys.length === 0) {
+        throw new QueryBuilderError(
+          `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
+            `For example: .from({ todos: todosCollection }). Got: empty object`
+        )
+      }
+      // Check if it looks like a string was passed (has numeric keys)
+      if (keys.every((k) => !isNaN(Number(k)))) {
+        throw new QueryBuilderError(
+          `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
+            `For example: .from({ todos: todosCollection }). Got: string`
+        )
+      }
       throw new OnlyOneSourceAllowedError(context)
     }
 
-    const alias = Object.keys(source)[0]!
+    const alias = keys[0]!
     const sourceValue = source[alias]
 
+    // Validate the value is a Collection or QueryBuilder
     let ref: CollectionRef | QueryRef
 
     if (sourceValue instanceof CollectionImpl) {
