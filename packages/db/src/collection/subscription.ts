@@ -18,21 +18,6 @@ import type {
 } from "../types.js"
 import type { CollectionImpl } from "./index.js"
 
-/**
- * Create a stable key for LoadSubsetOptions to enable deduplication.
- * This prevents multiple unloadSubset calls for the same query when
- * requestLimitedSnapshot is called multiple times with identical parameters.
- */
-function serializeLoadSubsetKey(opts: LoadSubsetOptions): string {
-  // Use JSON.stringify for simple stable serialization
-  // The IR expression objects have a consistent structure so this works reliably
-  return JSON.stringify({
-    where: opts.where,
-    orderBy: opts.orderBy,
-    limit: opts.limit,
-  })
-}
-
 type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
   optimizedOnly?: boolean
@@ -64,8 +49,7 @@ export class CollectionSubscription
   private snapshotSent = false
 
   // Track all loadSubset calls made by this subscription so we can unload them on cleanup
-  // Use a Map to deduplicate - multiple calls with same options only tracked once
-  private loadedSubsets: Map<string, LoadSubsetOptions> = new Map()
+  private loadedSubsets: Array<LoadSubsetOptions> = []
 
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
@@ -219,9 +203,8 @@ export class CollectionSubscription
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 
-    // Track this loadSubset call so we can unload it later (deduplicates automatically)
-    const subsetKey = serializeLoadSubsetKey({ where: stateOpts.where })
-    this.loadedSubsets.set(subsetKey, { where: stateOpts.where })
+    // Track this loadSubset call so we can unload it later
+    this.loadedSubsets.push({ where: stateOpts.where })
 
     const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
     if (trackLoadSubsetPromise) {
@@ -366,10 +349,8 @@ export class CollectionSubscription
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions1)
 
-    // Track this loadSubset call (deduplicates automatically)
-    const subset1 = { where: whereWithValueFilter, limit, orderBy }
-    const subsetKey1 = serializeLoadSubsetKey(subset1)
-    this.loadedSubsets.set(subsetKey1, subset1)
+    // Track this loadSubset call
+    this.loadedSubsets.push({ where: whereWithValueFilter, limit, orderBy })
 
     // Make parallel loadSubset calls for values equal to minValue and values greater than minValue
     const promises: Array<Promise<void>> = []
@@ -385,10 +366,8 @@ export class CollectionSubscription
       }
       const equalValueResult = this.collection._sync.loadSubset(loadOptions2)
 
-      // Track this loadSubset call (deduplicates automatically)
-      const subset2 = { where: exactValueFilter }
-      const subsetKey2 = serializeLoadSubsetKey(subset2)
-      this.loadedSubsets.set(subsetKey2, subset2)
+      // Track this loadSubset call
+      this.loadedSubsets.push({ where: exactValueFilter })
 
       if (equalValueResult instanceof Promise) {
         promises.push(equalValueResult)
@@ -455,13 +434,13 @@ export class CollectionSubscription
 
   unsubscribe() {
     // Unload all subsets that this subscription loaded
-    for (const subset of this.loadedSubsets.values()) {
+    for (const subset of this.loadedSubsets) {
       this.collection._sync.unloadSubset({
         ...subset,
         subscription: this,
       })
     }
-    this.loadedSubsets.clear()
+    this.loadedSubsets = []
 
     this.emitInner(`unsubscribed`, {
       type: `unsubscribed`,
