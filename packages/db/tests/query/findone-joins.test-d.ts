@@ -47,10 +47,11 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-      }>
+      | {
+          todo: Todo
+          todoOptions: TodoOption | undefined
+        }
+      | undefined
     >()
   })
 
@@ -68,10 +69,11 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption
-      }>
+      | {
+          todo: Todo
+          todoOptions: TodoOption
+        }
+      | undefined
     >()
   })
 
@@ -89,10 +91,11 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-      }>
+      | {
+          todo: Todo
+          todoOptions: TodoOption | undefined
+        }
+      | undefined
     >()
   })
 
@@ -110,10 +113,11 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo | undefined
-        todoOptions: TodoOption
-      }>
+      | {
+          todo: Todo | undefined
+          todoOptions: TodoOption
+        }
+      | undefined
     >()
   })
 
@@ -131,10 +135,11 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo | undefined
-        todoOptions: TodoOption | undefined
-      }>
+      | {
+          todo: Todo | undefined
+          todoOptions: TodoOption | undefined
+        }
+      | undefined
     >()
   })
 
@@ -168,11 +173,12 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-        tag: TodoTag
-      }>
+      | {
+          todo: Todo
+          todoOptions: TodoOption | undefined
+          tag: TodoTag
+        }
+      | undefined
     >()
   })
 
@@ -193,10 +199,11 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todoText: string
-        optionText: string | undefined
-      }>
+      | {
+          todoText: string
+          optionText: string | undefined
+        }
+      | undefined
     >()
   })
 
@@ -217,10 +224,11 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todoText: string
-        optionText: string | undefined
-      }>
+      | {
+          todoText: string
+          optionText: string | undefined
+        }
+      | undefined
     >()
   })
 

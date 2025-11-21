@@ -676,7 +676,7 @@ export class CollectionImpl<
 
   /**
    * Gets the current state of the collection as a Map
-   * @returns Map containing all items in the collection, with keys as identifiers
+   * @returns Map containing all items in the collection, with keys as identifiers, or a single item (or undefined) if singleResult is true
    * @example
    * const itemsMap = collection.state
    * console.log(`Collection has ${itemsMap.size} items`)
@@ -691,6 +691,11 @@ export class CollectionImpl<
    * }
    */
   get state() {
+    // For single result collections (from findOne()), return the first value or undefined
+    if ((this as any).singleResult) {
+      const firstValue = this.values().next()
+      return firstValue.done ? undefined : firstValue.value
+    }
     const result = new Map<TKey, TOutput>()
     for (const [key, value] of this.entries()) {
       result.set(key, value)
@@ -702,24 +707,29 @@ export class CollectionImpl<
    * Gets the current state of the collection as a Map, but only resolves when data is available
    * Waits for the first sync commit to complete before resolving
    *
-   * @returns Promise that resolves to a Map containing all items in the collection
+   * @returns Promise that resolves to a Map containing all items in the collection, or a single item (or undefined) if singleResult is true
    */
   stateWhenReady(): Promise<Map<TKey, TOutput>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
-      return Promise.resolve(this.state)
+      return Promise.resolve(this.state as any)
     }
 
     // Use preload to ensure the collection starts loading, then return the state
-    return this.preload().then(() => this.state)
+    return this.preload().then(() => this.state as any)
   }
 
   /**
    * Gets the current state of the collection as an Array
    *
-   * @returns An Array containing all items in the collection
+   * @returns An Array containing all items in the collection, or a single item (or undefined) if singleResult is true
    */
   get toArray() {
+    // For single result collections (from findOne()), return the first value or undefined
+    if ((this as any).singleResult) {
+      const firstValue = this.values().next()
+      return firstValue.done ? undefined : firstValue.value
+    }
     return Array.from(this.values())
   }
 
@@ -727,16 +737,16 @@ export class CollectionImpl<
    * Gets the current state of the collection as an Array, but only resolves when data is available
    * Waits for the first sync commit to complete before resolving
    *
-   * @returns Promise that resolves to an Array containing all items in the collection
+   * @returns Promise that resolves to an Array containing all items in the collection, or a single item (or undefined) if singleResult is true
    */
   toArrayWhenReady(): Promise<Array<TOutput>> {
     // If we already have data or collection is ready, resolve immediately
     if (this.size > 0 || this.isReady()) {
-      return Promise.resolve(this.toArray)
+      return Promise.resolve(this.toArray as any)
     }
 
     // Use preload to ensure the collection starts loading, then return the array
-    return this.preload().then(() => this.toArray)
+    return this.preload().then(() => this.toArray as any)
   }
 
   /**
