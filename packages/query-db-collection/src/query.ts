@@ -1071,76 +1071,22 @@ export function queryCollectionOptions(
         `[unloadSubset] queryKey=${JSON.stringify(key).slice(0, 100)}, currentCount=${currentCount}, newCount=${newCount}`
       )
 
+      // Update refcount (but don't cleanup rows here)
       if (newCount <= 0) {
-        // 5. GC rows where count reaches 0
-
-        // Safety check: Don't cleanup if observer still has active listeners
-        // This prevents premature cleanup when refcount tracking becomes inaccurate due to:
-        // - Race conditions during rapid mount/unmount
-        // - Async timing differences between unloadSubset calls and TanStack Query's internal state
-        // - In-flight invalidateQueries that haven't completed yet
-        const observer = state.observers.get(hashedQueryKey)
-        const hasListeners = observer?.hasListeners() ?? false
-        const isSubscribed = unsubscribes.has(hashedQueryKey)
-
         console.log(
-          `[unloadSubset] refcount=0, hasListeners=${hasListeners}, isSubscribed=${isSubscribed}, observerListenerCount=${(observer as any)?.listeners?.length ?? 0}`
+          `[unloadSubset] refcount reached 0, deleting from queryRefCounts`
         )
-
-        // Safety check: Don't cleanup if observer still has active listeners
-        // If hasListeners() is true, the observer is being kept alive by TanStack Query
-        // This happens during invalidateQueries when we're between unsubscribe/resubscribe
-        if (hasListeners) {
-          console.log(
-            `[unloadSubset] Skipping cleanup - observer has active listeners (likely invalidateQueries in progress)`
-          )
-          // Keep observer around and reset refcount to prevent repeated cleanup attempts
-          queryRefCounts.set(hashedQueryKey, 1)
-          return
-        }
-
-        console.log(`[unloadSubset] Proceeding with cleanup`)
-
-        // 3. Use existing machinery to find rows this query loaded
-        const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
-        const rowsToCheck = Array.from(queryToRowsSet)
-
-        if (rowsToCheck.length > 0) {
-          begin()
-          rowsToCheck.forEach((rowKey) => {
-            const needToRemove = removeRow(rowKey, hashedQueryKey)
-            if (needToRemove) {
-              const item = collection._state.syncedData.get(rowKey)
-              if (item) {
-                write({ type: `delete`, value: item })
-              }
-            }
-          })
-          commit()
-        }
-
-        // Unsubscribe our listener
-        const unsubscribeFn = unsubscribes.get(hashedQueryKey)
-        if (unsubscribeFn) {
-          unsubscribeFn()
-          unsubscribes.delete(hashedQueryKey)
-        }
-
-        // Remove from our tracking (but observer instance remains for TanStack Query to manage)
-        state.observers.delete(hashedQueryKey)
-
-        // Note: We deliberately don't call cancelQueries or removeQueries here.
-        // TanStack Query will manage the query lifecycle via gcTime.
-        // Calling cancelQueries could interfere with active subscriptions or in-flight mutations.
-
-        // Clean up tracking
+        // Refcount reached 0, remove from tracking
+        // But DON'T cleanup rows here - let TanStack Query's 'removed' event handle that
+        // This prevents premature cleanup during invalidateQueries
         queryRefCounts.delete(hashedQueryKey)
-        queryToRows.delete(hashedQueryKey)
-        hashToQueryKey.delete(hashedQueryKey)
       } else {
         // Still have other references, just decrement
         queryRefCounts.set(hashedQueryKey, newCount)
       }
+
+      // Note: Row cleanup happens in cleanupQuery() when TanStack Query emits 'removed' event
+      // This respects TanStack Query's gcTime and prevents issues with invalidateQueries
     }
 
     // Create deduplicated loadSubset wrapper for non-eager modes
