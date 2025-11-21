@@ -7,7 +7,11 @@ import {
   onCleanup,
 } from "solid-js"
 import { ReactiveMap } from "@solid-primitives/map"
-import { CollectionImpl, createLiveQueryCollection } from "@tanstack/db"
+import {
+  BaseQueryBuilder,
+  CollectionImpl,
+  createLiveQueryCollection,
+} from "@tanstack/db"
 import { createStore, reconcile } from "solid-js/store"
 import type { Accessor } from "solid-js"
 import type {
@@ -207,6 +211,15 @@ export function useLiveQuery(
   const collection = createMemo(
     () => {
       if (configOrQueryOrCollection.length === 1) {
+        // This is a query function - check if it returns null/undefined
+        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+        const result = configOrQueryOrCollection(queryBuilder)
+
+        if (result === undefined || result === null) {
+          // Disabled query - return null
+          return null
+        }
+
         return createLiveQueryCollection({
           query: configOrQueryOrCollection,
           startSync: true,
@@ -214,6 +227,12 @@ export function useLiveQuery(
       }
 
       const innerCollection = configOrQueryOrCollection()
+
+      if (innerCollection === undefined || innerCollection === null) {
+        // Disabled query - return null
+        return null
+      }
+
       if (innerCollection instanceof CollectionImpl) {
         innerCollection.startSyncImmediate()
         return innerCollection as Collection
@@ -237,9 +256,12 @@ export function useLiveQuery(
   })
 
   // Track collection status reactively
-  const [status, setStatus] = createSignal(collection().status, {
-    name: `TanstackDBStatus`,
-  })
+  const [status, setStatus] = createSignal(
+    collection() ? collection()!.status : (`disabled` as const),
+    {
+      name: `TanstackDBStatus`,
+    }
+  )
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -256,6 +278,18 @@ export function useLiveQuery(
   createComputed(
     () => {
       const currentCollection = collection()
+
+      // Handle null collection (disabled query)
+      if (!currentCollection) {
+        setStatus(`disabled` as const)
+        state.clear()
+        setData([])
+        if (currentUnsubscribe) {
+          currentUnsubscribe()
+          currentUnsubscribe = null
+        }
+        return
+      }
 
       // Update status ref whenever the effect runs
       setStatus(currentCollection.status)
@@ -320,7 +354,7 @@ export function useLiveQuery(
     collection,
     status,
     isLoading: () => status() === `loading`,
-    isReady: () => status() === `ready`,
+    isReady: () => status() === `ready` || status() === `disabled`,
     isIdle: () => status() === `idle`,
     isError: () => status() === `error`,
     isCleanedUp: () => status() === `cleaned-up`,

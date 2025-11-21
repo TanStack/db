@@ -8,7 +8,7 @@ import {
   toValue,
   watchEffect,
 } from "vue"
-import { createLiveQueryCollection } from "@tanstack/db"
+import { BaseQueryBuilder, createLiveQueryCollection } from "@tanstack/db"
 import type {
   ChangeMessage,
   Collection,
@@ -243,6 +243,15 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Vue hooks
     if (typeof unwrappedParam === `function`) {
+      // Check if query function returns null/undefined (disabled query)
+      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+      const result = unwrappedParam(queryBuilder)
+
+      if (result === undefined || result === null) {
+        // Disabled query - return null
+        return null
+      }
+
       return createLiveQueryCollection({
         query: unwrappedParam,
         startSync: true,
@@ -265,7 +274,9 @@ export function useLiveQuery(
   const data = computed(() => internalData)
 
   // Track collection status reactively
-  const status = ref(collection.value.status)
+  const status = ref(
+    collection.value ? collection.value.status : (`disabled` as const)
+  )
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -281,6 +292,18 @@ export function useLiveQuery(
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
     const currentCollection = collection.value
+
+    // Handle null collection (disabled query)
+    if (!currentCollection) {
+      status.value = `disabled` as const
+      state.clear()
+      internalData.length = 0
+      if (currentUnsubscribe) {
+        currentUnsubscribe()
+        currentUnsubscribe = null
+      }
+      return
+    }
 
     // Update status ref whenever the effect runs
     status.value = currentCollection.status
@@ -366,7 +389,9 @@ export function useLiveQuery(
     collection: computed(() => collection.value),
     status: computed(() => status.value),
     isLoading: computed(() => status.value === `loading`),
-    isReady: computed(() => status.value === `ready`),
+    isReady: computed(
+      () => status.value === `ready` || status.value === `disabled`
+    ),
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),
