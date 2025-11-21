@@ -42,9 +42,10 @@ describe(`QueryCollection`, () => {
     queryClient = new QueryClient({
       defaultOptions: {
         queries: {
-          // Setting a low staleTime and cacheTime to ensure queries can be refetched easily in tests
+          // Setting a low staleTime and gcTime to ensure queries can be refetched easily in tests
           // and GC'd quickly if not observed.
           staleTime: 0,
+          gcTime: 0, // Immediate GC for tests
           retry: false, // Disable retries for tests to avoid delays
         },
       },
@@ -2876,7 +2877,7 @@ describe(`QueryCollection`, () => {
 
       const queryFn = vi.fn().mockResolvedValue(items)
 
-      const onDelete = vi.fn(async ({ transaction, collection }) => {
+      const onDelete = vi.fn(({ transaction, collection }) => {
         const deletedItem = transaction.mutations[0]?.original
         // Call writeDelete inside onDelete handler - this should work without throwing
         collection.utils.writeDelete(deletedItem.id)
@@ -3274,7 +3275,10 @@ describe(`QueryCollection`, () => {
       // Items 2 and 3 should remain because they're shared with other queries
       await query1.cleanup()
 
-      expect(collection.size).toBe(4) // Should have items 2, 3, 4, 5
+      // Wait for async GC to complete (gcTime: 0 still schedules async removal)
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(4) // Should have items 2, 3, 4, 5
+      })
 
       // Verify item 1 is removed (it was only in query 1)
       expect(collection.has(`1`)).toBe(false)
@@ -3289,7 +3293,10 @@ describe(`QueryCollection`, () => {
       // Items 3 and 4 should remain because they are shared with query 3
       await query2.cleanup()
 
-      expect(collection.size).toBe(3) // Should have items 3, 4, 5
+      // Wait for async GC to complete
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Should have items 3, 4, 5
+      })
 
       // Verify item 2 is removed (it was only in query 2)
       expect(collection.has(`2`)).toBe(false)
@@ -3302,7 +3309,10 @@ describe(`QueryCollection`, () => {
       // GC query 3 (where: { category: 'C' }) - should remove all remaining items
       await query3.cleanup()
 
-      expect(collection.size).toBe(0)
+      // Wait for async GC to complete
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
 
       // Verify all items are now removed
       expect(collection.has(`3`)).toBe(false)
@@ -3413,7 +3423,10 @@ describe(`QueryCollection`, () => {
       // GC query 3 - should remove all items (no more queries reference them)
       await query3.cleanup()
 
-      expect(collection.size).toBe(0)
+      // Wait for async GC to complete
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
 
       // All items should now be removed
       expect(collection.has(`1`)).toBe(false)
@@ -3626,8 +3639,10 @@ describe(`QueryCollection`, () => {
       const proms = queries.map((query) => query.cleanup())
       await Promise.all(proms)
 
-      // Collection should be empty after all queries are GCed
-      expect(collection.size).toBe(0)
+      // Wait for async GC to complete
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
 
       // Verify all items are removed
       expect(collection.has(`1`)).toBe(false)
@@ -3737,7 +3752,10 @@ describe(`QueryCollection`, () => {
       // GC the first query (all category A without limit)
       await query1.cleanup()
 
-      expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
+      // Wait for async GC to complete
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
+      })
 
       // Verify that only row 3 is removed (it was only referenced by query 1)
       expect(collection.has(`1`)).toBe(true) // Still present (referenced by query 2)
@@ -3748,7 +3766,242 @@ describe(`QueryCollection`, () => {
       await query2.cleanup()
 
       // Wait for final GC to process
-      expect(collection.size).toBe(0)
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+    })
+
+    it(`should handle duplicate subset loads correctly (refcount bug)`, async () => {
+      // This test catches Bug 1: missing refcount increment when reusing existing observer
+      // When two subscriptions load the same subset, unloading one should NOT destroy
+      // the observer since another subscription still needs it
+
+      const baseQueryKey = [`refcount-bug-test`]
+      const items: Array<CategorisedItem> = [
+        { id: `1`, name: `Item 1`, category: `A` },
+        { id: `2`, name: `Item 2`, category: `A` },
+        { id: `3`, name: `Item 3`, category: `A` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `refcount-test`,
+        queryClient,
+        queryKey: baseQueryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create two live queries that request the SAME subset
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      // Load both queries
+      await query1.preload()
+      await query2.preload()
+
+      // Wait for data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+      })
+      expect(queryFn).toHaveBeenCalledTimes(1) // Deduplicated
+
+      // Cleanup query1
+      await query1.cleanup()
+      await flushPromises()
+
+      // BUG: Without refcount increment on reuse, the observer is destroyed
+      // and query2 stops receiving updates. Collection data is also removed.
+      // EXPECTED: query2 should still work since it's using the same observer
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Should still have data for query2
+      })
+
+      // Verify query2 still works by mutating data
+      await collection.insert({ id: `4`, name: `Item 4`, category: `A` })
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(4)
+        expect(collection.has(`4`)).toBe(true)
+      })
+
+      // Now cleanup query2
+      await query2.cleanup()
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0) // NOW it should be cleaned up
+      })
+    })
+
+    it(`should reset refcount after query GC and reload (stale refcount bug)`, async () => {
+      // This test catches Bug 2: stale refcounts after GC/remove
+      // When TanStack Query GCs a query, the refcount should be cleaned up
+      // Otherwise, reloading the same subset will start with a stale count
+
+      const baseQueryKey = [`stale-refcount-test`]
+      const items: Array<CategorisedItem> = [
+        { id: `1`, name: `Item 1`, category: `A` },
+        { id: `2`, name: `Item 2`, category: `A` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `stale-refcount-test`,
+        queryClient,
+        queryKey: baseQueryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create and load a query
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await query1.preload()
+
+      // Wait for data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // Force GC by calling removeQueries (simulates gcTime expiry)
+      queryClient.removeQueries({ queryKey: baseQueryKey })
+      await flushPromises()
+
+      // BUG: queryRefCounts still has stale count, wasn't cleaned up by cleanupQuery
+      // When we load again, the refcount will be wrong (starts at 1 instead of 0, or accumulates)
+
+      // Reload the same query
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await query2.preload()
+
+      // Wait for data to reload
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // Cleanup - this should properly decrement from 1 to 0 and clean up
+      await query2.cleanup()
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0) // Should be cleaned up
+      })
+
+      // BUG SYMPTOM: If refcount was stale (e.g. was 2, decremented to 1),
+      // the observer won't be destroyed and data won't be cleaned up
+    })
+
+    it(`should handle mount/unmount/remount without breaking cache (destroyed observer bug)`, async () => {
+      // This test catches Bug 3: destroyed observer reuse
+      // When subscriberCount hits 0, unsubscribeFromQueries() destroys observers
+      // but leaves them in state.observers. On remount, subscribeToQueries()
+      // tries to reuse destroyed observers, which breaks cache processing
+
+      const baseQueryKey = [`destroyed-observer-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Use a longer gcTime to ensure cache persists across unmount/remount
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000, // 5 minutes
+            staleTime: 0,
+            retry: false,
+          },
+        },
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `destroyed-observer-test`,
+        queryClient: customQueryClient,
+        queryKey: baseQueryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Mount: create and subscribe to a query
+      const query1 = createLiveQueryCollection({
+        query: (q) => q.from({ item: collection }).select(({ item }) => item),
+      })
+
+      await query1.preload()
+
+      // Wait for initial data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // Unmount: cleanup the query, triggering subscriberCount -> 0
+      // This calls unsubscribeFromQueries() which destroys observers
+      await query1.cleanup()
+      await flushPromises()
+
+      // At this point, observer.destroy() was called but observer is still in state.observers
+
+      // Remount quickly (before gcTime expires): cache should still be valid
+      const query2 = createLiveQueryCollection({
+        query: (q) => q.from({ item: collection }).select(({ item }) => item),
+      })
+
+      // BUG: subscribeToQueries() tries to subscribe to the destroyed observer
+      // QueryObserver.destroy() is terminal - reactivation isn't guaranteed
+      // This breaks cache processing on remount
+
+      await query2.preload()
+
+      // EXPECTED: Should process cached data immediately without refetch
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+      expect(queryFn).toHaveBeenCalledTimes(1) // No refetch!
+
+      // BUG SYMPTOM: If destroyed observer doesn't process cached results,
+      // collection will be empty or queryFn will be called again
     })
   })
 
@@ -3803,24 +4056,14 @@ describe(`QueryCollection`, () => {
         expect(queryFn).toHaveBeenCalledTimes(1)
       })
 
-      // Verify all items are present
+      // Verify all items are present before creating second query
       expect(collection.has(`1`)).toBe(true)
       expect(collection.has(`2`)).toBe(true)
       expect(collection.has(`3`)).toBe(true)
 
-      // Unsubscribe from query observer to simulate component unmount
-      // But don't cleanup the live query - this keeps the subscription alive
-      // This simulates what happens when a component unmounts but remounts quickly
-      const subscribers = (query1 as any).subscribers
-      if (subscribers && subscribers.size > 0) {
-        const subscriber = Array.from(subscribers)[0]
-        ;(subscriber as any).unsubscribe?.()
-      }
-
-      // Wait a bit to simulate navigation
-      await new Promise((resolve) => setTimeout(resolve, 10))
-
-      // Create second live query (simulating remount/navigation back)
+      // Create second live query while first is still active
+      // This simulates multiple components using the same collection
+      // (e.g., list view and detail view both querying the same collection)
       const query2 = createLiveQueryCollection({
         query: (q) =>
           q
@@ -3828,18 +4071,19 @@ describe(`QueryCollection`, () => {
             .select(({ item }) => ({ id: item.id, name: item.name })),
       })
 
-      // Preload - this should use cached data
+      // Preload - this should use cached data and process it immediately
       await query2.preload()
-
-      // Wait for any async operations
       await flushPromises()
 
       // queryFn should still only have been called once (using cache)
       // This verifies the fix: QueryObserver processes cached results immediately
       expect(queryFn).toHaveBeenCalledTimes(1)
 
-      // Data should be present
+      // Data should be present in both queries
       expect(collection.size).toBe(3)
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
 
       // Cleanup
       await query1.cleanup()
@@ -3847,14 +4091,14 @@ describe(`QueryCollection`, () => {
       customQueryClient.clear()
     })
 
-    it(`should not call removeQueries when subscription is still active during remount`, async () => {
-      const queryKey = [`no-remove-on-remount`]
+    it(`should preserve cache and avoid refetch during quick remount`, async () => {
+      const queryKey = [`preserve-cache-remount`]
       const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
 
       const queryFn = vi.fn().mockResolvedValue(items)
 
       const config: QueryCollectionConfig<TestItem> = {
-        id: `no-remove-on-remount`,
+        id: `preserve-cache-remount`,
         queryClient,
         queryKey,
         queryFn,
@@ -3862,8 +4106,6 @@ describe(`QueryCollection`, () => {
         startSync: true,
         syncMode: `on-demand`,
       }
-
-      const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
 
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
@@ -3877,88 +4119,30 @@ describe(`QueryCollection`, () => {
 
       await vi.waitFor(() => {
         expect(collection.size).toBe(1)
+        expect(queryFn).toHaveBeenCalledTimes(1)
       })
 
-      // Reset the spy to ignore any cleanup calls from initial setup
-      removeQueriesSpy.mockClear()
-
-      // Clean up query but immediately create new one (simulating remount)
-      const cleanupPromise = query1.cleanup()
+      // Create second query while first is still active (simulating remount)
+      // In real-world React, the first component unmounts but cleanup is deferred
       const query2 = createLiveQueryCollection({
         query: (q) => q.from({ item: collection }),
       })
 
-      await cleanupPromise
       await query2.preload()
-
-      // During quick remount, removeQueries should not be called
-      // because the subscription's 'unsubscribed' event only fires on true GC
       await flushPromises()
 
-      // The test is to verify collection still has data (cache persisted)
+      // Cache should still be present in the collection
       expect(collection.size).toBe(1)
 
-      // Cleanup
+      // We should NOT have refetched (used TanStack Query cache)
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // Cleanup both
+      await query1.cleanup()
       await query2.cleanup()
-      removeQueriesSpy.mockRestore()
     })
 
-    it(`should call removeQueries when subscription is truly unsubscribed after GC`, async () => {
-      const queryKey = [`remove-on-gc`]
-      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
-
-      const queryFn = vi.fn().mockResolvedValue(items)
-
-      const config: QueryCollectionConfig<TestItem> = {
-        id: `remove-on-gc`,
-        queryClient,
-        queryKey,
-        queryFn,
-        getKey,
-        startSync: true,
-        syncMode: `on-demand`,
-      }
-
-      const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
-
-      const options = queryCollectionOptions(config)
-      const collection = createCollection(options)
-
-      // Create and load query
-      const query = createLiveQueryCollection({
-        query: (q) => q.from({ item: collection }),
-      })
-
-      await query.preload()
-
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(1)
-      })
-
-      removeQueriesSpy.mockClear()
-
-      // Cleanup query - this should trigger subscription unsubscribe
-      await query.cleanup()
-
-      // Wait for subscription cleanup to complete
-      await flushPromises()
-
-      // Verify removeQueries was called during cleanup
-      // The subscription's 'unsubscribed' event triggers removeQueries
-      expect(removeQueriesSpy).toHaveBeenCalled()
-
-      // Verify the query key matches
-      const lastCall =
-        removeQueriesSpy.mock.calls[removeQueriesSpy.mock.calls.length - 1]
-      if (lastCall) {
-        expect(lastCall[0]).toMatchObject({ exact: true })
-      }
-
-      // Cleanup
-      removeQueriesSpy.mockRestore()
-    })
-
-    it(`should respect gcTime and not refetch when resubscribing within cache window`, async () => {
+    it(`should allow TanStack Query to manage cache lifecycle via gcTime`, async () => {
       const queryKey = [`gctime-respect-test`]
       const items: Array<TestItem> = [
         { id: `1`, name: `Item 1` },
@@ -3967,11 +4151,11 @@ describe(`QueryCollection`, () => {
 
       const queryFn = vi.fn().mockResolvedValue(items)
 
-      // Use a longer gcTime to verify cache persistence
+      // Use a longer gcTime to verify cache isn't prematurely removed
       const customQueryClient = new QueryClient({
         defaultOptions: {
           queries: {
-            gcTime: 5 * 60 * 1000, // 5 minutes - long enough for test
+            gcTime: 5 * 60 * 1000, // 5 minutes
             staleTime: 0,
             retry: false,
           },
@@ -3991,41 +4175,32 @@ describe(`QueryCollection`, () => {
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
 
-      // Create and load first query
+      // First mount
       const query1 = createLiveQueryCollection({
         query: (q) => q.from({ item: collection }),
       })
 
       await query1.preload()
-
       await vi.waitFor(() => {
         expect(collection.size).toBe(2)
         expect(queryFn).toHaveBeenCalledTimes(1)
       })
 
-      // Create second query while first is still active (simulates overlapping navigation)
+      // Create second query while first is active (simulating overlapping mount)
       const query2 = createLiveQueryCollection({
         query: (q) => q.from({ item: collection }),
       })
 
       await query2.preload()
+      await flushPromises()
 
-      // Data should still be present
+      // Should still use cache - no refetch
+      expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.size).toBe(2)
 
-      // Should not have called queryFn again because data is cached
-      expect(queryFn).toHaveBeenCalledTimes(1)
-
-      // Now clean up both
+      // Cleanup both
       await query1.cleanup()
       await query2.cleanup()
-
-      // After cleanup, data should be removed
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(0)
-      })
-
-      // Cleanup
       customQueryClient.clear()
     })
   })

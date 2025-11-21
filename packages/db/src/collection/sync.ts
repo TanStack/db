@@ -43,6 +43,8 @@ export class CollectionSyncManager<
   public syncLoadSubsetFn:
     | ((options: LoadSubsetOptions) => true | Promise<void>)
     | null = null
+  public syncUnloadSubsetFn: ((options: LoadSubsetOptions) => void) | null =
+    null
 
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
@@ -209,6 +211,9 @@ export class CollectionSyncManager<
       // Store loadSubset function if provided
       this.syncLoadSubsetFn = syncRes?.loadSubset ?? null
 
+      // Store unloadSubset function if provided
+      this.syncUnloadSubsetFn = syncRes?.unloadSubset ?? null
+
       // Validate: on-demand mode requires a loadSubset function
       if (this.syncMode === `on-demand` && !this.syncLoadSubsetFn) {
         throw new CollectionConfigurationError(
@@ -339,6 +344,16 @@ export class CollectionSyncManager<
     }
 
     return true
+  }
+
+  /**
+   * Notifies the sync layer that a subset is no longer needed.
+   * @param options Options that identify what data is being unloaded
+   */
+  public unloadSubset(options: LoadSubsetOptions): void {
+    if (this.syncUnloadSubsetFn) {
+      this.syncUnloadSubsetFn(options)
+    }
   }
 
   public cleanup(): void {
