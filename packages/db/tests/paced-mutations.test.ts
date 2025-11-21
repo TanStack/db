@@ -142,7 +142,8 @@ describe(`createPacedMutations`, () => {
 
       // NOW mutationFn should have been called
       expect(mutationFn).toHaveBeenCalledTimes(1)
-      expect(mutationFn.mock.calls[0][0].transaction.mutations).toHaveLength(1)
+      const firstCall = (mutationFn.mock.calls as any)[0]
+      expect(firstCall[0].transaction.mutations).toHaveLength(1)
     })
 
     it(`should execute on leading edge when leading: true`, async () => {
@@ -578,7 +579,7 @@ describe(`createPacedMutations`, () => {
       await new Promise((resolve) => setTimeout(resolve, 100))
 
       expect(mutationFn).toHaveBeenCalledTimes(1)
-      const call = mutationFn.mock.calls[0][0]
+      const call = (mutationFn.mock.calls as any)[0][0]
       expect(call.transaction.mutations).toHaveLength(1)
       expect(call.transaction.mutations[0]).toMatchObject({
         type: `insert`,
@@ -618,7 +619,7 @@ describe(`createPacedMutations`, () => {
       await new Promise((resolve) => setTimeout(resolve, 100))
 
       expect(mutationFn).toHaveBeenCalledTimes(1)
-      const call = mutationFn.mock.calls[0][0]
+      const call = (mutationFn.mock.calls as any)[0][0]
       expect(call.transaction.mutations).toHaveLength(3)
     })
   })
