@@ -60,6 +60,11 @@ export interface E2ETestConfig {
       posts: Collection<Post>
       comments: Collection<Comment>
     }
+    progressive?: {
+      users: Collection<User>
+      posts: Collection<Post>
+      comments: Collection<Comment>
+    }
   }
 
   // Mutation helpers using collection APIs (works for both Electric and Query)
@@ -71,9 +76,18 @@ export interface E2ETestConfig {
     insertPost: (post: Post) => Promise<void>
   }
 
+  // Helper to get txid for Electric txid tracking tests (Electric only)
+  getTxid?: () => Promise<number | null>
+
   // Indicates if the backend has replication lag (e.g., Electric sync)
   // When true, tests will wait for mutations to propagate before proceeding
   hasReplicationLag?: boolean
+
+  // Test control for progressive mode (Electric only)
+  // Allows explicit control over when initial sync completes for deterministic testing
+  progressiveTestControl?: {
+    releaseInitialSync: () => void
+  }
 
   // Lifecycle hooks
   setup: () => Promise<void>
