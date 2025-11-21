@@ -12,6 +12,7 @@ import {
   InvalidSourceError,
   JoinConditionMustBeEqualityError,
   OnlyOneSourceAllowedError,
+  QueryBuilderError,
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from "../../errors.js"
@@ -60,6 +61,22 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     source: TSource,
     context: string
   ): [string, CollectionRef | QueryRef] {
+    // Check if source is a plain object (not null, array, string, etc.)
+    // We need this check at runtime even though TypeScript knows the type,
+    // because callers can bypass type checks with `as any`
+    if (
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      source === null ||
+      typeof source !== `object` ||
+      Array.isArray(source) ||
+      typeof source === `string`
+    ) {
+      throw new QueryBuilderError(
+        `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
+          `For example: .from({ todos: todosCollection }). Got: ${typeof source === `string` ? `string "${source}"` : typeof source}`
+      )
+    }
+
     if (Object.keys(source).length !== 1) {
       throw new OnlyOneSourceAllowedError(context)
     }
