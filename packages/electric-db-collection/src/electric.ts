@@ -280,6 +280,93 @@ function hasTxids<T extends Row<unknown>>(
 }
 
 /**
+ * Creates a deduplicated loadSubset handler for progressive/on-demand modes
+ * Returns null for eager mode, or a DeduplicatedLoadSubset instance for other modes.
+ * Handles fetching snapshots in progressive mode during buffering phase,
+ * and requesting snapshots in on-demand mode
+ */
+function createLoadSubsetDedupe<T extends Row<unknown>>({
+  stream,
+  syncMode,
+  isBufferingInitialSync,
+  begin,
+  write,
+  commit,
+  collectionId,
+}: {
+  stream: ShapeStream<T>
+  syncMode: ElectricSyncMode
+  isBufferingInitialSync: () => boolean
+  begin: () => void
+  write: (mutation: {
+    type: `insert` | `update` | `delete`
+    value: T
+    metadata: Record<string, unknown>
+  }) => void
+  commit: () => void
+  collectionId?: string
+}): DeduplicatedLoadSubset | null {
+  // Eager mode doesn't need subset loading
+  if (syncMode === `eager`) {
+    return null
+  }
+
+  const loadSubset = async (opts: LoadSubsetOptions) => {
+    // In progressive mode, use fetchSnapshot during snapshot phase
+    if (isBufferingInitialSync()) {
+      // Progressive mode snapshot phase: fetch and apply immediately
+      const snapshotParams = compileSQL<T>(opts)
+      try {
+        const { data: rows } = await stream.fetchSnapshot(snapshotParams)
+
+        // Check again if we're still buffering - we might have received up-to-date
+        // and completed the atomic swap while waiting for the snapshot
+        if (!isBufferingInitialSync()) {
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Ignoring snapshot - sync completed while fetching`
+          )
+          return
+        }
+
+        // Apply snapshot data in a sync transaction (only if we have data)
+        if (rows.length > 0) {
+          begin()
+          for (const row of rows) {
+            write({
+              type: `insert`,
+              value: row.value,
+              metadata: {
+                ...row.headers,
+              },
+            })
+          }
+          commit()
+
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Applied snapshot with ${rows.length} rows`
+          )
+        }
+      } catch (error) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Error fetching snapshot: %o`,
+          error
+        )
+        throw error
+      }
+    } else if (syncMode === `progressive`) {
+      // Progressive mode after full sync complete: no need to load more
+      return
+    } else {
+      // On-demand mode: use requestSnapshot
+      const snapshotParams = compileSQL<T>(opts)
+      await stream.requestSnapshot(snapshotParams)
+    }
+  }
+
+  return new DeduplicatedLoadSubset({ loadSubset })
+}
+
+/**
  * Type for the awaitTxId utility function
  */
 export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
@@ -696,10 +783,10 @@ function createElectricSync<T extends Row<unknown>>(
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
-      const wrappedMarkReady = () => {
+      const wrappedMarkReady = (isBuffering: boolean) => {
         // Only create gate if we're in buffering phase (first up-to-date)
         if (
-          isBufferingInitialSync &&
+          isBuffering &&
           syncMode === `progressive` &&
           testHooks?.beforeMarkingReady
         ) {
@@ -780,61 +867,23 @@ function createElectricSync<T extends Row<unknown>>(
       let hasReceivedUpToDate = false // Track if we've completed initial sync in progressive mode
 
       // Progressive mode state
-      let isBufferingInitialSync = syncMode === `progressive` // True until first up-to-date in progressive mode
+      // Helper to determine if we're buffering the initial sync
+      const isBufferingInitialSync = () =>
+        syncMode === `progressive` && !hasReceivedUpToDate
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
 
       // Create deduplicated loadSubset wrapper for non-eager modes
       // This prevents redundant snapshot requests when multiple concurrent
       // live queries request overlapping or subset predicates
-      const loadSubsetDedupe =
-        syncMode === `eager`
-          ? null
-          : new DeduplicatedLoadSubset({
-              loadSubset: async (opts: LoadSubsetOptions) => {
-                // In progressive mode, use fetchSnapshot during snapshot phase
-                if (syncMode === `progressive`) {
-                  if (hasReceivedUpToDate) {
-                    // Full sync complete, no need to load more
-                    return
-                  }
-                  // Snapshot phase: fetch and apply immediately
-                  const snapshotParams = compileSQL<T>(opts)
-                  try {
-                    const snapshot = await stream.fetchSnapshot(snapshotParams)
-                    const rows = snapshot.data
-
-                    // Apply snapshot data in a sync transaction (only if we have data)
-                    if (rows.length > 0) {
-                      begin()
-                      for (const row of rows) {
-                        write({
-                          type: `insert`,
-                          value: row.value,
-                          metadata: {
-                            ...row.headers,
-                          },
-                        })
-                      }
-                      commit()
-
-                      debug(
-                        `${collectionId ? `[${collectionId}] ` : ``}Applied snapshot with ${rows.length} rows`
-                      )
-                    }
-                  } catch (error) {
-                    debug(
-                      `${collectionId ? `[${collectionId}] ` : ``}Error fetching snapshot: %o`,
-                      error
-                    )
-                    throw error
-                  }
-                } else {
-                  // On-demand mode: use requestSnapshot
-                  const snapshotParams = compileSQL<T>(opts)
-                  await stream.requestSnapshot(snapshotParams)
-                }
-              },
-            })
+      const loadSubsetDedupe = createLoadSubsetDedupe({
+        stream,
+        syncMode,
+        isBufferingInitialSync,
+        begin,
+        write,
+        commit,
+        collectionId,
+      })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
@@ -855,7 +904,7 @@ function createElectricSync<T extends Row<unknown>>(
 
           // Check for txids in the message and add them to our store
           // Skip during buffered initial sync in progressive mode (txids will be extracted during atomic swap)
-          if (hasTxids(message) && !isBufferingInitialSync) {
+          if (hasTxids(message) && !isBufferingInitialSync()) {
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
           }
 
@@ -890,7 +939,7 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             // In buffered initial sync of progressive mode, buffer messages instead of writing
-            if (isBufferingInitialSync) {
+            if (isBufferingInitialSync()) {
               bufferedMessages.push(message)
             } else {
               // Normal processing: write changes immediately
@@ -910,7 +959,7 @@ function createElectricSync<T extends Row<unknown>>(
             }
           } else if (isSnapshotEndMessage(message)) {
             // Skip snapshot-end tracking during buffered initial sync (will be extracted during atomic swap)
-            if (!isBufferingInitialSync) {
+            if (!isBufferingInitialSync()) {
               newSnapshots.push(parseSnapshotMessage(message))
             }
             hasSnapshotEnd = true
@@ -936,15 +985,14 @@ function createElectricSync<T extends Row<unknown>>(
             // Reset flags so we continue accumulating changes until next up-to-date
             hasUpToDate = false
             hasSnapshotEnd = false
-            hasReceivedUpToDate = false // Reset for progressive mode - we're starting a new sync
-            isBufferingInitialSync = syncMode === `progressive` // Reset buffering state
+            hasReceivedUpToDate = false // Reset for progressive mode (isBufferingInitialSync will reflect this)
             bufferedMessages.length = 0 // Clear buffered messages
           }
         }
 
         if (hasUpToDate || hasSnapshotEnd) {
           // PROGRESSIVE MODE: Atomic swap on first up-to-date
-          if (isBufferingInitialSync && hasUpToDate) {
+          if (isBufferingInitialSync() && hasUpToDate) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`
             )
@@ -981,8 +1029,8 @@ function createElectricSync<T extends Row<unknown>>(
             // Commit the atomic swap
             commit()
 
-            // Exit buffering phase - now in normal sync mode
-            isBufferingInitialSync = false
+            // Exit buffering phase by marking that we've received up-to-date
+            // isBufferingInitialSync() will now return false
             bufferedMessages.length = 0
 
             debug(
@@ -1001,7 +1049,7 @@ function createElectricSync<T extends Row<unknown>>(
 
           if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
             // Mark the collection as ready now that sync is up to date
-            wrappedMarkReady()
+            wrappedMarkReady(isBufferingInitialSync())
           }
 
           // Track that we've received the first up-to-date for progressive mode

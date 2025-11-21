@@ -2066,6 +2066,84 @@ describe(`Electric Integration`, () => {
       expect(mockRequestSnapshot).toHaveBeenCalled()
     })
 
+    it(`should ignore snapshot data when fetchSnapshot completes after up-to-date in progressive mode`, async () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      let resolveFetchSnapshot!: (value: any) => void
+      const fetchSnapshotPromise = new Promise((resolve) => {
+        resolveFetchSnapshot = resolve as any
+      })
+
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      // Mock fetchSnapshot to return a promise we control
+      mockFetchSnapshot.mockReturnValue(fetchSnapshotPromise)
+
+      const config = {
+        id: `progressive-snapshot-race-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      expect(testCollection.status).toBe(`loading`)
+
+      // Start a loadSubset request (should call fetchSnapshot)
+      const loadSubsetPromise = testCollection._sync.loadSubset({ limit: 10 })
+
+      // Verify fetchSnapshot was called
+      expect(mockFetchSnapshot).toHaveBeenCalled()
+
+      // Before the snapshot completes, send up-to-date to complete the sync
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Buffered User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Sync should be complete now
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.size).toBe(1)
+
+      // Now resolve the fetchSnapshot with data
+      resolveFetchSnapshot({
+        metadata: {},
+        data: [
+          {
+            key: `2`,
+            value: { id: 2, name: `Late Snapshot User` },
+            headers: { operation: `insert` },
+          },
+        ],
+      })
+
+      // Wait for loadSubset to complete
+      await loadSubsetPromise
+
+      // The snapshot data should be IGNORED because sync already completed
+      expect(testCollection.has(2)).toBe(false)
+      expect(testCollection.size).toBe(1) // Still only the buffered user
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Buffered User` })
+    })
+
     it(`should default offset to 'now' in on-demand mode when no offset provided`, async () => {
       vi.clearAllMocks()
 
