@@ -629,12 +629,13 @@ export function queryCollectionOptions(
   //
   // Lifecycle:
   // - Increment: when createQueryFromOpts creates or reuses an observer
-  // - Decrement: when subscription.unsubscribe() calls collection._sync.unloadSubset()
+  // - Decrement: when subscription.unsubscribe() passes predicates to collection._sync.unloadSubset()
   // - Reset: when cleanupQuery() is triggered by TanStack Query's cache GC
   //
-  // When refcount reaches 0, unloadSubset() performs row-level cleanup and removes
-  // the observer from tracking (but doesn't destroy it, allowing TanStack Query to
-  // manage cache lifecycle via gcTime for quick remounts).
+  // When refcount reaches 0, unloadSubset():
+  // 1. Computes the same queryKey from the predicates
+  // 2. Uses existing machinery (queryToRows map) to find rows that query loaded
+  // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
 
   // Helper function to add a row to the internal state
@@ -1037,38 +1038,39 @@ export function queryCollectionOptions(
     }
 
     /**
-     * Unload a query subset by decrementing its refcount and cleaning up if no longer needed.
+     * Unload a query subset - the symmetric counterpart to createQueryFromOpts.
      *
      * Called when a live query subscription unsubscribes (via collection._sync.unloadSubset()).
-     * This is the symmetric counterpart to createQueryFromOpts which increments the refcount.
      *
-     * When refcount reaches 0:
-     * - Removes rows from collection that are no longer referenced by any active query
-     * - Unsubscribes from the QueryObserver to stop receiving updates (preventing late-arriving data)
-     * - Removes observer from our tracking maps
-     * - Preserves TanStack Query's cache (no removeQueries or observer.destroy)
+     * Flow:
+     * 1. Receives the same predicates that were passed to loadSubset
+     * 2. Computes the queryKey using generateQueryKeyFromOptions (same logic as loadSubset)
+     * 3. Uses existing machinery (queryToRows map) to find rows that query loaded
+     * 4. Decrements refcount
+     * 5. GCs rows where count reaches 0 (rows no longer referenced by any active query)
      *
-     * Note: We don't cancel in-flight requests. Unsubscribing from the observer is sufficient
-     * to prevent late-arriving data from being processed. The request will complete and be cached
+     * When refcount reaches 0, we also:
+     * - Unsubscribe from the QueryObserver (preventing late-arriving data)
+     * - Remove observer from our tracking maps
+     * - Preserve TanStack Query's cache (no removeQueries or observer.destroy)
+     *
+     * We don't cancel in-flight requests. Unsubscribing from the observer is sufficient
+     * to prevent late-arriving data from being processed. The request completes and is cached
      * by TanStack Query, allowing quick remounts to restore data without refetching.
-     *
-     * TanStack Query manages final cache cleanup via gcTime.
      */
     const unloadSubset = (options: LoadSubsetOptions) => {
-      // Generate the same query key that loadSubset would have created
+      // 1. Same predicates → 2. Same queryKey
       const key = generateQueryKeyFromOptions(options)
       const hashedQueryKey = hashKey(key)
 
-      // Decrement reference count
+      // 4. Decrement refcount
       const currentCount = queryRefCounts.get(hashedQueryKey) || 0
       const newCount = currentCount - 1
 
       if (newCount <= 0) {
-        // Reference count reached 0, perform cleanup
-        // Note: We remove rows from the collection but preserve TanStack Query's cache.
-        // This allows quick remounts to restore data from cache without refetching.
+        // 5. GC rows where count reaches 0
 
-        // Row-level cleanup: remove rows from collection that are no longer referenced by any query
+        // 3. Use existing machinery to find rows this query loaded
         const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
         const rowsToCheck = Array.from(queryToRowsSet)
 
