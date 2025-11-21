@@ -5,13 +5,16 @@ import {
   createLiveQueryCollection,
   eq,
   gt,
+  parseLoadSubsetOptions,
 } from "@tanstack/db"
 import { QueryClient } from "@tanstack/query-core"
 import { z } from "zod"
 import { queryCollectionOptions } from "../src/query"
+import type { QueryCollectionConfig } from "../src/query"
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetOptions,
   UpdateMutationFnParams,
 } from "@tanstack/db"
 
@@ -401,6 +404,71 @@ describe(`Query collection type resolution tests`, () => {
 
       // Should infer ResponseType as select parameter type
       expectTypeOf(selectUserData).parameters.toEqualTypeOf<[ResponseType]>()
+    })
+  })
+
+  describe(`loadSubsetOptions type inference`, () => {
+    interface TestItem {
+      id: string
+      name: string
+    }
+
+    it(`should type loadSubsetOptions as LoadSubsetOptions in queryFn`, () => {
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `loadSubsetTest`,
+        queryClient,
+        queryKey: [`loadSubsetTest`],
+        queryFn: (ctx) => {
+          // Verify that loadSubsetOptions is assignable to LoadSubsetOptions
+          // This ensures it can be used where LoadSubsetOptions is expected
+          expectTypeOf(
+            ctx.meta!.loadSubsetOptions
+          ).toExtend<LoadSubsetOptions>()
+          // so that parseLoadSubsetOptions can be called without type errors
+          parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
+          // The fact that this call compiles without errors verifies that
+          // ctx.meta.loadSubsetOptions is typed correctly as LoadSubsetOptions
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
+    })
+
+    it(`should allow meta to contain additional properties beyond loadSubsetOptions`, () => {
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `loadSubsetTest`,
+        queryClient,
+        queryKey: [`loadSubsetTest`],
+        queryFn: (ctx) => {
+          // Verify that an object with loadSubsetOptions plus other properties
+          // can be assigned to ctx.meta's type. This ensures the type is not too restrictive.
+          const metaWithExtra = {
+            loadSubsetOptions: ctx.meta!.loadSubsetOptions,
+            customProperty: `test`,
+            anotherProperty: 123,
+          }
+
+          // Test that this object can be assigned to ctx.meta's type
+          // This verifies that ctx.meta allows additional properties beyond loadSubsetOptions
+          const typedMeta: typeof ctx.meta = metaWithExtra
+
+          // Verify the assignment worked (this will fail at compile time if types don't match)
+          expectTypeOf(
+            typedMeta.loadSubsetOptions
+          ).toExtend<LoadSubsetOptions>()
+
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
     })
   })
 })

@@ -6,6 +6,7 @@ import {
   QueryKeyRequiredError,
 } from "./errors"
 import { createWriteUtils } from "./manual-sync"
+import { serializeLoadSubsetOptions } from "./serialization"
 import type {
   BaseCollectionConfig,
   ChangeMessage,
@@ -29,6 +30,35 @@ import type { StandardSchemaV1 } from "@standard-schema/spec"
 
 // Re-export for external use
 export type { SyncOperation } from "./manual-sync"
+
+/**
+ * Base type for Query Collection meta properties.
+ * Users can extend this type when augmenting the @tanstack/query-core module
+ * to add their own custom properties while preserving loadSubsetOptions.
+ *
+ * @example
+ * ```typescript
+ * declare module "@tanstack/query-core" {
+ *   interface Register {
+ *     queryMeta: QueryCollectionMeta & {
+ *       myCustomProperty: string
+ *     }
+ *   }
+ * }
+ * ```
+ */
+export type QueryCollectionMeta = Record<string, unknown> & {
+  loadSubsetOptions: LoadSubsetOptions
+}
+
+// Module augmentation to extend TanStack Query's Register interface
+// This ensures that ctx.meta always includes loadSubsetOptions
+// We extend Record<string, unknown> to preserve the ability to add other meta properties
+declare module "@tanstack/query-core" {
+  interface Register {
+    queryMeta: QueryCollectionMeta
+  }
+}
 
 // Schema output type inference helper (matches electric.ts pattern)
 type InferSchemaOutput<T> = T extends StandardSchemaV1
@@ -626,7 +656,19 @@ export function queryCollectionOptions(
       queryFunction: typeof queryFn = queryFn
     ): true | Promise<void> => {
       // Push the predicates down to the queryKey and queryFn
-      const key = typeof queryKey === `function` ? queryKey(opts) : queryKey
+      let key: QueryKey
+      if (typeof queryKey === `function`) {
+        // Function-based queryKey: use it to build the key from opts
+        key = queryKey(opts)
+      } else if (syncMode === `on-demand`) {
+        // Static queryKey in on-demand mode: automatically append serialized predicates
+        // to create separate cache entries for different predicate combinations
+        const serialized = serializeLoadSubsetOptions(opts)
+        key = serialized !== undefined ? [...queryKey, serialized] : queryKey
+      } else {
+        // Static queryKey in eager mode: use as-is
+        key = queryKey
+      }
       const hashedQueryKey = hashKey(key)
       const extendedMeta = { ...meta, loadSubsetOptions: opts }
 
