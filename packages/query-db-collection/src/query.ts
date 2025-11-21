@@ -976,12 +976,25 @@ export function queryCollectionOptions(
       .subscribe((event) => {
         const hashedKey = event.query.queryHash
         if (event.type === `removed`) {
-          cleanupQuery(hashedKey)
+          // TanStack Query GC'd this query after gcTime expired
+          // Force cleanup regardless of hasListeners (explicit cleanup path)
+          forceCleanupQuery(hashedKey)
         }
       })
 
-    function cleanupQuery(hashedQueryKey: string) {
-      // Clear refcount immediately since TanStack Query has GC'd this query
+    /**
+     * Force cleanup of a query - used for explicit cleanup paths.
+     * This ALWAYS cleans up, regardless of hasListeners state.
+     *
+     * Used by:
+     * - collection.cleanup() - manual cleanup call
+     * - QueryCache 'removed' event - TanStack Query GC after gcTime
+     *
+     * NOT used by unloadSubset (subscription cleanup), which uses hasListeners check.
+     */
+    function forceCleanupQuery(hashedQueryKey: string) {
+      console.log(`[forceCleanupQuery] hashedQueryKey=${hashedQueryKey}`)
+      // Clear refcount immediately since we're forcing cleanup
       // This prevents stale refcounts when the query is reloaded later
       queryRefCounts.delete(hashedQueryKey)
 
@@ -990,14 +1003,19 @@ export function queryCollectionOptions(
 
       // Get all the rows that are in the result of this query
       const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
+      console.log(`[forceCleanupQuery] rowKeys count=${rowKeys.size}`)
 
-      // Remove the query from these rows
+      // Remove the query from these rows (ROW-LEVEL GC)
       rowKeys.forEach((rowKey) => {
         const queries = rowToQueries.get(rowKey) // set of queries that reference this row
+        console.log(
+          `[forceCleanupQuery] row=${rowKey}, queries count=${queries?.size ?? 0}`
+        )
         if (queries && queries.size > 0) {
           queries.delete(hashedQueryKey)
           if (queries.size === 0) {
             // Reference count dropped to 0, we can GC the row
+            console.log(`[forceCleanupQuery] Deleting row=${rowKey}`)
             rowToQueries.delete(rowKey)
 
             if (collection.has(rowKey)) {
@@ -1021,14 +1039,18 @@ export function queryCollectionOptions(
       unsubscribeFromQueries()
 
       const allQueryKeys = [...hashToQueryKey.values()]
+      const allHashedKeys = [...state.observers.keys()]
 
-      hashToQueryKey.clear()
-      queryToRows.clear()
-      rowToQueries.clear()
-      state.observers.clear()
-      queryRefCounts.clear()
+      // Force cleanup all queries (explicit cleanup path)
+      // This ignores hasListeners and always cleans up
+      for (const hashedKey of allHashedKeys) {
+        forceCleanupQuery(hashedKey)
+      }
+
+      // Unsubscribe from cache events (cleanup already happened above)
       unsubscribeQueryCache()
 
+      // Remove queries from TanStack Query cache
       await Promise.all(
         allQueryKeys.map(async (qKey) => {
           await queryClient.cancelQueries({ queryKey: qKey })
@@ -1038,21 +1060,24 @@ export function queryCollectionOptions(
     }
 
     /**
-     * Unload a query subset - the symmetric counterpart to createQueryFromOpts.
+     * Unload a query subset - the subscription-based cleanup path (on-demand mode).
      *
      * Called when a live query subscription unsubscribes (via collection._sync.unloadSubset()).
      *
      * Flow:
      * 1. Receives the same predicates that were passed to loadSubset
      * 2. Computes the queryKey using generateQueryKeyFromOptions (same logic as loadSubset)
-     * 3. Uses existing machinery (queryToRows map) to find rows that query loaded
-     * 4. Decrements refcount
-     * 5. GCs rows where count reaches 0 (rows no longer referenced by any active query)
+     * 3. Decrements refcount
+     * 4. If refcount reaches 0:
+     *    - Checks hasListeners() to detect invalidateQueries cycles
+     *    - If hasListeners is true: resets refcount (TanStack Query keeping observer alive)
+     *    - If hasListeners is false: calls forceCleanupQuery() to perform row-level GC
      *
-     * When refcount reaches 0, we also:
-     * - Unsubscribe from the QueryObserver (preventing late-arriving data)
-     * - Remove observer from our tracking maps
-     * - Preserve TanStack Query's cache (no removeQueries or observer.destroy)
+     * The hasListeners() check prevents premature cleanup during invalidateQueries:
+     * - invalidateQueries causes temporary unsubscribe/resubscribe
+     * - During unsubscribe, our refcount drops to 0
+     * - But observer.hasListeners() is still true (TanStack Query's internal listeners)
+     * - We skip cleanup and reset refcount, allowing resubscribe to succeed
      *
      * We don't cancel in-flight requests. Unsubscribing from the observer is sufficient
      * to prevent late-arriving data from being processed. The request completes and is cached
@@ -1063,7 +1088,7 @@ export function queryCollectionOptions(
       const key = generateQueryKeyFromOptions(options)
       const hashedQueryKey = hashKey(key)
 
-      // 4. Decrement refcount
+      // 3. Decrement refcount
       const currentCount = queryRefCounts.get(hashedQueryKey) || 0
       const newCount = currentCount - 1
 
@@ -1071,22 +1096,33 @@ export function queryCollectionOptions(
         `[unloadSubset] queryKey=${JSON.stringify(key).slice(0, 100)}, currentCount=${currentCount}, newCount=${newCount}`
       )
 
-      // Update refcount (but don't cleanup rows here)
+      // Update refcount
       if (newCount <= 0) {
+        const observer = state.observers.get(hashedQueryKey)
+        const hasListeners = observer?.hasListeners() ?? false
+
         console.log(
-          `[unloadSubset] refcount reached 0, deleting from queryRefCounts`
+          `[unloadSubset] refcount reached 0, hasListeners=${hasListeners}`
         )
-        // Refcount reached 0, remove from tracking
-        // But DON'T cleanup rows here - let TanStack Query's 'removed' event handle that
-        // This prevents premature cleanup during invalidateQueries
+
+        // If observer still has listeners, it means TanStack Query is keeping it alive
+        // (e.g., during invalidateQueries). Don't cleanup yet - reset refcount instead.
+        if (hasListeners) {
+          console.log(
+            `[unloadSubset] Skipping cleanup - observer has listeners (likely invalidateQueries)`
+          )
+          queryRefCounts.set(hashedQueryKey, 1)
+          return
+        }
+
+        // Refcount reached 0 and no active listeners - force cleanup (subscription cleanup path)
+        console.log(`[unloadSubset] Proceeding with forceCleanupQuery`)
         queryRefCounts.delete(hashedQueryKey)
+        forceCleanupQuery(hashedQueryKey)
       } else {
         // Still have other references, just decrement
         queryRefCounts.set(hashedQueryKey, newCount)
       }
-
-      // Note: Row cleanup happens in cleanupQuery() when TanStack Query emits 'removed' event
-      // This respects TanStack Query's gcTime and prevents issues with invalidateQueries
     }
 
     // Create deduplicated loadSubset wrapper for non-eager modes
