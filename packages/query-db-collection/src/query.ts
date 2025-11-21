@@ -1084,22 +1084,8 @@ export function queryCollectionOptions(
         const isSubscribed = unsubscribes.has(hashedQueryKey)
 
         console.log(
-          `[unloadSubset] refcount=0, hasListeners=${hasListeners}, isSubscribed=${isSubscribed}`
+          `[unloadSubset] refcount=0, hasListeners=${hasListeners}, isSubscribed=${isSubscribed}, observerListenerCount=${(observer as any)?.listeners?.length ?? 0}`
         )
-
-        // Only skip cleanup if BOTH conditions are true:
-        // 1. Observer has listeners (TanStack Query is keeping it alive)
-        // 2. We're actively subscribed (we're listening to updates)
-        // This prevents premature cleanup during invalidateQueries refetches
-        if (hasListeners && isSubscribed) {
-          console.log(
-            `[unloadSubset] Skipping cleanup - observer has listeners and we're subscribed`
-          )
-          // Observer still has active listeners and we're actively subscribed
-          // Keep it around and reset refcount to prevent repeated cleanup attempts
-          queryRefCounts.set(hashedQueryKey, 1)
-          return
-        }
 
         console.log(`[unloadSubset] Proceeding with cleanup`)
 
