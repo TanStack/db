@@ -18,6 +18,7 @@ This PR adds reference counting infrastructure to properly manage QueryObserver 
 5. GC rows where count reaches 0 (no longer referenced by any active query)
 
 **Impact:**
+
 - Navigation back to previously loaded pages shows cached data immediately
 - No unnecessary refetches during quick remounts (< gcTime)
 - Multiple live queries with identical predicates correctly share QueryObservers
