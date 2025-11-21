@@ -3793,6 +3793,7 @@ describe(`QueryCollection`, () => {
         getKey: (item) => item.id,
         startSync: true,
         syncMode: `on-demand`,
+        onInsert: () => ({ refetch: false }),
       }
 
       const options = queryCollectionOptions(config)

@@ -622,6 +622,19 @@ export function queryCollectionOptions(
   const unsubscribes = new Map<string, () => void>()
 
   // queryKey → reference count (how many loadSubset calls are active)
+  // Reference counting for QueryObserver lifecycle management
+  // =========================================================
+  // Tracks how many live query subscriptions are using each QueryObserver.
+  // Multiple live queries with identical predicates share the same QueryObserver for efficiency.
+  //
+  // Lifecycle:
+  // - Increment: when createQueryFromOpts creates or reuses an observer
+  // - Decrement: when subscription.unsubscribe() calls collection._sync.unloadSubset()
+  // - Reset: when cleanupQuery() is triggered by TanStack Query's cache GC
+  //
+  // When refcount reaches 0, unloadSubset() performs row-level cleanup and removes
+  // the observer from tracking (but doesn't destroy it, allowing TanStack Query to
+  // manage cache lifecycle via gcTime for quick remounts).
   const queryRefCounts = new Map<string, number>()
 
   // Helper function to add a row to the internal state
@@ -655,8 +668,10 @@ export function queryCollectionOptions(
     let syncStarted = false
 
     /**
-     * Generate a query key from LoadSubsetOptions.
-     * Must use the exact same logic in both loadSubset and unloadSubset to ensure keys match.
+     * Generate a consistent query key from LoadSubsetOptions.
+     * CRITICAL: Must use identical logic in both createQueryFromOpts and unloadSubset
+     * so that refcount increment/decrement operations target the same hashedQueryKey.
+     * Inconsistent keys would cause refcount leaks and prevent proper cleanup.
      */
     const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
       if (typeof queryKey === `function`) {
@@ -772,33 +787,6 @@ export function queryCollectionOptions(
       if (syncStarted || collection.subscriberCount > 0) {
         subscribeToQuery(localObserver, hashedQueryKey)
       }
-
-      // When a live query subscription is unsubscribed, clean up row references
-      // and cancel/remove the query from TanStack Query's cache
-      // This only happens when the live query is truly GC'd, not during quick remounts
-      const subscription = opts.subscription
-      subscription?.once(`unsubscribed`, () => {
-        const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
-        const rowsToCheck = Array.from(queryToRowsSet)
-
-        if (rowsToCheck.length > 0) {
-          begin()
-          rowsToCheck.forEach((rowKey) => {
-            const needToRemove = removeRow(rowKey, hashedQueryKey)
-            if (needToRemove) {
-              const item = collection._state.syncedData.get(rowKey)
-              if (item) {
-                write({ type: `delete`, value: item })
-              }
-            }
-          })
-          commit()
-        }
-
-        // Remove the query from TanStack Query's cache to cancel any in-flight requests
-        // and clean up properly. This is safe because the subscription is already unsubscribed.
-        queryClient.removeQueries({ queryKey: key, exact: true })
-      })
 
       return readyPromise
     }
@@ -992,6 +980,10 @@ export function queryCollectionOptions(
       })
 
     function cleanupQuery(hashedQueryKey: string) {
+      // Clear refcount immediately since TanStack Query has GC'd this query
+      // This prevents stale refcounts when the query is reloaded later
+      queryRefCounts.delete(hashedQueryKey)
+
       // Unsubscribe from the query's observer
       unsubscribes.get(hashedQueryKey)?.()
 
@@ -1044,6 +1036,22 @@ export function queryCollectionOptions(
       )
     }
 
+    /**
+     * Unload a query subset by decrementing its refcount and cleaning up if no longer needed.
+     *
+     * Called when a live query subscription unsubscribes (via collection._sync.unloadSubset()).
+     * This is the symmetric counterpart to createQueryFromOpts which increments the refcount.
+     *
+     * When refcount reaches 0:
+     * - Removes rows from collection that are no longer referenced by any active query
+     * - Unsubscribes from the QueryObserver to stop receiving updates
+     * - Removes observer from our tracking maps
+     * - Cancels in-flight HTTP requests
+     * - Preserves TanStack Query's cache (no removeQueries or observer.destroy)
+     *
+     * The preserved cache allows quick remounts to restore data without refetching,
+     * while TanStack Query manages final cache cleanup via gcTime.
+     */
     const unloadSubset = (options: LoadSubsetOptions) => {
       // Generate the same query key that loadSubset would have created
       const key = generateQueryKeyFromOptions(options)
@@ -1054,7 +1062,27 @@ export function queryCollectionOptions(
       const newCount = currentCount - 1
 
       if (newCount <= 0) {
-        // Reference count reached 0, destroy the observer
+        // Reference count reached 0, perform cleanup
+        // Note: We remove rows from the collection but preserve TanStack Query's cache.
+        // This allows quick remounts to restore data from cache without refetching.
+
+        // Row-level cleanup: remove rows from collection that are no longer referenced by any query
+        const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
+        const rowsToCheck = Array.from(queryToRowsSet)
+
+        if (rowsToCheck.length > 0) {
+          begin()
+          rowsToCheck.forEach((rowKey) => {
+            const needToRemove = removeRow(rowKey, hashedQueryKey)
+            if (needToRemove) {
+              const item = collection._state.syncedData.get(rowKey)
+              if (item) {
+                write({ type: `delete`, value: item })
+              }
+            }
+          })
+          commit()
+        }
 
         // Unsubscribe our listener
         const unsubscribeFn = unsubscribes.get(hashedQueryKey)
@@ -1063,15 +1091,17 @@ export function queryCollectionOptions(
           unsubscribes.delete(hashedQueryKey)
         }
 
-        // Destroy the QueryObserver to trigger TanStack Query GC
-        const observer = state.observers.get(hashedQueryKey)
-        if (observer) {
-          observer.destroy()
-          state.observers.delete(hashedQueryKey)
-        }
+        // Remove from our tracking (but observer instance remains for TanStack Query to manage)
+        state.observers.delete(hashedQueryKey)
+
+        // Cancel any in-flight requests to free up resources immediately
+        // Note: We use cancelQueries (not removeQueries) to preserve the cache for quick remounts.
+        // TanStack Query will GC the cache after gcTime expires if not reaccessed.
+        queryClient.cancelQueries({ queryKey: key, exact: true })
 
         // Clean up tracking
         queryRefCounts.delete(hashedQueryKey)
+        queryToRows.delete(hashedQueryKey)
         hashToQueryKey.delete(hashedQueryKey)
       } else {
         // Still have other references, just decrement
