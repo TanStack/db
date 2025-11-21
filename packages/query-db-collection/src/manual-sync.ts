@@ -204,7 +204,7 @@ export function performWriteOperations<
   ctx.commit()
 
   // Update query cache after successful commit
-  const updatedData = ctx.collection.toArray
+  const updatedData = Array.from(ctx.collection._state.syncedData.values())
   ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
 }
 
