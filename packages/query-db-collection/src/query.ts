@@ -710,26 +710,30 @@ export function queryCollectionOptions(
       }
 
       // When a live query subscription is unsubscribed, clean up row references
-      // This allows proper GC of rows no longer referenced by any queries
-      // while still allowing TanStack Query to manage its own cache based on gcTime
+      // and cancel/remove the query from TanStack Query's cache
+      // This only happens when the live query is truly GC'd, not during quick remounts
       const subscription = opts.subscription
       subscription?.once(`unsubscribed`, () => {
         const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
         const rowsToCheck = Array.from(queryToRowsSet)
 
-        if (rowsToCheck.length === 0) return
-
-        begin()
-        rowsToCheck.forEach((rowKey) => {
-          const needToRemove = removeRow(rowKey, hashedQueryKey)
-          if (needToRemove) {
-            const item = collection._state.syncedData.get(rowKey)
-            if (item) {
-              write({ type: `delete`, value: item })
+        if (rowsToCheck.length > 0) {
+          begin()
+          rowsToCheck.forEach((rowKey) => {
+            const needToRemove = removeRow(rowKey, hashedQueryKey)
+            if (needToRemove) {
+              const item = collection._state.syncedData.get(rowKey)
+              if (item) {
+                write({ type: `delete`, value: item })
+              }
             }
-          }
-        })
-        commit()
+          })
+          commit()
+        }
+
+        // Remove the query from TanStack Query's cache to cancel any in-flight requests
+        // and clean up properly. This is safe because the subscription is already unsubscribed.
+        queryClient.removeQueries({ queryKey: key, exact: true })
       })
 
       return readyPromise
