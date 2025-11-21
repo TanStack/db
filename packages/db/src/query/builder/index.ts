@@ -10,6 +10,7 @@ import {
 } from "../ir.js"
 import {
   InvalidSourceError,
+  InvalidSourceTypeError,
   JoinConditionMustBeEqualityError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
@@ -60,13 +61,38 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     source: TSource,
     context: string
   ): [string, CollectionRef | QueryRef] {
-    if (Object.keys(source).length !== 1) {
+    // Validate source is a plain object (not null, array, string, etc.)
+    // We use try-catch to handle null/undefined gracefully
+    let keys: Array<string>
+    try {
+      keys = Object.keys(source)
+    } catch {
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      const type = source === null ? `null` : `undefined`
+      throw new InvalidSourceTypeError(context, type)
+    }
+
+    // Check if it's an array (arrays pass Object.keys but aren't valid sources)
+    if (Array.isArray(source)) {
+      throw new InvalidSourceTypeError(context, `array`)
+    }
+
+    // Validate exactly one key
+    if (keys.length !== 1) {
+      if (keys.length === 0) {
+        throw new InvalidSourceTypeError(context, `empty object`)
+      }
+      // Check if it looks like a string was passed (has numeric keys)
+      if (keys.every((k) => !isNaN(Number(k)))) {
+        throw new InvalidSourceTypeError(context, `string`)
+      }
       throw new OnlyOneSourceAllowedError(context)
     }
 
-    const alias = Object.keys(source)[0]!
+    const alias = keys[0]!
     const sourceValue = source[alias]
 
+    // Validate the value is a Collection or QueryBuilder
     let ref: CollectionRef | QueryRef
 
     if (sourceValue instanceof CollectionImpl) {
