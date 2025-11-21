@@ -16,10 +16,11 @@ When using TanStack Query collections with live queries, we need to manage the l
 The tricky part is handling **`invalidateQueries`**. When you call:
 
 ```typescript
-await queryClient.invalidateQueries({ queryKey: ['users'] })
+await queryClient.invalidateQueries({ queryKey: ["users"] })
 ```
 
 TanStack Query internally does this:
+
 1. Marks the query as stale
 2. **Unsubscribes** the current observer (triggers our `unloadSubset`)
 3. **Resubscribes** with a new observer (triggers our `loadSubset`)
@@ -32,16 +33,19 @@ During step 2, our reference count temporarily drops to 0. If we immediately del
 ### Key Components
 
 **TanStack DB Collections:**
+
 - `Collection` - In-memory store of rows with transactions, indexes, and change events
 - `Subscription` - Connects live queries to collections, tracks `loadSubset` calls
 - `SyncConfig` - Interface for loading/unloading data subsets
 
 **TanStack Query:**
+
 - `QueryClient` - Manages query cache and orchestrates invalidation
 - `QueryObserver` - Subscribes to query results, has `hasListeners()` method
 - `QueryCache` - Emits 'removed' events when queries are GC'd
 
 **Our Integration:**
+
 - `queryCollectionOptions()` - Returns a `SyncConfig` that bridges TanStack Query to Collections
 - Reference counting - Tracks how many subscriptions use each QueryObserver
 - Row-level tracking - Maps queries ↔ rows for precise garbage collection
@@ -97,8 +101,8 @@ This creates a **symmetric pairing**: every `loadSubset` call is matched with a 
 Create `packages/query-db-collection/src/query.ts` with a basic `queryCollectionOptions` function:
 
 ```typescript
-import { QueryClient, QueryObserver, hashKey } from '@tanstack/query-core'
-import type { SyncConfig } from '@tanstack/db'
+import { QueryClient, QueryObserver, hashKey } from "@tanstack/query-core"
+import type { SyncConfig } from "@tanstack/db"
 
 export type QueryCollectionOptions = {
   id: string
@@ -108,7 +112,9 @@ export type QueryCollectionOptions = {
   getKey: (item: any) => string | number
 }
 
-export function queryCollectionOptions(options: QueryCollectionOptions): SyncConfig {
+export function queryCollectionOptions(
+  options: QueryCollectionOptions
+): SyncConfig {
   const { queryClient, queryKey, queryFn, getKey } = options
 
   return {
@@ -125,7 +131,7 @@ export function queryCollectionOptions(options: QueryCollectionOptions): SyncCon
           // Write data to collection
           begin()
           for (const item of result.data) {
-            write({ type: 'insert', value: item })
+            write({ type: "insert", value: item })
           }
           commit()
           markReady()
@@ -147,24 +153,24 @@ export function queryCollectionOptions(options: QueryCollectionOptions): SyncCon
 Create a simple test in `packages/query-db-collection/tests/query.test.ts`:
 
 ```typescript
-import { describe, it, expect } from 'vitest'
-import { createCollection } from '@tanstack/db'
-import { QueryClient } from '@tanstack/query-core'
-import { queryCollectionOptions } from '../src/query'
+import { describe, it, expect } from "vitest"
+import { createCollection } from "@tanstack/db"
+import { QueryClient } from "@tanstack/query-core"
+import { queryCollectionOptions } from "../src/query"
 
-describe('Basic Query Integration', () => {
-  it('should load data from queryFn into collection', async () => {
+describe("Basic Query Integration", () => {
+  it("should load data from queryFn into collection", async () => {
     const queryClient = new QueryClient()
     const mockData = [
-      { id: 1, name: 'Alice' },
-      { id: 2, name: 'Bob' },
+      { id: 1, name: "Alice" },
+      { id: 2, name: "Bob" },
     ]
 
     const collection = createCollection(
       queryCollectionOptions({
-        id: 'users',
+        id: "users",
         queryClient,
-        queryKey: ['users'],
+        queryKey: ["users"],
         queryFn: async () => mockData,
         getKey: (item) => item.id,
       })
@@ -173,8 +179,8 @@ describe('Basic Query Integration', () => {
     await collection.preload()
 
     expect(collection.size).toBe(2)
-    expect(collection.get(1)).toEqual({ id: 1, name: 'Alice' })
-    expect(collection.get(2)).toEqual({ id: 2, name: 'Bob' })
+    expect(collection.get(1)).toEqual({ id: 1, name: "Alice" })
+    expect(collection.get(2)).toEqual({ id: 2, name: "Bob" })
   })
 })
 ```
@@ -208,7 +214,7 @@ In eager mode, there's one query that loads everything. In on-demand mode, each 
 ```typescript
 export type QueryCollectionOptions = {
   // ... existing fields
-  syncMode?: 'eager' | 'on-demand'
+  syncMode?: "eager" | "on-demand"
   queryKey:
     | any[] // Static (for eager mode)
     | ((options: LoadSubsetOptions) => any[]) // Dynamic (for on-demand)
@@ -218,14 +224,14 @@ export type QueryCollectionOptions = {
 2. Implement `generateQueryKeyFromOptions`:
 
 ```typescript
-import type { LoadSubsetOptions } from '@tanstack/db'
-import { serializeExpression } from './serialize' // You'll need to implement this
+import type { LoadSubsetOptions } from "@tanstack/db"
+import { serializeExpression } from "./serialize" // You'll need to implement this
 
 function generateQueryKeyFromOptions(
   baseQueryKey: any[] | ((options: LoadSubsetOptions) => any[]),
   options: LoadSubsetOptions
 ): any[] {
-  if (typeof baseQueryKey === 'function') {
+  if (typeof baseQueryKey === "function") {
     return baseQueryKey(options)
   }
 
@@ -243,8 +249,10 @@ function generateQueryKeyFromOptions(
 3. Implement `loadSubset`:
 
 ```typescript
-export function queryCollectionOptions(options: QueryCollectionOptions): SyncConfig {
-  const { queryClient, queryKey, queryFn, getKey, syncMode = 'eager' } = options
+export function queryCollectionOptions(
+  options: QueryCollectionOptions
+): SyncConfig {
+  const { queryClient, queryKey, queryFn, getKey, syncMode = "eager" } = options
   const observers = new Map<string, QueryObserver>()
 
   return {
@@ -263,7 +271,8 @@ export function queryCollectionOptions(options: QueryCollectionOptions): SyncCon
         // Create new observer for this predicate
         const observer = new QueryObserver(queryClient, {
           queryKey: key,
-          queryFn: (context) => queryFn({ ...context, meta: { loadSubsetOptions: loadOptions } }),
+          queryFn: (context) =>
+            queryFn({ ...context, meta: { loadSubsetOptions: loadOptions } }),
         })
 
         observers.set(hashedKey, observer)
@@ -273,7 +282,7 @@ export function queryCollectionOptions(options: QueryCollectionOptions): SyncCon
           if (result.isSuccess && result.data) {
             begin()
             for (const item of result.data) {
-              write({ type: 'insert', value: item })
+              write({ type: "insert", value: item })
             }
             commit()
           }
@@ -287,7 +296,7 @@ export function queryCollectionOptions(options: QueryCollectionOptions): SyncCon
           // Unsubscribe all observers
           observers.clear()
         },
-        loadSubset: syncMode === 'eager' ? undefined : loadSubset,
+        loadSubset: syncMode === "eager" ? undefined : loadSubset,
       }
     },
   }
@@ -297,25 +306,25 @@ export function queryCollectionOptions(options: QueryCollectionOptions): SyncCon
 ### How to Test
 
 ```typescript
-it('should create separate observers for different predicates', async () => {
+it("should create separate observers for different predicates", async () => {
   const queryClient = new QueryClient()
   const allData = [
-    { id: 1, category: 'A' },
-    { id: 2, category: 'B' },
-    { id: 3, category: 'A' },
+    { id: 1, category: "A" },
+    { id: 2, category: "B" },
+    { id: 3, category: "A" },
   ]
 
   const collection = createCollection(
     queryCollectionOptions({
-      id: 'items-ondemand',
+      id: "items-ondemand",
       queryClient,
-      queryKey: (opts) => ['items', opts],
-      syncMode: 'on-demand',
+      queryKey: (opts) => ["items", opts],
+      syncMode: "on-demand",
       queryFn: (ctx) => {
         const options = ctx.meta?.loadSubsetOptions
         // Filter by category
         return Promise.resolve(
-          allData.filter(item => {
+          allData.filter((item) => {
             // Apply predicate filtering logic here
             return true
           })
@@ -327,7 +336,9 @@ it('should create separate observers for different predicates', async () => {
 
   // Manually trigger loadSubset (normally done by live query)
   await collection._sync.loadSubset({
-    where: { /* category = 'A' predicate */ }
+    where: {
+      /* category = 'A' predicate */
+    },
   })
 
   // Should only load category A items
@@ -508,6 +519,7 @@ class Subscribable {
 **Returns `false`:** When no subscriptions exist (safe to cleanup)
 
 During `invalidateQueries`:
+
 1. Our subscription unsubscribes → removes our listener
 2. But TanStack Query's internal machinery still has listeners
 3. `hasListeners()` returns `true` → we skip cleanup
@@ -517,15 +529,15 @@ During `invalidateQueries`:
 ### How to Test
 
 ```typescript
-it('should not cleanup during invalidateQueries cycle', async () => {
+it("should not cleanup during invalidateQueries cycle", async () => {
   const queryClient = new QueryClient()
-  const mockData = [{ id: 1, name: 'Alice' }]
+  const mockData = [{ id: 1, name: "Alice" }]
 
   const collection = createCollection(
     queryCollectionOptions({
-      id: 'users',
+      id: "users",
       queryClient,
-      queryKey: ['users'],
+      queryKey: ["users"],
       queryFn: async () => mockData,
       getKey: (item) => item.id,
     })
@@ -535,11 +547,11 @@ it('should not cleanup during invalidateQueries cycle', async () => {
   expect(collection.size).toBe(1)
 
   // Call invalidateQueries
-  await queryClient.invalidateQueries({ queryKey: ['users'] })
+  await queryClient.invalidateQueries({ queryKey: ["users"] })
 
   // Data should still be in collection after invalidation
   expect(collection.size).toBe(1)
-  expect(collection.get(1)).toEqual({ id: 1, name: 'Alice' })
+  expect(collection.get(1)).toEqual({ id: 1, name: "Alice" })
 })
 ```
 
@@ -597,7 +609,7 @@ const handleQueryResult = (hashedQueryKey: string) => (result) => {
     const rowKeys = new Set<string | number>()
 
     for (const item of result.data) {
-      write({ type: 'insert', value: item })
+      write({ type: "insert", value: item })
 
       const rowKey = getKey(item)
       rowKeys.add(rowKey)
@@ -640,7 +652,7 @@ function cleanupQuery(hashedQueryKey: string) {
 
         if (collection.has(rowKey)) {
           begin()
-          write({ type: 'delete', value: collection.get(rowKey) })
+          write({ type: "delete", value: collection.get(rowKey) })
           commit()
         }
       }
@@ -685,25 +697,27 @@ const unloadSubset = (options: LoadSubsetOptions) => {
 ### How to Test
 
 ```typescript
-it('should only delete non-shared rows when query is cleaned up', async () => {
+it("should only delete non-shared rows when query is cleaned up", async () => {
   const allData = [
-    { id: 1, category: 'A' },
-    { id: 2, category: 'A' }, // shared
-    { id: 3, category: 'A' }, // shared
-    { id: 4, category: 'B' }, // shared
-    { id: 5, category: 'B' },
+    { id: 1, category: "A" },
+    { id: 2, category: "A" }, // shared
+    { id: 3, category: "A" }, // shared
+    { id: 4, category: "B" }, // shared
+    { id: 5, category: "B" },
   ]
 
   // Create collection with filtering
   const collection = createCollection(
     queryCollectionOptions({
-      id: 'items',
+      id: "items",
       queryClient,
-      queryKey: (opts) => ['items', opts],
-      syncMode: 'on-demand',
+      queryKey: (opts) => ["items", opts],
+      syncMode: "on-demand",
       queryFn: (ctx) => {
         const category = ctx.meta?.loadSubsetOptions?.category
-        return Promise.resolve(allData.filter(item => item.category === category))
+        return Promise.resolve(
+          allData.filter((item) => item.category === category)
+        )
       },
       getKey: (item) => item.id,
     })
@@ -711,18 +725,16 @@ it('should only delete non-shared rows when query is cleaned up', async () => {
 
   // Load query A (category A): items 1, 2, 3
   const queryA = createLiveQueryCollection({
-    query: (q) => q.from({ item: collection }).where(({ item }) =>
-      eq(item.category, 'A')
-    )
+    query: (q) =>
+      q.from({ item: collection }).where(({ item }) => eq(item.category, "A")),
   })
   await queryA.preload()
   expect(collection.size).toBe(3) // 1, 2, 3
 
   // Load query B (category B): items 2, 3, 4
   const queryB = createLiveQueryCollection({
-    query: (q) => q.from({ item: collection }).where(({ item }) =>
-      eq(item.category, 'B')
-    )
+    query: (q) =>
+      q.from({ item: collection }).where(({ item }) => eq(item.category, "B")),
   })
   await queryB.preload()
   expect(collection.size).toBe(5) // 1, 2, 3, 4, 5
@@ -765,7 +777,9 @@ TanStack Query has its own garbage collection: after a query is inactive for `gc
 Subscribe to QueryCache 'removed' events:
 
 ```typescript
-export function queryCollectionOptions(options: QueryCollectionOptions): SyncConfig {
+export function queryCollectionOptions(
+  options: QueryCollectionOptions
+): SyncConfig {
   // ... existing code
 
   return {
@@ -777,7 +791,7 @@ export function queryCollectionOptions(options: QueryCollectionOptions): SyncCon
         .getQueryCache()
         .subscribe((event) => {
           const hashedKey = event.query.queryHash
-          if (event.type === 'removed') {
+          if (event.type === "removed") {
             // TanStack Query GC'd this query, cleanup our tracking
             cleanupQuery(hashedKey)
           }
@@ -794,7 +808,7 @@ export function queryCollectionOptions(options: QueryCollectionOptions): SyncCon
         loadSubset,
         unloadSubset,
       }
-    }
+    },
   }
 }
 ```
@@ -802,7 +816,7 @@ export function queryCollectionOptions(options: QueryCollectionOptions): SyncCon
 ### How to Test
 
 ```typescript
-it('should cleanup when TanStack Query GCs the query', async () => {
+it("should cleanup when TanStack Query GCs the query", async () => {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -813,17 +827,17 @@ it('should cleanup when TanStack Query GCs the query', async () => {
 
   const collection = createCollection(
     queryCollectionOptions({
-      id: 'users',
+      id: "users",
       queryClient,
-      queryKey: ['users'],
-      queryFn: async () => [{ id: 1, name: 'Alice' }],
+      queryKey: ["users"],
+      queryFn: async () => [{ id: 1, name: "Alice" }],
       getKey: (item) => item.id,
     })
   )
 
   // Create a live query
   const query = createLiveQueryCollection({
-    query: (q) => q.from({ user: collection })
+    query: (q) => q.from({ user: collection }),
   })
   await query.preload()
   expect(collection.size).toBe(1)
@@ -832,7 +846,7 @@ it('should cleanup when TanStack Query GCs the query', async () => {
   await query.cleanup()
 
   // Wait for TanStack Query to GC (gcTime + buffer)
-  await new Promise(resolve => setTimeout(resolve, 150))
+  await new Promise((resolve) => setTimeout(resolve, 150))
 
   // Row should be deleted after GC
   expect(collection.size).toBe(0)
@@ -854,6 +868,7 @@ it('should cleanup when TanStack Query GCs the query', async () => {
 ### What to Implement
 
 Implement the `cleanup` function to:
+
 1. Cleanup all query tracking
 2. Remove queries from TanStack Query cache
 3. Unsubscribe from cache events
@@ -861,9 +876,12 @@ Implement the `cleanup` function to:
 ```typescript
 const cleanup = async () => {
   // Get all query keys before cleaning up
-  const allQueryKeys = [...observers.keys()].map(hashedKey => {
-    return queryClient.getQueryCache().find({ queryHash: hashedKey })?.queryKey
-  }).filter(Boolean)
+  const allQueryKeys = [...observers.keys()]
+    .map((hashedKey) => {
+      return queryClient.getQueryCache().find({ queryHash: hashedKey })
+        ?.queryKey
+    })
+    .filter(Boolean)
 
   // Clean up rows for each query
   observers.forEach((observer, hashedKey) => {
@@ -886,16 +904,16 @@ const cleanup = async () => {
 ### How to Test
 
 ```typescript
-it('should fully cleanup collection and queries', async () => {
+it("should fully cleanup collection and queries", async () => {
   const queryClient = new QueryClient()
   const collection = createCollection(
     queryCollectionOptions({
-      id: 'users',
+      id: "users",
       queryClient,
-      queryKey: ['users'],
+      queryKey: ["users"],
       queryFn: async () => [
-        { id: 1, name: 'Alice' },
-        { id: 2, name: 'Bob' },
+        { id: 1, name: "Alice" },
+        { id: 2, name: "Bob" },
       ],
       getKey: (item) => item.id,
     })
@@ -911,7 +929,7 @@ it('should fully cleanup collection and queries', async () => {
   expect(collection.size).toBe(0)
 
   // Query should be removed from cache
-  const cachedQuery = queryClient.getQueryCache().find({ queryKey: ['users'] })
+  const cachedQuery = queryClient.getQueryCache().find({ queryKey: ["users"] })
   expect(cachedQuery).toBeUndefined()
 })
 ```
@@ -968,9 +986,9 @@ const handleQueryResult = (hashedQueryKey: string) => (result) => {
 ### Tests
 
 ```typescript
-it('should not leak data when unsubscribing during in-flight load', async () => {
+it("should not leak data when unsubscribing during in-flight load", async () => {
   let resolveQuery: any
-  const queryPromise = new Promise(resolve => {
+  const queryPromise = new Promise((resolve) => {
     resolveQuery = resolve
   })
 
@@ -982,7 +1000,7 @@ it('should not leak data when unsubscribing during in-flight load', async () => 
   )
 
   const query = createLiveQueryCollection({
-    query: (q) => q.from({ item: collection })
+    query: (q) => q.from({ item: collection }),
   })
 
   // Start loading (query is in-flight)
@@ -1016,17 +1034,17 @@ The `generateQueryKeyFromOptions` function must create **identical** keys for id
 function serializeExpression(expr: BasicExpression): any {
   if (!expr) return undefined
 
-  if (expr.type === 'ref') {
-    return { type: 'ref', path: expr.path }
+  if (expr.type === "ref") {
+    return { type: "ref", path: expr.path }
   }
 
-  if (expr.type === 'val') {
-    return { type: 'val', value: expr.value }
+  if (expr.type === "val") {
+    return { type: "val", value: expr.value }
   }
 
-  if (expr.type === 'func') {
+  if (expr.type === "func") {
     return {
-      type: 'func',
+      type: "func",
       name: expr.name,
       args: expr.args.map(serializeExpression),
     }
@@ -1054,11 +1072,11 @@ This ensures that when a query changes from loading "category A" to "category B"
 Add debug logging:
 
 ```typescript
-const DEBUG = process.env.DEBUG_QUERY_COLLECTION === 'true'
+const DEBUG = process.env.DEBUG_QUERY_COLLECTION === "true"
 
 function log(...args: any[]) {
   if (DEBUG) {
-    console.log('[QueryCollection]', ...args)
+    console.log("[QueryCollection]", ...args)
   }
 }
 
@@ -1070,6 +1088,7 @@ log(`cleanupQuery: deleting row ${rowKey}`)
 ```
 
 Run tests with:
+
 ```bash
 DEBUG_QUERY_COLLECTION=true pnpm test
 ```

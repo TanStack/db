@@ -1001,8 +1001,11 @@ describe(`QueryCollection`, () => {
       expect(collection.status).toBe(`cleaned-up`)
 
       // Verify that cleanup methods are called regardless of subscriber state
-      expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey })
-      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
+      expect(cancelQueriesSpy).toHaveBeenCalledWith({
+        queryKey,
+        exact: true,
+      })
+      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey, exact: true })
 
       // Verify subscribers can be safely cleaned up after collection cleanup
       subscription1.unsubscribe()
@@ -1144,8 +1147,11 @@ describe(`QueryCollection`, () => {
       expect(collection.status).toBe(`cleaned-up`)
 
       // Verify cleanup methods were called
-      expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey })
-      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
+      expect(cancelQueriesSpy).toHaveBeenCalledWith({
+        queryKey,
+        exact: true,
+      })
+      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey, exact: true })
 
       // Clear the spies to track new calls
       cancelQueriesSpy.mockClear()
@@ -1163,8 +1169,11 @@ describe(`QueryCollection`, () => {
       await flushPromises()
 
       // Verify cleanup methods were called again for the restarted sync
-      expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey })
-      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
+      expect(cancelQueriesSpy).toHaveBeenCalledWith({
+        queryKey,
+        exact: true,
+      })
+      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey, exact: true })
 
       // Restore spies
       cancelQueriesSpy.mockRestore()
