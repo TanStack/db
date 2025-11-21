@@ -17,15 +17,6 @@ This PR adds reference counting infrastructure to properly manage QueryObserver 
 4. Decrement the ref count
 5. GC rows where count reaches 0 (no longer referenced by any active query)
 
-**Additional Fix for CI Mutation Tests:**
-
-The mutation tests revealed a race condition where refcount could reach 0 while `invalidateQueries` was in progress. Added safety check that prevents cleanup when:
-
-1. Observer has active listeners (TanStack Query keeping it alive)
-2. We're actively subscribed (collection has subscribers)
-
-This ensures mutations via `invalidateQueries` can complete and update queries, while still allowing proper cleanup when components unmount.
-
 **Impact:**
 
 - Navigation back to previously loaded pages shows cached data immediately
@@ -34,4 +25,3 @@ This ensures mutations via `invalidateQueries` can complete and update queries, 
 - Proper row-level cleanup when last subscriber leaves
 - TanStack Query's cache lifecycle (gcTime) is fully respected
 - No data leakage from in-flight requests when unsubscribing
-- Mutations via invalidateQueries work reliably without race conditions
