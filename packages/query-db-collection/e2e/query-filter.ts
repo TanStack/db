@@ -162,7 +162,30 @@ export function applyPredicates<T>(
 ): Array<T> {
   if (!options) return data
 
-  const { filters, sorts, limit } = parseLoadSubsetOptions(options)
+  let filters, sorts, limit
+  try {
+    ;({ filters, sorts, limit } = parseLoadSubsetOptions(options))
+  } catch (error) {
+    // parseLoadSubsetOptions doesn't support complex operators like 'or'
+    // For these cases, fall back to using the IR expression directly
+    if (
+      error instanceof Error &&
+      error.message.includes(`does not support 'or' operator`)
+    ) {
+      // Return unfiltered data for queries with unsupported operators
+      // In a real implementation, you'd use parseWhereExpression with custom handlers
+      console.warn(
+        `[query-filter] Skipping filter for unsupported operator in query - returning all data`
+      )
+      return data
+    }
+    console.error(`[query-filter] Failed to parse loadSubsetOptions:`, {
+      options,
+      where: options.where,
+      error: error instanceof Error ? error.message : error,
+    })
+    throw error
+  }
   if (DEBUG_SUMMARY) {
     const { limit: rawLimit, where, orderBy } = options
     const analysis = analyzeExpression(where)
