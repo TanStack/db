@@ -1070,6 +1070,26 @@ export function queryCollectionOptions(
       if (newCount <= 0) {
         // 5. GC rows where count reaches 0
 
+        // Safety check: Don't cleanup if observer still has active listeners
+        // This prevents premature cleanup when refcount tracking becomes inaccurate due to:
+        // - Race conditions during rapid mount/unmount
+        // - Async timing differences between unloadSubset calls and TanStack Query's internal state
+        // - In-flight invalidateQueries that haven't completed yet
+        const observer = state.observers.get(hashedQueryKey)
+        const hasListeners = observer?.hasListeners() ?? false
+        const isSubscribed = unsubscribes.has(hashedQueryKey)
+
+        // Only skip cleanup if BOTH conditions are true:
+        // 1. Observer has listeners (TanStack Query is keeping it alive)
+        // 2. We're actively subscribed (we're listening to updates)
+        // This prevents premature cleanup during invalidateQueries refetches
+        if (hasListeners && isSubscribed) {
+          // Observer still has active listeners and we're actively subscribed
+          // Keep it around and reset refcount to prevent repeated cleanup attempts
+          queryRefCounts.set(hashedQueryKey, 1)
+          return
+        }
+
         // 3. Use existing machinery to find rows this query loaded
         const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
         const rowsToCheck = Array.from(queryToRowsSet)
