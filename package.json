@@ -99,6 +99,7 @@
     }
   },
   "dependencies": {
+    "@tanstack/pacer-lite": "^0.1.0",
     "tsx": "^4.20.6"
   }
 }
