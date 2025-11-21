@@ -10,6 +10,7 @@ This fixes two related bugs that caused query collections to return empty data w
 2. Changed query cleanup strategy to respect TanStack Query's cache lifecycle while properly removing unreferenced rows when live queries are garbage collected
 
 Impact:
+
 - Navigation back to previously loaded pages now shows cached data immediately
 - No unnecessary refetches during quick remounts (< gcTime)
 - TanStack Query's cache configuration (gcTime, staleTime) is now properly respected
