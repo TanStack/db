@@ -4004,6 +4004,84 @@ describe(`QueryCollection`, () => {
       // BUG SYMPTOM: If destroyed observer doesn't process cached results,
       // collection will be empty or queryFn will be called again
     })
+
+    it(`should not leak data when unsubscribing while load is in flight`, async () => {
+      // Test the edge case where the last subscriber unsubscribes before queryFn resolves.
+      // We need to ensure that:
+      // 1. No late-arriving data is written after unsubscribe
+      // 2. No rows leak back into the collection
+
+      const baseQueryKey = [`in-flight-unsubscribe-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      // Create a delayed queryFn that we can control
+      let resolveQuery: ((value: Array<TestItem>) => void) | undefined
+      const queryFnPromise = new Promise<Array<TestItem>>((resolve) => {
+        resolveQuery = resolve
+      })
+      const queryFn = vi.fn().mockReturnValue(queryFnPromise)
+
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000,
+            staleTime: 0,
+            retry: false,
+          },
+        },
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `in-flight-unsubscribe-test`,
+        queryClient: customQueryClient,
+        queryKey: baseQueryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create a live query and start loading
+      const query1 = createLiveQueryCollection({
+        query: (q) => q.from({ item: collection }).select(({ item }) => item),
+      })
+
+      // Start preload but don't await - this triggers the queryFn
+      const preloadPromise = query1.preload()
+
+      // Wait a bit to ensure queryFn has been called
+      await flushPromises()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(collection.size).toBe(0) // No data yet
+
+      // Unsubscribe while the query is still in flight (before queryFn resolves)
+      await query1.cleanup()
+      await flushPromises()
+
+      // Collection should be empty after cleanup
+      expect(collection.size).toBe(0)
+
+      // Now resolve the query - this is the "late-arriving data"
+      resolveQuery!(items)
+      await flushPromises()
+
+      // CRITICAL: After the late-arriving data is processed, the collection
+      // should still be empty. No rows should leak back in.
+      expect(collection.size).toBe(0)
+
+      // Clean up
+      try {
+        await preloadPromise
+      } catch {
+        // Query was cancelled, this is expected
+      }
+    })
   })
 
   describe(`Cache Persistence on Remount`, () => {

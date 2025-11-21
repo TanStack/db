@@ -1044,13 +1044,15 @@ export function queryCollectionOptions(
      *
      * When refcount reaches 0:
      * - Removes rows from collection that are no longer referenced by any active query
-     * - Unsubscribes from the QueryObserver to stop receiving updates
+     * - Unsubscribes from the QueryObserver to stop receiving updates (preventing late-arriving data)
      * - Removes observer from our tracking maps
-     * - Cancels in-flight HTTP requests
      * - Preserves TanStack Query's cache (no removeQueries or observer.destroy)
      *
-     * The preserved cache allows quick remounts to restore data without refetching,
-     * while TanStack Query manages final cache cleanup via gcTime.
+     * Note: We don't cancel in-flight requests. Unsubscribing from the observer is sufficient
+     * to prevent late-arriving data from being processed. The request will complete and be cached
+     * by TanStack Query, allowing quick remounts to restore data without refetching.
+     *
+     * TanStack Query manages final cache cleanup via gcTime.
      */
     const unloadSubset = (options: LoadSubsetOptions) => {
       // Generate the same query key that loadSubset would have created
