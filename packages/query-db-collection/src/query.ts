@@ -1087,6 +1087,18 @@ export function queryCollectionOptions(
           `[unloadSubset] refcount=0, hasListeners=${hasListeners}, isSubscribed=${isSubscribed}, observerListenerCount=${(observer as any)?.listeners?.length ?? 0}`
         )
 
+        // Safety check: Don't cleanup if observer still has active listeners
+        // If hasListeners() is true, the observer is being kept alive by TanStack Query
+        // This happens during invalidateQueries when we're between unsubscribe/resubscribe
+        if (hasListeners) {
+          console.log(
+            `[unloadSubset] Skipping cleanup - observer has active listeners (likely invalidateQueries in progress)`
+          )
+          // Keep observer around and reset refcount to prevent repeated cleanup attempts
+          queryRefCounts.set(hashedQueryKey, 1)
+          return
+        }
+
         console.log(`[unloadSubset] Proceeding with cleanup`)
 
         // 3. Use existing machinery to find rows this query loaded
