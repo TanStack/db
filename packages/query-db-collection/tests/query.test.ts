@@ -2877,7 +2877,7 @@ describe(`QueryCollection`, () => {
 
       const queryFn = vi.fn().mockResolvedValue(items)
 
-      const onDelete = vi.fn(({ transaction, collection }) => {
+      const onDelete = vi.fn(async ({ transaction, collection }) => {
         const deletedItem = transaction.mutations[0]?.original
         // Call writeDelete inside onDelete handler - this should work without throwing
         collection.utils.writeDelete(deletedItem.id)
@@ -3793,7 +3793,7 @@ describe(`QueryCollection`, () => {
         getKey: (item) => item.id,
         startSync: true,
         syncMode: `on-demand`,
-        onInsert: () => ({ refetch: false }),
+        onInsert: async () => ({ refetch: false }),
       }
 
       const options = queryCollectionOptions(config)

@@ -1094,10 +1094,9 @@ export function queryCollectionOptions(
         // Remove from our tracking (but observer instance remains for TanStack Query to manage)
         state.observers.delete(hashedQueryKey)
 
-        // Cancel any in-flight requests to free up resources immediately
-        // Note: We use cancelQueries (not removeQueries) to preserve the cache for quick remounts.
-        // TanStack Query will GC the cache after gcTime expires if not reaccessed.
-        queryClient.cancelQueries({ queryKey: key, exact: true })
+        // Note: We deliberately don't call cancelQueries or removeQueries here.
+        // TanStack Query will manage the query lifecycle via gcTime.
+        // Calling cancelQueries could interfere with active subscriptions or in-flight mutations.
 
         // Clean up tracking
         queryRefCounts.delete(hashedQueryKey)
