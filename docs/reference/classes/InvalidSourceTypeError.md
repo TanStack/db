@@ -1,11 +1,11 @@
 ---
-id: QueryMustHaveFromClauseError
-title: QueryMustHaveFromClauseError
+id: InvalidSourceTypeError
+title: InvalidSourceTypeError
 ---
 
-# Class: QueryMustHaveFromClauseError
+# Class: InvalidSourceTypeError
 
-Defined in: [packages/db/src/errors.ts:378](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L378)
+Defined in: [packages/db/src/errors.ts:363](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L363)
 
 ## Extends
 
@@ -16,14 +16,24 @@ Defined in: [packages/db/src/errors.ts:378](https://github.com/TanStack/db/blob/
 ### Constructor
 
 ```ts
-new QueryMustHaveFromClauseError(): QueryMustHaveFromClauseError;
+new InvalidSourceTypeError(context, type): InvalidSourceTypeError;
 ```
 
-Defined in: [packages/db/src/errors.ts:379](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L379)
+Defined in: [packages/db/src/errors.ts:364](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L364)
+
+#### Parameters
+
+##### context
+
+`string`
+
+##### type
+
+`string`
 
 #### Returns
 
-`QueryMustHaveFromClauseError`
+`InvalidSourceTypeError`
 
 #### Overrides
 

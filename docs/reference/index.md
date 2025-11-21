@@ -45,6 +45,7 @@ title: "@tanstack/db"
 - [InvalidJoinConditionSourceMismatchError](../classes/InvalidJoinConditionSourceMismatchError.md)
 - [InvalidSchemaError](../classes/InvalidSchemaError.md)
 - [InvalidSourceError](../classes/InvalidSourceError.md)
+- [InvalidSourceTypeError](../classes/InvalidSourceTypeError.md)
 - [InvalidStorageDataFormatError](../classes/InvalidStorageDataFormatError.md)
 - [InvalidStorageObjectFormatError](../classes/InvalidStorageObjectFormatError.md)
 - [JoinCollectionNotFoundError](../classes/JoinCollectionNotFoundError.md)
