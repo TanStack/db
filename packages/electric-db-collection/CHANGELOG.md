@@ -1,5 +1,21 @@
 # @tanstack/electric-db-collection
 
+## 0.2.3
+
+### Patch Changes
+
+- Improve type of mutations in transactions ([#854](https://github.com/TanStack/db/pull/854))
+
+- Updated dependencies [[`846a830`](https://github.com/TanStack/db/commit/846a8309a243197245f4400a5d53cef5cec6d5d9), [`8e26dcf`](https://github.com/TanStack/db/commit/8e26dcfde600e4a18cd51fbe524560d60ab98d70)]:
+  - @tanstack/db@0.5.3
+
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [[`99a3716`](https://github.com/TanStack/db/commit/99a371630b9f4632db86c43357c64701ecb53b0e)]:
+  - @tanstack/db@0.5.2
+
 ## 0.2.1
 
 ### Patch Changes

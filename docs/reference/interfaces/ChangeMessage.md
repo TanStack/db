@@ -5,7 +5,7 @@ title: ChangeMessage
 
 # Interface: ChangeMessage\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:292](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L292)
+Defined in: [packages/db/src/types.ts:311](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L311)
 
 ## Extended by
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/types.ts:292](https://github.com/TanStack/db/blob/m
 key: TKey;
 ```
 
-Defined in: [packages/db/src/types.ts:296](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L296)
+Defined in: [packages/db/src/types.ts:315](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L315)
 
 ***
 
@@ -39,7 +39,7 @@ Defined in: [packages/db/src/types.ts:296](https://github.com/TanStack/db/blob/m
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:300](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L300)
+Defined in: [packages/db/src/types.ts:319](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L319)
 
 ***
 
@@ -49,7 +49,7 @@ Defined in: [packages/db/src/types.ts:300](https://github.com/TanStack/db/blob/m
 optional previousValue: T;
 ```
 
-Defined in: [packages/db/src/types.ts:298](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L298)
+Defined in: [packages/db/src/types.ts:317](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L317)
 
 ***
 
@@ -59,7 +59,7 @@ Defined in: [packages/db/src/types.ts:298](https://github.com/TanStack/db/blob/m
 type: OperationType;
 ```
 
-Defined in: [packages/db/src/types.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L299)
+Defined in: [packages/db/src/types.ts:318](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L318)
 
 ***
 
@@ -69,4 +69,4 @@ Defined in: [packages/db/src/types.ts:299](https://github.com/TanStack/db/blob/m
 value: T;
 ```
 
-Defined in: [packages/db/src/types.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L297)
+Defined in: [packages/db/src/types.ts:316](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L316)

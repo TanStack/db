@@ -7,7 +7,28 @@ id: overview
 
 Welcome to the TanStack DB documentation.
 
-TanStack DB is the reactive client-first store for your API. Stop building custom endpoints for every view—TanStack DB lets you query your data however your components need it, with a blazing-fast local query engine, real-time reactivity, and instant optimistic updates.
+TanStack DB is the reactive client store for your API. It solves the problems of building fast, modern apps, helping you:
+
+- avoid endpoint sprawl and network waterfalls by loading data into normalized collections
+- optimise client performance with sub-millisecond live queries and real-time reactivity
+- take the network off the interaction path with instant optimistic writes
+
+Data loading is optimized. Interactions feel instantaneous. Your backend stays simple and your app stays blazing fast. No matter how much data you load.
+
+## Remove the complexity from building fast, modern apps
+
+TanStack DB lets you query your data however your components need it, with a blazing-fast local query engine, real-time reactivity and instant optimistic updates.
+
+Instead of choosing between the least of two evils:
+
+1. **view-specific APIs** - complicating your backend and leading to network waterfalls
+2. **load everything and filter** - leading to slow loads and sluggish client performance
+
+TanStack DB enables a new way:
+
+3. **normalized collections** - keep your backend simple
+4. **query-driven sync** - optimizes your data loading
+5. **sub-millisecond live queries** - keep your app fast and responsive
 
 It extends TanStack Query with collections, live queries and optimistic mutations, working seamlessly with REST APIs, sync engines, or any data source.
 
@@ -71,11 +92,41 @@ Collections can be populated in many ways, including:
 
 Once you have your data in collections, you can query across them using live queries in your components.
 
+#### Sync Modes
+
+Collections support three sync modes to optimize data loading:
+
+- **Eager mode** (default): Loads entire collection upfront. Best for <10k rows of mostly static data like user preferences or small reference tables.
+- **On-demand mode**: Loads only what queries request. Best for large datasets (>50k rows), search interfaces, and catalogs where most data won't be accessed.
+- **Progressive mode**: Loads query subset immediately, syncs full dataset in background. Best for collaborative apps needing instant first paint AND sub-millisecond queries.
+
+With on-demand mode, your component's query becomes the API call:
+
+```tsx
+const productsCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['products'],
+    queryFn: async (ctx) => {
+      // Query predicates passed automatically in ctx.meta
+      const params = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
+      return api.getProducts(params) // e.g., GET /api/products?category=electronics&price_lt=100
+    },
+    syncMode: 'on-demand', // ← Enable query-driven sync
+  })
+)
+```
+
+TanStack DB automatically collapses duplicate requests, performs delta loading when expanding queries, optimizes joins into minimal batched requests, and respects your TanStack Query cache policies. You often end up with _fewer_ network requests than custom view-specific APIs.
+
+See the [Query Collection documentation](../collections/query-collection.md#queryfn-and-predicate-push-down) for full predicate mapping details.
+
 ### Using live queries
 
 Live queries are used to query data out of collections. Live queries are reactive: when the underlying data changes in a way that would affect the query result, the result is incrementally updated and returned from the query, triggering a re-render.
 
-TanStack DB live queries are implemented using [d2ts](https://github.com/electric-sql/d2ts), a Typescript implementation of differential dataflow. This allows the query results to update _incrementally_ (rather than by re-running the whole query). This makes them blazing fast, usually sub-millisecond, even for highly complex queries.
+TanStack DB live queries are implemented using [d2ts](https://github.com/electric-sql/d2ts), a TypeScript implementation of differential dataflow. This allows the query results to update _incrementally_ (rather than by re-running the whole query). This makes them blazing fast, usually sub-millisecond, even for highly complex queries.
+
+**Performance:** Updating one row in a sorted 100,000-item collection completes in ~0.7ms on an M1 Pro MacBook—fast enough that optimistic updates feel truly instantaneous, even with complex queries and large datasets.
 
 Live queries support joins across collections. This allows you to:
 
@@ -203,9 +254,9 @@ The collection will use the schema for its type inference. If you provide a sche
 
 #### Creating Custom Collection Types
 
-You can create your own collection types by implementing the `Collection` interface found in [`../packages/db/src/collection.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection.ts).
+You can create your own collection types by implementing the `Collection` interface found in [`../packages/db/src/collection/index.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts).
 
-See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference. Also see the [Collection Options Creator guide](../guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
 
 ### Live queries
 
@@ -411,6 +462,16 @@ This pattern allows you to extend an existing TanStack Query application, or any
 ### 2. ElectricSQL sync
 
 One of the most powerful ways of using TanStack DB is with a sync engine, for a fully local-first experience with real-time sync. This allows you to incrementally adopt sync into an existing app, whilst still handling writes with your existing API.
+
+#### Why Sync Engines?
+
+While TanStack DB works great with REST APIs, sync engines provide powerful benefits:
+
+- **Easy real-time updates**: No WebSocket plumbing—write to your database and changes stream automatically to all clients
+- **Automatic side-effects**: When a mutation triggers cascading changes across tables, all affected data syncs automatically without manual cache invalidation
+- **Efficient delta updates**: Only changed rows cross the wire, making it practical to load large datasets client-side
+
+This pattern enables the "load everything once" approach that makes apps like Linear and Figma feel instant.
 
 Here, we illustrate this pattern using [ElectricSQL](https://electric-sql.com) as the sync engine.
 

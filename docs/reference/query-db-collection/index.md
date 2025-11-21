@@ -29,6 +29,7 @@ title: "@tanstack/query-db-collection"
 
 ## Type Aliases
 
+- [QueryCollectionMeta](../type-aliases/QueryCollectionMeta.md)
 - [SyncOperation](../type-aliases/SyncOperation.md)
 
 ## Functions
