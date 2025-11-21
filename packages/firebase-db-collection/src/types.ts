@@ -1,4 +1,6 @@
-export type ShapeOf<T> = Record<keyof T, unknown>
+export type ShapeOf<T> = {
+  [K in keyof T]: unknown
+}
 
 export type FirebaseConversion<I, O> = (value: I) => O
 
