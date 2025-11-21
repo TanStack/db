@@ -25,9 +25,6 @@ importers:
 
   .:
     dependencies:
-      '@tanstack/pacer-lite':
-        specifier: ^0.1.0
-        version: 0.1.0
       tsx:
         specifier: ^4.20.6
         version: 4.20.6
