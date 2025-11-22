@@ -28,7 +28,7 @@ export function IssueList() {
     [filterState]
   )
   const { data: countData } = useLiveQuery(issueCountQuery)
-  const totalCount = countData[0].count
+  const totalCount = countData[0]?.count
 
   const {
     data: issues,
