@@ -48,7 +48,10 @@ export class CollectionSubscription
   // While `snapshotSent` is false we filter out all changes from subscription to the collection.
   private snapshotSent = false
 
-  // Track all loadSubset calls made by this subscription so we can unload them on cleanup
+  /**
+   * Track all loadSubset calls made by this subscription so we can unload them on cleanup.
+   * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
+   */
   private loadedSubsets: Array<LoadSubsetOptions> = []
 
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
@@ -197,14 +200,14 @@ export class CollectionSubscription
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const loadOptions = {
+    const loadOptions: LoadSubsetOptions = {
       where: stateOpts.where,
       subscription: this,
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 
     // Track this loadSubset call so we can unload it later
-    this.loadedSubsets.push({ where: stateOpts.where })
+    this.loadedSubsets.push(loadOptions)
 
     const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
     if (trackLoadSubsetPromise) {
@@ -341,7 +344,7 @@ export class CollectionSubscription
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const loadOptions1 = {
+    const loadOptions1: LoadSubsetOptions = {
       where: whereWithValueFilter,
       limit,
       orderBy,
@@ -350,7 +353,7 @@ export class CollectionSubscription
     const syncResult = this.collection._sync.loadSubset(loadOptions1)
 
     // Track this loadSubset call
-    this.loadedSubsets.push({ where: whereWithValueFilter, limit, orderBy })
+    this.loadedSubsets.push(loadOptions1)
 
     // Make parallel loadSubset calls for values equal to minValue and values greater than minValue
     const promises: Array<Promise<void>> = []
@@ -360,14 +363,14 @@ export class CollectionSubscription
       const { expression } = orderBy[0]!
       const exactValueFilter = eq(expression, new Value(minValue))
 
-      const loadOptions2 = {
+      const loadOptions2: LoadSubsetOptions = {
         where: exactValueFilter,
         subscription: this,
       }
       const equalValueResult = this.collection._sync.loadSubset(loadOptions2)
 
       // Track this loadSubset call
-      this.loadedSubsets.push({ where: exactValueFilter })
+      this.loadedSubsets.push(loadOptions2)
 
       if (equalValueResult instanceof Promise) {
         promises.push(equalValueResult)
@@ -434,11 +437,9 @@ export class CollectionSubscription
 
   unsubscribe() {
     // Unload all subsets that this subscription loaded
-    for (const subset of this.loadedSubsets) {
-      this.collection._sync.unloadSubset({
-        ...subset,
-        subscription: this,
-      })
+    // We pass the exact same LoadSubsetOptions we used for loadSubset
+    for (const options of this.loadedSubsets) {
+      this.collection._sync.unloadSubset(options)
     }
     this.loadedSubsets = []
 
