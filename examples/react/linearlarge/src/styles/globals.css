@@ -1,0 +1,40 @@
+@import 'tailwindcss';
+
+@layer utilities {
+  .text-xxs {
+    font-size: 0.625rem; /* 10px */
+    line-height: 0.75rem;
+  }
+}
+
+body {
+  font-size: 12px;
+  font-weight: 500;
+  color: #6b7280;
+}
+
+.modal {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+}
+
+.editor ul {
+  list-style-type: circle;
+}
+.editor ol {
+  list-style-type: decimal;
+}
+
+#root,
+body,
+html {
+  height: 100%;
+}
+
+.tiptap p.is-editor-empty:first-child::before {
+  color: #adb5bd;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
