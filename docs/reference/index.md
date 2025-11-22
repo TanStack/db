@@ -207,6 +207,7 @@ title: "@tanstack/db"
 - [SyncMode](../type-aliases/SyncMode.md)
 - [TransactionState](../type-aliases/TransactionState.md)
 - [TransactionWithMutations](../type-aliases/TransactionWithMutations.md)
+- [UnloadSubsetFn](../type-aliases/UnloadSubsetFn.md)
 - [UpdateMutationFn](../type-aliases/UpdateMutationFn.md)
 - [UpdateMutationFnParams](../type-aliases/UpdateMutationFnParams.md)
 - [UtilsRecord](../type-aliases/UtilsRecord.md)
