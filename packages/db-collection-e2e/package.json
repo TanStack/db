@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db-collection-e2e",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "private": true,
   "description": "End-to-end test suite for TanStack DB collections",
   "type": "module",
