@@ -1512,21 +1512,33 @@ const userPosts = createLiveQueryCollection((q) =>
 
 ### Reusable Callback Functions
 
-Use `Ref<MyType>` to create reusable callback functions:
+Creating reusable query logic is a common pattern that improves code organization and maintainability. The recommended approach is to use callback functions with the `Ref<T>` type rather than trying to type `QueryBuilder` instances directly.
+
+#### The Recommended Pattern
+
+Use `Ref<MyType>` to create reusable filter and transform functions:
 
 ```ts
-import { Ref, eq, gt, and } from '@tanstack/db'
+import type { Ref } from '@tanstack/db'
+import { eq, gt, and } from '@tanstack/db'
 
-// Create reusable callbacks
-const isActiveUser = (user: Ref<User>) => eq(user.active, true)
-const isAdultUser = (user: Ref<User>) => gt(user.age, 18)
+// Create reusable filter callbacks
+const isActiveUser = ({ user }: { user: Ref<User> }) =>
+  eq(user.active, true)
 
-// Use them in queries
+const isAdultUser = ({ user }: { user: Ref<User> }) =>
+  gt(user.age, 18)
+
+const isActiveAdult = ({ user }: { user: Ref<User> }) =>
+  and(isActiveUser({ user }), isAdultUser({ user }))
+
+// Use them in queries - they work seamlessly with .where()
 const activeAdults = createCollection(liveQueryCollectionOptions({
   query: (q) =>
     q
       .from({ user: usersCollection })
-      .where(({ user }) => and(isActiveUser(user), isAdultUser(user)))
+      .where(isActiveUser)
+      .where(isAdultUser)
       .select(({ user }) => ({
         id: user.id,
         name: user.name,
@@ -1535,19 +1547,62 @@ const activeAdults = createCollection(liveQueryCollectionOptions({
 }))
 ```
 
-You can also create callbacks that take the whole row and pass them directly to `where`:
+The callback signature `({ user }: { user: Ref<User> }) => Expression` matches exactly what `.where()` expects, making it type-safe and composable.
+
+#### Chaining Multiple Filters
+
+You can chain multiple reusable filters:
+
+```tsx
+import { useLiveQuery } from '@tanstack/react-db'
+
+const { data } = useLiveQuery((q) => {
+  return q
+    .from({ item: itemsCollection })
+    .where(({ item }) => eq(item.id, 1))
+    .where(activeItemFilter)      // Reusable filter 1
+    .where(verifiedItemFilter)     // Reusable filter 2
+    .select(({ item }) => ({ ...item }))
+}, [])
+```
+
+#### Using with Different Aliases
+
+The pattern works with any table alias:
 
 ```ts
-// Callback that takes the whole row
-const isHighValueCustomer = (row: { user: User; order: Order }) => 
-  row.user.active && row.order.amount > 1000
+const activeFilter = ({ item }: { item: Ref<Item> }) =>
+  eq(item.active, true)
+
+// Works with any alias name
+const query1 = new Query()
+  .from({ item: itemsCollection })
+  .where(activeFilter)
+
+const query2 = new Query()
+  .from({ i: itemsCollection })
+  .where(({ i }) => activeFilter({ item: i }))  // Map the alias
+```
+
+#### Callbacks with Multiple Tables
+
+For queries with joins, create callbacks that accept multiple refs:
+
+```ts
+const isHighValueCustomer = ({ user, order }: {
+  user: Ref<User>
+  order: Ref<Order>
+}) => and(
+  eq(user.active, true),
+  gt(order.amount, 1000)
+)
 
 // Use directly in where clause
 const highValueCustomers = createCollection(liveQueryCollectionOptions({
   query: (q) =>
     q
       .from({ user: usersCollection })
-      .join({ order: ordersCollection }, ({ user, order }) => 
+      .join({ order: ordersCollection }, ({ user, order }) =>
         eq(user.id, order.userId)
       )
       .where(isHighValueCustomer)
@@ -1558,7 +1613,50 @@ const highValueCustomers = createCollection(liveQueryCollectionOptions({
 }))
 ```
 
-This approach makes your query logic more modular and testable.
+#### Why Not Type QueryBuilder?
+
+You might be tempted to create functions that accept and return `QueryBuilder`:
+
+```ts
+// ❌ Not recommended - overly complex typing
+const applyFilters = <T extends QueryBuilder<unknown>>(query: T): T => {
+  return query.where(({ item }) => eq(item.active, true))
+}
+```
+
+This approach has several issues:
+
+1. **Complex Types**: `QueryBuilder<T>` generic represents the entire query context including base schema, current schema, joins, result types, etc.
+2. **Type Inference**: The type changes with every method call, making it impractical to type manually
+3. **Limited Flexibility**: Hard to compose multiple filters or use with different table aliases
+
+Instead, use callback functions that work with the `.where()`, `.select()`, and other query methods directly.
+
+#### Reusable Select Transformations
+
+You can also create reusable select projections:
+
+```ts
+const basicUserInfo = ({ user }: { user: Ref<User> }) => ({
+  id: user.id,
+  name: user.name,
+  email: user.email,
+})
+
+const userWithStats = ({ user }: { user: Ref<User> }) => ({
+  ...basicUserInfo({ user }),
+  isAdult: gt(user.age, 18),
+  isActive: eq(user.active, true),
+})
+
+const users = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .select(userWithStats)
+)
+```
+
+This approach makes your query logic more modular, testable, and reusable across your application.
 
 ## Expression Functions Reference
 

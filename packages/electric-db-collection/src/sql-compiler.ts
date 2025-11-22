@@ -183,7 +183,18 @@ function compileFunction(
 }
 
 function isBinaryOp(name: string): boolean {
-  const binaryOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `and`, `or`, `in`]
+  const binaryOps = [
+    `eq`,
+    `gt`,
+    `gte`,
+    `lt`,
+    `lte`,
+    `and`,
+    `or`,
+    `in`,
+    `like`,
+    `ilike`,
+  ]
   return binaryOps.includes(name)
 }
 

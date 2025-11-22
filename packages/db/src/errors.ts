@@ -360,6 +360,15 @@ export class InvalidSourceError extends QueryBuilderError {
   }
 }
 
+export class InvalidSourceTypeError extends QueryBuilderError {
+  constructor(context: string, type: string) {
+    super(
+      `Invalid source for ${context}: Expected an object with a single key-value pair like { alias: collection }. ` +
+        `For example: .from({ todos: todosCollection }). Got: ${type}`
+    )
+  }
+}
+
 export class JoinConditionMustBeEqualityError extends QueryBuilderError {
   constructor() {
     super(`Join condition must be an equality expression`)

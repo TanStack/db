@@ -5,7 +5,7 @@ title: InvalidJoinConditionSourceMismatchError
 
 # Class: InvalidJoinConditionSourceMismatchError
 
-Defined in: [packages/db/src/errors.ts:491](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L491)
+Defined in: [packages/db/src/errors.ts:500](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L500)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:491](https://github.com/TanStack/db/blob/
 new InvalidJoinConditionSourceMismatchError(): InvalidJoinConditionSourceMismatchError;
 ```
 
-Defined in: [packages/db/src/errors.ts:492](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L492)
+Defined in: [packages/db/src/errors.ts:501](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L501)
 
 #### Returns
 

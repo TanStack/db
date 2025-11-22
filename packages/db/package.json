@@ -1,11 +1,11 @@
 {
   "name": "@tanstack/db",
   "description": "A reactive client store for building super fast apps on sync",
-  "version": "0.5.3",
+  "version": "0.5.5",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/pacer": "^0.16.3"
+    "@tanstack/pacer-lite": "^0.1.0"
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.2.4",

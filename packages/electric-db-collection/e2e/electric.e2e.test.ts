@@ -6,7 +6,7 @@
 
 import { afterAll, afterEach, beforeAll, describe, inject } from "vitest"
 import { createCollection } from "@tanstack/db"
-import { electricCollectionOptions } from "../src/electric"
+import { ELECTRIC_TEST_HOOKS, electricCollectionOptions } from "../src/electric"
 import { makePgClient } from "../../db-collection-e2e/support/global-setup"
 import {
   createCollationTestSuite,
@@ -16,11 +16,19 @@ import {
   createMutationsTestSuite,
   createPaginationTestSuite,
   createPredicatesTestSuite,
+  createProgressiveTestSuite,
   generateSeedData,
 } from "../../db-collection-e2e/src/index"
 import { waitFor } from "../../db-collection-e2e/src/utils/helpers"
 import type { E2ETestConfig } from "../../db-collection-e2e/src/types"
 import type { Client } from "pg"
+
+declare module "vitest" {
+  export interface ProvidedContext {
+    baseUrl: string
+    testSchema: string
+  }
+}
 
 describe(`Electric Collection E2E Tests`, () => {
   let config: E2ETestConfig
@@ -304,6 +312,85 @@ describe(`Electric Collection E2E Tests`, () => {
       })
     )
 
+    // Create control mechanisms for progressive collections
+    // These allow tests to explicitly control when the atomic swap happens
+    // We use a ref object so each test can get a fresh promise
+    const usersUpToDateControl = {
+      current: null as (() => void) | null,
+      createPromise: () =>
+        new Promise<void>((resolve) => {
+          usersUpToDateControl.current = resolve
+        }),
+    }
+    const postsUpToDateControl = {
+      current: null as (() => void) | null,
+      createPromise: () =>
+        new Promise<void>((resolve) => {
+          postsUpToDateControl.current = resolve
+        }),
+    }
+    const commentsUpToDateControl = {
+      current: null as (() => void) | null,
+      createPromise: () =>
+        new Promise<void>((resolve) => {
+          commentsUpToDateControl.current = resolve
+        }),
+    }
+
+    const progressiveUsers = createCollection(
+      electricCollectionOptions({
+        id: `electric-e2e-users-progressive-${testId}`,
+        shapeOptions: {
+          url: `${baseUrl}/v1/shape`,
+          params: {
+            table: `${testSchema}.${usersTable}`,
+          },
+        },
+        syncMode: `progressive`,
+        getKey: (item: any) => item.id,
+        startSync: false, // Don't start immediately - tests will start when ready
+        [ELECTRIC_TEST_HOOKS]: {
+          beforeMarkingReady: () => usersUpToDateControl.createPromise(),
+        },
+      })
+    )
+
+    const progressivePosts = createCollection(
+      electricCollectionOptions({
+        id: `electric-e2e-posts-progressive-${testId}`,
+        shapeOptions: {
+          url: `${baseUrl}/v1/shape`,
+          params: {
+            table: `${testSchema}.${postsTable}`,
+          },
+        },
+        syncMode: `progressive`,
+        getKey: (item: any) => item.id,
+        startSync: false, // Don't start immediately - tests will start when ready
+        [ELECTRIC_TEST_HOOKS]: {
+          beforeMarkingReady: () => postsUpToDateControl.createPromise(),
+        },
+      })
+    )
+
+    const progressiveComments = createCollection(
+      electricCollectionOptions({
+        id: `electric-e2e-comments-progressive-${testId}`,
+        shapeOptions: {
+          url: `${baseUrl}/v1/shape`,
+          params: {
+            table: `${testSchema}.${commentsTable}`,
+          },
+        },
+        syncMode: `progressive`,
+        getKey: (item: any) => item.id,
+        startSync: false, // Don't start immediately - tests will start when ready
+        [ELECTRIC_TEST_HOOKS]: {
+          beforeMarkingReady: () => commentsUpToDateControl.createPromise(),
+        },
+      })
+    )
+
     // Wait for eager collections to sync all data
     await eagerUsers.preload()
     await eagerPosts.preload()
@@ -313,6 +400,10 @@ describe(`Electric Collection E2E Tests`, () => {
     await onDemandUsers.preload()
     await onDemandPosts.preload()
     await onDemandComments.preload()
+
+    // Progressive collections start syncing in background
+    // Note: We DON'T call preload() here because the test hooks will block
+    // Individual progressive tests will handle preload and release as needed
 
     config = {
       collections: {
@@ -326,8 +417,30 @@ describe(`Electric Collection E2E Tests`, () => {
           posts: onDemandPosts as any,
           comments: onDemandComments as any,
         },
+        progressive: {
+          users: progressiveUsers as any,
+          posts: progressivePosts as any,
+          comments: progressiveComments as any,
+        },
       },
       hasReplicationLag: true, // Electric has async replication lag
+      progressiveTestControl: {
+        releaseInitialSync: () => {
+          usersUpToDateControl.current?.()
+          postsUpToDateControl.current?.()
+          commentsUpToDateControl.current?.()
+        },
+      },
+      getTxid: async () => {
+        // Get the current transaction ID from the last operation
+        // This uses pg_current_xact_id_if_assigned() which returns the txid
+        // Note: This gets the CURRENT transaction's ID, so must be called
+        // immediately after an insert in the same transaction context
+        const result = await dbClient.query(
+          `SELECT pg_current_xact_id_if_assigned()::text::bigint as txid`
+        )
+        return result.rows[0]?.txid || null
+      },
       mutations: {
         // Use direct SQL for Electric tests (simulates external changes)
         // This tests that Electric sync picks up database changes
@@ -420,6 +533,9 @@ describe(`Electric Collection E2E Tests`, () => {
           onDemandUsers.cleanup(),
           onDemandPosts.cleanup(),
           onDemandComments.cleanup(),
+          progressiveUsers.cleanup(),
+          progressivePosts.cleanup(),
+          progressiveComments.cleanup(),
         ])
       },
     }
@@ -458,4 +574,5 @@ describe(`Electric Collection E2E Tests`, () => {
   createCollationTestSuite(getConfig)
   createMutationsTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
+  createProgressiveTestSuite(getConfig)
 })

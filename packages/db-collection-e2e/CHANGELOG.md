@@ -1,5 +1,47 @@
 # @tanstack/db-collection-e2e
 
+## 0.0.7
+
+### Patch Changes
+
+- Updated dependencies [[`077fc1a`](https://github.com/TanStack/db/commit/077fc1a418ca090d7533115888c09f3f609e36b2)]:
+  - @tanstack/query-db-collection@1.0.4
+  - @tanstack/db@0.5.5
+  - @tanstack/electric-db-collection@0.2.5
+
+## 0.0.6
+
+### Patch Changes
+
+- Fix progressive mode to use fetchSnapshot and atomic swap ([#852](https://github.com/TanStack/db/pull/852))
+
+  Progressive mode was broken because `requestSnapshot()` injected snapshots into the stream in causally correct position, which didn't work properly with the `full` mode stream. This release fixes progressive mode by:
+
+  **Core Changes:**
+  - Use `fetchSnapshot()` during initial sync to fetch and apply snapshots immediately in sync transactions
+  - Buffer all stream messages during initial sync (renamed flag to `isBufferingInitialSync`)
+  - Perform atomic swap on first `up-to-date`: truncate snapshot data → apply buffered messages → mark ready
+  - Track txids/snapshots only after atomic swap (enables correct optimistic transaction confirmation)
+
+  **Test Infrastructure:**
+  - Added `ELECTRIC_TEST_HOOKS` symbol for test control (hidden from public API)
+  - Added `progressiveTestControl.releaseInitialSync()` to E2E test config for explicit transition control
+  - Created comprehensive progressive mode E2E test suite (8 tests):
+    - Explicit snapshot phase and atomic swap validation
+    - Txid tracking behavior (Electric-only)
+    - Multiple concurrent snapshots with deduplication
+    - Incremental updates after swap
+    - Predicate handling and resilience tests
+
+  **Bug Fixes:**
+  - Fixed type errors in test files
+  - All 166 unit tests + 95 E2E tests passing
+
+- Updated dependencies [[`f66f2cf`](https://github.com/TanStack/db/commit/f66f2cf944bbcc1a34ad7e340de2e78f5e27e666), [`e657a7d`](https://github.com/TanStack/db/commit/e657a7dad71dff6fb3dd24c2824f5b86d9f92cd5), [`f15b2a7`](https://github.com/TanStack/db/commit/f15b2a7081a2a21bd23ba3657fac44fc9c2f39a8), [`acb3e4f`](https://github.com/TanStack/db/commit/acb3e4f1441e6872ca577e74d92ae2d77deb5938), [`464805d`](https://github.com/TanStack/db/commit/464805d96bad6d0fd741e48fbfc98e90dc58bebe), [`2c2e4db`](https://github.com/TanStack/db/commit/2c2e4dbd781d278347d73373f66d3c51c6388116), [`15c772f`](https://github.com/TanStack/db/commit/15c772f5e42e49000a2d775fd8e4cfda3418243f)]:
+  - @tanstack/query-db-collection@1.0.3
+  - @tanstack/electric-db-collection@0.2.4
+  - @tanstack/db@0.5.4
+
 ## 0.0.5
 
 ### Patch Changes

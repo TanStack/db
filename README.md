@@ -37,14 +37,15 @@
 
 > Tanstack DB is currently in BETA. See [the release post](https://tanstack.com/blog/tanstack-db-0.1-the-embedded-client-database-for-tanstack-query) for more details.
 
-The reactive client-first store for your API.
+The reactive client store for your API.
 
-Stop building custom endpoints for every view. TanStack DB lets you query your data however your components need it—with a blazing-fast local query engine, real-time reactivity, and instant optimistic updates:
+TanStack DB solves the problems of building fast, modern apps, helping you:
 
-- Sub-millisecond live queries with joins & aggregates
-- Fine-grained reactivity to minimize re-rendering
-- Optimistic mutations with automatic rollback
-- Works with REST, sync engines, or any data source
+- Avoid endpoint sprawl and network waterfalls by loading data into normalized collections
+- Optimise client performance with sub-millisecond live queries and real-time reactivity
+- Take the network off the interaction path with instant optimistic writes
+
+Data loading is optimized. Interactions feel instantaneous. Your backend stays simple and your app stays blazing fast. No matter how much data you load.
 
 <a href="https://tanstack.com/db" style="font-weight:bold" >Read the docs →</a>
 <br />

@@ -10,8 +10,8 @@
   },
   "dependencies": {
     "@tanstack/offline-transactions": ">=1.0.0",
-    "@tanstack/query-db-collection": ">=1.0.2",
-    "@tanstack/react-db": ">=0.1.47",
+    "@tanstack/query-db-collection": ">=1.0.4",
+    "@tanstack/react-db": ">=0.1.49",
     "@tanstack/react-query": "^5.90.10",
     "@tanstack/react-router": "^1.136.8",
     "@tanstack/react-router-devtools": "^1.136.8",

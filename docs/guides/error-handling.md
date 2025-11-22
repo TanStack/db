@@ -92,8 +92,8 @@ const syncedCollection = createCollection(
 // Component can check error state
 function DataList() {
   const { data } = useLiveQuery((q) => q.from({ item: syncedCollection }))
-  const isError = syncedCollection.utils.isError()
-  const errorCount = syncedCollection.utils.errorCount()
+  const isError = syncedCollection.utils.isError
+  const errorCount = syncedCollection.utils.errorCount
   
   return (
     <>
@@ -112,9 +112,9 @@ function DataList() {
 ```
 
 Error tracking methods:
-- **`lastError()`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred:
-- **`isError()`**: Returns a boolean indicating whether the collection is currently in an error state:
-- **`errorCount()`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
+- **`lastError`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred:
+- **`isError`**: Returns a boolean indicating whether the collection is currently in an error state:
+- **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
 - **`clearError()`**: Clears the error state and triggers a refetch of the query. This method resets both `lastError` and `errorCount`:
 
 ## Collection Status and Error States
