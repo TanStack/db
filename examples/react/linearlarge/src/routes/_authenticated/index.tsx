@@ -5,9 +5,9 @@ import { preloadIssuesList, preloadIssueCount } from '@/lib/queries'
 import { getFilterStateFromSearch } from '@/utils/filterState'
 
 export const Route = createFileRoute(`/_authenticated/`)({
-  loader: async ({ context }) => {
-    const mode = context.search?.mode === 'electric' ? 'electric' : 'query'
-    const filterState = getFilterStateFromSearch(context.search || {})
+  loader: async ({ search }) => {
+    const mode = search?.mode === 'electric' ? 'electric' : 'query'
+    const filterState = getFilterStateFromSearch(search || {})
 
     await Promise.all([
       preloadIssuesList(
@@ -24,7 +24,16 @@ export const Route = createFileRoute(`/_authenticated/`)({
         priority: filterState.priority,
       }),
     ])
+
+    return {}
   },
+  loaderDeps: ({ search }) => ({
+    mode: search?.mode,
+    status: search?.status,
+    priority: search?.priority,
+    orderBy: search?.orderBy,
+    orderDirection: search?.orderDirection,
+  }),
   component: IssuesPage,
 })
 

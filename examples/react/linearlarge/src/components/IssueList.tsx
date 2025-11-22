@@ -1,35 +1,34 @@
-import {
-  useLiveInfiniteQuery,
-  useLiveQuery,
-  and,
-  eq,
-  inArray,
-} from '@tanstack/react-db'
+import { useLiveInfiniteQuery, useLiveQuery } from '@tanstack/react-db'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useRef, useEffect, useMemo, useCallback } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useSearch } from '@tanstack/react-router'
 import IssueRow from './IssueRow'
+import { TopFilter } from './TopFilter'
+import PriorityMenu from './contextmenu/PriorityMenu'
+import StatusMenu from './contextmenu/StatusMenu'
 import { useMode } from '@/lib/mode-context'
 import { getFilterStateFromSearch } from '@/utils/filterState'
-import { TopFilter } from './TopFilter'
-import { getIssueCountQuery } from '@/lib/queries'
-
-const PAGE_SIZE = 50
+import {
+  ISSUES_PAGE_SIZE,
+  getIssueCountQuery,
+  getIssuesListQuery,
+} from '@/lib/queries'
 
 export function IssueList() {
-  const { issuesCollection } = useMode()
+  const { issuesCollection, mode } = useMode()
   const parentRef = useRef<HTMLDivElement>(null)
   const search = useSearch({ strict: false })
   const filterState = useMemo(() => getFilterStateFromSearch(search), [search])
-
-  const issueCountQuery = getIssueCountQuery({
-    status: filterState.status,
-    priority: filterState.priority,
-  })
-
-  const { data: countData } = useLiveQuery(() => issueCountQuery, [search])
-
-  const totalCount = countData?.[0]?.count
+  const issuesQuery = useMemo(
+    () => getIssuesListQuery(filterState, mode),
+    [filterState, mode]
+  )
+  const issueCountQuery = useMemo(
+    () => getIssueCountQuery(filterState),
+    [filterState]
+  )
+  const { data: countData } = useLiveQuery(issueCountQuery)
+  const totalCount = countData[0].count
 
   const {
     data: issues,
@@ -37,64 +36,15 @@ export function IssueList() {
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
-    pages,
-  } = useLiveInfiniteQuery(
-    (q) => {
-      let query = q.from({ issue: issuesCollection })
-
-      // Apply filters using declarative expressions
-      if (filterState.status?.length || filterState.priority?.length) {
-        query = query.where(({ issue }) => {
-          const conditions = []
-
-          if (filterState.status?.length) {
-            // Use inArray for multiple values or eq for single value
-            if (filterState.status.length === 1) {
-              conditions.push(eq(issue.status, filterState.status[0]))
-            } else {
-              conditions.push(inArray(issue.status, filterState.status))
-            }
-          }
-
-          if (filterState.priority?.length) {
-            // Use inArray for multiple values or eq for single value
-            if (filterState.priority.length === 1) {
-              conditions.push(eq(issue.priority, filterState.priority[0]))
-            } else {
-              conditions.push(inArray(issue.priority, filterState.priority))
-            }
-          }
-
-          return conditions.length === 1 ? conditions[0] : and(...conditions)
-        })
+  } = useLiveInfiniteQuery(issuesQuery, {
+    pageSize: ISSUES_PAGE_SIZE,
+    getNextPageParam: (lastPage, allPages) => {
+      if (lastPage.length === ISSUES_PAGE_SIZE) {
+        return allPages.length
       }
-
-      // Apply ordering
-      const orderField =
-        filterState.orderBy === 'created_at' ? 'created_at' : 'modified'
-      return query.orderBy(
-        ({ issue }) => issue[orderField],
-        filterState.orderDirection
-      )
+      return undefined
     },
-    {
-      pageSize: PAGE_SIZE,
-      staleTime: 5 * 60 * 1000, // 5 minutes
-      gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
-      getNextPageParam: (lastPage, allPages) => {
-        // Continue fetching as long as the last page was full
-        // This is the standard infinite scroll pattern
-        if (lastPage.length === PAGE_SIZE) {
-          return allPages.length // Return next page index
-        }
-        // If we got fewer items than pageSize, we've reached the end
-        return undefined
-      },
-    },
-    [search]
-  )
-
-  console.log(`render`, { issues })
+  })
 
   // Memoize getScrollElement to avoid recreating virtualizer
   const getScrollElement = useCallback(() => parentRef.current, [])
@@ -103,12 +53,12 @@ export function IssueList() {
     count: totalCount ?? issues.length,
     getScrollElement,
     estimateSize: () => 36,
-    overscan: 50,
+    overscan: 25,
   })
 
   // Reset virtualizer to top when filters change
   useEffect(() => {
-    virtualizer.scrollToIndex(0, { align: 'start' })
+    virtualizer.scrollToIndex(0, { align: `start` })
   }, [
     filterState.status,
     filterState.priority,
@@ -122,7 +72,7 @@ export function IssueList() {
   const lastVirtualItem = virtualItems[virtualItems.length - 1]
 
   useEffect(() => {
-    if (!lastVirtualItem) return
+    if (virtualItems.length === 0) return
 
     const loadedCount = issues.length
 
@@ -134,13 +84,12 @@ export function IssueList() {
       fetchNextPage()
     }
   }, [
+    virtualItems.length,
     lastVirtualItem,
     hasNextPage,
     fetchNextPage,
     isFetchingNextPage,
     issues.length,
-    totalCount,
-    pages.length,
   ])
 
   if (status === `loading`) {
@@ -231,6 +180,9 @@ export function IssueList() {
           )}
         </div>
       </div>
+      {/* Shared context menus (render once instead of per row to avoid portal bloat) */}
+      <PriorityMenu issuesCollection={issuesCollection} />
+      <StatusMenu issuesCollection={issuesCollection} />
     </>
   )
 }

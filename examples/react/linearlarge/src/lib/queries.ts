@@ -9,6 +9,38 @@ import {
   getCommentsElectricCollection,
 } from './collections'
 
+export const ISSUES_PAGE_SIZE = 50
+
+type IssueFilters = {
+  status?: string[]
+  priority?: string[]
+}
+
+export type IssuesListFilters = IssueFilters & {
+  orderBy?: string
+  orderDirection?: 'asc' | 'desc'
+}
+
+const normalizeFilters = (filters?: IssueFilters) => ({
+  status: filters?.status ? [...filters.status].sort() : undefined,
+  priority: filters?.priority ? [...filters.priority].sort() : undefined,
+})
+
+const buildFilterCacheKey = (filters?: IssueFilters) =>
+  JSON.stringify(normalizeFilters(filters))
+const buildIssuesListCacheKey = (
+  filters: IssuesListFilters,
+  pageSize: number,
+  mode: 'query' | 'electric'
+) =>
+  JSON.stringify({
+    filters: normalizeFilters(filters),
+    orderBy: filters.orderBy,
+    orderDirection: filters.orderDirection,
+    pageSize,
+    mode,
+  })
+
 // ============================================================================
 // ISSUE QUERIES
 // ============================================================================
@@ -125,7 +157,7 @@ const createIssueCountQuery = (filters: {
   return query
 }
 
-type IssueCountQuery = ReturnType<typeof createIssueCountQuery>
+export type IssueCountQuery = ReturnType<typeof createIssueCountQuery>
 
 const issueCountCache = new Map<string, IssueCountQuery>()
 
@@ -133,15 +165,11 @@ export const getIssueCountQuery = (filters?: {
   status?: string[]
   priority?: string[]
 }): IssueCountQuery => {
-  const cacheKey = JSON.stringify({
-    status: filters?.status?.sort(),
-    priority: filters?.priority?.sort(),
-  })
-
-  console.log({ cacheKey })
+  const normalizedFilters = normalizeFilters(filters)
+  const cacheKey = buildFilterCacheKey(filters)
 
   if (!issueCountCache.has(cacheKey)) {
-    const query = createIssueCountQuery(filters || {})
+    const query = createIssueCountQuery(normalizedFilters)
 
     query.on('status:change', ({ status }) => {
       if (status === 'cleaned-up') {
@@ -189,42 +217,41 @@ export const preloadIssueCount = async (filters?: {
 }) => {
   const query = getIssueCountQuery(filters)
   await query.preload()
+  return query
 }
 
-export const preloadIssuesList = async (
-  filters?: {
-    status?: string[]
-    priority?: string[]
-    orderBy?: string
-    orderDirection?: 'asc' | 'desc'
-  },
-  mode: 'query' | 'electric' = 'query'
+export const createIssuesListQuery = (
+  filters: IssuesListFilters = {},
+  mode: 'query' | 'electric' = 'query',
+  pageSize = ISSUES_PAGE_SIZE
 ) => {
   const issuesCollection =
     mode === 'query'
       ? getIssuesQueryCollection()
       : getIssuesElectricCollection()
 
-  const query = createLiveQueryCollection((q) => {
+  const normalizedFilters = normalizeFilters(filters)
+
+  return createLiveQueryCollection((q) => {
     let query = q.from({ issue: issuesCollection })
 
-    if (filters?.status?.length || filters?.priority?.length) {
+    if (normalizedFilters.status?.length || normalizedFilters.priority?.length) {
       query = query.where(({ issue }) => {
         const conditions = []
 
-        if (filters.status?.length) {
-          if (filters.status.length === 1) {
-            conditions.push(eq(issue.status, filters.status[0]))
+        if (normalizedFilters.status?.length) {
+          if (normalizedFilters.status.length === 1) {
+            conditions.push(eq(issue.status, normalizedFilters.status[0]))
           } else {
-            conditions.push(inArray(issue.status, filters.status))
+            conditions.push(inArray(issue.status, normalizedFilters.status))
           }
         }
 
-        if (filters.priority?.length) {
-          if (filters.priority.length === 1) {
-            conditions.push(eq(issue.priority, filters.priority[0]))
+        if (normalizedFilters.priority?.length) {
+          if (normalizedFilters.priority.length === 1) {
+            conditions.push(eq(issue.priority, normalizedFilters.priority[0]))
           } else {
-            conditions.push(inArray(issue.priority, filters.priority))
+            conditions.push(inArray(issue.priority, normalizedFilters.priority))
           }
         }
 
@@ -234,14 +261,47 @@ export const preloadIssuesList = async (
 
     const orderField =
       filters?.orderBy === 'created_at' ? 'created_at' : 'modified'
+
     return query
       .orderBy(
         ({ issue }) => issue[orderField],
         filters?.orderDirection || 'desc'
       )
-      .limit(50)
+      .limit(pageSize + 1) // +1 for peek-ahead hasNextPage detection
       .offset(0)
   })
+}
 
+export type IssuesListQuery = ReturnType<typeof createIssuesListQuery>
+
+const issuesListCache = new Map<string, IssuesListQuery>()
+
+export const getIssuesListQuery = (
+  filters: IssuesListFilters = {},
+  mode: 'query' | 'electric' = 'query',
+  pageSize = ISSUES_PAGE_SIZE
+): IssuesListQuery => {
+  const cacheKey = buildIssuesListCacheKey(filters, pageSize, mode)
+  if (!issuesListCache.has(cacheKey)) {
+    const query = createIssuesListQuery(filters, mode, pageSize)
+
+    query.on('status:change', ({ status }) => {
+      if (status === 'cleaned-up') {
+        issuesListCache.delete(cacheKey)
+      }
+    })
+
+    issuesListCache.set(cacheKey, query)
+  }
+
+  return issuesListCache.get(cacheKey)!
+}
+
+export const preloadIssuesList = async (
+  filters?: IssuesListFilters,
+  mode: 'query' | 'electric' = 'query'
+) => {
+  const query = getIssuesListQuery(filters || {}, mode)
   await query.preload()
+  return query
 }

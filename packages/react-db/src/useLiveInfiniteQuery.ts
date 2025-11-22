@@ -230,6 +230,20 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     // For query functions, wait until collection is ready
     if (!isCollection && !queryResult.isReady) return
 
+    // If a pre-created collection already matches the expected window, avoid
+    // calling setWindow (which can flip isFetchingNextPage and trigger renders)
+    if (isCollection && isLiveQueryCollectionUtils(utils)) {
+      const currentWindow = utils.getWindow()
+      if (
+        currentWindow &&
+        currentWindow.offset === expectedOffset &&
+        currentWindow.limit === expectedLimit
+      ) {
+        setIsFetchingNextPage(false)
+        return
+      }
+    }
+
     // Adjust the window
     const result = utils.setWindow({
       offset: expectedOffset,

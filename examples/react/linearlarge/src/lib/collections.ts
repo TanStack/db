@@ -190,10 +190,13 @@ const createIssueCountQueryCollection = (filters?: {
   status?: string[]
   priority?: string[]
 }) => {
+  const sortedStatus = filters?.status ? [...filters.status].sort() : undefined
+  const sortedPriority = filters?.priority ? [...filters.priority].sort() : undefined
+
   // Build stable key from filters
   const filterKey = JSON.stringify({
-    status: filters?.status?.sort(),
-    priority: filters?.priority?.sort(),
+    status: sortedStatus,
+    priority: sortedPriority,
   })
 
   return createCollection(
@@ -208,12 +211,12 @@ const createIssueCountQueryCollection = (filters?: {
         // Build query parameters from filters
         const params = new URLSearchParams()
 
-        if (filters?.status?.length) {
-          params.set('status_in', JSON.stringify(filters.status))
+        if (sortedStatus?.length) {
+          params.set('status_in', JSON.stringify(sortedStatus))
         }
 
-        if (filters?.priority?.length) {
-          params.set('priority_in', JSON.stringify(filters.priority))
+        if (sortedPriority?.length) {
+          params.set('priority_in', JSON.stringify(sortedPriority))
         }
 
         const url = params.toString() ? `/api/issues/count?${params}` : '/api/issues/count'
