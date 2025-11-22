@@ -194,6 +194,8 @@ TanStack DB provides several built-in collection types for different data source
 
 - **[TrailBaseCollection](../collections/trailbase-collection.md)** &mdash; Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
 
+- **[PocketBaseCollection](../collections/pocketbase-collection.md)** &mdash; Sync data into collections using PocketBase's open-source backend with real-time subscriptions, built-in auth, and file storage.
+
 - **[RxDBCollection](../collections/rxdb-collection.md)** &mdash; Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
 
 - **[PowerSyncCollection](../collections/powersync-collection.md)** &mdash; Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.

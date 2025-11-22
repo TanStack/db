@@ -64,6 +64,10 @@
           "to": "collections/trailbase-collection"
         },
         {
+          "label": "PocketBase Collection",
+          "to": "collections/pocketbase-collection"
+        },
+        {
           "label": "RxDB Collection",
           "to": "collections/rxdb-collection"
         },
