@@ -2,8 +2,9 @@
  * Global type augmentation for @tanstack/query-core
  *
  * This file ensures the module augmentation is always loaded when the package is imported.
- * The index.ts file includes a triple-slash reference to this file, which guarantees
- * TypeScript processes it whenever anyone imports from @tanstack/query-db-collection.
+ * The index.ts file re-exports QueryCollectionMeta from this file, which guarantees
+ * TypeScript processes this file (and its module augmentation) whenever anyone imports
+ * from @tanstack/query-db-collection.
  *
  * This makes ctx.meta?.loadSubsetOptions automatically type-safe without requiring
  * users to manually import QueryCollectionMeta.

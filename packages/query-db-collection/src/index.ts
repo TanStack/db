@@ -1,5 +1,6 @@
-// Import global.d.ts to ensure module augmentation is loaded
-import type {} from "./global"
+// Export QueryCollectionMeta from global.ts
+// This ensures the module augmentation in global.ts is processed by TypeScript
+export type { QueryCollectionMeta } from "./global"
 
 export {
   queryCollectionOptions,
@@ -7,9 +8,6 @@ export {
   type QueryCollectionUtils,
   type SyncOperation,
 } from "./query"
-
-// Export QueryCollectionMeta from global.d.ts (the only source)
-export type { QueryCollectionMeta } from "./global"
 
 export * from "./errors"
 
