@@ -621,6 +621,23 @@ export function queryCollectionOptions(
   // queryKey → QueryObserver's unsubscribe function
   const unsubscribes = new Map<string, () => void>()
 
+  // queryKey → reference count (how many loadSubset calls are active)
+  // Reference counting for QueryObserver lifecycle management
+  // =========================================================
+  // Tracks how many live query subscriptions are using each QueryObserver.
+  // Multiple live queries with identical predicates share the same QueryObserver for efficiency.
+  //
+  // Lifecycle:
+  // - Increment: when createQueryFromOpts creates or reuses an observer
+  // - Decrement: when subscription.unsubscribe() passes predicates to collection._sync.unloadSubset()
+  // - Reset: when cleanupQuery() is triggered by TanStack Query's cache GC
+  //
+  // When refcount reaches 0, unloadSubset():
+  // 1. Computes the same queryKey from the predicates
+  // 2. Uses existing machinery (queryToRows map) to find rows that query loaded
+  // 3. Decrements refcount and GCs rows where count reaches 0
+  const queryRefCounts = new Map<string, number>()
+
   // Helper function to add a row to the internal state
   const addRow = (rowKey: string | number, hashedQueryKey: string) => {
     const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
@@ -651,29 +668,44 @@ export function queryCollectionOptions(
     // Track whether sync has been started
     let syncStarted = false
 
-    const createQueryFromOpts = (
-      opts: LoadSubsetOptions = {},
-      queryFunction: typeof queryFn = queryFn
-    ): true | Promise<void> => {
-      // Push the predicates down to the queryKey and queryFn
-      let key: QueryKey
+    /**
+     * Generate a consistent query key from LoadSubsetOptions.
+     * CRITICAL: Must use identical logic in both createQueryFromOpts and unloadSubset
+     * so that refcount increment/decrement operations target the same hashedQueryKey.
+     * Inconsistent keys would cause refcount leaks and prevent proper cleanup.
+     */
+    const generateQueryKeyFromOptions = (opts: LoadSubsetOptions): QueryKey => {
       if (typeof queryKey === `function`) {
         // Function-based queryKey: use it to build the key from opts
-        key = queryKey(opts)
+        return queryKey(opts)
       } else if (syncMode === `on-demand`) {
         // Static queryKey in on-demand mode: automatically append serialized predicates
         // to create separate cache entries for different predicate combinations
         const serialized = serializeLoadSubsetOptions(opts)
-        key = serialized !== undefined ? [...queryKey, serialized] : queryKey
+        return serialized !== undefined ? [...queryKey, serialized] : queryKey
       } else {
         // Static queryKey in eager mode: use as-is
-        key = queryKey
+        return queryKey
       }
+    }
+
+    const createQueryFromOpts = (
+      opts: LoadSubsetOptions = {},
+      queryFunction: typeof queryFn = queryFn
+    ): true | Promise<void> => {
+      // Generate key using common function
+      const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
       const extendedMeta = { ...meta, loadSubsetOptions: opts }
 
       if (state.observers.has(hashedQueryKey)) {
         // We already have a query for this queryKey
+        // Increment reference count since another consumer is using this observer
+        queryRefCounts.set(
+          hashedQueryKey,
+          (queryRefCounts.get(hashedQueryKey) || 0) + 1
+        )
+
         // Get the current result and return based on its state
         const observer = state.observers.get(hashedQueryKey)!
         const currentResult = observer.getCurrentResult()
@@ -732,6 +764,12 @@ export function queryCollectionOptions(
       hashToQueryKey.set(hashedQueryKey, key)
       state.observers.set(hashedQueryKey, localObserver)
 
+      // Increment reference count for this query
+      queryRefCounts.set(
+        hashedQueryKey,
+        (queryRefCounts.get(hashedQueryKey) || 0) + 1
+      )
+
       // Create a promise that resolves when the query result is first available
       const readyPromise = new Promise<void>((resolve, reject) => {
         const unsubscribe = localObserver.subscribe((result) => {
@@ -750,13 +788,6 @@ export function queryCollectionOptions(
       if (syncStarted || collection.subscriberCount > 0) {
         subscribeToQuery(localObserver, hashedQueryKey)
       }
-
-      // Tell tanstack query to GC the query when the subscription is unsubscribed
-      // The subscription is unsubscribed when the live query is GCed.
-      const subscription = opts.subscription
-      subscription?.once(`unsubscribed`, () => {
-        queryClient.removeQueries({ queryKey: key, exact: true })
-      })
 
       return readyPromise
     }
@@ -874,10 +905,17 @@ export function queryCollectionOptions(
       hashedQueryKey: string
     ) => {
       if (!isSubscribed(hashedQueryKey)) {
-        const queryKey = hashToQueryKey.get(hashedQueryKey)!
-        const handleQueryResult = makeQueryResultHandler(queryKey)
+        const cachedQueryKey = hashToQueryKey.get(hashedQueryKey)!
+        const handleQueryResult = makeQueryResultHandler(cachedQueryKey)
         const unsubscribeFn = observer.subscribe(handleQueryResult)
         unsubscribes.set(hashedQueryKey, unsubscribeFn)
+
+        // Process the current result immediately if available
+        // This ensures data is synced when resubscribing to a query with cached data
+        const currentResult = observer.getCurrentResult()
+        if (currentResult.isSuccess || currentResult.isError) {
+          handleQueryResult(currentResult)
+        }
       }
     }
 
@@ -927,10 +965,97 @@ export function queryCollectionOptions(
 
     // Ensure we process any existing query data (QueryObserver doesn't invoke its callback automatically with initial state)
     state.observers.forEach((observer, hashedQueryKey) => {
-      const queryKey = hashToQueryKey.get(hashedQueryKey)!
-      const handleQueryResult = makeQueryResultHandler(queryKey)
+      const cachedQueryKey = hashToQueryKey.get(hashedQueryKey)!
+      const handleQueryResult = makeQueryResultHandler(cachedQueryKey)
       handleQueryResult(observer.getCurrentResult())
     })
+
+    /**
+     * Perform row-level cleanup and remove all tracking for a query.
+     * Callers are responsible for ensuring the query is safe to cleanup.
+     */
+    const cleanupQueryInternal = (hashedQueryKey: string) => {
+      unsubscribes.get(hashedQueryKey)?.()
+      unsubscribes.delete(hashedQueryKey)
+
+      const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
+      const rowsToDelete: Array<any> = []
+
+      rowKeys.forEach((rowKey) => {
+        const queries = rowToQueries.get(rowKey)
+
+        if (!queries) {
+          return
+        }
+
+        queries.delete(hashedQueryKey)
+
+        if (queries.size === 0) {
+          rowToQueries.delete(rowKey)
+
+          if (collection.has(rowKey)) {
+            rowsToDelete.push(collection.get(rowKey))
+          }
+        }
+      })
+
+      if (rowsToDelete.length > 0) {
+        begin()
+        rowsToDelete.forEach((row) => {
+          write({ type: `delete`, value: row })
+        })
+        commit()
+      }
+
+      state.observers.delete(hashedQueryKey)
+      queryToRows.delete(hashedQueryKey)
+      hashToQueryKey.delete(hashedQueryKey)
+      queryRefCounts.delete(hashedQueryKey)
+    }
+
+    /**
+     * Attempt to cleanup a query when it appears unused.
+     * Respects refcounts and invalidateQueries cycles via hasListeners().
+     */
+    const cleanupQueryIfIdle = (hashedQueryKey: string) => {
+      const refcount = queryRefCounts.get(hashedQueryKey) || 0
+      const observer = state.observers.get(hashedQueryKey)
+
+      if (refcount <= 0) {
+        // Drop our subscription so hasListeners reflects only active consumers
+        unsubscribes.get(hashedQueryKey)?.()
+        unsubscribes.delete(hashedQueryKey)
+      }
+
+      const hasListeners = observer?.hasListeners() ?? false
+
+      if (hasListeners) {
+        // During invalidateQueries, TanStack Query keeps internal listeners alive.
+        // Leave refcount at 0 but keep observer so it can resubscribe.
+        queryRefCounts.set(hashedQueryKey, 0)
+        return
+      }
+
+      // No listeners means the query is truly idle.
+      // Even if refcount > 0, we treat hasListeners as authoritative to prevent leaks.
+      // This can happen if subscriptions are GC'd without calling unloadSubset.
+      if (refcount > 0) {
+        console.warn(
+          `[cleanupQueryIfIdle] Invariant violation: refcount=${refcount} but no listeners. Cleaning up to prevent leak.`,
+          { hashedQueryKey }
+        )
+      }
+
+      cleanupQueryInternal(hashedQueryKey)
+    }
+
+    /**
+     * Force cleanup used by explicit collection cleanup.
+     * Ignores refcounts/hasListeners and removes everything.
+     */
+    const forceCleanupQuery = (hashedQueryKey: string) => {
+      cleanupQueryInternal(hashedQueryKey)
+    }
 
     // Subscribe to the query client's cache to handle queries that are GCed by tanstack query
     const unsubscribeQueryCache = queryClient
@@ -938,60 +1063,81 @@ export function queryCollectionOptions(
       .subscribe((event) => {
         const hashedKey = event.query.queryHash
         if (event.type === `removed`) {
-          cleanupQuery(hashedKey)
-        }
-      })
-
-    function cleanupQuery(hashedQueryKey: string) {
-      // Unsubscribe from the query's observer
-      unsubscribes.get(hashedQueryKey)?.()
-
-      // Get all the rows that are in the result of this query
-      const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
-
-      // Remove the query from these rows
-      rowKeys.forEach((rowKey) => {
-        const queries = rowToQueries.get(rowKey) // set of queries that reference this row
-        if (queries && queries.size > 0) {
-          queries.delete(hashedQueryKey)
-          if (queries.size === 0) {
-            // Reference count dropped to 0, we can GC the row
-            rowToQueries.delete(rowKey)
-
-            if (collection.has(rowKey)) {
-              begin()
-              write({ type: `delete`, value: collection.get(rowKey) })
-              commit()
-            }
+          // Only cleanup if this is OUR query (we track it)
+          if (hashToQueryKey.has(hashedKey)) {
+            // TanStack Query GC'd this query after gcTime expired.
+            // Use the guarded cleanup path to avoid deleting rows for active queries.
+            cleanupQueryIfIdle(hashedKey)
           }
         }
       })
-
-      // Remove the query from the internal state
-      unsubscribes.delete(hashedQueryKey)
-      state.observers.delete(hashedQueryKey)
-      queryToRows.delete(hashedQueryKey)
-      hashToQueryKey.delete(hashedQueryKey)
-    }
 
     const cleanup = async () => {
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
 
-      const queryKeys = [...hashToQueryKey.values()]
+      const allQueryKeys = [...hashToQueryKey.values()]
+      const allHashedKeys = [...state.observers.keys()]
 
-      hashToQueryKey.clear()
-      queryToRows.clear()
-      rowToQueries.clear()
-      state.observers.clear()
+      // Force cleanup all queries (explicit cleanup path)
+      // This ignores hasListeners and always cleans up
+      for (const hashedKey of allHashedKeys) {
+        forceCleanupQuery(hashedKey)
+      }
+
+      // Unsubscribe from cache events (cleanup already happened above)
       unsubscribeQueryCache()
 
+      // Remove queries from TanStack Query cache
       await Promise.all(
-        queryKeys.map(async (queryKey) => {
-          await queryClient.cancelQueries({ queryKey })
-          queryClient.removeQueries({ queryKey })
+        allQueryKeys.map(async (qKey) => {
+          await queryClient.cancelQueries({ queryKey: qKey, exact: true })
+          queryClient.removeQueries({ queryKey: qKey, exact: true })
         })
       )
+    }
+
+    /**
+     * Unload a query subset - the subscription-based cleanup path (on-demand mode).
+     *
+     * Called when a live query subscription unsubscribes (via collection._sync.unloadSubset()).
+     *
+     * Flow:
+     * 1. Receives the same predicates that were passed to loadSubset
+     * 2. Computes the queryKey using generateQueryKeyFromOptions (same logic as loadSubset)
+     * 3. Decrements refcount
+     * 4. If refcount reaches 0:
+     *    - Checks hasListeners() to detect invalidateQueries cycles
+     *    - If hasListeners is true: resets refcount (TanStack Query keeping observer alive)
+     *    - If hasListeners is false: calls forceCleanupQuery() to perform row-level GC
+     *
+     * The hasListeners() check prevents premature cleanup during invalidateQueries:
+     * - invalidateQueries causes temporary unsubscribe/resubscribe
+     * - During unsubscribe, our refcount drops to 0
+     * - But observer.hasListeners() is still true (TanStack Query's internal listeners)
+     * - We skip cleanup and reset refcount, allowing resubscribe to succeed
+     *
+     * We don't cancel in-flight requests. Unsubscribing from the observer is sufficient
+     * to prevent late-arriving data from being processed. The request completes and is cached
+     * by TanStack Query, allowing quick remounts to restore data without refetching.
+     */
+    const unloadSubset = (options: LoadSubsetOptions) => {
+      // 1. Same predicates → 2. Same queryKey
+      const key = generateQueryKeyFromOptions(options)
+      const hashedQueryKey = hashKey(key)
+
+      // 3. Decrement refcount
+      const currentCount = queryRefCounts.get(hashedQueryKey) || 0
+      const newCount = currentCount - 1
+
+      // Update refcount
+      if (newCount <= 0) {
+        queryRefCounts.set(hashedQueryKey, 0)
+        cleanupQueryIfIdle(hashedQueryKey)
+      } else {
+        // Still have other references, just decrement
+        queryRefCounts.set(hashedQueryKey, newCount)
+      }
     }
 
     // Create deduplicated loadSubset wrapper for non-eager modes
@@ -1002,6 +1148,7 @@ export function queryCollectionOptions(
 
     return {
       loadSubset: loadSubsetDedupe,
+      unloadSubset: syncMode === `eager` ? undefined : unloadSubset,
       cleanup,
     }
   }
@@ -1025,9 +1172,9 @@ export function queryCollectionOptions(
    * @returns Promise that resolves when the refetch is complete, with QueryObserverResult
    */
   const refetch: RefetchFn = async (opts) => {
-    const queryKeys = [...hashToQueryKey.values()]
-    const refetchPromises = queryKeys.map((queryKey) => {
-      const queryObserver = state.observers.get(hashKey(queryKey))!
+    const allQueryKeys = [...hashToQueryKey.values()]
+    const refetchPromises = allQueryKeys.map((qKey) => {
+      const queryObserver = state.observers.get(hashKey(qKey))!
       return queryObserver.refetch({
         throwOnError: opts?.throwOnError,
       })
