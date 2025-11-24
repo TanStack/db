@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createCollection } from "../../src/collection/index.js"
-import { createLiveQueryCollection, eq } from "../../src/query/index.js"
+import { createLiveQueryCollection, eq, isNull } from "../../src/query/index.js"
 import { createTransaction } from "../../src/transactions.js"
+import { createOptimisticAction } from "../../src/optimistic-action.js"
 import { transactionScopedScheduler } from "../../src/scheduler.js"
 import { CollectionConfigBuilder } from "../../src/query/live/collection-config-builder.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 import type { FullSyncState } from "../../src/query/live/types.js"
 import type { SyncConfig } from "../../src/types.js"
 
@@ -523,5 +525,151 @@ describe(`live query scheduler`, () => {
     expect(maybeRunGraphSpy).toHaveBeenCalledTimes(1)
 
     maybeRunGraphSpy.mockRestore()
+  })
+
+  it(`should handle optimistic mutations with nested left joins without scheduler errors`, async () => {
+    // This test verifies that optimistic mutations on collections with nested live query
+    // collections using left joins complete successfully without scheduler errors.
+    //
+    // Expected behavior:
+    // 1. Collections are pre-populated with initialData (via mockSyncCollectionOptions)
+    // 2. Nested live query collections use left joins
+    // 3. An optimistic action updates an existing item using draft mutations
+    // 4. The scheduler should flush the transaction successfully without detecting unresolved dependencies
+
+    interface Account {
+      id: string
+      user_id: string
+      name: string
+    }
+
+    interface UserProfile {
+      id: string
+      profile: string
+    }
+
+    interface Team {
+      id: string
+      account_id: string
+      deleted_ts: string | null
+    }
+
+    // Use mockSyncCollectionOptions with initialData to match the failing test
+    // Note: mockSyncCollectionOptions already sets startSync: true internally
+    const accounts = createCollection<Account>(
+      mockSyncCollectionOptions({
+        id: `left-join-bug-accounts`,
+        getKey: (account) => account.id,
+        initialData: [
+          { id: `account-1`, user_id: `user-1`, name: `Account 1` },
+        ],
+      })
+    )
+
+    const users = createCollection<UserProfile>(
+      mockSyncCollectionOptions({
+        id: `left-join-bug-users`,
+        getKey: (user) => user.id,
+        initialData: [{ id: `user-1`, profile: `Profile 1` }],
+      })
+    )
+
+    const teams = createCollection<Team>(
+      mockSyncCollectionOptions({
+        id: `left-join-bug-teams`,
+        getKey: (team) => team.id,
+        initialData: [
+          {
+            id: `team-1`,
+            account_id: `account-1`,
+            deleted_ts: null as string | null,
+          },
+        ],
+      })
+    )
+
+    // Create nested live query collections similar to the bug report
+    const accountsWithUsers = createLiveQueryCollection({
+      id: `left-join-bug-accounts-with-users`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ account: accounts })
+          .join({ user: users }, ({ user, account }) =>
+            eq(user.id, account.user_id)
+          )
+          .select(({ account, user }) => ({
+            account: account,
+            profile: user?.profile,
+          })),
+    })
+
+    const activeTeams = createLiveQueryCollection({
+      id: `left-join-bug-active-teams`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ team: teams })
+          .where(({ team }) => isNull(team.deleted_ts))
+          .select(({ team }) => ({ team })),
+    })
+
+    const accountsWithTeams = createLiveQueryCollection({
+      id: `left-join-bug-accounts-with-teams`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ accountWithUser: accountsWithUsers })
+          .leftJoin({ team: activeTeams }, ({ accountWithUser, team }) =>
+            eq(team.team.account_id, accountWithUser.account.id)
+          )
+          .select(({ accountWithUser, team }) => ({
+            account: accountWithUser.account,
+            profile: accountWithUser.profile,
+            team: team?.team,
+          })),
+    })
+
+    // Wait for all queries to be ready
+    await Promise.all([
+      accountsWithUsers.preload(),
+      activeTeams.preload(),
+      accountsWithTeams.preload(),
+    ])
+
+    // Create an optimistic action that mutates using draft
+    const testAction = createOptimisticAction<string>({
+      onMutate: (id) => {
+        // Update existing data using draft mutation
+        accounts.update(id, (draft) => {
+          draft.name = `new name here`
+        })
+      },
+      mutationFn: (_id, _params) => {
+        return Promise.resolve({ txid: 0 })
+      },
+    })
+
+    // Execute the optimistic action and flush - this should complete without scheduler errors
+    let error: Error | undefined
+    let transaction: any
+
+    try {
+      transaction = testAction(`account-1`)
+
+      // Wait for the transaction to process
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // The scheduler should flush successfully without detecting unresolved dependencies
+      transactionScopedScheduler.flushAll()
+    } catch (e) {
+      error = e as Error
+    }
+
+    // The scheduler should not throw unresolved dependency errors
+    expect(error).toBeUndefined()
+
+    // Verify the transaction was created successfully
+    expect(transaction).toBeDefined()
   })
 })
