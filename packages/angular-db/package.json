@@ -15,7 +15,7 @@
     "angular",
     "typescript"
   ],
-  "packageManager": "pnpm@10.22.0",
+  "packageManager": "pnpm@10.23.0",
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },
@@ -27,7 +27,7 @@
     "@angular/platform-browser-dynamic": "^19.2.15",
     "@vitest/coverage-istanbul": "^3.2.4",
     "rxjs": "^7.8.2",
-    "zone.js": "^0.15.1"
+    "zone.js": "^0.16.0"
   },
   "exports": {
     ".": {
