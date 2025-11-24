@@ -20,8 +20,8 @@
     "@types/pg": "^8.15.6",
     "@vitest/ui": "^3.2.4",
     "typescript": "^5.9.2",
-    "vite": "^7.2.2",
+    "vite": "^7.2.4",
     "vitest": "^3.2.4"
   },
-  "packageManager": "pnpm@10.22.0"
+  "packageManager": "pnpm@10.23.0"
 }
