@@ -62,8 +62,6 @@ jobs:
               --body "Automated documentation update from release" \
               --base main \
               --head "$BRANCH"
-
-            gh pr merge "$BRANCH" --auto --squash
           else
             echo "No changes in generated docs"
           fi
