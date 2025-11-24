@@ -672,4 +672,110 @@ describe(`live query scheduler`, () => {
     // Verify the transaction was created successfully
     expect(transaction).toBeDefined()
   })
+
+  it(`should prevent stale data when lazy source also depends on modified collection`, async () => {
+    // This test exposes a race condition in the current implementation:
+    //
+    // Setup:
+    // - baseCollection changes
+    // - queryA depends on baseCollection
+    // - queryB also depends on baseCollection (independently)
+    // - queryC depends on queryA AND left-joins queryB (lazy)
+    //
+    // Issue: When baseCollection changes:
+    // 1. queryA schedules (depends on base)
+    // 2. queryB schedules (depends on base)
+    // 3. queryC schedules (depends on queryA, but NOT queryB because it's lazy-only)
+    //
+    // queryC can run before queryB completes and lazy-load STALE data from queryB.
+    //
+    // Expected: queryC should see updated data (100) from queryB
+    // Actual: queryC sees stale data (10) from queryB
+
+    interface BaseItem {
+      id: string
+      value: number
+    }
+
+    // Base collection
+    const baseCollection = createCollection<BaseItem>(
+      mockSyncCollectionOptions({
+        id: `race-base`,
+        getKey: (item) => item.id,
+        initialData: [{ id: `1`, value: 10 }],
+      })
+    )
+
+    // QueryA: depends on base
+    const queryA = createLiveQueryCollection({
+      id: `race-queryA`,
+      startSync: true,
+      query: (q) =>
+        q.from({ item: baseCollection }).select(({ item }) => ({
+          id: item.id,
+          value: item.value,
+        })),
+    })
+
+    // QueryB: also depends on base (independent from queryA)
+    const queryB = createLiveQueryCollection({
+      id: `race-queryB`,
+      startSync: true,
+      query: (q) =>
+        q.from({ item: baseCollection }).select(({ item }) => ({
+          id: item.id,
+          value: item.value,
+        })),
+    })
+
+    // QueryC: depends on queryA, left joins queryB (lazy)
+    const queryC = createLiveQueryCollection({
+      id: `race-queryC`,
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ a: queryA })
+          .leftJoin({ b: queryB }, ({ a, b }) => eq(a.id, b.id))
+          .select(({ a, b }) => ({
+            id: a.id,
+            aValue: a.value,
+            bValue: b?.value ?? null,
+          })),
+    })
+
+    // Wait for initial sync
+    await Promise.all([queryA.preload(), queryB.preload(), queryC.preload()])
+
+    // Verify initial state
+    const initialC = [...queryC.values()][0]
+    expect(initialC?.aValue).toBe(10)
+    expect(initialC?.bValue).toBe(10)
+
+    // Mutate the base collection
+    const action = createOptimisticAction<string>({
+      autoCommit: false,
+      onMutate: (id) => {
+        baseCollection.update(id, (draft) => {
+          draft.value = 100
+        })
+      },
+      mutationFn: (_id) => Promise.resolve({ txid: 0 }),
+    })
+
+    let error: Error | undefined
+    try {
+      action(`1`)
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      transactionScopedScheduler.flushAll()
+    } catch (e) {
+      error = e as Error
+    }
+
+    expect(error).toBeUndefined()
+
+    // This assertion FAILS - queryC sees stale data from queryB
+    const finalC = [...queryC.values()][0]
+    expect(finalC?.aValue).toBe(100)
+    expect(finalC?.bValue).toBe(100) // Fails: sees 10 instead of 100
+  })
 })
