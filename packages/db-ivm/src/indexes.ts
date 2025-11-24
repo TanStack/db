@@ -35,45 +35,13 @@
 
 import { MultiSet } from "./multiset.js"
 import { hash } from "./hashing/index.js"
+import { normalizeValue as normalizeKey } from "./utils/uint8array.js"
 import type { Hash } from "./hashing/index.js"
 
 // We use a symbol to represent the absence of a prefix, unprefixed values a stored
 // against this key.
 const NO_PREFIX = Symbol(`NO_PREFIX`)
 type NO_PREFIX = typeof NO_PREFIX
-
-/**
- * Threshold for normalizing Uint8Arrays to string representations.
- * Arrays larger than this will use reference equality to avoid memory overhead.
- * 128 bytes is enough for common ID formats (ULIDs are 16 bytes, UUIDs are 16 bytes)
- * while avoiding excessive string allocation for large binary data.
- */
-const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
-
-/**
- * Normalize a key for Map usage.
- * Converts Uint8Arrays/Buffers to string representations for content-based equality.
- * This enables proper joining on binary keys like ULIDs.
- */
-function normalizeKey<K>(key: K): K | string {
-  // Check if the key is a Uint8Array or Buffer
-  const isUint8Array =
-    (typeof Buffer !== `undefined` && key instanceof Buffer) ||
-    key instanceof Uint8Array
-
-  if (isUint8Array) {
-    // Only normalize small arrays to avoid memory overhead for large binary data
-    if (key.byteLength <= UINT8ARRAY_NORMALIZE_THRESHOLD) {
-      // Convert to a string representation that can be used as a Map key
-      // Use a special prefix to avoid collisions with user strings
-      return `__u8__${Array.from(key).join(`,`)}`
-    }
-    // For large arrays, fall back to reference equality
-    // Users working with large binary data should use a derived key if needed
-  }
-
-  return key
-}
 
 // A single value is a tuple of the value and the multiplicity.
 type SingleValue<TValue> = [TValue, number]

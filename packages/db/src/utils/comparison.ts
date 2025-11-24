@@ -1,3 +1,7 @@
+import {
+  isUint8Array,
+  normalizeValue as normalizeUint8ArrayValue,
+} from "@tanstack/db-ivm"
 import type { CompareOptions } from "../query/builder/types"
 
 // WeakMap to store stable IDs for objects
@@ -127,14 +131,6 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
- * Threshold for normalizing Uint8Arrays to string representations.
- * Arrays larger than this will use reference equality to avoid memory overhead.
- * 128 bytes is enough for common ID formats (ULIDs are 16 bytes, UUIDs are 16 bytes)
- * while avoiding excessive string allocation for large binary data.
- */
-const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
-
-/**
  * Normalize a value for comparison and Map key usage
  * Converts values that can't be directly compared or used as Map keys
  * into comparable primitive representations
@@ -144,21 +140,9 @@ export function normalizeValue(value: any): any {
     return value.getTime()
   }
 
-  // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
-  // This enables content-based equality for binary data like ULIDs
-  const isUint8Array =
-    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
-    value instanceof Uint8Array
-
-  if (isUint8Array) {
-    // Only normalize small arrays to avoid memory overhead for large binary data
-    if (value.byteLength <= UINT8ARRAY_NORMALIZE_THRESHOLD) {
-      // Convert to a string representation that can be used as a Map key
-      // Use a special prefix to avoid collisions with user strings
-      return `__u8__${Array.from(value).join(`,`)}`
-    }
-    // For large arrays, fall back to reference equality
-    // Users working with large binary data should use a derived key if needed
+  // Use shared Uint8Array normalization from db-ivm
+  if (isUint8Array(value)) {
+    return normalizeUint8ArrayValue(value)
   }
 
   return value
@@ -173,13 +157,9 @@ export function areValuesEqual(a: any, b: any): boolean {
     return true
   }
 
-  // Check for Uint8Array/Buffer comparison
-  const aIsUint8Array =
-    (typeof Buffer !== `undefined` && a instanceof Buffer) ||
-    a instanceof Uint8Array
-  const bIsUint8Array =
-    (typeof Buffer !== `undefined` && b instanceof Buffer) ||
-    b instanceof Uint8Array
+  // Check for Uint8Array/Buffer comparison using shared utility
+  const aIsUint8Array = isUint8Array(a)
+  const bIsUint8Array = isUint8Array(b)
 
   // If both are Uint8Arrays, compare by content
   if (aIsUint8Array && bIsUint8Array) {
