@@ -43,7 +43,88 @@ import type { IndexProxy } from "../indexes/lazy-index.js"
  * @template T - The type of items in the collection
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
+ * @template TSchema - The schema type for validation
  * @template TInsertInput - The type for insert operations (can be different from T for schemas with defaults)
+ *
+ * @example
+ * // Creating shared services that work with any collection
+ * // This is useful for building reusable utilities and abstractions
+ *
+ * // Pattern 1: Simple read-only helper (only T parameter needed)
+ * function getItemCount<T extends object>(
+ *   collection: Collection<T>
+ * ): number {
+ *   return collection.size
+ * }
+ *
+ * function findItemsById<T extends { id: string }>(
+ *   collection: Collection<T>,
+ *   ids: string[]
+ * ): T[] {
+ *   return ids.map(id => collection.get(id)).filter(Boolean) as T[]
+ * }
+ *
+ * @example
+ * // Pattern 2: Services that perform mutations
+ * // IMPORTANT: Specify at least T and TKey to preserve mutation types
+ * function createBulkInsertService<
+ *   T extends object,
+ *   TKey extends string | number = string | number
+ * >(collection: Collection<T, TKey>) {
+ *   return {
+ *     async bulkInsert(items: T[]) {
+ *       // Transaction types are now correctly inferred as TransactionWithMutations<T>
+ *       const tx = collection.insert(items)
+ *       await tx.isPersisted.promise
+ *       return tx
+ *     }
+ *   }
+ * }
+ *
+ * @example
+ * // Pattern 3: Services with custom utilities
+ * // Specify all three core parameters for full type safety
+ * interface MyUtils extends UtilsRecord {
+ *   refresh: () => Promise<void>
+ * }
+ *
+ * function createSyncService<
+ *   T extends object,
+ *   TKey extends string | number,
+ *   TUtils extends UtilsRecord
+ * >(collection: Collection<T, TKey, TUtils>) {
+ *   return {
+ *     async syncChanges(changes: Partial<T>[]) {
+ *       // Full access to collection methods and utils
+ *       changes.forEach(change => {
+ *         // Correctly typed - mutation.modified will be T, not Record<string, any>
+ *         collection.insert(change as T)
+ *       })
+ *       // Utils are available and properly typed
+ *       if ('refresh' in collection.utils) {
+ *         await (collection.utils as any).refresh()
+ *       }
+ *     }
+ *   }
+ * }
+ *
+ * @example
+ * // Using shared services with typed collections
+ * type Todo = { id: string; title: string; completed: boolean }
+ *
+ * const todoCollection = createCollection<Todo, string>({
+ *   getKey: (todo) => todo.id,
+ *   sync: { sync: () => {} }
+ * })
+ *
+ * // All helpers work with correct types
+ * const count = getItemCount(todoCollection) // number
+ * const todos = findItemsById(todoCollection, ['1', '2']) // Todo[]
+ *
+ * const bulkService = createBulkInsertService(todoCollection)
+ * await bulkService.bulkInsert([
+ *   { id: '3', title: 'New todo', completed: false }
+ * ])
  */
 export interface Collection<
   T extends object = Record<string, unknown>,

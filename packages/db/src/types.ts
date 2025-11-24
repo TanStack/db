@@ -368,6 +368,62 @@ export type UpdateMutationFnParams<
   collection: Collection<T, TKey, TUtils>
 }
 
+/**
+ * Parameters passed to insert mutation handlers
+ *
+ * @template T - The type of items in the collection
+ * @template TKey - The type of the key for the collection
+ * @template TUtils - The utilities record type
+ *
+ * @example
+ * // When creating a shared service with mutation handlers,
+ * // the transaction types are correctly preserved
+ *
+ * type Todo = { id: string; title: string; completed: boolean }
+ *
+ * const todos = createCollection<Todo, string>({
+ *   getKey: (todo) => todo.id,
+ *   onInsert: async ({ transaction, collection }) => {
+ *     // transaction.mutations[0].modified is correctly typed as Todo
+ *     const newTodo = transaction.mutations[0].modified
+ *     console.log(newTodo.title) // ✅ TypeScript knows this is a string
+ *
+ *     // NOT Record<string, any> - you get full type safety
+ *     await api.createTodo(newTodo)
+ *   },
+ *   sync: { sync: () => {} }
+ * })
+ *
+ * @example
+ * // Creating a reusable mutation handler
+ * function createInsertHandler<T extends object, TKey extends string | number>(
+ *   apiCall: (item: T) => Promise<void>
+ * ): (params: InsertMutationFnParams<T, TKey>) => Promise<void> {
+ *   return async ({ transaction, collection }) => {
+ *     // Loop through all mutations in the transaction
+ *     for (const mutation of transaction.mutations) {
+ *       // mutation.modified is correctly typed as T, not Record<string, any>
+ *       await apiCall(mutation.modified)
+ *     }
+ *   }
+ * }
+ *
+ * // Usage with properly typed collections
+ * type User = { id: string; name: string; email: string }
+ *
+ * const users = createCollection<User, string>({
+ *   getKey: (user) => user.id,
+ *   onInsert: createInsertHandler<User, string>(async (user) => {
+ *     // user is typed as User, not Record<string, any>
+ *     console.log(user.email) // ✅ Full autocomplete and type checking
+ *     await fetch('/api/users', {
+ *       method: 'POST',
+ *       body: JSON.stringify(user)
+ *     })
+ *   }),
+ *   sync: { sync: () => {} }
+ * })
+ */
 export type InsertMutationFnParams<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
