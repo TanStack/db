@@ -406,6 +406,16 @@ export class CollectionConfigBuilder<
       return Array.from(deps)
     })()
 
+    // Ensure dependent builders are actually scheduled in this context so that
+    // dependency edges always point to a real job (or a deduped no-op if already scheduled).
+    if (contextId) {
+      for (const dep of dependentBuilders) {
+        if (typeof dep.scheduleGraphRun === `function`) {
+          dep.scheduleGraphRun(undefined, { contextId })
+        }
+      }
+    }
+
     // We intentionally scope deduplication to the builder instance. Each instance
     // owns caches and compiled pipelines, so sharing work across instances that
     // merely reuse the same string id would execute the wrong builder's graph.
@@ -449,6 +459,13 @@ export class CollectionConfigBuilder<
    */
   clearPendingGraphRun(contextId: SchedulerContextId): void {
     this.pendingGraphRuns.delete(contextId)
+  }
+
+  /**
+   * Returns true if this builder has a pending graph run for the given context.
+   */
+  hasPendingGraphRun(contextId: SchedulerContextId): boolean {
+    return this.pendingGraphRuns.has(contextId)
   }
 
   /**

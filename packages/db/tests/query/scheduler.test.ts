@@ -674,24 +674,6 @@ describe(`live query scheduler`, () => {
   })
 
   it(`should prevent stale data when lazy source also depends on modified collection`, async () => {
-    // This test exposes a race condition in the current implementation:
-    //
-    // Setup:
-    // - baseCollection changes
-    // - queryA depends on baseCollection
-    // - queryB also depends on baseCollection (independently)
-    // - queryC depends on queryA AND left-joins queryB (lazy)
-    //
-    // Issue: When baseCollection changes:
-    // 1. queryA schedules (depends on base)
-    // 2. queryB schedules (depends on base)
-    // 3. queryC schedules (depends on queryA, but NOT queryB because it's lazy-only)
-    //
-    // queryC can run before queryB completes and lazy-load STALE data from queryB.
-    //
-    // Expected: queryC should see updated data (100) from queryB
-    // Actual: queryC sees stale data (10) from queryB
-
     interface BaseItem {
       id: string
       value: number
@@ -773,9 +755,8 @@ describe(`live query scheduler`, () => {
 
     expect(error).toBeUndefined()
 
-    // This assertion FAILS - queryC sees stale data from queryB
     const finalC = [...queryC.values()][0]
     expect(finalC?.aValue).toBe(100)
-    expect(finalC?.bValue).toBe(100) // Fails: sees 10 instead of 100
+    expect(finalC?.bValue).toBe(100)
   })
 })
