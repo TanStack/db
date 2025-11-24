@@ -446,9 +446,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 }
 
 export function electricCollectionOptions<T extends Row<unknown>>(
-  config: ElectricCollectionConfig<any, any>
+  config: ElectricCollectionConfig<T, any>
 ): Omit<
-  CollectionConfig<any, string | number, any, ElectricCollectionUtils<T>>,
+  CollectionConfig<T, string | number, any, ElectricCollectionUtils<T>>,
   `utils`
 > & {
   id?: string
@@ -507,7 +507,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     })
     removePendingMatches(matchesToResolve)
   }
-  const sync = createElectricSync<any>(config.shapeOptions, {
+  const sync = createElectricSync<T>(config.shapeOptions, {
     seenTxids,
     seenSnapshots,
     syncMode: internalSyncMode,
@@ -702,7 +702,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
         params: InsertMutationFnParams<
           any,
           string | number,
-          ElectricCollectionUtils<InferSchemaOutput<T>>
+          ElectricCollectionUtils<T>
         >
       ) => {
         const handlerResult = await config.onInsert!(params)
@@ -716,7 +716,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
         params: UpdateMutationFnParams<
           any,
           string | number,
-          ElectricCollectionUtils<InferSchemaOutput<T>>
+          ElectricCollectionUtils<T>
         >
       ) => {
         const handlerResult = await config.onUpdate!(params)
@@ -730,7 +730,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
         params: DeleteMutationFnParams<
           any,
           string | number,
-          ElectricCollectionUtils<InferSchemaOutput<T>>
+          ElectricCollectionUtils<T>
         >
       ) => {
         const handlerResult = await config.onDelete!(params)
@@ -758,7 +758,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     utils: {
       awaitTxId,
       awaitMatch,
-    } as ElectricCollectionUtils<any>,
+    },
   }
 }
 
