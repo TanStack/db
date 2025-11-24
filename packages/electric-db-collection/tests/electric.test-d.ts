@@ -124,9 +124,23 @@ describe(`Electric collection type resolution tests`, () => {
         expectTypeOf(collection.utils.awaitTxId).toBeFunction
         return Promise.resolve({ txid: 1 })
       },
+      onUpdate: async ({ collection }) => {
+        const testCollectionUtils: ElectricCollectionUtils<TodoType> =
+          collection.utils
+        expectTypeOf(testCollectionUtils.awaitTxId).toBeFunction
+        expectTypeOf(collection.utils.awaitTxId).toBeFunction
+        return Promise.resolve({ txid: 1 })
+      },
+      onDelete: async ({ collection }) => {
+        const testCollectionUtils: ElectricCollectionUtils<TodoType> =
+          collection.utils
+        expectTypeOf(testCollectionUtils.awaitTxId).toBeFunction
+        expectTypeOf(collection.utils.awaitTxId).toBeFunction
+        return Promise.resolve({ txid: 1 })
+      },
     })
 
-    // ✅ Test that options.utils is typed as ElectricCollectionUtils<TodoType>
+    // Test that options.utils is typed as ElectricCollectionUtils<TodoType>
     // The options object should have the correct type from electricCollectionOptions
     const testOptionsUtils: ElectricCollectionUtils<TodoType> = options.utils
 
