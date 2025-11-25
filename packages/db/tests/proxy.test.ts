@@ -1653,5 +1653,88 @@ describe(`Proxy Library`, () => {
       })
       expect(obj.date).toEqual(originalDate)
     })
+
+    // BUG: Array.find() returns unproxied items, so changes to them aren't tracked
+    // This is the root cause of the createOptimisticAction bug where mutationFn
+    // is never called when modifying nested array items via .find()
+    it(`should track changes when modifying array items retrieved via find()`, () => {
+      const obj = {
+        job: {
+          orders: [
+            { orderId: `order-1`, orderBinInt: 1 },
+            { orderId: `order-2`, orderBinInt: 2 },
+          ],
+        },
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // This is the exact pattern from the user's reproduction:
+      // Using .find() to get an array item and then modifying it
+      const order = proxy.job.orders.find(
+        (order) => order.orderId === `order-1`
+      )
+      if (order) {
+        order.orderBinInt = 99
+      }
+
+      // The changes should be tracked - this currently fails
+      const changes = getChanges()
+      expect(Object.keys(changes).length).toBeGreaterThan(0)
+      expect(changes.job?.orders?.[0]?.orderBinInt).toBe(99)
+    })
+
+    // Additional tests for other array iteration methods that should track changes
+    it(`should track changes when modifying array items via forEach`, () => {
+      const obj = {
+        items: [
+          { id: 1, value: 10 },
+          { id: 2, value: 20 },
+        ],
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.items.forEach((item) => {
+        item.value = item.value * 2
+      })
+
+      const changes = getChanges()
+      expect(Object.keys(changes).length).toBeGreaterThan(0)
+    })
+
+    it(`should track changes when modifying array items via for...of`, () => {
+      const obj = {
+        items: [
+          { id: 1, value: 10 },
+          { id: 2, value: 20 },
+        ],
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      for (const item of proxy.items) {
+        item.value = item.value * 2
+      }
+
+      const changes = getChanges()
+      expect(Object.keys(changes).length).toBeGreaterThan(0)
+    })
+
+    it(`should track changes when modifying array items via index access`, () => {
+      const obj = {
+        items: [
+          { id: 1, value: 10 },
+          { id: 2, value: 20 },
+        ],
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Direct index access should work
+      const firstItem = proxy.items[0]
+      if (firstItem) {
+        firstItem.value = 100
+      }
+
+      const changes = getChanges()
+      expect(Object.keys(changes).length).toBeGreaterThan(0)
+    })
   })
 })
