@@ -29,12 +29,11 @@ interface PendingAwareJob {
   hasPendingGraphRun: (contextId: SchedulerContextId) => boolean
 }
 
-function isPendingAwareJob(dep: unknown): dep is PendingAwareJob {
+function isPendingAwareJob(dep: any): dep is PendingAwareJob {
   return (
     typeof dep === `object` &&
     dep !== null &&
-    typeof (dep as { hasPendingGraphRun?: unknown }).hasPendingGraphRun ===
-      `function`
+    typeof dep.hasPendingGraphRun === `function`
   )
 }
 
