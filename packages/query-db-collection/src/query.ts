@@ -185,6 +185,7 @@ export interface QueryCollectionUtils<
   TKey extends string | number = string | number,
   TInsertInput extends object = TItem,
   TError = unknown,
+  TQueryData = any,
 > extends UtilsRecord {
   /** Manually trigger a refetch of the query */
   refetch: RefetchFn
@@ -221,6 +222,25 @@ export interface QueryCollectionUtils<
   fetchStatus: `fetching` | `paused` | `idle`
 
   /**
+   * The full query response data from queryFn, including any metadata.
+   * When using the select option, this contains the raw response before extraction.
+   * Useful for accessing pagination info, total counts, or other API metadata.
+   *
+   * @example
+   * // Without select - queryData is the array
+   * queryFn: async () => fetchContacts(), // returns Contact[]
+   * // queryData will be Contact[]
+   *
+   * @example
+   * // With select - queryData is the full response
+   * queryFn: async () => fetchContacts(), // returns { data: Contact[], total: number }
+   * select: (response) => response.data,
+   * // queryData will be { data: Contact[], total: number }
+   * const total = collection.utils.queryData?.total
+   */
+  queryData: TQueryData | undefined
+
+  /**
    * Clear the error state and trigger a refetch of the query
    * @returns Promise that resolves when the refetch completes successfully
    * @throws Error if the refetch fails
@@ -235,6 +255,7 @@ interface QueryCollectionState {
   lastError: any
   errorCount: number
   lastErrorUpdatedAt: number
+  queryData: any
   observers: Map<
     string,
     QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
@@ -330,6 +351,10 @@ class QueryCollectionUtilsImpl {
     return Array.from(this.state.observers.values()).map(
       (observer) => observer.getCurrentResult().fetchStatus
     )
+  }
+
+  public get queryData() {
+    return this.state.queryData
   }
 }
 
@@ -603,6 +628,7 @@ export function queryCollectionOptions(
     lastError: undefined as any,
     errorCount: 0,
     lastErrorUpdatedAt: 0,
+    queryData: undefined as any,
     observers: new Map<
       string,
       QueryObserver<Array<any>, any, Array<any>, Array<any>, any>
@@ -803,6 +829,7 @@ export function queryCollectionOptions(
           state.errorCount = 0
 
           const rawData = result.data
+          state.queryData = rawData
           const newItemsArray = select ? select(rawData) : rawData
 
           if (

@@ -692,6 +692,138 @@ describe(`QueryCollection`, () => {
       ) as MetaDataType<TestItem>
       expect(initialCache).toEqual(initialMetaData)
     })
+
+    it(`queryData is accessible via utils when using select`, async () => {
+      const queryKey = [`queryData-select-test`]
+
+      const queryFn = vi.fn().mockResolvedValue(initialMetaData)
+      const select = vi.fn().mockReturnValue(initialMetaData.data)
+
+      const options = queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        select,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(select).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(2)
+      })
+
+      // Verify that queryData contains the full response
+      expect(collection.utils.queryData).toEqual(initialMetaData)
+      expect(collection.utils.queryData?.metaDataOne).toBe(`example metadata`)
+      expect(collection.utils.queryData?.metaDataTwo).toBe(`example metadata`)
+    })
+
+    it(`queryData contains array when not using select`, async () => {
+      const queryKey = [`queryData-no-select-test`]
+      const items = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const options = queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(2)
+      })
+
+      // Verify that queryData contains the array directly
+      expect(collection.utils.queryData).toEqual(items)
+    })
+
+    it(`queryData updates reactively when query refetches`, async () => {
+      const queryKey = [`queryData-refetch-test`]
+
+      const initialData: MetaDataType<TestItem> = {
+        metaDataOne: `initial`,
+        metaDataTwo: `metadata`,
+        data: [{ id: `1`, name: `Initial Item` }],
+      }
+
+      const updatedData: MetaDataType<TestItem> = {
+        metaDataOne: `updated`,
+        metaDataTwo: `metadata`,
+        data: [
+          { id: `1`, name: `Updated Item` },
+          { id: `2`, name: `New Item` },
+        ],
+      }
+
+      const queryFn = vi
+        .fn()
+        .mockResolvedValueOnce(initialData)
+        .mockResolvedValueOnce(updatedData)
+      const select = vi.fn((data: MetaDataType<TestItem>) => data.data)
+
+      const options = queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        select,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Verify initial queryData
+      expect(collection.utils.queryData).toEqual(initialData)
+      expect(collection.utils.queryData?.metaDataOne).toBe(`initial`)
+
+      // Trigger refetch
+      await collection.utils.refetch()
+
+      // Wait for updated data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // Verify queryData has been updated
+      expect(collection.utils.queryData).toEqual(updatedData)
+      expect(collection.utils.queryData?.metaDataOne).toBe(`updated`)
+    })
+
+    it(`queryData is undefined initially before first fetch`, () => {
+      const queryKey = [`queryData-initial-test`]
+      const queryFn = vi.fn().mockResolvedValue(initialMetaData.data)
+
+      const options = queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: false, // Don't start sync automatically
+      })
+      const collection = createCollection(options)
+
+      // Before sync starts, queryData should be undefined
+      expect(collection.utils.queryData).toBeUndefined()
+    })
   })
   describe(`Direct persistence handlers`, () => {
     it(`should pass through direct persistence handlers to collection options`, () => {

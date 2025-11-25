@@ -77,6 +77,166 @@ The `queryCollectionOptions` function accepts the following options:
 - `onUpdate`: Handler called before update operations
 - `onDelete`: Handler called before delete operations
 
+## Working with API Responses
+
+Many APIs return data wrapped with metadata like pagination info, total counts, or other contextual information. Query Collection provides powerful tools to handle these scenarios.
+
+### The `select` Option
+
+When your API returns wrapped responses (data with metadata), use the `select` function to extract the array:
+
+```typescript
+const contactsCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['contacts'],
+    queryFn: async () => {
+      const response = await fetch('/api/contacts')
+      // API returns: { data: Contact[], pagination: { total: number } }
+      return response.json()
+    },
+    select: (response) => response.data, // Extract the array
+    queryClient,
+    getKey: (contact) => contact.id,
+  })
+)
+```
+
+### Accessing Metadata with `queryData`
+
+While `select` extracts the array for the collection, you often need access to the metadata (like pagination info). Use `collection.utils.queryData` to access the full response:
+
+```typescript
+// The full API response is available via utils.queryData
+const totalContacts = contactsCollection.utils.queryData?.pagination?.total
+const currentPage = contactsCollection.utils.queryData?.pagination?.page
+
+// Use in your components
+function ContactsTable() {
+  const contacts = useLiveQuery(contactsCollection)
+  const totalCount = contactsCollection.utils.queryData?.pagination?.total ?? 0
+
+  return (
+    <div>
+      <p>Showing {contacts.length} of {totalCount} contacts</p>
+      <Table data={contacts} />
+    </div>
+  )
+}
+```
+
+### Type-Safe Metadata Access
+
+TypeScript automatically infers the type of `queryData` from your `queryFn` return type:
+
+```typescript
+interface ContactsResponse {
+  data: Contact[]
+  pagination: {
+    total: number
+    page: number
+    perPage: number
+  }
+  metadata: {
+    lastSync: string
+  }
+}
+
+const contactsCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['contacts'],
+    queryFn: async (): Promise<ContactsResponse> => {
+      const response = await fetch('/api/contacts')
+      return response.json()
+    },
+    select: (response) => response.data,
+    queryClient,
+    getKey: (contact) => contact.id,
+  })
+)
+
+// TypeScript knows the structure of queryData
+const total = contactsCollection.utils.queryData?.pagination.total // ✅ Type-safe
+const lastSync = contactsCollection.utils.queryData?.metadata.lastSync // ✅ Type-safe
+```
+
+### Real-World Example: TanStack Table with Pagination
+
+A common use case is integrating with TanStack Table for server-side pagination:
+
+```typescript
+const contactsCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['contacts'],
+    queryFn: async (ctx) => {
+      const { limit, offset, sorts } = parseLoadSubsetOptions(
+        ctx.meta?.loadSubsetOptions
+      )
+
+      const response = await fetch('/api/contacts', {
+        method: 'POST',
+        body: JSON.stringify({ limit, offset, sorts }),
+      })
+
+      return response.json() // { data: Contact[], total: number }
+    },
+    select: (response) => response.data,
+    queryClient,
+    getKey: (contact) => contact.id,
+  })
+)
+
+function ContactsTable() {
+  const contacts = useLiveQuery(contactsCollection)
+  const totalRowCount = contactsCollection.utils.queryData?.total ?? 0
+
+  // Use with TanStack Table
+  const table = useReactTable({
+    data: contacts,
+    columns,
+    rowCount: totalRowCount,
+    // ... other options
+  })
+
+  return <TableComponent table={table} />
+}
+```
+
+### Without `select`: Direct Array Returns
+
+If your API returns a plain array, you don't need `select`. In this case, `queryData` will contain the array itself:
+
+```typescript
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ['todos'],
+    queryFn: async () => {
+      const response = await fetch('/api/todos')
+      return response.json() // Returns Todo[] directly
+    },
+    queryClient,
+    getKey: (todo) => todo.id,
+  })
+)
+
+// queryData is the array
+const todos = todosCollection.utils.queryData // Todo[] | undefined
+```
+
+### Reactive Updates
+
+The `queryData` property is reactive and updates automatically when:
+- The query refetches
+- Data is invalidated and refetched
+- Manual refetch is triggered
+
+```typescript
+// Trigger a refetch
+await contactsCollection.utils.refetch()
+
+// queryData is automatically updated with new response
+const newTotal = contactsCollection.utils.queryData?.pagination?.total
+```
+
 ## Persistence Handlers
 
 You can define handlers that are called when mutations occur. These handlers can persist changes to your backend and control whether the query should refetch after the operation:
@@ -135,12 +295,34 @@ This is useful when:
 
 ## Utility Methods
 
-The collection provides these utility methods via `collection.utils`:
+The collection provides utilities via `collection.utils` for managing the collection and accessing query state:
+
+### Methods
 
 - `refetch(opts?)`: Manually trigger a refetch of the query
   - `opts.throwOnError`: Whether to throw an error if the refetch fails (default: `false`)
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
   - Returns `QueryObserverResult` for inspecting the result
+
+- `clearError()`: Clear the error state and trigger a refetch
+
+- `writeInsert(data)`: Insert items directly to synced data (see [Direct Writes](#direct-writes))
+- `writeUpdate(data)`: Update items directly in synced data
+- `writeDelete(keys)`: Delete items directly from synced data
+- `writeUpsert(data)`: Insert or update items directly in synced data
+- `writeBatch(callback)`: Perform multiple write operations atomically
+
+### Properties
+
+- `queryData`: The full response from `queryFn`, including metadata (see [Working with API Responses](#working-with-api-responses))
+- `lastError`: The last error encountered (if any)
+- `isError`: Whether the collection is in an error state
+- `errorCount`: Number of consecutive sync failures
+- `isFetching`: Whether the query is currently fetching
+- `isRefetching`: Whether the query is refetching in the background
+- `isLoading`: Whether the query is loading for the first time
+- `dataUpdatedAt`: Timestamp of the last successful data update
+- `fetchStatus`: Current fetch status (`'fetching'`, `'paused'`, or `'idle'`)
 
 ## Direct Writes
 
