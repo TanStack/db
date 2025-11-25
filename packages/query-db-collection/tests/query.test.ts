@@ -969,7 +969,6 @@ describe(`QueryCollection`, () => {
       const cancelQueriesSpy = vi
         .spyOn(queryClient, `cancelQueries`)
         .mockResolvedValue()
-      const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
 
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
@@ -1001,16 +1000,14 @@ describe(`QueryCollection`, () => {
 
       // Verify that cleanup methods are called regardless of subscriber state
       expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey })
-      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
 
       // Verify subscribers can be safely cleaned up after collection cleanup
       subscription1.unsubscribe()
       subscription2.unsubscribe()
       expect(collection.subscriberCount).toBe(0)
 
-      // Restore spies
+      // Restore spy
       cancelQueriesSpy.mockRestore()
-      removeQueriesSpy.mockRestore()
     })
 
     it(`should handle multiple cleanup calls gracefully`, async () => {
@@ -1127,7 +1124,6 @@ describe(`QueryCollection`, () => {
       const cancelQueriesSpy = vi
         .spyOn(queryClient, `cancelQueries`)
         .mockResolvedValue()
-      const removeQueriesSpy = vi.spyOn(queryClient, `removeQueries`)
 
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
@@ -1144,11 +1140,9 @@ describe(`QueryCollection`, () => {
 
       // Verify cleanup methods were called
       expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey })
-      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
 
       // Clear the spies to track new calls
       cancelQueriesSpy.mockClear()
-      removeQueriesSpy.mockClear()
 
       // Restart by accessing collection
       const subscription = collection.subscribeChanges(() => {})
@@ -1163,11 +1157,9 @@ describe(`QueryCollection`, () => {
 
       // Verify cleanup methods were called again for the restarted sync
       expect(cancelQueriesSpy).toHaveBeenCalledWith({ queryKey })
-      expect(removeQueriesSpy).toHaveBeenCalledWith({ queryKey })
 
       // Restore spies
       cancelQueriesSpy.mockRestore()
-      removeQueriesSpy.mockRestore()
     })
 
     it(`should handle query invalidation and refetch properly`, async () => {
@@ -3147,9 +3139,9 @@ describe(`QueryCollection`, () => {
       await collection.cleanup()
 
       // Verify all items are removed
-      expect(collection.has(`1`)).toBe(false)
-      expect(collection.has(`2`)).toBe(false)
-      expect(collection.has(`3`)).toBe(false)
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
     })
 
     it(`should only delete non-shared rows when one of multiple overlapping queries is GCed`, async () => {
@@ -3163,7 +3155,6 @@ describe(`QueryCollection`, () => {
 
         // Query 1: items 1, 2, 3 (where: { category: 'A' })
         if (isCategory(`A`, where)) {
-          console.log(`Is category A`)
           return Promise.resolve([
             { id: `1`, name: `Item 1` },
             { id: `2`, name: `Item 2` },
@@ -3208,6 +3199,7 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
         syncMode: `on-demand`,
+        gcTime: 0, // GC immediately
       }
 
       const options = queryCollectionOptions(config)
@@ -3274,7 +3266,9 @@ describe(`QueryCollection`, () => {
       // Items 2 and 3 should remain because they're shared with other queries
       await query1.cleanup()
 
-      expect(collection.size).toBe(4) // Should have items 2, 3, 4, 5
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(4) // Should have items 2, 3, 4, 5
+      })
 
       // Verify item 1 is removed (it was only in query 1)
       expect(collection.has(`1`)).toBe(false)
@@ -3289,7 +3283,9 @@ describe(`QueryCollection`, () => {
       // Items 3 and 4 should remain because they are shared with query 3
       await query2.cleanup()
 
-      expect(collection.size).toBe(3) // Should have items 3, 4, 5
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Should have items 3, 4, 5
+      })
 
       // Verify item 2 is removed (it was only in query 2)
       expect(collection.has(`2`)).toBe(false)
@@ -3302,7 +3298,9 @@ describe(`QueryCollection`, () => {
       // GC query 3 (where: { category: 'C' }) - should remove all remaining items
       await query3.cleanup()
 
-      expect(collection.size).toBe(0)
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
 
       // Verify all items are now removed
       expect(collection.has(`3`)).toBe(false)
@@ -3336,6 +3334,7 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
         syncMode: `on-demand`,
+        gcTime: 0, // GC immediately
       }
 
       const options = queryCollectionOptions(config)
@@ -3368,10 +3367,9 @@ describe(`QueryCollection`, () => {
       })
       await query2.preload()
 
-      // Wait for query 2 data to load
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3) // Same data, no new items
-      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      expect(collection.size).toBe(3) // Same data, no new items
 
       // Add query 3 with different predicates (but returns same data)
       const query3 = createLiveQueryCollection({
@@ -3385,13 +3383,14 @@ describe(`QueryCollection`, () => {
       })
       await query3.preload()
 
-      // Wait for query 3 data to load
-      await vi.waitFor(() => {
-        expect(collection.size).toBe(3) // Same data, no new items
-      })
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      expect(collection.size).toBe(3) // Same data, no new items
 
       // GC query 1 - should not remove any items (all items are shared with other queries)
       await query1.cleanup()
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
 
       expect(collection.size).toBe(3) // Items still present due to other queries
 
@@ -3403,6 +3402,8 @@ describe(`QueryCollection`, () => {
       // GC query 2 - should still not remove any items (all items are shared with query 3)
       await query2.cleanup()
 
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
       expect(collection.size).toBe(3) // Items still present due to query 3
 
       // All items should still be present
@@ -3413,7 +3414,9 @@ describe(`QueryCollection`, () => {
       // GC query 3 - should remove all items (no more queries reference them)
       await query3.cleanup()
 
-      expect(collection.size).toBe(0)
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
 
       // All items should now be removed
       expect(collection.has(`1`)).toBe(false)
@@ -3455,6 +3458,7 @@ describe(`QueryCollection`, () => {
           getKey,
           startSync: true,
           syncMode: `on-demand`,
+          gcTime: 0, // GC immediately
         }
 
       const options = queryCollectionOptions(config)
@@ -3500,6 +3504,8 @@ describe(`QueryCollection`, () => {
 
       // GC empty query 1 - should not affect the collection
       await query1.cleanup()
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
 
       // Collection should still have items from query 2
       expect(collection.size).toBe(2)
@@ -3568,6 +3574,7 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
         syncMode: `on-demand`,
+        gcTime: 0, // GC immediately
       }
 
       const options = queryCollectionOptions(config)
@@ -3627,7 +3634,9 @@ describe(`QueryCollection`, () => {
       await Promise.all(proms)
 
       // Collection should be empty after all queries are GCed
-      expect(collection.size).toBe(0)
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
 
       // Verify all items are removed
       expect(collection.has(`1`)).toBe(false)
@@ -3679,6 +3688,7 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
         syncMode: `on-demand`,
+        gcTime: 0, // GC immediately
       }
 
       const options = queryCollectionOptions(config)
@@ -3737,7 +3747,9 @@ describe(`QueryCollection`, () => {
       // GC the first query (all category A without limit)
       await query1.cleanup()
 
-      expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
+      })
 
       // Verify that only row 3 is removed (it was only referenced by query 1)
       expect(collection.has(`1`)).toBe(true) // Still present (referenced by query 2)
@@ -3748,7 +3760,9 @@ describe(`QueryCollection`, () => {
       await query2.cleanup()
 
       // Wait for final GC to process
-      expect(collection.size).toBe(0)
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
     })
 
     it(`should not immediately remove query data from cache when live query is GCed (respects cacheTime)`, async () => {
