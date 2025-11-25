@@ -1118,7 +1118,7 @@ describe(`createLiveQueryCollection`, () => {
     })
 
     it(`source collection isLoadingSubset is independent of live query`, async () => {
-      let resolveLoadSubset: () => void
+      let resolveLoadSubset: (() => void) | undefined
       const loadSubsetPromise = new Promise<void>((resolve) => {
         resolveLoadSubset = resolve
       })
@@ -1145,24 +1145,25 @@ describe(`createLiveQueryCollection`, () => {
         startSync: true,
       })
 
-      await liveQuery.preload()
+      // Start preload but don't await yet
+      const preloadPromise = liveQuery.preload()
 
-      // After preload, live query's isLoadingSubset is true because the subscription
-      // triggered loadSubset on the source collection which returns a pending promise.
-      // This is the expected behavior for on-demand collections (see issue #909).
+      // While loading is in progress, isLoadingSubset should be true
+      await flushPromises()
       expect(liveQuery.isLoadingSubset).toBe(true)
 
       // Calling loadSubset directly on source collection sets its own isLoadingSubset
       sourceCollection._sync.loadSubset({})
       expect(sourceCollection.isLoadingSubset).toBe(true)
 
-      // Live query's isLoadingSubset is still true from the subscription-driven load
-      expect(liveQuery.isLoadingSubset).toBe(true)
-
+      // Resolve the loadSubset promise
       resolveLoadSubset!()
       await new Promise((resolve) => setTimeout(resolve, 10))
 
-      // After the promise resolves, both should be false
+      // Now preload should complete
+      await preloadPromise
+
+      // After preload completes, both should be false (preload now waits for loading)
       expect(sourceCollection.isLoadingSubset).toBe(false)
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
@@ -2054,8 +2055,11 @@ describe(`createLiveQueryCollection`, () => {
       // When using syncMode: "on-demand", calling liveQuery.preload() followed by
       // liveQuery.stateWhenReady() returns immediately with 0 items instead of
       // waiting for the async data to arrive.
+      //
+      // The fix: preload() now waits for loadSubset promises to resolve before
+      // returning. After preload() completes, the data is already available.
 
-      let resolveLoadSubset: () => void
+      let resolveLoadSubset: (() => void) | undefined
 
       // Create a source collection with on-demand sync that has async data loading
       const sourceCollection = createCollection<{ id: number; name: string }>({
@@ -2098,29 +2102,27 @@ describe(`createLiveQueryCollection`, () => {
       // Start preloading - this should trigger the sync and loadSubset
       const preloadPromise = liveQuery.preload()
 
-      // Wait for preload to complete (collection becomes "ready")
-      await preloadPromise
-
-      // At this point the collection is "ready" but data is still loading
-      // The live query's isLoadingSubset should be true
+      // At this point, preload is waiting for the loadSubset promise to resolve
+      await flushPromises()
       expect(liveQuery.isReady()).toBe(true)
       expect(liveQuery.isLoadingSubset).toBe(true)
       expect(liveQuery.size).toBe(0)
 
-      // Call stateWhenReady - this should wait for data to arrive
-      const statePromise = liveQuery.stateWhenReady()
-
       // Resolve the loadSubset to provide the data
-      await flushPromises()
       resolveLoadSubset!()
       await flushPromises()
 
-      // Now get the state
-      const state = await statePromise
+      // Now preload should complete with data already loaded
+      await preloadPromise
 
-      // The state should have 10 items, not 0
-      expect(state.size).toBe(10)
+      // After preload completes, data should be available
+      expect(liveQuery.isReady()).toBe(true)
+      expect(liveQuery.isLoadingSubset).toBe(false)
       expect(liveQuery.size).toBe(10)
+
+      // stateWhenReady should return immediately since data is already loaded
+      const state = await liveQuery.stateWhenReady()
+      expect(state.size).toBe(10)
     })
 
     it(`should return immediately if data already exists`, async () => {
@@ -2158,7 +2160,7 @@ describe(`createLiveQueryCollection`, () => {
     })
 
     it(`should work with toArrayWhenReady as well`, async () => {
-      let resolveLoadSubset: () => void
+      let resolveLoadSubset: (() => void) | undefined
 
       const sourceCollection = createCollection<{ id: number; name: string }>({
         id: `source-on-demand-toArray`,
@@ -2189,15 +2191,19 @@ describe(`createLiveQueryCollection`, () => {
         q.from({ item: sourceCollection })
       )
 
-      await liveQuery.preload()
+      // Start preloading (won't complete until loadSubset resolves)
+      const preloadPromise = liveQuery.preload()
 
-      const arrayPromise = liveQuery.toArrayWhenReady()
-
+      // Resolve the loadSubset to allow preload to complete
       await flushPromises()
       resolveLoadSubset!()
       await flushPromises()
 
-      const array = await arrayPromise
+      // Wait for preload to complete
+      await preloadPromise
+
+      // toArrayWhenReady should return immediately since data is already loaded
+      const array = await liveQuery.toArrayWhenReady()
 
       expect(array.length).toBe(2)
     })

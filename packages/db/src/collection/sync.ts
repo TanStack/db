@@ -36,7 +36,7 @@ export class CollectionSyncManager<
   private _events!: CollectionEventsManager
   private config!: CollectionConfig<TOutput, TKey, TSchema>
   private id: string
-  private syncMode: `eager` | `on-demand`
+  private _syncMode: `eager` | `on-demand`
 
   public preloadPromise: Promise<void> | null = null
   public syncCleanupFn: (() => void) | null = null
@@ -54,7 +54,14 @@ export class CollectionSyncManager<
   constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
     this.config = config
     this.id = id
-    this.syncMode = config.syncMode ?? `eager`
+    this._syncMode = config.syncMode ?? `eager`
+  }
+
+  /**
+   * Gets the sync mode for this collection
+   */
+  public get syncMode(): `eager` | `on-demand` {
+    return this._syncMode
   }
 
   setDeps(deps: {
@@ -215,7 +222,7 @@ export class CollectionSyncManager<
       this.syncUnloadSubsetFn = syncRes?.unloadSubset ?? null
 
       // Validate: on-demand mode requires a loadSubset function
-      if (this.syncMode === `on-demand` && !this.syncLoadSubsetFn) {
+      if (this._syncMode === `on-demand` && !this.syncLoadSubsetFn) {
         throw new CollectionConfigurationError(
           `Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. ` +
             `Either provide a loadSubset handler or use syncMode "eager".`
@@ -237,7 +244,7 @@ export class CollectionSyncManager<
     }
 
     // Warn when calling preload on an on-demand collection
-    if (this.syncMode === `on-demand`) {
+    if (this._syncMode === `on-demand`) {
       console.warn(
         `${this.id ? `[${this.id}] ` : ``}Calling .preload() on a collection with syncMode "on-demand" is a no-op. ` +
           `In on-demand mode, data is only loaded when queries request it. ` +
@@ -248,7 +255,9 @@ export class CollectionSyncManager<
 
     this.preloadPromise = new Promise<void>((resolve, reject) => {
       if (this.lifecycle.status === `ready`) {
-        resolve()
+        // Collection is already ready, but may still be loading subset data (issue #909).
+        // Wait for any pending loadSubset promises to complete.
+        this.waitForLoadingToComplete(resolve)
         return
       }
 
@@ -259,7 +268,9 @@ export class CollectionSyncManager<
 
       // Register callback BEFORE starting sync to avoid race condition
       this.lifecycle.onFirstReady(() => {
-        resolve()
+        // Collection is now ready, but may still be loading subset data (issue #909).
+        // Wait for any pending loadSubset promises to complete.
+        this.waitForLoadingToComplete(resolve)
       })
 
       // Start sync if collection hasn't started yet or was cleaned up
@@ -277,6 +288,26 @@ export class CollectionSyncManager<
     })
 
     return this.preloadPromise
+  }
+
+  /**
+   * Waits for any pending loadSubset promises to complete, then calls the callback.
+   * Calls the callback synchronously if not currently loading.
+   */
+  private waitForLoadingToComplete(callback: () => void): void {
+    if (!this.isLoadingSubset) {
+      // Not loading - call callback synchronously
+      callback()
+      return
+    }
+
+    // Loading in progress - subscribe to event and call callback when done
+    const unsubscribe = this._events.on(`loadingSubset:change`, (event) => {
+      if (!event.isLoadingSubset) {
+        unsubscribe()
+        callback()
+      }
+    })
   }
 
   /**
@@ -330,7 +361,7 @@ export class CollectionSyncManager<
    */
   public loadSubset(options: LoadSubsetOptions): Promise<void> | true {
     // Bypass loadSubset when syncMode is 'eager'
-    if (this.syncMode === `eager`) {
+    if (this._syncMode === `eager`) {
       return true
     }
 
