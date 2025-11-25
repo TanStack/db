@@ -705,13 +705,44 @@ export class CollectionImpl<
    * @returns Promise that resolves to a Map containing all items in the collection
    */
   stateWhenReady(): Promise<Map<TKey, TOutput>> {
-    // If we already have data or collection is ready, resolve immediately
-    if (this.size > 0 || this.isReady()) {
+    // If we already have data, resolve immediately
+    if (this.size > 0) {
+      return Promise.resolve(this.state)
+    }
+
+    // If collection is ready but still loading subset data (on-demand mode),
+    // wait for the loading to complete before returning the state
+    if (this.isReady() && this.isLoadingSubset) {
+      return new Promise<Map<TKey, TOutput>>((resolve) => {
+        const unsubscribe = this.on(`loadingSubset:change`, (event) => {
+          if (!event.isLoadingSubset) {
+            unsubscribe()
+            resolve(this.state)
+          }
+        })
+      })
+    }
+
+    // If collection is ready and not loading, resolve immediately
+    if (this.isReady()) {
       return Promise.resolve(this.state)
     }
 
     // Use preload to ensure the collection starts loading, then return the state
-    return this.preload().then(() => this.state)
+    // After preload completes, check if we still need to wait for subset loading
+    return this.preload().then(() => {
+      if (this.isLoadingSubset) {
+        return new Promise<Map<TKey, TOutput>>((resolve) => {
+          const unsubscribe = this.on(`loadingSubset:change`, (event) => {
+            if (!event.isLoadingSubset) {
+              unsubscribe()
+              resolve(this.state)
+            }
+          })
+        })
+      }
+      return this.state
+    })
   }
 
   /**
@@ -730,13 +761,44 @@ export class CollectionImpl<
    * @returns Promise that resolves to an Array containing all items in the collection
    */
   toArrayWhenReady(): Promise<Array<TOutput>> {
-    // If we already have data or collection is ready, resolve immediately
-    if (this.size > 0 || this.isReady()) {
+    // If we already have data, resolve immediately
+    if (this.size > 0) {
+      return Promise.resolve(this.toArray)
+    }
+
+    // If collection is ready but still loading subset data (on-demand mode),
+    // wait for the loading to complete before returning the array
+    if (this.isReady() && this.isLoadingSubset) {
+      return new Promise<Array<TOutput>>((resolve) => {
+        const unsubscribe = this.on(`loadingSubset:change`, (event) => {
+          if (!event.isLoadingSubset) {
+            unsubscribe()
+            resolve(this.toArray)
+          }
+        })
+      })
+    }
+
+    // If collection is ready and not loading, resolve immediately
+    if (this.isReady()) {
       return Promise.resolve(this.toArray)
     }
 
     // Use preload to ensure the collection starts loading, then return the array
-    return this.preload().then(() => this.toArray)
+    // After preload completes, check if we still need to wait for subset loading
+    return this.preload().then(() => {
+      if (this.isLoadingSubset) {
+        return new Promise<Array<TOutput>>((resolve) => {
+          const unsubscribe = this.on(`loadingSubset:change`, (event) => {
+            if (!event.isLoadingSubset) {
+              unsubscribe()
+              resolve(this.toArray)
+            }
+          })
+        })
+      }
+      return this.toArray
+    })
   }
 
   /**

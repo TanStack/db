@@ -108,7 +108,14 @@ export class CollectionChangesManager<
     })
 
     if (options.includeInitialState) {
-      subscription.requestSnapshot({ trackLoadSubsetPromise: false })
+      // For on-demand collections, track the loadSubset promise so that
+      // the subscription status correctly reflects the loading state.
+      // This allows live queries to properly wait for initial data to load
+      // via stateWhenReady() (see issue #909).
+      const shouldTrackPromise = this.sync.syncMode === `on-demand`
+      subscription.requestSnapshot({
+        trackLoadSubsetPromise: shouldTrackPromise,
+      })
     }
 
     // Add to batched listeners
