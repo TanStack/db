@@ -755,7 +755,7 @@ export function queryCollectionOptions(
       // The subscription is unsubscribed when the live query is GCed.
       const subscription = opts.subscription
       subscription?.once(`unsubscribed`, () => {
-        queryClient.removeQueries({ queryKey: key, exact: true })
+        unsubscribeFromQuery(hashedQueryKey)
       })
 
       return readyPromise
@@ -883,6 +883,14 @@ export function queryCollectionOptions(
 
     const subscribeToQueries = () => {
       state.observers.forEach(subscribeToQuery)
+    }
+
+    const unsubscribeFromQuery = (hashedQueryKey: string) => {
+      const unsubscribeFn = unsubscribes.get(hashedQueryKey)
+      if (unsubscribeFn) {
+        unsubscribeFn()
+        unsubscribes.delete(hashedQueryKey)
+      }
     }
 
     const unsubscribeFromQueries = () => {
