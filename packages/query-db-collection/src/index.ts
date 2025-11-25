@@ -1,7 +1,10 @@
+// Export QueryCollectionMeta from global.ts
+// This ensures the module augmentation in global.ts is processed by TypeScript
+export type { QueryCollectionMeta } from "./global"
+
 export {
   queryCollectionOptions,
   type QueryCollectionConfig,
-  type QueryCollectionMeta,
   type QueryCollectionUtils,
   type SyncOperation,
 } from "./query"

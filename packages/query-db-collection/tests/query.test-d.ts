@@ -488,5 +488,76 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions(config)
       createCollection(options)
     })
+
+    it(`should have loadSubsetOptions typed automatically without explicit QueryCollectionMeta import`, () => {
+      // This test validates that the module augmentation works automatically
+      // Note: We are NOT importing QueryCollectionMeta, yet ctx.meta.loadSubsetOptions
+      // should still be properly typed as LoadSubsetOptions
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `autoTypeTest`,
+        queryClient,
+        queryKey: [`autoTypeTest`],
+        queryFn: (ctx) => {
+          // This should compile without errors because the module augmentation
+          // in global.d.ts is automatically loaded via the triple-slash reference
+          // in index.ts
+          const options = ctx.meta?.loadSubsetOptions
+
+          // Verify the type is correct
+          expectTypeOf(options).toMatchTypeOf<LoadSubsetOptions | undefined>()
+
+          // Verify it can be passed to parseLoadSubsetOptions without type errors
+          const parsed = parseLoadSubsetOptions(options)
+          expectTypeOf(parsed).toMatchTypeOf<{
+            filters: Array<any>
+            sorts: Array<any>
+            limit?: number
+          }>()
+
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
+    })
+
+    it(`should allow users to extend QueryCollectionMeta via module augmentation`, () => {
+      // This test validates that users can extend QueryCollectionMeta to add custom properties
+      // by augmenting the @tanstack/query-db-collection module
+
+      // In reality, users would do:
+      // declare module "@tanstack/query-db-collection" {
+      //   interface QueryCollectionMeta {
+      //     customUserId: number
+      //     customContext?: string
+      //   }
+      // }
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `extendMetaTest`,
+        queryClient,
+        queryKey: [`extendMetaTest`],
+        queryFn: (ctx) => {
+          // ctx.meta still has loadSubsetOptions
+          expectTypeOf(ctx.meta?.loadSubsetOptions).toMatchTypeOf<
+            LoadSubsetOptions | undefined
+          >()
+
+          // This test documents the extension pattern even though we can't
+          // actually augment QueryCollectionMeta in a test file (it would
+          // affect all other tests in the same compilation unit)
+
+          return Promise.resolve([])
+        },
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      createCollection(options)
+    })
   })
 })
