@@ -1654,9 +1654,7 @@ describe(`Proxy Library`, () => {
       expect(obj.date).toEqual(originalDate)
     })
 
-    // BUG: Array.find() returns unproxied items, so changes to them aren't tracked
-    // This is the root cause of the createOptimisticAction bug where mutationFn
-    // is never called when modifying nested array items via .find()
+    // Test that array iteration methods return proxied elements for change tracking
     it(`should track changes when modifying array items retrieved via find()`, () => {
       const obj = {
         job: {
@@ -1668,8 +1666,7 @@ describe(`Proxy Library`, () => {
       }
       const { proxy, getChanges } = createChangeProxy(obj)
 
-      // This is the exact pattern from the user's reproduction:
-      // Using .find() to get an array item and then modifying it
+      // Use find() to get an array item and modify it
       const order = proxy.job.orders.find(
         (order) => order.orderId === `order-1`
       )
@@ -1677,13 +1674,11 @@ describe(`Proxy Library`, () => {
         order.orderBinInt = 99
       }
 
-      // The changes should be tracked - this currently fails
       const changes = getChanges()
       expect(Object.keys(changes).length).toBeGreaterThan(0)
       expect(changes.job?.orders?.[0]?.orderBinInt).toBe(99)
     })
 
-    // Additional tests for other array iteration methods that should track changes
     it(`should track changes when modifying array items via forEach`, () => {
       const obj = {
         items: [
