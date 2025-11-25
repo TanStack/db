@@ -10,7 +10,6 @@ import type { BasicExpression, OrderBy } from "../query/ir.js"
 import type { IndexInterface } from "../indexes/base-index.js"
 import type {
   ChangeMessage,
-  LoadSubsetOptions,
   Subscription,
   SubscriptionEvents,
   SubscriptionStatus,
@@ -47,12 +46,6 @@ export class CollectionSubscription
   // Flag to indicate that we have sent at least 1 snapshot.
   // While `snapshotSent` is false we filter out all changes from subscription to the collection.
   private snapshotSent = false
-
-  /**
-   * Track all loadSubset calls made by this subscription so we can unload them on cleanup.
-   * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
-   */
-  private loadedSubsets: Array<LoadSubsetOptions> = []
 
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
@@ -200,14 +193,10 @@ export class CollectionSubscription
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const loadOptions: LoadSubsetOptions = {
+    const syncResult = this.collection._sync.loadSubset({
       where: stateOpts.where,
       subscription: this,
-    }
-    const syncResult = this.collection._sync.loadSubset(loadOptions)
-
-    // Track this loadSubset call so we can unload it later
-    this.loadedSubsets.push(loadOptions)
+    })
 
     const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
     if (trackLoadSubsetPromise) {
@@ -344,16 +333,12 @@ export class CollectionSubscription
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const loadOptions1: LoadSubsetOptions = {
+    const syncResult = this.collection._sync.loadSubset({
       where: whereWithValueFilter,
       limit,
       orderBy,
       subscription: this,
-    }
-    const syncResult = this.collection._sync.loadSubset(loadOptions1)
-
-    // Track this loadSubset call
-    this.loadedSubsets.push(loadOptions1)
+    })
 
     // Make parallel loadSubset calls for values equal to minValue and values greater than minValue
     const promises: Array<Promise<void>> = []
@@ -363,14 +348,10 @@ export class CollectionSubscription
       const { expression } = orderBy[0]!
       const exactValueFilter = eq(expression, new Value(minValue))
 
-      const loadOptions2: LoadSubsetOptions = {
+      const equalValueResult = this.collection._sync.loadSubset({
         where: exactValueFilter,
         subscription: this,
-      }
-      const equalValueResult = this.collection._sync.loadSubset(loadOptions2)
-
-      // Track this loadSubset call
-      this.loadedSubsets.push(loadOptions2)
+      })
 
       if (equalValueResult instanceof Promise) {
         promises.push(equalValueResult)
@@ -436,13 +417,6 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
-    // Unload all subsets that this subscription loaded
-    // We pass the exact same LoadSubsetOptions we used for loadSubset
-    for (const options of this.loadedSubsets) {
-      this.collection._sync.unloadSubset(options)
-    }
-    this.loadedSubsets = []
-
     this.emitInner(`unsubscribed`, {
       type: `unsubscribed`,
       subscription: this,

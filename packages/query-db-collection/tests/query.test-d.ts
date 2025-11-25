@@ -10,7 +10,7 @@ import {
 import { QueryClient } from "@tanstack/query-core"
 import { z } from "zod"
 import { queryCollectionOptions } from "../src/query"
-import type { QueryCollectionConfig, QueryCollectionUtils } from "../src/query"
+import type { QueryCollectionConfig } from "../src/query"
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -70,33 +70,15 @@ describe(`Query collection type resolution tests`, () => {
 
     // Verify that the handlers are properly typed
     expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [
-        InsertMutationFnParams<
-          ExplicitType,
-          string | number,
-          QueryCollectionUtils<ExplicitType>
-        >,
-      ]
+      [InsertMutationFnParams<ExplicitType>]
     >()
 
     expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [
-        UpdateMutationFnParams<
-          ExplicitType,
-          string | number,
-          QueryCollectionUtils<ExplicitType>
-        >,
-      ]
+      [UpdateMutationFnParams<ExplicitType>]
     >()
 
     expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [
-        DeleteMutationFnParams<
-          ExplicitType,
-          string | number,
-          QueryCollectionUtils<ExplicitType>
-        >,
-      ]
+      [DeleteMutationFnParams<ExplicitType>]
     >()
   })
 

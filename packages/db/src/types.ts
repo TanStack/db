@@ -273,14 +273,11 @@ export type LoadSubsetOptions = {
 
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
-export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
-
 export type CleanupFn = () => void
 
 export type SyncConfigRes = {
   cleanup?: CleanupFn
   loadSubset?: LoadSubsetFn
-  unloadSubset?: UnloadSubsetFn
 }
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
