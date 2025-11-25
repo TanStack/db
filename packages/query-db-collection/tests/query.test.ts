@@ -3750,6 +3750,87 @@ describe(`QueryCollection`, () => {
       // Wait for final GC to process
       expect(collection.size).toBe(0)
     })
+
+    it(`should not immediately remove query data from cache when live query is GCed (respects cacheTime)`, async () => {
+      // Create a QueryClient with a longer cacheTime to test that data should persist
+      const testQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 0,
+            gcTime: 300,
+            retry: false,
+          },
+        },
+      })
+
+      const queryKey = [`premature-gc-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Use on-demand mode so the query is only created when the live query needs it
+      // This ensures the subscription is passed when the query is created
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `premature-gc-test`,
+        queryClient: testQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        syncMode: `on-demand`, // Use on-demand mode so query is created with subscription
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create a live query that uses the collection
+      // This creates a subscription that will trigger the unsubscribed event when cleaned up
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      // Preload the live query - this will create the query with the subscription
+      await liveQuery.preload()
+
+      // Wait for data to load
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(2)
+      })
+
+      // Verify query data is in the cache
+      const cachedData = testQueryClient.getQueryData(
+        queryKey
+      ) as Array<TestItem>
+      expect(cachedData).toBeDefined()
+      expect(cachedData).toEqual(items)
+
+      // Cleanup the live query - this triggers the unsubscribed event
+      await liveQuery.cleanup()
+
+      // Wait 100ms, the gcTime is set to 300ms, so data should remain in the cache
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
+      // Data should remain in cache until gcTime elapses
+      const cachedDataAfterCleanup = testQueryClient.getQueryData(queryKey)
+      expect(cachedDataAfterCleanup).toBeDefined()
+      expect(cachedDataAfterCleanup).toEqual(items)
+
+      // Wait an additional 250ms to be sure the gcTime elapsed
+      await new Promise((resolve) => setTimeout(resolve, 250))
+
+      // Data should be removed from cache after gcTime elapses
+      const cachedDataAfterCacheTime = testQueryClient.getQueryData(queryKey)
+      expect(cachedDataAfterCacheTime).toBeUndefined()
+
+      // Cleanup
+      testQueryClient.clear()
+    })
   })
 
   describe(`Static queryKey with on-demand mode`, () => {
