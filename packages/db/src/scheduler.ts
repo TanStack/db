@@ -25,6 +25,18 @@ interface SchedulerContextState {
   completed: Set<unknown>
 }
 
+interface PendingAwareJob {
+  hasPendingGraphRun: (contextId: SchedulerContextId) => boolean
+}
+
+function isPendingAwareJob(dep: any): dep is PendingAwareJob {
+  return (
+    typeof dep === `object` &&
+    dep !== null &&
+    typeof dep.hasPendingGraphRun === `function`
+  )
+}
+
 /**
  * Scoped scheduler that coalesces work by context and job.
  *
@@ -119,7 +131,19 @@ export class Scheduler {
         if (deps) {
           ready = true
           for (const dep of deps) {
-            if (dep !== jobId && !completed.has(dep)) {
+            if (dep === jobId) continue
+
+            const depHasPending =
+              isPendingAwareJob(dep) && dep.hasPendingGraphRun(contextId)
+
+            // Treat dependencies as blocking if the dep has a pending run in this
+            // context or if it's enqueued and not yet complete. If the dep is
+            // neither pending nor enqueued, consider it satisfied to avoid deadlocks
+            // on lazy sources that never schedule work.
+            if (
+              (jobs.has(dep) && !completed.has(dep)) ||
+              (!jobs.has(dep) && depHasPending)
+            ) {
               ready = false
               break
             }
