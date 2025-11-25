@@ -1007,7 +1007,6 @@ export function queryCollectionOptions(
         queryKeys.map(async ([hashedQueryKey, queryKey]) => {
           unsubscribeFromQuery(hashedQueryKey)
           await queryClient.cancelQueries({ queryKey })
-          // queryClient.removeQueries({ queryKey })
         })
       )
     }
