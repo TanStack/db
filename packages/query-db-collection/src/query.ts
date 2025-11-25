@@ -140,6 +140,13 @@ export interface QueryCollectionConfig<
     Array<T>,
     TQueryKey
   >[`staleTime`]
+  gcTime?: QueryObserverOptions<
+    Array<T>,
+    TError,
+    Array<T>,
+    Array<T>,
+    TQueryKey
+  >[`gcTime`]
 
   /**
    * Metadata to pass to the query.
@@ -566,6 +573,7 @@ export function queryCollectionOptions(
     retry,
     retryDelay,
     staleTime,
+    gcTime,
     getKey,
     onInsert,
     onUpdate,
@@ -719,6 +727,7 @@ export function queryCollectionOptions(
         ...(retry !== undefined && { retry }),
         ...(retryDelay !== undefined && { retryDelay }),
         ...(staleTime !== undefined && { staleTime }),
+        ...(gcTime !== undefined && { gcTime }),
       }
 
       const localObserver = new QueryObserver<
@@ -986,7 +995,7 @@ export function queryCollectionOptions(
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
 
-      const queryKeys = [...hashToQueryKey.values()]
+      const queryKeys = [...hashToQueryKey.entries()]
 
       hashToQueryKey.clear()
       queryToRows.clear()
@@ -995,9 +1004,10 @@ export function queryCollectionOptions(
       unsubscribeQueryCache()
 
       await Promise.all(
-        queryKeys.map(async (queryKey) => {
+        queryKeys.map(async ([hashedQueryKey, queryKey]) => {
+          unsubscribeFromQuery(hashedQueryKey)
           await queryClient.cancelQueries({ queryKey })
-          queryClient.removeQueries({ queryKey })
+          // queryClient.removeQueries({ queryKey })
         })
       )
     }
