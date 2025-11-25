@@ -25,6 +25,7 @@
     "@firefox-devtools/react-contextmenu": "^5.2.3",
     "@tailwindcss/vite": "^4.1.16",
     "@tanstack/electric-db-collection": "^0.1.7",
+    "@tanstack/pacer-lite": "^0.1.0",
     "@tanstack/query-core": "^5.90.7",
     "@tanstack/query-db-collection": "^0.2.32",
     "@tanstack/react-db": "https://pkg.pr.new/@tanstack/react-db@763",
