@@ -411,6 +411,182 @@ export function createChangeProxy<
                 return result
               }
             }
+
+            // For Array methods that iterate with callbacks and may return elements
+            // These need to pass proxied elements to callbacks and return proxied results
+            const callbackIterationMethods = new Set([
+              `find`,
+              `findLast`,
+              `findIndex`,
+              `findLastIndex`,
+              `filter`,
+              `map`,
+              `flatMap`,
+              `forEach`,
+              `some`,
+              `every`,
+              `reduce`,
+              `reduceRight`,
+            ])
+
+            if (callbackIterationMethods.has(methodName)) {
+              return function (...args: Array<unknown>) {
+                const callback = args[0]
+                if (typeof callback !== `function`) {
+                  return value.apply(changeTracker.copy_, args)
+                }
+
+                // Create a helper to get proxied version of an array element
+                const getProxiedElement = (
+                  element: unknown,
+                  index: number
+                ): unknown => {
+                  if (
+                    element &&
+                    typeof element === `object` &&
+                    !((element as any) instanceof Date) &&
+                    !((element as any) instanceof RegExp) &&
+                    !isTemporal(element)
+                  ) {
+                    // Create a parent reference for the array element
+                    const nestedParent = {
+                      tracker: changeTracker,
+                      prop: String(index),
+                    }
+                    const { proxy: elementProxy } = memoizedCreateChangeProxy(
+                      element as Record<string | symbol, unknown>,
+                      nestedParent
+                    )
+                    return elementProxy
+                  }
+                  return element
+                }
+
+                // Wrap the callback to pass proxied elements
+                const wrappedCallback = function (
+                  this: unknown,
+                  element: unknown,
+                  index: number,
+                  array: unknown
+                ) {
+                  const proxiedElement = getProxiedElement(element, index)
+                  return callback.call(this, proxiedElement, index, array)
+                }
+
+                // For reduce/reduceRight, the callback signature is different
+                if (methodName === `reduce` || methodName === `reduceRight`) {
+                  const reduceCallback = function (
+                    this: unknown,
+                    accumulator: unknown,
+                    element: unknown,
+                    index: number,
+                    array: unknown
+                  ) {
+                    const proxiedElement = getProxiedElement(element, index)
+                    return callback.call(
+                      this,
+                      accumulator,
+                      proxiedElement,
+                      index,
+                      array
+                    )
+                  }
+                  return value.apply(changeTracker.copy_, [
+                    reduceCallback,
+                    ...args.slice(1),
+                  ])
+                }
+
+                const result = value.apply(changeTracker.copy_, [
+                  wrappedCallback,
+                  ...args.slice(1),
+                ])
+
+                // For find/findLast, proxy the returned element if it's an object
+                if (
+                  (methodName === `find` || methodName === `findLast`) &&
+                  result &&
+                  typeof result === `object`
+                ) {
+                  // Find the index of the result in the array
+                  const foundIndex = (
+                    changeTracker.copy_ as Array<unknown>
+                  ).indexOf(result)
+                  if (foundIndex !== -1) {
+                    return getProxiedElement(result, foundIndex)
+                  }
+                }
+
+                // For filter/map/flatMap, proxy each element in the result array
+                if (
+                  (methodName === `filter` ||
+                    methodName === `map` ||
+                    methodName === `flatMap`) &&
+                  Array.isArray(result)
+                ) {
+                  // For filter, the result contains original elements
+                  // For map/flatMap, the result contains new elements from callback
+                  // We don't need to proxy map/flatMap results as they're new objects
+                  if (methodName === `filter`) {
+                    return result.map((element) => {
+                      const originalIndex = (
+                        changeTracker.copy_ as Array<unknown>
+                      ).indexOf(element)
+                      if (originalIndex !== -1) {
+                        return getProxiedElement(element, originalIndex)
+                      }
+                      return element
+                    })
+                  }
+                }
+
+                return result
+              }
+            }
+
+            // Handle array Symbol.iterator for for...of loops
+            if (prop === Symbol.iterator) {
+              return function () {
+                const array = changeTracker.copy_ as Array<unknown>
+                let index = 0
+
+                return {
+                  next() {
+                    if (index >= array.length) {
+                      return { done: true, value: undefined }
+                    }
+
+                    const element = array[index]
+                    let proxiedElement = element
+
+                    // Proxy object elements
+                    if (
+                      element &&
+                      typeof element === `object` &&
+                      !((element as any) instanceof Date) &&
+                      !((element as any) instanceof RegExp) &&
+                      !isTemporal(element)
+                    ) {
+                      const nestedParent = {
+                        tracker: changeTracker,
+                        prop: String(index),
+                      }
+                      const { proxy: elementProxy } = memoizedCreateChangeProxy(
+                        element as Record<string | symbol, unknown>,
+                        nestedParent
+                      )
+                      proxiedElement = elementProxy
+                    }
+
+                    index++
+                    return { done: false, value: proxiedElement }
+                  },
+                  [Symbol.iterator]() {
+                    return this
+                  },
+                }
+              }
+            }
           }
 
           // For Map and Set methods that modify the collection
