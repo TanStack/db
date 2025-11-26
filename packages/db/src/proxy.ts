@@ -256,7 +256,10 @@ function createMapSetIteratorHandler<T extends object>(
   changeTracker: ChangeTracker<T>,
   memoizedCreateChangeProxy: (
     obj: Record<string | symbol, unknown>,
-    parent?: Record<string, unknown>
+    parent?: {
+      tracker: ChangeTracker<Record<string | symbol, unknown>>
+      prop: string | symbol
+    }
   ) => { proxy: Record<string | symbol, unknown> },
   markChanged: (tracker: ChangeTracker<T>) => void
 ): ((...args: Array<unknown>) => unknown) | undefined {
@@ -340,8 +343,10 @@ function createMapSetIteratorHandler<T extends object>(
               ) {
                 const mapKey = nextResult.value[0]
                 const mapParent = {
-                  tracker: changeTracker,
-                  prop: mapKey,
+                  tracker: changeTracker as unknown as ChangeTracker<
+                    Record<string | symbol, unknown>
+                  >,
+                  prop: mapKey as string | symbol,
                   updateMap: (newValue: unknown) => {
                     if (changeTracker.copy_ instanceof Map) {
                       ;(changeTracker.copy_ as Map<unknown, unknown>).set(
@@ -353,7 +358,10 @@ function createMapSetIteratorHandler<T extends object>(
                 }
                 const { proxy: valueProxy } = memoizedCreateChangeProxy(
                   nextResult.value[1] as Record<string | symbol, unknown>,
-                  mapParent
+                  mapParent as unknown as {
+                    tracker: ChangeTracker<Record<string | symbol, unknown>>
+                    prop: string | symbol
+                  }
                 )
                 nextResult.value[1] = valueProxy
               }
@@ -367,8 +375,10 @@ function createMapSetIteratorHandler<T extends object>(
                 const mapKey = valueToKeyMap.get(nextResult.value)
                 if (mapKey !== undefined) {
                   const mapParent = {
-                    tracker: changeTracker,
-                    prop: mapKey,
+                    tracker: changeTracker as unknown as ChangeTracker<
+                      Record<string | symbol, unknown>
+                    >,
+                    prop: mapKey as string | symbol,
                     updateMap: (newValue: unknown) => {
                       if (changeTracker.copy_ instanceof Map) {
                         ;(changeTracker.copy_ as Map<unknown, unknown>).set(
@@ -380,7 +390,10 @@ function createMapSetIteratorHandler<T extends object>(
                   }
                   const { proxy: valueProxy } = memoizedCreateChangeProxy(
                     nextResult.value as Record<string | symbol, unknown>,
-                    mapParent
+                    mapParent as unknown as {
+                      tracker: ChangeTracker<Record<string | symbol, unknown>>
+                      prop: string | symbol
+                    }
                   )
                   nextResult.value = valueProxy
                 }
@@ -388,8 +401,10 @@ function createMapSetIteratorHandler<T extends object>(
                 // For Set, track modifications
                 const setOriginalValue = nextResult.value
                 const setParent = {
-                  tracker: changeTracker,
-                  prop: setOriginalValue,
+                  tracker: changeTracker as unknown as ChangeTracker<
+                    Record<string | symbol, unknown>
+                  >,
+                  prop: setOriginalValue as unknown as string | symbol,
                   updateSet: (newValue: unknown) => {
                     if (changeTracker.copy_ instanceof Set) {
                       ;(changeTracker.copy_ as Set<unknown>).delete(
@@ -402,7 +417,10 @@ function createMapSetIteratorHandler<T extends object>(
                 }
                 const { proxy: valueProxy } = memoizedCreateChangeProxy(
                   nextResult.value as Record<string | symbol, unknown>,
-                  setParent
+                  setParent as unknown as {
+                    tracker: ChangeTracker<Record<string | symbol, unknown>>
+                    prop: string | symbol
+                  }
                 )
                 nextResult.value = valueProxy
               } else {
@@ -411,7 +429,9 @@ function createMapSetIteratorHandler<T extends object>(
                 const { proxy: valueProxy } = memoizedCreateChangeProxy(
                   nextResult.value as Record<string | symbol, unknown>,
                   {
-                    tracker: changeTracker,
+                    tracker: changeTracker as unknown as ChangeTracker<
+                      Record<string | symbol, unknown>
+                    >,
                     prop: tempKey,
                   }
                 )
