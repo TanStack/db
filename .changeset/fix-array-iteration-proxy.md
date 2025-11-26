@@ -8,7 +8,7 @@ Previously, modifications to array items retrieved via iteration methods were no
 
 ```ts
 collection.update(id, (draft) => {
-  const item = draft.items.find(x => x.id === targetId)
+  const item = draft.items.find((x) => x.id === targetId)
   if (item) {
     item.value = newValue // This change was not tracked!
   }
