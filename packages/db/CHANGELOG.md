@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.5.8
+
+### Patch Changes
+
+- Fix pagination with Date orderBy values when backend has higher precision than JavaScript's millisecond precision. When loading duplicate values during cursor-based pagination, Date values now use a 1ms range query (`gte`/`lt`) instead of exact equality (`eq`) to correctly match all rows that fall within the same millisecond, even if the backend (e.g., PostgreSQL) stores them with microsecond precision. ([#913](https://github.com/TanStack/db/pull/913))
+
+- Fixed incorrect deduplication of limited queries with different where clauses. Previously, a query like `{where: searchFilter, limit: 10}` could be incorrectly deduplicated against a prior query `{where: undefined, limit: 10}`, causing search/filter results to only show cached data. Now, limited queries are only deduplicated when their where clauses are structurally equal. ([#914](https://github.com/TanStack/db/pull/914))
+
 ## 0.5.7
 
 ### Patch Changes
