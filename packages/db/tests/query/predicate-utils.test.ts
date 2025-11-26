@@ -648,7 +648,8 @@ describe(`isLimitSubset`, () => {
 })
 
 describe(`isPredicateSubset`, () => {
-  it(`should check all components`, () => {
+  it(`should check all components for unlimited superset`, () => {
+    // For unlimited supersets, where-subset logic applies
     const subset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(20)),
       orderBy: [orderByClause(ref(`age`), `asc`)],
@@ -660,9 +661,64 @@ describe(`isPredicateSubset`, () => {
         orderByClause(ref(`age`), `asc`),
         orderByClause(ref(`name`), `desc`),
       ],
+      // No limit - unlimited superset
+    }
+    expect(isPredicateSubset(subset, superset)).toBe(true)
+  })
+
+  it(`should require equal where clauses for limited supersets`, () => {
+    // For limited supersets, where clauses must be EQUAL
+    const sameWhere = gt(ref(`age`), val(10))
+
+    const subset: LoadSubsetOptions = {
+      where: sameWhere,
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 5,
+    }
+    const superset: LoadSubsetOptions = {
+      where: sameWhere, // Same where clause
+      orderBy: [
+        orderByClause(ref(`age`), `asc`),
+        orderByClause(ref(`name`), `desc`),
+      ],
       limit: 20,
     }
     expect(isPredicateSubset(subset, superset)).toBe(true)
+  })
+
+  it(`should return false for limited superset with different where clause`, () => {
+    // Even if subset's where is more restrictive, it can't be a subset
+    // of a limited superset with a different where clause.
+    // The top N items of "age > 20" may not be in the top M items of "age > 10"
+    const subset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(20)), // More restrictive
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 5,
+    }
+    const superset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(10)), // Less restrictive but LIMITED
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 20,
+    }
+    // This should be FALSE because the top 5 of "age > 20"
+    // might include items outside the top 20 of "age > 10"
+    expect(isPredicateSubset(subset, superset)).toBe(false)
+  })
+
+  it(`should return false for limited superset with no where vs subset with where`, () => {
+    // This is the reported bug case: pagination with search filter
+    const subset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(20)), // Has a filter
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 10,
+    }
+    const superset: LoadSubsetOptions = {
+      where: undefined, // No filter but LIMITED
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 10,
+    }
+    // The filtered results might include items outside the unfiltered top 10
+    expect(isPredicateSubset(subset, superset)).toBe(false)
   })
 
   it(`should return false if where is not subset`, () => {

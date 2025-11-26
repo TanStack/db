@@ -153,6 +153,49 @@ describe(`createDeduplicatedLoadSubset`, () => {
       },
     ]
 
+    const whereClause = gt(ref(`age`), val(10))
+
+    // First call: age > 10, orderBy age asc, limit 10
+    await deduplicated.loadSubset({
+      where: whereClause,
+      orderBy: orderBy1,
+      limit: 10,
+    })
+    expect(callCount).toBe(1)
+
+    // Second call: SAME where clause, same orderBy, smaller limit (subset)
+    // For limited queries, where clauses must be EQUAL for subset relationship
+    const result = await deduplicated.loadSubset({
+      where: whereClause, // Same where clause
+      orderBy: orderBy1,
+      limit: 5,
+    })
+    expect(result).toBe(true)
+    expect(callCount).toBe(1) // Should not call - subset of first
+  })
+
+  it(`should NOT dedupe limited calls with different where clauses`, async () => {
+    let callCount = 0
+    const mockLoadSubset = () => {
+      callCount++
+      return Promise.resolve()
+    }
+
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
+
+    const orderBy1: OrderBy = [
+      {
+        expression: ref(`age`),
+        compareOptions: {
+          direction: `asc`,
+          nulls: `last`,
+          stringSort: `lexical`,
+        },
+      },
+    ]
+
     // First call: age > 10, orderBy age asc, limit 10
     await deduplicated.loadSubset({
       where: gt(ref(`age`), val(10)),
@@ -161,14 +204,15 @@ describe(`createDeduplicatedLoadSubset`, () => {
     })
     expect(callCount).toBe(1)
 
-    // Second call: age > 20, orderBy age asc, limit 5 (subset)
-    const result = await deduplicated.loadSubset({
+    // Second call: DIFFERENT where clause (age > 20) - should NOT be deduped
+    // even though age > 20 is "more restrictive" than age > 10,
+    // the top 5 of age > 20 might not be in the top 10 of age > 10
+    await deduplicated.loadSubset({
       where: gt(ref(`age`), val(20)),
       orderBy: orderBy1,
       limit: 5,
     })
-    expect(result).toBe(true)
-    expect(callCount).toBe(1) // Should not call - subset of first
+    expect(callCount).toBe(2) // Should call - different where clause
   })
 
   it(`should call underlying for non-subset limited calls`, async () => {
@@ -671,17 +715,20 @@ describe(`createDeduplicatedLoadSubset`, () => {
         },
       ]
 
+      const whereClause = gt(ref(`age`), val(10))
+
       // First limited call
       await deduplicated.loadSubset({
-        where: gt(ref(`age`), val(10)),
+        where: whereClause,
         orderBy: orderBy1,
         limit: 10,
       })
       expect(callCount).toBe(1)
 
-      // Second limited call is a subset (stricter where and smaller limit)
+      // Second limited call is a subset (SAME where clause and smaller limit)
+      // For limited queries, where clauses must be EQUAL for subset relationship
       const subsetOptions = {
-        where: gt(ref(`age`), val(20)),
+        where: whereClause, // Same where clause
         orderBy: orderBy1,
         limit: 5,
       }
@@ -739,6 +786,107 @@ describe(`createDeduplicatedLoadSubset`, () => {
       // Now the callback should have been called exactly once, with the subset options
       expect(onDeduplicate).toHaveBeenCalledTimes(1)
       expect(onDeduplicate).toHaveBeenCalledWith(subsetOptions)
+    })
+  })
+
+  describe(`bug fix: pagination with search filter`, () => {
+    // This test reproduces the reported bug where:
+    // 1. Initial query loads paginated data without a filter
+    // 2. User adds a search filter
+    // 3. The search query was incorrectly being deduplicated
+    //    because the deduper thought the filtered results were
+    //    a subset of the unfiltered paginated results
+
+    it(`should NOT dedupe when adding search filter to paginated query`, async () => {
+      let callCount = 0
+      const calls: Array<LoadSubsetOptions> = []
+      const mockLoadSubset = (options: LoadSubsetOptions) => {
+        callCount++
+        calls.push(options)
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      const orderByCreatedAt: OrderBy = [
+        {
+          expression: ref(`created_at`),
+          compareOptions: {
+            direction: `desc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+          },
+        },
+      ]
+
+      // Initial paginated query with no search filter
+      await deduplicated.loadSubset({
+        where: undefined, // No filter
+        orderBy: orderByCreatedAt,
+        limit: 10, // Pagination
+      })
+      expect(callCount).toBe(1)
+
+      // User adds a search filter - this should trigger a new request
+      // because the top 10 items matching the search might not be
+      // in the overall top 10 items
+      const searchWhere = and(
+        eq(ref(`title`), val(`test`)) // Simulating a search filter
+      )
+      await deduplicated.loadSubset({
+        where: searchWhere,
+        orderBy: orderByCreatedAt,
+        limit: 10,
+      })
+
+      // CRITICAL: This should be 2, not 1
+      // The search results are NOT a subset of the unfiltered results
+      expect(callCount).toBe(2)
+
+      // Verify the second call includes the search filter
+      expect(calls[1]?.where).toEqual(searchWhere)
+    })
+
+    it(`should dedupe same paginated query without filter`, async () => {
+      let callCount = 0
+      const mockLoadSubset = () => {
+        callCount++
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      const orderByCreatedAt: OrderBy = [
+        {
+          expression: ref(`created_at`),
+          compareOptions: {
+            direction: `desc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+          },
+        },
+      ]
+
+      // Initial paginated query
+      await deduplicated.loadSubset({
+        where: undefined,
+        orderBy: orderByCreatedAt,
+        limit: 10,
+      })
+      expect(callCount).toBe(1)
+
+      // Same query with smaller limit - this IS a valid subset
+      const result = await deduplicated.loadSubset({
+        where: undefined, // Same (no filter)
+        orderBy: orderByCreatedAt,
+        limit: 5, // Smaller limit
+      })
+      expect(result).toBe(true)
+      expect(callCount).toBe(1) // Should be deduplicated
     })
   })
 })
