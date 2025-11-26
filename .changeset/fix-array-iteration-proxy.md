@@ -16,3 +16,5 @@ collection.update(id, (draft) => {
 ```
 
 The fix adds proxy handling for array iteration methods similar to how Map/Set iteration is already handled, ensuring that callbacks receive proxied elements and returned elements are properly proxied.
+
+Also refactors proxy.ts for improved readability by extracting helper functions and hoisting constants to module scope.
