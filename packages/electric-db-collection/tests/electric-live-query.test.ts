@@ -606,11 +606,10 @@ describe.each([
       // Wait for the live query to process
       await new Promise((resolve) => setTimeout(resolve, 0))
 
-      // With the fix for limited query deduplication, queries with limits are only
-      // deduplicated when their where clauses are EQUAL (not just subset).
-      // Both queries have the same where clause (active = true), so the second query
-      // with limit 6 can't fully reuse the first query with limit 2.
-      // The internal query system may make additional requests as it processes.
+      // Limited queries are only deduplicated when their where clauses are equal.
+      // Both queries have the same where clause (active = true), but the second query
+      // with limit 6 needs more data than the first query with limit 2 provided.
+      // The internal query system makes additional requests as it processes the data.
       // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
       expect(mockRequestSnapshot).toHaveBeenCalledTimes(6)
 
@@ -877,8 +876,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
       })
     )
 
-    // With the fix for limited query deduplication, queries with limits but different
-    // where clauses (or no where clause vs with where clause) are not deduplicated.
+    // For limited queries, only requests with identical where clauses can be deduplicated.
     // The internal query system may make additional requests as it processes the data.
     // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
     expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
@@ -1190,8 +1188,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0))
 
-    // With the fix for limited query deduplication, additional requests may be made
-    // as the internal query system processes data.
+    // For limited queries, only requests with identical where clauses can be deduplicated.
+    // The internal query system may make additional requests as it processes data.
     // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
     expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
 

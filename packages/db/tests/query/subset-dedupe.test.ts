@@ -789,15 +789,13 @@ describe(`createDeduplicatedLoadSubset`, () => {
     })
   })
 
-  describe(`bug fix: pagination with search filter`, () => {
-    // This test reproduces the reported bug where:
-    // 1. Initial query loads paginated data without a filter
-    // 2. User adds a search filter
-    // 3. The search query was incorrectly being deduplicated
-    //    because the deduper thought the filtered results were
-    //    a subset of the unfiltered paginated results
+  describe(`limited queries with different where clauses`, () => {
+    // When a query has a limit, only the top N rows (by orderBy) are loaded.
+    // A subsequent query with a different where clause cannot reuse that data,
+    // even if the new where clause is "more restrictive", because the filtered
+    // top N might include rows outside the original unfiltered top N.
 
-    it(`should NOT dedupe when adding search filter to paginated query`, async () => {
+    it(`should NOT dedupe when where clause differs on limited queries`, async () => {
       let callCount = 0
       const calls: Array<LoadSubsetOptions> = []
       const mockLoadSubset = (options: LoadSubsetOptions) => {
@@ -821,35 +819,29 @@ describe(`createDeduplicatedLoadSubset`, () => {
         },
       ]
 
-      // Initial paginated query with no search filter
+      // First query: top 10 items with no filter
       await deduplicated.loadSubset({
-        where: undefined, // No filter
+        where: undefined,
         orderBy: orderByCreatedAt,
-        limit: 10, // Pagination
+        limit: 10,
       })
       expect(callCount).toBe(1)
 
-      // User adds a search filter - this should trigger a new request
-      // because the top 10 items matching the search might not be
-      // in the overall top 10 items
-      const searchWhere = and(
-        eq(ref(`title`), val(`test`)) // Simulating a search filter
-      )
+      // Second query: top 10 items WITH a filter
+      // This requires a separate request because the filtered top 10
+      // might include items outside the unfiltered top 10
+      const searchWhere = and(eq(ref(`title`), val(`test`)))
       await deduplicated.loadSubset({
         where: searchWhere,
         orderBy: orderByCreatedAt,
         limit: 10,
       })
 
-      // CRITICAL: This should be 2, not 1
-      // The search results are NOT a subset of the unfiltered results
       expect(callCount).toBe(2)
-
-      // Verify the second call includes the search filter
       expect(calls[1]?.where).toEqual(searchWhere)
     })
 
-    it(`should dedupe same paginated query without filter`, async () => {
+    it(`should dedupe when where clause is identical on limited queries`, async () => {
       let callCount = 0
       const mockLoadSubset = () => {
         callCount++
@@ -871,7 +863,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
         },
       ]
 
-      // Initial paginated query
+      // First query: top 10 items with no filter
       await deduplicated.loadSubset({
         where: undefined,
         orderBy: orderByCreatedAt,
@@ -879,14 +871,15 @@ describe(`createDeduplicatedLoadSubset`, () => {
       })
       expect(callCount).toBe(1)
 
-      // Same query with smaller limit - this IS a valid subset
+      // Second query: same where clause (undefined), smaller limit
+      // The top 5 are contained within the already-loaded top 10
       const result = await deduplicated.loadSubset({
-        where: undefined, // Same (no filter)
+        where: undefined,
         orderBy: orderByCreatedAt,
-        limit: 5, // Smaller limit
+        limit: 5,
       })
       expect(result).toBe(true)
-      expect(callCount).toBe(1) // Should be deduplicated
+      expect(callCount).toBe(1)
     })
   })
 })
