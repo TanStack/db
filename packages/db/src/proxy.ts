@@ -25,6 +25,36 @@ const CALLBACK_ITERATION_METHODS = new Set([
 ])
 
 /**
+ * Set of array methods that modify the array in place.
+ */
+const ARRAY_MODIFYING_METHODS = new Set([
+  `pop`,
+  `push`,
+  `shift`,
+  `unshift`,
+  `splice`,
+  `sort`,
+  `reverse`,
+  `fill`,
+  `copyWithin`,
+])
+
+/**
+ * Set of Map/Set methods that modify the collection in place.
+ */
+const MAP_SET_MODIFYING_METHODS = new Set([`set`, `delete`, `clear`, `add`])
+
+/**
+ * Set of Map/Set iterator methods.
+ */
+const MAP_SET_ITERATOR_METHODS = new Set([
+  `entries`,
+  `keys`,
+  `values`,
+  `forEach`,
+])
+
+/**
  * Check if a value is a proxiable object (not Date, RegExp, or Temporal)
  */
 function isProxiableObject(
@@ -195,6 +225,210 @@ function createArrayIteratorHandler<T extends object>(
         return this
       },
     }
+  }
+}
+
+/**
+ * Creates a wrapper for methods that modify a collection (array, Map, Set).
+ * The wrapper calls the method and marks the change tracker as modified.
+ */
+function createModifyingMethodHandler<T extends object>(
+  methodFn: (...args: Array<unknown>) => unknown,
+  changeTracker: ChangeTracker<T>,
+  markChanged: (tracker: ChangeTracker<T>) => void
+): (...args: Array<unknown>) => unknown {
+  return function (...args: Array<unknown>) {
+    const result = methodFn.apply(changeTracker.copy_, args)
+    markChanged(changeTracker)
+    return result
+  }
+}
+
+/**
+ * Creates handlers for Map/Set iterator methods (entries, keys, values, forEach).
+ * Returns proxied values for iteration to enable change tracking.
+ */
+function createMapSetIteratorHandler<T extends object>(
+  methodName: string,
+  prop: string | symbol,
+  methodFn: (...args: Array<unknown>) => unknown,
+  target: Map<unknown, unknown> | Set<unknown>,
+  changeTracker: ChangeTracker<T>,
+  memoizedCreateChangeProxy: (
+    obj: Record<string | symbol, unknown>,
+    parent?: Record<string, unknown>
+  ) => { proxy: Record<string | symbol, unknown> },
+  markChanged: (tracker: ChangeTracker<T>) => void
+): ((...args: Array<unknown>) => unknown) | undefined {
+  const isIteratorMethod =
+    MAP_SET_ITERATOR_METHODS.has(methodName) || prop === Symbol.iterator
+
+  if (!isIteratorMethod) {
+    return undefined
+  }
+
+  return function (this: unknown, ...args: Array<unknown>) {
+    const result = methodFn.apply(changeTracker.copy_, args)
+
+    // For forEach, wrap the callback to track changes
+    if (methodName === `forEach`) {
+      const callback = args[0]
+      if (typeof callback === `function`) {
+        const wrappedCallback = function (
+          this: unknown,
+          value: unknown,
+          key: unknown,
+          collection: unknown
+        ) {
+          const cbresult = callback.call(this, value, key, collection)
+          markChanged(changeTracker)
+          return cbresult
+        }
+        return methodFn.apply(target, [wrappedCallback, ...args.slice(1)])
+      }
+    }
+
+    // For iterators (entries, keys, values, Symbol.iterator)
+    const isValueIterator =
+      methodName === `entries` ||
+      methodName === `values` ||
+      methodName === Symbol.iterator.toString() ||
+      prop === Symbol.iterator
+
+    if (isValueIterator) {
+      const originalIterator = result as Iterator<unknown>
+
+      // For values() iterator on Maps, create a value-to-key mapping
+      const valueToKeyMap = new Map()
+      if (methodName === `values` && target instanceof Map) {
+        for (const [key, mapValue] of (
+          changeTracker.copy_ as unknown as Map<unknown, unknown>
+        ).entries()) {
+          valueToKeyMap.set(mapValue, key)
+        }
+      }
+
+      // For Set iterators, create an original-to-modified mapping
+      const originalToModifiedMap = new Map()
+      if (target instanceof Set) {
+        for (const setValue of (
+          changeTracker.copy_ as unknown as Set<unknown>
+        ).values()) {
+          originalToModifiedMap.set(setValue, setValue)
+        }
+      }
+
+      // Return a wrapped iterator that proxies values
+      return {
+        next() {
+          const nextResult = originalIterator.next()
+
+          if (
+            !nextResult.done &&
+            nextResult.value &&
+            typeof nextResult.value === `object`
+          ) {
+            // For entries, the value is a [key, value] pair
+            if (
+              methodName === `entries` &&
+              Array.isArray(nextResult.value) &&
+              nextResult.value.length === 2
+            ) {
+              if (
+                nextResult.value[1] &&
+                typeof nextResult.value[1] === `object`
+              ) {
+                const mapKey = nextResult.value[0]
+                const mapParent = {
+                  tracker: changeTracker,
+                  prop: mapKey,
+                  updateMap: (newValue: unknown) => {
+                    if (changeTracker.copy_ instanceof Map) {
+                      ;(changeTracker.copy_ as Map<unknown, unknown>).set(
+                        mapKey,
+                        newValue
+                      )
+                    }
+                  },
+                }
+                const { proxy: valueProxy } = memoizedCreateChangeProxy(
+                  nextResult.value[1] as Record<string | symbol, unknown>,
+                  mapParent
+                )
+                nextResult.value[1] = valueProxy
+              }
+            } else if (
+              methodName === `values` ||
+              methodName === Symbol.iterator.toString() ||
+              prop === Symbol.iterator
+            ) {
+              // For Map values(), use the key mapping
+              if (methodName === `values` && target instanceof Map) {
+                const mapKey = valueToKeyMap.get(nextResult.value)
+                if (mapKey !== undefined) {
+                  const mapParent = {
+                    tracker: changeTracker,
+                    prop: mapKey,
+                    updateMap: (newValue: unknown) => {
+                      if (changeTracker.copy_ instanceof Map) {
+                        ;(changeTracker.copy_ as Map<unknown, unknown>).set(
+                          mapKey,
+                          newValue
+                        )
+                      }
+                    },
+                  }
+                  const { proxy: valueProxy } = memoizedCreateChangeProxy(
+                    nextResult.value as Record<string | symbol, unknown>,
+                    mapParent
+                  )
+                  nextResult.value = valueProxy
+                }
+              } else if (target instanceof Set) {
+                // For Set, track modifications
+                const setOriginalValue = nextResult.value
+                const setParent = {
+                  tracker: changeTracker,
+                  prop: setOriginalValue,
+                  updateSet: (newValue: unknown) => {
+                    if (changeTracker.copy_ instanceof Set) {
+                      ;(changeTracker.copy_ as Set<unknown>).delete(
+                        setOriginalValue
+                      )
+                      ;(changeTracker.copy_ as Set<unknown>).add(newValue)
+                      originalToModifiedMap.set(setOriginalValue, newValue)
+                    }
+                  },
+                }
+                const { proxy: valueProxy } = memoizedCreateChangeProxy(
+                  nextResult.value as Record<string | symbol, unknown>,
+                  setParent
+                )
+                nextResult.value = valueProxy
+              } else {
+                // For other cases, use a symbol placeholder
+                const tempKey = Symbol(`iterator-value`)
+                const { proxy: valueProxy } = memoizedCreateChangeProxy(
+                  nextResult.value as Record<string | symbol, unknown>,
+                  {
+                    tracker: changeTracker,
+                    prop: tempKey,
+                  }
+                )
+                nextResult.value = valueProxy
+              }
+            }
+          }
+
+          return nextResult
+        },
+        [Symbol.iterator]() {
+          return this
+        },
+      }
+    }
+
+    return result
   }
 }
 
@@ -585,24 +819,13 @@ export function createChangeProxy<
           // For Array methods that modify the array
           if (Array.isArray(ptarget)) {
             const methodName = prop.toString()
-            const modifyingMethods = new Set([
-              `pop`,
-              `push`,
-              `shift`,
-              `unshift`,
-              `splice`,
-              `sort`,
-              `reverse`,
-              `fill`,
-              `copyWithin`,
-            ])
 
-            if (modifyingMethods.has(methodName)) {
-              return function (...args: Array<unknown>) {
-                const result = value.apply(changeTracker.copy_, args)
-                markChanged(changeTracker)
-                return result
-              }
+            if (ARRAY_MODIFYING_METHODS.has(methodName)) {
+              return createModifyingMethodHandler(
+                value,
+                changeTracker,
+                markChanged
+              )
             }
 
             // Handle array iteration methods (find, filter, forEach, etc.)
@@ -628,234 +851,27 @@ export function createChangeProxy<
           // For Map and Set methods that modify the collection
           if (ptarget instanceof Map || ptarget instanceof Set) {
             const methodName = prop.toString()
-            const modifyingMethods = new Set([
-              `set`,
-              `delete`,
-              `clear`,
-              `add`,
-              `pop`,
-              `push`,
-              `shift`,
-              `unshift`,
-              `splice`,
-              `sort`,
-              `reverse`,
-            ])
 
-            if (modifyingMethods.has(methodName)) {
-              return function (...args: Array<unknown>) {
-                const result = value.apply(changeTracker.copy_, args)
-                markChanged(changeTracker)
-                return result
-              }
+            if (MAP_SET_MODIFYING_METHODS.has(methodName)) {
+              return createModifyingMethodHandler(
+                value,
+                changeTracker,
+                markChanged
+              )
             }
 
             // Handle iterator methods for Map and Set
-            const iteratorMethods = new Set([
-              `entries`,
-              `keys`,
-              `values`,
-              `forEach`,
-              Symbol.iterator,
-            ])
-
-            if (iteratorMethods.has(methodName) || prop === Symbol.iterator) {
-              return function (this: unknown, ...args: Array<unknown>) {
-                const result = value.apply(changeTracker.copy_, args)
-
-                // For forEach, we need to wrap the callback to track changes
-                if (methodName === `forEach`) {
-                  const callback = args[0]
-                  if (typeof callback === `function`) {
-                    // Replace the original callback with our wrapped version
-                    const wrappedCallback = function (
-                      this: unknown,
-                      // eslint-disable-next-line
-                      value: unknown,
-                      key: unknown,
-                      collection: unknown
-                    ) {
-                      // Call the original callback
-                      const cbresult = callback.call(
-                        this,
-                        value,
-                        key,
-                        collection
-                      )
-                      // Mark as changed since the callback might have modified the value
-                      markChanged(changeTracker)
-                      return cbresult
-                    }
-                    // Call forEach with our wrapped callback
-                    return value.apply(ptarget, [
-                      wrappedCallback,
-                      ...args.slice(1),
-                    ])
-                  }
-                }
-
-                // For iterators (entries, keys, values, Symbol.iterator)
-                if (
-                  methodName === `entries` ||
-                  methodName === `values` ||
-                  methodName === Symbol.iterator.toString() ||
-                  prop === Symbol.iterator
-                ) {
-                  // If it's an iterator, we need to wrap the returned iterator
-                  // to track changes when the values are accessed and potentially modified
-                  const originalIterator = result
-
-                  // For values() iterator on Maps, we need to create a value-to-key mapping
-                  const valueToKeyMap = new Map()
-                  if (methodName === `values` && ptarget instanceof Map) {
-                    // Build a mapping from value to key for reverse lookup
-                    // Use the copy_ (which is the current state) to build the mapping
-                    for (const [
-                      key,
-                      mapValue,
-                    ] of changeTracker.copy_.entries()) {
-                      valueToKeyMap.set(mapValue, key)
-                    }
-                  }
-
-                  // For Set iterators, we need to create an original-to-modified mapping
-                  const originalToModifiedMap = new Map()
-                  if (ptarget instanceof Set) {
-                    // Initialize with original values
-                    for (const setValue of changeTracker.copy_.values()) {
-                      originalToModifiedMap.set(setValue, setValue)
-                    }
-                  }
-
-                  // Create a proxy for the iterator that will mark changes when next() is called
-                  return {
-                    next() {
-                      const nextResult = originalIterator.next()
-
-                      // If we have a value and it's an object, we need to track it
-                      if (
-                        !nextResult.done &&
-                        nextResult.value &&
-                        typeof nextResult.value === `object`
-                      ) {
-                        // For entries, the value is a [key, value] pair
-                        if (
-                          methodName === `entries` &&
-                          Array.isArray(nextResult.value) &&
-                          nextResult.value.length === 2
-                        ) {
-                          // The value is at index 1 in the [key, value] pair
-                          if (
-                            nextResult.value[1] &&
-                            typeof nextResult.value[1] === `object`
-                          ) {
-                            const mapKey = nextResult.value[0]
-                            // Create a special parent tracker that knows how to update the Map
-                            const mapParent = {
-                              tracker: changeTracker,
-                              prop: mapKey,
-                              updateMap: (newValue: unknown) => {
-                                // Update the Map in the copy
-                                if (changeTracker.copy_ instanceof Map) {
-                                  changeTracker.copy_.set(mapKey, newValue)
-                                }
-                              },
-                            }
-
-                            // Create a proxy for the value and replace it in the result
-                            const { proxy: valueProxy } =
-                              memoizedCreateChangeProxy(
-                                nextResult.value[1],
-                                mapParent
-                              )
-                            nextResult.value[1] = valueProxy
-                          }
-                        } else if (
-                          methodName === `values` ||
-                          methodName === Symbol.iterator.toString() ||
-                          prop === Symbol.iterator
-                        ) {
-                          // If the value is an object, create a proxy for it
-                          if (
-                            typeof nextResult.value === `object` &&
-                            nextResult.value !== null
-                          ) {
-                            // For Map values(), try to find the key using our mapping
-                            if (
-                              methodName === `values` &&
-                              ptarget instanceof Map
-                            ) {
-                              const mapKey = valueToKeyMap.get(nextResult.value)
-                              if (mapKey !== undefined) {
-                                // Create a special parent tracker for this Map value
-                                const mapParent = {
-                                  tracker: changeTracker,
-                                  prop: mapKey,
-                                  updateMap: (newValue: unknown) => {
-                                    // Update the Map in the copy
-                                    if (changeTracker.copy_ instanceof Map) {
-                                      changeTracker.copy_.set(mapKey, newValue)
-                                    }
-                                  },
-                                }
-
-                                const { proxy: valueProxy } =
-                                  memoizedCreateChangeProxy(
-                                    nextResult.value,
-                                    mapParent
-                                  )
-                                nextResult.value = valueProxy
-                              }
-                            } else if (ptarget instanceof Set) {
-                              // For Set, we need to track modifications and update the Set accordingly
-                              const setOriginalValue = nextResult.value
-                              const setParent = {
-                                tracker: changeTracker,
-                                prop: setOriginalValue, // Use the original value as the prop
-                                updateSet: (newValue: unknown) => {
-                                  // Update the Set in the copy by removing old value and adding new one
-                                  if (changeTracker.copy_ instanceof Set) {
-                                    changeTracker.copy_.delete(setOriginalValue)
-                                    changeTracker.copy_.add(newValue)
-                                    // Update our mapping for future iterations
-                                    originalToModifiedMap.set(
-                                      setOriginalValue,
-                                      newValue
-                                    )
-                                  }
-                                },
-                              }
-
-                              const { proxy: valueProxy } =
-                                memoizedCreateChangeProxy(
-                                  nextResult.value,
-                                  setParent
-                                )
-                              nextResult.value = valueProxy
-                            } else {
-                              // For other cases, use a symbol as a placeholder
-                              const tempKey = Symbol(`iterator-value`)
-                              const { proxy: valueProxy } =
-                                memoizedCreateChangeProxy(nextResult.value, {
-                                  tracker: changeTracker,
-                                  prop: tempKey,
-                                })
-                              nextResult.value = valueProxy
-                            }
-                          }
-                        }
-                      }
-
-                      return nextResult
-                    },
-                    [Symbol.iterator]() {
-                      return this
-                    },
-                  }
-                }
-
-                return result
-              }
+            const iteratorHandler = createMapSetIteratorHandler(
+              methodName,
+              prop,
+              value,
+              ptarget,
+              changeTracker,
+              memoizedCreateChangeProxy,
+              markChanged
+            )
+            if (iteratorHandler) {
+              return iteratorHandler
             }
           }
           return value.bind(ptarget)
