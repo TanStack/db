@@ -510,7 +510,7 @@ export function createChangeProxy<
                 ) {
                   // Find the index of the result in the array
                   const foundIndex = (
-                    changeTracker.copy_ as Array<unknown>
+                    changeTracker.copy_ as unknown as Array<unknown>
                   ).indexOf(result)
                   if (foundIndex !== -1) {
                     return getProxiedElement(result, foundIndex)
@@ -530,7 +530,7 @@ export function createChangeProxy<
                   if (methodName === `filter`) {
                     return result.map((element) => {
                       const originalIndex = (
-                        changeTracker.copy_ as Array<unknown>
+                        changeTracker.copy_ as unknown as Array<unknown>
                       ).indexOf(element)
                       if (originalIndex !== -1) {
                         return getProxiedElement(element, originalIndex)
@@ -547,7 +547,7 @@ export function createChangeProxy<
             // Handle array Symbol.iterator for for...of loops
             if (prop === Symbol.iterator) {
               return function () {
-                const array = changeTracker.copy_ as Array<unknown>
+                const array = changeTracker.copy_ as unknown as Array<unknown>
                 let index = 0
 
                 return {
