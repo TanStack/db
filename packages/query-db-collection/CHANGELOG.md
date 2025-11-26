@@ -1,5 +1,26 @@
 # @tanstack/query-db-collection
 
+## 1.0.5
+
+### Patch Changes
+
+- fix: ensure ctx.meta.loadSubsetOptions type-safety works automatically ([#869](https://github.com/TanStack/db/pull/869))
+
+  The module augmentation for ctx.meta.loadSubsetOptions is now guaranteed to load automatically when importing from @tanstack/query-db-collection. Previously, users needed to explicitly import QueryCollectionMeta or use @ts-ignore to pass ctx.meta?.loadSubsetOptions to parseLoadSubsetOptions.
+
+  Additionally, QueryCollectionMeta is now an interface (instead of a type alias), enabling users to safely extend meta with custom properties via declaration merging:
+
+  ```typescript
+  declare module "@tanstack/query-db-collection" {
+    interface QueryCollectionMeta {
+      myCustomProperty: string
+    }
+  }
+  ```
+
+- Updated dependencies [[`c8a2c16`](https://github.com/TanStack/db/commit/c8a2c16aa528427d5ddd55cda4ee59a5cb369b5f)]:
+  - @tanstack/db@0.5.6
+
 ## 1.0.4
 
 ### Patch Changes

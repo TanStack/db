@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.5.6
+
+### Patch Changes
+
+- Fix scheduler handling of lazy left-join/live-query dependencies: treat non-enqueued lazy deps as satisfied to avoid unresolved-dependency deadlocks, and block only when a dep actually has pending work. ([#898](https://github.com/TanStack/db/pull/898))
+
 ## 0.5.5
 
 ### Patch Changes
