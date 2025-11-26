@@ -1622,6 +1622,70 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`1`)).toBe(false)
     })
 
+    it(`should allow write operations on on-demand collections without startSync`, async () => {
+      // This test verifies that on-demand collections can perform write operations
+      // even when startSync is not explicitly set to true.
+      // See: https://github.com/TanStack/db/issues/xyz - SyncNotInitializedError
+      // was thrown when trying to writeUpsert on on-demand collections
+
+      const queryKey = [`on-demand-write-test`]
+      const queryFn = vi.fn().mockResolvedValue([])
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `on-demand-write-collection`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+        // Note: startSync is NOT set to true - this was the bug scenario
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // On-demand collections should be ready immediately
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Write operations should work without throwing SyncNotInitializedError
+      const newItem: TestItem = { id: `1`, name: `Item 1`, value: 10 }
+      collection.utils.writeInsert(newItem)
+
+      expect(collection.size).toBe(1)
+      expect(collection.get(`1`)).toEqual(newItem)
+
+      // Test writeUpsert (the specific operation from the bug report)
+      collection.utils.writeUpsert({ id: `2`, name: `Item 2`, value: 20 })
+
+      expect(collection.size).toBe(2)
+      expect(collection.get(`2`)).toEqual({
+        id: `2`,
+        name: `Item 2`,
+        value: 20,
+      })
+
+      // Test writeUpdate
+      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
+      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      // Test writeDelete
+      collection.utils.writeDelete(`1`)
+      expect(collection.size).toBe(1)
+      expect(collection.has(`1`)).toBe(false)
+
+      // Test writeBatch
+      collection.utils.writeBatch(() => {
+        collection.utils.writeInsert({ id: `3`, name: `Item 3`, value: 30 })
+        collection.utils.writeUpsert({ id: `4`, name: `Item 4`, value: 40 })
+      })
+
+      expect(collection.size).toBe(3)
+      expect(collection.get(`3`)?.name).toBe(`Item 3`)
+      expect(collection.get(`4`)?.name).toBe(`Item 4`)
+    })
+
     it(`should handle sync method errors appropriately`, async () => {
       const queryKey = [`sync-error-test`]
       const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
