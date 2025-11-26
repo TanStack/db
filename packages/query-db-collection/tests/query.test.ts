@@ -3006,17 +3006,16 @@ describe(`QueryCollection`, () => {
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
 
-      // Collection should be idle initially
-      expect(collection.status).toBe(`idle`)
+      // On-demand collections are ready immediately (sync auto-starts for write support)
+      // but no data is loaded until loadSubset is called
+      expect(collection.status).toBe(`ready`)
       expect(queryFn).not.toHaveBeenCalled()
       expect(collection.size).toBe(0)
 
-      // Preload should resolve immediately without calling queryFn
-      // since there's no initial query in on-demand mode
+      // Preload is a no-op for on-demand collections (logs a warning)
       await collection.preload()
 
-      // After preload, collection should be ready
-      // but queryFn should NOT have been called and collection should still be empty
+      // Collection should still be ready with no data loaded
       expect(collection.status).toBe(`ready`)
       expect(queryFn).not.toHaveBeenCalled()
       expect(collection.size).toBe(0)
