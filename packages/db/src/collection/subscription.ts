@@ -1,5 +1,5 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and, eq, gt, lt } from "../query/builder/functions.js"
+import { and, eq, gt, gte, lt } from "../query/builder/functions.js"
 import { Value } from "../query/ir.js"
 import { EventEmitter } from "../event-emitter.js"
 import {
@@ -361,7 +361,19 @@ export class CollectionSubscription
     // First promise: load all values equal to minValue
     if (typeof minValue !== `undefined`) {
       const { expression } = orderBy[0]!
-      const exactValueFilter = eq(expression, new Value(minValue))
+
+      // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
+      // A JS Date represents a 1ms range, so we query for all values within that range
+      let exactValueFilter
+      if (minValue instanceof Date) {
+        const minValuePlus1ms = new Date(minValue.getTime() + 1)
+        exactValueFilter = and(
+          gte(expression, new Value(minValue)),
+          lt(expression, new Value(minValuePlus1ms))
+        )
+      } else {
+        exactValueFilter = eq(expression, new Value(minValue))
+      }
 
       const loadOptions2: LoadSubsetOptions = {
         where: exactValueFilter,
