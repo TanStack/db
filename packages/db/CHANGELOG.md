@@ -1,5 +1,26 @@
 # @tanstack/db
 
+## 0.5.7
+
+### Patch Changes
+
+- Fix change tracking for array items accessed via iteration methods (find, forEach, for...of, etc.) ([#910](https://github.com/TanStack/db/pull/910))
+
+  Previously, modifications to array items retrieved via iteration methods were not tracked by the change proxy because these methods returned raw array elements instead of proxied versions. This caused `getChanges()` to return an empty object, which in turn caused `createOptimisticAction`'s `mutationFn` to never be called when using patterns like:
+
+  ```ts
+  collection.update(id, (draft) => {
+    const item = draft.items.find((x) => x.id === targetId)
+    if (item) {
+      item.value = newValue // This change was not tracked!
+    }
+  })
+  ```
+
+  The fix adds proxy handling for array iteration methods similar to how Map/Set iteration is already handled, ensuring that callbacks receive proxied elements and returned elements are properly proxied.
+
+  Also refactors proxy.ts for improved readability by extracting helper functions and hoisting constants to module scope.
+
 ## 0.5.6
 
 ### Patch Changes
