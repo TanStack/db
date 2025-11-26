@@ -4,6 +4,7 @@
 export {
   BaseQueryBuilder,
   Query,
+  getQueryIR,
   type InitialQueryBuilder,
   type QueryBuilder,
   type Context,
@@ -11,6 +12,9 @@ export {
   type GetResult,
   type InferResultType,
 } from "./builder/index.js"
+
+// Query fingerprinting for change detection
+export { getQueryFingerprint } from "./fingerprint.js"
 
 // Expression functions exports
 export {

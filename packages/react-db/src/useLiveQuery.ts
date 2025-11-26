@@ -3,6 +3,8 @@ import {
   BaseQueryBuilder,
   CollectionImpl,
   createLiveQueryCollection,
+  getQueryFingerprint,
+  getQueryIR,
 } from "@tanstack/db"
 import type {
   Collection,
@@ -331,6 +333,7 @@ export function useLiveQuery(
   )
   const depsRef = useRef<Array<unknown> | null>(null)
   const configRef = useRef<unknown>(null)
+  const fingerprintRef = useRef<string | null>(null)
 
   // Use refs to track version and memoized snapshot
   const versionRef = useRef(0)
@@ -339,14 +342,38 @@ export function useLiveQuery(
     version: number
   } | null>(null)
 
+  // Compute fingerprint for query functions to detect changes even without deps
+  let currentFingerprint: string | null = null
+  if (typeof configOrQueryOrCollection === `function` && !isCollection) {
+    try {
+      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+      const result = configOrQueryOrCollection(queryBuilder)
+      if (result instanceof BaseQueryBuilder) {
+        const queryIR = getQueryIR(result)
+        currentFingerprint = getQueryFingerprint(queryIR)
+      }
+    } catch {
+      // If fingerprinting fails, fall back to deps-based comparison
+      currentFingerprint = null
+    }
+  }
+
   // Check if we need to create/recreate the collection
+  // Use fingerprint comparison as a fallback when deps haven't changed
+  const depsChanged =
+    depsRef.current === null ||
+    depsRef.current.length !== deps.length ||
+    depsRef.current.some((dep, i) => dep !== deps[i])
+
+  const fingerprintChanged =
+    currentFingerprint !== null &&
+    fingerprintRef.current !== null &&
+    currentFingerprint !== fingerprintRef.current
+
   const needsNewCollection =
     !collectionRef.current ||
     (isCollection && configRef.current !== configOrQueryOrCollection) ||
-    (!isCollection &&
-      (depsRef.current === null ||
-        depsRef.current.length !== deps.length ||
-        depsRef.current.some((dep, i) => dep !== deps[i])))
+    (!isCollection && (depsChanged || fingerprintChanged))
 
   if (needsNewCollection) {
     if (isCollection) {
@@ -390,6 +417,7 @@ export function useLiveQuery(
           )
         }
         depsRef.current = [...deps]
+        fingerprintRef.current = currentFingerprint
       } else {
         // Original logic for config objects
         collectionRef.current = createLiveQueryCollection({
@@ -398,6 +426,7 @@ export function useLiveQuery(
           ...configOrQueryOrCollection,
         })
         depsRef.current = [...deps]
+        fingerprintRef.current = currentFingerprint
       }
     }
   }
