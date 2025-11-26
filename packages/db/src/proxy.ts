@@ -6,6 +6,40 @@
 import { deepEquals, isTemporal } from "./utils"
 
 /**
+ * Set of array methods that iterate with callbacks and may return elements.
+ * Hoisted to module scope to avoid creating a new Set on every property access.
+ */
+const CALLBACK_ITERATION_METHODS = new Set([
+  `find`,
+  `findLast`,
+  `findIndex`,
+  `findLastIndex`,
+  `filter`,
+  `map`,
+  `flatMap`,
+  `forEach`,
+  `some`,
+  `every`,
+  `reduce`,
+  `reduceRight`,
+])
+
+/**
+ * Check if a value is a proxiable object (not Date, RegExp, or Temporal)
+ */
+function isProxiableObject(
+  value: unknown
+): value is Record<string | symbol, unknown> {
+  return (
+    value !== null &&
+    typeof value === `object` &&
+    !((value as any) instanceof Date) &&
+    !((value as any) instanceof RegExp) &&
+    !isTemporal(value)
+  )
+}
+
+/**
  * Simple debug utility that only logs when debug mode is enabled
  * Set DEBUG to true in localStorage to enable debug logging
  */
@@ -414,22 +448,7 @@ export function createChangeProxy<
 
             // For Array methods that iterate with callbacks and may return elements
             // These need to pass proxied elements to callbacks and return proxied results
-            const callbackIterationMethods = new Set([
-              `find`,
-              `findLast`,
-              `findIndex`,
-              `findLastIndex`,
-              `filter`,
-              `map`,
-              `flatMap`,
-              `forEach`,
-              `some`,
-              `every`,
-              `reduce`,
-              `reduceRight`,
-            ])
-
-            if (callbackIterationMethods.has(methodName)) {
+            if (CALLBACK_ITERATION_METHODS.has(methodName)) {
               return function (...args: Array<unknown>) {
                 const callback = args[0]
                 if (typeof callback !== `function`) {
@@ -441,20 +460,14 @@ export function createChangeProxy<
                   element: unknown,
                   index: number
                 ): unknown => {
-                  if (
-                    element &&
-                    typeof element === `object` &&
-                    !((element as any) instanceof Date) &&
-                    !((element as any) instanceof RegExp) &&
-                    !isTemporal(element)
-                  ) {
+                  if (isProxiableObject(element)) {
                     // Create a parent reference for the array element
                     const nestedParent = {
                       tracker: changeTracker,
                       prop: String(index),
                     }
                     const { proxy: elementProxy } = memoizedCreateChangeProxy(
-                      element as Record<string | symbol, unknown>,
+                      element,
                       nestedParent
                     )
                     return elementProxy
@@ -560,19 +573,13 @@ export function createChangeProxy<
                     let proxiedElement = element
 
                     // Proxy object elements
-                    if (
-                      element &&
-                      typeof element === `object` &&
-                      !((element as any) instanceof Date) &&
-                      !((element as any) instanceof RegExp) &&
-                      !isTemporal(element)
-                    ) {
+                    if (isProxiableObject(element)) {
                       const nestedParent = {
                         tracker: changeTracker,
                         prop: String(index),
                       }
                       const { proxy: elementProxy } = memoizedCreateChangeProxy(
-                        element as Record<string | symbol, unknown>,
+                        element,
                         nestedParent
                       )
                       proxiedElement = elementProxy
@@ -826,13 +833,7 @@ export function createChangeProxy<
         }
 
         // If the value is an object (but not Date, RegExp, or Temporal), create a proxy for it
-        if (
-          value &&
-          typeof value === `object` &&
-          !((value as any) instanceof Date) &&
-          !((value as any) instanceof RegExp) &&
-          !isTemporal(value)
-        ) {
+        if (isProxiableObject(value)) {
           // Create a parent reference for the nested object
           const nestedParent = {
             tracker: changeTracker,

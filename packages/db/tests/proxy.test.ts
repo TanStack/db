@@ -1731,5 +1731,84 @@ describe(`Proxy Library`, () => {
       const changes = getChanges()
       expect(Object.keys(changes).length).toBeGreaterThan(0)
     })
+
+    it(`should track changes when modifying items from filter() result`, () => {
+      const obj = {
+        items: [
+          { id: 1, value: 10 },
+          { id: 2, value: 20 },
+        ],
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      const filtered = proxy.items.filter((item) => item.id === 1)
+      const first = filtered[0]
+      if (first) {
+        first.value = 42
+      }
+
+      const changes = getChanges()
+      expect(changes.items?.[0]?.value).toBe(42)
+    })
+
+    it(`should track changes when modifying array items retrieved via findLast()`, () => {
+      const obj = {
+        job: {
+          orders: [
+            { orderId: `order-1`, orderBinInt: 1 },
+            { orderId: `order-2`, orderBinInt: 2 },
+          ],
+        },
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      const order = proxy.job.orders.findLast((order) =>
+        order.orderId.startsWith(`order-`)
+      )
+      if (order) {
+        order.orderBinInt = 123
+      }
+
+      const changes = getChanges()
+      expect(changes.job?.orders?.[1]?.orderBinInt).toBe(123)
+    })
+
+    it(`should track changes when modifying array items inside some() callback`, () => {
+      const obj = {
+        items: [
+          { id: 1, value: 10 },
+          { id: 2, value: 20 },
+        ],
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.items.some((item) => {
+        item.value = item.value * 2
+        return false
+      })
+
+      const changes = getChanges()
+      expect(changes.items?.[0]?.value).toBe(20)
+      expect(changes.items?.[1]?.value).toBe(40)
+    })
+
+    it(`should track changes when modifying array items inside reduce() callback`, () => {
+      const obj = {
+        items: [
+          { id: 1, value: 10 },
+          { id: 2, value: 20 },
+        ],
+      }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      proxy.items.reduce((acc, item) => {
+        item.value = item.value + 1
+        return acc + item.value
+      }, 0)
+
+      const changes = getChanges()
+      expect(changes.items?.[0]?.value).toBe(11)
+      expect(changes.items?.[1]?.value).toBe(21)
+    })
   })
 })
