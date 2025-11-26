@@ -1762,9 +1762,12 @@ describe(`Proxy Library`, () => {
       }
       const { proxy, getChanges } = createChangeProxy(obj)
 
-      const order = proxy.job.orders.findLast((order) =>
-        order.orderId.startsWith(`order-`)
-      )
+      // Use type assertion to call findLast (ES2023 method)
+      type Order = { orderId: string; orderBinInt: number }
+      const orders = proxy.job.orders as unknown as {
+        findLast: (predicate: (o: Order) => boolean) => Order | undefined
+      }
+      const order = orders.findLast((o) => o.orderId.startsWith(`order-`))
       if (order) {
         order.orderBinInt = 123
       }
