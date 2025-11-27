@@ -176,6 +176,8 @@ This combines to support a model of uni-directional data flow, extending the red
 
 With an instant inner loop of optimistic state, superseded in time by the slower outer loop of persisting to the server and syncing the updated server state back into the collection.
 
+The Uni-directional and optimistic updates is the reason why Tanstack DB is called a "client-first" framework. Not to be confused with the [Local-first movement](https://www.inkandswitch.com/essay/local-first/), which usually implements bi-directional dataflow. 
+
 ## API reference
 
 ### Collections
