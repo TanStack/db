@@ -190,17 +190,30 @@ export class CollectionSubscriber<
       whereExpression,
     })
 
-    subscription.setOrderByIndex(index)
-
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
-    // Load the first `offset + limit` values from the index
-    // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
-    subscription.requestLimitedSnapshot({
-      limit: offset + limit,
-      orderBy: normalizedOrderBy,
-    })
+    if (index) {
+      // We have an index on the first orderBy column - use lazy loading optimization
+      // This works for both single-column and multi-column orderBy:
+      // - Single-column: index provides exact ordering
+      // - Multi-column: index provides ordering on first column, secondary sort in memory
+      subscription.setOrderByIndex(index)
+
+      // Load the first `offset + limit` values from the index
+      // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
+      subscription.requestLimitedSnapshot({
+        limit: offset + limit,
+        orderBy: normalizedOrderBy,
+      })
+    } else {
+      // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
+      // so the sync layer can optimize if the backend supports it
+      subscription.requestSnapshot({
+        orderBy: normalizedOrderBy,
+        limit: offset + limit,
+      })
+    }
 
     return subscription
   }
@@ -220,11 +233,10 @@ export class CollectionSubscriber<
     const { dataNeeded } = orderByInfo
 
     if (!dataNeeded) {
-      // This should never happen because the topK operator should always set the size callback
-      // which in turn should lead to the orderBy operator setting the dataNeeded callback
-      throw new Error(
-        `Missing dataNeeded callback for collection ${this.collectionId}`,
-      )
+      // dataNeeded is not set when there's no index (e.g., non-ref expression).
+      // In this case, we've already loaded all data via requestSnapshot
+      // and don't need to lazily load more.
+      return true
     }
 
     // `dataNeeded` probes the orderBy operator to see if it needs more data
@@ -275,9 +287,20 @@ export class CollectionSubscriber<
     }
     const { orderBy, valueExtractorForRawRow } = orderByInfo
     const biggestSentRow = this.biggest
-    const biggestSentValue = biggestSentRow
+
+    // Extract all orderBy column values from the biggest sent row
+    // For single-column: returns single value, for multi-column: returns array
+    const extractedValues = biggestSentRow
       ? valueExtractorForRawRow(biggestSentRow)
-      : biggestSentRow
+      : undefined
+
+    // Normalize to array format for minValues
+    const minValues =
+      extractedValues !== undefined
+        ? Array.isArray(extractedValues)
+          ? extractedValues
+          : [extractedValues]
+        : undefined
 
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
@@ -286,7 +309,7 @@ export class CollectionSubscriber<
     subscription.requestLimitedSnapshot({
       orderBy: normalizedOrderBy,
       limit: n,
-      minValue: biggestSentValue,
+      minValues,
     })
   }
 
