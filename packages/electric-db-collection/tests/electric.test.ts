@@ -2264,6 +2264,118 @@ describe(`Electric Integration`, () => {
 
   // Tests for commit and ready behavior with snapshot-end and up-to-date messages
   describe(`Commit and ready behavior`, () => {
+    it(`should ignore snapshot-end before first up-to-date in eager mode`, () => {
+      const config = {
+        id: `eager-ignore-snapshot-end-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `eager` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send data followed by snapshot-end (but no up-to-date)
+      // In eager mode, snapshot-end should NOT trigger a commit because
+      // the snapshot-end in the log could be from a significant period
+      // before the stream is actually up to date
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+      ])
+
+      // Data should NOT be committed yet (snapshot-end should be ignored before up-to-date)
+      expect(testCollection.has(1)).toBe(false)
+      expect(testCollection.status).toBe(`loading`)
+
+      // Now send up-to-date - this should trigger the commit
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Now the data should be committed
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+      expect(testCollection.status).toBe(`ready`)
+    })
+
+    it(`should ignore snapshot-end before first up-to-date in progressive mode`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
+      const config = {
+        id: `progressive-ignore-snapshot-end-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send data followed by snapshot-end (but no up-to-date)
+      // In progressive mode, these messages should be BUFFERED, and snapshot-end
+      // should NOT trigger a commit because the snapshot-end in the log could be
+      // from a significant period before the stream is actually up to date
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+      ])
+
+      // Data should NOT be visible yet (snapshot-end should be ignored before up-to-date)
+      expect(testCollection.has(1)).toBe(false)
+      expect(testCollection.status).toBe(`loading`)
+
+      // Now send up-to-date (triggers atomic swap)
+      testSubscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Now data should be visible after atomic swap
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+      expect(testCollection.status).toBe(`ready`)
+    })
+
     it(`should commit on snapshot-end in eager mode but not mark ready`, () => {
       const config = {
         id: `eager-snapshot-end-test`,
