@@ -22,7 +22,7 @@
     "test:verify-links": "node scripts/verify-links.ts"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.7",
+    "@changesets/cli": "^2.29.8",
     "@eslint/js": "^9.39.1",
     "@stylistic/eslint-plugin": "^4.4.1",
     "@svitejs/changesets-changelog-github-compact": "^1.2.0",
@@ -66,21 +66,6 @@
     "examples/*",
     "examples/react/*"
   ],
-  "overrides": {
-    "@tanstack/angular-db": "workspace:*",
-    "@tanstack/db": "workspace:*",
-    "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/electric-db-collection": "workspace:*",
-    "@tanstack/offline-transactions": "workspace:*",
-    "@tanstack/powersync-db-collection": "workspace:*",
-    "@tanstack/query-db-collection": "workspace:*",
-    "@tanstack/react-db": "workspace:*",
-    "@tanstack/rxdb-db-collection": "workspace:*",
-    "@tanstack/solid-db": "workspace:*",
-    "@tanstack/svelte-db": "workspace:*",
-    "@tanstack/trailbase-db-collection": "workspace:*",
-    "@tanstack/vue-db": "workspace:*"
-  },
   "pnpm": {
     "overrides": {
       "@tanstack/angular-db": "workspace:*",
