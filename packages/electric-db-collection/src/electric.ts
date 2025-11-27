@@ -1038,7 +1038,13 @@ function createElectricSync<T extends Row<unknown>>(
             )
           } else {
             // Normal mode or on-demand: commit transaction if one was started
-            if (transactionStarted) {
+            // In eager mode, only commit on snapshot-end if we've already received
+            // the first up-to-date, because the snapshot-end in the log could be from
+            // a significant period before the stream is actually up to date
+            const shouldCommit =
+              hasUpToDate || syncMode === `on-demand` || hasReceivedUpToDate
+
+            if (transactionStarted && shouldCommit) {
               commit()
               transactionStarted = false
             }
