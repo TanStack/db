@@ -2041,5 +2041,121 @@ describe(`createLiveQueryCollection`, () => {
       resolveLoadSubset!()
       await flushPromises()
     })
+
+    it(`passes single orderBy clause to loadSubset when using limit`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const baseCollection = createCollection<{
+        id: number
+        name: string
+        age: number
+      }>({
+        id: `test-base-orderby`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with orderBy and limit
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q
+          .from({ item: baseCollection })
+          .orderBy(({ item }) => item.age, `asc`)
+          .limit(10)
+      )
+
+      // Trigger sync which will call loadSubset
+      await liveQueryCollection.preload()
+      await flushPromises()
+
+      expect(capturedOptions.length).toBeGreaterThan(0)
+
+      // Find the call that has orderBy (the limited snapshot request)
+      const callWithOrderBy = capturedOptions.find(
+        (opt) => opt.orderBy !== undefined
+      )
+      expect(callWithOrderBy).toBeDefined()
+      expect(callWithOrderBy?.orderBy).toHaveLength(1)
+      expect(callWithOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
+      expect(callWithOrderBy?.limit).toBe(10)
+
+      resolveLoadSubset!()
+      await flushPromises()
+    })
+
+    it(`passes multiple orderBy columns to loadSubset when using limit`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const baseCollection = createCollection<{
+        id: number
+        name: string
+        age: number
+        department: string
+      }>({
+        id: `test-base-multi-orderby`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with multiple orderBy columns and limit
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q
+          .from({ item: baseCollection })
+          .orderBy(({ item }) => item.department, `asc`)
+          .orderBy(({ item }) => item.age, `desc`)
+          .limit(10)
+      )
+
+      // Trigger sync which will call loadSubset
+      await liveQueryCollection.preload()
+      await flushPromises()
+
+      expect(capturedOptions.length).toBeGreaterThan(0)
+
+      // Find the call that has orderBy with multiple columns
+      const callWithMultiOrderBy = capturedOptions.find(
+        (opt) => opt.orderBy !== undefined && opt.orderBy.length > 1
+      )
+
+      // Multi-column orderBy should be passed to loadSubset so the sync layer
+      // can optimize the query if the backend supports composite ordering
+      expect(callWithMultiOrderBy).toBeDefined()
+      expect(callWithMultiOrderBy?.orderBy).toHaveLength(2)
+      expect(callWithMultiOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
+      expect(callWithMultiOrderBy?.orderBy?.[1]?.expression.type).toBe(`ref`)
+      expect(callWithMultiOrderBy?.limit).toBe(10)
+
+      resolveLoadSubset!()
+      await flushPromises()
+    })
   })
 })

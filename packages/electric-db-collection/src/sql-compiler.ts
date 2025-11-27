@@ -172,6 +172,120 @@ function compileFunction(
       throw new Error(`Binary operator ${name} expects 2 arguments`)
     }
     const [lhs, rhs] = compiledArgs
+
+    // Special case for comparison operators with boolean values
+    // PostgreSQL doesn't support < > <= >= on booleans
+    // Transform to equivalent equality checks or constant expressions
+    if (isComparisonOp(name)) {
+      const lhsArg = args[0]
+      const rhsArg = args[1]
+
+      // Check if RHS is a boolean literal value
+      if (
+        rhsArg &&
+        rhsArg.type === `val` &&
+        typeof rhsArg.value === `boolean`
+      ) {
+        const boolValue = rhsArg.value
+        // Remove the boolean param we just added since we'll transform the expression
+        params.pop()
+
+        // Transform based on operator and boolean value
+        // Boolean ordering: false < true
+        if (name === `lt`) {
+          if (boolValue === true) {
+            // lt(col, true) → col = false (only false is less than true)
+            params.push(false)
+            return `${lhs} = $${params.length}`
+          } else {
+            // lt(col, false) → nothing is less than false
+            return `false`
+          }
+        } else if (name === `gt`) {
+          if (boolValue === false) {
+            // gt(col, false) → col = true (only true is greater than false)
+            params.push(true)
+            return `${lhs} = $${params.length}`
+          } else {
+            // gt(col, true) → nothing is greater than true
+            return `false`
+          }
+        } else if (name === `lte`) {
+          if (boolValue === true) {
+            // lte(col, true) → everything is ≤ true
+            return `true`
+          } else {
+            // lte(col, false) → col = false
+            params.push(false)
+            return `${lhs} = $${params.length}`
+          }
+        } else if (name === `gte`) {
+          if (boolValue === false) {
+            // gte(col, false) → everything is ≥ false
+            return `true`
+          } else {
+            // gte(col, true) → col = true
+            params.push(true)
+            return `${lhs} = $${params.length}`
+          }
+        }
+      }
+
+      // Check if LHS is a boolean literal value (less common but handle it)
+      if (
+        lhsArg &&
+        lhsArg.type === `val` &&
+        typeof lhsArg.value === `boolean`
+      ) {
+        const boolValue = lhsArg.value
+        // Remove params for this expression and rebuild
+        params.pop() // remove RHS
+        params.pop() // remove LHS (boolean)
+
+        // Recompile RHS to get fresh param
+        const rhsCompiled = compileBasicExpression(rhsArg!, params)
+
+        // Transform: flip the comparison (val op col → col flipped_op val)
+        if (name === `lt`) {
+          // lt(true, col) → gt(col, true) → col > true → nothing is greater than true
+          if (boolValue === true) {
+            return `false`
+          } else {
+            // lt(false, col) → gt(col, false) → col = true
+            params.push(true)
+            return `${rhsCompiled} = $${params.length}`
+          }
+        } else if (name === `gt`) {
+          // gt(true, col) → lt(col, true) → col = false
+          if (boolValue === true) {
+            params.push(false)
+            return `${rhsCompiled} = $${params.length}`
+          } else {
+            // gt(false, col) → lt(col, false) → nothing is less than false
+            return `false`
+          }
+        } else if (name === `lte`) {
+          if (boolValue === false) {
+            // lte(false, col) → gte(col, false) → everything
+            return `true`
+          } else {
+            // lte(true, col) → gte(col, true) → col = true
+            params.push(true)
+            return `${rhsCompiled} = $${params.length}`
+          }
+        } else if (name === `gte`) {
+          if (boolValue === true) {
+            // gte(true, col) → lte(col, true) → everything
+            return `true`
+          } else {
+            // gte(false, col) → lte(col, false) → col = false
+            params.push(false)
+            return `${rhsCompiled} = $${params.length}`
+          }
+        }
+      }
+    }
+
     // Special case for = ANY operator which needs parentheses around the array parameter
     if (name === `in`) {
       return `${lhs} ${opName}(${rhs})`
@@ -196,6 +310,14 @@ function isBinaryOp(name: string): boolean {
     `ilike`,
   ]
   return binaryOps.includes(name)
+}
+
+/**
+ * Checks if the operator is a comparison operator (excluding eq)
+ * These operators don't work on booleans in PostgreSQL without casting
+ */
+function isComparisonOp(name: string): boolean {
+  return [`gt`, `gte`, `lt`, `lte`].includes(name)
 }
 
 function getOpName(name: string): string {

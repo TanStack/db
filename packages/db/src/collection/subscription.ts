@@ -1,5 +1,5 @@
 import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and, eq, gt, gte, lt } from "../query/builder/functions.js"
+import { and, eq, gt, gte, lt, or } from "../query/builder/functions.js"
 import { Value } from "../query/ir.js"
 import { EventEmitter } from "../event-emitter.js"
 import {
@@ -22,12 +22,17 @@ type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
   optimizedOnly?: boolean
   trackLoadSubsetPromise?: boolean
+  /** Optional orderBy to pass to loadSubset for backend optimization */
+  orderBy?: OrderBy
+  /** Optional limit to pass to loadSubset for backend optimization */
+  limit?: number
 }
 
 type RequestLimitedSnapshotOptions = {
   orderBy: OrderBy
   limit: number
-  minValue?: any
+  /** All column values for cursor (first value used for local index, all values for sync layer) */
+  minValues?: Array<unknown>
 }
 
 type CollectionSubscriptionOptions = {
@@ -36,6 +41,75 @@ type CollectionSubscriptionOptions = {
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
+}
+
+/**
+ * Builds a composite cursor expression for multi-column orderBy.
+ * For [col1 ASC, col2 DESC] with values [v1, v2], produces:
+ *   or(
+ *     gt(col1, v1),                         // col1 > v1
+ *     and(eq(col1, v1), lt(col2, v2))       // col1 = v1 AND col2 < v2 (DESC)
+ *   )
+ *
+ * This creates a precise cursor that works with composite indexes on the backend.
+ */
+function buildCompositeCursor(
+  orderBy: OrderBy,
+  values: Array<unknown>
+): BasicExpression<boolean> | undefined {
+  if (values.length === 0 || orderBy.length === 0) {
+    return undefined
+  }
+
+  // For single column, just use simple gt/lt
+  if (orderBy.length === 1) {
+    const { expression, compareOptions } = orderBy[0]!
+    const operator = compareOptions.direction === `asc` ? gt : lt
+    return operator(expression, new Value(values[0]))
+  }
+
+  // For multi-column, build the composite cursor:
+  // or(
+  //   gt(col1, v1),
+  //   and(eq(col1, v1), gt(col2, v2)),
+  //   and(eq(col1, v1), eq(col2, v2), gt(col3, v3)),
+  //   ...
+  // )
+  const clauses: Array<BasicExpression<boolean>> = []
+
+  for (let i = 0; i < orderBy.length && i < values.length; i++) {
+    const clause = orderBy[i]!
+    const value = values[i]
+
+    // Build equality conditions for all previous columns
+    const eqConditions: Array<BasicExpression<boolean>> = []
+    for (let j = 0; j < i; j++) {
+      const prevClause = orderBy[j]!
+      const prevValue = values[j]
+      eqConditions.push(eq(prevClause.expression, new Value(prevValue)))
+    }
+
+    // Add the comparison for the current column (respecting direction)
+    const operator = clause.compareOptions.direction === `asc` ? gt : lt
+    const comparison = operator(clause.expression, new Value(value))
+
+    if (eqConditions.length === 0) {
+      // First column: just the comparison
+      clauses.push(comparison)
+    } else {
+      // Subsequent columns: and(eq(prev...), comparison)
+      // We need to spread into and() which expects at least 2 args
+      const allConditions = [...eqConditions, comparison]
+      clauses.push(allConditions.reduce((acc, cond) => and(acc, cond)))
+    }
+  }
+
+  // Combine all clauses with OR
+  if (clauses.length === 1) {
+    return clauses[0]!
+  }
+  // Use reduce to combine with or() which expects exactly 2 args
+  return clauses.reduce((acc, clause) => or(acc, clause))
 }
 
 export class CollectionSubscription
@@ -203,6 +277,9 @@ export class CollectionSubscription
     const loadOptions: LoadSubsetOptions = {
       where: stateOpts.where,
       subscription: this,
+      // Include orderBy and limit if provided so sync layer can optimize the query
+      orderBy: opts?.orderBy,
+      limit: opts?.limit,
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 
@@ -233,17 +310,22 @@ export class CollectionSubscription
   }
 
   /**
-   * Sends a snapshot that fulfills the `where` clause and all rows are bigger or equal to `minValue`.
+   * Sends a snapshot that fulfills the `where` clause and all rows are bigger or equal to the cursor.
    * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
    * It uses that range index to load the items in the order of the index.
-   * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to `minValue` + limit values greater than `minValue`.
+   *
+   * For multi-column orderBy:
+   * - Uses first value from `minValues` for LOCAL index operations (wide bounds, ensures no missed rows)
+   * - Uses all `minValues` to build a precise composite cursor for SYNC layer loadSubset
+   *
+   * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
    *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
    * Note 2: it does not send keys that have already been sent before.
    */
   requestLimitedSnapshot({
     orderBy,
     limit,
-    minValue,
+    minValues,
   }: RequestLimitedSnapshotOptions) {
     if (!limit) throw new Error(`limit is required`)
 
@@ -252,6 +334,11 @@ export class CollectionSubscription
         `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`
       )
     }
+
+    // Derive first column value from minValues (used for local index operations)
+    const minValue = minValues?.[0]
+    // Cast for index operations (index expects string | number)
+    const minValueForIndex = minValue as string | number | undefined
 
     const index = this.orderByIndex
     const where = this.options.whereExpression
@@ -272,7 +359,7 @@ export class CollectionSubscription
       return whereFilterFn?.(value) ?? true
     }
 
-    let biggestObservedValue = minValue
+    let biggestObservedValue = minValueForIndex
     const changes: Array<ChangeMessage<any, string | number>> = []
 
     // If we have a minValue we need to handle the case
@@ -281,12 +368,16 @@ export class CollectionSubscription
     // so if minValue is 3 then the previous snapshot may not have included all 3s
     // e.g. if it was offset 0 and limit 3 it would only have loaded the first 3
     //      so we load all rows equal to minValue first, to be sure we don't skip any duplicate values
+    //
+    // For multi-column orderBy, we use the first column value for index operations (wide bounds)
+    // This may load some duplicates but ensures we never miss any rows.
     let keys: Array<string | number> = []
-    if (minValue !== undefined) {
-      // First, get all items with the same value as minValue
+    if (minValueForIndex !== undefined) {
+      // First, get all items with the same FIRST COLUMN value as minValue
+      // This provides wide bounds for the local index
       const { expression } = orderBy[0]!
       const allRowsWithMinValue = this.collection.currentStateAsChanges({
-        where: eq(expression, new Value(minValue)),
+        where: eq(expression, new Value(minValueForIndex)),
       })
 
       if (allRowsWithMinValue) {
@@ -300,15 +391,15 @@ export class CollectionSubscription
         // Then get items greater than minValue
         const keysGreaterThanMin = index.take(
           limit - keys.length,
-          minValue,
+          minValueForIndex,
           filterFn
         )
         keys.push(...keysGreaterThanMin)
       } else {
-        keys = index.take(limit, minValue, filterFn)
+        keys = index.take(limit, minValueForIndex, filterFn)
       }
     } else {
-      keys = index.take(limit, minValue, filterFn)
+      keys = index.take(limit, minValueForIndex, filterFn)
     }
 
     const valuesNeeded = () => Math.max(limit - changes.length, 0)
@@ -333,13 +424,14 @@ export class CollectionSubscription
 
     this.callback(changes)
 
+    // Build the WHERE filter for sync layer loadSubset
+    // buildCompositeCursor handles both single-column and multi-column cases
     let whereWithValueFilter = where
-    if (typeof minValue !== `undefined`) {
-      // Only request data that we haven't seen yet (i.e. is bigger than the minValue)
-      const { expression, compareOptions } = orderBy[0]!
-      const operator = compareOptions.direction === `asc` ? gt : lt
-      const valueFilter = operator(expression, new Value(minValue))
-      whereWithValueFilter = where ? and(where, valueFilter) : valueFilter
+    if (minValues !== undefined && minValues.length > 0) {
+      const cursor = buildCompositeCursor(orderBy, minValues)
+      if (cursor) {
+        whereWithValueFilter = where ? and(where, cursor) : cursor
+      }
     }
 
     // Request the sync layer to load more data
