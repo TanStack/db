@@ -1060,7 +1060,9 @@ export function createChangeProxy<
   }
 
   // Create a proxy for the target object
-  const proxy = createObjectProxy(target)
+  // Use the unfrozen copy_ as the proxy target to avoid Proxy invariant violations
+  // when the original target is frozen (e.g., from Immer)
+  const proxy = createObjectProxy(changeTracker.copy_ as unknown as T)
 
   // Return the proxy and a function to get the changes
   return {
