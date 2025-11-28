@@ -12,6 +12,14 @@ import type {
   SingleResult,
 } from "@tanstack/db"
 
+// Unique symbol for type-level error messages
+declare const TypeException: unique symbol
+
+// Custom compile-time error for disabled queries
+type DisabledQueryError = {
+  [TypeException]: `❌ useLiveSuspenseQuery does not support disabled queries (returning undefined/null).\n\n✅ Solution 1: Use conditional rendering\n   Don't render this component until data is ready:\n   {userId ? <Profile userId={userId} /> : <div>No user</div>}\n\n✅ Solution 2: Use useLiveQuery instead\n   It supports the 'isEnabled' flag for conditional queries:\n   useLiveQuery((q) => userId ? q.from(...) : undefined, [userId])`
+}
+
 /**
  * Create a live query with React Suspense support
  * @param queryFn - Query function that defines what data to fetch
@@ -71,6 +79,39 @@ import type {
  *     </ErrorBoundary>
  *   )
  * }
+ *
+ * @remarks
+ * **Important:** This hook does NOT support disabled queries (returning undefined/null).
+ * Following TanStack Query's useSuspenseQuery design, the query callback must always
+ * return a valid query, collection, or config object.
+ *
+ * ❌ **This will cause a type error:**
+ * ```ts
+ * useLiveSuspenseQuery(
+ *   (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+ * )
+ * ```
+ *
+ * ✅ **Use conditional rendering instead:**
+ * ```ts
+ * function Profile({ userId }: { userId: string }) {
+ *   const { data } = useLiveSuspenseQuery(
+ *     (q) => q.from({ users }).where(({ users }) => eq(users.id, userId))
+ *   )
+ *   return <div>{data.name}</div>
+ * }
+ *
+ * // In parent component:
+ * {userId ? <Profile userId={userId} /> : <div>No user</div>}
+ * ```
+ *
+ * ✅ **Or use useLiveQuery for conditional queries:**
+ * ```ts
+ * const { data, isEnabled } = useLiveQuery(
+ *   (q) => userId ? q.from({ users }) : undefined,  // ✅ Supported!
+ *   [userId]
+ * )
+ * ```
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveSuspenseQuery<TContext extends Context>(
@@ -118,11 +159,38 @@ export function useLiveSuspenseQuery<
   collection: Collection<TResult, TKey, TUtils> & SingleResult
 }
 
+// "Poison pill" overloads - catch disabled queries and show custom compile-time error
+// These MUST come AFTER the specific overloads so TypeScript tries them last
+export function useLiveSuspenseQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => QueryBuilder<TContext> | undefined | null,
+  deps?: Array<unknown>
+): DisabledQueryError
+
+export function useLiveSuspenseQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => LiveQueryCollectionConfig<TContext> | undefined | null,
+  deps?: Array<unknown>
+): DisabledQueryError
+
+export function useLiveSuspenseQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => Collection<TResult, TKey, TUtils> | undefined | null,
+  deps?: Array<unknown>
+): DisabledQueryError
+
 // Implementation - uses useLiveQuery internally and adds Suspense logic
 export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
   deps: Array<unknown> = []
-) {
+): DisabledQueryError | { state: any; data: any; collection: any } {
   const promiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const hasBeenReadyRef = useRef(false)
@@ -146,9 +214,13 @@ export function useLiveSuspenseQuery(
   // SUSPENSE LOGIC: Throw promise or error based on collection status
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!result.isEnabled) {
-    // Suspense queries cannot be disabled - throw error
+    // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior
     throw new Error(
-      `useLiveSuspenseQuery does not support disabled queries. Use useLiveQuery instead for conditional queries.`
+      `useLiveSuspenseQuery does not support disabled queries (callback returned undefined/null). ` +
+        `The Suspense pattern requires data to always be defined (T, not T | undefined). ` +
+        `Solutions: ` +
+        `1) Use conditional rendering - don't render the component until the condition is met. ` +
+        `2) Use useLiveQuery instead, which supports disabled queries with the 'isEnabled' flag.`
     )
   }
 
