@@ -11,11 +11,17 @@ export interface OrderByOptions<Ve> {
   offset?: number
 }
 
-type OrderByWithFractionalIndexOptions<Ve> = OrderByOptions<Ve> & {
+type OrderByWithFractionalIndexOptions<
+  Ve,
+  KeyType = unknown,
+  ValueType = unknown,
+> = OrderByOptions<Ve> & {
   setSizeCallback?: (getSize: () => number) => void
   setWindowFn?: (
     windowFn: (options: { offset?: number; limit?: number }) => void
   ) => void
+  groupByKey?: boolean
+  groupKeyFn?: (key: KeyType, value: ValueType) => unknown
 }
 
 /**
@@ -142,7 +148,11 @@ export function orderByWithFractionalIndexBase<
   valueExtractor: (
     value: T extends KeyValue<unknown, infer V> ? V : never
   ) => Ve,
-  options?: OrderByWithFractionalIndexOptions<Ve>
+  options?: OrderByWithFractionalIndexOptions<
+    Ve,
+    T extends KeyValue<infer K, unknown> ? K : never,
+    T extends KeyValue<unknown, infer V> ? V : never
+  >
 ) {
   type KeyType = T extends KeyValue<infer K, unknown> ? K : never
   type ValueType = T extends KeyValue<unknown, infer V> ? V : never
@@ -160,6 +170,19 @@ export function orderByWithFractionalIndexBase<
       return 1
     })
 
+  type GroupKeyFn = (key: KeyType, value: ValueType) => unknown
+  const shouldGroupByKey =
+    options?.groupKeyFn !== undefined ? true : (options?.groupByKey ?? true)
+
+  const resolvedGroupKeyFn: GroupKeyFn | undefined =
+    options?.groupKeyFn ??
+    (shouldGroupByKey
+      ? (((key: KeyType) =>
+          Array.isArray(key)
+            ? (key as unknown as Array<unknown>)[0]
+            : key) as GroupKeyFn)
+      : undefined)
+
   return (
     stream: IStreamBuilder<T>
   ): IStreamBuilder<[KeyType, [ValueType, string]]> => {
@@ -172,6 +195,7 @@ export function orderByWithFractionalIndexBase<
           offset,
           setSizeCallback,
           setWindowFn,
+          groupKeyFn: resolvedGroupKeyFn,
         }
       ),
       consolidate()
