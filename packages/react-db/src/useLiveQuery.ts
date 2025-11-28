@@ -492,7 +492,7 @@ export function useLiveQuery(
         collection: undefined,
         status: `disabled`,
         isLoading: false,
-        isReady: false,
+        isReady: true,
         isIdle: false,
         isError: false,
         isCleanedUp: false,
