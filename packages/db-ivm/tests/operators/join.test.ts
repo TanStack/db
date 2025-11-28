@@ -12,6 +12,7 @@ import {
 describe(`Operators`, () => {
   describe(`Join operation`, () => {
     testJoin()
+    testUint8ArrayKeyJoin()
   })
 })
 
@@ -340,5 +341,72 @@ function testJoin() {
 
     assertKeyedResults(`join step-by-step`, stepResult, expectedResults, 6)
     assertKeyedResults(`join batch processing`, batchResult, expectedResults, 6)
+  })
+}
+
+function testUint8ArrayKeyJoin() {
+  test(`join with Uint8Array keys compared by content`, () => {
+    const graph = new D2()
+    const inputA = graph.newInput<[Uint8Array, string]>()
+    const inputB = graph.newInput<[Uint8Array, string]>()
+    const results: Array<[Uint8Array, [string, string]]> = []
+
+    inputA.pipe(
+      join(inputB),
+      output((message) => {
+        for (const [item] of message.getInner()) {
+          results.push(item)
+        }
+      })
+    )
+
+    graph.finalize()
+
+    // Create separate Uint8Array instances with the same content
+    const key1A = new Uint8Array([1, 2, 3, 4])
+    const key1B = new Uint8Array([1, 2, 3, 4])
+    const key2A = new Uint8Array([5, 6, 7, 8])
+    const key2B = new Uint8Array([5, 6, 7, 8])
+
+    // Verify that the arrays are different objects
+    expect(key1A).not.toBe(key1B)
+    expect(key2A).not.toBe(key2B)
+
+    // Send data with different Uint8Array instances but same content
+    inputA.sendData(
+      new MultiSet([
+        [[key1A, `a`], 1],
+        [[key2A, `b`], 1],
+      ])
+    )
+
+    inputB.sendData(
+      new MultiSet([
+        [[key1B, `x`], 1],
+        [[key2B, `y`], 1],
+      ])
+    )
+
+    graph.run()
+
+    // Should join successfully based on content, not reference
+    expect(results).toHaveLength(2)
+
+    // Verify the joined data is correct
+    const sortedResults = results.sort((a, b) => {
+      const [keyA] = a
+      const [keyB] = b
+      return keyA[0]! - keyB[0]!
+    })
+
+    const [key1, [val1A, val1B]] = sortedResults[0]!
+    expect(Array.from(key1)).toEqual([1, 2, 3, 4])
+    expect(val1A).toBe(`a`)
+    expect(val1B).toBe(`x`)
+
+    const [key2, [val2A, val2B]] = sortedResults[1]!
+    expect(Array.from(key2)).toEqual([5, 6, 7, 8])
+    expect(val2A).toBe(`b`)
+    expect(val2B).toBe(`y`)
   })
 }

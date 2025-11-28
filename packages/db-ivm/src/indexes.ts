@@ -35,6 +35,7 @@
 
 import { MultiSet } from "./multiset.js"
 import { hash } from "./hashing/index.js"
+import { normalizeValue as normalizeKey } from "./utils/uint8array.js"
 import type { Hash } from "./hashing/index.js"
 
 // We use a symbol to represent the absence of a prefix, unprefixed values a stored
@@ -151,6 +152,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    */
   #inner: IndexMap<TKey, TValue, TPrefix>
   #consolidatedMultiplicity: Map<TKey, number> = new Map() // sum of multiplicities per key
+  #originalKeys: Map<TKey, TKey> = new Map() // map from normalized keys to original keys
 
   constructor() {
     this.#inner = new Map()
@@ -200,7 +202,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns True if the index has the key, false otherwise.
    */
   has(key: TKey): boolean {
-    return this.#inner.has(key)
+    return this.#inner.has(normalizeKey(key) as TKey)
   }
 
   /**
@@ -209,7 +211,9 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns True if the key has non-zero consolidated multiplicity, false otherwise.
    */
   hasPresence(key: TKey): boolean {
-    return (this.#consolidatedMultiplicity.get(key) || 0) !== 0
+    return (
+      (this.#consolidatedMultiplicity.get(normalizeKey(key) as TKey) || 0) !== 0
+    )
   }
 
   /**
@@ -218,15 +222,18 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns The consolidated multiplicity for the key.
    */
   getConsolidatedMultiplicity(key: TKey): number {
-    return this.#consolidatedMultiplicity.get(key) || 0
+    return this.#consolidatedMultiplicity.get(normalizeKey(key) as TKey) || 0
   }
 
   /**
    * Get all keys that have presence (non-zero consolidated multiplicity).
    * @returns An iterator of keys with non-zero consolidated multiplicity.
    */
-  getPresenceKeys(): Iterable<TKey> {
-    return this.#consolidatedMultiplicity.keys()
+  *getPresenceKeys(): Iterable<TKey> {
+    for (const normalizedKey of this.#consolidatedMultiplicity.keys()) {
+      const originalKey = this.#originalKeys.get(normalizedKey) || normalizedKey
+      yield originalKey
+    }
   }
 
   /**
@@ -244,7 +251,7 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns An iterator of value tuples [value, multiplicity].
    */
   *getIterator(key: TKey): Iterable<[TValue, number]> {
-    const mapOrSingleValue = this.#inner.get(key)
+    const mapOrSingleValue = this.#inner.get(normalizeKey(key) as TKey)
     if (isSingleValue(mapOrSingleValue)) {
       yield mapOrSingleValue
     } else if (mapOrSingleValue === undefined) {
@@ -273,9 +280,10 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns An iterable of all key-value pairs (and their multiplicities) in the index.
    */
   *entries(): Iterable<[TKey, [TValue, number]]> {
-    for (const key of this.#inner.keys()) {
-      for (const valueTuple of this.getIterator(key)) {
-        yield [key, valueTuple]
+    for (const normalizedKey of this.#inner.keys()) {
+      const originalKey = this.#originalKeys.get(normalizedKey) || normalizedKey
+      for (const valueTuple of this.getIterator(normalizedKey)) {
+        yield [originalKey, valueTuple]
       }
     }
   }
@@ -287,8 +295,9 @@ export class Index<TKey, TValue, TPrefix = any> {
    * @returns An iterator of all *keys* in the index and their corresponding value iterator.
    */
   *entriesIterators(): Iterable<[TKey, Iterable<[TValue, number]>]> {
-    for (const key of this.#inner.keys()) {
-      yield [key, this.getIterator(key)]
+    for (const normalizedKey of this.#inner.keys()) {
+      const originalKey = this.#originalKeys.get(normalizedKey) || normalizedKey
+      yield [originalKey, this.getIterator(normalizedKey)]
     }
   }
 
@@ -302,27 +311,40 @@ export class Index<TKey, TValue, TPrefix = any> {
     // If the multiplicity is 0, do nothing
     if (multiplicity === 0) return
 
-    // Update consolidated multiplicity tracking
-    const newConsolidatedMultiplicity =
-      (this.#consolidatedMultiplicity.get(key) || 0) + multiplicity
-    if (newConsolidatedMultiplicity === 0) {
-      this.#consolidatedMultiplicity.delete(key)
-    } else {
-      this.#consolidatedMultiplicity.set(key, newConsolidatedMultiplicity)
+    // Normalize the key for Map operations
+    const normalizedKey = normalizeKey(key) as TKey
+
+    // Store the original key if this is a new key
+    if (!this.#originalKeys.has(normalizedKey)) {
+      this.#originalKeys.set(normalizedKey, key)
     }
 
-    const mapOrSingleValue = this.#inner.get(key)
+    // Update consolidated multiplicity tracking
+    const newConsolidatedMultiplicity =
+      (this.#consolidatedMultiplicity.get(normalizedKey) || 0) + multiplicity
+    if (newConsolidatedMultiplicity === 0) {
+      this.#consolidatedMultiplicity.delete(normalizedKey)
+      // Also clean up the original key mapping when the key is completely removed
+      this.#originalKeys.delete(normalizedKey)
+    } else {
+      this.#consolidatedMultiplicity.set(
+        normalizedKey,
+        newConsolidatedMultiplicity
+      )
+    }
+
+    const mapOrSingleValue = this.#inner.get(normalizedKey)
 
     if (mapOrSingleValue === undefined) {
       // First value for this key
-      this.#inner.set(key, valueTuple)
+      this.#inner.set(normalizedKey, valueTuple)
       return
     }
 
     if (isSingleValue(mapOrSingleValue)) {
       // Handle transition from single value to map
       this.#handleSingleValueTransition(
-        key,
+        normalizedKey,
         mapOrSingleValue,
         value,
         multiplicity
@@ -338,28 +360,31 @@ export class Index<TKey, TValue, TPrefix = any> {
         const prefixMap = new PrefixMap<TValue, TPrefix>()
         prefixMap.set(NO_PREFIX, mapOrSingleValue)
         prefixMap.set(prefix, valueTuple)
-        this.#inner.set(key, prefixMap)
+        this.#inner.set(normalizedKey, prefixMap)
       } else {
         // Add to existing ValueMap
         const isEmpty = mapOrSingleValue.addValue(value, multiplicity)
         if (isEmpty) {
-          this.#inner.delete(key)
+          this.#inner.delete(normalizedKey)
+          this.#originalKeys.delete(normalizedKey)
         }
       }
     } else {
       // Handle existing PrefixMap
       const isEmpty = mapOrSingleValue.addValue(value, multiplicity)
       if (isEmpty) {
-        this.#inner.delete(key)
+        this.#inner.delete(normalizedKey)
+        this.#originalKeys.delete(normalizedKey)
       }
     }
   }
 
   /**
    * Handle the transition from a single value to either a ValueMap or PrefixMap
+   * Note: The key parameter should already be normalized before calling this method
    */
   #handleSingleValueTransition(
-    key: TKey,
+    normalizedKey: TKey,
     currentSingleValue: SingleValue<TValue>,
     newValue: TValue,
     multiplicity: number
@@ -370,9 +395,9 @@ export class Index<TKey, TValue, TPrefix = any> {
     if (currentValue === newValue) {
       const newMultiplicity = currentMultiplicity + multiplicity
       if (newMultiplicity === 0) {
-        this.#inner.delete(key)
+        this.#inner.delete(normalizedKey)
       } else {
-        this.#inner.set(key, [newValue, newMultiplicity])
+        this.#inner.set(normalizedKey, [newValue, newMultiplicity])
       }
       return
     }
@@ -388,9 +413,9 @@ export class Index<TKey, TValue, TPrefix = any> {
     ) {
       const newMultiplicity = currentMultiplicity + multiplicity
       if (newMultiplicity === 0) {
-        this.#inner.delete(key)
+        this.#inner.delete(normalizedKey)
       } else {
-        this.#inner.set(key, [newValue, newMultiplicity])
+        this.#inner.set(normalizedKey, [newValue, newMultiplicity])
       }
       return
     }
@@ -401,7 +426,7 @@ export class Index<TKey, TValue, TPrefix = any> {
       const valueMap = new ValueMap<TValue>()
       valueMap.set(hash(currentValue), currentSingleValue)
       valueMap.set(hash(newValue), [newValue, multiplicity])
-      this.#inner.set(key, valueMap)
+      this.#inner.set(normalizedKey, valueMap)
     } else {
       // At least one has a prefix, use PrefixMap
       const prefixMap = new PrefixMap<TValue, TPrefix>()
@@ -418,7 +443,7 @@ export class Index<TKey, TValue, TPrefix = any> {
         prefixMap.set(newPrefix, [newValue, multiplicity])
       }
 
-      this.#inner.set(key, prefixMap)
+      this.#inner.set(normalizedKey, prefixMap)
     }
   }
 
