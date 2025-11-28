@@ -371,7 +371,10 @@ export class InvalidSourceTypeError extends QueryBuilderError {
 
 export class JoinConditionMustBeEqualityError extends QueryBuilderError {
   constructor() {
-    super(`Join condition must be an equality expression`)
+    super(
+      `Join condition must be an equality expression (eq) or compound equality (and(eq, eq, ...)). ` +
+        `Only eq() expressions are allowed within and().`
+    )
   }
 }
 
