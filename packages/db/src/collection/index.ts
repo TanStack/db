@@ -310,8 +310,11 @@ export class CollectionImpl<
       events: this._events,
     })
 
-    // Only start sync immediately if explicitly enabled
-    if (config.startSync === true) {
+    // Start sync immediately if:
+    // 1. Explicitly enabled via startSync: true
+    // 2. Collection uses on-demand sync mode - sync must be started for write
+    //    operations to work, but no data will be fetched until loadSubset is called
+    if (config.startSync === true || config.syncMode === `on-demand`) {
       this._sync.startSync()
     }
   }
