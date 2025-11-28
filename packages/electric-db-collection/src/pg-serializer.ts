@@ -26,6 +26,11 @@ export function serialize(value: unknown): string {
     return value.toString()
   }
 
+  // Handle bigints - convert to string
+  if (typeof value === `bigint`) {
+    return value.toString()
+  }
+
   // Handle booleans - return as lowercase string
   if (typeof value === `boolean`) {
     return value ? `true` : `false`
@@ -54,5 +59,13 @@ export function serialize(value: unknown): string {
     return `{${elements.join(`,`)}}`
   }
 
-  throw new Error(`Cannot serialize value: ${JSON.stringify(value)}`)
+  // Safely stringify the value for the error message
+  // JSON.stringify can't handle BigInt and other types, so we use a try-catch
+  let valueStr: string
+  try {
+    valueStr = JSON.stringify(value)
+  } catch {
+    valueStr = String(value)
+  }
+  throw new Error(`Cannot serialize value: ${valueStr}`)
 }
