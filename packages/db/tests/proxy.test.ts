@@ -599,6 +599,7 @@ describe(`Proxy Library`, () => {
 
       // Modify and delete
       proxy.name = `Jane`
+      // @ts-expect-error testing delete on non-optional property
       delete proxy.age
 
       // Only the modified property is returned by getChanges
@@ -616,6 +617,7 @@ describe(`Proxy Library`, () => {
 
       // In strict mode (which Vitest uses), deleting a non-configurable property throws
       expect(() => {
+        // @ts-expect-error testing delete on non-optional property
         delete proxy.age
       }).toThrow()
 
