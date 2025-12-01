@@ -20,6 +20,7 @@ export interface Post {
   title: string
   content: string | null
   viewCount: number
+  largeViewCount: bigint // BIGINT field for testing large number serialization
   publishedAt: Date | null
   deletedAt: Date | null
 }

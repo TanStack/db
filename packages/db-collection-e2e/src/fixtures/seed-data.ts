@@ -132,6 +132,14 @@ export function generateSeedData(): SeedDataResult {
     // ViewCount: varied distribution
     const viewCount = i === 0 ? 0 : i === 1 ? -10 : i * 42
 
+    // LargeViewCount: BigInt field with values exceeding MAX_SAFE_INTEGER for some posts
+    // This tests BigInt serialization in predicates
+    // Base value: 9007199254740992n (Number.MAX_SAFE_INTEGER + 1)
+    const largeViewCount =
+      i < 10
+        ? BigInt(`9007199254740992`) + BigInt(i) // First 10 posts have very large values
+        : BigInt(i * 1000) // Other posts have smaller bigint values
+
     // PublishedAt: 80% published, 20% null (drafts)
     const publishedAt =
       i % 5 !== 0 ? new Date(now.getTime() - Math.random() * oneYear) : null
@@ -148,6 +156,7 @@ export function generateSeedData(): SeedDataResult {
       title,
       content,
       viewCount,
+      largeViewCount,
       publishedAt,
       deletedAt,
     })

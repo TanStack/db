@@ -259,6 +259,65 @@ export function createPredicatesTestSuite(
 
         await query.cleanup()
       })
+
+      it(`should filter with eq() on BIGINT field using JavaScript BigInt`, async () => {
+        const config = await getConfig()
+        const postsCollection = config.collections.onDemand.posts
+
+        // Target the first post which has largeViewCount = 9007199254740992n (MAX_SAFE_INTEGER + 1)
+        const targetBigInt = BigInt(`9007199254740992`)
+
+        const query = createLiveQueryCollection((q) =>
+          q
+            .from({ post: postsCollection })
+            .where(({ post }) => eq(post.largeViewCount, targetBigInt))
+        )
+
+        await query.preload()
+        await waitForQueryData(query, { minSize: 1 })
+
+        const results = Array.from(query.state.values())
+        expect(results.length).toBe(1)
+        // Post 0 has largeViewCount = 9007199254740992n
+        // Database may return as bigint or string depending on driver
+        assertAllItemsMatch(query, (p) => {
+          const value = String(p.largeViewCount)
+          return value === targetBigInt.toString()
+        })
+
+        await query.cleanup()
+      })
+
+      it(`should filter with gt() on BIGINT field using JavaScript BigInt`, async () => {
+        const config = await getConfig()
+        const postsCollection = config.collections.onDemand.posts
+
+        // Filter for posts with largeViewCount > 9007199254740995
+        // This should match posts 4-9 (indices 4,5,6,7,8,9 have values 9007199254740996-9007199254741001)
+        const thresholdBigInt = BigInt(`9007199254740995`)
+
+        const query = createLiveQueryCollection((q) =>
+          q
+            .from({ post: postsCollection })
+            .where(({ post }) => gt(post.largeViewCount, thresholdBigInt))
+        )
+
+        await query.preload()
+        await waitForQueryData(query, { minSize: 1 })
+
+        const results = Array.from(query.state.values())
+        expect(results.length).toBeGreaterThan(0)
+        // All results should have largeViewCount > threshold
+        assertAllItemsMatch(query, (p) => {
+          const value =
+            typeof p.largeViewCount === `bigint`
+              ? p.largeViewCount
+              : BigInt(p.largeViewCount)
+          return value > thresholdBigInt
+        })
+
+        await query.cleanup()
+      })
     })
 
     describe(`String Pattern Matching Operators`, () => {
@@ -581,6 +640,42 @@ export function createPredicatesTestSuite(
         await query.preload()
 
         assertCollectionSize(query, 0)
+
+        await query.cleanup()
+      })
+
+      it(`should filter with inArray() on BIGINT array using JavaScript BigInt`, async () => {
+        const config = await getConfig()
+        const postsCollection = config.collections.onDemand.posts
+
+        // Target posts 0 and 1 which have largeViewCount values:
+        // Post 0: 9007199254740992n, Post 1: 9007199254740993n
+        const targetBigInts = [
+          BigInt(`9007199254740992`),
+          BigInt(`9007199254740993`),
+        ]
+
+        const query = createLiveQueryCollection((q) =>
+          q
+            .from({ post: postsCollection })
+            .where(({ post }) => inArray(post.largeViewCount, targetBigInts))
+        )
+
+        await query.preload()
+        await waitForQueryData(query, { minSize: 2 })
+
+        const results = Array.from(query.state.values())
+        expect(results.length).toBe(2)
+
+        // Verify both matching posts are returned
+        const targetStrings = targetBigInts.map((b) => b.toString())
+        assertAllItemsMatch(query, (p) => {
+          const value =
+            typeof p.largeViewCount === `bigint`
+              ? p.largeViewCount.toString()
+              : String(p.largeViewCount)
+          return targetStrings.includes(value)
+        })
 
         await query.cleanup()
       })

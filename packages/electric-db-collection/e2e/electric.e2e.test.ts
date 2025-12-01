@@ -74,6 +74,7 @@ describe(`Electric Collection E2E Tests`, () => {
         title TEXT NOT NULL,
         content TEXT,
         "viewCount" INTEGER NOT NULL DEFAULT 0,
+        "largeViewCount" BIGINT NOT NULL,
         "publishedAt" TIMESTAMP,
         "deletedAt" TIMESTAMP
       )
@@ -112,14 +113,15 @@ describe(`Electric Collection E2E Tests`, () => {
 
     for (const post of seedData.posts) {
       await dbClient.query(
-        `INSERT INTO ${postsTable} (id, "userId", title, content, "viewCount", "publishedAt", "deletedAt")
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO ${postsTable} (id, "userId", title, content, "viewCount", "largeViewCount", "publishedAt", "deletedAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           post.id,
           post.userId,
           post.title,
           post.content,
           post.viewCount,
+          post.largeViewCount.toString(), // BigInt must be converted to string for pg
           post.publishedAt,
           post.deletedAt,
         ]
@@ -493,14 +495,15 @@ describe(`Electric Collection E2E Tests`, () => {
         },
         insertPost: async (post) => {
           await dbClient.query(
-            `INSERT INTO ${postsTable} (id, "userId", title, content, "viewCount", "publishedAt", "deletedAt")
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            `INSERT INTO ${postsTable} (id, "userId", title, content, "viewCount", "largeViewCount", "publishedAt", "deletedAt")
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
             [
               post.id,
               post.userId,
               post.title,
               post.content || null,
               post.viewCount,
+              post.largeViewCount.toString(), // BigInt must be converted to string for pg
               post.publishedAt || null,
               post.deletedAt || null,
             ]
