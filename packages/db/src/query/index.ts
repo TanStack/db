@@ -47,6 +47,13 @@ export {
 // Aggregates remain in functions.ts (they're handled differently)
 export { count, avg, sum, min, max } from "./builder/functions.js"
 
+// Operator registry for custom operators
+export {
+  registerOperator,
+  type EvaluatorFactory,
+  type CompiledExpression,
+} from "./compiler/registry.js"
+
 // Ref proxy utilities
 export type { Ref } from "./builder/types.js"
 
