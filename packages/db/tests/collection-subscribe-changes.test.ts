@@ -2066,4 +2066,19 @@ describe(`Collection.subscribeChanges`, () => {
     // Clean up
     subscription.unsubscribe()
   })
+
+  it(`should throw if both where and whereExpression are provided`, () => {
+    const collection = createCollection<{ id: number; status: string }>({
+      id: `where-both-error-test`,
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+
+    expect(() => {
+      collection.subscribeChanges(() => {}, {
+        where: (row) => eq(row.status, `active`),
+        whereExpression: eq(new PropRef([`status`]), `active`),
+      })
+    }).toThrow(`Cannot specify both 'where' and 'whereExpression' options`)
+  })
 })

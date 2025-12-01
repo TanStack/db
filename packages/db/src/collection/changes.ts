@@ -104,8 +104,14 @@ export class CollectionChangesManager<
     this.addSubscriber()
 
     // Compile where callback to whereExpression if provided
+    if (options.where && options.whereExpression) {
+      throw new Error(
+        `Cannot specify both 'where' and 'whereExpression' options. Use one or the other.`
+      )
+    }
+
     let whereExpression = options.whereExpression
-    if (options.where && !whereExpression) {
+    if (options.where) {
       const proxy = createSingleRowRefProxy<TOutput>()
       const result = options.where(proxy)
       whereExpression = toExpression(result)
