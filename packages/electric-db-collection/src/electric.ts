@@ -14,8 +14,19 @@ import {
   TimeoutWaitingForTxIdError,
 } from './errors'
 import { compileSQL } from './sql-compiler'
+import {
+  addTagToIndex,
+  findRowsMatchingPattern,
+  getTagLength,
+  isMoveOutMessage,
+  removeTagFromIndex,
+  tagMatchesPattern,
+} from './tagIndex'
+import type { MoveOutPattern, MoveTag, RowId, TagIndex } from './tagIndex'
 import type {
   BaseCollectionConfig,
+  ChangeMessage,
+  Collection,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -880,6 +891,185 @@ function createElectricSync<T extends Row<unknown>>(
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
 
+  // Tag tracking state
+  const rowTagSets = new Map<RowId, Set<MoveTag>>()
+  const tagIndex: TagIndex = []
+  let tagLength: number | undefined = undefined
+
+  /**
+   * Initialize the tag index with the correct length
+   */
+  const initializeTagIndex = (length: number): void => {
+    if (tagIndex.length < length) {
+      // Extend the index array to the required length
+      for (let i = tagIndex.length; i < length; i++) {
+        tagIndex[i] = new Map()
+      }
+    }
+  }
+
+  /**
+   * Add tags to a row and update the tag index
+   */
+  const addTagsToRow = (
+    tags: Array<MoveTag>,
+    rowId: RowId,
+    rowTagSet: Set<MoveTag>,
+  ): void => {
+    for (const tag of tags) {
+      // Infer tag length from first tag
+      if (tagLength === undefined) {
+        tagLength = getTagLength(tag)
+        initializeTagIndex(tagLength)
+      }
+
+      // Validate tag length matches
+      const currentTagLength = getTagLength(tag)
+      if (currentTagLength !== tagLength) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`,
+        )
+        continue
+      }
+
+      rowTagSet.add(tag)
+      addTagToIndex(tag, rowId, tagIndex, tagLength)
+    }
+  }
+
+  /**
+   * Remove tags from a row and update the tag index
+   */
+  const removeTagsFromRow = (
+    removedTags: Array<MoveTag>,
+    rowId: RowId,
+    rowTagSet: Set<MoveTag>,
+  ): void => {
+    if (tagLength === undefined) {
+      return
+    }
+
+    for (const tag of removedTags) {
+      const currentTagLength = getTagLength(tag)
+      if (currentTagLength === tagLength) {
+        rowTagSet.delete(tag)
+        removeTagFromIndex(tag, rowId, tagIndex, tagLength)
+      }
+    }
+  }
+
+  /**
+   * Process tags for a change message (add and remove tags)
+   */
+  const processTagsForChangeMessage = (
+    tags: Array<MoveTag> | undefined,
+    removedTags: Array<MoveTag> | undefined,
+    rowId: RowId,
+  ): Set<MoveTag> => {
+    // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
+    if (!rowTagSets.has(rowId)) {
+      rowTagSets.set(rowId, new Set())
+    }
+    const rowTagSet = rowTagSets.get(rowId)!
+
+    // Add new tags
+    if (tags) {
+      addTagsToRow(tags, rowId, rowTagSet)
+    }
+
+    // Remove tags
+    if (removedTags) {
+      removeTagsFromRow(removedTags, rowId, rowTagSet)
+    }
+
+    return rowTagSet
+  }
+
+  /**
+   * Clear all tag tracking state (used when truncating)
+   */
+  const clearTagTrackingState = (): void => {
+    rowTagSets.clear()
+    tagIndex.length = 0
+    tagLength = undefined
+  }
+
+  /**
+   * Remove matching tags from a row based on a pattern
+   * Returns true if the row's tag set is now empty
+   */
+  const removeMatchingTagsFromRow = (
+    rowId: RowId,
+    pattern: MoveOutPattern,
+  ): boolean => {
+    const rowTagSet = rowTagSets.get(rowId)
+    if (!rowTagSet) {
+      return false
+    }
+
+    // Find tags that match this pattern and remove them
+    for (const tag of rowTagSet) {
+      if (tagMatchesPattern(tag, pattern)) {
+        rowTagSet.delete(tag)
+        removeTagFromIndex(tag, rowId, tagIndex, tagLength!)
+      }
+    }
+
+    // Check if row's tag set is now empty
+    if (rowTagSet.size === 0) {
+      rowTagSets.delete(rowId)
+      return true
+    }
+
+    return false
+  }
+
+  /**
+   * Process move-out event: remove matching tags from rows and delete rows with empty tag sets
+   */
+  const processMoveOutEvent = (
+    patterns: Array<MoveOutPattern>,
+    collection: Collection<T, string | number, any, any, any>,
+    begin: () => void,
+    write: (message: Omit<ChangeMessage<T>, `key`>) => void,
+    transactionStarted: boolean,
+  ): boolean => {
+    if (tagLength === undefined) {
+      debug(
+        `${collectionId ? `[${collectionId}] ` : ``}Received move-out message but no tag length set yet, ignoring`,
+      )
+      return transactionStarted
+    }
+
+    let txStarted = transactionStarted
+
+    // Process all patterns and collect rows to delete
+    for (const pattern of patterns) {
+      // Find all rows that match this pattern
+      const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+
+      for (const rowId of affectedRowIds) {
+        if (removeMatchingTagsFromRow(rowId, pattern)) {
+          // Delete rows with empty tag sets
+          if (!txStarted) {
+            begin()
+            txStarted = true
+          }
+
+          const rowValue = collection.get(rowId)
+          if (rowValue !== undefined) {
+            write({
+              type: `delete`,
+              value: rowValue,
+            })
+          }
+        }
+      }
+    }
+
+    return txStarted
+  }
+
   /**
    * Get the sync metadata for insert operations
    * @returns Record containing relation information
@@ -1074,14 +1264,38 @@ function createElectricSync<T extends Row<unknown>>(
                 transactionStarted = true
               }
 
-              write({
-                type: message.headers.operation,
-                value: message.value,
-                // Include the primary key and relation info in the metadata
-                metadata: {
-                  ...message.headers,
-                },
-              })
+              // Process tags if present
+              const tags = message.headers.tags
+              const removedTags = message.headers.removed_tags
+              const hasTags = tags || removedTags
+
+              const rowId = collection.getKeyFromItem(message.value)
+              const rowTagSet = () =>
+                processTagsForChangeMessage(tags, removedTags, rowId)
+
+              // Check if row should be deleted (empty tag set)
+              // but only if the message includes tags
+              // because shapes without subqueries don't contain tags
+              // so we should keep those around
+              if (hasTags && rowTagSet().size === 0) {
+                rowTagSets.delete(rowId)
+                write({
+                  type: `delete`,
+                  value: message.value,
+                  metadata: {
+                    ...message.headers,
+                  },
+                })
+              } else {
+                write({
+                  type: message.headers.operation,
+                  value: message.value,
+                  // Include the primary key and relation info in the metadata
+                  metadata: {
+                    ...message.headers,
+                  },
+                })
+              }
             }
           } else if (isSnapshotEndMessage(message)) {
             // Track postgres snapshot metadata for resolving awaiting mutations
@@ -1097,6 +1311,15 @@ function createElectricSync<T extends Row<unknown>>(
             if (commitPoint !== `up-to-date`) {
               commitPoint = `subset-end`
             }
+          } else if (isMoveOutMessage(message)) {
+            // Handle move-out event: remove matching tags from rows
+            transactionStarted = processMoveOutEvent(
+              message.headers.patterns,
+              collection,
+              begin,
+              write,
+              transactionStarted,
+            )
           } else if (isMustRefetchMessage(message)) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
@@ -1109,6 +1332,9 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             truncate()
+
+            // Clear tag tracking state
+            clearTagTrackingState()
 
             // Reset the loadSubset deduplication state since we're starting fresh
             // This ensures that previously loaded predicates don't prevent refetching after truncate
@@ -1134,16 +1360,41 @@ function createElectricSync<T extends Row<unknown>>(
             // Truncate to clear all snapshot data
             truncate()
 
+            // Clear tag tracking state for atomic swap
+            clearTagTrackingState()
+
             // Apply all buffered change messages and extract txids/snapshots
             for (const bufferedMsg of bufferedMessages) {
               if (isChangeMessage(bufferedMsg)) {
-                write({
-                  type: bufferedMsg.headers.operation,
-                  value: bufferedMsg.value,
-                  metadata: {
-                    ...bufferedMsg.headers,
-                  },
-                })
+                // Process tags for buffered messages
+                const tags = bufferedMsg.headers.tags
+                const removedTags = bufferedMsg.headers.removed_tags
+                const rowId = collection.getKeyFromItem(bufferedMsg.value)
+
+                const rowTagSet = processTagsForChangeMessage(
+                  tags,
+                  removedTags,
+                  rowId,
+                )
+
+                // Check if row should be deleted (empty tag set)
+                if (rowTagSet.size === 0) {
+                  write({
+                    type: `delete`,
+                    value: bufferedMsg.value,
+                    metadata: {
+                      ...bufferedMsg.headers,
+                    },
+                  })
+                } else {
+                  write({
+                    type: bufferedMsg.headers.operation,
+                    value: bufferedMsg.value,
+                    metadata: {
+                      ...bufferedMsg.headers,
+                    },
+                  })
+                }
 
                 // Extract txids from buffered messages (will be committed to store after transaction)
                 if (hasTxids(bufferedMsg)) {
