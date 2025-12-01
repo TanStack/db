@@ -1023,6 +1023,34 @@ function createElectricSync<T extends Row<unknown>>(
   }
 
   /**
+   * Remove all tags for a row from both the tag set and the index
+   * Used when a row is deleted
+   */
+  const clearTagsForRow = (rowId: RowId): void => {
+    if (tagLength === undefined) {
+      return
+    }
+
+    const rowTagSet = rowTagSets.get(rowId)
+    if (!rowTagSet) {
+      return
+    }
+
+    // Remove each tag from the index
+    for (const tag of rowTagSet) {
+      const parsedTag = parseTag(tag)
+      const currentTagLength = getTagLength(parsedTag)
+      if (currentTagLength === tagLength) {
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+      }
+      tagCache.delete(tag)
+    }
+
+    // Remove the row from the tag sets map
+    rowTagSets.delete(rowId)
+  }
+
+  /**
    * Remove matching tags from a row based on a pattern
    * Returns true if the row's tag set is now empty
    */
@@ -1307,7 +1335,7 @@ function createElectricSync<T extends Row<unknown>>(
               // because shapes without subqueries don't contain tags
               // so we should keep those around
               if (hasTags && rowTagSet().size === 0) {
-                rowTagSets.delete(rowId)
+                clearTagsForRow(rowId)
                 write({
                   type: `delete`,
                   value: message.value,
@@ -1316,6 +1344,9 @@ function createElectricSync<T extends Row<unknown>>(
                   },
                 })
               } else {
+                if (message.headers.operation === `delete`) {
+                  clearTagsForRow(rowId)
+                }
                 write({
                   type: message.headers.operation,
                   value: message.value,
@@ -1409,6 +1440,7 @@ function createElectricSync<T extends Row<unknown>>(
                 // because shapes without subqueries don't contain tags
                 // so we should keep those around
                 if (hasTags && rowTagSet().size === 0) {
+                  clearTagsForRow(rowId)
                   write({
                     type: `delete`,
                     value: bufferedMsg.value,
@@ -1417,6 +1449,9 @@ function createElectricSync<T extends Row<unknown>>(
                     },
                   })
                 } else {
+                  if (bufferedMsg.headers.operation === `delete`) {
+                    clearTagsForRow(rowId)
+                  }
                   write({
                     type: bufferedMsg.headers.operation,
                     value: bufferedMsg.value,
