@@ -125,15 +125,15 @@ export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-    BaseCollectionConfig<
-      T,
-      string | number,
-      TSchema,
-      ElectricCollectionUtils<T>,
-      any
-    >,
-    `onInsert` | `onUpdate` | `onDelete` | `syncMode`
-  > {
+  BaseCollectionConfig<
+    T,
+    string | number,
+    TSchema,
+    ElectricCollectionUtils<T>,
+    any
+  >,
+  `onInsert` | `onUpdate` | `onDelete` | `syncMode`
+> {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
