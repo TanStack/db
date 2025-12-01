@@ -897,17 +897,11 @@ function createElectricSync<T extends Row<unknown>>(
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
 
-  // ////////
-  // TODO: move this to the bottom of this file
   const tagCache = new Map<MoveTag, ParsedMoveTag>()
 
-  /**
-   * Parses a tag string into a MoveTag.
-   * It memoizes the result parsed tag such that future calls
-   * for the same tag string return the same MoveTag array.
-   * @param tag - The tag string to parse.
-   * @returns The parsed MoveTag.
-   */
+  // Parses a tag string into a MoveTag.
+  // It memoizes the result parsed tag such that future calls
+  // for the same tag string return the same MoveTag array.
   const parseTag = (tag: MoveTag): ParsedMoveTag => {
     if (tagCache.has(tag)) {
       return tagCache.get(tag)!
@@ -916,7 +910,6 @@ function createElectricSync<T extends Row<unknown>>(
     tagCache.set(tag, parsedTag)
     return parsedTag
   }
-  // ////////////
 
   // Tag tracking state
   const rowTagSets = new Map<RowId, Set<MoveTag>>()
@@ -984,6 +977,11 @@ function createElectricSync<T extends Row<unknown>>(
       if (currentTagLength === tagLength) {
         rowTagSet.delete(tag)
         removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+        // We aggresively evict the tag from the cache
+        // if this tag is shared with another row
+        // and is not removed from that other row
+        // then next time we encounter the tag it will be parsed again
+        tagCache.delete(tag)
       }
     }
   }
