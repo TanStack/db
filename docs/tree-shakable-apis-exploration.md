@@ -555,3 +555,169 @@ The key insight is that most of the bundle is in systems users don't always need
 - Index system (~10%) - only for indexed queries
 
 By making these opt-in through separate imports, we can dramatically reduce the cost of "just trying out" TanStack DB.
+
+---
+
+## Appendix A: Dependency Graph Analysis
+
+### Dependency Analysis Tool
+
+We used `madge` to analyze the import/export graph:
+
+```bash
+npx madge --extensions ts packages/db/src/index.ts --circular
+npx madge --extensions ts packages/db/src/index.ts --summary
+```
+
+### Circular Dependencies (41 chains detected!)
+
+The codebase has **41 circular dependency chains** that impede tree-shaking:
+
+**Most problematic cycles:**
+```
+1. collection/index.ts ↔ collection/changes.ts ↔ collection/events.ts
+2. types.ts ↔ query/ir.ts ↔ query/builder/types.ts ↔ query/builder/index.ts
+3. collection/index.ts → mutations.ts → transactions.ts → (back to collection)
+4. query/live/collection-config-builder.ts ↔ query/live/collection-registry.ts
+```
+
+### Most Imported Files (Dependents)
+
+Files imported by many others - changes cascade widely:
+
+| Dependents | File | Impact |
+|------------|------|--------|
+| 32 | `types.ts` | Core types - can't split |
+| 27 | `query/ir.ts` | Query AST - shared foundation |
+| 21 | `collection/index.ts` | Main collection - needs refactor |
+| 18 | `errors.ts` | Error classes - leaf node ✓ |
+| 17 | `query/builder/types.ts` | Query types - can centralize |
+| 11 | `transactions.ts` | Tx system - can isolate |
+| 10 | `indexes/base-index.ts` | Index base - can isolate |
+
+### Heaviest Importers (Dependencies)
+
+Files that import the most - they pull in large chunks:
+
+| Imports | File | Problem |
+|---------|------|---------|
+| 19 | `index.ts` | Barrel export - expected |
+| 17 | `query/live/collection-config-builder.ts` | Live query setup |
+| 16 | `collection/index.ts` | Imports all managers |
+| 12 | `query/compiler/index.ts` | Query compilation |
+| 11 | `query/compiler/joins.ts` | Join processing |
+
+### Leaf Nodes (Pure, Tree-Shakable)
+
+These modules have no dependencies - ideal for splitting:
+
+```
+✓ SortedMap.ts
+✓ deferred.ts
+✓ errors.ts
+✓ event-emitter.ts
+✓ scheduler.ts
+✓ utils/browser-polyfills.ts
+✓ utils/btree.ts
+✓ utils/type-guards.ts
+```
+
+### Critical Paths
+
+What the most-imported files bring with them:
+
+**`types.ts` imports:**
+- `collection/index.ts` ← Pulls in EVERYTHING
+- `query/ir.ts`
+- `transactions.ts`
+
+**`collection/index.ts` imports (16 files!):**
+- All 7 manager classes
+- Index system
+- Query builder internals
+- Error handling
+
+---
+
+## Appendix B: db-ivm Operators Analysis
+
+### Currently Bundled db-ivm Operators
+
+The `@tanstack/db` package imports these operators from `@tanstack/db-ivm`:
+
+| Operator | Used In | Always Needed? |
+|----------|---------|----------------|
+| `distinct` | compiler/index.ts | Only for DISTINCT queries |
+| `filter` | compiler/index.ts, joins.ts, group-by.ts | Core - always needed |
+| `map` | Multiple files | Core - always needed |
+| `output` | collection-config-builder.ts | Core - always needed |
+| `join` | compiler/joins.ts | Only for JOIN queries |
+| `groupBy` | compiler/group-by.ts | Only for GROUP BY |
+| `orderByWithFractionalIndex` | compiler/order-by.ts | Only for ORDER BY |
+| `tap` | compiler/joins.ts | Debug/internal |
+
+### Heavy Optional Operators in db-ivm
+
+These operators exist in db-ivm but are NOT currently used by default:
+
+| Operator | Lines | Size | Use Case |
+|----------|-------|------|----------|
+| `topKWithFractionalIndexBTree.ts` | 307 | ~10kb | Large ordered collections |
+| `topKWithFractionalIndex.ts` | 481 | ~16kb | Paginated results |
+| `groupBy.ts` | 377 | ~12kb | GROUP BY queries |
+| `join.ts` | 374 | ~12kb | JOIN queries |
+| `orderBy.ts` | 205 | ~7kb | ORDER BY queries |
+
+### Recommendation: Lazy Load Heavy Operators
+
+The `topKWithFractionalIndexBTree` already uses dynamic import for `sorted-btree`:
+
+```typescript
+// topKWithFractionalIndexBTree.ts
+let BTree: BTreeClass | undefined
+
+export async function loadBTree() {
+  if (BTree === undefined) {
+    const { default: _BTreeClass } = await import('sorted-btree')
+    BTree = _BTreeClass
+  }
+}
+```
+
+This pattern should be extended to other heavy operators:
+
+```typescript
+// Proposed: lazy-loaded query operators
+import { createLiveQueryCollection } from '@tanstack/db/live-query'
+import { withOrderBy } from '@tanstack/db/operators/order-by'  // Separate import
+
+const query = createLiveQueryCollection((q) =>
+  q.from({ todo: todos })
+   .pipe(withOrderBy(({ todo }) => todo.createdAt))  // Lazy loaded
+   .limit(10)
+)
+```
+
+---
+
+## Appendix C: Type Safety Research Summary
+
+See `docs/tree-shakable-type-safety-research.md` for full analysis.
+
+### Key Findings
+
+1. **Type inference is preserved** when splitting operators - Context types don't depend on module boundaries
+
+2. **No circular type dependencies** between operators - each is self-contained
+
+3. **RefProxy is runtime-only** - type inference uses generic constraints, not runtime values
+
+4. **Recommended approach**: Centralize type utilities in `shared-types.ts`, split operators into individual files
+
+### Type Safety Guarantees
+
+With the recommended architecture:
+- ✓ Full generic type inference preserved
+- ✓ IDE autocomplete works across module boundaries
+- ✓ No TypeScript compilation issues
+- ✓ Backward compatible with existing code
