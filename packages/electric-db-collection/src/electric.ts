@@ -1398,16 +1398,17 @@ function createElectricSync<T extends Row<unknown>>(
                 // Process tags for buffered messages
                 const tags = bufferedMsg.headers.tags
                 const removedTags = bufferedMsg.headers.removed_tags
+                const hasTags = tags || removedTags
                 const rowId = collection.getKeyFromItem(bufferedMsg.value)
 
-                const rowTagSet = processTagsForChangeMessage(
-                  tags,
-                  removedTags,
-                  rowId,
-                )
+                const rowTagSet = () =>
+                  processTagsForChangeMessage(tags, removedTags, rowId)
 
                 // Check if row should be deleted (empty tag set)
-                if (rowTagSet.size === 0) {
+                // but only if the message includes tags
+                // because shapes without subqueries don't contain tags
+                // so we should keep those around
+                if (hasTags && rowTagSet().size === 0) {
                   write({
                     type: `delete`,
                     value: bufferedMsg.value,
