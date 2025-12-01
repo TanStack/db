@@ -131,13 +131,12 @@ function compileFunction(func: Func, isSingleRow: boolean) {
 ### Tree-Shaking Now Works
 
 ```
-User imports                        Bundle includes
-─────────────────────────────────────────────────────────────────
-import { eq } from '.../eq'    →   eq builder + eq evaluator (~20 lines)
-import { gt } from '.../gt'    →   gt builder + gt evaluator (~15 lines)
+User imports                                    Bundle includes
+─────────────────────────────────────────────────────────────────────────────
+import { eq, gt } from '@tanstack/db/operators' → eq + gt builders & evaluators
 
-                                   NOT included: and, or, upper, lower,
-                                   like, concat, coalesce, etc.
+                                                  NOT included: and, or, upper,
+                                                  lower, like, concat, etc.
 ```
 
 ### Package.json sideEffects
@@ -374,7 +373,7 @@ export function getOperatorEvaluator(name: string): EvaluatorFactory {
   if (!evaluator) {
     throw new Error(
       `Unknown operator "${name}". ` +
-      `Did you forget to import it from @tanstack/db/operators/${name}?`
+      `Did you forget to import it from @tanstack/db/operators?`
     )
   }
   return evaluator

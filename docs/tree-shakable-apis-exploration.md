@@ -7,7 +7,7 @@ Enable developers to "just try" TanStack DB with a minimal bundle. A single live
 ```typescript
 // This should be ~10kb, not 48kb
 import { createCollection } from '@tanstack/db/collection'
-import { eq } from '@tanstack/db/operators/eq'
+import { eq } from '@tanstack/db/operators'
 import { createLiveQueryCollection } from '@tanstack/db/live-query'
 
 const todos = createCollection({ ... })
@@ -180,9 +180,9 @@ Update `package.json` exports:
 {
   "exports": {
     ".": "./dist/esm/index.js",
+    "./collection": "./dist/esm/collection/index.js",
     "./operators": "./dist/esm/operators/index.js",
-    "./operators/eq": "./dist/esm/operators/eq.js",
-    "./operators/gt": "./dist/esm/operators/gt.js"
+    "./live-query": "./dist/esm/query/live-query-collection.js"
   }
 }
 ```
@@ -245,14 +245,9 @@ Users choose their import style:
 // Full bundle (current behavior, backward compatible)
 import { createCollection, eq, gt } from '@tanstack/db'
 
-// Tree-shakable - individual imports
+// Tree-shakable (only includes what you use)
 import { createCollection } from '@tanstack/db/collection'
-import { eq } from '@tanstack/db/operators/eq'
-import { gt } from '@tanstack/db/operators/gt'
-
-// Tree-shakable - barrel import (only includes what you use)
 import { eq, gt } from '@tanstack/db/operators'
-// ↑ Only eq.ts and gt.ts are bundled, not and/or/upper/etc.
 ```
 
 The chained query API remains unchanged:
@@ -290,7 +285,7 @@ createLiveQueryCollection((q) =>
 ```typescript
 throw new Error(
   `Unknown operator "${name}". ` +
-  `Did you forget to import it from @tanstack/db/operators/${name}?`
+  `Did you forget to import it from @tanstack/db/operators?`
 )
 ```
 
