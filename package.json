@@ -5,7 +5,7 @@
     "type": "git",
     "url": "https://github.com/tanstack/db.git"
   },
-  "packageManager": "pnpm@10.23.0",
+  "packageManager": "pnpm@10.24.0",
   "type": "module",
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
@@ -26,14 +26,14 @@
     "@eslint/js": "^9.39.1",
     "@stylistic/eslint-plugin": "^4.4.1",
     "@svitejs/changesets-changelog-github-compact": "^1.2.0",
-    "@tanstack/config": "^0.22.1",
+    "@tanstack/config": "^0.22.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@types/node": "^24.6.2",
-    "@types/react": "^19.2.6",
+    "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/use-sync-external-store": "^1.5.0",
-    "@typescript-eslint/eslint-plugin": "^8.47.0",
-    "@typescript-eslint/parser": "^8.47.0",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
     "@vitejs/plugin-react": "^5.1.1",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
@@ -42,11 +42,11 @@
     "eslint-plugin-react": "^7.37.5",
     "husky": "^9.1.7",
     "jsdom": "^27.2.0",
-    "knip": "^5.70.1",
+    "knip": "^5.70.2",
     "lint-staged": "^15.5.2",
     "markdown-link-extractor": "^4.0.3",
     "mitt": "^3.0.1",
-    "prettier": "^3.6.2",
+    "prettier": "^3.7.3",
     "publint": "^0.3.15",
     "sherif": "^1.9.0",
     "shx": "^0.4.0",
@@ -84,6 +84,6 @@
     }
   },
   "dependencies": {
-    "tsx": "^4.20.6"
+    "tsx": "^4.21.0"
   }
 }
