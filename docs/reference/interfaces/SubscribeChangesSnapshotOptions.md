@@ -19,7 +19,7 @@ Defined in: [packages/db/src/types.ts:730](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:733](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L733)
+Defined in: [packages/db/src/types.ts:735](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L735)
 
 ***
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/types.ts:733](https://github.com/TanStack/db/blob/m
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:732](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L732)
+Defined in: [packages/db/src/types.ts:734](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L734)
 
 ***
 
