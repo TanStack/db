@@ -245,13 +245,14 @@ Users choose their import style:
 // Full bundle (current behavior, backward compatible)
 import { createCollection, eq, gt } from '@tanstack/db'
 
-// Tree-shakable (new)
+// Tree-shakable - individual imports
 import { createCollection } from '@tanstack/db/collection'
 import { eq } from '@tanstack/db/operators/eq'
 import { gt } from '@tanstack/db/operators/gt'
 
-// Convenience bundle of all operators
-import { eq, gt, and, or } from '@tanstack/db/operators'
+// Tree-shakable - barrel import (only includes what you use)
+import { eq, gt } from '@tanstack/db/operators'
+// ↑ Only eq.ts and gt.ts are bundled, not and/or/upper/etc.
 ```
 
 The chained query API remains unchanged:
