@@ -4,7 +4,15 @@
  * end-to-end tests using actual Postgres + Electric sync
  */
 
-import { afterAll, afterEach, beforeAll, describe, inject } from "vitest"
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  inject,
+  it,
+} from "vitest"
 import { createCollection } from "@tanstack/db"
 import { ELECTRIC_TEST_HOOKS, electricCollectionOptions } from "../src/electric"
 import { makePgClient } from "../../db-collection-e2e/support/global-setup"
@@ -575,4 +583,189 @@ describe(`Electric Collection E2E Tests`, () => {
   createMutationsTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
   createProgressiveTestSuite(getConfig)
+
+  // BigInt predicate pushdown tests
+  describe(`BigInt Predicate Pushdown`, () => {
+    it(`should filter with eq() on BIGINT field using JavaScript BigInt`, async () => {
+      const baseUrl = inject(`baseUrl`)
+      const testSchema = inject(`testSchema`)
+      const testId = Date.now().toString(16)
+      const bigintTable = `"bigint_test_${testId}"`
+
+      // Create a table with BIGINT column
+      await dbClient.query(`
+        CREATE TABLE ${bigintTable} (
+          id UUID PRIMARY KEY,
+          large_number BIGINT NOT NULL,
+          name TEXT NOT NULL
+        )
+      `)
+
+      // Insert test data with large numbers that exceed Number.MAX_SAFE_INTEGER
+      const testData = [
+        {
+          id: `00000000-0000-4000-8000-000000000001`,
+          large_number: BigInt(`9007199254740993`), // MAX_SAFE_INTEGER + 2
+          name: `Large 1`,
+        },
+        {
+          id: `00000000-0000-4000-8000-000000000002`,
+          large_number: BigInt(`9007199254740994`), // MAX_SAFE_INTEGER + 3
+          name: `Large 2`,
+        },
+        {
+          id: `00000000-0000-4000-8000-000000000003`,
+          large_number: BigInt(`100`), // Small number for comparison
+          name: `Small`,
+        },
+      ]
+
+      for (const item of testData) {
+        await dbClient.query(
+          `INSERT INTO ${bigintTable} (id, large_number, name) VALUES ($1, $2, $3)`,
+          [item.id, item.large_number.toString(), item.name]
+        )
+      }
+
+      // Create collection for bigint table
+      const bigintCollection = createCollection(
+        electricCollectionOptions({
+          id: `bigint-test-${testId}`,
+          shapeOptions: {
+            url: `${baseUrl}/v1/shape`,
+            params: {
+              table: `${testSchema}.${bigintTable}`,
+            },
+          },
+          syncMode: `on-demand`,
+          getKey: (item: any) => item.id,
+          startSync: true,
+        })
+      )
+
+      try {
+        await bigintCollection.preload()
+
+        // Test filtering with BigInt predicate
+        const { createLiveQueryCollection, eq } = await import(`@tanstack/db`)
+        const targetBigInt = BigInt(`9007199254740993`)
+
+        const query = createLiveQueryCollection((q: any) =>
+          q
+            .from({ item: bigintCollection })
+            .where(({ item }: any) => eq(item.large_number, targetBigInt))
+        )
+
+        await query.preload()
+        await waitFor(() => query.size >= 1, {
+          timeout: 10000,
+          interval: 100,
+          message: `BigInt predicate query did not return expected results`,
+        })
+
+        const results = Array.from(query.state.values())
+        expect(results.length).toBe(1)
+        expect(results[0]?.name).toBe(`Large 1`)
+
+        await query.cleanup()
+      } finally {
+        await bigintCollection.cleanup()
+        await dbClient.query(`DROP TABLE IF EXISTS ${bigintTable}`)
+      }
+    })
+
+    it(`should filter with inArray() on BIGINT field using JavaScript BigInt array`, async () => {
+      const baseUrl = inject(`baseUrl`)
+      const testSchema = inject(`testSchema`)
+      const testId = Date.now().toString(16)
+      const bigintTable = `"bigint_inarray_test_${testId}"`
+
+      // Create a table with BIGINT column
+      await dbClient.query(`
+        CREATE TABLE ${bigintTable} (
+          id UUID PRIMARY KEY,
+          large_number BIGINT NOT NULL,
+          name TEXT NOT NULL
+        )
+      `)
+
+      // Insert test data
+      const testData = [
+        {
+          id: `00000000-0000-4000-8000-000000000001`,
+          large_number: BigInt(`9007199254740993`),
+          name: `Match 1`,
+        },
+        {
+          id: `00000000-0000-4000-8000-000000000002`,
+          large_number: BigInt(`9007199254740994`),
+          name: `Match 2`,
+        },
+        {
+          id: `00000000-0000-4000-8000-000000000003`,
+          large_number: BigInt(`100`),
+          name: `No Match`,
+        },
+      ]
+
+      for (const item of testData) {
+        await dbClient.query(
+          `INSERT INTO ${bigintTable} (id, large_number, name) VALUES ($1, $2, $3)`,
+          [item.id, item.large_number.toString(), item.name]
+        )
+      }
+
+      // Create collection
+      const bigintCollection = createCollection(
+        electricCollectionOptions({
+          id: `bigint-inarray-test-${testId}`,
+          shapeOptions: {
+            url: `${baseUrl}/v1/shape`,
+            params: {
+              table: `${testSchema}.${bigintTable}`,
+            },
+          },
+          syncMode: `on-demand`,
+          getKey: (item: any) => item.id,
+          startSync: true,
+        })
+      )
+
+      try {
+        await bigintCollection.preload()
+
+        const { createLiveQueryCollection, inArray } = await import(
+          `@tanstack/db`
+        )
+        const targetBigInts = [
+          BigInt(`9007199254740993`),
+          BigInt(`9007199254740994`),
+        ]
+
+        const query = createLiveQueryCollection((q: any) =>
+          q
+            .from({ item: bigintCollection })
+            .where(({ item }: any) => inArray(item.large_number, targetBigInts))
+        )
+
+        await query.preload()
+        await waitFor(() => query.size >= 2, {
+          timeout: 10000,
+          interval: 100,
+          message: `BigInt inArray query did not return expected results`,
+        })
+
+        const results = Array.from(query.state.values())
+        expect(results.length).toBe(2)
+
+        const names = results.map((r: any) => r.name).sort()
+        expect(names).toEqual([`Match 1`, `Match 2`])
+
+        await query.cleanup()
+      } finally {
+        await bigintCollection.cleanup()
+        await dbClient.query(`DROP TABLE IF EXISTS ${bigintTable}`)
+      }
+    })
+  })
 })
