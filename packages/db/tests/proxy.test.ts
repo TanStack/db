@@ -532,6 +532,114 @@ describe(`Proxy Library`, () => {
     })
   })
 
+  describe(`Object.seal and Object.preventExtensions handling`, () => {
+    it(`should handle Object.seal correctly`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Seal the proxy
+      Object.seal(proxy)
+
+      // Modify existing property (should work)
+      proxy.name = `Jane`
+
+      // Attempt to add a new property (should throw in strict mode)
+      expect(() => {
+        // @ts-expect-error testing runtime behavior
+        proxy.role = `admin`
+      }).toThrow(/not extensible/)
+
+      // Check that only the name change was tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+
+      // Original object should be unchanged
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+    })
+
+    it(`should handle Object.preventExtensions correctly`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Prevent extensions on the proxy
+      Object.preventExtensions(proxy)
+
+      // Modify existing property (should work)
+      proxy.name = `Jane`
+
+      // Attempt to add a new property (should throw)
+      expect(() => {
+        // @ts-expect-error testing runtime behavior
+        proxy.role = `admin`
+      }).toThrow(/not extensible/)
+
+      // Check that only the name change was tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+
+      // Original object should be unchanged
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+    })
+
+    it(`should allow deleting properties with preventExtensions (but not seal)`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Object.preventExtensions allows deletion of configurable properties
+      // Object.seal makes properties non-configurable, so delete wouldn't work
+      Object.preventExtensions(proxy)
+
+      // Modify and delete
+      proxy.name = `Jane`
+      delete proxy.age
+
+      // Only the modified property is returned by getChanges
+      // (deleted properties are tracked internally but not in the result)
+      const changes = getChanges()
+      expect(changes.name).toBe(`Jane`)
+    })
+
+    it(`should not allow deleting properties on sealed objects`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy } = createChangeProxy(obj)
+
+      // Object.seal makes properties non-configurable
+      Object.seal(proxy)
+
+      // In strict mode (which Vitest uses), deleting a non-configurable property throws
+      expect(() => {
+        delete proxy.age
+      }).toThrow()
+
+      // Property should still exist
+      expect(proxy.age).toBe(30)
+    })
+
+    it(`should handle sealing a proxy with nested objects`, () => {
+      const obj = { user: { name: `John` }, count: 0 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      Object.seal(proxy)
+
+      // Modifying nested objects should still work
+      proxy.user.name = `Jane`
+      proxy.count = 5
+
+      expect(getChanges()).toEqual({
+        user: { name: `Jane` },
+        count: 5,
+      })
+    })
+  })
+
   describe(`Enhanced Iterator Method Tracking`, () => {
     it(`should track changes when Map values are modified via iterator`, () => {
       const map = new Map([
