@@ -125,9 +125,9 @@ export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-    BaseCollectionConfig<T, string | number, TSchema, UtilsRecord, any>,
-    `onInsert` | `onUpdate` | `onDelete` | `syncMode`
-  > {
+  BaseCollectionConfig<T, string | number, TSchema, UtilsRecord, any>,
+  `onInsert` | `onUpdate` | `onDelete` | `syncMode`
+> {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
@@ -382,8 +382,9 @@ export type AwaitMatchFn<T extends Row<unknown>> = (
 /**
  * Electric collection utilities type
  */
-export interface ElectricCollectionUtils<T extends Row<unknown> = Row<unknown>>
-  extends UtilsRecord {
+export interface ElectricCollectionUtils<
+  T extends Row<unknown> = Row<unknown>,
+> extends UtilsRecord {
   awaitTxId: AwaitTxIdFn
   awaitMatch: AwaitMatchFn<T>
 }

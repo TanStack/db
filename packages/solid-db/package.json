@@ -15,13 +15,13 @@
     "solid",
     "typescript"
   ],
-  "packageManager": "pnpm@10.23.0",
+  "packageManager": "pnpm@10.24.0",
   "dependencies": {
     "@solid-primitives/map": "^0.7.2",
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@electric-sql/client": "1.1.5",
+    "@electric-sql/client": "1.2.0",
     "@solidjs/testing-library": "^0.8.10",
     "@vitest/coverage-istanbul": "^3.2.4",
     "jsdom": "^27.2.0",
