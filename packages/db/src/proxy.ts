@@ -994,21 +994,31 @@ export function createChangeProxy<
         return true
       },
 
-      defineProperty(_ptarget, prop, descriptor) {
-        // const result = Reflect.defineProperty(
-        //   changeTracker.copy_,
-        //   prop,
-        //   descriptor
-        // )
-        // if (result) {
-        if (`value` in descriptor) {
+      defineProperty(ptarget, prop, descriptor) {
+        // Forward the defineProperty to the target to maintain Proxy invariants
+        // This allows Object.seal() and Object.freeze() to work on the proxy
+        const result = Reflect.defineProperty(ptarget, prop, descriptor)
+        if (result && `value` in descriptor) {
           changeTracker.copy_[prop as keyof T] = deepClone(descriptor.value)
           changeTracker.assigned_[prop.toString()] = true
           markChanged(changeTracker)
         }
-        // }
-        // return result
-        return true
+        return result
+      },
+
+      getOwnPropertyDescriptor(ptarget, prop) {
+        // Forward to target to maintain Proxy invariants for seal/freeze
+        return Reflect.getOwnPropertyDescriptor(ptarget, prop)
+      },
+
+      preventExtensions(ptarget) {
+        // Forward to target to allow Object.seal() and Object.preventExtensions()
+        return Reflect.preventExtensions(ptarget)
+      },
+
+      isExtensible(ptarget) {
+        // Forward to target to maintain consistency
+        return Reflect.isExtensible(ptarget)
       },
 
       deleteProperty(dobj, prop) {
@@ -1020,33 +1030,36 @@ export function createChangeProxy<
           const hadPropertyInOriginal =
             stringProp in changeTracker.originalObject
 
-          // Delete the property from the copy
-          // Use type assertion to tell TypeScript this is allowed
-          delete (changeTracker.copy_ as Record<string | symbol, unknown>)[prop]
+          // Forward the delete to the target using Reflect
+          // This respects Object.seal/preventExtensions constraints
+          const result = Reflect.deleteProperty(dobj, prop)
 
-          // If the property didn't exist in the original object, removing it
-          // should revert to the original state
-          if (!hadPropertyInOriginal) {
-            delete changeTracker.copy_[stringProp]
-            delete changeTracker.assigned_[stringProp]
+          if (result) {
+            // If the property didn't exist in the original object, removing it
+            // should revert to the original state
+            if (!hadPropertyInOriginal) {
+              delete changeTracker.assigned_[stringProp]
 
-            // If this is the last change and we're not a nested object,
-            // mark the object as unmodified
-            if (
-              Object.keys(changeTracker.assigned_).length === 0 &&
-              Object.getOwnPropertySymbols(changeTracker.assigned_).length === 0
-            ) {
-              changeTracker.modified = false
+              // If this is the last change and we're not a nested object,
+              // mark the object as unmodified
+              if (
+                Object.keys(changeTracker.assigned_).length === 0 &&
+                Object.getOwnPropertySymbols(changeTracker.assigned_).length ===
+                  0
+              ) {
+                changeTracker.modified = false
+              } else {
+                // We still have changes, keep as modified
+                changeTracker.modified = true
+              }
             } else {
-              // We still have changes, keep as modified
-              changeTracker.modified = true
+              // Mark this property as deleted
+              changeTracker.assigned_[stringProp] = false
+              markChanged(changeTracker)
             }
-          } else {
-            // Mark this property as deleted
-            changeTracker.assigned_[stringProp] = false
-            changeTracker.copy_[stringProp as keyof T] = undefined as T[keyof T]
-            markChanged(changeTracker)
           }
+
+          return result
         }
 
         return true
@@ -1060,7 +1073,9 @@ export function createChangeProxy<
   }
 
   // Create a proxy for the target object
-  const proxy = createObjectProxy(target)
+  // Use the unfrozen copy_ as the proxy target to avoid Proxy invariant violations
+  // when the original target is frozen (e.g., from Immer)
+  const proxy = createObjectProxy(changeTracker.copy_ as unknown as T)
 
   // Return the proxy and a function to get the changes
   return {

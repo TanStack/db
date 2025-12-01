@@ -360,125 +360,287 @@ describe(`Proxy Library`, () => {
     // })
   })
 
-  // describe(`Object.freeze and Object.seal handling`, () => {
-  //   it(`should handle Object.freeze correctly`, () => {
-  //     const obj = { name: `John`, age: 30 }
-  //     const { proxy, getChanges } = createChangeProxy(obj)
-  //
-  //     // Freeze the proxy
-  //     Object.freeze(proxy)
-  //
-  //     // Attempt to modify the frozen proxy (should throw in strict mode)
-  //     let errorThrown = false
-  //     let errorMessage = ``
-  //     try {
-  //       proxy.name = `Jane`
-  //     } catch (e) {
-  //       // Expected error
-  //       errorThrown = true
-  //       errorMessage = e instanceof Error ? e.message : String(e)
-  //     }
-  //
-  //     // In strict mode, an error should be thrown
-  //     if (errorThrown) {
-  //       // Verify the error message contains expected text about the property being read-only
-  //       expect(errorMessage).toContain(`read only property`)
-  //     }
-  //
-  //     // Either way, no changes should be tracked
-  //     expect(getChanges()).toEqual({})
-  //
-  //     // Check that the original object is unchanged
-  //     expect(obj).toEqual({
-  //       name: `John`,
-  //       age: 30,
-  //     })
-  //   })
+  describe(`Frozen object handling`, () => {
+    it(`should handle creating a proxy for an already-frozen object`, () => {
+      const obj = { name: `John`, age: 30 }
+      Object.freeze(obj)
 
-  // it(`should handle Object.seal correctly`, () => {
-  //   const obj = { name: `John`, age: 30 }
-  //   const { proxy, getChanges } = createChangeProxy(obj)
-  //
-  //   // Seal the proxy
-  //   Object.seal(proxy)
-  //
-  //   // Modify existing property (should work)
-  //   proxy.name = `Jane`
-  //
-  //   // Attempt to add a new property (should not work)
-  //   let errorThrown = false
-  //   let errorMessage = ``
-  //   try {
-  //     // @ts-expect-error ignore for test
-  //     proxy.role = `admin`
-  //   } catch (e) {
-  //     // Expected error
-  //     errorThrown = true
-  //     errorMessage = e instanceof Error ? e.message : String(e)
-  //   }
-  //
-  //   // In strict mode, an error should be thrown
-  //   if (errorThrown) {
-  //     // Verify the error message contains expected text about the object not being extensible
-  //     expect(errorMessage).toContain(`object is not extensible`)
-  //   }
-  //
-  //   // Check that only the name change was tracked
-  //   expect(getChanges()).toEqual({
-  //     name: `Jane`,
-  //   })
-  //
-  //   // Check that the original object has the name change but no new property
-  //   expect(obj).toEqual({
-  //     name: `Jane`,
-  //     age: 30,
-  //   })
-  //
-  //   expect(obj.hasOwnProperty(`role`)).toBe(false)
-  // })
+      // This should not throw - the proxy should work with frozen objects
+      const { proxy, getChanges } = createChangeProxy(obj)
 
-  // it(`should handle Object.preventExtensions correctly`, () => {
-  //   const obj = { name: `John`, age: 30 }
-  //   const { proxy, getChanges } = createChangeProxy(obj)
-  //
-  //   // Prevent extensions on the proxy
-  //   Object.preventExtensions(proxy)
-  //
-  //   // Modify existing property (should work)
-  //   proxy.name = `Jane`
-  //
-  //   // Attempt to add a new property (should not work)
-  //   let errorThrown = false
-  //   let errorMessage = ``
-  //   try {
-  //     // @ts-expect-error ignore for test
-  //     proxy.role = `admin`
-  //   } catch (e) {
-  //     // Expected error
-  //     errorThrown = true
-  //     errorMessage = e instanceof Error ? e.message : String(e)
-  //   }
-  //
-  //   // In strict mode, an error should be thrown
-  //   if (errorThrown) {
-  //     // Verify the error message contains expected text about the object not being extensible
-  //     expect(errorMessage).toContain(`object is not extensible`)
-  //   }
-  //
-  //   // Check that only the name change was tracked
-  //   expect(getChanges()).toEqual({
-  //     name: `Jane`,
-  //   })
-  //
-  //   // Check that the original object has the name change but no new property
-  //   expect(obj).toEqual({
-  //     name: `Jane`,
-  //     age: 30,
-  //   })
-  //
-  //   expect(obj.hasOwnProperty(`role`)).toBe(false)
-  // })
-  // })
+      // Modify properties via the proxy
+      proxy.name = `Jane`
+      proxy.age = 31
+
+      // Changes should be tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+        age: 31,
+      })
+
+      // Original frozen object should remain unchanged
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+      expect(Object.isFrozen(obj)).toBe(true)
+    })
+
+    it(`should handle deeply frozen nested objects`, () => {
+      const obj = {
+        user: {
+          name: `John`,
+          address: {
+            city: `NYC`,
+            zip: `10001`,
+          },
+        },
+      }
+      // Deep freeze the object
+      Object.freeze(obj)
+      Object.freeze(obj.user)
+      Object.freeze(obj.user.address)
+
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Modify nested properties
+      proxy.user.name = `Jane`
+      proxy.user.address.city = `LA`
+
+      // Changes should be tracked
+      expect(getChanges()).toEqual({
+        user: {
+          name: `Jane`,
+          address: {
+            city: `LA`,
+            zip: `10001`,
+          },
+        },
+      })
+
+      // Original should be unchanged
+      expect(obj.user.name).toBe(`John`)
+      expect(obj.user.address.city).toBe(`NYC`)
+    })
+
+    it(`should handle withArrayChangeTracking with frozen objects`, () => {
+      const item1 = { id: 1, name: `Item 1` }
+      const item2 = { id: 2, name: `Item 2` }
+      Object.freeze(item1)
+      Object.freeze(item2)
+      const frozenArray = [item1, item2]
+      Object.freeze(frozenArray)
+
+      // This should not throw - matches the RTK Query adapter use case
+      const changes = withArrayChangeTracking(frozenArray, (drafts) => {
+        if (drafts[0]) {
+          drafts[0].name = `Updated Item 1`
+        }
+      })
+
+      // Changes should be captured
+      expect(changes[0]).toEqual({ name: `Updated Item 1` })
+      expect(changes[1]).toEqual({})
+
+      // Original frozen objects should be unchanged
+      expect(item1.name).toBe(`Item 1`)
+      expect(Object.isFrozen(item1)).toBe(true)
+    })
+
+    it(`should handle withChangeTracking with a frozen object`, () => {
+      const obj = { id: 1, name: `Test`, value: 100 }
+      Object.freeze(obj)
+
+      const changes = withChangeTracking(obj, (draft) => {
+        draft.name = `Updated`
+        draft.value = 200
+      })
+
+      expect(changes).toEqual({
+        name: `Updated`,
+        value: 200,
+      })
+
+      // Original should be unchanged
+      expect(obj.name).toBe(`Test`)
+      expect(obj.value).toBe(100)
+    })
+
+    it(`should handle frozen arrays with nested frozen objects`, () => {
+      const data = [
+        { id: 1, details: { score: 10 } },
+        { id: 2, details: { score: 20 } },
+      ]
+      // Deep freeze everything
+      data.forEach((item) => {
+        Object.freeze(item.details)
+        Object.freeze(item)
+      })
+      Object.freeze(data)
+
+      const changes = withArrayChangeTracking(data, (drafts) => {
+        // Modify nested property
+        if (drafts[0]) {
+          drafts[0].details.score = 100
+        }
+      })
+
+      expect(changes[0]).toEqual({
+        details: { score: 100 },
+      })
+
+      // Original should be unchanged
+      expect(data[0]!.details.score).toBe(10)
+    })
+
+    it(`should handle iteration over frozen array elements`, () => {
+      const items = [
+        { id: 1, name: `A` },
+        { id: 2, name: `B` },
+        { id: 3, name: `C` },
+      ]
+      items.forEach((item) => Object.freeze(item))
+      Object.freeze(items)
+
+      const changes = withArrayChangeTracking(items, (drafts) => {
+        // Use find to locate and modify an item
+        const found = drafts.find((d) => d.id === 2)
+        if (found) {
+          found.name = `Updated B`
+        }
+      })
+
+      expect(changes[1]).toEqual({ name: `Updated B` })
+      expect(items[1]!.name).toBe(`B`) // Original unchanged
+    })
+
+    it(`should handle createArrayChangeProxy with frozen objects`, () => {
+      const items = [
+        { id: 1, status: `pending` },
+        { id: 2, status: `pending` },
+      ]
+      items.forEach((item) => Object.freeze(item))
+
+      const { proxies, getChanges } = createArrayChangeProxy(items)
+
+      proxies[0]!.status = `completed`
+      proxies[1]!.status = `in-progress`
+
+      const changes = getChanges()
+      expect(changes[0]).toEqual({ status: `completed` })
+      expect(changes[1]).toEqual({ status: `in-progress` })
+    })
+  })
+
+  describe(`Object.seal and Object.preventExtensions handling`, () => {
+    it(`should handle Object.seal correctly`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Seal the proxy
+      Object.seal(proxy)
+
+      // Modify existing property (should work)
+      proxy.name = `Jane`
+
+      // Attempt to add a new property (should throw in strict mode)
+      expect(() => {
+        // @ts-expect-error testing runtime behavior
+        proxy.role = `admin`
+      }).toThrow(/not extensible/)
+
+      // Check that only the name change was tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+
+      // Original object should be unchanged
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+    })
+
+    it(`should handle Object.preventExtensions correctly`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Prevent extensions on the proxy
+      Object.preventExtensions(proxy)
+
+      // Modify existing property (should work)
+      proxy.name = `Jane`
+
+      // Attempt to add a new property (should throw)
+      expect(() => {
+        // @ts-expect-error testing runtime behavior
+        proxy.role = `admin`
+      }).toThrow(/not extensible/)
+
+      // Check that only the name change was tracked
+      expect(getChanges()).toEqual({
+        name: `Jane`,
+      })
+
+      // Original object should be unchanged
+      expect(obj).toEqual({
+        name: `John`,
+        age: 30,
+      })
+    })
+
+    it(`should allow deleting properties with preventExtensions (but not seal)`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      // Object.preventExtensions allows deletion of configurable properties
+      // Object.seal makes properties non-configurable, so delete wouldn't work
+      Object.preventExtensions(proxy)
+
+      // Modify and delete
+      proxy.name = `Jane`
+      // @ts-expect-error testing delete on non-optional property
+      delete proxy.age
+
+      // Only the modified property is returned by getChanges
+      // (deleted properties are tracked internally but not in the result)
+      const changes = getChanges()
+      expect(changes.name).toBe(`Jane`)
+    })
+
+    it(`should not allow deleting properties on sealed objects`, () => {
+      const obj = { name: `John`, age: 30 }
+      const { proxy } = createChangeProxy(obj)
+
+      // Object.seal makes properties non-configurable
+      Object.seal(proxy)
+
+      // In strict mode (which Vitest uses), deleting a non-configurable property throws
+      expect(() => {
+        // @ts-expect-error testing delete on non-optional property
+        delete proxy.age
+      }).toThrow()
+
+      // Property should still exist
+      expect(proxy.age).toBe(30)
+    })
+
+    it(`should handle sealing a proxy with nested objects`, () => {
+      const obj = { user: { name: `John` }, count: 0 }
+      const { proxy, getChanges } = createChangeProxy(obj)
+
+      Object.seal(proxy)
+
+      // Modifying nested objects should still work
+      proxy.user.name = `Jane`
+      proxy.count = 5
+
+      expect(getChanges()).toEqual({
+        user: { name: `Jane` },
+        count: 5,
+      })
+    })
+  })
 
   describe(`Enhanced Iterator Method Tracking`, () => {
     it(`should track changes when Map values are modified via iterator`, () => {
