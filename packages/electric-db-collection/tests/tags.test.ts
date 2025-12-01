@@ -213,6 +213,47 @@ describe(`Electric Tag Tracking and GC`, () => {
     expect(collection.state).toEqual(new Map())
   })
 
+  it(`should track tags that are structurally equal`, () => {
+    const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
+    const tag1Copy: MoveTag = [`hash1`, `hash2`, `hash3`]
+
+    // Insert row with tags
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Test User` },
+        headers: {
+          operation: `insert`,
+          tags: [tag1],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state).toEqual(
+      new Map([[1, { id: 1, name: `Test User` }]]),
+    )
+
+    // Remove first tag - row should be gone
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Updated User` },
+        headers: {
+          operation: `update`,
+          removed_tags: [tag1Copy],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state).toEqual(new Map())
+  })
+
   it(`should not interfere between rows with distinct tags`, () => {
     const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
     const tag2: MoveTag = [`hash4`, `hash5`, `hash6`]
