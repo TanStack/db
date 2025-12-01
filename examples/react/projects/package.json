@@ -18,7 +18,7 @@
     "@tailwindcss/vite": "^4.1.17",
     "@tanstack/query-core": "^5.90.11",
     "@tanstack/query-db-collection": ">=1.0.5",
-    "@tanstack/react-db": ">=0.1.52",
+    "@tanstack/react-db": ">=0.1.53",
     "@tanstack/react-router": "^1.139.12",
     "@tanstack/react-router-devtools": "^1.139.12",
     "@tanstack/react-router-with-query": "^1.130.17",
