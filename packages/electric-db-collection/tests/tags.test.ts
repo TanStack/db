@@ -1156,4 +1156,86 @@ describe(`Electric Tag Tracking and GC`, () => {
       new Map([[1, { id: 1, name: `Updated User` }]]),
     )
   })
+
+  it(`should not recover old tags when row is deleted and re-inserted`, () => {
+    const tag1 = `hash1|hash2|hash3`
+    const tag2 = `hash4|hash5|hash6`
+
+    // Insert row with tag1
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Test User` },
+        headers: {
+          operation: `insert`,
+          tags: [tag1],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state).toEqual(
+      new Map([[1, { id: 1, name: `Test User` }]]),
+    )
+
+    // Delete the row (without tags)
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Test User` },
+        headers: {
+          operation: `delete`,
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row should be deleted
+    expect(collection.state.size).toBe(0)
+    expect(collection.state.has(1)).toBe(false)
+
+    // Insert the row again with a new tag (tag2)
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Re-inserted User` },
+        headers: {
+          operation: `insert`,
+          tags: [tag2],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row should exist with new tag
+    expect(collection.state).toEqual(
+      new Map([[1, { id: 1, name: `Re-inserted User` }]]),
+    )
+
+    // Update the row with removed_tags including its new tag (tag2)
+    // The row should NOT have the old tag1, only tag2
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `Re-inserted User` },
+        headers: {
+          operation: `update`,
+          removed_tags: [tag2],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row should be gone because tag2 was removed and it doesn't have old tag1
+    expect(collection.state.size).toBe(0)
+    expect(collection.state.has(1)).toBe(false)
+  })
 })
