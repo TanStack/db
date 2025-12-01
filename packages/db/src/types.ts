@@ -1,9 +1,10 @@
-import type { IStreamBuilder } from '@tanstack/db-ivm'
-import type { Collection } from './collection/index.js'
-import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { Transaction } from './transactions'
-import type { BasicExpression, OrderBy } from './query/ir.js'
-import type { EventEmitter } from './event-emitter.js'
+import type { IStreamBuilder } from "@tanstack/db-ivm"
+import type { Collection } from "./collection/index.js"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { Transaction } from "./transactions"
+import type { BasicExpression, OrderBy } from "./query/ir.js"
+import type { EventEmitter } from "./event-emitter.js"
+import type { SingleRowRefProxy } from "./query/builder/ref-proxy.js"
 
 /**
  * Interface for a collection-like object that provides the necessary methods
@@ -775,17 +776,33 @@ export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
 /**
  * Options for subscribing to collection changes
  */
-export interface SubscribeChangesOptions {
+export interface SubscribeChangesOptions<
+  T extends object = Record<string, unknown>,
+> {
   /** Whether to include the current state as initial changes */
   includeInitialState?: boolean
+  /**
+   * Callback function for filtering changes using a row proxy.
+   * The callback receives a proxy object that records property access,
+   * allowing you to use query builder functions like `eq`, `gt`, etc.
+   *
+   * @example
+   * ```ts
+   * import { eq } from "@tanstack/db"
+   *
+   * collection.subscribeChanges(callback, {
+   *   where: (row) => eq(row.status, "active")
+   * })
+   * ```
+   */
+  where?: (row: SingleRowRefProxy<T>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
 }
 
-export interface SubscribeChangesSnapshotOptions extends Omit<
-  SubscribeChangesOptions,
-  `includeInitialState`
-> {
+export interface SubscribeChangesSnapshotOptions<
+  T extends object = Record<string, unknown>,
+> extends Omit<SubscribeChangesOptions<T>, `includeInitialState`> {
   orderBy?: OrderBy
   limit?: number
 }

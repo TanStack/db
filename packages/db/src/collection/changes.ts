@@ -1,11 +1,15 @@
-import { NegativeActiveSubscribersError } from '../errors'
-import { CollectionSubscription } from './subscription.js'
-import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { ChangeMessage, SubscribeChangesOptions } from '../types'
-import type { CollectionLifecycleManager } from './lifecycle.js'
-import type { CollectionSyncManager } from './sync.js'
-import type { CollectionEventsManager } from './events.js'
-import type { CollectionImpl } from './index.js'
+import { NegativeActiveSubscribersError } from "../errors"
+import {
+  createSingleRowRefProxy,
+  toExpression,
+} from "../query/builder/ref-proxy.js"
+import { CollectionSubscription } from "./subscription.js"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { ChangeMessage, SubscribeChangesOptions } from "../types"
+import type { CollectionLifecycleManager } from "./lifecycle.js"
+import type { CollectionSyncManager } from "./sync.js"
+import type { CollectionEventsManager } from "./events.js"
+import type { CollectionImpl } from "./index.js"
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -94,13 +98,22 @@ export class CollectionChangesManager<
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions = {},
+    options: SubscribeChangesOptions<TOutput> = {}
   ): CollectionSubscription {
     // Start sync and track subscriber
     this.addSubscriber()
 
+    // Compile where callback to whereExpression if provided
+    let whereExpression = options.whereExpression
+    if (options.where && !whereExpression) {
+      const proxy = createSingleRowRefProxy<TOutput>()
+      const result = options.where(proxy)
+      whereExpression = toExpression(result)
+    }
+
     const subscription = new CollectionSubscription(this.collection, callback, {
-      ...options,
+      includeInitialState: options.includeInitialState,
+      whereExpression,
       onUnsubscribe: () => {
         this.removeSubscriber()
         this.changeSubscriptions.delete(subscription)
