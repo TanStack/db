@@ -279,12 +279,11 @@ export function createPredicatesTestSuite(
         const results = Array.from(query.state.values())
         expect(results.length).toBe(1)
         // Post 0 has largeViewCount = 9007199254740992n
-        assertAllItemsMatch(
-          query,
-          (p) =>
-            p.largeViewCount === targetBigInt ||
-            p.largeViewCount === `9007199254740992`
-        )
+        // Database may return as bigint or string depending on driver
+        assertAllItemsMatch(query, (p) => {
+          const value = String(p.largeViewCount)
+          return value === targetBigInt.toString()
+        })
 
         await query.cleanup()
       })
