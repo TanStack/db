@@ -21,8 +21,14 @@ import {
   isMoveOutMessage,
   removeTagFromIndex,
   tagMatchesPattern,
-} from "./tagIndex"
-import type { MoveOutPattern, MoveTag, RowId, TagIndex } from "./tagIndex"
+} from "./tag-index"
+import type {
+  MoveOutPattern,
+  MoveTag,
+  ParsedMoveTag,
+  RowId,
+  TagIndex,
+} from "./tag-index"
 import type {
   BaseCollectionConfig,
   ChangeMessage,
@@ -817,6 +823,27 @@ function createElectricSync<T extends Row<unknown>>(
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
 
+  // ////////
+  // TODO: move this to the bottom of this file
+  const tagCache = new Map<MoveTag, ParsedMoveTag>()
+
+  /**
+   * Parses a tag string into a MoveTag.
+   * It memoizes the result parsed tag such that future calls
+   * for the same tag string return the same MoveTag array.
+   * @param tag - The tag string to parse.
+   * @returns The parsed MoveTag.
+   */
+  const parseTag = (tag: MoveTag): ParsedMoveTag => {
+    if (tagCache.has(tag)) {
+      return tagCache.get(tag)!
+    }
+    const parsedTag = tag.split(`|`)
+    tagCache.set(tag, parsedTag)
+    return parsedTag
+  }
+  // ////////////
+
   // Tag tracking state
   const rowTagSets = new Map<RowId, Set<MoveTag>>()
   const tagIndex: TagIndex = []
@@ -843,14 +870,16 @@ function createElectricSync<T extends Row<unknown>>(
     rowTagSet: Set<MoveTag>
   ): void => {
     for (const tag of tags) {
+      const parsedTag = parseTag(tag)
+
       // Infer tag length from first tag
       if (tagLength === undefined) {
-        tagLength = getTagLength(tag)
+        tagLength = getTagLength(parsedTag)
         initializeTagIndex(tagLength)
       }
 
       // Validate tag length matches
-      const currentTagLength = getTagLength(tag)
+      const currentTagLength = getTagLength(parsedTag)
       if (currentTagLength !== tagLength) {
         debug(
           `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`
@@ -859,7 +888,7 @@ function createElectricSync<T extends Row<unknown>>(
       }
 
       rowTagSet.add(tag)
-      addTagToIndex(tag, rowId, tagIndex, tagLength)
+      addTagToIndex(parsedTag, rowId, tagIndex, tagLength)
     }
   }
 
@@ -876,10 +905,11 @@ function createElectricSync<T extends Row<unknown>>(
     }
 
     for (const tag of removedTags) {
-      const currentTagLength = getTagLength(tag)
+      const parsedTag = parseTag(tag)
+      const currentTagLength = getTagLength(parsedTag)
       if (currentTagLength === tagLength) {
         rowTagSet.delete(tag)
-        removeTagFromIndex(tag, rowId, tagIndex, tagLength)
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
       }
     }
   }
@@ -935,9 +965,10 @@ function createElectricSync<T extends Row<unknown>>(
 
     // Find tags that match this pattern and remove them
     for (const tag of rowTagSet) {
-      if (tagMatchesPattern(tag, pattern)) {
+      const parsedTag = parseTag(tag)
+      if (tagMatchesPattern(parsedTag, pattern)) {
         rowTagSet.delete(tag)
-        removeTagFromIndex(tag, rowId, tagIndex, tagLength!)
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
       }
     }
 
