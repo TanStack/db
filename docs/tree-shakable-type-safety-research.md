@@ -131,12 +131,12 @@ function compileFunction(func: Func, isSingleRow: boolean) {
 ### Tree-Shaking Now Works
 
 ```
-User imports                                    Bundle includes
+User imports                              Bundle includes
 ─────────────────────────────────────────────────────────────────────────────
-import { eq, gt } from '@tanstack/db/operators' → eq + gt builders & evaluators
+import { eq, gt } from '@tanstack/db'  →  eq + gt builders & evaluators
 
-                                                  NOT included: and, or, upper,
-                                                  lower, like, concat, etc.
+                                          NOT included: and, or, upper,
+                                          lower, like, concat, etc.
 ```
 
 ### Package.json sideEffects
@@ -346,7 +346,7 @@ Still bundled (core infrastructure):
 
 **Mitigation:** Registration happens at module import time:
 ```typescript
-import { eq } from '@tanstack/db/operators'  // ← eq registers here
+import { eq } from '@tanstack/db'  // ← eq registers here
 
 // By the time this code runs, eq is already registered
 createLiveQueryCollection((q) =>

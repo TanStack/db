@@ -6,15 +6,15 @@ Enable developers to "just try" TanStack DB with a minimal bundle. A single live
 
 ```typescript
 // This should be ~10kb, not 48kb
-import { createCollection } from '@tanstack/db/collection'
-import { eq } from '@tanstack/db/operators'
-import { createLiveQueryCollection } from '@tanstack/db/live-query'
+import { createCollection, eq, createLiveQueryCollection } from '@tanstack/db'
 
 const todos = createCollection({ ... })
 const active = createLiveQueryCollection((q) =>
   q.from({ todo: todos }).where(({ todo }) => eq(todo.completed, false))
 )
 ```
+
+**Key insight:** The API stays the same. This is an internal refactor, not an API change.
 
 ---
 
@@ -115,14 +115,15 @@ function compileFunction(func: Func) {
 ### How Tree-Shaking Works
 
 ```
-User imports                        Bundle includes
+User imports                              Bundle includes
 ─────────────────────────────────────────────────────────────────
-import { eq } from '.../eq'    →   eq builder + eq evaluator
-import { gt } from '.../gt'    →   gt builder + gt evaluator
+import { eq, gt } from '@tanstack/db'  →  eq + gt (builder + evaluator)
 
-                                   NOT included: and, or, upper,
-                                   lower, like, concat, etc.
+                                          NOT included: and, or, upper,
+                                          lower, like, concat, etc.
 ```
+
+The barrel file re-exports all operators. Bundlers eliminate unused re-exports, so only the operators you actually use get bundled.
 
 ### sideEffects: false Still Works
 
@@ -174,19 +175,6 @@ packages/db/src/operators/
 └── isNull.ts
 ```
 
-Update `package.json` exports:
-
-```json
-{
-  "exports": {
-    ".": "./dist/esm/index.js",
-    "./collection": "./dist/esm/collection/index.js",
-    "./operators": "./dist/esm/operators/index.js",
-    "./live-query": "./dist/esm/query/live-query-collection.js"
-  }
-}
-```
-
 ### Phase 3: Extended Tree-Shaking (5-6 days)
 
 1. **Lazy-load db-ivm operators** in compiler based on query features
@@ -235,34 +223,6 @@ Key points:
 
 ---
 
-## API Design
-
-### Recommended: Subpath Exports (Preserve Current API)
-
-Users choose their import style:
-
-```typescript
-// Full bundle (current behavior, backward compatible)
-import { createCollection, eq, gt } from '@tanstack/db'
-
-// Tree-shakable (only includes what you use)
-import { createCollection } from '@tanstack/db/collection'
-import { eq, gt } from '@tanstack/db/operators'
-```
-
-The chained query API remains unchanged:
-
-```typescript
-createLiveQueryCollection((q) =>
-  q.from({ todo: todos })
-   .where(({ todo }) => eq(todo.completed, false))
-   .orderBy(({ todo }) => todo.createdAt)
-   .limit(10)
-)
-```
-
----
-
 ## Risks and Mitigations
 
 ### Risk: Registration Order
@@ -271,7 +231,7 @@ createLiveQueryCollection((q) =>
 
 **Mitigation:** Registration happens at module import time:
 ```typescript
-import { eq } from '@tanstack/db/operators'  // ← eq registers here
+import { eq } from '@tanstack/db'  // ← eq registers here
 
 // By the time this code runs, eq is already registered
 createLiveQueryCollection((q) =>
@@ -379,6 +339,6 @@ True tree-shaking requires the **auto-registering operator architecture**:
 3. Evaluator becomes a registry lookup
 4. Bundlers eliminate unused operators
 
-This is a significant refactor (~15-18 days) but enables the 75-83% bundle reduction needed for TanStack DB to be viable for "just trying it out."
+This is a significant internal refactor (~15-18 days) but enables the 75-83% bundle reduction needed for TanStack DB to be viable for "just trying it out."
 
-The current chained API is preserved - only the import paths change for users who want smaller bundles.
+**No API changes required.** Users keep importing from `@tanstack/db` as they do today.
