@@ -5,7 +5,7 @@ import type { ElectricCollectionUtils } from '../src/electric'
 import type { Collection } from '@tanstack/db'
 import type { Message, Row } from '@electric-sql/client'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { MoveOutPattern, MoveTag } from '../src/tagIndex'
+import type { MoveOutPattern } from '../src/tag-index'
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
@@ -74,8 +74,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should track tags when rows are inserted with tags`, () => {
-    const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
-    const tag2: MoveTag = [`hash4`, `hash5`, `hash6`]
+    const tag1 = `hash1|hash2|hash3`
+    const tag2 = `hash4|hash5|hash6`
 
     // Insert row with tags
     subscriber([
@@ -135,7 +135,7 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should track tags when rows are updated with new tags`, () => {
-    const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
+    const tag1 = `hash1|hash2|hash3`
 
     // Insert row with tags
     subscriber([
@@ -157,7 +157,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     )
 
     // Update with additional tags
-    const tag2: MoveTag = [`hash4`, `hash5`, `hash6`]
+    const tag2 = `hash4|hash5|hash6`
     subscriber([
       {
         key: `1`,
@@ -214,8 +214,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should track tags that are structurally equal`, () => {
-    const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
-    const tag1Copy: MoveTag = [`hash1`, `hash2`, `hash3`]
+    const tag1 = `hash1|hash2|hash3`
+    const tag1Copy = `hash1|hash2|hash3`
 
     // Insert row with tags
     subscriber([
@@ -255,10 +255,10 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should not interfere between rows with distinct tags`, () => {
-    const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
-    const tag2: MoveTag = [`hash4`, `hash5`, `hash6`]
-    const tag3: MoveTag = [`hash7`, `hash8`, `hash9`]
-    const tag4: MoveTag = [`hash10`, `hash11`, `hash12`]
+    const tag1 = `hash1|hash2|hash3`
+    const tag2 = `hash4|hash5|hash6`
+    const tag3 = `hash7|hash8|hash9`
+    const tag4 = `hash10|hash11|hash12`
 
     // Insert multiple rows with some shared tags
     // Row 1: tag1, tag2
@@ -390,8 +390,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should require exact match in removed_tags for tags with wildcards (underscore)`, () => {
-    const tagWithWildcard: MoveTag = [`hash1`, `_`, `hash3`]
-    const tagWithoutWildcard: MoveTag = [`hash1`, `hash2`, `hash3`]
+    const tagWithWildcard = `hash1|_|hash3`
+    const tagWithoutWildcard = `hash1|hash2|hash3`
 
     // Insert row with wildcard tag
     subscriber([
@@ -503,9 +503,9 @@ describe(`Electric Tag Tracking and GC`, () => {
     expect(collection.state.has(2)).toBe(false)
 
     // Test with multiple tags including wildcards
-    const tagWildcard1: MoveTag = [`hash1`, `_`, `hash3`]
-    const tagWildcard2: MoveTag = [`hash4`, `_`, `hash6`]
-    const tagSpecific: MoveTag = [`hash1`, `hash2`, `hash3`]
+    const tagWildcard1 = `hash1|_|hash3`
+    const tagWildcard2 = `hash4|_|hash6`
+    const tagSpecific = `hash1|hash2|hash3`
 
     subscriber([
       {
@@ -598,9 +598,9 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should handle move-out events that remove matching tags`, () => {
-    const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
-    const tag2: MoveTag = [`hash1`, `hash2`, `hash4`]
-    const tag3: MoveTag = [`hash5`, `hash6`, `hash1`]
+    const tag1 = `hash1|hash2|hash3`
+    const tag2 = `hash1|hash2|hash4`
+    const tag3 = `hash5|hash6|hash1`
 
     // Insert rows with tags
     subscriber([
@@ -662,10 +662,10 @@ describe(`Electric Tag Tracking and GC`, () => {
 
   it(`should remove shared tags from all rows when move-out pattern matches`, () => {
     // Create tags where some are shared between rows
-    const sharedTag1: MoveTag = [`hash1`, `hash2`, `hash3`] // Shared by rows 1 and 2
-    const sharedTag2: MoveTag = [`hash4`, `hash5`, `hash6`] // Shared by rows 2 and 3
-    const uniqueTag1: MoveTag = [`hash7`, `hash8`, `hash9`] // Only in row 1
-    const uniqueTag2: MoveTag = [`hash10`, `hash11`, `hash12`] // Only in row 3
+    const sharedTag1 = `hash1|hash2|hash3` // Shared by rows 1 and 2
+    const sharedTag2 = `hash4|hash5|hash6` // Shared by rows 2 and 3
+    const uniqueTag1 = `hash7|hash8|hash9` // Only in row 1
+    const uniqueTag2 = `hash10|hash11|hash12` // Only in row 3
 
     // Insert rows with multiple tags, some shared
     // Row 1: sharedTag1, uniqueTag1
@@ -790,9 +790,9 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should not remove tags with underscores when pattern matches non-indexed position`, () => {
-    // Tag with underscore at position 1: [a, _, c]
+    // Tag with underscore at position 1: a|_|c
     // This tag is NOT indexed at position 1 (because of underscore)
-    const tagWithUnderscore: MoveTag = [`a`, `_`, `c`]
+    const tagWithUnderscore = `a|_|c`
 
     // Insert row with tag containing underscore
     subscriber([
@@ -838,7 +838,7 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     // Send move-out event with pattern matching position 2 (where 'c' is)
     // Position 2 is indexed (has value 'c'), so it will be found in the index
-    // The pattern [*, *, c] matches the tag [a, _, c], so the tag is removed
+    // The pattern matching position 2 with value 'c' matches the tag a|_|c, so the tag is removed
     const patternIndexed: MoveOutPattern = {
       position: 2,
       value: `c`,
@@ -863,9 +863,9 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should handle move-out events with multiple patterns`, () => {
-    const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
-    const tag2: MoveTag = [`hash4`, `hash5`, `hash6`]
-    const tag3: MoveTag = [`hash7`, `hash8`, `hash9`]
+    const tag1 = `hash1|hash2|hash3`
+    const tag2 = `hash4|hash5|hash6`
+    const tag3 = `hash7|hash8|hash9`
 
     // Insert rows with tags
     subscriber([
@@ -928,8 +928,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should clear tag state on must-refetch`, () => {
-    const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
-    const tag2: MoveTag = [`hash4`, `hash5`, `hash6`]
+    const tag1 = `hash1|hash2|hash3`
+    const tag2 = `hash4|hash5|hash6`
 
     // Insert row with tag
     subscriber([
@@ -1064,7 +1064,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     )
 
     // Insert a row with tags
-    const tag: MoveTag = [`hash1`, `hash2`, `hash3`]
+    const tag = `hash1|hash2|hash3`
     subscriber([
       {
         key: `2`,
@@ -1113,8 +1113,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should handle adding and removing tags in same update`, () => {
-    const tag1: MoveTag = [`hash1`, `hash2`, `hash3`]
-    const tag2: MoveTag = [`hash4`, `hash5`, `hash6`]
+    const tag1 = `hash1|hash2|hash3`
+    const tag2 = `hash4|hash5|hash6`
 
     // Insert row with tag1
     subscriber([

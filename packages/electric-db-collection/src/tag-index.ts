@@ -2,7 +2,8 @@
 import type { Message, Row } from '@electric-sql/client'
 
 export type RowId = string | number
-export type MoveTag = Array<string>
+export type MoveTag = string
+export type ParsedMoveTag = Array<string>
 export type Position = number
 export type Value = string
 export type MoveOutPattern = {
@@ -43,7 +44,7 @@ export type TagIndex = Array<Map<Value, Set<RowId>>>
 /**
  * Abstraction to get the value at a specific position in a tag
  */
-export function getValue(tag: MoveTag, position: Position): Value {
+export function getValue(tag: ParsedMoveTag, position: Position): Value {
   if (position >= tag.length) {
     throw new Error(`Position out of bounds`)
   }
@@ -63,7 +64,7 @@ export function getPositionalValue(pattern: MoveOutPattern): {
 /**
  * Abstraction to get the length of a tag
  */
-export function getTagLength(tag: MoveTag): number {
+export function getTagLength(tag: ParsedMoveTag): number {
   return tag.length
 }
 
@@ -73,7 +74,7 @@ export function getTagLength(tag: MoveTag): number {
  * or if the value at that position is "_" (wildcard).
  */
 export function tagMatchesPattern(
-  tag: MoveTag,
+  tag: ParsedMoveTag,
   pattern: MoveOutPattern,
 ): boolean {
   const { position, value } = getPositionalValue(pattern)
@@ -85,7 +86,7 @@ export function tagMatchesPattern(
  * Add a tag to the index for efficient pattern matching
  */
 export function addTagToIndex(
-  tag: MoveTag,
+  tag: ParsedMoveTag,
   rowId: RowId,
   index: TagIndex,
   tagLength: number,
@@ -110,7 +111,7 @@ export function addTagToIndex(
  * Remove a tag from the index
  */
 export function removeTagFromIndex(
-  tag: MoveTag,
+  tag: ParsedMoveTag,
   rowId: RowId,
   index: TagIndex,
   tagLength: number,
