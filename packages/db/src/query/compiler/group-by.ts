@@ -1,12 +1,12 @@
-import { filter, groupBy, groupByOperators, map } from "@tanstack/db-ivm"
+import { filter, groupBy, map } from "@tanstack/db-ivm"
 import { Func, PropRef, getHavingExpression } from "../ir.js"
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
   UnknownHavingExpressionTypeError,
-  UnsupportedAggregateFunctionError,
 } from "../../errors.js"
 import { compileExpression, toBooleanPredicate } from "./evaluators.js"
+import { getAggregateConfig } from "./aggregate-registry.js"
 import type {
   Aggregate,
   BasicExpression,
@@ -16,7 +16,12 @@ import type {
 } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 
-const { sum, count, avg, min, max } = groupByOperators
+// Import all aggregates to ensure they're registered before any compilation happens
+import "../builder/aggregates/sum.js"
+import "../builder/aggregates/count.js"
+import "../builder/aggregates/avg.js"
+import "../builder/aggregates/min.js"
+import "../builder/aggregates/max.js"
 
 /**
  * Interface for caching the mapping between GROUP BY expressions and SELECT expressions
@@ -342,46 +347,44 @@ function getAggregateFunction(aggExpr: Aggregate) {
   // Pre-compile the value extractor expression
   const compiledExpr = compileExpression(aggExpr.args[0]!)
 
-  // Create a value extractor function for the expression to aggregate
-  const valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
-    const value = compiledExpr(namespacedRow)
-    // Ensure we return a number for numeric aggregate functions
-    return typeof value === `number` ? value : value != null ? Number(value) : 0
-  }
+  // Get the aggregate configuration from registry
+  const config = getAggregateConfig(aggExpr.name)
 
-  // Create a value extractor function for the expression to aggregate
-  const valueExtractorWithDate = ([, namespacedRow]: [
-    string,
-    NamespacedRow,
-  ]) => {
-    const value = compiledExpr(namespacedRow)
-    return typeof value === `number` || value instanceof Date
-      ? value
-      : value != null
-        ? Number(value)
-        : 0
-  }
+  // Create the appropriate value extractor based on the config
+  let valueExtractor: (entry: [string, NamespacedRow]) => any
 
-  // Create a raw value extractor function for the expression to aggregate
-  const rawValueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
-    return compiledExpr(namespacedRow)
-  }
-
-  // Return the appropriate aggregate function
-  switch (aggExpr.name.toLowerCase()) {
-    case `sum`:
-      return sum(valueExtractor)
-    case `count`:
-      return count(rawValueExtractor)
-    case `avg`:
-      return avg(valueExtractor)
-    case `min`:
-      return min(valueExtractorWithDate)
-    case `max`:
-      return max(valueExtractorWithDate)
+  switch (config.valueTransform) {
+    case `numeric`:
+      valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+        const value = compiledExpr(namespacedRow)
+        // Ensure we return a number for numeric aggregate functions
+        return typeof value === `number`
+          ? value
+          : value != null
+            ? Number(value)
+            : 0
+      }
+      break
+    case `numericOrDate`:
+      valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+        const value = compiledExpr(namespacedRow)
+        return typeof value === `number` || value instanceof Date
+          ? value
+          : value != null
+            ? Number(value)
+            : 0
+      }
+      break
+    case `raw`:
     default:
-      throw new UnsupportedAggregateFunctionError(aggExpr.name)
+      valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
+        return compiledExpr(namespacedRow)
+      }
+      break
   }
+
+  // Return the aggregate function using the registered factory
+  return config.factory(valueExtractor)
 }
 
 /**

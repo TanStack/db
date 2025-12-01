@@ -44,8 +44,8 @@ export {
   divide,
 } from "./builder/operators/index.js"
 
-// Aggregates remain in functions.ts (they're handled differently)
-export { count, avg, sum, min, max } from "./builder/functions.js"
+// Aggregates - now from aggregate modules for tree-shaking
+export { count, avg, sum, min, max } from "./builder/aggregates/index.js"
 
 // Operator registry for custom operators
 export {
@@ -53,6 +53,14 @@ export {
   type EvaluatorFactory,
   type CompiledExpression,
 } from "./compiler/registry.js"
+
+// Aggregate registry for custom aggregates
+export {
+  registerAggregate,
+  type AggregateConfig,
+  type AggregateFactory,
+  type ValueExtractor,
+} from "./compiler/aggregate-registry.js"
 
 // Ref proxy utilities
 export type { Ref } from "./builder/types.js"
