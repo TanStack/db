@@ -269,12 +269,15 @@ createLiveQueryCollection((q) =>
 
 **Problem:** Evaluator lookup before operator import?
 
-**Mitigation:** Query compilation happens after the callback returns:
+**Mitigation:** Registration happens at module import time:
 ```typescript
+import { eq } from '@tanstack/db/operators'  // ← eq registers here
+
+// By the time this code runs, eq is already registered
 createLiveQueryCollection((q) =>
   q.from({ todo: todos })
-   .where(({ todo }) => eq(todo.completed, false))  // eq imported
-)  // ← Compilation happens here, after callback
+   .where(({ todo }) => eq(todo.completed, false))
+)
 ```
 
 ### Risk: Missing Operator at Runtime

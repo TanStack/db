@@ -344,12 +344,15 @@ Still bundled (core infrastructure):
 
 **Problem:** What if evaluator is looked up before operator is imported?
 
-**Mitigation:** The query builder callback ensures operators are imported before compilation:
+**Mitigation:** Registration happens at module import time:
 ```typescript
+import { eq } from '@tanstack/db/operators'  // ← eq registers here
+
+// By the time this code runs, eq is already registered
 createLiveQueryCollection((q) =>
   q.from({ todo: todos })
-   .where(({ todo }) => eq(todo.completed, false))  // eq imported here
-)  // Compilation happens after callback returns
+   .where(({ todo }) => eq(todo.completed, false))
+)
 ```
 
 ### Risk: Duplicate Registration
