@@ -1,358 +1,93 @@
-# Type Safety Implications: Converting TanStack DB to Tree-Shakable APIs
+# Tree-Shakable APIs: Architecture Research
 
 ## Executive Summary
 
-Converting TanStack DB's query builder to tree-shakable APIs is **technically feasible** while maintaining full type safety. The main challenge isn't type inference itself, but ensuring that the runtime RefProxy system and type annotations remain synchronized across split modules.
+Converting TanStack DB to tree-shakable APIs requires **architectural changes to the operator evaluation pipeline**, not just file reorganization. The current architecture couples operator builders to a centralized evaluator through string-based dispatch, making true tree-shaking impossible without a registry/plugin pattern.
 
-**Key Findings:**
-- Type inference in the builder works through generic constraints that are **independent** of module boundaries
-- RefProxy is a **runtime implementation detail** that doesn't affect type inference
-- Operators can be **safely split** into individual files with proper type exports
-- **No architectural changes needed** to the type system for tree-shaking support
+**Key Finding:** Even splitting operators into separate files provides no bundle size benefit because the evaluator (`evaluators.ts`) contains a 300-line switch statement with ALL operator implementations hardcoded.
+
+**Required Solution:** Each operator must be a complete unit that auto-registers its evaluator when imported.
 
 ---
 
-## 1. Current Type Architecture Analysis
+## 1. The Pipeline Coupling Problem
 
-### 1.1 The Context Type - Schema Tracking Across Chain
+### Current Architecture
 
-The core of TanStack DB's type safety is the `Context` interface (from `packages/db/src/query/builder/types.ts`):
+```
+User Code           Builder              IR                    Evaluator
+───────────────────────────────────────────────────────────────────────────
+eq(a, b)      →    new Func('eq', args)  →  { name: 'eq', ... }  →  switch(name) {
+                                                                      case 'eq': ...
+                                                                      case 'gt': ...
+                                                                      // 25+ cases
+                                                                    }
+```
+
+The problem: **string-based dispatch** in the evaluator.
+
+### Why File Splitting Alone Doesn't Work
 
 ```typescript
-export interface Context {
-  baseSchema: ContextSchema         // Original tables
-  schema: ContextSchema             // Current available tables
-  fromSourceName: string            // Main table alias
-  hasJoins?: boolean                // Join state tracking
-  joinTypes?: Record<string, JoinType>  // Join optionality tracking
-  result?: any                      // Select() projection
-  singleResult?: boolean            // findOne() flag
+// @tanstack/db/operators/eq.ts - CURRENT APPROACH (doesn't help)
+export function eq<T>(left: T, right: T): BasicExpression<boolean> {
+  return new Func('eq', [toExpression(left), toExpression(right)])
 }
+// This just creates an IR node with name='eq'
+// The EVALUATOR still needs to know what 'eq' means!
 ```
-
-**How it evolves through the chain:**
-
-1. **`.from({ todo: todos })`** creates initial context
-2. **`.join({ orders }, ...)`** expands schema with optional types
-3. **`.select(...)`** updates result type
-
-### 1.2 The Ref Type System
-
-TanStack DB's `Ref` type handles optional chaining elegantly:
 
 ```typescript
-// RefsForContext creates refs for all available tables
-export type RefsForContext<TContext extends Context> = {
-  [K in keyof TContext['schema']]: IsNonExactOptional<TContext['schema'][K]> extends true
-    ? Ref<NonUndefined<TContext['schema'][K]>> | undefined
-    : Ref<TContext['schema'][K]>
-}
-```
-
-**Key insight:** The `| undefined` is **outside** the Ref, so optional chaining (`?.`) works correctly.
-
-### 1.3 RefProxy - Runtime Path Tracking
-
-RefProxy records property access paths at runtime:
-
-```typescript
-export function createRefProxy<T>(aliases: Array<string>): RefProxy<T> & T {
-  return new Proxy({}, {
-    get(target, prop) {
-      if (prop === '__path') return path
-      return createProxy([...path, String(prop)])
-    }
-  })
-}
-```
-
-**Critical for tree-shaking:** RefProxy is purely runtime - it has NO impact on type inference.
-
----
-
-## 2. Type Inference Challenges & Solutions
-
-### 2.1 Generic Constraint Flow
-
-**Challenge:** Will splitting operators break type inference?
-
-**Answer: NO**, because:
-- `RefsForContext` is independent of any specific operator
-- Operators receive already-typed refs from the callback parameter
-- Generic inference happens at the `.where()` call, not inside the operator
-
-```typescript
-// Operator in separate file
-import { eq } from '@tanstack/db/operators/eq'
-
-// Type inference still works:
-.where(({ todo }) => {        // ({ todo }) is RefsForContext<Context>
-  return eq(todo.completed, false)  // Types flow naturally
-})
-```
-
-### 2.2 Nullability Preservation
-
-The trickiest part is preserving nullability through operator chains:
-
-```typescript
-type StringFunctionReturnType<T> =
-  ExtractType<T> extends infer U
-    ? U extends string | undefined | null
-      ? BasicExpression<U>          // ✓ Preserves nullability!
-      : BasicExpression<string | undefined | null>
-    : BasicExpression<string | undefined | null>
-```
-
-**When split into separate files:**
-```typescript
-// @tanstack/db/operators/upper.ts
-import type { StringFunctionReturnType } from '../shared/types.js'
-
-export function upper<T extends ExpressionLike>(
-  arg: T
-): StringFunctionReturnType<T> {
-  return new Func('upper', [toExpression(arg)])
-}
-```
-
-**Result:** ✓ Type inference is **preserved** because type utilities don't depend on Context.
-
-### 2.3 Circular Dependencies Analysis
-
-**Current import structure (no cycles in operators!):**
-```
-functions.ts imports from:
-  ├─ ir.ts ✓ (no reverse import)
-  └─ ref-proxy.ts ✓ (no reverse import)
-
-No operator imports from another operator.
-Safe to split independently.
-```
-
----
-
-## 3. Solutions from Similar Libraries
-
-### 3.1 Drizzle ORM Approach
-
-Drizzle (7.4kb minified+gzipped) proves complex type inference works across modules:
-- Uses dialect-specific entry points: `drizzle-orm/pg-core`, `drizzle-orm/mysql-core`
-- Preserves type safety through Higher-Kinded Type pattern
-- Type inference works because:
-  1. Type utilities defined once, imported everywhere
-  2. Generics constrained at function signature level
-  3. No runtime code hidden behind type barriers
-
-### 3.2 Tree-Shaking Best Practices
-
-**Pattern 1: Full-Path Imports**
-```typescript
-import { eq } from '@tanstack/db/operators/eq'  // ✓ Tree-shakable
-import { eq } from '@tanstack/db'                // ✗ Bundles everything
-```
-
-**Pattern 2: sideEffects Declaration**
-```json
-{ "sideEffects": false }  // Already configured in TanStack DB ✓
-```
-
----
-
-## 4. Specific Challenges for TanStack DB
-
-### 4.1 RefProxy Integration
-
-When operators are split:
-1. RefProxy is created once per query (in the builder)
-2. It's passed to operators as parameters
-3. Operators don't create RefProxy, they just use it
-4. **Module boundaries don't affect parameter passing**
-
-### 4.2 Type Utilities Must Be Centralized
-
-**Recommendation:** Create a shared module:
-```
-packages/db/src/query/
-├── builder/
-│   ├── types.ts          ← Core Context types (CENTRALIZED)
-│   └── shared-types.ts   ← Operator utility types
-├── operators/
-│   ├── eq.ts
-│   ├── gt.ts
-│   └── index.ts
-└── ir.ts
-```
-
-### 4.3 RefLeaf Symbol Handling
-
-`RefLeaf` uses a branded type:
-```typescript
-declare const RefBrand: unique symbol
-export type RefLeaf<T = any> = { readonly [RefBrand]?: T }
-```
-
-**Safe to split:** `unique symbol` works correctly across module boundaries. The symbol is for type branding only—it doesn't exist at runtime.
-
----
-
-## 5. Recommended Architecture
-
-### 5.1 Package Exports Configuration
-
-```json
-{
-  "exports": {
-    ".": "./dist/esm/index.js",
-    "./operators": "./dist/esm/query/operators/index.js",
-    "./operators/eq": "./dist/esm/query/operators/eq.js",
-    "./operators/gt": "./dist/esm/query/operators/gt.js"
-  },
-  "sideEffects": false
-}
-```
-
-### 5.2 Implementation Phases
-
-| Phase | Effort | Risk | Impact |
-|-------|--------|------|--------|
-| 1. Split operators | 2-3 days | Low | High |
-| 2. Add subpath exports | 1 day | Low | High |
-| 3. Core collection extract | 3-4 days | Medium | Medium |
-| 4. Update framework packages | 1 day each | Low | Low |
-
-### 5.3 Type Safety Guarantees
-
-With this approach:
-- ✓ Full type inference preserved
-- ✓ No type inconsistencies
-- ✓ IDE autocomplete works
-- ✓ Tree-shaking effective
-- ✓ Backward compatible
-
----
-
-## 6. Potential Pitfalls to Avoid
-
-### Pitfall 1: Duplicating Type Utilities
-```typescript
-// ❌ WRONG - Types defined in multiple places
-// @tanstack/db/operators/eq.ts
-type ComparisonOperand<T> = ...
-
-// @tanstack/db/operators/gt.ts
-type ComparisonOperand<T> = ...  // Different definition!
-```
-**Solution:** Define once in `shared-types.ts`, import everywhere
-
-### Pitfall 2: Circular Imports Between Operators
-```typescript
-// ❌ WRONG
-import { gt } from './gt.js'  // Operator importing operator!
-```
-**Solution:** Operators must be completely independent
-
-### Pitfall 3: Forgetting Type Exports
-```typescript
-// ❌ WRONG
-export function eq(left: any, right: any) { ... }
-
-// ✓ CORRECT
-export type { ComparisonOperand } from '../shared-types.js'
-export function eq<T>(...): BasicExpression<boolean> { ... }
-```
-
----
-
-## 7. Bundle Size Impact
-
-### Current vs Tree-Shakable
-
-| Scenario | Current | Tree-Shakable | Savings |
-|----------|---------|---------------|---------|
-| Single live query | ~48kb | ~7-8kb | **83%** |
-| Live query + mutations | ~48kb | ~10-12kb | **75%** |
-| Full feature set | ~48kb | ~48kb | 0% |
-
----
-
----
-
-## 8. Critical Finding: The Pipeline Coupling Problem
-
-**The maintainer's concern is valid and deeper than initially analyzed.**
-
-### The Real Issue
-
-The current architecture has a fundamental coupling that prevents true tree-shaking:
-
-```
-Builder:    eq(a, b)  →  new Func('eq', [a, b])
-                                    ↓
-IR:                      Func { name: 'eq', args: [...] }
-                                    ↓
-Evaluator:           switch(func.name) {
-                       case 'eq': return (a, b) => a === b
-                       case 'gt': return (a, b) => a > b
-                       case 'upper': return (s) => s.toUpperCase()
-                       // ... 25+ more cases
-                     }
-```
-
-**Even if you split `eq` into `@tanstack/db/operators/eq`:**
-- The evaluator (`evaluators.ts` lines 163-457) has a **giant switch statement** with ALL operators
-- Importing just `eq` still requires the full evaluator with all 25+ operator implementations
-- The optimizer also has hardcoded logic for specific operators
-- **Result: No actual tree-shaking benefit**
-
-### Current Evaluator Structure (Not Tree-Shakable)
-
-```typescript
-// evaluators.ts - 486 lines, ALL operators hardcoded
-function compileFunction(func: Func, isSingleRow: boolean) {
+// evaluators.ts - Still bundles EVERYTHING
+function compileFunction(func: Func) {
   switch (func.name) {
-    case 'eq': { /* eq implementation */ }
-    case 'gt': { /* gt implementation */ }
-    case 'gte': { /* gte implementation */ }
-    case 'lt': { /* lt implementation */ }
-    case 'lte': { /* lte implementation */ }
-    case 'and': { /* and implementation */ }
-    case 'or': { /* or implementation */ }
-    case 'not': { /* not implementation */ }
-    case 'in': { /* in implementation */ }
-    case 'like': { /* like implementation */ }
-    case 'ilike': { /* ilike implementation */ }
-    case 'upper': { /* upper implementation */ }
-    case 'lower': { /* lower implementation */ }
-    case 'length': { /* length implementation */ }
-    case 'concat': { /* concat implementation */ }
-    case 'coalesce': { /* coalesce implementation */ }
-    case 'add': { /* add implementation */ }
-    case 'subtract': { /* subtract implementation */ }
-    case 'multiply': { /* multiply implementation */ }
-    case 'divide': { /* divide implementation */ }
-    case 'isUndefined': { /* isUndefined implementation */ }
-    case 'isNull': { /* isNull implementation */ }
+    case 'eq': { /* 15 lines */ }
+    case 'gt': { /* 12 lines */ }
+    case 'gte': { /* 12 lines */ }
+    case 'lt': { /* 12 lines */ }
+    case 'lte': { /* 12 lines */ }
+    case 'and': { /* 20 lines */ }
+    case 'or': { /* 20 lines */ }
+    case 'not': { /* 10 lines */ }
+    case 'in': { /* 12 lines */ }
+    case 'like': { /* 15 lines */ }
+    case 'ilike': { /* 15 lines */ }
+    case 'upper': { /* 5 lines */ }
+    case 'lower': { /* 5 lines */ }
+    case 'length': { /* 10 lines */ }
+    case 'concat': { /* 15 lines */ }
+    case 'coalesce': { /* 10 lines */ }
+    case 'add': { /* 8 lines */ }
+    case 'subtract': { /* 8 lines */ }
+    case 'multiply': { /* 8 lines */ }
+    case 'divide': { /* 10 lines */ }
+    case 'isUndefined': { /* 5 lines */ }
+    case 'isNull': { /* 5 lines */ }
     default: throw new UnknownFunctionError(func.name)
   }
 }
 ```
 
-### Required Solution: Plugin/Registry Architecture
+**Result:** Importing just `eq` still includes the entire evaluator with all 25+ operator implementations.
 
-Each operator needs to be a **complete unit** that registers itself:
+---
+
+## 2. Required Solution: Auto-Registering Operators
+
+Each operator must bundle its builder AND evaluator, registering itself on import:
 
 ```typescript
 // @tanstack/db/operators/eq.ts - PROPOSED
-import { registerOperator } from '@tanstack/db/registry'
-import { Func, type BasicExpression } from '@tanstack/db/ir'
+import { registerOperator } from '../registry.js'
+import { Func } from '../ir.js'
+import { normalizeValue, areValuesEqual, isUnknown } from '../utils/comparison.js'
 
-// Builder function
+// Builder function (what users import and call)
 export function eq<T>(left: T, right: T): BasicExpression<boolean> {
   return new Func('eq', [toExpression(left), toExpression(right)])
 }
 
-// Evaluator implementation
+// Evaluator implementation (co-located with builder)
 const eqEvaluator = (compiledArgs: CompiledExpression[]) => {
   const [argA, argB] = compiledArgs
   return (data: any) => {
@@ -363,12 +98,12 @@ const eqEvaluator = (compiledArgs: CompiledExpression[]) => {
   }
 }
 
-// Self-registration (side effect, but tree-shakable if not imported)
+// Auto-registration: happens when module is imported
 registerOperator('eq', eqEvaluator)
 ```
 
 ```typescript
-// @tanstack/db/registry.ts - PROPOSED
+// @tanstack/db/registry.ts
 const operatorRegistry = new Map<string, EvaluatorFactory>()
 
 export function registerOperator(name: string, evaluator: EvaluatorFactory) {
@@ -385,70 +120,286 @@ export function getOperatorEvaluator(name: string): EvaluatorFactory {
 ```
 
 ```typescript
-// evaluators.ts - PROPOSED (much smaller)
+// evaluators.ts - Now just a registry lookup (tiny!)
 function compileFunction(func: Func, isSingleRow: boolean) {
   const evaluatorFactory = getOperatorEvaluator(func.name)
   const compiledArgs = func.args.map(arg => compileExpressionInternal(arg, isSingleRow))
-  return evaluatorFactory(compiledArgs)
+  return evaluatorFactory(compiledArgs, isSingleRow)
 }
 ```
 
-### Impact on Other Pipeline Stages
+### Tree-Shaking Now Works
 
-**Optimizer also needs refactoring:**
-- Currently has hardcoded logic for AND clause splitting
-- Specific handling for certain predicates
-- Would need operator-specific optimization hints
+```
+User imports                        Bundle includes
+─────────────────────────────────────────────────────────────────
+import { eq } from '.../eq'    →   eq builder + eq evaluator (~20 lines)
+import { gt } from '.../gt'    →   gt builder + gt evaluator (~15 lines)
 
-**Compiler needs refactoring:**
-- Currently imports all db-ivm operators upfront
-- Would need lazy/dynamic operator loading
+                                   NOT included: and, or, upper, lower,
+                                   like, concat, coalesce, etc.
+```
 
-### Revised Effort Estimate
+### Package.json sideEffects
 
-| Component | Current Approach | Plugin Architecture |
-|-----------|-----------------|---------------------|
-| Split operators (builder only) | 2-3 days | - |
-| Add subpath exports | 1 day | - |
-| **Operator registry system** | - | **3-4 days** |
-| **Refactor evaluators** | - | **2-3 days** |
-| **Refactor optimizer** | - | **2-3 days** |
-| **Refactor compiler** | - | **3-4 days** |
-| Testing & validation | 2 days | **3-4 days** |
-| **Total** | ~5-6 days | **~15-18 days** |
+Keep `sideEffects: false` - it still works correctly:
 
-### Recommendation
+```json
+{
+  "sideEffects": false
+}
+```
 
-The maintainer is correct: **true tree-shaking requires the plugin architecture**.
+Why this is fine:
+- If you `import { eq }` → bundler includes `eq.ts` → registration runs ✓
+- If you don't import `eq` → bundler excludes it → registration never needed ✓
 
-However, a **phased approach** is possible:
-
-**Phase 1 (Quick Win):** Split operators at the builder level only. This doesn't enable tree-shaking but:
-- Improves code organization
-- Enables per-operator documentation
-- Prepares for Phase 2
-
-**Phase 2 (Full Solution):** Implement the operator registry:
-1. Create registry pattern
-2. Migrate evaluator to use registry
-3. Each operator self-registers
-4. Now tree-shaking works
-
-**Phase 3 (Optimization):** Extend to optimizer and compiler.
+The registration "side effect" is self-contained. It only registers into a Map that's only consulted when compiling a query that uses that operator. No leaked global state.
 
 ---
 
-## 9. Conclusion
+## 3. Type Safety Analysis
 
-**Converting TanStack DB to tree-shakable APIs while maintaining full type safety is achievable, but requires more than organizational refactoring—it requires an architectural change to the operator evaluation pipeline.**
+The good news: **type safety is preserved** with this architecture.
 
-The current type system is sophisticated enough to survive module splitting:
-- RefProxy design separates runtime (path tracking) from type inference (generics)
-- Context evolution is based on pure type computations
-- No circular dependencies between operators
+### Why Types Still Work
 
-**Recommended first step:** Split operators into individual files. This is:
-- Lowest risk
-- Highest bundle size impact
-- 2-3 days of work
-- Preserves all existing APIs
+1. **Generic constraints are module-independent**
+   ```typescript
+   // Works across module boundaries
+   .where(({ todo }) => eq(todo.completed, false))
+   //      ↑ RefsForContext<Context> - inferred at call site
+   //                       ↑ Ref<boolean> - flows through generics
+   ```
+
+2. **RefProxy is purely runtime**
+   - Type inference uses generic constraints, not runtime values
+   - The `__path` tracking is invisible to TypeScript
+
+3. **No circular type dependencies between operators**
+   - Each operator is self-contained
+   - All share the same `BasicExpression` return type
+
+### Type Architecture
+
+```typescript
+// Centralized types (shared by all operators)
+// @tanstack/db/types.ts
+export type BasicExpression<T> = PropRef<T> | Value<T> | Func<T>
+export type CompiledExpression = (data: NamespacedRow) => any
+export type EvaluatorFactory = (args: CompiledExpression[]) => CompiledExpression
+
+// Each operator imports and uses these
+// @tanstack/db/operators/eq.ts
+import type { BasicExpression, EvaluatorFactory } from '../types.js'
+
+export function eq<T>(left: T, right: T): BasicExpression<boolean>
+```
+
+### Context Type Flow (Unchanged)
+
+The query builder's `Context` type continues to work:
+
+```typescript
+interface Context {
+  baseSchema: ContextSchema
+  schema: ContextSchema        // Evolves through .join(), .select()
+  fromSourceName: string
+  hasJoins?: boolean
+  result?: any
+}
+
+// .from() creates initial context
+// .join() expands schema
+// .where() receives RefsForContext<Context>
+// Operators receive typed refs, return BasicExpression
+```
+
+None of this depends on where operators are defined.
+
+---
+
+## 4. Full Pipeline Impact
+
+### Components Requiring Changes
+
+| Component | Current State | Required Change |
+|-----------|--------------|-----------------|
+| **Builder functions** | Create `Func('name', args)` | + Register evaluator |
+| **Evaluator** | 300-line switch statement | Registry lookup |
+| **Optimizer** | Hardcoded AND/OR handling | Operator hints (optional) |
+| **Compiler** | Static db-ivm imports | Dynamic/lazy loading |
+
+### Optimizer Considerations
+
+The optimizer has some operator-specific logic:
+
+```typescript
+// optimizer.ts - AND clause splitting
+case 'and':
+  // Split into multiple WHERE clauses for pushdown
+```
+
+Options:
+1. **Keep hardcoded** for core operators (and, or, not) - these are always needed
+2. **Add operator hints** for optimization behavior
+3. **Defer to Phase 3** - optimizer changes are lower priority
+
+### Compiler Considerations
+
+The compiler imports db-ivm operators statically:
+
+```typescript
+// compiler/index.ts
+import { distinct, filter, map } from "@tanstack/db-ivm"
+```
+
+For full tree-shaking, these would need dynamic loading based on query features. This is a Phase 3 optimization.
+
+---
+
+## 5. Implementation Plan
+
+### Phase 1: Registry Infrastructure (3-4 days)
+
+1. Create `registry.ts` with `registerOperator` / `getOperatorEvaluator`
+2. Refactor `evaluators.ts` to use registry lookup
+3. Keep existing operators working (register them from current location)
+4. Add tests for registry behavior
+
+### Phase 2: Split Operators (4-5 days)
+
+1. Create `operators/` directory structure
+2. Move each operator to its own file with co-located evaluator
+3. Each file auto-registers on import
+4. Update exports in `package.json`
+5. Add per-operator tests
+
+```
+packages/db/src/operators/
+├── index.ts          # Re-exports all (convenience)
+├── eq.ts             # eq builder + evaluator + registration
+├── gt.ts
+├── gte.ts
+├── lt.ts
+├── lte.ts
+├── and.ts
+├── or.ts
+├── not.ts
+├── in.ts
+├── like.ts
+├── ilike.ts
+├── upper.ts
+├── lower.ts
+├── length.ts
+├── concat.ts
+├── coalesce.ts
+├── add.ts
+├── subtract.ts
+├── multiply.ts
+├── divide.ts
+├── isUndefined.ts
+└── isNull.ts
+```
+
+### Phase 3: Extended Tree-Shaking (5-6 days)
+
+1. Lazy-load db-ivm operators in compiler
+2. Add operator optimization hints (optional)
+3. Split collection managers for mutations tree-shaking
+4. Update framework packages (react-db, etc.)
+
+### Total Effort: ~15-18 days
+
+---
+
+## 6. Bundle Size Projections
+
+### After Full Implementation
+
+| Scenario | Current | Tree-Shakable | Reduction |
+|----------|---------|---------------|-----------|
+| Minimal query (eq only) | ~48kb | ~8-10kb | **79-83%** |
+| Basic query (eq, gt, and) | ~48kb | ~10-12kb | **75-79%** |
+| Full query features | ~48kb | ~48kb | 0% |
+
+### What Gets Tree-Shaken
+
+With registry architecture:
+- ✅ Unused operators (evaluator code)
+- ✅ String functions (upper, lower, concat) if not used
+- ✅ Math functions (add, subtract, etc.) if not used
+- ✅ Null checks (isNull, isUndefined) if not used
+
+Still bundled (core infrastructure):
+- Registry (~50 lines)
+- IR classes (Func, PropRef, Value)
+- Expression compilation core
+- Collection core
+
+---
+
+## 7. Risks and Mitigations
+
+### Risk: Registration Order
+
+**Problem:** What if evaluator is looked up before operator is imported?
+
+**Mitigation:** The query builder callback ensures operators are imported before compilation:
+```typescript
+createLiveQueryCollection((q) =>
+  q.from({ todo: todos })
+   .where(({ todo }) => eq(todo.completed, false))  // eq imported here
+)  // Compilation happens after callback returns
+```
+
+### Risk: Duplicate Registration
+
+**Problem:** Same operator imported from multiple entry points.
+
+**Mitigation:** Registry uses Map, duplicate `set()` is idempotent:
+```typescript
+registerOperator('eq', eqEvaluator)  // First import
+registerOperator('eq', eqEvaluator)  // Subsequent imports - no-op
+```
+
+### Risk: Missing Operator at Runtime
+
+**Problem:** User creates `Func('custom', args)` without registering evaluator.
+
+**Mitigation:** Clear error message:
+```typescript
+export function getOperatorEvaluator(name: string): EvaluatorFactory {
+  const evaluator = operatorRegistry.get(name)
+  if (!evaluator) {
+    throw new Error(
+      `Unknown operator "${name}". ` +
+      `Did you forget to import it from @tanstack/db/operators/${name}?`
+    )
+  }
+  return evaluator
+}
+```
+
+---
+
+## 8. Conclusion
+
+True tree-shaking for TanStack DB operators requires the **auto-registering plugin architecture**:
+
+1. Each operator bundles its builder AND evaluator
+2. Import triggers self-registration
+3. Evaluator becomes a simple registry lookup
+4. Bundlers can eliminate unused operators
+
+**Type safety is fully preserved** because:
+- Generic constraints work across module boundaries
+- RefProxy is a runtime detail invisible to types
+- All operators share centralized type definitions
+
+**Recommended approach:**
+- Phase 1: Build registry infrastructure
+- Phase 2: Split operators with co-located evaluators
+- Phase 3: Extend to compiler and collection managers
+
+This is a significant refactor (~15-18 days) but enables the 75-83% bundle reduction that makes TanStack DB viable for "just trying it out" scenarios.
