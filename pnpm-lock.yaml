@@ -603,7 +603,7 @@ importers:
         version: 0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11)
       express:
         specifier: ^4.21.2
         version: 4.21.2
@@ -790,8 +790,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: ^1.2.0
-        version: 1.2.0
+        specifier: https://pkg.pr.new/@electric-sql/client@3497
+        version: https://pkg.pr.new/@electric-sql/client@3497
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
@@ -1586,6 +1586,10 @@ packages:
 
   '@electric-sql/client@1.2.0':
     resolution: {integrity: sha512-K/MEjti3UF4aPKJJqO6Tp4f5noqc2/3icU1NPdpKfQaHwbzGtEX2aJmL2vxTEUJbfyrISkPKbOPnrz/lAvw1Vg==}
+
+  '@electric-sql/client@https://pkg.pr.new/@electric-sql/client@3497':
+    resolution: {tarball: https://pkg.pr.new/@electric-sql/client@3497}
+    version: 1.1.5
 
   '@emnapi/core@1.5.0':
     resolution: {integrity: sha512-sbP8GzB1WDzacS8fgNPpHlp6C9VZe+SJP3F90W9rLemaQj2PzIuTEl1qDOYQf58YIpyjViI24y9aPWCjEzY2cg==}
@@ -9919,6 +9923,12 @@ snapshots:
     optionalDependencies:
       '@rollup/rollup-darwin-arm64': 4.52.5
 
+  '@electric-sql/client@https://pkg.pr.new/@electric-sql/client@3497':
+    dependencies:
+      '@microsoft/fetch-event-source': 2.0.1
+    optionalDependencies:
+      '@rollup/rollup-darwin-arm64': 4.52.5
+
   '@emnapi/core@1.5.0':
     dependencies:
       '@emnapi/wasi-threads': 1.1.0
@@ -14042,11 +14052,6 @@ snapshots:
       kysely: 0.28.8
       pg: 8.16.3
       postgres: 3.4.7
-
-  drizzle-zod@0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76):
-    dependencies:
-      drizzle-orm: 0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7)
-      zod: 3.25.76
 
   drizzle-zod@0.8.3(drizzle-orm@0.44.7(@opentelemetry/api@1.9.0)(@types/pg@8.15.6)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.11):
     dependencies:
