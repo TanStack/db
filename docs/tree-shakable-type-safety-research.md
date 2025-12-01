@@ -276,9 +276,171 @@ export function eq<T>(...): BasicExpression<boolean> { ... }
 
 ---
 
-## 8. Conclusion
+---
 
-**Converting TanStack DB to tree-shakable APIs while maintaining full type safety is achievable through organizational refactoring, not architectural changes.**
+## 8. Critical Finding: The Pipeline Coupling Problem
+
+**The maintainer's concern is valid and deeper than initially analyzed.**
+
+### The Real Issue
+
+The current architecture has a fundamental coupling that prevents true tree-shaking:
+
+```
+Builder:    eq(a, b)  →  new Func('eq', [a, b])
+                                    ↓
+IR:                      Func { name: 'eq', args: [...] }
+                                    ↓
+Evaluator:           switch(func.name) {
+                       case 'eq': return (a, b) => a === b
+                       case 'gt': return (a, b) => a > b
+                       case 'upper': return (s) => s.toUpperCase()
+                       // ... 25+ more cases
+                     }
+```
+
+**Even if you split `eq` into `@tanstack/db/operators/eq`:**
+- The evaluator (`evaluators.ts` lines 163-457) has a **giant switch statement** with ALL operators
+- Importing just `eq` still requires the full evaluator with all 25+ operator implementations
+- The optimizer also has hardcoded logic for specific operators
+- **Result: No actual tree-shaking benefit**
+
+### Current Evaluator Structure (Not Tree-Shakable)
+
+```typescript
+// evaluators.ts - 486 lines, ALL operators hardcoded
+function compileFunction(func: Func, isSingleRow: boolean) {
+  switch (func.name) {
+    case 'eq': { /* eq implementation */ }
+    case 'gt': { /* gt implementation */ }
+    case 'gte': { /* gte implementation */ }
+    case 'lt': { /* lt implementation */ }
+    case 'lte': { /* lte implementation */ }
+    case 'and': { /* and implementation */ }
+    case 'or': { /* or implementation */ }
+    case 'not': { /* not implementation */ }
+    case 'in': { /* in implementation */ }
+    case 'like': { /* like implementation */ }
+    case 'ilike': { /* ilike implementation */ }
+    case 'upper': { /* upper implementation */ }
+    case 'lower': { /* lower implementation */ }
+    case 'length': { /* length implementation */ }
+    case 'concat': { /* concat implementation */ }
+    case 'coalesce': { /* coalesce implementation */ }
+    case 'add': { /* add implementation */ }
+    case 'subtract': { /* subtract implementation */ }
+    case 'multiply': { /* multiply implementation */ }
+    case 'divide': { /* divide implementation */ }
+    case 'isUndefined': { /* isUndefined implementation */ }
+    case 'isNull': { /* isNull implementation */ }
+    default: throw new UnknownFunctionError(func.name)
+  }
+}
+```
+
+### Required Solution: Plugin/Registry Architecture
+
+Each operator needs to be a **complete unit** that registers itself:
+
+```typescript
+// @tanstack/db/operators/eq.ts - PROPOSED
+import { registerOperator } from '@tanstack/db/registry'
+import { Func, type BasicExpression } from '@tanstack/db/ir'
+
+// Builder function
+export function eq<T>(left: T, right: T): BasicExpression<boolean> {
+  return new Func('eq', [toExpression(left), toExpression(right)])
+}
+
+// Evaluator implementation
+const eqEvaluator = (compiledArgs: CompiledExpression[]) => {
+  const [argA, argB] = compiledArgs
+  return (data: any) => {
+    const a = normalizeValue(argA!(data))
+    const b = normalizeValue(argB!(data))
+    if (isUnknown(a) || isUnknown(b)) return null
+    return areValuesEqual(a, b)
+  }
+}
+
+// Self-registration (side effect, but tree-shakable if not imported)
+registerOperator('eq', eqEvaluator)
+```
+
+```typescript
+// @tanstack/db/registry.ts - PROPOSED
+const operatorRegistry = new Map<string, EvaluatorFactory>()
+
+export function registerOperator(name: string, evaluator: EvaluatorFactory) {
+  operatorRegistry.set(name, evaluator)
+}
+
+export function getOperatorEvaluator(name: string): EvaluatorFactory {
+  const evaluator = operatorRegistry.get(name)
+  if (!evaluator) {
+    throw new UnknownFunctionError(name)
+  }
+  return evaluator
+}
+```
+
+```typescript
+// evaluators.ts - PROPOSED (much smaller)
+function compileFunction(func: Func, isSingleRow: boolean) {
+  const evaluatorFactory = getOperatorEvaluator(func.name)
+  const compiledArgs = func.args.map(arg => compileExpressionInternal(arg, isSingleRow))
+  return evaluatorFactory(compiledArgs)
+}
+```
+
+### Impact on Other Pipeline Stages
+
+**Optimizer also needs refactoring:**
+- Currently has hardcoded logic for AND clause splitting
+- Specific handling for certain predicates
+- Would need operator-specific optimization hints
+
+**Compiler needs refactoring:**
+- Currently imports all db-ivm operators upfront
+- Would need lazy/dynamic operator loading
+
+### Revised Effort Estimate
+
+| Component | Current Approach | Plugin Architecture |
+|-----------|-----------------|---------------------|
+| Split operators (builder only) | 2-3 days | - |
+| Add subpath exports | 1 day | - |
+| **Operator registry system** | - | **3-4 days** |
+| **Refactor evaluators** | - | **2-3 days** |
+| **Refactor optimizer** | - | **2-3 days** |
+| **Refactor compiler** | - | **3-4 days** |
+| Testing & validation | 2 days | **3-4 days** |
+| **Total** | ~5-6 days | **~15-18 days** |
+
+### Recommendation
+
+The maintainer is correct: **true tree-shaking requires the plugin architecture**.
+
+However, a **phased approach** is possible:
+
+**Phase 1 (Quick Win):** Split operators at the builder level only. This doesn't enable tree-shaking but:
+- Improves code organization
+- Enables per-operator documentation
+- Prepares for Phase 2
+
+**Phase 2 (Full Solution):** Implement the operator registry:
+1. Create registry pattern
+2. Migrate evaluator to use registry
+3. Each operator self-registers
+4. Now tree-shaking works
+
+**Phase 3 (Optimization):** Extend to optimizer and compiler.
+
+---
+
+## 9. Conclusion
+
+**Converting TanStack DB to tree-shakable APIs while maintaining full type safety is achievable, but requires more than organizational refactoring—it requires an architectural change to the operator evaluation pipeline.**
 
 The current type system is sophisticated enough to survive module splitting:
 - RefProxy design separates runtime (path tracking) from type inference (generics)
