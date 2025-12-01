@@ -116,6 +116,10 @@ function serializeValue(value: unknown): unknown {
     }
   }
 
+  if (typeof value === `bigint`) {
+    return { __type: `bigint`, value: value.toString() }
+  }
+
   if (
     value === null ||
     typeof value === `string` ||
