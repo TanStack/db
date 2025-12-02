@@ -63,7 +63,14 @@ const basicQuery = query({ users: usersCollection }, ({ users }) => ({
 }))
 
 // Result type is inferred: { name: string, email: string }
+// Type assertion: this will fail to compile if inference is wrong
 type BasicResult = typeof basicQuery._result
+type _AssertBasicResult = BasicResult extends { name: string; email: string }
+  ? { name: string; email: string } extends BasicResult
+    ? true // Types are equal
+    : "ERROR: BasicResult is too wide"
+  : "ERROR: BasicResult doesn't have name/email as strings"
+const _checkBasicResult: _AssertBasicResult = true
 
 // =============================================================================
 // Demo: Query with OrderBy and Limit
@@ -128,6 +135,15 @@ const joinQuery = query(
     },
   })
 )
+
+// Type assertion: join result should have { name: string, title: string }
+type JoinResult = typeof joinQuery._result
+type _AssertJoinResult = JoinResult extends { name: string; title: string }
+  ? { name: string; title: string } extends JoinResult
+    ? true
+    : "ERROR: JoinResult is too wide"
+  : "ERROR: JoinResult doesn't match expected type"
+const _checkJoinResult: _AssertJoinResult = true
 
 // =============================================================================
 // Demo: Tree-shakable GROUP BY clause

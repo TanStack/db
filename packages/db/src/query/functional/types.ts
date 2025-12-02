@@ -190,16 +190,41 @@ export interface Query<TResult> {
 }
 
 /**
+ * UnwrapExpression - Extracts the underlying type from a BasicExpression
+ *
+ * This is key for type inference: when you write `select: { name: users.name }`,
+ * `users.name` is `BasicExpression<string>`, but the result should be `string`.
+ */
+export type UnwrapExpression<T> = T extends BasicExpression<infer U>
+  ? U
+  : T extends RefProxy<infer U>
+    ? U
+    : T
+
+/**
+ * UnwrapSelect - Recursively unwraps all expressions in a select shape
+ */
+export type UnwrapSelect<T> = T extends BasicExpression<infer U>
+  ? U
+  : T extends RefProxy<infer U>
+    ? U
+    : T extends object
+      ? { [K in keyof T]: UnwrapSelect<T[K]> }
+      : T
+
+/**
  * InferResult - Infers the result type from a QueryShape
+ *
+ * The select shape contains BasicExpression<T> types (e.g., users.name is
+ * BasicExpression<string>), but the actual result should have unwrapped
+ * types (e.g., string).
  */
 export type InferResult<
   TSources extends Sources,
   TShape extends QueryShape<any>
 > = TShape["select"] extends undefined
   ? InferSchema<TSources>[keyof TSources] // No select = return full row
-  : TShape["select"] extends infer S
-    ? S
-    : never
+  : UnwrapSelect<TShape["select"]>
 
 // =============================================================================
 // Shape Processor Registry (for core clauses)
