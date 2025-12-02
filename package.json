@@ -5,7 +5,7 @@
     "type": "git",
     "url": "https://github.com/tanstack/db.git"
   },
-  "packageManager": "pnpm@10.22.0",
+  "packageManager": "pnpm@10.24.0",
   "type": "module",
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
@@ -22,18 +22,18 @@
     "test:verify-links": "node scripts/verify-links.ts"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.29.7",
+    "@changesets/cli": "^2.29.8",
     "@eslint/js": "^9.39.1",
     "@stylistic/eslint-plugin": "^4.4.1",
     "@svitejs/changesets-changelog-github-compact": "^1.2.0",
-    "@tanstack/config": "^0.22.0",
+    "@tanstack/config": "^0.22.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@types/node": "^24.6.2",
-    "@types/react": "^19.2.5",
+    "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/use-sync-external-store": "^1.5.0",
-    "@typescript-eslint/eslint-plugin": "^8.46.4",
-    "@typescript-eslint/parser": "^8.46.4",
+    "@typescript-eslint/eslint-plugin": "^8.48.0",
+    "@typescript-eslint/parser": "^8.48.0",
     "@vitejs/plugin-react": "^5.1.1",
     "eslint": "^9.39.1",
     "eslint-config-prettier": "^10.1.8",
@@ -42,17 +42,17 @@
     "eslint-plugin-react": "^7.37.5",
     "husky": "^9.1.7",
     "jsdom": "^27.2.0",
-    "knip": "^5.69.1",
+    "knip": "^5.70.2",
     "lint-staged": "^15.5.2",
-    "markdown-link-extractor": "^4.0.2",
+    "markdown-link-extractor": "^4.0.3",
     "mitt": "^3.0.1",
-    "prettier": "^3.6.2",
+    "prettier": "^3.7.3",
     "publint": "^0.3.15",
     "sherif": "^1.9.0",
     "shx": "^0.4.0",
     "tinyglobby": "^0.2.15",
     "typescript": "^5.9.2",
-    "vite": "^7.2.2",
+    "vite": "^7.2.6",
     "vitest": "^3.2.4",
     "zod": "^3.25.76"
   },
@@ -66,21 +66,6 @@
     "examples/*",
     "examples/react/*"
   ],
-  "overrides": {
-    "@tanstack/angular-db": "workspace:*",
-    "@tanstack/db": "workspace:*",
-    "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/electric-db-collection": "workspace:*",
-    "@tanstack/offline-transactions": "workspace:*",
-    "@tanstack/powersync-db-collection": "workspace:*",
-    "@tanstack/query-db-collection": "workspace:*",
-    "@tanstack/react-db": "workspace:*",
-    "@tanstack/rxdb-db-collection": "workspace:*",
-    "@tanstack/solid-db": "workspace:*",
-    "@tanstack/svelte-db": "workspace:*",
-    "@tanstack/trailbase-db-collection": "workspace:*",
-    "@tanstack/vue-db": "workspace:*"
-  },
   "pnpm": {
     "overrides": {
       "@tanstack/angular-db": "workspace:*",
@@ -99,6 +84,6 @@
     }
   },
   "dependencies": {
-    "tsx": "^4.20.6"
+    "tsx": "^4.21.0"
   }
 }

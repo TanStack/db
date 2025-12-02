@@ -802,11 +802,55 @@ export function isPredicateSubset(
   subset: LoadSubsetOptions,
   superset: LoadSubsetOptions
 ): boolean {
+  // When the superset has a limit, we can only determine subset relationship
+  // if the where clauses are equal (not just subset relationship).
+  //
+  // This is because a limited query only loads a portion of the matching rows.
+  // A more restrictive where clause might require rows outside that portion.
+  //
+  // Example: superset = {where: undefined, limit: 10, orderBy: desc}
+  //          subset = {where: LIKE 'search%', limit: 10, orderBy: desc}
+  // The top 10 items matching 'search%' might include items outside the overall top 10.
+  //
+  // However, if the where clauses are equal, then the subset relationship can
+  // be determined by orderBy and limit alone:
+  // Example: superset = {where: status='active', limit: 10, orderBy: desc}
+  //          subset = {where: status='active', limit: 5, orderBy: desc}
+  // The top 5 active items ARE contained in the top 10 active items.
+  if (superset.limit !== undefined) {
+    // For limited supersets, where clauses must be equal
+    if (!areWhereClausesEqual(subset.where, superset.where)) {
+      return false
+    }
+    return (
+      isOrderBySubset(subset.orderBy, superset.orderBy) &&
+      isLimitSubset(subset.limit, superset.limit)
+    )
+  }
+
+  // For unlimited supersets, use the normal subset logic
   return (
     isWhereSubset(subset.where, superset.where) &&
     isOrderBySubset(subset.orderBy, superset.orderBy) &&
     isLimitSubset(subset.limit, superset.limit)
   )
+}
+
+/**
+ * Check if two where clauses are structurally equal.
+ * Used for limited query subset checks where subset relationship isn't sufficient.
+ */
+function areWhereClausesEqual(
+  a: BasicExpression<boolean> | undefined,
+  b: BasicExpression<boolean> | undefined
+): boolean {
+  if (a === undefined && b === undefined) {
+    return true
+  }
+  if (a === undefined || b === undefined) {
+    return false
+  }
+  return areExpressionsEqual(a, b)
 }
 
 // ============================================================================

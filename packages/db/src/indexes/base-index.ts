@@ -73,9 +73,9 @@ export interface IndexInterface<
 /**
  * Base abstract class that all index types extend
  */
-export abstract class BaseIndex<TKey extends string | number = string | number>
-  implements IndexInterface<TKey>
-{
+export abstract class BaseIndex<
+  TKey extends string | number = string | number,
+> implements IndexInterface<TKey> {
   public readonly id: number
   public readonly name?: string
   public readonly expression: BasicExpression

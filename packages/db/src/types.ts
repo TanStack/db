@@ -13,9 +13,9 @@ export interface CollectionLike<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > extends Pick<
-    Collection<T, TKey>,
-    `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
-  > {}
+  Collection<T, TKey>,
+  `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
+> {}
 
 /**
  * StringSortOpts - Options for string sorting behavior
@@ -273,11 +273,14 @@ export type LoadSubsetOptions = {
 
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
 
+export type UnloadSubsetFn = (options: LoadSubsetOptions) => void
+
 export type CleanupFn = () => void
 
 export type SyncConfigRes = {
   cleanup?: CleanupFn
   loadSubset?: LoadSubsetFn
+  unloadSubset?: UnloadSubsetFn
 }
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
@@ -724,8 +727,10 @@ export interface SubscribeChangesOptions {
   whereExpression?: BasicExpression<boolean>
 }
 
-export interface SubscribeChangesSnapshotOptions
-  extends Omit<SubscribeChangesOptions, `includeInitialState`> {
+export interface SubscribeChangesSnapshotOptions extends Omit<
+  SubscribeChangesOptions,
+  `includeInitialState`
+> {
   orderBy?: OrderBy
   limit?: number
 }

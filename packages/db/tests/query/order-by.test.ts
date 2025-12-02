@@ -2923,3 +2923,157 @@ describe(`OrderBy with duplicate values`, () => {
 
   createOrderByBugTests(`eager`)
 })
+
+describe(`OrderBy with Date values and precision differences`, () => {
+  type TestItemWithDate = {
+    id: number
+    createdAt: Date
+    keep: boolean
+  }
+
+  it(`should use range query for Date values to handle backend precision differences`, async () => {
+    // This test verifies that when paginating with Date orderBy values,
+    // the code uses a range query (gte/lt) instead of exact equality (eq)
+    // to handle backends with higher precision than JavaScript's millisecond precision.
+    //
+    // The bug: PostgreSQL stores timestamps with microsecond precision.
+    // When JS has a Date "2024-01-15T10:30:45.123Z", the backend might have multiple
+    // rows with 123.000μs, 123.100μs, 123.200μs, etc. Using eq() would only match
+    // 123.000μs, missing the others. The fix uses gte/lt to match the full 1ms range.
+
+    const baseTime = new Date(`2024-01-15T10:30:45.123Z`)
+
+    const testData: Array<TestItemWithDate> = [
+      { id: 1, createdAt: new Date(`2024-01-15T10:30:45.120Z`), keep: true },
+      { id: 2, createdAt: new Date(`2024-01-15T10:30:45.121Z`), keep: true },
+      { id: 3, createdAt: new Date(`2024-01-15T10:30:45.122Z`), keep: true },
+      { id: 4, createdAt: new Date(`2024-01-15T10:30:45.122Z`), keep: true },
+      { id: 5, createdAt: baseTime, keep: true },
+      { id: 6, createdAt: baseTime, keep: true },
+      { id: 7, createdAt: baseTime, keep: true },
+      { id: 8, createdAt: baseTime, keep: true },
+      { id: 9, createdAt: baseTime, keep: true },
+      { id: 10, createdAt: baseTime, keep: true },
+      { id: 11, createdAt: new Date(`2024-01-15T10:30:45.124Z`), keep: true },
+      { id: 12, createdAt: new Date(`2024-01-15T10:30:45.125Z`), keep: true },
+    ]
+
+    const initialData = testData.slice(0, 5)
+
+    // Track the WHERE clauses sent to loadSubset
+    const loadSubsetWhereClauses: Array<any> = []
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions<TestItemWithDate>({
+        id: `test-date-precision-query`,
+        getKey: (item) => item.id,
+        initialData,
+        autoIndex: `eager`,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            initialData.forEach((item) => {
+              write({ type: `insert`, value: item })
+            })
+            commit()
+            markReady()
+
+            return {
+              loadSubset: (options) => {
+                // Capture the WHERE clause for inspection
+                loadSubsetWhereClauses.push(options.where)
+
+                return new Promise<void>((resolve) => {
+                  setTimeout(() => {
+                    begin()
+                    const sortedData = [...testData].sort(
+                      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+                    )
+
+                    let filteredData = sortedData
+                    if (options.where) {
+                      try {
+                        const filterFn = createFilterFunctionFromExpression(
+                          options.where
+                        )
+                        filteredData = sortedData.filter(filterFn)
+                      } catch {
+                        filteredData = sortedData
+                      }
+                    }
+
+                    const { limit } = options
+                    const dataToLoad = limit
+                      ? filteredData.slice(0, limit)
+                      : filteredData
+
+                    dataToLoad.forEach((item) => {
+                      write({ type: `insert`, value: item })
+                    })
+
+                    commit()
+                    resolve()
+                  }, 10)
+                })
+              },
+            }
+          },
+        },
+      })
+    )
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .where(({ items }) => eq(items.keep, true))
+        .orderBy(({ items }) => items.createdAt, `asc`)
+        .offset(0)
+        .limit(5)
+        .select(({ items }) => ({
+          id: items.id,
+          createdAt: items.createdAt,
+          keep: items.keep,
+        }))
+    )
+    await collection.preload()
+
+    // First page loads
+    const results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+    expect(results.map((r) => r.id)).toEqual([1, 2, 3, 4, 5])
+
+    // Clear tracked clauses before moving to next page
+    loadSubsetWhereClauses.length = 0
+
+    // Move to next page - this should trigger the Date precision handling
+    const moveToSecondPage = collection.utils.setWindow({ offset: 5, limit: 5 })
+    await moveToSecondPage
+
+    // Find the WHERE clause that queries for the "equal values" (the minValue query)
+    // With the fix, this should be: and(gte(createdAt, baseTime), lt(createdAt, baseTime+1ms))
+    // Without the fix, this would be: eq(createdAt, baseTime)
+    const equalValuesQuery = loadSubsetWhereClauses.find((clause) => {
+      if (!clause) return false
+      // Check if it's an 'and' with 'gte' and 'lt' (the fix)
+      if (clause.name === `and` && clause.args?.length === 2) {
+        const [first, second] = clause.args
+        return first?.name === `gte` && second?.name === `lt`
+      }
+      return false
+    })
+
+    // The fix should produce a range query (and(gte, lt)) for Date values
+    // instead of an exact equality query (eq)
+    expect(equalValuesQuery).toBeDefined()
+    expect(equalValuesQuery.name).toBe(`and`)
+    expect(equalValuesQuery.args[0].name).toBe(`gte`)
+    expect(equalValuesQuery.args[1].name).toBe(`lt`)
+
+    // Verify the range is exactly 1ms
+    const gteValue = equalValuesQuery.args[0].args[1].value
+    const ltValue = equalValuesQuery.args[1].args[1].value
+    expect(gteValue).toBeInstanceOf(Date)
+    expect(ltValue).toBeInstanceOf(Date)
+    expect(ltValue.getTime() - gteValue.getTime()).toBe(1) // 1ms difference
+  })
+})
