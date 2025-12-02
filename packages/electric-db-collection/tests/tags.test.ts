@@ -122,7 +122,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `1`,
         value: { id: 1, name: `Test User` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tag2],
         },
       },
@@ -201,7 +201,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `1`,
         value: { id: 1, name: `Updated User` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tag2],
         },
       },
@@ -242,7 +242,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `1`,
         value: { id: 1, name: `Updated User` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tag1Copy],
         },
       },
@@ -328,7 +328,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `1`,
         value: { id: 1, name: `User 1` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tag2],
         },
       },
@@ -372,7 +372,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `2`,
         value: { id: 2, name: `User 2` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tag2],
         },
       },
@@ -435,7 +435,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `1`,
         value: { id: 1, name: `User 1` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tagWithWildcard],
         },
       },
@@ -489,7 +489,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `2`,
         value: { id: 2, name: `User 2` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tagWithoutWildcard],
         },
       },
@@ -583,7 +583,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `3`,
         value: { id: 3, name: `User 3` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tagWildcard2],
         },
       },
@@ -1007,7 +1007,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `1`,
         value: { id: 1, name: `Test User` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tag2],
         } as any, // TODO: remove this when pushing to CI
       },
@@ -1225,7 +1225,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         key: `1`,
         value: { id: 1, name: `Re-inserted User` },
         headers: {
-          operation: `update`,
+          operation: `delete`,
           removed_tags: [tag2],
         },
       },
