@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": major
+"@tanstack/db": minor
 ---
 
 Make indexing optional to reduce default bundle size
