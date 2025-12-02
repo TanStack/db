@@ -43,7 +43,7 @@ describe(`Operators`, () => {
       let latestMessage: any = null
 
       input.pipe(
-        orderBy((item) => item.value),
+        orderBy((item) => item.value, { groupByKey: false }),
         output((message) => {
           latestMessage = message
         })
@@ -93,6 +93,7 @@ describe(`Operators`, () => {
       input.pipe(
         orderBy((item) => item.value, {
           comparator: (a, b) => b.localeCompare(a), // reverse order
+          groupByKey: false,
         }),
         output((message) => {
           latestMessage = message
@@ -141,7 +142,7 @@ describe(`Operators`, () => {
       let latestMessage: any = null
 
       input.pipe(
-        orderBy((item) => item.value, { limit: 3 }),
+        orderBy((item) => item.value, { limit: 3, groupByKey: false }),
         output((message) => {
           latestMessage = message
         })
@@ -190,6 +191,7 @@ describe(`Operators`, () => {
         orderBy((item) => item.value, {
           limit: 2,
           offset: 2,
+          groupByKey: false,
         }),
         output((message) => {
           latestMessage = message
@@ -221,6 +223,157 @@ describe(`Operators`, () => {
       ])
     })
 
+    test(`per-key limits applied by default`, () => {
+      const graph = new D2()
+      const input = graph.newInput<
+        KeyValue<
+          [string, string],
+          {
+            id: string
+            value: number
+          }
+        >
+      >()
+      let latestMessage: any = null
+
+      input.pipe(
+        orderBy((item) => item.value, { limit: 2 }),
+        output((message) => {
+          latestMessage = message
+        })
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        new MultiSet([
+          [[[`group1`, `a`], { id: `g1-a`, value: 5 }], 1],
+          [[[`group1`, `b`], { id: `g1-b`, value: 1 }], 1],
+          [[[`group1`, `c`], { id: `g1-c`, value: 3 }], 1],
+          [[[`group2`, `a`], { id: `g2-a`, value: 4 }], 1],
+          [[[`group2`, `b`], { id: `g2-b`, value: 2 }], 1],
+          [[[`group2`, `c`], { id: `g2-c`, value: 6 }], 1],
+        ])
+      )
+
+      graph.run()
+
+      expect(latestMessage).not.toBeNull()
+
+      const result = latestMessage.getInner()
+      const groupedValues = new Map<string, Array<number>>()
+
+      for (const [[key, [value]], multiplicity] of result) {
+        if (multiplicity !== 1) continue
+        const group = Array.isArray(key)
+          ? (key as Array<string>)[0]!
+          : String(key)
+        const list = groupedValues.get(group) ?? []
+        list.push((value as { value: number }).value)
+        groupedValues.set(group, list)
+      }
+
+      for (const [group, values] of groupedValues) {
+        values.sort((a, b) => a - b)
+        groupedValues.set(group, values)
+      }
+
+      expect(groupedValues.get(`group1`)).toEqual([1, 3])
+      expect(groupedValues.get(`group2`)).toEqual([2, 4])
+    })
+
+    test(`per-key limits stay correct through incremental updates`, () => {
+      const graph = new D2()
+      const input = graph.newInput<
+        KeyValue<
+          [string, string],
+          {
+            id: string
+            value: number
+          }
+        >
+      >()
+      const tracker = new MessageTracker<
+        [[string, string], [{ id: string; value: number }, string]]
+      >()
+
+      input.pipe(
+        orderBy((item) => item.value, { limit: 2 }),
+        output((message) => {
+          tracker.addMessage(message)
+        })
+      )
+
+      graph.finalize()
+
+      const seedData: Array<
+        [[[string, string], { id: string; value: number }], number]
+      > = [
+        [[[`group1`, `a`], { id: `g1-a`, value: 5 }], 1],
+        [[[`group1`, `b`], { id: `g1-b`, value: 1 }], 1],
+        [[[`group1`, `c`], { id: `g1-c`, value: 3 }], 1],
+        [[[`group2`, `a`], { id: `g2-a`, value: 4 }], 1],
+        [[[`group2`, `b`], { id: `g2-b`, value: 2 }], 1],
+        [[[`group2`, `c`], { id: `g2-c`, value: 6 }], 1],
+      ]
+
+      const collectStateFromResults = (
+        entries: Array<
+          [[string, string], [{ id: string; value: number }, string]]
+        >
+      ) => {
+        const grouped = new Map<string, Array<number>>()
+        for (const [keyLike, [value]] of entries) {
+          const group = Array.isArray(keyLike) ? keyLike[0] : String(keyLike)
+          const list = grouped.get(group) ?? []
+          list.push(value.value)
+          grouped.set(group, list)
+        }
+        for (const [group, values] of grouped) {
+          values.sort((a, b) => a - b)
+          grouped.set(group, values)
+        }
+        return grouped
+      }
+
+      // Seed the data
+      input.sendData(new MultiSet(seedData))
+      graph.run()
+
+      const initial = tracker.getResult(compareFractionalIndex)
+      let messageOffset = initial.messages.length
+      let currentGroups = collectStateFromResults(initial.sortedResults)
+      expect(currentGroups.get(`group1`)).toEqual([1, 3])
+      expect(currentGroups.get(`group2`)).toEqual([2, 4])
+
+      // Insert a better value into group1 - should evict the previous second entry
+      input.sendData(
+        new MultiSet([[[[`group1`, `d`], { id: `g1-d`, value: 0 }], 1]])
+      )
+      graph.run()
+
+      const afterInsert = tracker.getResult(compareFractionalIndex)
+      const group1Delta = afterInsert.messages.slice(messageOffset)
+      messageOffset = afterInsert.messages.length
+
+      const group1Messages = sortByKeyAndIndex(
+        group1Delta as Array<
+          [[[string, string], [{ id: string; value: number }, string]], number]
+        >
+      ).map(stripFractionalIndex)
+      expect(group1Messages).toHaveLength(2)
+      expect(group1Messages).toEqual(
+        expect.arrayContaining([
+          [[`group1`, `c`], { id: `g1-c`, value: 3 }, -1],
+          [[`group1`, `d`], { id: `g1-d`, value: 0 }, 1],
+        ])
+      )
+
+      currentGroups = collectStateFromResults(afterInsert.sortedResults)
+      expect(currentGroups.get(`group1`)).toEqual([0, 1])
+      expect(currentGroups.get(`group2`)).toEqual([2, 4])
+    })
+
     test(`ordering by numeric property`, () => {
       const graph = new D2()
       const input = graph.newInput<
@@ -235,7 +388,7 @@ describe(`Operators`, () => {
       let latestMessage: any = null
 
       input.pipe(
-        orderBy((item) => item.id),
+        orderBy((item) => item.id, { groupByKey: false }),
         output((message) => {
           latestMessage = message
         })
@@ -283,7 +436,7 @@ describe(`Operators`, () => {
       let latestMessage: any = null
 
       input.pipe(
-        orderBy((item) => item.value, { limit: 3 }),
+        orderBy((item) => item.value, { limit: 3, groupByKey: false }),
         output((message) => {
           latestMessage = message
         })
@@ -349,7 +502,7 @@ describe(`Operators`, () => {
       >()
 
       input.pipe(
-        orderBy((item) => item.value, { limit: 3 }),
+        orderBy((item) => item.value, { limit: 3, groupByKey: false }),
         output((message) => {
           tracker.addMessage(message)
         })
@@ -421,7 +574,7 @@ describe(`Operators`, () => {
       >()
 
       input.pipe(
-        orderBy((item) => item.value, { limit: 3 }),
+        orderBy((item) => item.value, { limit: 3, groupByKey: false }),
         output((message) => {
           tracker.addMessage(message)
         })
@@ -504,6 +657,7 @@ describe(`Operators`, () => {
         orderByWithFractionalIndex((item) => item.value, {
           limit: 3,
           offset: 0,
+          groupByKey: false,
           setWindowFn: (fn) => {
             windowFn = fn
           },
@@ -578,6 +732,7 @@ describe(`Operators`, () => {
         orderByWithFractionalIndex((item) => item.value, {
           limit: 3,
           offset: 3,
+          groupByKey: false,
           setWindowFn: (fn) => {
             windowFn = fn
           },
@@ -652,6 +807,7 @@ describe(`Operators`, () => {
         orderByWithFractionalIndex((item) => item.value, {
           limit: 2,
           offset: 0,
+          groupByKey: false,
           setWindowFn: (fn) => {
             windowFn = fn
           },
@@ -741,6 +897,7 @@ describe(`Operators`, () => {
         orderByWithFractionalIndex((item) => item.value, {
           limit: 2,
           offset: 1,
+          groupByKey: false,
           setWindowFn: (fn) => {
             windowFn = fn
           },
@@ -820,6 +977,7 @@ describe(`Operators`, () => {
         orderByWithFractionalIndex((item) => item.value, {
           limit: 2,
           offset: 0,
+          groupByKey: false,
           setWindowFn: (fn) => {
             windowFn = fn
           },
@@ -912,15 +1070,13 @@ function sortByKeyAndIndex(results: Array<any>) {
       (
         [[aKey, [_aValue, _aIndex]], _aMultiplicity],
         [[bKey, [_bValue, _bIndex]], _bMultiplicity]
-      ) => aKey - bKey
+      ) => String(aKey).localeCompare(String(bKey))
     )
     .sort(
       (
         [[_aKey, [_aValue, aIndex]], _aMultiplicity],
         [[_bKey, [_bValue, bIndex]], _bMultiplicity]
       ) => {
-        // lexically compare the index
-        // return aIndex.localeCompare(bIndex)
         return aIndex < bIndex ? -1 : aIndex > bIndex ? 1 : 0
       }
     )
