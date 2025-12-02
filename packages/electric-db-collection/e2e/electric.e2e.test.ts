@@ -17,6 +17,7 @@ import {
   createPaginationTestSuite,
   createPredicatesTestSuite,
   createProgressiveTestSuite,
+  createTagsTestSuite,
   generateSeedData,
 } from '../../db-collection-e2e/src/index'
 import { waitFor } from '../../db-collection-e2e/src/utils/helpers'
@@ -31,7 +32,15 @@ declare module 'vitest' {
 }
 
 describe(`Electric Collection E2E Tests`, () => {
-  let config: E2ETestConfig
+  let config: E2ETestConfig & {
+    tagsTestSetup?: {
+      dbClient: Client
+      baseUrl: string
+      testSchema: string
+      usersTable: string
+      postsTable: string
+    }
+  }
   let dbClient: Client
   let usersTable: string
   let postsTable: string
@@ -433,6 +442,13 @@ describe(`Electric Collection E2E Tests`, () => {
           commentsUpToDateControl.current?.()
         },
       },
+      tagsTestSetup: {
+        dbClient,
+        baseUrl,
+        testSchema,
+        usersTable,
+        postsTable,
+      },
       getTxid: async () => {
         // Get the current transaction ID from the last operation
         // This uses pg_current_xact_id_if_assigned() which returns the txid
@@ -578,4 +594,5 @@ describe(`Electric Collection E2E Tests`, () => {
   createMutationsTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
   createProgressiveTestSuite(getConfig)
+  createTagsTestSuite(getConfig as any)
 })
