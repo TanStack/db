@@ -50,15 +50,13 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint src"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
-    "@tanstack/db": "workspace:*",
     "eslint": "^8.57.1",
     "typescript": "^5.5.4",
     "vitest": "^3.2.4"
-  },
-  "peerDependencies": {
-    "@tanstack/db": "*"
   }
 }
