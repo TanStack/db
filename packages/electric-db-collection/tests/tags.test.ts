@@ -637,7 +637,7 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     // Send move-out event with pattern matching hash1 at position 0
     const pattern: MoveOutPattern = {
-      position: 0,
+      pos: 0,
       value: `hash1`,
     }
 
@@ -646,7 +646,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         headers: {
           event: `move-out`,
           patterns: [pattern],
-        } as any, // TODO: remove this when pushing to CI
+        },
       },
       {
         headers: { control: `up-to-date` },
@@ -709,7 +709,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     // Send move-out event matching sharedTag1 (hash1 at position 0)
     // This should remove sharedTag1 from both row 1 and row 2
     const pattern: MoveOutPattern = {
-      position: 0,
+      pos: 0,
       value: `hash1`,
     }
 
@@ -718,7 +718,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         headers: {
           event: `move-out`,
           patterns: [pattern],
-        } as any, // TODO: remove this when pushing to CI
+        },
       },
       {
         headers: { control: `up-to-date` },
@@ -738,7 +738,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     // Send move-out event matching sharedTag2 (hash4 at position 0)
     // This should remove sharedTag2 from both row 2 and row 3
     const pattern2: MoveOutPattern = {
-      position: 0,
+      pos: 0,
       value: `hash4`,
     }
 
@@ -747,7 +747,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         headers: {
           event: `move-out`,
           patterns: [pattern2],
-        } as any, // TODO: remove this when pushing to CI
+        },
       },
       {
         headers: { control: `up-to-date` },
@@ -765,7 +765,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     // Send move-out event matching uniqueTag1 (hash7 at position 0)
     // This should remove uniqueTag1 from row 1
     const pattern3: MoveOutPattern = {
-      position: 0,
+      pos: 0,
       value: `hash7`,
     }
 
@@ -774,7 +774,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         headers: {
           event: `move-out`,
           patterns: [pattern3],
-        } as any, // TODO: remove this when pushing to CI
+        },
       },
       {
         headers: { control: `up-to-date` },
@@ -816,7 +816,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     // Since the tag is not indexed at position 1, it won't be found in the index
     // and the tag should remain
     const patternNonIndexed: MoveOutPattern = {
-      position: 1,
+      pos: 1,
       value: `b`,
     }
 
@@ -825,7 +825,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         headers: {
           event: `move-out`,
           patterns: [patternNonIndexed],
-        } as any, // TODO: remove this when pushing to CI
+        },
       },
       {
         headers: { control: `up-to-date` },
@@ -840,7 +840,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     // Position 2 is indexed (has value 'c'), so it will be found in the index
     // The pattern matching position 2 with value 'c' matches the tag a|_|c, so the tag is removed
     const patternIndexed: MoveOutPattern = {
-      position: 2,
+      pos: 2,
       value: `c`,
     }
 
@@ -849,7 +849,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         headers: {
           event: `move-out`,
           patterns: [patternIndexed],
-        } as any, // TODO: remove this when pushing to CI
+        },
       },
       {
         headers: { control: `up-to-date` },
@@ -902,11 +902,11 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     // Send move-out event with multiple patterns
     const pattern1: MoveOutPattern = {
-      position: 0,
+      pos: 0,
       value: `hash1`,
     }
     const pattern2: MoveOutPattern = {
-      position: 0,
+      pos: 0,
       value: `hash4`,
     }
 
@@ -915,7 +915,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         headers: {
           event: `move-out`,
           patterns: [pattern1, pattern2],
-        } as any, // TODO: remove this when pushing to CI
+        },
       },
       {
         headers: { control: `up-to-date` },
@@ -987,7 +987,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         headers: {
           operation: `insert`,
           tags: [tag2],
-        } as any, // TODO: remove this when pushing to CI
+        },
       },
       {
         headers: { control: `up-to-date` },
@@ -1009,7 +1009,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         headers: {
           operation: `delete`,
           removed_tags: [tag2],
-        } as any, // TODO: remove this when pushing to CI
+        },
       },
       {
         headers: { control: `up-to-date` },
@@ -1089,13 +1089,13 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     // Move out that matches the tag
     const pattern: MoveOutPattern = {
-      position: 1,
+      pos: 1,
       value: `hash2`,
     }
 
     subscriber([
       {
-        headers: { event: `move-out`, patterns: [pattern] } as any, // TODO: remove this when pushing to CI
+        headers: { event: `move-out`, patterns: [pattern] },
       },
       {
         headers: { control: `up-to-date` },
