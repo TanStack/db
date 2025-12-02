@@ -11,10 +11,11 @@ Each operator and aggregate now bundles its builder function and evaluator in a 
 - **Custom aggregates**: Use `registerAggregate()` to add your own aggregate functions
 
 **Custom Operator Example:**
-```typescript
-import { registerOperator, type EvaluatorFactory } from '@tanstack/db'
 
-registerOperator('between', (compiledArgs, _isSingleRow) => {
+```typescript
+import { registerOperator, type EvaluatorFactory } from "@tanstack/db"
+
+registerOperator("between", (compiledArgs, _isSingleRow) => {
   const [valueEval, minEval, maxEval] = compiledArgs
   return (data) => {
     const value = valueEval!(data)
@@ -24,11 +25,12 @@ registerOperator('between', (compiledArgs, _isSingleRow) => {
 ```
 
 **Custom Aggregate Example:**
+
 ```typescript
-import { registerAggregate, type ValueExtractor } from '@tanstack/db'
+import { registerAggregate, type ValueExtractor } from "@tanstack/db"
 
 // Custom "product" aggregate that multiplies values
-registerAggregate('product', {
+registerAggregate("product", {
   factory: (valueExtractor: ValueExtractor) => ({
     preMap: valueExtractor,
     reduce: (values) => {
@@ -39,6 +41,6 @@ registerAggregate('product', {
       return product
     },
   }),
-  valueTransform: 'numeric',
+  valueTransform: "numeric",
 })
 ```
