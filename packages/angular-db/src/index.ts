@@ -67,13 +67,41 @@ export function injectLiveQuery<
     params: TParams
     q: InitialQueryBuilder
   }) => QueryBuilder<TContext> | undefined | null
-}): InjectLiveQueryResult<GetResult<TContext>>
+}): {
+  state: Signal<Map<string | number, GetResult<TContext>>>
+  data: Signal<Array<GetResult<TContext>>>
+  collection: Signal<Collection<
+    GetResult<TContext>,
+    string | number,
+    {}
+  > | null>
+  status: Signal<CollectionStatus | `disabled`>
+  isLoading: Signal<boolean>
+  isReady: Signal<boolean>
+  isIdle: Signal<boolean>
+  isError: Signal<boolean>
+  isCleanedUp: Signal<boolean>
+}
 export function injectLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
 ): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext> | undefined | null
-): InjectLiveQueryResult<GetResult<TContext>>
+): {
+  state: Signal<Map<string | number, GetResult<TContext>>>
+  data: Signal<Array<GetResult<TContext>>>
+  collection: Signal<Collection<
+    GetResult<TContext>,
+    string | number,
+    {}
+  > | null>
+  status: Signal<CollectionStatus | `disabled`>
+  isLoading: Signal<boolean>
+  isReady: Signal<boolean>
+  isIdle: Signal<boolean>
+  isError: Signal<boolean>
+  isCleanedUp: Signal<boolean>
+}
 export function injectLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>
 ): InjectLiveQueryResult<GetResult<TContext>>
