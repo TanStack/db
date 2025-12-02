@@ -146,7 +146,11 @@ describe(`Electric collection type resolution tests`, () => {
 
     expectTypeOf(testOptionsUtils.awaitTxId).toBeFunction
 
-    const todosCollection = createCollection(options)
+    const todosCollection = createCollection<
+      TodoType,
+      string | number,
+      ElectricCollectionUtils<TodoType>
+    >(options)
 
     // Test that todosCollection.utils is ElectricCollectionUtils<TodoType>
     // Note: We can't use expectTypeOf(...).toEqualTypeOf<ElectricCollectionUtils<T>> because
