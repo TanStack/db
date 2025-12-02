@@ -182,7 +182,14 @@ packages/db/src/operators/
 3. **Break circular dependencies** (41 chains to untangle)
 4. **Update framework packages** to not re-export everything
 
-### Total Effort: ~15-18 days
+### Phase 4: Tree-Shakable Query Clauses (Future/v2.0)
+
+Tree-shaking **query clauses** (join, groupBy, orderBy, etc.) requires API changes because they're methods on a class. See detailed exploration below.
+
+### Total Effort
+
+- Phases 1-3: ~15-18 days (internal refactor, no API changes)
+- Phase 4: TBD (requires API design work)
 
 ---
 
@@ -330,15 +337,208 @@ These should be lazy-loaded based on query features (Phase 3).
 
 ---
 
+## Phase 4 Deep Dive: Tree-Shakable Query Clauses
+
+### Why This Matters More Than Operators
+
+The operator tree-shaking (Phases 1-2) handles ~500 lines of code. The clause implementations are **5x larger**:
+
+| File | Lines | Always Needed? |
+|------|-------|----------------|
+| `builder/index.ts` | 874 | Only `from`, `where`, `select` for basic queries |
+| `compiler/joins.ts` | 616 | Only if using `.join()` |
+| `compiler/group-by.ts` | 442 | Only if using `.groupBy()` |
+| `compiler/order-by.ts` | 245 | Only if using `.orderBy()` |
+| `compiler/select.ts` | 265 | Always (but could be smaller) |
+| **Total** | **2442** | |
+
+A minimal query (`from` + `where` + basic `select`) bundles ~2400 lines it doesn't need.
+
+### The Fundamental Problem
+
+Method chaining requires all methods on the class:
+
+```typescript
+// Current: importing BaseQueryBuilder imports ALL methods
+class BaseQueryBuilder<TContext> {
+  from()     { /* 80 lines */ }   // ✅ Always needed
+  where()    { /* 15 lines */ }   // ✅ Usually needed
+  select()   { /* 30 lines */ }   // ✅ Usually needed
+  join()     { /* 60 lines */ }   // ❌ Rarely needed
+  groupBy()  { /* 20 lines */ }   // ❌ Rarely needed
+  having()   { /* 15 lines */ }   // ❌ Rarely needed
+  orderBy()  { /* 40 lines */ }   // ⚠️ Sometimes needed
+  limit()    { /* 5 lines */ }    // ⚠️ Sometimes needed
+  distinct() { /* 5 lines */ }    // ❌ Rarely needed
+}
+```
+
+Plus the compiler statically imports ALL clause processors.
+
+### Proposed: Functional Composition API
+
+```typescript
+// User imports only what they need
+import { query, from, where, select } from '@tanstack/db/query'
+import { eq } from '@tanstack/db'
+
+// No join/groupBy/orderBy = that code not bundled
+const q = query(
+  from({ users: usersCollection }),
+  where(({ users }) => eq(users.active, true)),
+  select(({ users }) => ({ name: users.name }))
+)
+
+// Used with live queries
+createLiveQueryCollection(() => q)
+```
+
+### Implementation Sketch
+
+**1. Each clause is a standalone function returning a transformer:**
+
+```typescript
+// query/clauses/from.ts (~50 lines)
+import { createRef, registerClause } from '../core.js'
+
+export function from<TSource extends Source>(source: TSource): FromClause<TSource> {
+  return {
+    type: 'from',
+    apply(ir: Partial<QueryIR>) {
+      const [alias, ref] = createRef(source)
+      return {
+        ir: { ...ir, from: ref },
+        aliases: [alias]
+      }
+    }
+  }
+}
+
+// Auto-register compiler for this clause type
+registerClause('from', compileFrom)
+
+function compileFrom(ir: QueryIR, inputs: Record<string, Stream>, ...) {
+  // FROM compilation logic
+}
+```
+
+**2. The `query` function composes clauses:**
+
+```typescript
+// query/core.ts (~100 lines, always bundled)
+export function query<TResult>(...clauses: Clause[]): CompiledQuery<TResult> {
+  let ir: Partial<QueryIR> = {}
+  let aliases: string[] = []
+
+  for (const clause of clauses) {
+    const result = clause.apply(ir, aliases)
+    ir = result.ir
+    if (result.aliases) aliases = result.aliases
+  }
+
+  return { ir: ir as QueryIR, _type: undefined as TResult }
+}
+```
+
+**3. Clause compilers register themselves:**
+
+```typescript
+// query/clause-registry.ts
+const clauseCompilers = new Map<string, ClauseCompiler>()
+
+export function registerClause(type: string, compiler: ClauseCompiler) {
+  clauseCompilers.set(type, compiler)
+}
+
+export function getClauseCompiler(type: string): ClauseCompiler {
+  return clauseCompilers.get(type) ?? (() => {})
+}
+```
+
+### Type Inference Strategy
+
+The challenge: `where` needs to know about `users` from `from`.
+
+**Solution: Overloaded `query` function with tuple inference**
+
+```typescript
+// Overloads for common patterns
+export function query<S extends Source>(
+  from: FromClause<S>
+): Query<ContextFromSource<S>>
+
+export function query<S extends Source, W>(
+  from: FromClause<S>,
+  where: WhereClause<ContextFromSource<S>>
+): Query<ContextFromSource<S>>
+
+export function query<S extends Source, R>(
+  from: FromClause<S>,
+  where: WhereClause<ContextFromSource<S>>,
+  select: SelectClause<ContextFromSource<S>, R>
+): Query<R>
+
+// ... more overloads for common combinations
+```
+
+Or use a builder-style that's still tree-shakable:
+
+```typescript
+// Alternative: fluent but tree-shakable
+import { from } from '@tanstack/db/query/from'
+import { where } from '@tanstack/db/query/where'
+import { select } from '@tanstack/db/query/select'
+
+const q = from({ users: usersCollection })
+  .pipe(where(({ users }) => eq(users.active, true)))
+  .pipe(select(({ users }) => ({ name: users.name })))
+```
+
+### Bundle Size Impact (Estimated)
+
+| Query Type | Current | Functional | Reduction |
+|------------|---------|------------|-----------|
+| from + where | ~48kb | ~12kb | **75%** |
+| from + where + select | ~48kb | ~14kb | **71%** |
+| from + where + orderBy + limit | ~48kb | ~18kb | **63%** |
+| With joins | ~48kb | ~28kb | **42%** |
+| With groupBy + having | ~48kb | ~32kb | **33%** |
+| Full query features | ~48kb | ~48kb | 0% |
+
+### Migration Path
+
+1. **v1.x**: Ship functional API alongside method chaining (both work)
+2. **v2.0**: Make functional API the primary, method chaining deprecated
+3. **v3.0**: Remove method chaining
+
+### Open Questions
+
+1. **Is the API change worth it?** Method chaining is familiar to SQL users
+2. **Type inference complexity** - Can we make it as good as method chaining?
+3. **createLiveQueryCollection integration** - How does it accept the new format?
+4. **Backward compatibility** - Can we support both APIs indefinitely?
+
+---
+
 ## Conclusion
 
-True tree-shaking requires the **auto-registering operator architecture**:
+Tree-shaking TanStack DB has two levels:
 
-1. Each operator bundles builder + evaluator
-2. Import triggers self-registration
-3. Evaluator becomes a registry lookup
-4. Bundlers eliminate unused operators
+### Level 1: Operators (Phases 1-3) ✅ No API Changes
 
-This is a significant internal refactor (~15-18 days) but enables the 75-83% bundle reduction needed for TanStack DB to be viable for "just trying it out."
+Auto-registering operators provide ~20-30% bundle reduction:
+- Each operator bundles builder + evaluator + registration
+- Evaluator becomes a registry lookup
+- Bundlers eliminate unused operators
 
-**No API changes required.** Users keep importing from `@tanstack/db` as they do today.
+### Level 2: Clauses (Phase 4) ⚠️ Requires API Changes
+
+Functional composition API provides additional ~40-50% reduction:
+- Each clause is a standalone function
+- Clause compilers register themselves
+- Query built via `query(from(...), where(...), select(...))`
+
+**Recommendation:**
+1. Ship Phases 1-3 first (internal refactor, no breaking changes)
+2. Evaluate Phase 4 based on user feedback on remaining bundle size
+3. Phase 4 is a v2.0 consideration requiring community input on API preferences
