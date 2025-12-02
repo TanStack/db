@@ -1,0 +1,47 @@
+version: "3.8"
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: todo_app
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "54322:5432"
+    volumes:
+      - ./postgres.conf:/etc/postgresql/postgresql.conf:ro
+    tmpfs:
+      - /var/lib/postgresql/data
+      - /tmp
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  electric:
+    image: electricsql/electric:canary
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/todo_app?sslmode=disable
+      ELECTRIC_INSECURE: true
+    ports:
+      - 3003:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  trailbase:
+    image: trailbase/trailbase:latest
+    ports:
+      - "${PORT:-4000}:4000"
+    restart: unless-stopped
+    volumes:
+      - ./traildepot:/app/traildepot
+    command: "/app/trail --data-dir /app/traildepot run --address 0.0.0.0:4000 --dev"
+
+volumes:
+  postgres_data:

@@ -9,6 +9,7 @@ export {
   type Context,
   type Source,
   type GetResult,
+  type InferResultType,
 } from "./builder/index.js"
 
 // Expression functions exports
@@ -25,6 +26,8 @@ export {
   inArray,
   like,
   ilike,
+  isUndefined,
+  isNull,
   // Functions
   upper,
   lower,
@@ -50,5 +53,19 @@ export { compileQuery } from "./compiler/index.js"
 export {
   createLiveQueryCollection,
   liveQueryCollectionOptions,
-  type LiveQueryCollectionConfig,
 } from "./live-query-collection.js"
+
+export { type LiveQueryCollectionConfig } from "./live/types.js"
+export { type LiveQueryCollectionUtils } from "./live/collection-config-builder.js"
+
+// Predicate utilities for predicate push-down
+export {
+  isWhereSubset,
+  unionWherePredicates,
+  minusWherePredicates,
+  isOrderBySubset,
+  isLimitSubset,
+  isPredicateSubset,
+} from "./predicate-utils.js"
+
+export { DeduplicatedLoadSubset } from "./subset-dedupe.js"

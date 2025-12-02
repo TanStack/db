@@ -12,10 +12,9 @@ export default defineConfig({
     }),
     tailwindcss(),
     tanstackStart({
-      customViteReactPlugin: true,
-      spa: {
-        enabled: true,
-      },
+      srcDirectory: `src`,
+      start: { entry: `./start.tsx` },
+      server: { entry: `./server.ts` },
     }),
     react(),
   ],

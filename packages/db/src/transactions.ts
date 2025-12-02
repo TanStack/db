@@ -1,10 +1,12 @@
 import { createDeferred } from "./deferred"
+import "./duplicate-instance-check"
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
 } from "./errors"
+import { transactionScopedScheduler } from "./scheduler.js"
 import type { Deferred } from "./deferred"
 import type {
   MutationFn,
@@ -18,6 +20,86 @@ const transactions: Array<Transaction<any>> = []
 let transactionStack: Array<Transaction<any>> = []
 
 let sequenceNumber = 0
+
+/**
+ * Merges two pending mutations for the same item within a transaction
+ *
+ * Merge behavior truth table:
+ * - (insert, update) → insert (merge changes, keep empty original)
+ * - (insert, delete) → null (cancel both mutations)
+ * - (update, delete) → delete (delete dominates)
+ * - (update, update) → update (replace with latest, union changes)
+ * - (delete, delete) → delete (replace with latest)
+ * - (insert, insert) → insert (replace with latest)
+ *
+ * Note: (delete, update) and (delete, insert) should never occur as the collection
+ * layer prevents operations on deleted items within the same transaction.
+ *
+ * @param existing - The existing mutation in the transaction
+ * @param incoming - The new mutation being applied
+ * @returns The merged mutation, or null if both should be removed
+ */
+function mergePendingMutations<T extends object>(
+  existing: PendingMutation<T>,
+  incoming: PendingMutation<T>
+): PendingMutation<T> | null {
+  // Truth table implementation
+  switch (`${existing.type}-${incoming.type}` as const) {
+    case `insert-update`: {
+      // Update after insert: keep as insert but merge changes
+      // For insert-update, the key should remain the same since collections don't allow key changes
+      return {
+        ...existing,
+        type: `insert` as const,
+        original: {},
+        modified: incoming.modified,
+        changes: { ...existing.changes, ...incoming.changes },
+        // Keep existing keys (key changes not allowed in updates)
+        key: existing.key,
+        globalKey: existing.globalKey,
+        // Merge metadata (last-write-wins)
+        metadata: incoming.metadata ?? existing.metadata,
+        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
+        // Update tracking info
+        mutationId: incoming.mutationId,
+        updatedAt: incoming.updatedAt,
+      }
+    }
+
+    case `insert-delete`:
+      // Delete after insert: cancel both mutations
+      return null
+
+    case `update-delete`:
+      // Delete after update: delete dominates
+      return incoming
+
+    case `update-update`: {
+      // Update after update: replace with latest, union changes
+      return {
+        ...incoming,
+        // Keep original from first update
+        original: existing.original,
+        // Union the changes from both updates
+        changes: { ...existing.changes, ...incoming.changes },
+        // Merge metadata
+        metadata: incoming.metadata ?? existing.metadata,
+        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
+      }
+    }
+
+    case `delete-delete`:
+    case `insert-insert`:
+      // Same type: replace with latest
+      return incoming
+
+    default: {
+      // Exhaustiveness check
+      const _exhaustive: never = `${existing.type}-${incoming.type}` as never
+      throw new Error(`Unhandled mutation combination: ${_exhaustive}`)
+    }
+  }
+}
 
 /**
  * Creates a new transaction for grouping multiple collection operations
@@ -99,11 +181,21 @@ export function getActiveTransaction(): Transaction | undefined {
 }
 
 function registerTransaction(tx: Transaction<any>) {
+  // Clear any stale work that may have been left behind if a previous mutate
+  // scope aborted before we could flush.
+  transactionScopedScheduler.clear(tx.id)
   transactionStack.push(tx)
 }
 
 function unregisterTransaction(tx: Transaction<any>) {
-  transactionStack = transactionStack.filter((t) => t.id !== tx.id)
+  // Always flush pending work for this transaction before removing it from
+  // the ambient stack – this runs even if the mutate callback throws.
+  // If flush throws (e.g., due to a job error), we still clean up the stack.
+  try {
+    transactionScopedScheduler.flush(tx.id)
+  } finally {
+    transactionStack = transactionStack.filter((t) => t.id !== tx.id)
+  }
 }
 
 function removeFromPendingList(tx: Transaction<any>) {
@@ -153,7 +245,9 @@ class Transaction<T extends object = Record<string, unknown>> {
 
   /**
    * Execute collection operations within this transaction
-   * @param callback - Function containing collection operations to group together
+   * @param callback - Function containing collection operations to group together. If the
+   * callback returns a Promise, the transaction context will remain active until the promise
+   * settles, allowing optimistic writes after `await` boundaries.
    * @returns This transaction for chaining
    * @example
    * // Group multiple operations
@@ -196,6 +290,7 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     registerTransaction(this)
+
     try {
       callback()
     } finally {
@@ -203,12 +298,32 @@ class Transaction<T extends object = Record<string, unknown>> {
     }
 
     if (this.autoCommit) {
-      this.commit()
+      this.commit().catch(() => {
+        // Errors from autoCommit are handled via isPersisted.promise
+        // This catch prevents unhandled promise rejections
+      })
     }
 
     return this
   }
 
+  /**
+   * Apply new mutations to this transaction, intelligently merging with existing mutations
+   *
+   * When mutations operate on the same item (same globalKey), they are merged according to
+   * the following rules:
+   *
+   * - **insert + update** → insert (merge changes, keep empty original)
+   * - **insert + delete** → removed (mutations cancel each other out)
+   * - **update + delete** → delete (delete dominates)
+   * - **update + update** → update (union changes, keep first original)
+   * - **same type** → replace with latest
+   *
+   * This merging reduces over-the-wire churn and keeps the optimistic local view
+   * aligned with user intent.
+   *
+   * @param mutations - Array of new mutations to apply
+   */
   applyMutations(mutations: Array<PendingMutation<any>>): void {
     for (const newMutation of mutations) {
       const existingIndex = this.mutations.findIndex(
@@ -216,8 +331,16 @@ class Transaction<T extends object = Record<string, unknown>> {
       )
 
       if (existingIndex >= 0) {
-        // Replace existing mutation
-        this.mutations[existingIndex] = newMutation
+        const existingMutation = this.mutations[existingIndex]!
+        const mergeResult = mergePendingMutations(existingMutation, newMutation)
+
+        if (mergeResult === null) {
+          // Remove the mutation (e.g., delete after insert cancels both)
+          this.mutations.splice(existingIndex, 1)
+        } else {
+          // Replace with merged mutation
+          this.mutations[existingIndex] = mergeResult
+        }
       } else {
         // Insert new mutation
         this.mutations.push(newMutation)
@@ -295,11 +418,11 @@ class Transaction<T extends object = Record<string, unknown>> {
     const hasCalled = new Set()
     for (const mutation of this.mutations) {
       if (!hasCalled.has(mutation.collection.id)) {
-        mutation.collection.onTransactionStateChange()
+        mutation.collection._state.onTransactionStateChange()
 
         // Only call commitPendingTransactions if there are pending sync transactions
-        if (mutation.collection.pendingSyncedTransactions.length > 0) {
-          mutation.collection.commitPendingTransactions()
+        if (mutation.collection._state.pendingSyncedTransactions.length > 0) {
+          mutation.collection._state.commitPendingTransactions()
         }
 
         hasCalled.add(mutation.collection.id)
@@ -355,6 +478,7 @@ class Transaction<T extends object = Record<string, unknown>> {
 
     if (this.mutations.length === 0) {
       this.setState(`completed`)
+      this.isPersisted.resolve(this)
 
       return this
     }
@@ -373,14 +497,21 @@ class Transaction<T extends object = Record<string, unknown>> {
 
       this.isPersisted.resolve(this)
     } catch (error) {
+      // Preserve the original error for rethrowing
+      const originalError =
+        error instanceof Error ? error : new Error(String(error))
+
       // Update transaction with error information
       this.error = {
-        message: error instanceof Error ? error.message : String(error),
-        error: error instanceof Error ? error : new Error(String(error)),
+        message: originalError.message,
+        error: originalError,
       }
 
       // rollback the transaction
-      return this.rollback()
+      this.rollback()
+
+      // Re-throw the original error to preserve identity and stack
+      throw originalError
     }
 
     return this

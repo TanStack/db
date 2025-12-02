@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection.js"
+import { CollectionImpl } from "../../../src/collection/index.js"
 import { buildQuery } from "../../../src/query/builder/index.js"
 import { and, eq, gt, or } from "../../../src/query/builder/functions.js"
 
@@ -67,7 +67,7 @@ describe(`buildQuery function`, () => {
         )
         .select(({ employees, departments }) => ({
           employee_name: employees.name,
-          department_name: departments.name,
+          department_name: departments?.name,
         }))
     )
 

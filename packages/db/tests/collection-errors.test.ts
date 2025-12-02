@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import {
   CollectionInErrorStateError,
   InvalidCollectionStatusTransitionError,
@@ -290,9 +290,10 @@ describe(`Collection Error Handling`, () => {
         onUpdate: async () => {}, // Add handler to prevent "no handler" error
         onDelete: async () => {}, // Add handler to prevent "no handler" error
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             begin()
             commit()
+            markReady()
           },
         },
       })
@@ -317,10 +318,11 @@ describe(`Collection Error Handling`, () => {
           onUpdate: async () => {},
           onDelete: async () => {},
           sync: {
-            sync: ({ begin, write, commit }) => {
+            sync: ({ begin, write, commit, markReady }) => {
               begin()
               write({ type: `insert`, value: { id: `2`, name: `test2` } })
               commit()
+              markReady()
             },
           },
         }
@@ -372,12 +374,12 @@ describe(`Collection Error Handling`, () => {
 
       // Test invalid transition
       expect(() => {
-        collectionImpl.validateStatusTransition(`ready`, `loading`)
+        collectionImpl._lifecycle.validateStatusTransition(`ready`, `loading`)
       }).toThrow(InvalidCollectionStatusTransitionError)
 
       // Test valid transition
       expect(() => {
-        collectionImpl.validateStatusTransition(`idle`, `loading`)
+        collectionImpl._lifecycle.validateStatusTransition(`idle`, `loading`)
       }).not.toThrow()
     })
 
@@ -397,76 +399,77 @@ describe(`Collection Error Handling`, () => {
 
       // Valid transitions from idle
       expect(() =>
-        collectionImpl.validateStatusTransition(`idle`, `loading`)
+        collectionImpl._lifecycle.validateStatusTransition(`idle`, `loading`)
       ).not.toThrow()
       expect(() =>
-        collectionImpl.validateStatusTransition(`idle`, `error`)
+        collectionImpl._lifecycle.validateStatusTransition(`idle`, `error`)
       ).not.toThrow()
       expect(() =>
-        collectionImpl.validateStatusTransition(`idle`, `cleaned-up`)
+        collectionImpl._lifecycle.validateStatusTransition(`idle`, `cleaned-up`)
       ).not.toThrow()
 
       // Valid transitions from loading
       expect(() =>
-        collectionImpl.validateStatusTransition(`loading`, `initialCommit`)
+        collectionImpl._lifecycle.validateStatusTransition(`loading`, `ready`)
       ).not.toThrow()
       expect(() =>
-        collectionImpl.validateStatusTransition(`loading`, `error`)
+        collectionImpl._lifecycle.validateStatusTransition(`loading`, `error`)
       ).not.toThrow()
       expect(() =>
-        collectionImpl.validateStatusTransition(`loading`, `cleaned-up`)
-      ).not.toThrow()
-
-      // Valid transitions from initialCommit
-      expect(() =>
-        collectionImpl.validateStatusTransition(`initialCommit`, `ready`)
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl.validateStatusTransition(`initialCommit`, `error`)
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl.validateStatusTransition(`initialCommit`, `cleaned-up`)
+        collectionImpl._lifecycle.validateStatusTransition(
+          `loading`,
+          `cleaned-up`
+        )
       ).not.toThrow()
 
       // Valid transitions from ready
       expect(() =>
-        collectionImpl.validateStatusTransition(`ready`, `cleaned-up`)
+        collectionImpl._lifecycle.validateStatusTransition(
+          `ready`,
+          `cleaned-up`
+        )
       ).not.toThrow()
       expect(() =>
-        collectionImpl.validateStatusTransition(`ready`, `error`)
+        collectionImpl._lifecycle.validateStatusTransition(`ready`, `error`)
       ).not.toThrow()
 
       // Valid transitions from error (allow recovery)
       expect(() =>
-        collectionImpl.validateStatusTransition(`error`, `cleaned-up`)
+        collectionImpl._lifecycle.validateStatusTransition(
+          `error`,
+          `cleaned-up`
+        )
       ).not.toThrow()
       expect(() =>
-        collectionImpl.validateStatusTransition(`error`, `idle`)
+        collectionImpl._lifecycle.validateStatusTransition(`error`, `idle`)
       ).not.toThrow()
 
       // Valid transitions from cleaned-up (allow restart)
       expect(() =>
-        collectionImpl.validateStatusTransition(`cleaned-up`, `loading`)
+        collectionImpl._lifecycle.validateStatusTransition(
+          `cleaned-up`,
+          `loading`
+        )
       ).not.toThrow()
       expect(() =>
-        collectionImpl.validateStatusTransition(`cleaned-up`, `error`)
+        collectionImpl._lifecycle.validateStatusTransition(
+          `cleaned-up`,
+          `error`
+        )
       ).not.toThrow()
 
       // Allow same-state transitions (idempotent operations)
       expect(() =>
-        collectionImpl.validateStatusTransition(`idle`, `idle`)
+        collectionImpl._lifecycle.validateStatusTransition(`idle`, `idle`)
       ).not.toThrow()
       expect(() =>
-        collectionImpl.validateStatusTransition(
-          `initialCommit`,
-          `initialCommit`
+        collectionImpl._lifecycle.validateStatusTransition(`ready`, `ready`)
+      ).not.toThrow()
+      expect(() =>
+        collectionImpl._lifecycle.validateStatusTransition(
+          `cleaned-up`,
+          `cleaned-up`
         )
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl.validateStatusTransition(`ready`, `ready`)
-      ).not.toThrow()
-      expect(() =>
-        collectionImpl.validateStatusTransition(`cleaned-up`, `cleaned-up`)
       ).not.toThrow()
     })
   })

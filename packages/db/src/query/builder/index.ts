@@ -1,5 +1,13 @@
-import { CollectionImpl } from "../../collection.js"
-import { CollectionRef, QueryRef } from "../ir.js"
+import { CollectionImpl } from "../../collection/index.js"
+import {
+  Aggregate as AggregateExpr,
+  CollectionRef,
+  Func as FuncExpr,
+  PropRef,
+  QueryRef,
+  Value as ValueExpr,
+  isExpressionLike,
+} from "../ir.js"
 import {
   InvalidSourceError,
   JoinConditionMustBeEqualityError,
@@ -7,25 +15,26 @@ import {
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from "../../errors.js"
-import { createRefProxy, isRefProxy, toExpression } from "./ref-proxy.js"
-import type { NamespacedRow } from "../../types.js"
+import { createRefProxy, toExpression } from "./ref-proxy.js"
+import type { NamespacedRow, SingleResult } from "../../types.js"
 import type {
   Aggregate,
   BasicExpression,
   JoinClause,
   OrderBy,
-  OrderByClause,
   OrderByDirection,
   QueryIR,
 } from "../ir.js"
 import type {
+  CompareOptions,
   Context,
   GroupByCallback,
   JoinOnCallback,
-  MergeContext,
+  MergeContextForJoinCallback,
   MergeContextWithJoinType,
   OrderByCallback,
-  RefProxyForContext,
+  OrderByOptions,
+  RefsForContext,
   ResultTypeFromSelect,
   SchemaFromSource,
   SelectObject,
@@ -69,7 +78,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       }
       ref = new QueryRef(subQuery, alias)
     } else {
-      throw new InvalidSourceError()
+      throw new InvalidSourceError(alias)
     }
 
     return [alias, ref]
@@ -140,7 +149,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   >(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >,
     type: TJoinType = `left` as TJoinType
   ): QueryBuilder<
@@ -151,8 +160,8 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // Create a temporary context for the callback
     const currentAliases = this._getCurrentAliases()
     const newAliases = [...currentAliases, alias]
-    const refProxy = createRefProxy(newAliases) as RefProxyForContext<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+    const refProxy = createRefProxy(newAliases) as RefsForContext<
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
 
     // Get the join condition expression
@@ -207,7 +216,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   leftJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `left`>
@@ -233,7 +242,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   rightJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `right`>
@@ -259,7 +268,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   innerJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `inner`>
@@ -285,7 +294,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   fullJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContext<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
     >
   ): QueryBuilder<
     MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `full`>
@@ -323,7 +332,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   where(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
 
     const existingWhere = this.query.where || []
@@ -364,7 +373,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   having(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
 
     const existingHaving = this.query.having || []
@@ -410,42 +419,16 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   select<TSelectObject extends SelectObject>(
-    callback: (refs: RefProxyForContext<TContext>) => TSelectObject
+    callback: (refs: RefsForContext<TContext>) => TSelectObject
   ): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const selectObject = callback(refProxy)
-
-    // Check if any tables were spread during the callback
-    const spreadSentinels = (refProxy as any).__spreadSentinels as Set<string>
-
-    // Convert the select object to use expressions, including spread sentinels
-    const select: Record<string, BasicExpression | Aggregate> = {}
-
-    // First, add spread sentinels for any tables that were spread
-    for (const spreadAlias of spreadSentinels) {
-      const sentinelKey = `__SPREAD_SENTINEL__${spreadAlias}`
-      select[sentinelKey] = toExpression(spreadAlias) // Use alias as a simple reference
-    }
-
-    // Then add the explicit select fields
-    for (const [key, value] of Object.entries(selectObject)) {
-      if (isRefProxy(value)) {
-        select[key] = toExpression(value)
-      } else if (
-        typeof value === `object` &&
-        `type` in value &&
-        (value.type === `agg` || value.type === `func`)
-      ) {
-        select[key] = value as BasicExpression | Aggregate
-      } else {
-        select[key] = toExpression(value)
-      }
-    }
+    const select = buildNestedSelect(selectObject)
 
     return new BaseQueryBuilder({
       ...this.query,
-      select,
+      select: select,
       fnSelect: undefined, // remove the fnSelect clause if it exists
     }) as any
   }
@@ -478,23 +461,44 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   orderBy(
     callback: OrderByCallback<TContext>,
-    direction: OrderByDirection = `asc`
+    options: OrderByDirection | OrderByOptions = `asc`
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const result = callback(refProxy)
 
-    // Create the new OrderBy structure with expression and direction
-    const orderByClause: OrderByClause = {
-      expression: toExpression(result),
-      direction,
+    const opts: CompareOptions =
+      typeof options === `string`
+        ? { direction: options, nulls: `first` }
+        : {
+            direction: options.direction ?? `asc`,
+            nulls: options.nulls ?? `first`,
+            stringSort: options.stringSort,
+            locale:
+              options.stringSort === `locale` ? options.locale : undefined,
+            localeOptions:
+              options.stringSort === `locale`
+                ? options.localeOptions
+                : undefined,
+          }
+
+    const makeOrderByClause = (res: any) => {
+      return {
+        expression: toExpression(res),
+        compareOptions: opts,
+      }
     }
+
+    // Create the new OrderBy structure with expression and direction
+    const orderByClauses = Array.isArray(result)
+      ? result.map((r) => makeOrderByClause(r))
+      : [makeOrderByClause(result)]
 
     const existingOrderBy: OrderBy = this.query.orderBy || []
 
     return new BaseQueryBuilder({
       ...this.query,
-      orderBy: [...existingOrderBy, orderByClause],
+      orderBy: [...existingOrderBy, ...orderByClauses],
     }) as any
   }
 
@@ -528,17 +532,18 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   groupBy(callback: GroupByCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefProxyForContext<TContext>
+    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const result = callback(refProxy)
 
     const newExpressions = Array.isArray(result)
       ? result.map((r) => toExpression(r))
       : [toExpression(result)]
 
-    // Replace existing groupBy expressions instead of extending them
+    // Extend existing groupBy expressions (multiple groupBy calls should accumulate)
+    const existingGroupBy = this.query.groupBy || []
     return new BaseQueryBuilder({
       ...this.query,
-      groupBy: newExpressions,
+      groupBy: [...existingGroupBy, ...newExpressions],
     }) as any
   }
 
@@ -608,6 +613,28 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       ...this.query,
       distinct: true,
     }) as any
+  }
+
+  /**
+   * Specify that the query should return a single result
+   * @returns A QueryBuilder that returns the first result
+   *
+   * @example
+   * ```ts
+   * // Get the user matching the query
+   * query
+   *   .from({ users: usersCollection })
+   *   .where(({users}) => eq(users.id, 1))
+   *   .findOne()
+   *```
+   */
+  findOne(): QueryBuilder<TContext & SingleResult> {
+    return new BaseQueryBuilder({
+      ...this.query,
+      // TODO: enforcing return only one result with also a default orderBy if none is specified
+      // limit: 1,
+      singleResult: true,
+    })
   }
 
   // Helper methods
@@ -736,6 +763,43 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   }
 }
 
+// Helper to ensure we have a BasicExpression/Aggregate for a value
+function toExpr(value: any): BasicExpression | Aggregate {
+  if (value === undefined) return toExpression(null)
+  if (
+    value instanceof AggregateExpr ||
+    value instanceof FuncExpr ||
+    value instanceof PropRef ||
+    value instanceof ValueExpr
+  ) {
+    return value as BasicExpression | Aggregate
+  }
+  return toExpression(value)
+}
+
+function isPlainObject(value: any): value is Record<string, any> {
+  return (
+    value !== null &&
+    typeof value === `object` &&
+    !isExpressionLike(value) &&
+    !value.__refProxy
+  )
+}
+
+function buildNestedSelect(obj: any): any {
+  if (!isPlainObject(obj)) return toExpr(obj)
+  const out: Record<string, any> = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (typeof k === `string` && k.startsWith(`__SPREAD_SENTINEL__`)) {
+      // Preserve sentinel key and its value (value is unimportant at compile time)
+      out[k] = v
+      continue
+    }
+    out[k] = buildNestedSelect(v)
+  }
+  return out
+}
+
 // Internal function to build a query from a callback
 // used by liveQueryCollectionOptions.query
 export function buildQuery<TContext extends Context>(
@@ -775,4 +839,10 @@ export type ExtractContext<T> =
       : never
 
 // Export the types from types.ts for convenience
-export type { Context, Source, GetResult } from "./types.js"
+export type {
+  Context,
+  Source,
+  GetResult,
+  RefLeaf as Ref,
+  InferResultType,
+} from "./types.js"

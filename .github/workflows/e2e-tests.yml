@@ -1,0 +1,77 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  e2e-tests:
+    name: Run E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.22.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start Docker services
+        run: |
+          cd packages/db-collection-e2e/docker
+          docker compose up -d
+          echo "Waiting for services to be healthy..."
+          timeout 60 bash -c 'until docker compose ps | grep -q "healthy"; do sleep 2; done'
+
+      - name: Build packages
+        run: |
+          pnpm --filter @tanstack/db-ivm build
+          pnpm --filter @tanstack/db build
+          pnpm --filter @tanstack/electric-db-collection build
+          pnpm --filter @tanstack/query-db-collection build
+
+      - name: Run Electric E2E tests
+        run: |
+          cd packages/electric-db-collection
+          pnpm test:e2e
+        env:
+          ELECTRIC_URL: http://localhost:3000
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 54321
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: e2e_test
+
+      - name: Run Query E2E tests
+        run: |
+          cd packages/query-db-collection
+          pnpm test:e2e
+        env:
+          ELECTRIC_URL: http://localhost:3000
+
+      - name: Stop Docker services
+        if: always()
+        run: |
+          cd packages/db-collection-e2e/docker
+          docker compose down -v
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: packages/db-collection-e2e/junit/
+          retention-days: 7

@@ -2,7 +2,8 @@
 This is the intermediate representation of the query.
 */
 
-import type { CollectionImpl } from "../collection"
+import type { CompareOptions } from "./builder/types"
+import type { Collection, CollectionImpl } from "../collection/index.js"
 import type { NamespacedRow } from "../types"
 
 export interface QueryIR {
@@ -16,6 +17,7 @@ export interface QueryIR {
   limit?: Limit
   offset?: Offset
   distinct?: true
+  singleResult?: true
 
   // Functional variants
   fnSelect?: (row: NamespacedRow) => any
@@ -26,7 +28,7 @@ export interface QueryIR {
 export type From = CollectionRef | QueryRef
 
 export type Select = {
-  [alias: string]: BasicExpression | Aggregate
+  [alias: string]: BasicExpression | Aggregate | Select
 }
 
 export type Join = Array<JoinClause>
@@ -38,7 +40,9 @@ export interface JoinClause {
   right: BasicExpression
 }
 
-export type Where = BasicExpression<boolean>
+export type Where =
+  | BasicExpression<boolean>
+  | { expression: BasicExpression<boolean>; residual?: boolean }
 
 export type GroupBy = Array<BasicExpression>
 
@@ -48,7 +52,7 @@ export type OrderBy = Array<OrderByClause>
 
 export type OrderByClause = {
   expression: BasicExpression
-  direction: OrderByDirection
+  compareOptions: CompareOptions
 }
 
 export type OrderByDirection = `asc` | `desc`
@@ -125,5 +129,129 @@ export class Aggregate<T = any> extends BaseExpression<T> {
     public args: Array<BasicExpression>
   ) {
     super()
+  }
+}
+
+/**
+ * Runtime helper to detect IR expression-like objects.
+ * Prefer this over ad-hoc local implementations to keep behavior consistent.
+ */
+export function isExpressionLike(value: any): boolean {
+  return (
+    value instanceof Aggregate ||
+    value instanceof Func ||
+    value instanceof PropRef ||
+    value instanceof Value
+  )
+}
+
+/**
+ * Helper functions for working with Where clauses
+ */
+
+/**
+ * Extract the expression from a Where clause
+ */
+export function getWhereExpression(where: Where): BasicExpression<boolean> {
+  return typeof where === `object` && `expression` in where
+    ? where.expression
+    : where
+}
+
+/**
+ * Extract the expression from a HAVING clause
+ * HAVING clauses can contain aggregates, unlike regular WHERE clauses
+ */
+export function getHavingExpression(
+  having: Having
+): BasicExpression | Aggregate {
+  return typeof having === `object` && `expression` in having
+    ? having.expression
+    : having
+}
+
+/**
+ * Check if a Where clause is marked as residual
+ */
+export function isResidualWhere(where: Where): boolean {
+  return (
+    typeof where === `object` &&
+    `expression` in where &&
+    where.residual === true
+  )
+}
+
+/**
+ * Create a residual Where clause from an expression
+ */
+export function createResidualWhere(
+  expression: BasicExpression<boolean>
+): Where {
+  return { expression, residual: true }
+}
+
+function getRefFromAlias(
+  query: QueryIR,
+  alias: string
+): CollectionRef | QueryRef | void {
+  if (query.from.alias === alias) {
+    return query.from
+  }
+
+  for (const join of query.join || []) {
+    if (join.from.alias === alias) {
+      return join.from
+    }
+  }
+}
+
+/**
+ * Follows the given reference in a query
+ * until its finds the root field the reference points to.
+ * @returns The collection, its alias, and the path to the root field in this collection
+ */
+export function followRef(
+  query: QueryIR,
+  ref: PropRef<any>,
+  collection: Collection
+): { collection: Collection; path: Array<string> } | void {
+  if (ref.path.length === 0) {
+    return
+  }
+
+  if (ref.path.length === 1) {
+    // This field should be part of this collection
+    const field = ref.path[0]!
+    // is it part of the select clause?
+    if (query.select) {
+      const selectedField = query.select[field]
+      if (selectedField && selectedField.type === `ref`) {
+        return followRef(query, selectedField, collection)
+      }
+    }
+
+    // Either this field is not part of the select clause
+    // and thus it must be part of the collection itself
+    // or it is part of the select but is not a reference
+    // so we can stop here and don't have to follow it
+    return { collection, path: [field] }
+  }
+
+  if (ref.path.length > 1) {
+    // This is a nested field
+    const [alias, ...rest] = ref.path
+    const aliasRef = getRefFromAlias(query, alias!)
+    if (!aliasRef) {
+      return
+    }
+
+    if (aliasRef.type === `queryRef`) {
+      return followRef(aliasRef.query, new PropRef(rest), collection)
+    } else {
+      // This is a reference to a collection
+      // we can't follow it further
+      // so the field must be on the collection itself
+      return { collection: aliasRef.collection, path: rest }
+    }
   }
 }

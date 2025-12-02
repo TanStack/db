@@ -151,3 +151,4 @@ tasks/
 .output
 .tanstack
 .claude
+package-lock.json

@@ -1,17 +1,17 @@
 {
   "name": "@tanstack/svelte-db",
   "description": "Svelte integration for @tanstack/db",
-  "version": "0.0.2",
+  "version": "0.1.46",
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@sveltejs/package": "^2.4.0",
-    "@sveltejs/vite-plugin-svelte": "^6.1.0",
-    "@vitest/coverage-istanbul": "^3.0.9",
-    "publint": "^0.3.2",
-    "svelte": "^5.28.6",
-    "svelte-check": "^4.3.0"
+    "@sveltejs/package": "^2.5.4",
+    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "publint": "^0.3.15",
+    "svelte": "^5.43.8",
+    "svelte-check": "^4.3.4"
   },
   "exports": {
     ".": {

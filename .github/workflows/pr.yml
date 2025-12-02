@@ -3,6 +3,9 @@ name: PR
 on:
   pull_request:
 
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.ref }}
   cancel-in-progress: true
@@ -20,13 +23,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v5.0.0
         with:
           fetch-depth: 0
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
       - name: Get base and head commits for `nx affected`
-        uses: nrwl/nx-set-shas@v4.3.0
+        uses: nrwl/nx-set-shas@v4.4.0
         with:
           main-branch-name: main
       - name: Run Checks
@@ -36,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v5.0.0
         with:
           fetch-depth: 0
       - name: Setup Tools
@@ -51,18 +54,20 @@ jobs:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           pattern: "./packages/db/dist/**/*.{js,mjs}"
           comment-key: "db-package-size"
+          build-script: "build:minified"
       - name: Compressed Size Action - React DB Package
         uses: preactjs/compressed-size-action@v2
         with:
           repo-token: "${{ secrets.GITHUB_TOKEN }}"
           pattern: "./packages/react-db/dist/**/*.{js,mjs}"
           comment-key: "react-db-package-size"
+          build-script: "build:minified"
   build-example:
     name: Build Example Site
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v5.0.0
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
       - name: Build Packages
@@ -70,4 +75,18 @@ jobs:
       - name: Build Example Site
         run: |
           cd examples/react/todo
+          pnpm build
+  build-starter:
+    name: Build Example Site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5.0.0
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@main
+      - name: Build Packages
+        run: pnpm run build
+      - name: Build Starter Site
+        run: |
+          cd examples/react/projects
           pnpm build

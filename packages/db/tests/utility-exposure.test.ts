@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import type { CollectionConfig, SyncConfig, UtilsRecord } from "../src/types"
 
 // Mock utility functions for testing
@@ -17,9 +17,7 @@ describe(`Utility exposure pattern`, () => {
     // Create a mock sync config
     const mockSync: SyncConfig<{ id: string }> = {
       sync: () => {
-        return {
-          unsubscribe: () => {},
-        }
+        return () => {}
       },
     }
 
@@ -47,9 +45,7 @@ describe(`Utility exposure pattern`, () => {
     // Create a mock sync config
     const mockSync: SyncConfig<{ id: string }> = {
       sync: () => {
-        return {
-          unsubscribe: () => {},
-        }
+        return () => {}
       },
     }
 

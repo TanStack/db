@@ -12,7 +12,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "paths": {
-      "@tanstack/db": ["../db/src"]
+      "@tanstack/db": ["../db/src"],
+      "@tanstack/db-ivm": ["../db-ivm/src"]
     }
   },
   "include": ["src/**/*", "tests", "vite.config.ts", "svelte.config.js"],
