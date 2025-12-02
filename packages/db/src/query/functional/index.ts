@@ -5,7 +5,7 @@
  * - First argument establishes type context (sources)
  * - Second argument is a shape callback with typed refs
  *
- * @example
+ * @example Basic query
  * ```ts
  * import { query } from '@tanstack/db/query/functional'
  * import { eq } from '@tanstack/db'
@@ -13,7 +13,7 @@
  * const q = query(
  *   { users: usersCollection },
  *   ({ users }) => ({
- *     filter: eq(users.active, true),
+ *     where: eq(users.active, true),
  *     select: { name: users.name },
  *     orderBy: users.createdAt,
  *     limit: 10
@@ -21,15 +21,33 @@
  * )
  * ```
  *
- * For joins, groupBy, or having - import the processors:
+ * @example With tree-shakable clauses
  * ```ts
- * import '@tanstack/db/query/functional/join'
- * import '@tanstack/db/query/functional/group-by'
+ * import { query, join, groupBy } from '@tanstack/db/query/functional'
+ * import { eq } from '@tanstack/db'
+ *
+ * const q = query(
+ *   { users: usersCollection },
+ *   ({ users }) => ({
+ *     join: join({
+ *       posts: { collection: postsCollection, on: eq(posts.authorId, users.id) }
+ *     }),
+ *     where: eq(users.active, true),
+ *     select: { name: users.name }
+ *   })
+ * )
  * ```
+ *
+ * Tree-shaking: If you don't import join(), groupBy(), or having(),
+ * that code won't be bundled.
  */
 
 // Core API
 export { query, compileQuery, getQueryIR, shapeRegistry } from "./core.js"
+
+// Tree-shakable clause functions
+export { join } from "./join.js"
+export { groupBy, having } from "./group-by.js"
 
 // Types
 export type {
@@ -42,11 +60,12 @@ export type {
   InferSchema,
   JoinShape,
   OrderByShape,
-  ShapeProcessor,
-  ShapeRegistry,
+  ClauseResult,
+  JoinClauseResult,
+  GroupByClauseResult,
+  HavingClauseResult,
   ProcessorContext,
 } from "./types.js"
 
-// Note: join.ts and group-by.ts are NOT exported here
-// They must be explicitly imported to register their processors
-// This enables tree-shaking
+// Type guard
+export { isClauseResult } from "./types.js"

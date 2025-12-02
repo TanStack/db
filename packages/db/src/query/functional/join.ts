@@ -1,70 +1,87 @@
 /**
- * Join Shape Processor
+ * Join Clause Function
  *
- * This file is tree-shakable: if you don't use joins in your query shape,
- * this code won't be bundled.
+ * Tree-shakable: if you don't import join(), this code isn't bundled.
  *
- * To use joins, import this file:
+ * @example
  * ```ts
- * import '@tanstack/db/query/functional/join'
- * ```
+ * import { query, join } from '@tanstack/db/query/functional'
+ * import { eq } from '@tanstack/db'
  *
- * Or it will be auto-imported when you use `join` in your shape.
+ * const q = query(
+ *   { users: usersCollection },
+ *   ({ users }) => ({
+ *     join: join({
+ *       posts: {
+ *         collection: postsCollection,
+ *         on: eq(posts.authorId, users.id),
+ *         type: 'left'
+ *       }
+ *     }),
+ *     where: eq(users.active, true),
+ *     select: { name: users.name }
+ *   })
+ * )
+ * ```
  */
 
-import { shapeRegistry } from "./core.js"
 import type { CollectionImpl } from "../../collection/index.js"
 import { CollectionRef as CollectionRefClass } from "../ir.js"
 import type { JoinClause } from "../ir.js"
-import type { JoinShape, ProcessorContext } from "./types.js"
+import type {
+  JoinShape,
+  JoinClauseResult,
+  ProcessorContext,
+} from "./types.js"
 
 /**
- * Process join shape into IR JoinClauses
+ * join - Creates a tree-shakable JOIN clause
+ *
+ * @param shape - Object mapping alias to join definition
+ * @returns JoinClauseResult with embedded processing logic
  */
-function processJoin(
-  _key: string,
-  value: JoinShape,
-  ir: any,
-  _context: ProcessorContext
-) {
-  const joinClauses: JoinClause[] = []
-
-  for (const [alias, joinDef] of Object.entries(value)) {
-    const { collection, on, type = "left" } = joinDef
-
-    if (!collection || typeof collection !== "object") {
-      throw new Error(`Invalid join source: ${alias} is not a Collection`)
-    }
-
-    const fromRef = new CollectionRefClass(collection as CollectionImpl, alias)
-
-    // Extract left/right from the ON expression
-    // For now, assume it's an eq() expression with two args
-    let left = on
-    let right = on
-    if (on && "args" in on && Array.isArray((on as any).args)) {
-      const args = (on as any).args
-      left = args[0]
-      right = args[1]
-    }
-
-    joinClauses.push({
-      from: fromRef,
-      type,
-      left,
-      right,
-    })
-  }
-
-  const existingJoins = ir.join || []
+export function join(shape: JoinShape): JoinClauseResult {
   return {
-    ...ir,
-    join: [...existingJoins, ...joinClauses],
+    __clause: "join",
+    shape,
+    process(ir, _context: ProcessorContext) {
+      const joinClauses: JoinClause[] = []
+
+      for (const [alias, joinDef] of Object.entries(shape)) {
+        const { collection, on, type = "left" } = joinDef
+
+        if (!collection || typeof collection !== "object") {
+          throw new Error(`Invalid join source: ${alias} is not a Collection`)
+        }
+
+        const fromRef = new CollectionRefClass(
+          collection as CollectionImpl,
+          alias
+        )
+
+        // Extract left/right from the ON expression
+        // For now, assume it's an eq() expression with two args
+        let left = on
+        let right = on
+        if (on && "args" in on && Array.isArray((on as any).args)) {
+          const args = (on as any).args
+          left = args[0]
+          right = args[1]
+        }
+
+        joinClauses.push({
+          from: fromRef,
+          type,
+          left,
+          right,
+        })
+      }
+
+      const existingJoins = (ir as any).join || []
+      return {
+        ...ir,
+        join: [...existingJoins, ...joinClauses],
+      }
+    },
   }
 }
-
-// Register the join processor
-shapeRegistry.register("join", processJoin)
-
-// Export for explicit import
-export { processJoin }

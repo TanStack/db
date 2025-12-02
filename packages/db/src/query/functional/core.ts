@@ -3,15 +3,16 @@ import { CollectionRef as CollectionRefClass } from "../ir.js"
 import { CollectionImpl } from "../../collection/index.js"
 import { QueryMustHaveFromClauseError } from "../../errors.js"
 import { createRefProxy } from "../builder/ref-proxy.js"
-import type {
-  Sources,
-  RefsFor,
-  QueryShape,
-  Query,
-  InferResult,
-  ShapeProcessor,
-  ShapeRegistry,
-  ProcessorContext,
+import {
+  isClauseResult,
+  type Sources,
+  type RefsFor,
+  type QueryShape,
+  type Query,
+  type InferResult,
+  type ShapeProcessor,
+  type ShapeRegistry,
+  type ProcessorContext,
 } from "./types.js"
 
 // =============================================================================
@@ -21,13 +22,9 @@ import type {
 /**
  * Registry for shape processors
  *
- * Each shape key (filter, select, orderBy, join, groupBy, etc.) can have
- * a processor registered. This enables tree-shaking: if you don't use joins,
- * the join processor code isn't bundled.
- *
- * Core processors (filter, select, orderBy, limit, offset) are registered
- * in this file. Advanced processors (join, groupBy, having) are registered
- * in separate files.
+ * Core clauses (where, select, orderBy, limit, offset, distinct) use the registry.
+ * Tree-shakable clauses (join, groupBy, having) use ClauseResult objects with
+ * embedded processing logic - no registry lookup needed.
  */
 class ShapeRegistryImpl implements ShapeRegistry {
   private processors = new Map<string, ShapeProcessor>()
@@ -46,6 +43,14 @@ class ShapeRegistryImpl implements ShapeRegistry {
     for (const [key, value] of Object.entries(shape)) {
       if (value === undefined) continue
 
+      // Check if it's a ClauseResult (tree-shakable clause function)
+      if (isClauseResult(value)) {
+        // ClauseResult has its own process method - call it directly
+        result = value.process(result, context) as Partial<QueryIR>
+        continue
+      }
+
+      // Otherwise, use the registry for core processors
       const processor = this.processors.get(key)
       if (processor) {
         result = processor(key, value, result, context)
@@ -137,9 +142,9 @@ shapeRegistry.register("distinct", (_key, value, ir, _context) => ({
  * First argument establishes type context (sources).
  * Second argument is a shape callback that receives typed refs.
  *
- * @example
+ * @example Basic query
  * ```ts
- * import { query } from '@tanstack/db/query'
+ * import { query } from '@tanstack/db/query/functional'
  * import { eq } from '@tanstack/db'
  *
  * const q = query(
@@ -149,6 +154,23 @@ shapeRegistry.register("distinct", (_key, value, ir, _context) => ({
  *     select: { name: users.name },
  *     orderBy: users.createdAt,
  *     limit: 10
+ *   })
+ * )
+ * ```
+ *
+ * @example With tree-shakable clauses
+ * ```ts
+ * import { query, join } from '@tanstack/db/query/functional'
+ * import { eq } from '@tanstack/db'
+ *
+ * const q = query(
+ *   { users: usersCollection },
+ *   ({ users }) => ({
+ *     join: join({
+ *       posts: { collection: postsCollection, on: eq(posts.authorId, users.id) }
+ *     }),
+ *     where: eq(users.active, true),
+ *     select: { name: users.name }
  *   })
  * )
  * ```

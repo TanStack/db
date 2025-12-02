@@ -49,35 +49,47 @@ export type RefsFor<T extends Sources> = {
 }
 
 // =============================================================================
-// Shape Types (the callback's return type)
+// Clause Function Types (for tree-shaking)
 // =============================================================================
 
 /**
- * QueryShape - The object returned by the shape callback
- *
- * This is the "flat API" - all clauses in one object:
- * - where: WHERE clause (filter condition)
- * - select: SELECT clause (what to return)
- * - orderBy: ORDER BY clause
- * - limit: LIMIT clause
- * - offset: OFFSET clause
- * - distinct: DISTINCT flag
- * - join: JOIN clauses (tree-shakable - only processed if present)
- * - groupBy: GROUP BY clause (tree-shakable)
- * - having: HAVING clause (tree-shakable)
+ * ProcessorContext - Context passed to clause processors
  */
-export interface QueryShape<TSelect = any> {
-  where?: BasicExpression<boolean>
-  select?: TSelect
-  orderBy?: OrderByShape | OrderByShape[]
-  limit?: number
-  offset?: number
-  distinct?: boolean
-  // Advanced (tree-shakable):
-  join?: JoinShape
-  groupBy?: BasicExpression<any> | BasicExpression<any>[]
-  having?: BasicExpression<boolean>
+export interface ProcessorContext {
+  sources: Sources
+  aliases: string[]
 }
+
+/**
+ * ClauseResult - Return type of clause functions like join(), groupBy()
+ *
+ * Clause functions return objects with embedded processing logic.
+ * This enables tree-shaking: if you don't import join(), its code isn't bundled.
+ */
+export interface ClauseResult<TClause extends string = string> {
+  readonly __clause: TClause
+  readonly process: (
+    ir: Partial<QueryIR>,
+    context: ProcessorContext
+  ) => Partial<QueryIR>
+}
+
+/**
+ * Type guard to check if a value is a ClauseResult
+ */
+export function isClauseResult(value: unknown): value is ClauseResult {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "__clause" in value &&
+    "process" in value &&
+    typeof (value as ClauseResult).process === "function"
+  )
+}
+
+// =============================================================================
+// Shape Types (the callback's return type)
+// =============================================================================
 
 /**
  * OrderByShape - Shape for orderBy clause
@@ -91,7 +103,7 @@ export type OrderByShape =
     }
 
 /**
- * JoinShape - Shape for join clauses
+ * JoinShape - Shape for join clauses (input to join() function)
  */
 export interface JoinShape {
   [alias: string]: {
@@ -99,6 +111,65 @@ export interface JoinShape {
     on: BasicExpression<boolean>
     type?: "inner" | "left" | "right" | "full"
   }
+}
+
+/**
+ * JoinClauseResult - Return type of join() function
+ */
+export interface JoinClauseResult extends ClauseResult<"join"> {
+  readonly shape: JoinShape
+}
+
+/**
+ * GroupByClauseResult - Return type of groupBy() function
+ */
+export interface GroupByClauseResult extends ClauseResult<"groupBy"> {
+  readonly expressions: BasicExpression<any>[]
+}
+
+/**
+ * HavingClauseResult - Return type of having() function
+ */
+export interface HavingClauseResult extends ClauseResult<"having"> {
+  readonly condition: BasicExpression<boolean>
+}
+
+/**
+ * QueryShape - The object returned by the shape callback
+ *
+ * This is the "flat API" - all clauses in one object:
+ * - where: WHERE clause (filter condition)
+ * - select: SELECT clause (what to return)
+ * - orderBy: ORDER BY clause
+ * - limit: LIMIT clause
+ * - offset: OFFSET clause
+ * - distinct: DISTINCT flag
+ * - join: JOIN clauses (tree-shakable)
+ * - groupBy: GROUP BY clause (tree-shakable)
+ * - having: HAVING clause (tree-shakable)
+ *
+ * Tree-shakable clauses use clause functions:
+ * ```ts
+ * import { query, join, groupBy } from '@tanstack/db/query/functional'
+ *
+ * query({ users }, ({ users }) => ({
+ *   join: join({ posts: { collection: postsCollection, on: eq(...) } }),
+ *   groupBy: groupBy(users.department),
+ *   select: { name: users.name }
+ * }))
+ * ```
+ */
+export interface QueryShape<TSelect = any> {
+  where?: BasicExpression<boolean>
+  select?: TSelect
+  orderBy?: OrderByShape | OrderByShape[]
+  limit?: number
+  offset?: number
+  distinct?: boolean
+  // Tree-shakable clauses - use clause functions:
+  join?: JoinClauseResult
+  groupBy?: GroupByClauseResult
+  having?: HavingClauseResult
 }
 
 // =============================================================================
@@ -127,7 +198,7 @@ export type InferResult<
     : never
 
 // =============================================================================
-// Shape Processor Registry (for tree-shaking)
+// Shape Processor Registry (for core clauses)
 // =============================================================================
 
 /**
@@ -141,17 +212,13 @@ export type ShapeProcessor = (
 ) => Partial<QueryIR>
 
 /**
- * ProcessorContext - Context passed to shape processors
- */
-export interface ProcessorContext {
-  sources: Sources
-  aliases: string[]
-}
-
-/**
  * ShapeRegistry - Registry of shape processors
  */
 export interface ShapeRegistry {
   register(key: string, processor: ShapeProcessor): void
-  process(shape: QueryShape, ir: Partial<QueryIR>, context: ProcessorContext): QueryIR
+  process(
+    shape: QueryShape,
+    ir: Partial<QueryIR>,
+    context: ProcessorContext
+  ): QueryIR
 }
