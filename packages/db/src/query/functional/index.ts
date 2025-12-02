@@ -1,61 +1,52 @@
 /**
- * Tree-shakable functional query API for TanStack DB
+ * EdgeDB-style Functional Query API
  *
- * This module provides a functional alternative to the method-chaining query builder.
- * Each clause is in a separate file, enabling tree-shaking: unused clauses aren't bundled.
+ * Tree-shakable query builder using the pattern:
+ * - First argument establishes type context (sources)
+ * - Second argument is a shape callback with typed refs
  *
- * ## Auto-Registration Pattern
- *
- * Each clause file (from.ts, where.ts, select.ts) automatically registers its compiler
- * when imported. This enables the query() function to compile clauses to IR without
- * explicitly importing compilers.
- *
- * ## Type Inference
- *
- * Types flow through the functional composition:
- * - FROM establishes the base schema
- * - WHERE/SELECT see the schema from FROM
- * - SELECT establishes the result type
- *
- * ## Example
- *
+ * @example
  * ```ts
- * import { query, from, where, select } from '@tanstack/db/query/functional'
+ * import { query } from '@tanstack/db/query/functional'
  * import { eq } from '@tanstack/db'
  *
  * const q = query(
- *   from({ users: usersCollection }),
- *   where(({ users }) => eq(users.active, true)),
- *   select(({ users }) => ({ name: users.name }))
+ *   { users: usersCollection },
+ *   ({ users }) => ({
+ *     filter: eq(users.active, true),
+ *     select: { name: users.name },
+ *     orderBy: users.createdAt,
+ *     limit: 10
+ *   })
  * )
  * ```
  *
- * ## Tree-Shaking
- *
- * If you only use `from` and `where`, the `select` clause and its compiler
- * won't be included in your bundle:
- *
+ * For joins, groupBy, or having - import the processors:
  * ```ts
- * import { query, from, where } from '@tanstack/db/query/functional'
- * // select.ts is never imported, so it's not bundled
+ * import '@tanstack/db/query/functional/join'
+ * import '@tanstack/db/query/functional/group-by'
  * ```
  */
 
-// Core query function and types
-export { query, compileQuery, getQueryIR } from "./core.js"
-export type { Query, Context, ClauseRegistry } from "./types.js"
+// Core API
+export { query, compileQuery, getQueryIR, shapeRegistry } from "./core.js"
 
-// Clause functions - each import triggers auto-registration
-export { from } from "./from.js"
-export { where } from "./where.js"
-export { select } from "./select.js"
-
-// Type exports for advanced use cases
+// Types
 export type {
-  FromClause,
-  WhereClause,
-  SelectClause,
-  AnyClause,
-  ExtractContext,
-  GetResult,
+  Sources,
+  RefsFor,
+  RefProxy,
+  QueryShape,
+  Query,
+  InferResult,
+  InferSchema,
+  JoinShape,
+  OrderByShape,
+  ShapeProcessor,
+  ShapeRegistry,
+  ProcessorContext,
 } from "./types.js"
+
+// Note: join.ts and group-by.ts are NOT exported here
+// They must be explicitly imported to register their processors
+// This enables tree-shaking

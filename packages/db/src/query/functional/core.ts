@@ -1,108 +1,228 @@
-import type { QueryIR } from "../ir.js"
+import type { QueryIR, CollectionRef } from "../ir.js"
+import { CollectionRef as CollectionRefClass } from "../ir.js"
+import { CollectionImpl } from "../../collection/index.js"
 import { QueryMustHaveFromClauseError } from "../../errors.js"
+import { createRefProxy } from "../builder/ref-proxy.js"
 import type {
-  AnyClause,
-  ClauseCompiler,
-  ClauseRegistry,
+  Sources,
+  RefsFor,
+  QueryShape,
   Query,
-  InferQueryContext,
+  InferResult,
+  ShapeProcessor,
+  ShapeRegistry,
+  ProcessorContext,
 } from "./types.js"
 
-/**
- * Global registry for clause compilers
- *
- * This implements the auto-registration pattern:
- * - Each clause file registers its compiler when imported
- * - The registry maps clause types to their compiler functions
- * - Tree-shaking: unused clauses aren't imported, so unused compilers aren't bundled
- */
-class ClauseRegistryImpl implements ClauseRegistry {
-  private compilers = new Map<string, ClauseCompiler>()
+// =============================================================================
+// Shape Processor Registry
+// =============================================================================
 
-  register(clauseType: string, compiler: ClauseCompiler): void {
-    this.compilers.set(clauseType, compiler)
+/**
+ * Registry for shape processors
+ *
+ * Each shape key (filter, select, orderBy, join, groupBy, etc.) can have
+ * a processor registered. This enables tree-shaking: if you don't use joins,
+ * the join processor code isn't bundled.
+ *
+ * Core processors (filter, select, orderBy, limit, offset) are registered
+ * in this file. Advanced processors (join, groupBy, having) are registered
+ * in separate files.
+ */
+class ShapeRegistryImpl implements ShapeRegistry {
+  private processors = new Map<string, ShapeProcessor>()
+
+  register(key: string, processor: ShapeProcessor): void {
+    this.processors.set(key, processor)
   }
 
-  compile(clauses: ReadonlyArray<AnyClause>): QueryIR {
-    let ir: Partial<QueryIR> = {}
-    let runtimeContext: any = {}
+  process(
+    shape: QueryShape,
+    ir: Partial<QueryIR>,
+    context: ProcessorContext
+  ): QueryIR {
+    let result = { ...ir }
 
-    // Process clauses in order, building up the IR
-    for (const clause of clauses) {
-      const compiler = this.compilers.get(clause.clauseType)
-      if (!compiler) {
-        throw new Error(`No compiler registered for clause type: ${clause.clauseType}`)
-      }
+    for (const [key, value] of Object.entries(shape)) {
+      if (value === undefined) continue
 
-      // Each compiler transforms the IR and can access the runtime context
-      ir = compiler(clause as any, ir, runtimeContext)
-
-      // Update runtime context based on clause type
-      if (clause.clauseType === "from") {
-        runtimeContext = {
-          ...runtimeContext,
-          from: ir.from,
-        }
+      const processor = this.processors.get(key)
+      if (processor) {
+        result = processor(key, value, result, context)
+      } else {
+        console.warn(`No processor registered for shape key: ${key}`)
       }
     }
 
-    // Validate that we have a FROM clause
-    if (!ir.from) {
-      throw new QueryMustHaveFromClauseError()
-    }
-
-    return ir as QueryIR
+    return result as QueryIR
   }
 }
 
-// Global singleton registry
-export const registry: ClauseRegistry = new ClauseRegistryImpl()
+export const shapeRegistry: ShapeRegistry = new ShapeRegistryImpl()
+
+// =============================================================================
+// Core Shape Processors (always bundled)
+// =============================================================================
+
+// Filter processor (WHERE)
+shapeRegistry.register("filter", (_key, value, ir, _context) => {
+  const existingWhere = ir.where || []
+  return {
+    ...ir,
+    where: [...existingWhere, value],
+  }
+})
+
+// Select processor
+shapeRegistry.register("select", (_key, value, ir, _context) => {
+  // Convert select shape to IR format
+  // For now, just pass through - the compiler will handle it
+  return {
+    ...ir,
+    select: value,
+  }
+})
+
+// OrderBy processor
+shapeRegistry.register("orderBy", (_key, value, ir, _context) => {
+  const orderByArray = Array.isArray(value) ? value : [value]
+  const orderByClauses = orderByArray.map((item) => {
+    if (item && typeof item === "object" && "expr" in item) {
+      return {
+        expression: item.expr,
+        compareOptions: {
+          direction: item.direction || "asc",
+          nulls: item.nulls || "first",
+        },
+      }
+    }
+    return {
+      expression: item,
+      compareOptions: { direction: "asc" as const, nulls: "first" as const },
+    }
+  })
+
+  const existingOrderBy = ir.orderBy || []
+  return {
+    ...ir,
+    orderBy: [...existingOrderBy, ...orderByClauses],
+  }
+})
+
+// Limit processor
+shapeRegistry.register("limit", (_key, value, ir, _context) => ({
+  ...ir,
+  limit: value,
+}))
+
+// Offset processor
+shapeRegistry.register("offset", (_key, value, ir, _context) => ({
+  ...ir,
+  offset: value,
+}))
+
+// Distinct processor
+shapeRegistry.register("distinct", (_key, value, ir, _context) => ({
+  ...ir,
+  distinct: value,
+}))
+
+// =============================================================================
+// Query Function - The Main API
+// =============================================================================
 
 /**
- * query - Composes multiple clauses into a query
+ * query - EdgeDB-style query builder
  *
- * This is the main entry point for the functional API.
- * It takes a variable number of clauses and composes them into a query.
- *
- * Type inference works through the clause chain:
- * - FROM clause establishes the base schema
- * - WHERE/SELECT clauses see the schema from FROM
- * - SELECT clause establishes the result type
+ * First argument establishes type context (sources).
+ * Second argument is a shape callback that receives typed refs.
  *
  * @example
  * ```ts
+ * import { query } from '@tanstack/db/query'
+ * import { eq } from '@tanstack/db'
+ *
  * const q = query(
- *   from({ users: usersCollection }),
- *   where(({ users }) => eq(users.active, true)),
- *   select(({ users }) => ({ name: users.name }))
+ *   { users: usersCollection },
+ *   ({ users }) => ({
+ *     filter: eq(users.active, true),
+ *     select: { name: users.name },
+ *     orderBy: users.createdAt,
+ *     limit: 10
+ *   })
  * )
  * ```
+ *
+ * Type inference works because:
+ * 1. First arg `{ users: usersCollection }` has type `{ users: Collection<User> }`
+ * 2. TypeScript infers callback parameter as `{ users: RefProxy<User> }`
+ * 3. Callback return type is inferred from the shape
  */
-export function query<TClauses extends ReadonlyArray<AnyClause>>(
-  ...clauses: TClauses
-): Query<InferQueryContext<TClauses>> {
+export function query<
+  TSources extends Sources,
+  TShape extends QueryShape<any>
+>(
+  sources: TSources,
+  shapeCallback: (refs: RefsFor<TSources>) => TShape
+): Query<InferResult<TSources, TShape>> {
+  // Create ref proxies for each source
+  const aliases = Object.keys(sources)
+  const refs = createRefProxy(aliases) as RefsFor<TSources>
+
+  // Execute the callback to get the shape
+  const shape = shapeCallback(refs)
+
   return {
-    clauses,
-    _context: undefined as any, // Type-level only
+    _sources: sources,
+    _shape: shape,
+    _result: undefined as any, // Phantom type
   }
 }
 
 /**
  * compileQuery - Compiles a functional query to IR
  *
- * This is the bridge between the functional API and the existing compiler.
- * It uses the clause registry to convert functional clauses to IR.
- *
- * @param query - The functional query to compile
- * @returns QueryIR that can be executed by the existing query engine
+ * This bridges the functional API to the existing query compiler.
  */
-export function compileQuery(query: Query<any>): QueryIR {
-  return registry.compile(query.clauses)
+export function compileQuery<TResult>(q: Query<TResult>): QueryIR {
+  const { _sources: sources, _shape: shape } = q
+
+  // Build FROM clause from sources
+  const sourceEntries = Object.entries(sources)
+  if (sourceEntries.length === 0) {
+    throw new QueryMustHaveFromClauseError()
+  }
+
+  // For now, support single source (first one is the FROM)
+  const [mainAlias, mainCollection] = sourceEntries[0]!
+
+  // Check if it's a collection-like object (has the required properties)
+  if (!mainCollection || typeof mainCollection !== "object") {
+    throw new Error(`Invalid source: ${mainAlias} is not a Collection`)
+  }
+
+  const fromRef: CollectionRef = new CollectionRefClass(
+    mainCollection as CollectionImpl,
+    mainAlias
+  )
+
+  // Start with FROM in IR
+  let ir: Partial<QueryIR> = {
+    from: fromRef,
+  }
+
+  // Process the shape through the registry
+  const context: ProcessorContext = {
+    sources,
+    aliases: Object.keys(sources),
+  }
+
+  return shapeRegistry.process(shape, ir, context)
 }
 
 /**
  * getQueryIR - Alias for compileQuery for compatibility
  */
-export function getQueryIR(query: Query<any>): QueryIR {
-  return compileQuery(query)
+export function getQueryIR<TResult>(q: Query<TResult>): QueryIR {
+  return compileQuery(q)
 }

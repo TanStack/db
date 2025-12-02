@@ -1,67 +1,142 @@
 /**
- * Simplified demonstration of the functional query API
+ * EdgeDB-style Functional Query API Demo
  *
- * This shows that the basic structure works, even though full type inference
- * through callbacks is limited by TypeScript's inference capabilities.
+ * This demonstrates the type inference pattern:
+ * - First argument establishes type context
+ * - Callback receives typed refs
  */
 
-import { query, from, where, select, compileQuery } from "./index.js"
-import { eq } from "../../index.js"
-import { CollectionImpl } from "../../collection/index.js"
+import { query } from "./index.js"
+import type { Collection } from "../../collection/index.js"
+import type { BasicExpression } from "../ir.js"
 
-// Mock collection types
-type User = {
-  id: number
+// =============================================================================
+// Mock types for demonstration
+// =============================================================================
+
+interface User {
+  id: string
   name: string
   email: string
   active: boolean
+  createdAt: Date
 }
 
-declare const usersCollection: CollectionImpl<User, any, any, any, any>
+interface Post {
+  id: string
+  title: string
+  content: string
+  authorId: string
+  publishedAt: Date
+}
 
-// Example 1: Basic query - tree-shakable!
-// Only `from` clause is imported, so `where` and `select` compilers aren't bundled
+// Mock collections (in real usage, these come from createCollection)
+declare const usersCollection: Collection<User, "id", any, any, any>
+declare const postsCollection: Collection<Post, "id", any, any, any>
+
+// Mock operator
+declare function eq<T>(left: BasicExpression<T>, right: T): BasicExpression<boolean>
+
+// =============================================================================
+// Demo: Basic Query
+// =============================================================================
+
+/**
+ * Simple query with filter and select
+ *
+ * Type inference works:
+ * 1. `{ users: usersCollection }` has type `{ users: Collection<User> }`
+ * 2. Callback receives `{ users: RefProxy<User> }`
+ * 3. `users.active`, `users.name` are typed!
+ */
 const basicQuery = query(
-  from({ users: usersCollection })
+  { users: usersCollection },
+  ({ users }) => ({
+    filter: eq(users.active, true),
+    select: {
+      name: users.name,
+      email: users.email,
+    },
+  })
 )
 
-// Example 2: Query with where - tree-shakable!
-// Only `from` and `where` clauses imported, `select` compiler not bundled
-const filteredQuery = query(
-  from({ users: usersCollection }),
-  where(({ users }) => eq((users as any).active, true))  // Note: manual type assertion needed
+// Result type is inferred: { name: string, email: string }
+type BasicResult = typeof basicQuery._result
+
+// =============================================================================
+// Demo: Query with OrderBy and Limit
+// =============================================================================
+
+const paginatedQuery = query(
+  { users: usersCollection },
+  ({ users }) => ({
+    filter: eq(users.active, true),
+    select: {
+      name: users.name,
+    },
+    orderBy: users.createdAt,
+    limit: 10,
+    offset: 0,
+  })
 )
 
-// Example 3: Full query with select - tree-shakable!
-// All clauses imported, all compilers bundled
-const projectedQuery = query(
-  from({ users: usersCollection }),
-  where(({ users }) => eq((users as any).active, true)),
-  select(({ users }) => ({
-    name: (users as any).name,
-    email: (users as any).email,
-  }))
+// =============================================================================
+// Demo: Query with complex orderBy
+// =============================================================================
+
+const complexOrderQuery = query(
+  { users: usersCollection },
+  ({ users }) => ({
+    select: { name: users.name },
+    orderBy: [
+      { expr: users.createdAt, direction: "desc" },
+      { expr: users.name, direction: "asc" },
+    ],
+  })
 )
 
-// Example 4: Compile to IR
-const ir = compileQuery(projectedQuery)
+// =============================================================================
+// Demo: Full row selection (no select = return full row)
+// =============================================================================
 
-console.log("Functional query API demonstration")
-console.log("Basic query:", basicQuery)
-console.log("Filtered query:", filteredQuery)
-console.log("Projected query:", projectedQuery)
-console.log("IR:", JSON.stringify(ir, null, 2))
+const fullRowQuery = query(
+  { users: usersCollection },
+  ({ users }) => ({
+    filter: eq(users.active, true),
+  })
+)
 
-// The key benefits:
-// 1. ✅ Tree-shakable: Each clause in separate file
-// 2. ✅ Auto-registration: Compilers register on import
-// 3. ✅ Separate files: from.ts, where.ts, select.ts
-// 4. ⚠️  Type inference: Limited by TypeScript's inference through generic callbacks
-//
-// Type inference limitation:
-// Full type inference through callbacks like ({ users }) => users.active
-// requires TypeScript to infer the callback parameter type from context.
-// This is challenging with function composition.
-//
-// Workaround: Type assertions (shown above) or using a builder pattern
-// that chains types explicitly.
+// Result type is User (full row)
+type FullRowResult = typeof fullRowQuery._result
+
+// =============================================================================
+// Tree-shaking note
+// =============================================================================
+
+/**
+ * To use joins:
+ *
+ * import '@tanstack/db/query/functional/join'
+ *
+ * const joinQuery = query(
+ *   { users: usersCollection },
+ *   ({ users }) => ({
+ *     join: {
+ *       posts: {
+ *         collection: postsCollection,
+ *         on: eq(posts.authorId, users.id),
+ *         type: 'left'
+ *       }
+ *     },
+ *     filter: eq(users.active, true),
+ *     select: {
+ *       name: users.name,
+ *       posts: { title: true }
+ *     }
+ *   })
+ * )
+ *
+ * If you don't import join.ts, the join processor code isn't bundled.
+ */
+
+export { basicQuery, paginatedQuery, complexOrderQuery, fullRowQuery }

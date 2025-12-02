@@ -1,145 +1,157 @@
 import type { BasicExpression, QueryIR } from "../ir.js"
-import type {
-  SchemaFromSource,
-  Source,
-} from "../builder/types.js"
+import type { Collection } from "../../collection/index.js"
 
 /**
- * Functional query API types
+ * EdgeDB-style Functional Query API Types
  *
- * These types enable tree-shakable query building through function composition
- * instead of method chaining.
+ * The key insight from EdgeDB: first argument establishes type context,
+ * callback receives typed refs. This enables full type inference.
  */
 
+// =============================================================================
+// Source Types
+// =============================================================================
+
 /**
- * Context - Carries type information through the functional query pipeline
+ * Sources - Map of alias to collection
+ */
+export type Sources = Record<string, Collection<any, any, any, any, any>>
+
+/**
+ * InferSchema - Extracts the schema type from a Sources object
+ */
+export type InferSchema<T extends Sources> = {
+  [K in keyof T]: T[K] extends Collection<infer TData, any, any, any, any>
+    ? TData
+    : never
+}
+
+/**
+ * RefProxy - Proxy object for accessing properties in expressions
+ * This is what the callback receives for each source
+ */
+export type RefProxy<T> = {
+  [K in keyof T]: T[K] extends object
+    ? RefProxy<T[K]> & BasicExpression<T[K]>
+    : BasicExpression<T[K]>
+} & {
+  __refProxy: true
+  __path: string[]
+}
+
+/**
+ * RefsFor - Creates RefProxy for each source in Sources
+ */
+export type RefsFor<T extends Sources> = {
+  [K in keyof T]: T[K] extends Collection<infer TData, any, any, any, any>
+    ? RefProxy<TData>
+    : never
+}
+
+// =============================================================================
+// Shape Types (the callback's return type)
+// =============================================================================
+
+/**
+ * QueryShape - The object returned by the shape callback
  *
- * Similar to the builder Context, but adapted for functional composition.
- * Each clause function transforms the context to flow types through.
+ * This is the "flat API" - all clauses in one object:
+ * - filter: WHERE clause
+ * - select: SELECT clause (what to return)
+ * - orderBy: ORDER BY clause
+ * - limit: LIMIT clause
+ * - offset: OFFSET clause
+ * - distinct: DISTINCT flag
+ * - join: JOIN clauses (tree-shakable - only processed if present)
+ * - groupBy: GROUP BY clause (tree-shakable)
+ * - having: HAVING clause (tree-shakable)
  */
-export interface Context {
-  baseSchema: ContextSchema
-  schema: ContextSchema
-  fromSourceName: string
-  hasJoins?: boolean
-  result?: any
-}
-
-export type ContextSchema = Record<string, unknown>
-
-/**
- * Clause - Base type for all query clauses
- *
- * Each clause is a tagged object that carries:
- * - clauseType: Identifies what kind of clause this is
- * - compile: Function to convert this clause to IR
- * - context: Type-level only - carries Context through the type system
- */
-export interface Clause<
-  TClauseType extends string = string,
-  TContext extends Context = Context,
-> {
-  readonly clauseType: TClauseType
-  readonly _context?: TContext // Type-level only, used for inference
+export interface QueryShape<TSelect = any> {
+  filter?: BasicExpression<boolean>
+  select?: TSelect
+  orderBy?: OrderByShape | OrderByShape[]
+  limit?: number
+  offset?: number
+  distinct?: boolean
+  // Advanced (tree-shakable):
+  join?: JoinShape
+  groupBy?: BasicExpression<any> | BasicExpression<any>[]
+  having?: BasicExpression<boolean>
 }
 
 /**
- * FromClause - Represents a FROM clause
+ * OrderByShape - Shape for orderBy clause
  */
-export interface FromClause<TSource extends Source>
-  extends Clause<"from", FromContext<TSource>> {
-  readonly source: TSource
+export type OrderByShape =
+  | BasicExpression<any>
+  | {
+      expr: BasicExpression<any>
+      direction?: "asc" | "desc"
+      nulls?: "first" | "last"
+    }
+
+/**
+ * JoinShape - Shape for join clauses
+ */
+export interface JoinShape {
+  [alias: string]: {
+    collection: Collection<any, any, any, any, any>
+    on: BasicExpression<boolean>
+    type?: "inner" | "left" | "right" | "full"
+  }
+}
+
+// =============================================================================
+// Query Result Types
+// =============================================================================
+
+/**
+ * Query - Represents a compiled query with its result type
+ */
+export interface Query<TResult> {
+  readonly _sources: Sources
+  readonly _shape: QueryShape<any>
+  readonly _result: TResult // Phantom type for result inference
 }
 
 /**
- * FromContext - Context after a FROM clause
+ * InferResult - Infers the result type from a QueryShape
  */
-export type FromContext<TSource extends Source> = {
-  baseSchema: SchemaFromSource<TSource>
-  schema: SchemaFromSource<TSource>
-  fromSourceName: keyof TSource & string
-  hasJoins: false
-}
+export type InferResult<
+  TSources extends Sources,
+  TShape extends QueryShape<any>
+> = TShape["select"] extends undefined
+  ? InferSchema<TSources>[keyof TSources] // No select = return full row
+  : TShape["select"] extends infer S
+    ? S
+    : never
+
+// =============================================================================
+// Shape Processor Registry (for tree-shaking)
+// =============================================================================
 
 /**
- * WhereClause - Represents a WHERE clause
+ * ShapeProcessor - Function that processes a shape key into IR
  */
-export interface WhereClause<TContext extends Context>
-  extends Clause<"where", TContext> {
-  readonly callback: (refs: any) => BasicExpression<boolean>
-}
-
-/**
- * SelectClause - Represents a SELECT clause
- */
-export interface SelectClause<TContext extends Context, TResult>
-  extends Clause<"select", WithResult<TContext, TResult>> {
-  readonly callback: (refs: any) => any
-}
-
-/**
- * WithResult - Helper to add result type to context
- */
-export type WithResult<TContext extends Context, TResult> = Omit<
-  TContext,
-  "result"
-> & {
-  result: TResult
-}
-
-/**
- * AnyClause - Union of all possible clause types
- */
-export type AnyClause = FromClause<any> | WhereClause<any> | SelectClause<any, any>
-
-/**
- * ExtractContext - Extracts the Context type from a Clause
- */
-export type ExtractContext<T> = T extends Clause<any, infer TContext>
-  ? TContext
-  : never
-
-/**
- * Query - Represents a complete query built from clauses
- */
-export interface Query<TContext extends Context = Context> {
-  readonly clauses: ReadonlyArray<AnyClause>
-  readonly _context?: TContext // Type-level only
-}
-
-/**
- * ClauseCompiler - Function that compiles a clause to IR
- */
-export type ClauseCompiler<TClauseType extends string = string> = (
-  clause: Clause<TClauseType>,
-  query: Partial<QueryIR>,
-  context: any
+export type ShapeProcessor = (
+  key: string,
+  value: any,
+  ir: Partial<QueryIR>,
+  context: ProcessorContext
 ) => Partial<QueryIR>
 
 /**
- * ClauseRegistry - Registry of clause compilers
+ * ProcessorContext - Context passed to shape processors
  */
-export interface ClauseRegistry {
-  register(clauseType: string, compiler: ClauseCompiler): void
-  compile(clauses: ReadonlyArray<AnyClause>): QueryIR
+export interface ProcessorContext {
+  sources: Sources
+  aliases: string[]
 }
 
 /**
- * InferQueryContext - Infers the final context from a list of clauses
- *
- * This walks through clauses in reverse order and accumulates the context type.
- * The last clause's context is the final context (since each clause sees the previous context).
+ * ShapeRegistry - Registry of shape processors
  */
-export type InferQueryContext<TClauses extends ReadonlyArray<AnyClause>> =
-  TClauses extends readonly [...any, infer Last]
-    ? Last extends AnyClause
-      ? ExtractContext<Last>
-      : Context
-    : Context
-
-/**
- * GetResult - Gets the result type from a context
- */
-export type GetResult<TContext extends Context> = TContext["result"] extends object
-  ? TContext["result"]
-  : TContext["schema"][TContext["fromSourceName"]]
+export interface ShapeRegistry {
+  register(key: string, processor: ShapeProcessor): void
+  process(shape: QueryShape, ir: Partial<QueryIR>, context: ProcessorContext): QueryIR
+}
