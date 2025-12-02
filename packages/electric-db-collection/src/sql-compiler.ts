@@ -124,6 +124,13 @@ function compileOrderByClause(
   return sql
 }
 
+/**
+ * Check if a BasicExpression represents a null/undefined value
+ */
+function isNullValue(exp: IR.BasicExpression<unknown>): boolean {
+  return exp.type === `val` && (exp.value === null || exp.value === undefined)
+}
+
 function compileFunction(
   exp: IR.Func<unknown>,
   params: Array<unknown> = []
@@ -131,6 +138,36 @@ function compileFunction(
   const { name, args } = exp
 
   const opName = getOpName(name)
+
+  // Handle comparison operators with null/undefined values
+  // These would create invalid queries with missing params (e.g., "col = $1" with empty params)
+  if (isComparisonOp(name)) {
+    const nullArgIndex = args.findIndex((arg: IR.BasicExpression) =>
+      isNullValue(arg)
+    )
+
+    if (nullArgIndex !== -1) {
+      const otherArgIndex = nullArgIndex === 0 ? 1 : 0
+      const otherArg = args[otherArgIndex]
+
+      if (name === `eq`) {
+        // Transform eq(col, null) to "col IS NULL"
+        // This is the semantically correct behavior in SQL
+        if (otherArg) {
+          return `${compileBasicExpression(otherArg, params)} IS NULL`
+        }
+      }
+
+      // For other comparison operators (gt, lt, gte, lte, like, ilike),
+      // null comparisons don't make semantic sense in SQL (they always evaluate to UNKNOWN)
+      throw new Error(
+        `Cannot use null/undefined value with '${name}' operator. ` +
+          `Comparisons with null always evaluate to UNKNOWN in SQL. ` +
+          `Use isNull() or isUndefined() to check for null values, ` +
+          `or filter out null values before building the query.`
+      )
+    }
+  }
 
   const compiledArgs = args.map((arg: IR.BasicExpression) =>
     compileBasicExpression(arg, params)
@@ -196,6 +233,16 @@ function isBinaryOp(name: string): boolean {
     `ilike`,
   ]
   return binaryOps.includes(name)
+}
+
+/**
+ * Check if operator is a comparison operator that takes two values
+ * These operators cannot accept null/undefined as values
+ * (null comparisons in SQL always evaluate to UNKNOWN)
+ */
+function isComparisonOp(name: string): boolean {
+  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`]
+  return comparisonOps.includes(name)
 }
 
 function getOpName(name: string): string {
