@@ -1238,6 +1238,50 @@ function createElectricSync<T extends Row<unknown>>(
         syncMode === `progressive` && !hasReceivedUpToDate
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
 
+      /**
+       * Process a change message: handle tags and write the mutation
+       */
+      const processChangeMessage = (changeMessage: Message<T>) => {
+        if (!isChangeMessage(changeMessage)) {
+          return
+        }
+
+        // Process tags if present
+        const tags = changeMessage.headers.tags
+        const removedTags = changeMessage.headers.removed_tags
+        const hasTags = tags || removedTags
+
+        const rowId = collection.getKeyFromItem(changeMessage.value)
+        const rowTagSet = () =>
+          processTagsForChangeMessage(tags, removedTags, rowId)
+
+        // Check if row should be deleted (empty tag set)
+        // but only if the message includes tags
+        // because shapes without subqueries don't contain tags
+        // so we should keep those around
+        if (hasTags && rowTagSet().size === 0) {
+          clearTagsForRow(rowId)
+          write({
+            type: `delete`,
+            value: changeMessage.value,
+            metadata: {
+              ...changeMessage.headers,
+            },
+          })
+        } else {
+          if (changeMessage.headers.operation === `delete`) {
+            clearTagsForRow(rowId)
+          }
+          write({
+            type: changeMessage.headers.operation,
+            value: changeMessage.value,
+            metadata: {
+              ...changeMessage.headers,
+            },
+          })
+        }
+      }
+
       // Create deduplicated loadSubset wrapper for non-eager modes
       // This prevents redundant snapshot requests when multiple concurrent
       // live queries request overlapping or subset predicates
@@ -1320,41 +1364,7 @@ function createElectricSync<T extends Row<unknown>>(
                 transactionStarted = true
               }
 
-              // Process tags if present
-              const tags = message.headers.tags
-              const removedTags = message.headers.removed_tags
-              const hasTags = tags || removedTags
-
-              const rowId = collection.getKeyFromItem(message.value)
-              const rowTagSet = () =>
-                processTagsForChangeMessage(tags, removedTags, rowId)
-
-              // Check if row should be deleted (empty tag set)
-              // but only if the message includes tags
-              // because shapes without subqueries don't contain tags
-              // so we should keep those around
-              if (hasTags && rowTagSet().size === 0) {
-                clearTagsForRow(rowId)
-                write({
-                  type: `delete`,
-                  value: message.value,
-                  metadata: {
-                    ...message.headers,
-                  },
-                })
-              } else {
-                if (message.headers.operation === `delete`) {
-                  clearTagsForRow(rowId)
-                }
-                write({
-                  type: message.headers.operation,
-                  value: message.value,
-                  // Include the primary key and relation info in the metadata
-                  metadata: {
-                    ...message.headers,
-                  },
-                })
-              }
+              processChangeMessage(message)
             }
           } else if (isSnapshotEndMessage(message)) {
             // Track postgres snapshot metadata for resolving awaiting mutations
@@ -1425,40 +1435,7 @@ function createElectricSync<T extends Row<unknown>>(
             // Apply all buffered change messages and extract txids/snapshots
             for (const bufferedMsg of bufferedMessages) {
               if (isChangeMessage(bufferedMsg)) {
-                // Process tags for buffered messages
-                const tags = bufferedMsg.headers.tags
-                const removedTags = bufferedMsg.headers.removed_tags
-                const hasTags = tags || removedTags
-                const rowId = collection.getKeyFromItem(bufferedMsg.value)
-
-                const rowTagSet = () =>
-                  processTagsForChangeMessage(tags, removedTags, rowId)
-
-                // Check if row should be deleted (empty tag set)
-                // but only if the message includes tags
-                // because shapes without subqueries don't contain tags
-                // so we should keep those around
-                if (hasTags && rowTagSet().size === 0) {
-                  clearTagsForRow(rowId)
-                  write({
-                    type: `delete`,
-                    value: bufferedMsg.value,
-                    metadata: {
-                      ...bufferedMsg.headers,
-                    },
-                  })
-                } else {
-                  if (bufferedMsg.headers.operation === `delete`) {
-                    clearTagsForRow(rowId)
-                  }
-                  write({
-                    type: bufferedMsg.headers.operation,
-                    value: bufferedMsg.value,
-                    metadata: {
-                      ...bufferedMsg.headers,
-                    },
-                  })
-                }
+                processChangeMessage(bufferedMsg)
 
                 // Extract txids from buffered messages (will be committed to store after transaction)
                 if (hasTxids(bufferedMsg)) {
