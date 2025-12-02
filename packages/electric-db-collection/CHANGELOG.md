@@ -1,5 +1,18 @@
 # @tanstack/electric-db-collection
 
+## 0.2.11
+
+### Patch Changes
+
+- Type utils in collection options as specific type (e.g. ElectricCollectionUtils) instead of generic UtilsRecord. ([#940](https://github.com/TanStack/db/pull/940))
+
+- fix: Add BigInt support to pg-serializer and fix error message for non-JSON-serializable values ([#932](https://github.com/TanStack/db/pull/932))
+  - Added support for serializing BigInt values to strings in the `serialize` function
+  - Fixed the error message when encountering unsupported types to handle values that cannot be serialized by `JSON.stringify` (like BigInt), preventing a secondary error from masking the original issue
+
+- Updated dependencies [[`1d19d22`](https://github.com/TanStack/db/commit/1d19d2219cbbaef6483845df1c3b078077e4e3bd), [`b3e4e80`](https://github.com/TanStack/db/commit/b3e4e80c4b73d96c15391ac25efb518c7ae7ccbb)]:
+  - @tanstack/db@0.5.10
+
 ## 0.2.10
 
 ### Patch Changes

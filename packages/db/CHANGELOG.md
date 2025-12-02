@@ -1,5 +1,15 @@
 # @tanstack/db
 
+## 0.5.10
+
+### Patch Changes
+
+- Type utils in collection options as specific type (e.g. ElectricCollectionUtils) instead of generic UtilsRecord. ([#940](https://github.com/TanStack/db/pull/940))
+
+- Fix proxy to handle frozen objects correctly. Previously, creating a proxy for a frozen object (such as data from state management libraries that freeze their state) would throw a TypeError when attempting to modify properties via the proxy. The proxy now uses an unfrozen internal copy as the Proxy target, allowing modifications to be tracked correctly while preserving the immutability of the original object. ([#933](https://github.com/TanStack/db/pull/933))
+
+  Also adds support for `Object.seal()` and `Object.preventExtensions()` on proxies, allowing these operations to work correctly on change-tracking proxies.
+
 ## 0.5.9
 
 ### Patch Changes

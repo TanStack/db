@@ -1,5 +1,12 @@
 # @tanstack/powersync-db-collection
 
+## 0.1.14
+
+### Patch Changes
+
+- Updated dependencies [[`1d19d22`](https://github.com/TanStack/db/commit/1d19d2219cbbaef6483845df1c3b078077e4e3bd), [`b3e4e80`](https://github.com/TanStack/db/commit/b3e4e80c4b73d96c15391ac25efb518c7ae7ccbb)]:
+  - @tanstack/db@0.5.10
+
 ## 0.1.13
 
 ### Patch Changes
