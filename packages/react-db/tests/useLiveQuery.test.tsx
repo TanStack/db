@@ -12,7 +12,10 @@ import {
 } from "@tanstack/db"
 import { useEffect } from "react"
 import { useLiveQuery } from "../src/useLiveQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
+import {
+  mockSyncCollectionOptions,
+  mockSyncCollectionOptionsNoInitialState,
+} from "../../db/tests/utils"
 
 type Person = {
   id: string
@@ -2347,6 +2350,797 @@ describe(`Query Collections`, () => {
       expect(result.current.data).toBeUndefined()
       expect(result.current.status).toBe(`disabled`)
       expect(result.current.isEnabled).toBe(false)
+    })
+  })
+
+  describe(`count query re-render optimization`, () => {
+    it(`should not re-render when count result hasn't changed`, async () => {
+      // Track render count
+      let renderCount = 0
+      // Track change events emitted by the live query collection
+      const changeEvents: Array<{ type: string; value: any }> = []
+
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `count-rerender-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { result } = renderHook(() => {
+        renderCount++
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              activeCount: count(persons.id),
+            }))
+        )
+      })
+
+      // Wait for initial sync
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(1)
+      })
+
+      // Subscribe to track change events from the live query collection
+      const subscription = result.current.collection.subscribeChanges(
+        (changes: Array<any>) => {
+          changes.forEach((change) => {
+            changeEvents.push({ type: change.type, value: change.value })
+          })
+        }
+      )
+
+      const initialRenderCount = renderCount
+      const initialCount = result.current.data[0]?.activeCount
+
+      // Verify initial count is correct (only John Smith age 35 matches)
+      expect(initialCount).toBe(1)
+
+      // Clear any initial change events
+      changeEvents.length = 0
+
+      // Update a person's email (a field NOT used in the query output)
+      // This should NOT trigger a re-render since the count doesn't change
+      act(() => {
+        collection.utils.begin()
+        collection.utils.write({
+          type: `update`,
+          value: {
+            id: `3`, // John Smith - the one matching the filter
+            name: `John Smith`,
+            age: 35,
+            email: `john.smith.updated@example.com`, // Changed email
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        collection.utils.commit()
+      })
+
+      // Wait a bit for any potential re-renders
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // The count should still be the same
+      expect(result.current.data[0]?.activeCount).toBe(1)
+
+      // CRITICAL: No change events should be emitted since the count didn't change
+      expect(changeEvents.length).toBe(0)
+
+      // CRITICAL: Render count should NOT have increased since the count didn't change
+      expect(renderCount).toBe(initialRenderCount)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should not re-render when updating a field not in the count query result`, async () => {
+      // Track renders with their data values
+      const renderSnapshots: Array<{ count: number; timestamp: number }> = []
+
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `count-field-update-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { result } = renderHook(() => {
+        const queryResult = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => eq(persons.isActive, true))
+            .select(({ persons }) => ({
+              totalActive: count(persons.id),
+            }))
+        )
+
+        // Track each render
+        useEffect(() => {
+          if (queryResult.data[0]) {
+            renderSnapshots.push({
+              count: queryResult.data[0].totalActive,
+              timestamp: Date.now(),
+            })
+          }
+        }, [queryResult.data])
+
+        return queryResult
+      })
+
+      // Wait for initial sync
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(1)
+      })
+
+      // All 3 initial persons are active, so count should be 3
+      expect(result.current.data[0]?.totalActive).toBe(3)
+
+      // Clear snapshots after initial load
+      renderSnapshots.length = 0
+
+      // Update the name of a person (doesn't affect count)
+      act(() => {
+        collection.utils.begin()
+        collection.utils.write({
+          type: `update`,
+          value: {
+            id: `1`,
+            name: `John Doe Updated`, // Changed name
+            age: 30,
+            email: `john.doe@example.com`,
+            isActive: true, // Still active - count shouldn't change
+            team: `team1`,
+          },
+        })
+        collection.utils.commit()
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Count should still be 3
+      expect(result.current.data[0]?.totalActive).toBe(3)
+
+      // Should NOT have any new renders since count didn't change
+      expect(renderSnapshots.length).toBe(0)
+    })
+
+    it(`should not re-render count query when sync updates unrelated fields`, async () => {
+      // This test simulates the bug where sync operations trigger re-renders
+      // even when the count result hasn't changed
+      let renderCount = 0
+      const changeEvents: Array<{ type: string; value: any }> = []
+
+      // Use mockSyncCollectionOptionsNoInitialState to have full control over sync
+      const config = mockSyncCollectionOptionsNoInitialState<Person>({
+        id: `count-sync-test`,
+        getKey: (person: Person) => person.id,
+      })
+      const collection = createCollection(config)
+
+      const { result } = renderHook(() => {
+        renderCount++
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              activeCount: count(persons.id),
+            }))
+        )
+      })
+
+      // Start sync and write initial data
+      act(() => {
+        collection.preload()
+      })
+
+      act(() => {
+        config.utils.begin()
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `1`,
+            name: `Young Person`,
+            age: 25,
+            email: `young@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `2`,
+            name: `Old Person`,
+            age: 40, // Matches filter age > 30
+            email: `old@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        config.utils.commit()
+        config.utils.markReady()
+      })
+
+      // Wait for initial sync
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(1)
+      })
+
+      // Count should be 1 (only Old Person matches)
+      expect(result.current.data[0]?.activeCount).toBe(1)
+
+      // Subscribe to track change events
+      const subscription = result.current.collection.subscribeChanges(
+        (changes: Array<any>) => {
+          changes.forEach((change) => {
+            changeEvents.push({ type: change.type, value: change.value })
+          })
+        }
+      )
+
+      const initialRenderCount = renderCount
+      changeEvents.length = 0
+
+      // Simulate a sync update - the old person's email changes
+      // This is what happens when sync refetches and the row has changed
+      // but the count-relevant fields haven't
+      act(() => {
+        config.utils.begin()
+        config.utils.write({
+          type: `update`,
+          value: {
+            id: `2`,
+            name: `Old Person`,
+            age: 40, // Still matches filter
+            email: `old.updated@example.com`, // Email changed - simulates lastUpdated changing
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        config.utils.commit()
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Count should still be 1
+      expect(result.current.data[0]?.activeCount).toBe(1)
+
+      // CRITICAL: No change events should be emitted since count didn't change
+      expect(changeEvents.length).toBe(0)
+
+      // CRITICAL: Render count should NOT have increased
+      expect(renderCount).toBe(initialRenderCount)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should re-render only when count actually changes`, async () => {
+      let renderCount = 0
+
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `count-change-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const { result } = renderHook(() => {
+        renderCount++
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              count: count(persons.id),
+            }))
+        )
+      })
+
+      // Wait for initial sync
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(1)
+      })
+
+      const renderCountAfterInitial = renderCount
+      expect(result.current.data[0]?.count).toBe(1) // Only John Smith (age 35)
+
+      // Update email (should NOT cause re-render - count unchanged)
+      act(() => {
+        collection.utils.begin()
+        collection.utils.write({
+          type: `update`,
+          value: {
+            id: `3`,
+            name: `John Smith`,
+            age: 35,
+            email: `new.email@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        collection.utils.commit()
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Count still 1, render count should be unchanged
+      expect(result.current.data[0]?.count).toBe(1)
+      expect(renderCount).toBe(renderCountAfterInitial)
+
+      // NOW add a new person who matches the filter (should cause re-render)
+      const renderCountBeforeInsert = renderCount
+      act(() => {
+        collection.utils.begin()
+        collection.utils.write({
+          type: `insert`,
+          value: {
+            id: `4`,
+            name: `New Person`,
+            age: 40, // Matches age > 30
+            email: `new@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        collection.utils.commit()
+      })
+
+      await waitFor(() => {
+        expect(result.current.data[0]?.count).toBe(2)
+      })
+
+      // This SHOULD have caused a re-render since count changed
+      expect(renderCount).toBeGreaterThan(renderCountBeforeInsert)
+    })
+
+    it(`should not re-render count when optimistic update changes unrelated field`, async () => {
+      // This test simulates:
+      // 1. User has a count query
+      // 2. An optimistic action updates a row's "updatedAt" field
+      // 3. Count stays the same - should not trigger re-render
+      let renderCount = 0
+      const changeEvents: Array<{ type: string; value: any }> = []
+
+      type Session = {
+        id: string
+        name: string
+        status: string
+        lastUpdated: number
+      }
+
+      const config = mockSyncCollectionOptionsNoInitialState<Session>({
+        id: `count-optimistic-test`,
+        getKey: (session) => session.id,
+      })
+      const sessionCollection = createCollection(config)
+
+      const { result } = renderHook(() => {
+        renderCount++
+        return useLiveQuery((q) =>
+          q
+            .from({ sessions: sessionCollection })
+            .where(({ sessions }) => eq(sessions.status, `active`))
+            .select(({ sessions }) => ({
+              activeCount: count(sessions.id),
+            }))
+        )
+      })
+
+      // Initialize with some sessions
+      act(() => {
+        sessionCollection.preload()
+      })
+
+      act(() => {
+        config.utils.begin()
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `session-1`,
+            name: `Session 1`,
+            status: `active`,
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `session-2`,
+            name: `Session 2`,
+            status: `active`,
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `session-3`,
+            name: `Session 3`,
+            status: `draft`, // Not active - shouldn't be counted
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.commit()
+        config.utils.markReady()
+      })
+
+      // Wait for initial sync
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(1)
+      })
+
+      // Count should be 2 (two active sessions)
+      expect(result.current.data[0]?.activeCount).toBe(2)
+
+      // Subscribe to track change events
+      const subscription = result.current.collection.subscribeChanges(
+        (changes: Array<any>) => {
+          changes.forEach((change) => {
+            changeEvents.push({ type: change.type, value: change.value })
+          })
+        }
+      )
+
+      const initialRenderCount = renderCount
+      changeEvents.length = 0
+
+      // Simulate an optimistic update that only changes lastUpdated
+      // This is the scenario where user launches a session and it updates the lastUpdated field
+      act(() => {
+        sessionCollection.update(`session-1`, (draft) => {
+          draft.lastUpdated = 2000 // Only this field changed
+        })
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Count should still be 2
+      expect(result.current.data[0]?.activeCount).toBe(2)
+
+      // CRITICAL: No change events should be emitted for the count query
+      // since the count didn't change
+      expect(changeEvents.length).toBe(0)
+
+      // CRITICAL: Render count should NOT have increased
+      expect(renderCount).toBe(initialRenderCount)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should not re-render count when sync refetches same data with updated timestamp`, async () => {
+      // This test simulates the user's exact scenario:
+      // 1. They have a count query for active sessions
+      // 2. Sync refetches every 2 seconds
+      // 3. The data is the same except for updatedAt
+      // 4. Count should NOT cause re-render
+      let renderCount = 0
+      const changeEvents: Array<{ type: string; value: any }> = []
+
+      type Session = {
+        id: string
+        name: string
+        status: string
+        lastUpdated: number
+      }
+
+      const config = mockSyncCollectionOptionsNoInitialState<Session>({
+        id: `count-refetch-test`,
+        getKey: (session) => session.id,
+      })
+      const sessionCollection = createCollection(config)
+
+      const { result } = renderHook(() => {
+        renderCount++
+        return useLiveQuery((q) =>
+          q
+            .from({ sessions: sessionCollection })
+            .where(({ sessions }) => eq(sessions.status, `active`))
+            .select(({ sessions }) => ({
+              activeCount: count(sessions.id),
+            }))
+        )
+      })
+
+      // Initialize with some sessions (first sync)
+      act(() => {
+        sessionCollection.preload()
+      })
+
+      act(() => {
+        config.utils.begin()
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `session-1`,
+            name: `Session 1`,
+            status: `active`,
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `session-2`,
+            name: `Session 2`,
+            status: `active`,
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `session-3`,
+            name: `Session 3`,
+            status: `draft`, // Not active
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.commit()
+        config.utils.markReady()
+      })
+
+      // Wait for initial sync
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(1)
+      })
+
+      expect(result.current.data[0]?.activeCount).toBe(2)
+
+      // Subscribe to track change events
+      const subscription = result.current.collection.subscribeChanges(
+        (changes: Array<any>) => {
+          changes.forEach((change) => {
+            changeEvents.push({ type: change.type, value: change.value })
+          })
+        }
+      )
+
+      const initialRenderCount = renderCount
+      changeEvents.length = 0
+
+      // Simulate a sync refetch - same data but with updated timestamps
+      // This is what happens when polling refetches the same data
+      act(() => {
+        config.utils.begin()
+        // Sync sends ALL data again (like a full refetch/poll)
+        config.utils.write({
+          type: `update`,
+          value: {
+            id: `session-1`,
+            name: `Session 1`,
+            status: `active`,
+            lastUpdated: 2000, // Timestamp updated
+          },
+        })
+        config.utils.write({
+          type: `update`,
+          value: {
+            id: `session-2`,
+            name: `Session 2`,
+            status: `active`,
+            lastUpdated: 2000, // Timestamp updated
+          },
+        })
+        config.utils.write({
+          type: `update`,
+          value: {
+            id: `session-3`,
+            name: `Session 3`,
+            status: `draft`,
+            lastUpdated: 2000, // Timestamp updated
+          },
+        })
+        config.utils.commit()
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Count should still be 2
+      expect(result.current.data[0]?.activeCount).toBe(2)
+
+      // CRITICAL: No change events should be emitted since count didn't change
+      expect(changeEvents.length).toBe(0)
+
+      // CRITICAL: Render count should NOT have increased
+      expect(renderCount).toBe(initialRenderCount)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should not re-render count queries when three queries exist and unrelated data changes`, async () => {
+      // This test simulates the user's exact scenario:
+      // - Three count queries (activeCount, draftCount, archivedCount)
+      // - When a session is touched (lastUpdated changes), none should re-render
+      let activeCountRenderCount = 0
+      let draftCountRenderCount = 0
+      let archivedCountRenderCount = 0
+      const activeCountChangeEvents: Array<any> = []
+      const draftCountChangeEvents: Array<any> = []
+      const archivedCountChangeEvents: Array<any> = []
+
+      type Session = {
+        id: string
+        name: string
+        status: `active` | `draft` | `archived`
+        lastUpdated: number
+      }
+
+      const config = mockSyncCollectionOptionsNoInitialState<Session>({
+        id: `three-count-test`,
+        getKey: (session) => session.id,
+      })
+      const sessionCollection = createCollection(config)
+
+      // Render three count queries simultaneously (like user's scenario)
+      const { result: activeResult } = renderHook(() => {
+        activeCountRenderCount++
+        return useLiveQuery((q) =>
+          q
+            .from({ sessions: sessionCollection })
+            .where(({ sessions }) => eq(sessions.status, `active`))
+            .select(({ sessions }) => ({
+              activeCount: count(sessions.id),
+            }))
+        )
+      })
+
+      const { result: draftResult } = renderHook(() => {
+        draftCountRenderCount++
+        return useLiveQuery((q) =>
+          q
+            .from({ sessions: sessionCollection })
+            .where(({ sessions }) => eq(sessions.status, `draft`))
+            .select(({ sessions }) => ({
+              draftCount: count(sessions.id),
+            }))
+        )
+      })
+
+      const { result: archivedResult } = renderHook(() => {
+        archivedCountRenderCount++
+        return useLiveQuery((q) =>
+          q
+            .from({ sessions: sessionCollection })
+            .where(({ sessions }) => eq(sessions.status, `archived`))
+            .select(({ sessions }) => ({
+              archivedCount: count(sessions.id),
+            }))
+        )
+      })
+
+      // Initialize with some sessions
+      act(() => {
+        sessionCollection.preload()
+      })
+
+      act(() => {
+        config.utils.begin()
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `1`,
+            name: `Session 1`,
+            status: `active`,
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `2`,
+            name: `Session 2`,
+            status: `active`,
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `3`,
+            name: `Session 3`,
+            status: `draft`,
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `4`,
+            name: `Session 4`,
+            status: `archived`,
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.write({
+          type: `insert`,
+          value: {
+            id: `5`,
+            name: `Session 5`,
+            status: `archived`,
+            lastUpdated: 1000,
+          },
+        })
+        config.utils.commit()
+        config.utils.markReady()
+      })
+
+      // Wait for initial sync
+      await waitFor(() => {
+        expect(activeResult.current.state.size).toBe(1)
+        expect(draftResult.current.state.size).toBe(1)
+        expect(archivedResult.current.state.size).toBe(1)
+      })
+
+      expect(activeResult.current.data[0]?.activeCount).toBe(2)
+      expect(draftResult.current.data[0]?.draftCount).toBe(1)
+      expect(archivedResult.current.data[0]?.archivedCount).toBe(2)
+
+      // Subscribe to track change events
+      const activeSubscription =
+        activeResult.current.collection.subscribeChanges(
+          (changes: Array<any>) => {
+            changes.forEach((change) => activeCountChangeEvents.push(change))
+          }
+        )
+      const draftSubscription = draftResult.current.collection.subscribeChanges(
+        (changes: Array<any>) => {
+          changes.forEach((change) => draftCountChangeEvents.push(change))
+        }
+      )
+      const archivedSubscription =
+        archivedResult.current.collection.subscribeChanges(
+          (changes: Array<any>) => {
+            changes.forEach((change) => archivedCountChangeEvents.push(change))
+          }
+        )
+
+      const initialActiveRenderCount = activeCountRenderCount
+      const initialDraftRenderCount = draftCountRenderCount
+      const initialArchivedRenderCount = archivedCountRenderCount
+      activeCountChangeEvents.length = 0
+      draftCountChangeEvents.length = 0
+      archivedCountChangeEvents.length = 0
+
+      // Simulate an action that updates lastUpdated on an active session
+      // This is the scenario the user described - launching a session updates its lastUpdated
+      act(() => {
+        config.utils.begin()
+        config.utils.write({
+          type: `update`,
+          value: {
+            id: `1`,
+            name: `Session 1`,
+            status: `active`, // Still active
+            lastUpdated: 2000, // Timestamp updated
+          },
+        })
+        config.utils.commit()
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Counts should still be the same
+      expect(activeResult.current.data[0]?.activeCount).toBe(2)
+      expect(draftResult.current.data[0]?.draftCount).toBe(1)
+      expect(archivedResult.current.data[0]?.archivedCount).toBe(2)
+
+      // CRITICAL: No query should have re-rendered since counts didn't change
+      expect(activeCountChangeEvents.length).toBe(0)
+      expect(draftCountChangeEvents.length).toBe(0)
+      expect(archivedCountChangeEvents.length).toBe(0)
+      expect(activeCountRenderCount).toBe(initialActiveRenderCount)
+      expect(draftCountRenderCount).toBe(initialDraftRenderCount)
+      expect(archivedCountRenderCount).toBe(initialArchivedRenderCount)
+
+      activeSubscription.unsubscribe()
+      draftSubscription.unsubscribe()
+      archivedSubscription.unsubscribe()
     })
   })
 })
