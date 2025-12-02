@@ -539,7 +539,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await collection2.cleanup()
     })
 
-    it(`Multi-row batch: some rows move in, some move out`, async () => {
+    it(`Multi-row transaction: some rows move in, some move out`, async () => {
       const collection = createPostsByActiveUsersCollection()
       await waitForReady(collection)
 
