@@ -3,7 +3,7 @@ import {
   createSingleRowRefProxy,
   toExpression,
 } from '../query/builder/ref-proxy'
-import { BTreeIndex } from '../indexes/btree-index'
+import { getDefaultIndexType } from '../indexes/index-registry'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { BaseIndex, IndexResolver } from '../indexes/base-index'
 import type { ChangeMessage } from '../types'
@@ -38,8 +38,21 @@ export class CollectionIndexesManager<
 
   /**
    * Creates an index on a collection for faster queries.
+   *
+   * Note: If no indexType is specified, this will use the registered default
+   * index type. If no default is registered, an error will be thrown.
+   *
+   * @example
+   * ```ts
+   * // With explicit index type (recommended for tree-shaking)
+   * import { BTreeIndex } from '@tanstack/db/indexing'
+   * collection.createIndex((row) => row.userId, { indexType: BTreeIndex })
+   *
+   * // With registered default (requires registerDefaultIndexType)
+   * collection.createIndex((row) => row.userId)
+   * ```
    */
-  public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
+  public createIndex<TResolver extends IndexResolver<TKey>>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
     config: IndexOptions<TResolver> = {},
   ): IndexProxy<TKey> {
@@ -50,8 +63,22 @@ export class CollectionIndexesManager<
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
 
-    // Default to BTreeIndex if no type specified
-    const resolver = config.indexType ?? (BTreeIndex as unknown as TResolver)
+    // Use provided index type, or fall back to registered default
+    let resolver: TResolver
+    if (config.indexType) {
+      resolver = config.indexType
+    } else {
+      const defaultType = getDefaultIndexType()
+      if (!defaultType) {
+        throw new Error(
+          `No index type specified and no default index type registered. ` +
+            `Either pass indexType in config, or register a default:\n` +
+            `  import { registerDefaultIndexType, BTreeIndex } from '@tanstack/db/indexing'\n` +
+            `  registerDefaultIndexType(BTreeIndex)`
+        )
+      }
+      resolver = defaultType as unknown as TResolver
+    }
 
     // Create lazy wrapper
     const lazyIndex = new LazyIndexWrapper<TKey>(
@@ -65,23 +92,15 @@ export class CollectionIndexesManager<
 
     this.lazyIndexes.set(indexId, lazyIndex)
 
-    // For BTreeIndex, resolve immediately and synchronously
-    if ((resolver as unknown) === BTreeIndex) {
-      try {
-        const resolvedIndex = lazyIndex.getResolved()
-        this.resolvedIndexes.set(indexId, resolvedIndex)
-      } catch (error) {
-        console.warn(`Failed to resolve BTreeIndex:`, error)
-      }
-    } else if (typeof resolver === `function` && resolver.prototype) {
-      // Other synchronous constructors - resolve immediately
+    // For synchronous index constructors (like BTreeIndex), resolve immediately
+    if (typeof resolver === `function` && resolver.prototype) {
       try {
         const resolvedIndex = lazyIndex.getResolved()
         this.resolvedIndexes.set(indexId, resolvedIndex)
       } catch {
-        // Fallback to async resolution
+        // Fallback to async resolution if sync resolution fails
         this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
-          console.warn(`Failed to resolve single index:`, error)
+          console.warn(`Failed to resolve index:`, error)
         })
       }
     } else if (this.isIndexesResolved) {

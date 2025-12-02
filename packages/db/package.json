@@ -36,6 +36,16 @@
         "default": "./dist/cjs/index.cjs"
       }
     },
+    "./indexing": {
+      "import": {
+        "types": "./dist/esm/indexing.d.ts",
+        "default": "./dist/esm/indexing.js"
+      },
+      "require": {
+        "types": "./dist/cjs/indexing.d.cts",
+        "default": "./dist/cjs/indexing.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,

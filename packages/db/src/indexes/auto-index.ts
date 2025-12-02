@@ -1,8 +1,13 @@
-import { DEFAULT_COMPARE_OPTIONS } from '../utils'
-import { BTreeIndex } from './btree-index'
-import type { CompareOptions } from '../query/builder/types'
-import type { BasicExpression } from '../query/ir'
-import type { CollectionImpl } from '../collection/index.js'
+import { DEFAULT_COMPARE_OPTIONS } from "../utils"
+import {
+  checkCollectionSizeForIndex,
+  getDefaultIndexType,
+  isDevModeEnabled,
+  isIndexingAvailable,
+} from "./index-registry"
+import type { CompareOptions } from "../query/builder/types"
+import type { BasicExpression } from "../query/ir"
+import type { CollectionImpl } from "../collection/index.js"
 
 export interface AutoIndexConfig {
   autoIndex?: `off` | `eager`
@@ -11,6 +16,19 @@ export interface AutoIndexConfig {
 function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   // Only proceed if auto-indexing is enabled
   if (collection.config.autoIndex !== `eager`) {
+    return false
+  }
+
+  // Check if indexing is available (BTreeIndex registered)
+  if (!isIndexingAvailable()) {
+    if (isDevModeEnabled()) {
+      console.warn(
+        `[TanStack DB] Auto-indexing is enabled but no index type is registered. ` +
+          `Import and register BTreeIndex to enable indexing:\n` +
+          `  import { registerDefaultIndexType, BTreeIndex } from '@tanstack/db/indexing'\n` +
+          `  registerDefaultIndexType(BTreeIndex)`
+      )
+    }
     return false
   }
 
@@ -46,6 +64,21 @@ export function ensureIndexForField<
     return // Index already exists
   }
 
+  // Dev mode: check if collection size warrants an index suggestion
+  if (isDevModeEnabled()) {
+    checkCollectionSizeForIndex(
+      collection.id || `unknown`,
+      collection.size,
+      fieldPath
+    )
+  }
+
+  // Get the registered default index type
+  const IndexType = getDefaultIndexType()
+  if (!IndexType) {
+    return // No index type available
+  }
+
   // Create a new index for this field using the collection's createIndex method
   try {
     // Use the proxy-based approach to create the proper accessor for nested paths
@@ -60,7 +93,7 @@ export function ensureIndexForField<
       },
       {
         name: `auto:${fieldPath.join(`.`)}`,
-        indexType: BTreeIndex,
+        indexType: IndexType,
         options: compareFn ? { compareFn, compareOptions: compareOpts } : {},
       },
     )

@@ -17,11 +17,30 @@ export { deepEquals } from './utils'
 export * from './paced-mutations'
 export * from './strategies/index.js'
 
-// Index system exports
-export * from './indexes/base-index.js'
-export * from './indexes/btree-index.js'
-export * from './indexes/lazy-index.js'
-export { type IndexOptions } from './indexes/index-options.js'
+// Index system exports - types only from main entry
+// For BTreeIndex and other index implementations, import from '@tanstack/db/indexing'
+export type {
+  IndexInterface,
+  IndexConstructor,
+  IndexResolver,
+  IndexStats,
+  IndexOperation,
+} from "./indexes/base-index.js"
+export { BaseIndex } from "./indexes/base-index.js"
+export type { IndexProxy } from "./indexes/lazy-index.js"
+export { type IndexOptions } from "./indexes/index-options.js"
+
+// Index registry - allows checking if indexing is available
+export {
+  registerDefaultIndexType,
+  isIndexingAvailable,
+  configureIndexDevMode,
+  isDevModeEnabled,
+} from "./indexes/index-registry.js"
+export type {
+  IndexDevModeConfig,
+  IndexSuggestion,
+} from "./indexes/index-registry.js"
 
 // Expression helpers
 export * from './query/expression-helpers.js'
