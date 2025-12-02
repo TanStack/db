@@ -145,11 +145,8 @@ export function findRowsMatchingPattern(
   index: TagIndex,
 ): Set<RowId> {
   const { position, value } = getPositionalValue(pattern)
-  // the index for this position exists
-  // because we initialize the index with the right length
-  // as soon as we know the tag length (i.e. when we first receive a tag)
-  const positionIndex = index[position]!
-  const rowSet = positionIndex.get(value)
+  const positionIndex = index[position]
+  const rowSet = positionIndex?.get(value)
   return rowSet ?? new Set()
 }
 
