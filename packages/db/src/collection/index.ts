@@ -245,9 +245,11 @@ export function createCollection<
 
 // Implementation
 export function createCollection(
-  options: CollectionConfig<any, string | number, any, UtilsRecord> & {
-    schema?: StandardSchemaV1
-  }
+  options:
+    | (CollectionConfig<any, string | number, any, UtilsRecord> & {
+        schema?: StandardSchemaV1
+      })
+    | any // Use 'any' to satisfy all overloads - actual validation happens via overload signatures
 ): Collection<any, string | number, UtilsRecord, any, any> {
   const collection = new CollectionImpl<any, string | number, any, any, any>(
     options
