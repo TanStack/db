@@ -104,10 +104,14 @@ export type OrderByShape =
 
 /**
  * JoinShape - Shape for join clauses (input to join() function)
+ *
+ * The alias must match a source in the query's sources object.
+ * The collection is looked up from sources, so you only specify:
+ * - on: the join condition
+ * - type: join type (inner, left, right, full)
  */
 export interface JoinShape {
   [alias: string]: {
-    collection: Collection<any, any, any, any, any>
     on: BasicExpression<boolean>
     type?: "inner" | "left" | "right" | "full"
   }

@@ -36,10 +36,10 @@ interface Post {
 declare const usersCollection: Collection<User, "id", any, any, any>
 declare const postsCollection: Collection<Post, "id", any, any, any>
 
-// Mock operators
+// Mock operators - both sides can be expressions or values
 declare function eq<T>(
-  left: BasicExpression<T>,
-  right: T
+  left: BasicExpression<T> | T,
+  right: BasicExpression<T> | T
 ): BasicExpression<boolean>
 
 // =============================================================================
@@ -109,23 +109,25 @@ type FullRowResult = typeof fullRowQuery._result
 /**
  * Using join() - tree-shakable!
  *
- * If you don't import join from the barrel, the join processing code
- * won't be bundled. The join() function returns a ClauseResult with
- * embedded processing logic.
+ * ALL sources (including joined tables) go in the first argument.
+ * This gives you typed refs for everything - no "as any" hacks needed.
+ *
+ * The join() function just specifies HOW to join (ON condition, type),
+ * not WHAT to join - since the collection is already in sources.
  */
-const joinQuery = query({ users: usersCollection }, ({ users }) => ({
-  join: join({
-    posts: {
-      collection: postsCollection,
-      on: eq((postsCollection as any).authorId, users.id),
-      type: "left",
+const joinQuery = query(
+  { users: usersCollection, posts: postsCollection },
+  ({ users, posts }) => ({
+    join: join({
+      posts: { on: eq(posts.authorId, users.id), type: "left" },
+    }),
+    where: eq(users.active, true),
+    select: {
+      name: users.name,
+      title: posts.title,
     },
-  }),
-  where: eq(users.active, true),
-  select: {
-    name: users.name,
-  },
-}))
+  })
+)
 
 // =============================================================================
 // Demo: Tree-shakable GROUP BY clause

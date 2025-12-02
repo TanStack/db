@@ -42,7 +42,7 @@ export function groupBy(
     __clause: "groupBy",
     expressions,
     process(ir, _context: ProcessorContext) {
-      const existingGroupBy = (ir as any).groupBy || []
+      const existingGroupBy = ir.groupBy ?? []
       return {
         ...ir,
         groupBy: [...existingGroupBy, ...expressions],
@@ -62,7 +62,7 @@ export function having(condition: BasicExpression<boolean>): HavingClauseResult 
     __clause: "having",
     condition,
     process(ir, _context: ProcessorContext) {
-      const existingHaving = (ir as any).having || []
+      const existingHaving = ir.having ?? []
       return {
         ...ir,
         having: [...existingHaving, condition],

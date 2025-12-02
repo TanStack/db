@@ -158,19 +158,20 @@ shapeRegistry.register("distinct", (_key, value, ir, _context) => ({
  * )
  * ```
  *
- * @example With tree-shakable clauses
+ * @example With tree-shakable clauses (join, groupBy, having)
  * ```ts
  * import { query, join } from '@tanstack/db/query/functional'
  * import { eq } from '@tanstack/db'
  *
+ * // All sources (including joined tables) go in first argument
  * const q = query(
- *   { users: usersCollection },
- *   ({ users }) => ({
+ *   { users: usersCollection, posts: postsCollection },
+ *   ({ users, posts }) => ({
  *     join: join({
- *       posts: { collection: postsCollection, on: eq(posts.authorId, users.id) }
+ *       posts: { on: eq(posts.authorId, users.id), type: 'left' }
  *     }),
  *     where: eq(users.active, true),
- *     select: { name: users.name }
+ *     select: { name: users.name, title: posts.title }
  *   })
  * )
  * ```

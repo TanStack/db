@@ -8,18 +8,15 @@
  * import { query, join } from '@tanstack/db/query/functional'
  * import { eq } from '@tanstack/db'
  *
+ * // All sources go in first argument - this gives you typed refs
  * const q = query(
- *   { users: usersCollection },
- *   ({ users }) => ({
+ *   { users: usersCollection, posts: postsCollection },
+ *   ({ users, posts }) => ({
  *     join: join({
- *       posts: {
- *         collection: postsCollection,
- *         on: eq(posts.authorId, users.id),
- *         type: 'left'
- *       }
+ *       posts: { on: eq(posts.authorId, users.id), type: 'left' }
  *     }),
  *     where: eq(users.active, true),
- *     select: { name: users.name }
+ *     select: { name: users.name, title: posts.title }
  *   })
  * )
  * ```
@@ -28,30 +25,34 @@
 import type { CollectionImpl } from "../../collection/index.js"
 import { CollectionRef as CollectionRefClass } from "../ir.js"
 import type { JoinClause } from "../ir.js"
-import type {
-  JoinShape,
-  JoinClauseResult,
-  ProcessorContext,
-} from "./types.js"
+import type { JoinShape, JoinClauseResult, ProcessorContext } from "./types.js"
 
 /**
  * join - Creates a tree-shakable JOIN clause
  *
- * @param shape - Object mapping alias to join definition
+ * The alias in the shape must match a source in the query's sources object.
+ * The collection is looked up from sources automatically.
+ *
+ * @param shape - Object mapping alias to join definition (on, type)
  * @returns JoinClauseResult with embedded processing logic
  */
 export function join(shape: JoinShape): JoinClauseResult {
   return {
     __clause: "join",
     shape,
-    process(ir, _context: ProcessorContext) {
+    process(ir, context: ProcessorContext) {
       const joinClauses: JoinClause[] = []
 
       for (const [alias, joinDef] of Object.entries(shape)) {
-        const { collection, on, type = "left" } = joinDef
+        const { on, type = "left" } = joinDef
 
+        // Look up the collection from sources by alias
+        const collection = context.sources[alias]
         if (!collection || typeof collection !== "object") {
-          throw new Error(`Invalid join source: ${alias} is not a Collection`)
+          throw new Error(
+            `Invalid join: "${alias}" not found in sources. ` +
+              `Available sources: ${context.aliases.join(", ")}`
+          )
         }
 
         const fromRef = new CollectionRefClass(
@@ -77,7 +78,7 @@ export function join(shape: JoinShape): JoinClauseResult {
         })
       }
 
-      const existingJoins = (ir as any).join || []
+      const existingJoins = ir.join ?? []
       return {
         ...ir,
         join: [...existingJoins, ...joinClauses],
