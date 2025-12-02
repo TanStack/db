@@ -181,6 +181,7 @@ packages/db/src/operators/
 2. **Split collection managers** for mutations tree-shaking
 3. **Break circular dependencies** (41 chains to untangle)
 4. **Update framework packages** to not re-export everything
+5. **Tree-shake indexes** (see below)
 
 ### Phase 4: Tree-Shakable Query Clauses (Future/v2.0)
 
@@ -310,7 +311,54 @@ Most problematic cycles:
 
 ---
 
-## Appendix B: db-ivm Operators
+## Appendix B: Index Tree-Shaking
+
+### Current State
+
+Indexes are exported directly from the main entry point:
+
+```typescript
+// index.ts
+export * from "./indexes/base-index.js"
+export * from "./indexes/btree-index.js"
+export * from "./indexes/lazy-index.js"
+```
+
+| File | Lines | Always Needed? |
+|------|-------|----------------|
+| `base-index.ts` | 214 | Yes (base class) |
+| `btree-index.ts` | 353 | Only if using BTree indexes |
+| `lazy-index.ts` | 251 | Only if using lazy indexes |
+| `auto-index.ts` | 147 | Only if using auto indexes |
+| `reverse-index.ts` | 120 | Only if using reverse indexes |
+| **Total** | **1085** | |
+
+### Solution
+
+Most users don't use indexes explicitly - they're an advanced optimization. Move to subpath exports:
+
+```typescript
+// Only import if needed
+import { BTreeIndex } from '@tanstack/db/indexes/btree'
+import { LazyIndex } from '@tanstack/db/indexes/lazy'
+```
+
+Or use auto-registration like operators:
+
+```typescript
+// indexes/btree-index.ts
+import { registerIndexType } from '../index-registry.js'
+
+export class BTreeIndex extends BaseIndex { ... }
+
+registerIndexType('btree', BTreeIndex)
+```
+
+**Estimated reduction:** ~800 lines for users not using indexes explicitly.
+
+---
+
+## Appendix C: db-ivm Operators
 
 ### Currently Bundled
 
@@ -459,39 +507,86 @@ export function getClauseCompiler(type: string): ClauseCompiler {
 
 The challenge: `where` needs to know about `users` from `from`.
 
-**Solution: Overloaded `query` function with tuple inference**
+**Best Solution: EdgeDB-style Single Callback Pattern**
+
+EdgeDB's query builder solves this elegantly. The first argument establishes context, the callback receives typed refs:
 
 ```typescript
-// Overloads for common patterns
+// EdgeDB pattern
+e.select(e.Movie, (movie) => ({
+  title: true,
+  filter: e.op(movie.title, '=', 'Iron Man')
+}))
+```
+
+**Adapted for TanStack DB:**
+
+```typescript
+import { query } from '@tanstack/db/query'
+import { eq } from '@tanstack/db'
+
+// First arg = sources, second arg = shape callback with typed refs
+const q = query(
+  { users: usersCollection },
+  ({ users }) => ({
+    filter: eq(users.active, true),
+    select: { name: users.name },
+    orderBy: users.createdAt,
+    limit: 10
+  })
+)
+```
+
+**Why this works:**
+1. First argument `{ users: usersCollection }` establishes the type context
+2. TypeScript infers callback parameter type from first argument
+3. Callback receives `{ users: RefProxy<User> }` - fully typed!
+4. Single callback = single object = flat API (like EdgeDB's "no nesting" philosophy)
+
+**With joins:**
+
+```typescript
+const q = query(
+  { users: usersCollection },
+  ({ users }) => ({
+    join: {
+      posts: {
+        collection: postsCollection,
+        on: eq(posts.authorId, users.id),
+        type: 'left'
+      }
+    },
+    filter: eq(users.active, true),
+    select: {
+      name: users.name,
+      posts: { title: true }
+    }
+  })
+)
+```
+
+**Tree-shakable:** The `query` function is tiny. Join/groupBy/orderBy logic only loads if the shape includes those keys.
+
+**Alternative: Separate clauses with context threading**
+
+If we want separate clause functions, use overloads:
+
+```typescript
+// Overloads thread context through
 export function query<S extends Source>(
   from: FromClause<S>
 ): Query<ContextFromSource<S>>
 
-export function query<S extends Source, W>(
+export function query<S extends Source>(
   from: FromClause<S>,
-  where: WhereClause<ContextFromSource<S>>
+  where: (refs: RefsFor<S>) => Expression<boolean>
 ): Query<ContextFromSource<S>>
 
 export function query<S extends Source, R>(
   from: FromClause<S>,
-  where: WhereClause<ContextFromSource<S>>,
-  select: SelectClause<ContextFromSource<S>, R>
+  where: (refs: RefsFor<S>) => Expression<boolean>,
+  select: (refs: RefsFor<S>) => R
 ): Query<R>
-
-// ... more overloads for common combinations
-```
-
-Or use a builder-style that's still tree-shakable:
-
-```typescript
-// Alternative: fluent but tree-shakable
-import { from } from '@tanstack/db/query/from'
-import { where } from '@tanstack/db/query/where'
-import { select } from '@tanstack/db/query/select'
-
-const q = from({ users: usersCollection })
-  .pipe(where(({ users }) => eq(users.active, true)))
-  .pipe(select(({ users }) => ({ name: users.name })))
 ```
 
 ### Bundle Size Impact (Estimated)
