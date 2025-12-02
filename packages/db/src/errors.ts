@@ -87,6 +87,16 @@ export class CollectionRequiresSyncConfigError extends CollectionConfigurationEr
   }
 }
 
+export class MutationsNotEnabledError extends CollectionConfigurationError {
+  constructor(method: `insert` | `update` | `delete`) {
+    super(
+      `Cannot call ${method}() on a read-only collection. ` +
+        `Set \`mutations: true\` in the collection config to enable mutations.`
+    )
+    this.name = `MutationsNotEnabledError`
+  }
+}
+
 export class InvalidSchemaError extends CollectionConfigurationError {
   constructor() {
     super(`Schema must implement the standard-schema interface`)

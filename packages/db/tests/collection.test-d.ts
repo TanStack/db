@@ -9,6 +9,7 @@ describe(`Collection.update type tests`, () => {
 
   const testCollection = createCollection<TypeTestItem, string>({
     getKey: (item) => item.id,
+    mutations: true,
     sync: { sync: () => {} },
   })
   const updateMethod = testCollection.update
@@ -358,6 +359,7 @@ describe(`Collection callback type tests`, () => {
   it(`should correctly type onInsert callback parameters`, () => {
     createCollection<TypeTestItem>({
       getKey: (item) => item.id,
+      mutations: true,
       sync: { sync: () => {} },
       onInsert: (params) => {
         expectTypeOf(params.transaction).toHaveProperty(`mutations`)
@@ -372,6 +374,7 @@ describe(`Collection callback type tests`, () => {
   it(`should correctly type onUpdate callback parameters`, () => {
     createCollection<TypeTestItem>({
       getKey: (item) => item.id,
+      mutations: true,
       sync: { sync: () => {} },
       onUpdate: (params) => {
         expectTypeOf(params.transaction).toHaveProperty(`mutations`)
@@ -388,6 +391,7 @@ describe(`Collection callback type tests`, () => {
   it(`should correctly type onDelete callback parameters`, () => {
     createCollection<TypeTestItem>({
       getKey: (item) => item.id,
+      mutations: true,
       sync: { sync: () => {} },
       onDelete: (params) => {
         expectTypeOf(params.transaction).toHaveProperty(`mutations`)

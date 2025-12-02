@@ -30,6 +30,7 @@ describe(`Collection getters`, () => {
     const config = {
       id: `test-collection`,
       getKey: (val: Item) => val.id,
+      mutations: true as const,
       sync: mockSync,
       startSync: true,
     }
@@ -63,6 +64,7 @@ describe(`Collection getters`, () => {
       const emptyCollection = createCollection({
         id: `empty-collection`,
         getKey: (val: Item) => val.id,
+        mutations: true,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -80,6 +82,7 @@ describe(`Collection getters`, () => {
       const syncCollection = createCollection<{ id: string; name: string }>({
         id: `sync-size-test`,
         getKey: (val) => val.id,
+        mutations: true,
         startSync: true,
         sync: {
           sync: (callbacks) => {

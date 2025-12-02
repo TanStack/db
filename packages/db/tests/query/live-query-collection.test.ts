@@ -348,6 +348,7 @@ describe(`createLiveQueryCollection`, () => {
     const sourceCollection = createCollection<User>({
       id: `delayed-source-collection`,
       getKey: (user) => user.id,
+      mutations: true,
       startSync: false, // Don't start sync immediately
       sync: {
         sync: ({ begin, commit, write, markReady }) => {
@@ -800,6 +801,7 @@ describe(`createLiveQueryCollection`, () => {
         const base = createCollection<{ id: string; created_at: number }>({
           id: `delayed-inserts`,
           getKey: (item) => item.id,
+          mutations: true,
           startSync: true,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -861,6 +863,7 @@ describe(`createLiveQueryCollection`, () => {
         const base = createCollection<{ id: string; created_at: number }>({
           id: `delayed-inserts-many`,
           getKey: (item) => item.id,
+          mutations: true,
           startSync: true,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -930,6 +933,7 @@ describe(`createLiveQueryCollection`, () => {
         }>({
           id: `queued-optimistic-updates`,
           getKey: (todo) => todo.id,
+          mutations: true,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
               syncBegin = begin
@@ -1032,6 +1036,7 @@ describe(`createLiveQueryCollection`, () => {
         }>({
           id: `commit-blocked`,
           getKey: (todo) => todo.id,
+          mutations: true,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
               begin()
@@ -1079,6 +1084,7 @@ describe(`createLiveQueryCollection`, () => {
       const sourceCollection = createCollection<{ id: string; value: string }>({
         id: `source`,
         getKey: (item) => item.id,
+        mutations: true,
         sync: {
           sync: ({ markReady }) => {
             markReady()

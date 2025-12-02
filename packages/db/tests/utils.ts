@@ -247,6 +247,7 @@ export function mockSyncCollectionOptions<
     sync,
     ...(config.syncMode ? { syncMode: config.syncMode } : {}),
     startSync: true,
+    mutations: true,
     onInsert: async (_params: MutationFnParams<T>) => {
       // TODO
       await awaitSync()
@@ -329,6 +330,7 @@ export function mockSyncCollectionOptionsNoInitialState<
       },
     },
     startSync: false,
+    mutations: true,
     onInsert: async (_params: MutationFnParams<T>) => {
       // TODO
       await awaitSync()

@@ -609,6 +609,7 @@ export function localStorageCollectionOptions(
   return {
     ...restConfig,
     id: collectionId,
+    mutations: true as const,
     sync,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,

@@ -12,6 +12,7 @@ describe(`applyMutations merge logic`, () => {
     }>({
       id: `test-collection`,
       getKey: (item) => item.id,
+      mutations: true,
       onInsert: async () => {}, // Add required handler
       onUpdate: async () => {}, // Add required handler
       onDelete: async () => {}, // Add required handler

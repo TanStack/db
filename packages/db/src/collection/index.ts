@@ -1,6 +1,7 @@
 import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
+  MutationsNotEnabledError,
 } from "../errors"
 import { currentStateAsChanges } from "./change-events"
 
@@ -9,8 +10,8 @@ import { CollectionChangesManager } from "./changes"
 import { CollectionLifecycleManager } from "./lifecycle.js"
 import { CollectionSyncManager } from "./sync"
 import { CollectionIndexesManager } from "./indexes"
-import { CollectionMutationsManager } from "./mutations"
 import { CollectionEventsManager } from "./events.js"
+import { CollectionMutationsManager } from "./mutations"
 import type { CollectionSubscription } from "./subscription"
 import type { AllCollectionEvents, CollectionEventHandler } from "./events.js"
 import type { BaseIndex, IndexResolver } from "../indexes/base-index.js"
@@ -285,7 +286,8 @@ export class CollectionImpl<
   public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   public _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
   private _indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
-  private _mutations: CollectionMutationsManager<
+  // Only instantiated when mutations: true (for tree-shaking)
+  private _mutations?: CollectionMutationsManager<
     TOutput,
     TKey,
     TUtils,
@@ -331,9 +333,19 @@ export class CollectionImpl<
     this._events = new CollectionEventsManager()
     this._indexes = new CollectionIndexesManager()
     this._lifecycle = new CollectionLifecycleManager(config, this.id)
-    this._mutations = new CollectionMutationsManager(config, this.id)
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
+
+    // Only instantiate mutations module when mutations are enabled (for tree-shaking)
+    // Bundlers can eliminate this code path and the import if mutations: true is never used
+    if (config.mutations === true) {
+      this._mutations = new CollectionMutationsManager(config, this.id)
+      this._mutations.setDeps({
+        collection: this,
+        lifecycle: this._lifecycle,
+        state: this._state,
+      })
+    }
 
     this.comparisonOpts = buildCompareOptionsFromConfig(config)
 
@@ -356,11 +368,6 @@ export class CollectionImpl<
       indexes: this._indexes,
       state: this._state,
       sync: this._sync,
-    })
-    this._mutations.setDeps({
-      collection: this, // Required for passing to config.onInsert/onUpdate/onDelete and annotating mutations
-      lifecycle: this._lifecycle,
-      state: this._state,
     })
     this._state.setDeps({
       collection: this, // Required for filtering events to only include this collection
@@ -575,6 +582,9 @@ export class CollectionImpl<
     type: `insert` | `update`,
     key?: TKey
   ): TOutput | never {
+    if (!this._mutations) {
+      throw new MutationsNotEnabledError(type)
+    }
     return this._mutations.validateData(data, type, key)
   }
 
@@ -620,6 +630,9 @@ export class CollectionImpl<
    * }
    */
   insert = (data: TInput | Array<TInput>, config?: InsertConfig) => {
+    if (!this._mutations) {
+      throw new MutationsNotEnabledError(`insert`)
+    }
     return this._mutations.insert(data, config)
   }
 
@@ -699,6 +712,9 @@ export class CollectionImpl<
       | ((draft: WritableDeep<TInput>) => void)
       | ((drafts: Array<WritableDeep<TInput>>) => void)
   ) {
+    if (!this._mutations) {
+      throw new MutationsNotEnabledError(`update`)
+    }
     return this._mutations.update(keys, configOrCallback, maybeCallback)
   }
 
@@ -736,6 +752,9 @@ export class CollectionImpl<
     keys: Array<TKey> | TKey,
     config?: OperationConfig
   ): TransactionType<any> => {
+    if (!this._mutations) {
+      throw new MutationsNotEnabledError(`delete`)
+    }
     return this._mutations.delete(keys, config)
   }
 

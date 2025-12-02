@@ -13,6 +13,7 @@ describe(`createOptimisticAction`, () => {
     const collection = createCollection<{ id: string; text: string }>({
       id: `test-collection`,
       getKey: (item) => item.id,
+      mutations: true,
       sync: {
         sync: () => {
           // No-op sync for testing
@@ -62,6 +63,7 @@ describe(`createOptimisticAction`, () => {
     const collection = createCollection<{ id: string; text: string }>({
       id: `async-on-mutate-collection`,
       getKey: (item) => item.id,
+      mutations: true,
       sync: {
         sync: () => {
           // No-op sync for testing
@@ -93,6 +95,7 @@ describe(`createOptimisticAction`, () => {
     }>({
       id: `todo-collection`,
       getKey: (item) => item.id,
+      mutations: true,
       sync: {
         sync: () => {
           // No-op sync for testing
@@ -213,6 +216,7 @@ describe(`createOptimisticAction`, () => {
     const collection = createCollection<{ id: string; text: string }>({
       id: `error-collection`,
       getKey: (item) => item.id,
+      mutations: true,
       sync: {
         sync: () => {
           // No-op sync for testing

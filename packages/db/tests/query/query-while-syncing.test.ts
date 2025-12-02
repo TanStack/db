@@ -1007,6 +1007,7 @@ describe(`Query while syncing`, () => {
         const usersCollection = createCollection<User, number>({
           id: `test-users-optimistic-mutations`,
           getKey: (user) => user.id,
+          mutations: true,
           autoIndex,
           startSync: false,
           sync: {

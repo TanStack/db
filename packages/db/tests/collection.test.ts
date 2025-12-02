@@ -24,10 +24,11 @@ describe(`Collection`, () => {
   })
 
   it(`should throw an error when trying to use mutation operations outside of a transaction`, async () => {
-    // Create a collection with sync but no mutationFn
+    // Create a collection with mutations enabled but no handlers
     const collection = createCollection<{ value: string }>({
       id: `foo`,
       getKey: (item) => item.value,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -72,6 +73,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `id-update-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -108,6 +110,7 @@ describe(`Collection`, () => {
     createCollection<{ name: string }>({
       id: `foo`,
       getKey: (item) => item.name,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ collection, begin, write, commit }) => {
@@ -157,6 +160,7 @@ describe(`Collection`, () => {
     }>({
       id: `mock`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -427,9 +431,8 @@ describe(`Collection`, () => {
     // new collection w/ mock sync/mutation
     const collection = createCollection<{ id: number; value: string }>({
       id: `mock`,
-      getKey: (item) => {
-        return item.id
-      },
+      getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -504,6 +507,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ name: string }>({
       id: `delete-errors`,
       getKey: (val) => val.name,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, commit }) => {
@@ -537,6 +541,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `duplicate-id-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -571,6 +576,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `bulk-duplicate-id-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, commit, markReady }) => {
@@ -622,6 +628,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `handlers-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -687,6 +694,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `direct-operations-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -741,6 +749,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `no-handlers-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -792,6 +801,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `non-optimistic-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -895,6 +905,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `optimistic-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -1004,6 +1015,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; checked: boolean }>({
       id: `user-action-blocking-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -1106,6 +1118,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-basic-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -1153,6 +1166,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-operations-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -1219,6 +1233,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-empty-test`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, commit, truncate, markReady }) => {
@@ -1257,6 +1272,7 @@ describe(`Collection`, () => {
       mockSyncCollectionOptionsNoInitialState<Row>({
         id: `repro-truncate-open-transaction`,
         getKey: (r) => r.id,
+        mutations: true,
       })
     )
     const preloadPromise = collection.preload()
@@ -1319,6 +1335,7 @@ describe(`Collection`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `multiple-sync-before-ready`,
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -1407,6 +1424,7 @@ describe(`Collection isLoadingSubset property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      mutations: true,
       sync: {
         sync: ({ markReady }) => {
           markReady()
@@ -1426,6 +1444,7 @@ describe(`Collection isLoadingSubset property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      mutations: true,
       syncMode: `on-demand`,
       startSync: true,
       sync: {
@@ -1458,6 +1477,7 @@ describe(`Collection isLoadingSubset property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      mutations: true,
       syncMode: `on-demand`,
       startSync: true,
       sync: {
@@ -1487,6 +1507,7 @@ describe(`Collection isLoadingSubset property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      mutations: true,
       syncMode: `on-demand`,
       startSync: true,
       sync: {
@@ -1537,6 +1558,7 @@ describe(`Collection isLoadingSubset property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      mutations: true,
       syncMode: `on-demand`,
       startSync: true,
       sync: {
@@ -1591,6 +1613,7 @@ describe(`Collection isLoadingSubset property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      mutations: true,
       syncMode: `on-demand`,
       startSync: true,
       sync: {
@@ -1617,6 +1640,7 @@ describe(`Collection isLoadingSubset property`, () => {
     const collection = createCollection<{ id: string; value: string }>({
       id: `test`,
       getKey: (item) => item.id,
+      mutations: true,
       syncMode: `on-demand`,
       startSync: true,
       sync: {

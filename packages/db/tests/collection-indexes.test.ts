@@ -86,6 +86,7 @@ describe(`Collection Indexes`, () => {
 
     collection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
+      mutations: true,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -1319,6 +1320,7 @@ describe(`Collection Indexes`, () => {
 
       const specialCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
+        mutations: true,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -1381,6 +1383,7 @@ describe(`Collection Indexes`, () => {
     it(`should handle index creation on empty collection`, () => {
       const emptyCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
+        mutations: true,
         sync: { sync: () => {} },
       })
 
