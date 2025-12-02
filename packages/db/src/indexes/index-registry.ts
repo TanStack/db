@@ -1,8 +1,14 @@
 /**
- * Index Registry - Allows optional indexing by not hard-coding BTreeIndex
+ * Index Registry - Allows optional and custom indexing
  *
  * This module provides a way to register index types at runtime,
- * enabling tree-shaking of the BTree implementation when indexing isn't used.
+ * enabling:
+ * - Tree-shaking of BTree implementation when indexing isn't used
+ * - Custom index implementations (register your own index type)
+ * - Per-collection or global index configuration
+ *
+ * Dev mode suggestions are ON by default in non-production builds
+ * to help developers identify when indexes would improve performance.
  */
 
 import type { IndexConstructor } from "./base-index"
@@ -10,9 +16,9 @@ import type { IndexConstructor } from "./base-index"
 // Global registry for default index type
 let defaultIndexType: IndexConstructor<any> | null = null
 
-// Dev mode detection settings
+// Dev mode detection settings - ON by default in non-production
 let devModeConfig: IndexDevModeConfig = {
-  enabled: false,
+  enabled: true,
   collectionSizeThreshold: 100,
   slowQueryThresholdMs: 10,
   onSuggestion: null,

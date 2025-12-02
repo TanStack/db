@@ -322,7 +322,7 @@ export class CollectionImpl<
     // Set default values for optional config properties
     this.config = {
       ...config,
-      autoIndex: config.autoIndex ?? `eager`,
+      autoIndex: config.autoIndex ?? `off`,
     }
 
     this._changes = new CollectionChangesManager()
