@@ -903,9 +903,11 @@ function createElectricSync<T extends Row<unknown>>(
   // It memoizes the result parsed tag such that future calls
   // for the same tag string return the same MoveTag array.
   const parseTag = (tag: MoveTag): ParsedMoveTag => {
-    if (tagCache.has(tag)) {
-      return tagCache.get(tag)!
+    const cachedTag = tagCache.get(tag)
+    if (cachedTag) {
+      return cachedTag
     }
+
     const parsedTag = tag.split(`|`)
     tagCache.set(tag, parsedTag)
     return parsedTag
@@ -973,16 +975,13 @@ function createElectricSync<T extends Row<unknown>>(
 
     for (const tag of removedTags) {
       const parsedTag = parseTag(tag)
-      const currentTagLength = getTagLength(parsedTag)
-      if (currentTagLength === tagLength) {
-        rowTagSet.delete(tag)
-        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
-        // We aggresively evict the tag from the cache
-        // if this tag is shared with another row
-        // and is not removed from that other row
-        // then next time we encounter the tag it will be parsed again
-        tagCache.delete(tag)
-      }
+      rowTagSet.delete(tag)
+      removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+      // We aggresively evict the tag from the cache
+      // if this tag is shared with another row
+      // and is not removed from that other row
+      // then next time we encounter the tag it will be parsed again
+      tagCache.delete(tag)
     }
   }
 
