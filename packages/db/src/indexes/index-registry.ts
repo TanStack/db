@@ -1,22 +1,8 @@
 /**
- * Index Registry - Allows optional and custom indexing
+ * Index Dev Mode - Helps developers identify when indexes would improve performance
  *
- * This module provides a way to register index types at runtime,
- * enabling:
- * - Tree-shaking of BTree implementation when indexing isn't used
- * - MapIndex for lightweight equality lookups (eq, in)
- * - BTreeIndex for full-featured indexing with sorted iteration
- * - Custom index implementations (register your own index type)
- * - Per-collection or global index configuration
- *
- * Dev mode suggestions are ON by default in non-production builds
- * to help developers identify when indexes would improve performance.
+ * Dev mode suggestions are ON by default in non-production builds.
  */
-
-import type { IndexConstructor } from "./base-index"
-
-// Global registry for default index type
-let defaultIndexType: IndexConstructor<any> | null = null
 
 // Dev mode detection settings - ON by default in non-production
 let devModeConfig: IndexDevModeConfig = {
@@ -59,36 +45,6 @@ const queryPatterns = new Map<
 >()
 
 /**
- * Register a default index type to be used when no explicit type is provided.
- * This allows BTreeIndex to be tree-shaken when not used.
- *
- * @example
- * ```ts
- * import { registerDefaultIndexType, BTreeIndex } from '@tanstack/db/indexing'
- * registerDefaultIndexType(BTreeIndex)
- * ```
- */
-export function registerDefaultIndexType(
-  indexType: IndexConstructor<any>
-): void {
-  defaultIndexType = indexType
-}
-
-/**
- * Get the registered default index type, or null if none registered.
- */
-export function getDefaultIndexType(): IndexConstructor<any> | null {
-  return defaultIndexType
-}
-
-/**
- * Check if indexing is available (a default index type has been registered)
- */
-export function isIndexingAvailable(): boolean {
-  return defaultIndexType !== null
-}
-
-/**
  * Configure dev mode for index suggestions
  */
 export function configureIndexDevMode(
@@ -121,15 +77,11 @@ export function emitIndexSuggestion(suggestion: IndexSuggestion): void {
     devModeConfig.onSuggestion(suggestion)
   } else {
     // Default: log to console with helpful formatting
-    const indexTypeHint = defaultIndexType
-      ? ``
-      : `\n  First, enable indexing: import { enableIndexing } from '@tanstack/db/indexing'; enableIndexing()`
     console.warn(
       `[TanStack DB] Index suggestion for "${suggestion.collectionId}":\n` +
         `  ${suggestion.message}\n` +
-        `  Field: ${suggestion.fieldPath.join(`.`)}` +
-        indexTypeHint +
-        `\n  Add index: collection.createIndex((row) => row.${suggestion.fieldPath.join(`.`)})`
+        `  Field: ${suggestion.fieldPath.join(`.`)}\n` +
+        `  Add index: collection.createIndex((row) => row.${suggestion.fieldPath.join(`.`)})`
     )
   }
 }

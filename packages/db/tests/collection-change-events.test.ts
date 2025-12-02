@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createCollection } from '../src/collection/index.js'
-import { currentStateAsChanges } from '../src/collection/change-events.js'
-import { Func, PropRef, Value } from '../src/query/ir.js'
-import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { createCollection } from "../src/collection/index.js"
+import { currentStateAsChanges } from "../src/collection/change-events.js"
+import { Func, PropRef, Value } from "../src/query/ir.js"
+import { DEFAULT_COMPARE_OPTIONS } from "../src/utils.js"
+import { BTreeIndex } from "../src/indexes/btree-index.js"
 
 interface TestUser {
   id: string
@@ -39,6 +40,7 @@ describe(`currentStateAsChanges`, () => {
       id: `test-collection-${autoIndex}`,
       getKey: (user) => user.id,
       autoIndex,
+      defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
       sync: {
         sync: mockSync,
       },

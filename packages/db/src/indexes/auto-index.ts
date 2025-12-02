@@ -1,10 +1,5 @@
 import { DEFAULT_COMPARE_OPTIONS } from "../utils"
-import {
-  checkCollectionSizeForIndex,
-  getDefaultIndexType,
-  isDevModeEnabled,
-  isIndexingAvailable,
-} from "./index-registry"
+import { checkCollectionSizeForIndex, isDevModeEnabled } from "./index-registry"
 import type { CompareOptions } from "../query/builder/types"
 import type { BasicExpression } from "../query/ir"
 import type { CollectionImpl } from "../collection/index.js"
@@ -19,17 +14,14 @@ function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
     return false
   }
 
-  // Check if indexing is available (MapIndex or BTreeIndex registered)
-  if (!isIndexingAvailable()) {
+  // Check if defaultIndexType is set on the collection
+  if (!collection.config.defaultIndexType) {
     if (isDevModeEnabled()) {
       console.warn(
-        `[TanStack DB] Auto-indexing is enabled but no index type is registered. ` +
-          `Import and enable indexing:\n` +
-          `  import { enableIndexing } from '@tanstack/db/indexing'\n` +
-          `  enableIndexing()  // For equality lookups (eq, in)\n` +
-          `  // Or for ORDER BY optimization on large collections:\n` +
-          `  import { enableBTreeIndexing } from '@tanstack/db/indexing'\n` +
-          `  enableBTreeIndexing()`
+        `[TanStack DB] Auto-indexing is enabled but no defaultIndexType is set. ` +
+          `Set defaultIndexType on the collection:\n` +
+          `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
+          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`
       )
     }
     return false
@@ -76,15 +68,9 @@ export function ensureIndexForField<
     )
   }
 
-  // Get the registered default index type
-  const IndexType = getDefaultIndexType()
-  if (!IndexType) {
-    return // No index type available
-  }
-
   // Create a new index for this field using the collection's createIndex method
+  // The collection will use its defaultIndexType
   try {
-    // Use the proxy-based approach to create the proper accessor for nested paths
     collection.createIndex(
       (row) => {
         // Navigate through the field path
@@ -96,7 +82,6 @@ export function ensureIndexForField<
       },
       {
         name: `auto:${fieldPath.join(`.`)}`,
-        indexType: IndexType,
         options: compareFn ? { compareFn, compareOptions: compareOpts } : {},
       },
     )

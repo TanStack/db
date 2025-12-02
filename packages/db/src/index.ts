@@ -18,22 +18,18 @@ export * from './paced-mutations'
 export * from './strategies/index.js'
 
 // Index system exports - types only from main entry
-// For BTreeIndex and other index implementations, import from '@tanstack/db/indexing'
+// For BasicIndex, BTreeIndex and other index implementations, import from '@tanstack/db/indexing'
 export type {
   IndexInterface,
   IndexConstructor,
-  IndexResolver,
   IndexStats,
   IndexOperation,
 } from "./indexes/base-index.js"
 export { BaseIndex } from "./indexes/base-index.js"
-export type { IndexProxy } from "./indexes/lazy-index.js"
 export { type IndexOptions } from "./indexes/index-options.js"
 
-// Index registry - allows checking if indexing is available
+// Dev mode utilities
 export {
-  registerDefaultIndexType,
-  isIndexingAvailable,
   configureIndexDevMode,
   isDevModeEnabled,
 } from "./indexes/index-registry.js"
