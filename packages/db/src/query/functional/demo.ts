@@ -52,7 +52,7 @@ declare function eq<T>(left: BasicExpression<T>, right: T): BasicExpression<bool
 const basicQuery = query(
   { users: usersCollection },
   ({ users }) => ({
-    filter: eq(users.active, true),
+    where: eq(users.active, true),
     select: {
       name: users.name,
       email: users.email,
@@ -70,7 +70,7 @@ type BasicResult = typeof basicQuery._result
 const paginatedQuery = query(
   { users: usersCollection },
   ({ users }) => ({
-    filter: eq(users.active, true),
+    where: eq(users.active, true),
     select: {
       name: users.name,
     },
@@ -102,7 +102,7 @@ const complexOrderQuery = query(
 const fullRowQuery = query(
   { users: usersCollection },
   ({ users }) => ({
-    filter: eq(users.active, true),
+    where: eq(users.active, true),
   })
 )
 
@@ -128,7 +128,7 @@ type FullRowResult = typeof fullRowQuery._result
  *         type: 'left'
  *       }
  *     },
- *     filter: eq(users.active, true),
+ *     where: eq(users.active, true),
  *     select: {
  *       name: users.name,
  *       posts: { title: true }

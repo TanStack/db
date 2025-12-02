@@ -56,7 +56,7 @@ export type RefsFor<T extends Sources> = {
  * QueryShape - The object returned by the shape callback
  *
  * This is the "flat API" - all clauses in one object:
- * - filter: WHERE clause
+ * - where: WHERE clause (filter condition)
  * - select: SELECT clause (what to return)
  * - orderBy: ORDER BY clause
  * - limit: LIMIT clause
@@ -67,7 +67,7 @@ export type RefsFor<T extends Sources> = {
  * - having: HAVING clause (tree-shakable)
  */
 export interface QueryShape<TSelect = any> {
-  filter?: BasicExpression<boolean>
+  where?: BasicExpression<boolean>
   select?: TSelect
   orderBy?: OrderByShape | OrderByShape[]
   limit?: number

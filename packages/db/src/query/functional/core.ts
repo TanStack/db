@@ -64,8 +64,8 @@ export const shapeRegistry: ShapeRegistry = new ShapeRegistryImpl()
 // Core Shape Processors (always bundled)
 // =============================================================================
 
-// Filter processor (WHERE)
-shapeRegistry.register("filter", (_key, value, ir, _context) => {
+// Where processor (WHERE clause)
+shapeRegistry.register("where", (_key, value, ir, _context) => {
   const existingWhere = ir.where || []
   return {
     ...ir,
@@ -145,7 +145,7 @@ shapeRegistry.register("distinct", (_key, value, ir, _context) => ({
  * const q = query(
  *   { users: usersCollection },
  *   ({ users }) => ({
- *     filter: eq(users.active, true),
+ *     where: eq(users.active, true),
  *     select: { name: users.name },
  *     orderBy: users.createdAt,
  *     limit: 10
