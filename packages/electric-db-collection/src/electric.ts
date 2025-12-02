@@ -1252,34 +1252,20 @@ function createElectricSync<T extends Row<unknown>>(
         const hasTags = tags || removedTags
 
         const rowId = collection.getKeyFromItem(changeMessage.value)
-        const rowTagSet = () =>
-          processTagsForChangeMessage(tags, removedTags, rowId)
 
-        // Check if row should be deleted (empty tag set)
-        // but only if the message includes tags
-        // because shapes without subqueries don't contain tags
-        // so we should keep those around
-        if (hasTags && rowTagSet().size === 0) {
+        if (changeMessage.headers.operation === `delete`) {
           clearTagsForRow(rowId)
-          write({
-            type: `delete`,
-            value: changeMessage.value,
-            metadata: {
-              ...changeMessage.headers,
-            },
-          })
-        } else {
-          if (changeMessage.headers.operation === `delete`) {
-            clearTagsForRow(rowId)
-          }
-          write({
-            type: changeMessage.headers.operation,
-            value: changeMessage.value,
-            metadata: {
-              ...changeMessage.headers,
-            },
-          })
+        } else if (hasTags) {
+          processTagsForChangeMessage(tags, removedTags, rowId)
         }
+
+        write({
+          type: changeMessage.headers.operation,
+          value: changeMessage.value,
+          metadata: {
+            ...changeMessage.headers,
+          },
+        })
       }
 
       // Create deduplicated loadSubset wrapper for non-eager modes
