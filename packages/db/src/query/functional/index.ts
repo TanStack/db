@@ -41,10 +41,26 @@
  *
  * Tree-shaking: If you don't import join(), groupBy(), or having(),
  * that code won't be bundled.
+ *
+ * ## Limitations
+ *
+ * - **First source is FROM**: The first key in the sources object becomes
+ *   the primary FROM table. Additional sources are available for joins.
+ *
+ * - **Multi-source queries require select**: When using joins, you should
+ *   always provide a `select` clause. Without it, the result type is a
+ *   union of row types (e.g., `User | Post`), not a joined row.
+ *
+ * - **Join conditions**: Only binary comparisons like `eq(a, b)` are
+ *   supported. Complex conditions like `and(eq(...), eq(...))` require
+ *   IR changes and will throw an error.
+ *
+ * - **Join types**: Supports `inner`, `left`, `right`, `full`. The IR's
+ *   `outer` and `cross` join types are not exposed in this API.
  */
 
-// Core API
-export { query, compileQuery, getQueryIR, shapeRegistry } from "./core.js"
+// Core API (shapeRegistry is internal - not exported)
+export { query, compileQuery, getQueryIR } from "./core.js"
 
 // Tree-shakable clause functions
 export { join } from "./join.js"

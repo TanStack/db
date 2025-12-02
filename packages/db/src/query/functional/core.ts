@@ -78,13 +78,16 @@ class ShapeRegistryImpl implements ShapeRegistry {
       }
     }
 
-    // Warn about any keys not in CLAUSE_ORDER (typos or unsupported clauses)
+    // Fail fast on unknown keys (catches typos and unsupported clauses)
     for (const key of Object.keys(shape)) {
       if (
         !ShapeRegistryImpl.CLAUSE_ORDER.includes(key) &&
         (shape as Record<string, unknown>)[key] !== undefined
       ) {
-        console.warn(`Unknown clause key: ${key}`)
+        throw new Error(
+          `Unknown clause key: "${key}". ` +
+            `Supported clauses: ${ShapeRegistryImpl.CLAUSE_ORDER.join(", ")}`
+        )
       }
     }
 
