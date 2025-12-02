@@ -1,6 +1,7 @@
 import { assertType, describe, expectTypeOf, it } from "vitest"
 import { z } from "zod"
 import { createCollection } from "../src/collection/index.js"
+import { mutations } from "../src/index.js"
 import type { OperationConfig } from "../src/types"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 
@@ -9,7 +10,7 @@ describe(`Collection.update type tests`, () => {
 
   const testCollection = createCollection<TypeTestItem, string>({
     getKey: (item) => item.id,
-    mutations: true,
+    mutations,
     sync: { sync: () => {} },
   })
   const updateMethod = testCollection.update
@@ -359,7 +360,7 @@ describe(`Collection callback type tests`, () => {
   it(`should correctly type onInsert callback parameters`, () => {
     createCollection<TypeTestItem>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: { sync: () => {} },
       onInsert: (params) => {
         expectTypeOf(params.transaction).toHaveProperty(`mutations`)
@@ -374,7 +375,7 @@ describe(`Collection callback type tests`, () => {
   it(`should correctly type onUpdate callback parameters`, () => {
     createCollection<TypeTestItem>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: { sync: () => {} },
       onUpdate: (params) => {
         expectTypeOf(params.transaction).toHaveProperty(`mutations`)
@@ -391,7 +392,7 @@ describe(`Collection callback type tests`, () => {
   it(`should correctly type onDelete callback parameters`, () => {
     createCollection<TypeTestItem>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: { sync: () => {} },
       onDelete: (params) => {
         expectTypeOf(params.transaction).toHaveProperty(`mutations`)

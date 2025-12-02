@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
 import { createCollection } from "../../src/collection/index.js"
+import { mutations } from "../../src/index.js"
 import { createTransaction } from "../../src/transactions.js"
 
 // Sample user type for tests
@@ -1007,7 +1008,7 @@ describe(`Query while syncing`, () => {
         const usersCollection = createCollection<User, number>({
           id: `test-users-optimistic-mutations`,
           getKey: (user) => user.id,
-          mutations: true,
+          mutations,
           autoIndex,
           startSync: false,
           sync: {

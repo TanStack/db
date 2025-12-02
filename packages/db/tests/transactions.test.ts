@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { createTransaction } from "../src/transactions"
 import { createCollection } from "../src/collection/index.js"
+import { mutations } from "../src/index.js"
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
@@ -60,7 +61,7 @@ describe(`Transactions`, () => {
     }>({
       id: `foo`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -97,7 +98,7 @@ describe(`Transactions`, () => {
     }>({
       id: `foo`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -109,7 +110,7 @@ describe(`Transactions`, () => {
     }>({
       id: `foo2`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -144,7 +145,7 @@ describe(`Transactions`, () => {
     }>({
       id: `foo`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -178,7 +179,7 @@ describe(`Transactions`, () => {
     }>({
       id: `foo`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -215,7 +216,7 @@ describe(`Transactions`, () => {
     }>({
       id: `foo`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -251,7 +252,7 @@ describe(`Transactions`, () => {
     }>({
       id: `test-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -288,7 +289,7 @@ describe(`Transactions`, () => {
     }>({
       id: `test-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -334,7 +335,7 @@ describe(`Transactions`, () => {
     }>({
       id: `test-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -425,7 +426,7 @@ describe(`Transactions`, () => {
     }>({
       id: `test-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -466,7 +467,7 @@ describe(`Transactions`, () => {
     }>({
       id: `test-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },
@@ -524,7 +525,7 @@ describe(`Transactions`, () => {
     }>({
       id: `foo`,
       getKey: (val) => val.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {},
       },

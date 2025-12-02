@@ -1,5 +1,5 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest"
-import { createCollection, createOptimisticAction } from "../src"
+import { createCollection, createOptimisticAction, mutations } from "../src"
 import type {
   MutationFnParams,
   Transaction,
@@ -13,7 +13,7 @@ describe(`createOptimisticAction`, () => {
     const collection = createCollection<{ id: string; text: string }>({
       id: `test-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {
           // No-op sync for testing
@@ -63,7 +63,7 @@ describe(`createOptimisticAction`, () => {
     const collection = createCollection<{ id: string; text: string }>({
       id: `async-on-mutate-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {
           // No-op sync for testing
@@ -95,7 +95,7 @@ describe(`createOptimisticAction`, () => {
     }>({
       id: `todo-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {
           // No-op sync for testing
@@ -216,7 +216,7 @@ describe(`createOptimisticAction`, () => {
     const collection = createCollection<{ id: string; text: string }>({
       id: `error-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: () => {
           // No-op sync for testing

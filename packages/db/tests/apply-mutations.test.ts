@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { createTransaction } from "../src/transactions"
 import { createCollection } from "../src/collection"
+import { mutations } from "../src/index.js"
 
 describe(`applyMutations merge logic`, () => {
   // Create a shared collection for all tests
@@ -12,7 +13,7 @@ describe(`applyMutations merge logic`, () => {
     }>({
       id: `test-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       onInsert: async () => {}, // Add required handler
       onUpdate: async () => {}, // Add required handler
       onDelete: async () => {}, // Add required handler

@@ -4,6 +4,11 @@
 import * as IR from "./query/ir.js"
 
 export * from "./collection/index.js"
+export {
+  mutations,
+  mutationPlugin,
+  type MutationsPlugin,
+} from "./collection/mutations.js"
 export * from "./SortedMap"
 export * from "./transactions"
 export * from "./types"

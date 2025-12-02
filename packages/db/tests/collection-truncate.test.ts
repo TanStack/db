@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createCollection } from "../src/collection/index.js"
+import { mutations } from "../src/index.js"
 import type { SyncConfig } from "../src/types"
 
 describe(`Collection truncate operations`, () => {
@@ -20,7 +21,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-with-optimistic`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -96,7 +97,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-during-mutation`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -152,7 +153,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-empty-collection`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -216,7 +217,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-optimistic-only`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -289,7 +290,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-late-optimistic`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -357,7 +358,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-preserve-optimistic`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -418,7 +419,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-optimistic-delete-active`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -476,7 +477,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-optimistic-vs-server`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -543,7 +544,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-consecutive`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -610,7 +611,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-same-key-mutation`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {
@@ -671,7 +672,7 @@ describe(`Collection truncate operations`, () => {
     const collection = createCollection<{ id: number; value: string }, number>({
       id: `truncate-transaction-completes`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: (cfg) => {

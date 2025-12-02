@@ -91,7 +91,7 @@ export class MutationsNotEnabledError extends CollectionConfigurationError {
   constructor(method: `insert` | `update` | `delete`) {
     super(
       `Cannot call ${method}() on a read-only collection. ` +
-        `Set \`mutations: true\` in the collection config to enable mutations.`
+        `Pass \`mutations\` in the collection config to enable mutations.`
     )
     this.name = `MutationsNotEnabledError`
   }

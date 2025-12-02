@@ -1,4 +1,4 @@
-import { createCollection } from "@tanstack/db"
+import { createCollection, mutations } from "@tanstack/db"
 import { startOfflineExecutor } from "../src/index"
 import type { ChangeMessage, Collection, PendingMutation } from "@tanstack/db"
 import type {
@@ -112,6 +112,7 @@ function createDefaultCollection(): {
   const collection = createCollection<TestItem, string, {}>({
     id: `test-items`,
     getKey: (item) => item.id,
+    mutations,
     startSync: true,
     sync: {
       sync: (params) => {

@@ -32,6 +32,70 @@ import type {
 import type { CollectionLifecycleManager } from "./lifecycle"
 import type { CollectionStateManager } from "./state"
 
+/**
+ * The mutations plugin interface.
+ * Used to enable optimistic mutations on a collection.
+ * Import and pass to the `mutations` option to enable insert/update/delete.
+ *
+ * @example
+ * ```ts
+ * import { createCollection, mutations } from "@tanstack/db"
+ *
+ * const collection = createCollection({
+ *   id: "todos",
+ *   getKey: (todo) => todo.id,
+ *   sync: { sync: () => {} },
+ *   mutations,
+ *   onInsert: async ({ transaction }) => {
+ *     await api.createTodo(transaction.mutations[0].modified)
+ *   }
+ * })
+ * ```
+ */
+export interface MutationsPlugin {
+  readonly _brand: `mutations`
+  /** @internal */
+  readonly _createManager: <
+    TOutput extends object,
+    TKey extends string | number,
+    TUtils extends UtilsRecord,
+    TSchema extends StandardSchemaV1,
+    TInput extends object,
+  >(
+    config: CollectionConfig<TOutput, TKey, TSchema>,
+    id: string
+  ) => CollectionMutationsManager<TOutput, TKey, TUtils, TSchema, TInput>
+}
+
+/**
+ * The mutations plugin. Import and pass to the `mutations` option to enable
+ * insert, update, and delete operations on a collection.
+ *
+ * @example
+ * ```ts
+ * import { createCollection, mutations } from "@tanstack/db"
+ *
+ * const collection = createCollection({
+ *   id: "todos",
+ *   getKey: (todo) => todo.id,
+ *   sync: { sync: () => {} },
+ *   mutations,
+ *   onInsert: async ({ transaction }) => {
+ *     await api.createTodo(transaction.mutations[0].modified)
+ *   }
+ * })
+ * ```
+ */
+export const mutations: MutationsPlugin = {
+  _brand: `mutations` as const,
+  _createManager: (config, id) => new CollectionMutationsManager(config, id),
+}
+
+/**
+ * @deprecated Use `mutations` instead
+ */
+export const mutationPlugin = mutations
+
 export class CollectionMutationsManager<
   TOutput extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -162,7 +226,7 @@ export class CollectionMutationsManager<
     }
 
     const items = Array.isArray(data) ? data : [data]
-    const mutations: Array<PendingMutation<TOutput>> = []
+    const pendingMutations: Array<PendingMutation<TOutput>> = []
     const keysInCurrentBatch = new Set<TKey>()
 
     // Create mutations for each item
@@ -202,12 +266,12 @@ export class CollectionMutationsManager<
         collection: this.collection,
       }
 
-      mutations.push(mutation)
+      pendingMutations.push(mutation)
     })
 
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
-      ambientTransaction.applyMutations(mutations)
+      ambientTransaction.applyMutations(pendingMutations)
 
       state.transactions.set(ambientTransaction.id, ambientTransaction)
       state.scheduleTransactionCleanup(ambientTransaction)
@@ -231,7 +295,7 @@ export class CollectionMutationsManager<
       })
 
       // Apply mutations to the new transaction
-      directOpTransaction.applyMutations(mutations)
+      directOpTransaction.applyMutations(pendingMutations)
       // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
       directOpTransaction.commit().catch(() => undefined)
 
@@ -309,7 +373,7 @@ export class CollectionMutationsManager<
     }
 
     // Create mutations for each object that has changes
-    const mutations: Array<
+    const pendingMutations: Array<
       PendingMutation<
         TOutput,
         `update`,
@@ -386,7 +450,7 @@ export class CollectionMutationsManager<
     >
 
     // If no changes were made, return an empty transaction early
-    if (mutations.length === 0) {
+    if (pendingMutations.length === 0) {
       const emptyTransaction = createTransaction({
         mutationFn: async () => {},
       })
@@ -399,7 +463,7 @@ export class CollectionMutationsManager<
 
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
-      ambientTransaction.applyMutations(mutations)
+      ambientTransaction.applyMutations(pendingMutations)
 
       state.transactions.set(ambientTransaction.id, ambientTransaction)
       state.scheduleTransactionCleanup(ambientTransaction)
@@ -426,7 +490,7 @@ export class CollectionMutationsManager<
     })
 
     // Apply mutations to the new transaction
-    directOpTransaction.applyMutations(mutations)
+    directOpTransaction.applyMutations(pendingMutations)
     // Errors still hit tx.isPersisted.promise; avoid leaking an unhandled rejection from the fire-and-forget commit
     directOpTransaction.commit().catch(() => undefined)
 
@@ -461,7 +525,7 @@ export class CollectionMutationsManager<
     }
 
     const keysArray = Array.isArray(keys) ? keys : [keys]
-    const mutations: Array<
+    const pendingMutations: Array<
       PendingMutation<
         TOutput,
         `delete`,
@@ -497,12 +561,12 @@ export class CollectionMutationsManager<
         collection: this.collection,
       }
 
-      mutations.push(mutation)
+      pendingMutations.push(mutation)
     }
 
     // If an ambient transaction exists, use it
     if (ambientTransaction) {
-      ambientTransaction.applyMutations(mutations)
+      ambientTransaction.applyMutations(pendingMutations)
 
       state.transactions.set(ambientTransaction.id, ambientTransaction)
       state.scheduleTransactionCleanup(ambientTransaction)
@@ -528,7 +592,7 @@ export class CollectionMutationsManager<
     })
 
     // Apply mutations to the new transaction
-    directOpTransaction.applyMutations(mutations)
+    directOpTransaction.applyMutations(pendingMutations)
     // Errors still reject tx.isPersisted.promise; silence the internal commit promise to prevent test noise
     directOpTransaction.commit().catch(() => undefined)
 

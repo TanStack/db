@@ -1,4 +1,5 @@
 import { DiffTriggerOperation, sanitizeSQL } from "@powersync/common"
+import { mutations } from "@tanstack/db"
 import { PendingOperationStore } from "./PendingOperationStore"
 import { PowerSyncTransactor } from "./PowerSyncTransactor"
 import { DEFAULT_BATCH_SIZE } from "./definitions"
@@ -219,7 +220,13 @@ export function powerSyncCollectionOptions<
 export function powerSyncCollectionOptions<
   TTable extends Table,
   TSchema extends StandardSchemaV1<any> = never,
->(config: PowerSyncCollectionConfig<TTable, TSchema>) {
+>(
+  config: PowerSyncCollectionConfig<TTable, TSchema>
+): EnhancedPowerSyncCollectionConfig<
+  TTable,
+  InferPowerSyncOutputType<TTable, TSchema>,
+  TSchema
+> {
   const {
     database,
     table,
@@ -443,6 +450,7 @@ export function powerSyncCollectionOptions<
     // Syncing should start immediately since we need to monitor the changes for mutations
     startSync: true,
     sync,
+    mutations,
     onInsert: async (params) => {
       // The transaction here should only ever contain a single insert mutation
       return await transactor.applyTransaction(params.transaction)

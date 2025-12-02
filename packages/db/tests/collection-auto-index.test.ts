@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { createCollection } from "../src/collection/index.js"
+import { createLiveQueryCollection, mutations } from "../src/index.js"
 import {
   and,
   eq,
@@ -10,7 +11,6 @@ import {
   or,
 } from "../src/query/builder/functions"
 import { createSingleRowRefProxy } from "../src/query/builder/ref-proxy"
-import { createLiveQueryCollection } from "../src"
 import { PropRef } from "../src/query/ir"
 import {
   createIndexUsageTracker,
@@ -81,7 +81,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should not create auto-indexes when autoIndex is "off"`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `off`,
       startSync: true,
       sync: {
@@ -125,7 +125,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should create auto-indexes by default when autoIndex is not specified`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -172,7 +172,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should create auto-indexes for simple where expressions when autoIndex is "eager"`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -222,7 +222,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should not create duplicate auto-indexes for the same field`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -270,7 +270,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should create auto-indexes for different supported operations`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -322,7 +322,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should create auto-indexes for AND expressions`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -363,7 +363,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should not create auto-indexes for OR expressions`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -397,7 +397,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should create auto-indexes for complex AND expressions with multiple fields`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -443,7 +443,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should create auto-indexes for join key on lazy collection when joining`, async () => {
     const leftCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -464,7 +464,7 @@ describe(`Collection Auto-Indexing`, () => {
 
     const rightCollection = createCollection<TestItem2, string>({
       getKey: (item) => item.id2,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -557,7 +557,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should create auto-indexes for join key on lazy collection when joining subquery`, async () => {
     const leftCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -578,7 +578,7 @@ describe(`Collection Auto-Indexing`, () => {
 
     const rightCollection = createCollection<TestItem2, string>({
       getKey: (item) => item.id2,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -678,7 +678,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should not create auto-indexes for unsupported operations`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -717,7 +717,7 @@ describe(`Collection Auto-Indexing`, () => {
   it(`should use auto-created indexes for query optimization`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {
@@ -814,7 +814,7 @@ describe(`Collection Auto-Indexing`, () => {
 
     const collection = createCollection<NestedTestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       autoIndex: `eager`,
       startSync: true,
       sync: {

@@ -4,6 +4,7 @@ import {
   SerializationError,
   StorageKeyRequiredError,
 } from "./errors"
+import { mutations } from "./collection/mutations"
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -609,7 +610,7 @@ export function localStorageCollectionOptions(
   return {
     ...restConfig,
     id: collectionId,
-    mutations: true as const,
+    mutations,
     sync,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
@@ -845,9 +846,9 @@ function createLocalStorageSync<T extends object>(
   /**
    * Confirms mutations by writing them through the sync interface
    * This moves mutations from optimistic to synced state
-   * @param mutations - Array of mutation objects to confirm
+   * @param pendingMutations - Array of mutation objects to confirm
    */
-  const confirmOperationsSync = (mutations: Array<any>) => {
+  const confirmOperationsSync = (pendingMutations: Array<any>) => {
     if (!syncParams) {
       // Sync not initialized yet, mutations will be handled on next sync
       return
@@ -857,7 +858,7 @@ function createLocalStorageSync<T extends object>(
 
     // Write the mutations through sync to confirm them
     begin()
-    mutations.forEach((mutation: any) => {
+    pendingMutations.forEach((mutation: any) => {
       write({
         type: mutation.type,
         value:

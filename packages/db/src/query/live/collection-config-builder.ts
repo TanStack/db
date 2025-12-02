@@ -5,6 +5,7 @@ import {
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
 } from "../../errors.js"
+import { mutationPlugin } from "../../collection/mutations.js"
 import { transactionScopedScheduler } from "../../scheduler.js"
 import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
@@ -236,7 +237,7 @@ export class CollectionConfigBuilder<
     if (hasMutationHandlers) {
       return {
         ...baseConfig,
-        mutations: true,
+        mutations: mutationPlugin,
         onInsert: this.config.onInsert,
         onUpdate: this.config.onUpdate,
         onDelete: this.config.onDelete,

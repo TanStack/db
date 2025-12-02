@@ -6,7 +6,7 @@ import {
 } from "@electric-sql/client"
 import { Store } from "@tanstack/store"
 import DebugModule from "debug"
-import { DeduplicatedLoadSubset } from "@tanstack/db"
+import { DeduplicatedLoadSubset, mutations } from "@tanstack/db"
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
@@ -752,6 +752,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     ...restConfig,
     syncMode: finalSyncMode,
     sync,
+    mutations,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,

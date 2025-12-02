@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "@tanstack/db"
+import { createCollection, mutations } from "@tanstack/db"
 import {
   IndexedDBAdapter,
   LocalStorageAdapter,
@@ -31,6 +31,7 @@ describe(`storage failure handling`, () => {
     mockCollection = createCollection({
       id: `test-collection`,
       getKey: (item: any) => item.id,
+      mutations,
       sync: {
         sync: () => {},
       },

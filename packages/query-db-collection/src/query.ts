@@ -1,4 +1,5 @@
 import { QueryObserver, hashKey } from "@tanstack/query-core"
+import { mutations } from "@tanstack/db"
 import {
   GetKeyRequiredError,
   QueryClientRequiredError,
@@ -1235,14 +1236,32 @@ export function queryCollectionOptions(
   // Create utils instance with state and dependencies passed explicitly
   const utils: any = new QueryCollectionUtilsImpl(state, refetch, writeUtils)
 
+  // Check if mutation handlers are present
+  const hasMutationHandlers =
+    wrappedOnInsert !== undefined ||
+    wrappedOnUpdate !== undefined ||
+    wrappedOnDelete !== undefined
+
+  // Always include mutations plugin since writeInsert/writeUpdate/etc utilities
+  // need collection.validateData() which requires the mutations system
   return {
     ...baseCollectionConfig,
     getKey,
     syncMode,
     sync: { sync: enhancedInternalSync },
-    onInsert: wrappedOnInsert,
-    onUpdate: wrappedOnUpdate,
-    onDelete: wrappedOnDelete,
+    mutations,
+    ...(hasMutationHandlers && {
+      onInsert: wrappedOnInsert,
+      onUpdate: wrappedOnUpdate,
+      onDelete: wrappedOnDelete,
+    }),
     utils,
+  } as CollectionConfig<
+    Record<string, unknown>,
+    string | number,
+    never,
+    QueryCollectionUtils
+  > & {
+    utils: QueryCollectionUtils
   }
 }

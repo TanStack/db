@@ -2,6 +2,7 @@ import { type } from "arktype"
 import { describe, expect, expectTypeOf, it } from "vitest"
 import { z } from "zod"
 import { createCollection } from "../src/collection/index.js"
+import { mutations } from "../src/index.js"
 import { SchemaValidationError } from "../src/errors"
 import { createTransaction } from "../src/transactions"
 import type {
@@ -23,7 +24,7 @@ describe(`Collection Schema Validation`, () => {
 
     const collection = createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       sync: { sync: () => {} },
     })
@@ -60,7 +61,7 @@ describe(`Collection Schema Validation`, () => {
 
     const updateCollection = createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: updateSchema,
       sync: { sync: () => {} },
     })
@@ -102,7 +103,7 @@ describe(`Collection Schema Validation`, () => {
 
     const collection = createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       sync: { sync: () => {} },
     })
@@ -159,7 +160,7 @@ describe(`Collection Schema Validation`, () => {
 
     const collection = createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       sync: { sync: () => {} },
     })
@@ -230,7 +231,7 @@ describe(`Collection Schema Validation`, () => {
 
     const collection = createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       sync: { sync: () => {} },
     })
@@ -288,7 +289,7 @@ describe(`Collection with schema validation`, () => {
     const collection = createCollection({
       id: `test`,
       getKey: (item) => item.name,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, commit }) => {
@@ -382,7 +383,7 @@ describe(`Collection with schema validation`, () => {
     const collection = createCollection({
       id: `test`,
       getKey: (item) => item.name,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, commit }) => {
@@ -484,7 +485,7 @@ describe(`Collection with schema validation`, () => {
     const collection = createCollection({
       id: `defaults-test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, commit }) => {
           begin()
@@ -597,7 +598,7 @@ describe(`Collection with schema validation`, () => {
 
     const collection = createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       startSync: true,
       sync: {
@@ -674,7 +675,7 @@ describe(`Collection with schema validation`, () => {
 
     const collection = createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       startSync: true,
       sync: {
@@ -763,7 +764,7 @@ describe(`Collection with schema validation`, () => {
 
     const collection = createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       startSync: true,
       sync: {
@@ -841,7 +842,7 @@ describe(`Collection with schema validation`, () => {
 
     const updateCollection = createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: updateSchema,
       startSync: true,
       sync: {
@@ -909,7 +910,7 @@ describe(`Collection schema callback type tests`, () => {
 
     createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       sync: { sync: () => {} },
       onInsert: (params) => {
@@ -951,7 +952,7 @@ describe(`Collection schema callback type tests`, () => {
 
     createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       sync: { sync: () => {} },
       onInsert: (params) => {
@@ -989,7 +990,7 @@ describe(`Collection schema callback type tests`, () => {
 
     createCollection({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       schema: userSchema,
       sync: { sync: () => {} },
       onInsert: (params) => {

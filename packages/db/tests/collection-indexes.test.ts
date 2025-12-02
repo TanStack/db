@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import mitt from "mitt"
 import { createCollection } from "../src/collection/index.js"
+import { mutations } from "../src/index.js"
 import { createTransaction } from "../src/transactions"
 import {
   and,
@@ -86,7 +87,7 @@ describe(`Collection Indexes`, () => {
 
     collection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -1320,7 +1321,7 @@ describe(`Collection Indexes`, () => {
 
       const specialCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         startSync: true,
         sync: {
           sync: ({ begin, write, commit }) => {
@@ -1383,7 +1384,7 @@ describe(`Collection Indexes`, () => {
     it(`should handle index creation on empty collection`, () => {
       const emptyCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: { sync: () => {} },
       })
 

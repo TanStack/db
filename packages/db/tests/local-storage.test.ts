@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import superjson from "superjson"
-import { createCollection } from "../src/index"
+import { createCollection, mutations } from "../src/index"
 import { localStorageCollectionOptions } from "../src/local-storage"
 import { createTransaction } from "../src/transactions"
 import { StorageKeyRequiredError } from "../src/errors"
@@ -93,7 +93,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -259,7 +259,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -274,7 +274,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -291,7 +291,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
           // No onInsert, onUpdate, or onDelete handlers provided
         })
       )
@@ -352,7 +352,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
           onInsert: insertSpy,
           onUpdate: updateSpy,
           onDelete: deleteSpy,
@@ -411,7 +411,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
           onInsert: () => Promise.resolve({ success: true }),
         })
       )
@@ -462,7 +462,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
           onUpdate: () => Promise.resolve({ success: true }),
         })
       )
@@ -508,7 +508,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
           onDelete: () => Promise.resolve({ success: true }),
         })
       )
@@ -539,7 +539,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -828,7 +828,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -892,7 +892,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -902,7 +902,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -956,7 +956,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -1015,7 +1015,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -1118,7 +1118,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -1167,7 +1167,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-            mutations: true,
+            mutations,
           })
         )
 
@@ -1231,7 +1231,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-            mutations: true,
+            mutations,
           })
         )
 
@@ -1289,7 +1289,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-            mutations: true,
+            mutations,
           })
         )
 
@@ -1355,7 +1355,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-            mutations: true,
+            mutations,
           })
         )
 
@@ -1421,7 +1421,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-            mutations: true,
+            mutations,
           })
         )
 
@@ -1469,7 +1469,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-            mutations: true,
+            mutations,
           })
         )
 
@@ -1577,7 +1577,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-            mutations: true,
+            mutations,
           })
         )
 
@@ -1653,7 +1653,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -1713,7 +1713,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -1777,7 +1777,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -1840,7 +1840,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -1920,7 +1920,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -1989,7 +1989,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -2033,7 +2033,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 
@@ -2089,7 +2089,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-          mutations: true,
+          mutations,
         })
       )
 

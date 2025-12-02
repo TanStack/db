@@ -1,5 +1,6 @@
 import type { IStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "./collection/index.js"
+import type { MutationsPlugin } from "./collection/mutations.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
 import type { BasicExpression, OrderBy } from "./query/ir.js"
@@ -663,7 +664,7 @@ export interface MutationHandlersConfig<
 }
 
 /**
- * Configuration for a mutable collection (mutations: true)
+ * Configuration for a mutable collection (mutations)
  * Allows onInsert, onUpdate, onDelete handlers
  */
 export interface MutableCollectionConfig<
@@ -678,14 +679,23 @@ export interface MutableCollectionConfig<
     MutationHandlersConfig<T, TKey, TUtils, TReturn> {
   /**
    * Enable mutations (insert, update, delete) on this collection.
-   * When true, mutation handlers (onInsert, onUpdate, onDelete) can be provided.
-   * @default false
+   * Import and pass `mutations` to enable mutation handlers.
+   *
+   * @example
+   * ```ts
+   * import { createCollection, mutations } from "@tanstack/db"
+   *
+   * const collection = createCollection({
+   *   mutations,
+   *   onInsert: async ({ transaction }) => { ... }
+   * })
+   * ```
    */
-  mutations: true
+  mutations: MutationsPlugin
 }
 
 /**
- * Configuration for a read-only collection (mutations: false or undefined)
+ * Configuration for a read-only collection (no mutations plugin provided)
  * Does NOT allow onInsert, onUpdate, onDelete handlers
  */
 export interface ReadOnlyCollectionConfig<
@@ -695,16 +705,15 @@ export interface ReadOnlyCollectionConfig<
   TUtils extends UtilsRecord = UtilsRecord,
 > extends CoreCollectionConfig<T, TKey, TSchema, TUtils> {
   /**
-   * Enable mutations (insert, update, delete) on this collection.
-   * When false or undefined, the collection is read-only.
-   * @default false
+   * When not provided or undefined, the collection is read-only.
+   * Import and pass `mutations` to enable mutations.
    */
-  mutations?: false | undefined
-  /** Not available on read-only collections. Set mutations: true to enable. */
+  mutations?: undefined
+  /** Not available on read-only collections. Pass `mutations` to enable. */
   onInsert?: never
-  /** Not available on read-only collections. Set mutations: true to enable. */
+  /** Not available on read-only collections. Pass `mutations` to enable. */
   onUpdate?: never
-  /** Not available on read-only collections. Set mutations: true to enable. */
+  /** Not available on read-only collections. Pass `mutations` to enable. */
   onDelete?: never
 }
 
@@ -724,22 +733,42 @@ export interface BaseCollectionConfig<
     MutationHandlersConfig<T, TKey, TUtils, TReturn> {
   /**
    * Enable mutations (insert, update, delete) on this collection.
-   * @default true (for backwards compatibility)
+   * Import and pass `mutations` to enable.
    */
-  mutations?: boolean
+  mutations?: MutationsPlugin
 }
 
 /**
- * Collection configuration - discriminated union based on `mutations` flag.
+ * Collection configuration - discriminated union based on `mutations` option.
  *
- * When `mutations: true`:
+ * When `mutations` is provided:
  * - Mutation handlers (onInsert, onUpdate, onDelete) can be provided
  * - The collection will have insert(), update(), delete() methods
  *
- * When `mutations` is false or undefined (default):
+ * When `mutations` is undefined (default):
  * - Mutation handlers are NOT allowed (TypeScript will error)
  * - The collection is read-only (no insert/update/delete methods)
  * - Smaller bundle size as mutation code is tree-shaken
+ *
+ * @example
+ * ```ts
+ * // Read-only collection (mutations tree-shaken)
+ * const readOnly = createCollection({
+ *   id: "users",
+ *   getKey: (u) => u.id,
+ *   sync: { sync: () => {} }
+ * })
+ *
+ * // Mutable collection (import mutations)
+ * import { mutations } from "@tanstack/db"
+ * const mutable = createCollection({
+ *   id: "users",
+ *   getKey: (u) => u.id,
+ *   sync: { sync: () => {} },
+ *   mutations,
+ *   onInsert: async ({ transaction }) => { ... }
+ * })
+ * ```
  */
 export type CollectionConfig<
   T extends object = Record<string, unknown>,

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createCollection } from "../src/collection/index.js"
+import { mutations } from "../src/index.js"
 import {
   CollectionInErrorStateError,
   InvalidCollectionStatusTransitionError,
@@ -30,7 +31,7 @@ describe(`Collection Error Handling`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `error-test-collection`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -82,7 +83,7 @@ describe(`Collection Error Handling`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `stack-trace-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -128,7 +129,7 @@ describe(`Collection Error Handling`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `non-error-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -173,7 +174,7 @@ describe(`Collection Error Handling`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `no-cleanup-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -198,7 +199,7 @@ describe(`Collection Error Handling`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `multiple-cleanup-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -256,7 +257,7 @@ describe(`Collection Error Handling`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `error-status-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: () => {
             throw new Error(`Sync initialization failed`)
@@ -292,7 +293,7 @@ describe(`Collection Error Handling`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `cleaned-up-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         onInsert: async () => {}, // Add handler to prevent "no handler" error
         onUpdate: async () => {}, // Add handler to prevent "no handler" error
         onDelete: async () => {}, // Add handler to prevent "no handler" error
@@ -322,7 +323,7 @@ describe(`Collection Error Handling`, () => {
         {
           id: `cleaned-up-test-2`,
           getKey: (item) => item.id,
-          mutations: true,
+          mutations,
           onUpdate: async () => {},
           onDelete: async () => {},
           sync: {
@@ -367,7 +368,7 @@ describe(`Collection Error Handling`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `transition-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -396,7 +397,7 @@ describe(`Collection Error Handling`, () => {
       const collection = createCollection<{ id: string; name: string }>({
         id: `valid-transitions-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: ({ begin, commit }) => {
             begin()

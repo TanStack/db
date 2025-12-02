@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
 import { createCollection } from "../src/collection/index.js"
+import { mutations } from "../src/index.js"
 import { createTransaction } from "../src/transactions"
 import { eq } from "../src/query/builder/functions"
 import { PropRef } from "../src/query/ir"
@@ -23,7 +24,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ value: string }>({
       id: `initial-state-test`,
       getKey: (item) => item.value,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Immediately populate with initial data
@@ -74,7 +75,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ value: string }>({
       id: `initial-state-test`,
       getKey: (item) => item.value,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Immediately populate with initial data
@@ -113,7 +114,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `sync-changes-test-with-mitt`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Setup a listener for our test events
@@ -232,7 +233,7 @@ describe(`Collection.subscribeChanges`, () => {
       getKey: (item) => {
         return item.id
       },
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit }) => {
@@ -356,7 +357,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `mixed-changes-test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Setup a listener for our test events
@@ -505,7 +506,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `diff-changes-test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Immediately populate with initial data
@@ -621,7 +622,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `unsubscribe-test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, commit }) => {
           begin()
@@ -664,7 +665,7 @@ describe(`Collection.subscribeChanges`, () => {
     }>({
       id: `filtered-updates-test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, write, commit }) => {
           // Start with some initial data
@@ -828,7 +829,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-changes-test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -903,7 +904,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-optimistic-changes-test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -1023,7 +1024,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-new-data-changes-test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -1124,7 +1125,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-empty-changes-test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, commit, truncate, markReady }) => {
@@ -1172,7 +1173,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-opt-update-exists-after`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -1230,7 +1231,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-opt-delete-exists-after`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -1271,7 +1272,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `non-optimistic-delete-sync`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, write, commit }) => {
           // replay any pending mutations emitted via mitt
@@ -1336,7 +1337,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-opt-insert-not-after`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -1388,7 +1389,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-opt-update-not-after`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -1436,7 +1437,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `truncate-opt-delete-not-after`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, truncate, markReady }) => {
@@ -1484,7 +1485,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<TestItem>({
       id: `test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           callBegin = begin
@@ -1552,7 +1553,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<TestItem>({
       id: `test`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           callBegin = begin
@@ -1624,7 +1625,7 @@ describe(`Collection.subscribeChanges`, () => {
       >({
         id: `async-oninsert-race-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: (cfg) => {
             syncOps = cfg
@@ -1687,7 +1688,7 @@ describe(`Collection.subscribeChanges`, () => {
       >({
         id: `single-insert-delayed-sync-test`,
         getKey: (item) => item.id,
-        mutations: true,
+        mutations,
         sync: {
           sync: (cfg) => {
             syncOps = cfg
@@ -1740,7 +1741,7 @@ describe(`Collection.subscribeChanges`, () => {
     const collection = createCollection<{ id: number; value: string }>({
       id: `sync-changes-before-ready`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -1848,7 +1849,7 @@ describe(`Collection.subscribeChanges`, () => {
     }>({
       id: `filtered-sync-changes-before-ready`,
       getKey: (item) => item.id,
-      mutations: true,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {

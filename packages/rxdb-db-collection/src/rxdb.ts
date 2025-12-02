@@ -7,6 +7,7 @@ import {
   rxStorageWriteErrorToRxError,
 } from "rxdb/plugins/core"
 import DebugModule from "debug"
+import { mutations } from "@tanstack/db"
 import { stripRxdbFields } from "./helper"
 import type {
   FilledMangoQuery,
@@ -101,7 +102,9 @@ export function rxdbCollectionOptions<T extends object>(
   schema?: never // no schema in the result
 }
 
-export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
+export function rxdbCollectionOptions(
+  config: RxDBCollectionConfig<any, any>
+): CollectionConfig<Record<string, unknown>, string> {
   type Row = Record<string, unknown>
   type Key = string // because RxDB primary keys must be strings
 
@@ -267,6 +270,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
     ...restConfig,
     getKey,
     sync,
+    mutations,
     onInsert: async (params) => {
       debug(`insert`, params)
       const newItems = params.transaction.mutations.map((m) => m.modified)
@@ -279,11 +283,8 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
     },
     onUpdate: async (params) => {
       debug(`update`, params)
-      const mutations = params.transaction.mutations.filter(
-        (m) => m.type === `update`
-      )
-
-      for (const mutation of mutations) {
+      // Mutations in onUpdate handler are already typed as update mutations
+      for (const mutation of params.transaction.mutations) {
         const newValue = stripRxdbFields(mutation.modified)
         const id = getKey(newValue)
         const doc = await rxCollection.findOne(id).exec()
@@ -295,10 +296,10 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
     },
     onDelete: async (params) => {
       debug(`delete`, params)
-      const mutations = params.transaction.mutations.filter(
-        (m) => m.type === `delete`
+      // Mutations in onDelete handler are already typed as delete mutations
+      const ids = params.transaction.mutations.map((mutation) =>
+        getKey(mutation.original)
       )
-      const ids = mutations.map((mutation) => getKey(mutation.original))
       return rxCollection.bulkRemove(ids).then((result) => {
         if (result.error.length > 0) {
           throw result.error

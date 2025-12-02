@@ -11,7 +11,7 @@ import { CollectionLifecycleManager } from "./lifecycle.js"
 import { CollectionSyncManager } from "./sync"
 import { CollectionIndexesManager } from "./indexes"
 import { CollectionEventsManager } from "./events.js"
-import { CollectionMutationsManager } from "./mutations"
+import type { CollectionMutationsManager } from "./mutations"
 import type { CollectionSubscription } from "./subscription"
 import type { AllCollectionEvents, CollectionEventHandler } from "./events.js"
 import type { BaseIndex, IndexResolver } from "../indexes/base-index.js"
@@ -286,7 +286,7 @@ export class CollectionImpl<
   public _lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   public _sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
   private _indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
-  // Only instantiated when mutations: true (for tree-shaking)
+  // Only instantiated when mutationPlugin is provided (for tree-shaking)
   private _mutations?: CollectionMutationsManager<
     TOutput,
     TKey,
@@ -336,10 +336,11 @@ export class CollectionImpl<
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
 
-    // Only instantiate mutations module when mutations are enabled (for tree-shaking)
-    // Bundlers can eliminate this code path and the import if mutations: true is never used
-    if (config.mutations === true) {
-      this._mutations = new CollectionMutationsManager(config, this.id)
+    // Only instantiate mutations module when mutations plugin is provided
+    // Tree-shaking works because the plugin (and mutations module) is only imported
+    // when the user explicitly imports mutations
+    if (config.mutations) {
+      this._mutations = config.mutations._createManager(config, this.id)
       this._mutations.setDeps({
         collection: this,
         lifecycle: this._lifecycle,
