@@ -4,9 +4,9 @@ import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
   UnknownHavingExpressionTypeError,
+  UnsupportedAggregateFunctionError,
 } from "../../errors.js"
 import { compileExpression, toBooleanPredicate } from "./evaluators.js"
-import { getAggregateConfig } from "./aggregate-registry.js"
 import type {
   Aggregate,
   BasicExpression,
@@ -16,10 +16,8 @@ import type {
 } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 
-// Aggregates are lazily registered when imported by user code.
-// Each aggregate file (e.g., sum.ts) auto-registers its config on import.
-// If a user uses an aggregate without importing it, compilation will fail
-// with an UnsupportedAggregateFunctionError guiding them to import it.
+// Each aggregate's Aggregate node carries its own config.
+// No global registry is needed - the config is passed directly to Aggregate.
 
 /**
  * Interface for caching the mapping between GROUP BY expressions and SELECT expressions
@@ -345,8 +343,11 @@ function getAggregateFunction(aggExpr: Aggregate) {
   // Pre-compile the value extractor expression
   const compiledExpr = compileExpression(aggExpr.args[0]!)
 
-  // Get the aggregate configuration from registry
-  const config = getAggregateConfig(aggExpr.name)
+  // Use the config embedded in the Aggregate node
+  const config = aggExpr.config
+  if (!config) {
+    throw new UnsupportedAggregateFunctionError(aggExpr.name)
+  }
 
   // Create the appropriate value extractor based on the config
   let valueExtractor: (entry: [string, NamespacedRow]) => any
@@ -381,7 +382,7 @@ function getAggregateFunction(aggExpr: Aggregate) {
       break
   }
 
-  // Return the aggregate function using the registered factory
+  // Return the aggregate function using the embedded factory
   return config.factory(valueExtractor)
 }
 
@@ -414,7 +415,8 @@ export function replaceAggregatesByRefs(
         (arg: BasicExpression | Aggregate) =>
           replaceAggregatesByRefs(arg, selectClause)
       )
-      return new Func(funcExpr.name, transformedArgs)
+      // Preserve the factory from the original Func
+      return new Func(funcExpr.name, transformedArgs, funcExpr.factory)
     }
 
     case `ref`: {

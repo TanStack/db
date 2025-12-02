@@ -1,11 +1,13 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
 import { areValuesEqual, normalizeValue } from "../../../utils/comparison.js"
-import type { Aggregate, BasicExpression } from "../../ir.js"
+import type {
+  Aggregate,
+  BasicExpression,
+  CompiledExpression,
+} from "../../ir.js"
 import type { RefProxy } from "../ref-proxy.js"
 import type { RefLeaf } from "../types.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
 
 // ============================================================
 // TYPES
@@ -26,24 +28,7 @@ type ComparisonOperandPrimitive<T extends string | number | boolean> =
   | null
 
 // ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function eq<T>(
-  left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
-): BasicExpression<boolean>
-export function eq<T extends string | number | boolean>(
-  left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
-): BasicExpression<boolean>
-export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
-export function eq(left: any, right: any): BasicExpression<boolean> {
-  return new Func(`eq`, [toExpression(left), toExpression(right)])
-}
-
-// ============================================================
-// EVALUATOR
+// EVALUATOR FACTORY
 // ============================================================
 
 function isUnknown(value: any): boolean {
@@ -71,7 +56,22 @@ function eqEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`eq`, eqEvaluatorFactory)
+export function eq<T>(
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
+): BasicExpression<boolean>
+export function eq<T extends string | number | boolean>(
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
+): BasicExpression<boolean>
+export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function eq(left: any, right: any): BasicExpression<boolean> {
+  return new Func(
+    `eq`,
+    [toExpression(left), toExpression(right)],
+    eqEvaluatorFactory
+  )
+}

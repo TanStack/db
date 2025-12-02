@@ -1,8 +1,6 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { BasicExpression } from "../../ir.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
+import type { BasicExpression, CompiledExpression } from "../../ir.js"
 
 // ============================================================
 // TYPES
@@ -10,14 +8,6 @@ import type { CompiledExpression } from "../../compiler/registry.js"
 
 // Helper type for any expression-like value
 type ExpressionLike = BasicExpression | any
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function not(value: ExpressionLike): BasicExpression<boolean> {
-  return new Func(`not`, [toExpression(value)])
-}
 
 // ============================================================
 // EVALUATOR
@@ -47,7 +37,9 @@ function notEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`not`, notEvaluatorFactory)
+export function not(value: ExpressionLike): BasicExpression<boolean> {
+  return new Func(`not`, [toExpression(value)], notEvaluatorFactory)
+}

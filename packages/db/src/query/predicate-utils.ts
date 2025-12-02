@@ -1,5 +1,7 @@
-import { Func, Value } from "./ir.js"
-import type { BasicExpression, OrderBy, PropRef } from "./ir.js"
+import { Value } from "./ir.js"
+import { or as orBuilder } from "./builder/operators/or.js"
+import { eq as eqBuilder } from "./builder/operators/eq.js"
+import type { BasicExpression, Func, OrderBy, PropRef } from "./ir.js"
 import type { LoadSubsetOptions } from "../types.js"
 
 /**
@@ -52,12 +54,14 @@ function makeDisjunction(
   if (preds.length === 1) {
     return preds[0]!
   }
-  return new Func(`or`, preds)
+  // Use the builder function to create an OR with the proper evaluator factory
+  return orBuilder(preds)
 }
 
 function convertInToOr(inField: InField) {
   const equalities = inField.values.map(
-    (value) => new Func(`eq`, [inField.ref, new Value(value)])
+    // Use the builder function to create EQ with the proper evaluator factory
+    (value) => eqBuilder(inField.ref, new Value(value))
   )
   return makeDisjunction(equalities)
 }

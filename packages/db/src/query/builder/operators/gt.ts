@@ -1,10 +1,12 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { Aggregate, BasicExpression } from "../../ir.js"
+import type {
+  Aggregate,
+  BasicExpression,
+  CompiledExpression,
+} from "../../ir.js"
 import type { RefProxy } from "../ref-proxy.js"
 import type { RefLeaf } from "../types.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
 
 // ============================================================
 // TYPES
@@ -23,23 +25,6 @@ type ComparisonOperandPrimitive<T extends string | number> =
   | BasicExpression<T>
   | undefined
   | null
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function gt<T>(
-  left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
-): BasicExpression<boolean>
-export function gt<T extends string | number>(
-  left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
-): BasicExpression<boolean>
-export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
-export function gt(left: any, right: any): BasicExpression<boolean> {
-  return new Func(`gt`, [toExpression(left), toExpression(right)])
-}
 
 // ============================================================
 // EVALUATOR
@@ -70,7 +55,22 @@ function gtEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`gt`, gtEvaluatorFactory)
+export function gt<T>(
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
+): BasicExpression<boolean>
+export function gt<T extends string | number>(
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
+): BasicExpression<boolean>
+export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function gt(left: any, right: any): BasicExpression<boolean> {
+  return new Func(
+    `gt`,
+    [toExpression(left), toExpression(right)],
+    gtEvaluatorFactory
+  )
+}

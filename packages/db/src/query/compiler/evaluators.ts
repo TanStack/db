@@ -3,14 +3,11 @@ import {
   UnknownExpressionTypeError,
   UnknownFunctionError,
 } from "../../errors.js"
-import { tryGetOperatorEvaluator } from "./registry.js"
 import type { BasicExpression, Func, PropRef } from "../ir.js"
 import type { NamespacedRow } from "../../types.js"
 
-// Operators are lazily registered when imported by user code.
-// Each operator file (e.g., eq.ts) auto-registers its evaluator on import.
-// If a user uses an operator without importing it, compilation will fail
-// with an UnknownFunctionError guiding them to import it.
+// Each operator's Func node carries its own factory function.
+// No global registry is needed - the factory is passed directly to Func.
 
 /**
  * Converts a 3-valued logic result to a boolean for use in WHERE/HAVING filters.
@@ -159,15 +156,11 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
     compileExpressionInternal(arg, isSingleRow)
   )
 
-  // Try registry first (for migrated operators)
-  const evaluatorFactory = tryGetOperatorEvaluator(func.name)
-  if (evaluatorFactory) {
-    return evaluatorFactory(compiledArgs, isSingleRow)
+  // Use the factory embedded in the Func node
+  if (func.factory) {
+    return func.factory(compiledArgs, isSingleRow)
   }
 
-  // Fall back to switch for non-migrated operators (currently none, but kept for extensibility)
-  switch (func.name) {
-    default:
-      throw new UnknownFunctionError(func.name)
-  }
+  // No factory available - the operator wasn't imported
+  throw new UnknownFunctionError(func.name)
 }

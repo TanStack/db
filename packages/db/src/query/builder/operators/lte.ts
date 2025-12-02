@@ -1,10 +1,12 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { Aggregate, BasicExpression } from "../../ir.js"
+import type {
+  Aggregate,
+  BasicExpression,
+  CompiledExpression,
+} from "../../ir.js"
 import type { RefProxy } from "../ref-proxy.js"
 import type { RefLeaf } from "../types.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
 
 // ============================================================
 // TYPES
@@ -23,23 +25,6 @@ type ComparisonOperandPrimitive<T extends string | number> =
   | BasicExpression<T>
   | undefined
   | null
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function lte<T>(
-  left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
-): BasicExpression<boolean>
-export function lte<T extends string | number>(
-  left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
-): BasicExpression<boolean>
-export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
-export function lte(left: any, right: any): BasicExpression<boolean> {
-  return new Func(`lte`, [toExpression(left), toExpression(right)])
-}
 
 // ============================================================
 // EVALUATOR
@@ -70,7 +55,22 @@ function lteEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`lte`, lteEvaluatorFactory)
+export function lte<T>(
+  left: ComparisonOperand<T>,
+  right: ComparisonOperand<T>
+): BasicExpression<boolean>
+export function lte<T extends string | number>(
+  left: ComparisonOperandPrimitive<T>,
+  right: ComparisonOperandPrimitive<T>
+): BasicExpression<boolean>
+export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
+export function lte(left: any, right: any): BasicExpression<boolean> {
+  return new Func(
+    `lte`,
+    [toExpression(left), toExpression(right)],
+    lteEvaluatorFactory
+  )
+}

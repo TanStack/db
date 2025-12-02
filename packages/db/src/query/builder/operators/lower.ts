@@ -1,18 +1,7 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
+import type { CompiledExpression } from "../../ir.js"
 import type { ExpressionLike, StringFunctionReturnType } from "./types.js"
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function lower<T extends ExpressionLike>(
-  arg: T
-): StringFunctionReturnType<T> {
-  return new Func(`lower`, [toExpression(arg)]) as StringFunctionReturnType<T>
-}
 
 // ============================================================
 // EVALUATOR
@@ -31,7 +20,15 @@ function lowerEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`lower`, lowerEvaluatorFactory)
+export function lower<T extends ExpressionLike>(
+  arg: T
+): StringFunctionReturnType<T> {
+  return new Func(
+    `lower`,
+    [toExpression(arg)],
+    lowerEvaluatorFactory
+  ) as StringFunctionReturnType<T>
+}

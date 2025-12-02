@@ -1,8 +1,6 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { BasicExpression } from "../../ir.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
+import type { BasicExpression, CompiledExpression } from "../../ir.js"
 
 // ============================================================
 // TYPES
@@ -10,17 +8,6 @@ import type { CompiledExpression } from "../../compiler/registry.js"
 
 // Helper type for any expression-like value
 type ExpressionLike = BasicExpression | any
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
-  return new Func(
-    `coalesce`,
-    args.map((arg) => toExpression(arg))
-  )
-}
 
 // ============================================================
 // EVALUATOR
@@ -42,7 +29,13 @@ function coalesceEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`coalesce`, coalesceEvaluatorFactory)
+export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
+  return new Func(
+    `coalesce`,
+    args.map((arg) => toExpression(arg)),
+    coalesceEvaluatorFactory
+  )
+}

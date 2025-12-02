@@ -1,8 +1,6 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { BasicExpression } from "../../ir.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
+import type { BasicExpression, CompiledExpression } from "../../ir.js"
 
 // ============================================================
 // TYPES
@@ -15,20 +13,6 @@ type ExpressionLike = BasicExpression | any
 type BinaryNumericReturnType<_T1, _T2> = BasicExpression<
   number | undefined | null
 >
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function divide<T1 extends ExpressionLike, T2 extends ExpressionLike>(
-  left: T1,
-  right: T2
-): BinaryNumericReturnType<T1, T2> {
-  return new Func(`divide`, [
-    toExpression(left),
-    toExpression(right),
-  ]) as BinaryNumericReturnType<T1, T2>
-}
 
 // ============================================================
 // EVALUATOR
@@ -50,7 +34,16 @@ function divideEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`divide`, divideEvaluatorFactory)
+export function divide<T1 extends ExpressionLike, T2 extends ExpressionLike>(
+  left: T1,
+  right: T2
+): BinaryNumericReturnType<T1, T2> {
+  return new Func(
+    `divide`,
+    [toExpression(left), toExpression(right)],
+    divideEvaluatorFactory
+  ) as BinaryNumericReturnType<T1, T2>
+}

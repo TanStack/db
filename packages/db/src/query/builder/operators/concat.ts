@@ -1,8 +1,6 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { BasicExpression } from "../../ir.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
+import type { BasicExpression, CompiledExpression } from "../../ir.js"
 
 // ============================================================
 // TYPES
@@ -10,19 +8,6 @@ import type { CompiledExpression } from "../../compiler/registry.js"
 
 // Helper type for any expression-like value
 type ExpressionLike = BasicExpression | any
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function concat(
-  ...args: Array<ExpressionLike>
-): BasicExpression<string> {
-  return new Func(
-    `concat`,
-    args.map((arg) => toExpression(arg))
-  )
-}
 
 // ============================================================
 // EVALUATOR
@@ -51,7 +36,15 @@ function concatEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`concat`, concatEvaluatorFactory)
+export function concat(
+  ...args: Array<ExpressionLike>
+): BasicExpression<string> {
+  return new Func(
+    `concat`,
+    args.map((arg) => toExpression(arg)),
+    concatEvaluatorFactory
+  )
+}

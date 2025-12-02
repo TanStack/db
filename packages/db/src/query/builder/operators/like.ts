@@ -1,8 +1,6 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { BasicExpression } from "../../ir.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
+import type { BasicExpression, CompiledExpression } from "../../ir.js"
 
 // ============================================================
 // TYPES
@@ -13,18 +11,6 @@ type StringRef =
   | BasicExpression<string | null>
   | BasicExpression<string | undefined>
 type StringLike = StringRef | string | null | undefined | any
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function like(
-  left: StringLike,
-  right: StringLike
-): BasicExpression<boolean>
-export function like(left: any, right: any): BasicExpression<boolean> {
-  return new Func(`like`, [toExpression(left), toExpression(right)])
-}
 
 // ============================================================
 // EVALUATOR
@@ -80,10 +66,20 @@ function likeEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`like`, likeEvaluatorFactory)
+export function like(
+  left: StringLike,
+  right: StringLike
+): BasicExpression<boolean>
+export function like(left: any, right: any): BasicExpression<boolean> {
+  return new Func(
+    `like`,
+    [toExpression(left), toExpression(right)],
+    likeEvaluatorFactory
+  )
+}
 
 // Export for use by ilike
 export { evaluateLike }

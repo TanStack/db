@@ -47,20 +47,18 @@ export {
 // Aggregates - now from aggregate modules for tree-shaking
 export { count, avg, sum, min, max } from "./builder/aggregates/index.js"
 
-// Operator registry for custom operators
+// Types for custom operators and aggregates
+// Custom operators: create a Func with your own factory as the 3rd argument
+// Custom aggregates: create an Aggregate with your own config as the 3rd argument
 export {
-  registerOperator,
+  Func,
+  Aggregate,
   type EvaluatorFactory,
   type CompiledExpression,
-} from "./compiler/registry.js"
-
-// Aggregate registry for custom aggregates
-export {
-  registerAggregate,
   type AggregateConfig,
   type AggregateFactory,
   type ValueExtractor,
-} from "./compiler/aggregate-registry.js"
+} from "./ir.js"
 
 // Ref proxy utilities
 export type { Ref } from "./builder/types.js"

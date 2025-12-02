@@ -1,19 +1,18 @@
-import { beforeAll, describe, expect, it } from "vitest"
+import { describe, expect, it } from "vitest"
 import { createCollection } from "../../../src/collection/index.js"
 import {
+  Aggregate,
   avg,
   count,
   createLiveQueryCollection,
   sum,
 } from "../../../src/query/index.js"
-import { Aggregate } from "../../../src/query/ir.js"
 import { toExpression } from "../../../src/query/builder/ref-proxy.js"
-import {
-  getAggregateConfig,
-  registerAggregate,
-} from "../../../src/query/compiler/aggregate-registry.js"
 import { mockSyncCollectionOptions } from "../../utils.js"
-import type { ValueExtractor } from "../../../src/query/compiler/aggregate-registry.js"
+import type {
+  AggregateConfig,
+  ValueExtractor,
+} from "../../../src/query/index.js"
 
 interface TestItem {
   id: number
@@ -39,106 +38,84 @@ function createTestCollection() {
   )
 }
 
-// Custom aggregate builder function (follows the same pattern as sum, count, etc.)
+// Custom aggregate configs (following the same pattern as built-in aggregates)
+const productConfig: AggregateConfig = {
+  factory: (valueExtractor: ValueExtractor) => ({
+    preMap: valueExtractor,
+    reduce: (values: Array<[number, number]>) => {
+      let result = 1
+      for (const [value, multiplicity] of values) {
+        // For positive multiplicity, multiply the value that many times
+        // For negative multiplicity, divide (inverse operation for IVM)
+        if (multiplicity > 0) {
+          for (let i = 0; i < multiplicity; i++) {
+            result *= value
+          }
+        } else if (multiplicity < 0) {
+          for (let i = 0; i < -multiplicity; i++) {
+            result /= value
+          }
+        }
+      }
+      return result
+    },
+  }),
+  valueTransform: `numeric`,
+}
+
+const varianceConfig: AggregateConfig = {
+  factory: (valueExtractor: ValueExtractor) => ({
+    preMap: (data: any) => {
+      const value = valueExtractor(data)
+      return { sum: value, sumSq: value * value, n: 1 }
+    },
+    reduce: (
+      values: Array<[{ sum: number; sumSq: number; n: number }, number]>
+    ) => {
+      let totalSum = 0
+      let totalSumSq = 0
+      let totalN = 0
+      for (const [{ sum: s, sumSq, n }, multiplicity] of values) {
+        totalSum += s * multiplicity
+        totalSumSq += sumSq * multiplicity
+        totalN += n * multiplicity
+      }
+      return { sum: totalSum, sumSq: totalSumSq, n: totalN }
+    },
+    postMap: (acc: { sum: number; sumSq: number; n: number }) => {
+      if (acc.n === 0) return 0
+      const mean = acc.sum / acc.n
+      return acc.sumSq / acc.n - mean * mean
+    },
+  }),
+  valueTransform: `raw`, // We handle the transformation in preMap
+}
+
+// Custom aggregate builder functions (pass config as 3rd argument to Aggregate)
 function product<T>(arg: T): Aggregate<number> {
-  return new Aggregate(`product`, [toExpression(arg)])
+  return new Aggregate(`product`, [toExpression(arg)], productConfig)
 }
 
 function variance<T>(arg: T): Aggregate<number> {
-  return new Aggregate(`variance`, [toExpression(arg)])
+  return new Aggregate(`variance`, [toExpression(arg)], varianceConfig)
 }
 
 describe(`Custom Aggregates`, () => {
-  beforeAll(() => {
-    // Register custom aggregates for testing
-    // Aggregate functions must implement the IVM aggregate interface:
-    // { preMap: (data) => V, reduce: (values: [V, multiplicity][]) => V, postMap?: (V) => R }
-
-    // Custom product aggregate: multiplies all values together
-    registerAggregate(`product`, {
-      factory: (valueExtractor: ValueExtractor) => ({
-        preMap: valueExtractor,
-        reduce: (values: Array<[number, number]>) => {
-          let product = 1
-          for (const [value, multiplicity] of values) {
-            // For positive multiplicity, multiply the value that many times
-            // For negative multiplicity, divide (inverse operation for IVM)
-            if (multiplicity > 0) {
-              for (let i = 0; i < multiplicity; i++) {
-                product *= value
-              }
-            } else if (multiplicity < 0) {
-              for (let i = 0; i < -multiplicity; i++) {
-                product /= value
-              }
-            }
-          }
-          return product
-        },
-      }),
-      valueTransform: `numeric`,
-    })
-
-    // Custom variance aggregate (simplified - population variance)
-    // Stores { sum, sumSq, n } to compute variance
-    registerAggregate(`variance`, {
-      factory: (valueExtractor: ValueExtractor) => ({
-        preMap: (data: any) => {
-          const value = valueExtractor(data)
-          return { sum: value, sumSq: value * value, n: 1 }
-        },
-        reduce: (
-          values: Array<[{ sum: number; sumSq: number; n: number }, number]>
-        ) => {
-          let totalSum = 0
-          let totalSumSq = 0
-          let totalN = 0
-          for (const [{ sum, sumSq, n }, multiplicity] of values) {
-            totalSum += sum * multiplicity
-            totalSumSq += sumSq * multiplicity
-            totalN += n * multiplicity
-          }
-          return { sum: totalSum, sumSq: totalSumSq, n: totalN }
-        },
-        postMap: (acc: { sum: number; sumSq: number; n: number }) => {
-          if (acc.n === 0) return 0
-          const mean = acc.sum / acc.n
-          return acc.sumSq / acc.n - mean * mean
-        },
-      }),
-      valueTransform: `raw`, // We handle the transformation in preMap
-    })
-  })
-
-  describe(`registerAggregate`, () => {
-    it(`registers a custom aggregate in the registry`, () => {
-      const config = getAggregateConfig(`product`)
-      expect(config).toBeDefined()
-      expect(config.valueTransform).toBe(`numeric`)
-      expect(typeof config.factory).toBe(`function`)
-    })
-
-    it(`retrieves custom aggregate config (case-insensitive)`, () => {
-      const config1 = getAggregateConfig(`Product`)
-      const config2 = getAggregateConfig(`PRODUCT`)
-      expect(config1).toBeDefined()
-      expect(config2).toBeDefined()
-    })
-  })
-
   describe(`custom aggregate builder functions`, () => {
-    it(`creates an Aggregate IR node for product`, () => {
+    it(`creates an Aggregate IR node for product with embedded config`, () => {
       const agg = product(10)
       expect(agg.type).toBe(`agg`)
       expect(agg.name).toBe(`product`)
       expect(agg.args).toHaveLength(1)
+      expect(agg.config).toBe(productConfig)
     })
 
-    it(`creates an Aggregate IR node for variance`, () => {
+    it(`creates an Aggregate IR node for variance with embedded config`, () => {
       const agg = variance(10)
       expect(agg.type).toBe(`agg`)
       expect(agg.name).toBe(`variance`)
       expect(agg.args).toHaveLength(1)
+      expect(agg.config).toBe(varianceConfig)
     })
   })
 

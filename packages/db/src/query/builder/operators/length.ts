@@ -1,18 +1,7 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
+import type { CompiledExpression } from "../../ir.js"
 import type { ExpressionLike, NumericFunctionReturnType } from "./types.js"
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function length<T extends ExpressionLike>(
-  arg: T
-): NumericFunctionReturnType<T> {
-  return new Func(`length`, [toExpression(arg)]) as NumericFunctionReturnType<T>
-}
 
 // ============================================================
 // EVALUATOR
@@ -37,7 +26,15 @@ function lengthEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`length`, lengthEvaluatorFactory)
+export function length<T extends ExpressionLike>(
+  arg: T
+): NumericFunctionReturnType<T> {
+  return new Func(
+    `length`,
+    [toExpression(arg)],
+    lengthEvaluatorFactory
+  ) as NumericFunctionReturnType<T>
+}

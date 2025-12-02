@@ -1,78 +1,70 @@
 import { describe, expect, it } from "vitest"
 import { compileExpression } from "../../../src/query/compiler/evaluators.js"
-import { registerOperator } from "../../../src/query/compiler/registry.js"
 import { Func, PropRef, Value } from "../../../src/query/ir.js"
 import { toExpression } from "../../../src/query/builder/ref-proxy.js"
+import { and } from "../../../src/query/builder/operators/index.js"
 import type {
+  BasicExpression,
   CompiledExpression,
   EvaluatorFactory,
-} from "../../../src/query/compiler/registry.js"
-import type { BasicExpression } from "../../../src/query/ir.js"
-
-// Import operators to register evaluators (needed for direct IR testing)
-import "../../../src/query/builder/operators/index.js"
+} from "../../../src/query/ir.js"
 
 describe(`custom operators`, () => {
-  describe(`registerOperator`, () => {
-    it(`allows registering a custom "between" operator`, () => {
-      // Register a custom "between" operator
-      const betweenFactory: EvaluatorFactory = (
-        compiledArgs: Array<CompiledExpression>,
-        _isSingleRow: boolean
-      ): CompiledExpression => {
-        const valueEval = compiledArgs[0]!
-        const minEval = compiledArgs[1]!
-        const maxEval = compiledArgs[2]!
+  // Define factory for the "between" operator
+  const betweenFactory: EvaluatorFactory = (
+    compiledArgs: Array<CompiledExpression>,
+    _isSingleRow: boolean
+  ): CompiledExpression => {
+    const valueEval = compiledArgs[0]!
+    const minEval = compiledArgs[1]!
+    const maxEval = compiledArgs[2]!
 
-        return (data: any) => {
-          const value = valueEval(data)
-          const min = minEval(data)
-          const max = maxEval(data)
+    return (data: any) => {
+      const value = valueEval(data)
+      const min = minEval(data)
+      const max = maxEval(data)
 
-          if (value === null || value === undefined) {
-            return null // 3-valued logic
-          }
-
-          return value >= min && value <= max
-        }
+      if (value === null || value === undefined) {
+        return null // 3-valued logic
       }
 
-      registerOperator(`between`, betweenFactory)
+      return value >= min && value <= max
+    }
+  }
 
+  // Builder function for "between" operator
+  function between(value: any, min: any, max: any): BasicExpression<boolean> {
+    return new Func(
+      `between`,
+      [toExpression(value), toExpression(min), toExpression(max)],
+      betweenFactory
+    )
+  }
+
+  describe(`custom operator pattern`, () => {
+    it(`allows creating a custom "between" operator`, () => {
       // Test the custom operator
-      const func = new Func(`between`, [
-        new Value(5),
-        new Value(1),
-        new Value(10),
-      ])
+      const func = between(new Value(5), new Value(1), new Value(10))
       const compiled = compileExpression(func)
 
       expect(compiled({})).toBe(true)
     })
 
     it(`custom "between" operator returns false when out of range`, () => {
-      const func = new Func(`between`, [
-        new Value(15),
-        new Value(1),
-        new Value(10),
-      ])
+      const func = between(new Value(15), new Value(1), new Value(10))
       const compiled = compileExpression(func)
 
       expect(compiled({})).toBe(false)
     })
 
     it(`custom "between" operator handles null with 3-valued logic`, () => {
-      const func = new Func(`between`, [
-        new Value(null),
-        new Value(1),
-        new Value(10),
-      ])
+      const func = between(new Value(null), new Value(1), new Value(10))
       const compiled = compileExpression(func)
 
       expect(compiled({})).toBe(null)
     })
 
-    it(`allows registering a custom "startsWith" operator`, () => {
+    it(`allows creating a custom "startsWith" operator`, () => {
       const startsWithFactory: EvaluatorFactory = (
         compiledArgs: Array<CompiledExpression>,
         _isSingleRow: boolean
@@ -95,19 +87,22 @@ describe(`custom operators`, () => {
         }
       }
 
-      registerOperator(`startsWith`, startsWithFactory)
+      function startsWith(str: any, prefix: any): BasicExpression<boolean> {
+        return new Func(
+          `startsWith`,
+          [toExpression(str), toExpression(prefix)],
+          startsWithFactory
+        )
+      }
 
-      const func = new Func(`startsWith`, [
-        new Value(`hello world`),
-        new Value(`hello`),
-      ])
+      const func = startsWith(new Value(`hello world`), new Value(`hello`))
       const compiled = compileExpression(func)
 
       expect(compiled({})).toBe(true)
     })
 
     it(`custom operator works with property references`, () => {
-      // Register a custom "isEmpty" operator
+      // Define a custom "isEmpty" operator
       const isEmptyFactory: EvaluatorFactory = (
         compiledArgs: Array<CompiledExpression>,
         _isSingleRow: boolean
@@ -131,10 +126,12 @@ describe(`custom operators`, () => {
         }
       }
 
-      registerOperator(`isEmpty`, isEmptyFactory)
+      function isEmpty(value: any): BasicExpression<boolean> {
+        return new Func(`isEmpty`, [toExpression(value)], isEmptyFactory)
+      }
 
       // Test with a property reference
-      const func = new Func(`isEmpty`, [new PropRef([`users`, `name`])])
+      const func = isEmpty(new PropRef([`users`, `name`]))
       const compiled = compileExpression(func)
 
       expect(compiled({ users: { name: `` } })).toBe(true)
@@ -142,7 +139,7 @@ describe(`custom operators`, () => {
       expect(compiled({ users: { name: null } })).toBe(true)
     })
 
-    it(`allows registering a custom "modulo" operator`, () => {
+    it(`allows creating a custom "modulo" operator`, () => {
       const moduloFactory: EvaluatorFactory = (
         compiledArgs: Array<CompiledExpression>,
         _isSingleRow: boolean
@@ -165,27 +162,33 @@ describe(`custom operators`, () => {
         }
       }
 
-      registerOperator(`modulo`, moduloFactory)
+      function modulo(left: any, right: any): BasicExpression<number> {
+        return new Func(
+          `modulo`,
+          [toExpression(left), toExpression(right)],
+          moduloFactory
+        )
+      }
 
-      const func = new Func(`modulo`, [new Value(10), new Value(3)])
+      const func = modulo(new Value(10), new Value(3))
       const compiled = compileExpression(func)
 
       expect(compiled({})).toBe(1)
     })
 
     it(`custom operator can be used in nested expressions`, () => {
-      // Use the previously registered "between" with an "and" operator
-      const func = new Func(`and`, [
-        new Func(`between`, [new Value(5), new Value(1), new Value(10)]),
-        new Func(`between`, [new Value(15), new Value(10), new Value(20)]),
-      ])
+      // Use the "between" operator with an "and" operator
+      const func = and(
+        between(new Value(5), new Value(1), new Value(10)),
+        between(new Value(15), new Value(10), new Value(20))
+      )
       const compiled = compileExpression(func)
 
       expect(compiled({})).toBe(true)
     })
 
-    it(`custom operator can override built-in operator behavior`, () => {
-      // Register a custom version of "length" that handles objects
+    it(`custom operator with extended behavior`, () => {
+      // Define a custom version of "length" that also handles objects
       const customLengthFactory: EvaluatorFactory = (
         compiledArgs: Array<CompiledExpression>,
         _isSingleRow: boolean
@@ -209,10 +212,15 @@ describe(`custom operators`, () => {
         }
       }
 
-      // This will override the built-in length operator
-      registerOperator(`customLength`, customLengthFactory)
+      function customLength(value: any): BasicExpression<number> {
+        return new Func(
+          `customLength`,
+          [toExpression(value)],
+          customLengthFactory
+        )
+      }
 
-      const func = new Func(`customLength`, [new Value({ a: 1, b: 2, c: 3 })])
+      const func = customLength(new Value({ a: 1, b: 2, c: 3 }))
       const compiled = compileExpression(func)
 
       expect(compiled({})).toBe(3)
@@ -220,29 +228,16 @@ describe(`custom operators`, () => {
   })
 
   describe(`builder function pattern`, () => {
-    it(`can create a builder function for custom operators`, () => {
+    it(`demonstrates the full pattern for custom operators`, () => {
       // This demonstrates the full pattern users would use
 
-      // 1. Define the builder function (like eq, gt, etc.)
-      function between(
-        value: any,
-        min: any,
-        max: any
-      ): BasicExpression<boolean> {
-        return new Func(`between`, [
-          toExpression(value),
-          toExpression(min),
-          toExpression(max),
-        ])
-      }
+      // 1. The builder function was already defined above (between)
+      // It includes both the factory and the builder function
 
-      // 2. The evaluator was already registered in previous tests
-      // In real usage, you'd register it alongside the builder
-
-      // 3. Use it like any other operator
+      // 2. Use it like any other operator
       const expr = between(new PropRef([`users`, `age`]), 18, 65)
 
-      // 4. Compile and execute
+      // 3. Compile and execute
       const compiled = compileExpression(expr)
 
       expect(compiled({ users: { age: 30 } })).toBe(true)

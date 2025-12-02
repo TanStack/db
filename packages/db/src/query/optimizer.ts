@@ -124,13 +124,13 @@ import { deepEquals } from "../utils.js"
 import { CannotCombineEmptyExpressionListError } from "../errors.js"
 import {
   CollectionRef as CollectionRefClass,
-  Func,
   PropRef,
   QueryRef as QueryRefClass,
   createResidualWhere,
   getWhereExpression,
   isResidualWhere,
 } from "./ir.js"
+import { and as andBuilder } from "./builder/operators/and.js"
 import type { BasicExpression, From, QueryIR, Select, Where } from "./ir.js"
 
 /**
@@ -1056,6 +1056,6 @@ function combineWithAnd(
     return expressions[0]!
   }
 
-  // Create an AND function with all expressions as arguments
-  return new Func(`and`, expressions)
+  // Use the builder function to create an AND with the proper evaluator factory
+  return andBuilder(expressions)
 }

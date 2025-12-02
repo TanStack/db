@@ -1,8 +1,6 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
-import { registerOperator } from "../../compiler/registry.js"
-import type { BasicExpression } from "../../ir.js"
-import type { CompiledExpression } from "../../compiler/registry.js"
+import type { BasicExpression, CompiledExpression } from "../../ir.js"
 
 // ============================================================
 // TYPES
@@ -10,14 +8,6 @@ import type { CompiledExpression } from "../../compiler/registry.js"
 
 // Helper type for any expression-like value
 type ExpressionLike = BasicExpression | any
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function isUndefined(value: ExpressionLike): BasicExpression<boolean> {
-  return new Func(`isUndefined`, [toExpression(value)])
-}
 
 // ============================================================
 // EVALUATOR
@@ -36,7 +26,13 @@ function isUndefinedEvaluatorFactory(
 }
 
 // ============================================================
-// AUTO-REGISTRATION
+// BUILDER FUNCTION
 // ============================================================
 
-registerOperator(`isUndefined`, isUndefinedEvaluatorFactory)
+export function isUndefined(value: ExpressionLike): BasicExpression<boolean> {
+  return new Func(
+    `isUndefined`,
+    [toExpression(value)],
+    isUndefinedEvaluatorFactory
+  )
+}
