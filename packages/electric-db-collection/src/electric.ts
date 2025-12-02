@@ -1,12 +1,12 @@
+import DebugModule from "debug"
+import { Store } from "@tanstack/store"
+import { DeduplicatedLoadSubset } from "@tanstack/db"
 import {
   ShapeStream,
   isChangeMessage,
   isControlMessage,
   isVisibleInSnapshot,
 } from "@electric-sql/client"
-import { Store } from "@tanstack/store"
-import DebugModule from "debug"
-import { DeduplicatedLoadSubset } from "@tanstack/db"
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
@@ -14,6 +14,19 @@ import {
   TimeoutWaitingForTxIdError,
 } from "./errors"
 import { compileSQL } from "./sql-compiler"
+import { validateJsonSerializable } from "./persistence/persistenceAdapter"
+import { createPersistence } from "./persistence/createPersistence"
+import type { ElectricPersistenceConfig } from "./persistence/createPersistence"
+import type {
+  ControlMessage,
+  GetExtensions,
+  Message,
+  Offset,
+  PostgresSnapshot,
+  Row,
+  ShapeStreamOptions,
+} from "@electric-sql/client"
+
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -26,14 +39,6 @@ import type {
   UtilsRecord,
 } from "@tanstack/db"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type {
-  ControlMessage,
-  GetExtensions,
-  Message,
-  PostgresSnapshot,
-  Row,
-  ShapeStreamOptions,
-} from "@electric-sql/client"
 
 // Re-export for user convenience in custom match functions
 export { isChangeMessage, isControlMessage } from "@electric-sql/client"
@@ -98,8 +103,7 @@ type InferSchemaOutput<T> = T extends StandardSchemaV1
     : Record<string, unknown>
   : Record<string, unknown>
 
-/**
- * The mode of sync to use for the collection.
+/** The mode of sync to use for the collection.
  * @default `eager`
  * @description
  * - `eager`:
@@ -125,19 +129,25 @@ export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-  BaseCollectionConfig<
-    T,
-    string | number,
-    TSchema,
-    ElectricCollectionUtils<T>,
-    any
-  >,
-  `onInsert` | `onUpdate` | `onDelete` | `syncMode`
-> {
+    BaseCollectionConfig<
+      T,
+      string | number,
+      TSchema,
+      ElectricCollectionUtils<T>,
+      any
+    >,
+    `onInsert` | `onUpdate` | `onDelete` | `syncMode`
+  > {
   /**
    * Configuration options for the ElectricSQL ShapeStream
    */
   shapeOptions: ShapeStreamOptions<GetExtensions<T>>
+
+  /**
+   * Optional persistence configuration for localStorage storage
+   * When provided, data will be persisted to localStorage or the specified storage and loaded on startup
+   */
+  persistence?: ElectricPersistenceConfig
   syncMode?: ElectricSyncMode
 
   /**
@@ -396,6 +406,15 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
 
 /**
+ * Type for the clearPersistence utility function
+ */
+export type ClearPersistenceFn = () => Promise<void>
+
+/**
+ * Type for the getPersistenceSize utility function
+ */
+export type GetPersistenceSizeFn = () => Promise<number>
+/**
  * Type for the awaitMatch utility function
  */
 export type AwaitMatchFn<T extends Row<unknown>> = (
@@ -406,11 +425,19 @@ export type AwaitMatchFn<T extends Row<unknown>> = (
 /**
  * Electric collection utilities type
  */
-export interface ElectricCollectionUtils<
-  T extends Row<unknown> = Row<unknown>,
-> extends UtilsRecord {
+export interface ElectricCollectionUtils<T extends Row<unknown> = Row<unknown>>
+  extends UtilsRecord {
   awaitTxId: AwaitTxIdFn
   awaitMatch: AwaitMatchFn<T>
+}
+
+/**
+ * Electric collection utilities type with persistence
+ */
+export interface ElectricCollectionUtilsWithPersistence
+  extends ElectricCollectionUtils {
+  clearPersistence: ClearPersistenceFn
+  getPersistenceSize: GetPersistenceSizeFn
 }
 
 /**
@@ -456,6 +483,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   schema?: any
 } {
   const seenTxids = new Store<Set<Txid>>(new Set([]))
+  const persistence =
+    config.persistence && createPersistence(config.persistence)
+
   const seenSnapshots = new Store<Array<PostgresSnapshot>>([])
   const internalSyncMode = config.syncMode ?? `eager`
   const finalSyncMode =
@@ -510,6 +540,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   const sync = createElectricSync<T>(config.shapeOptions, {
     seenTxids,
     seenSnapshots,
+    persistence: config.persistence,
     syncMode: internalSyncMode,
     pendingMatches,
     currentBatchMessages,
@@ -705,12 +736,25 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           ElectricCollectionUtils<T>
         >
       ) => {
+        // Validate that all values in the transaction can be JSON serialized (if persistence enabled)
+        if (config.persistence) {
+          params.transaction.mutations.forEach((m) =>
+            validateJsonSerializable(m.modified, `insert`)
+          )
+        }
         const handlerResult = await config.onInsert!(params)
         await processMatchingStrategy(handlerResult)
+
+        if (persistence) {
+          // called outside stream -> snapshot rows, keep prior cursor
+          persistence.saveCollectionSnapshot(params.collection)
+        }
+
         return handlerResult
       }
     : undefined
 
+  // Create wrapper handlers for direct persistence operations that handle txid awaiting
   const wrappedOnUpdate = config.onUpdate
     ? async (
         params: UpdateMutationFnParams<
@@ -719,8 +763,19 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           ElectricCollectionUtils<T>
         >
       ) => {
+        // Validate that all values in the transaction can be JSON serialized (if persistence enabled)
+        if (config.persistence) {
+          params.transaction.mutations.forEach((m) =>
+            validateJsonSerializable(m.modified, `update`)
+          )
+        }
         const handlerResult = await config.onUpdate!(params)
         await processMatchingStrategy(handlerResult)
+
+        if (persistence) {
+          persistence.saveCollectionSnapshot(params.collection)
+        }
+
         return handlerResult
       }
     : undefined
@@ -735,18 +790,43 @@ export function electricCollectionOptions<T extends Row<unknown>>(
       ) => {
         const handlerResult = await config.onDelete!(params)
         await processMatchingStrategy(handlerResult)
+
+        // Persist to storage if configured
+        if (persistence) {
+          // Save collection state to storage adapter
+          persistence.saveCollectionSnapshot(params.collection)
+        }
+
         return handlerResult
       }
     : undefined
 
+  const clearPersistence: ClearPersistenceFn = async () => {
+    if (!persistence) {
+      throw new Error(`Persistence is not configured for this collection`)
+    }
+    persistence.clear()
+  }
+
+  const getPersistenceSize: GetPersistenceSizeFn = async () =>
+    persistence ? persistence.size() : 0
+
   // Extract standard Collection config properties
   const {
     shapeOptions: _shapeOptions,
+    persistence: _persistence,
     onInsert: _onInsert,
     onUpdate: _onUpdate,
     onDelete: _onDelete,
     ...restConfig
   } = config
+
+  // Build utils object based on whether persistence is configured
+  const utils:
+    | ElectricCollectionUtils
+    | ElectricCollectionUtilsWithPersistence = persistence
+    ? { awaitTxId, awaitMatch, clearPersistence, getPersistenceSize }
+    : { awaitTxId, awaitMatch }
 
   return {
     ...restConfig,
@@ -755,10 +835,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,
     onDelete: wrappedOnDelete,
-    utils: {
-      awaitTxId,
-      awaitMatch,
-    },
+    utils: utils as ElectricCollectionUtils<any>,
   }
 }
 
@@ -787,6 +864,7 @@ function createElectricSync<T extends Row<unknown>>(
     removePendingMatches: (matchIds: Array<string>) => void
     resolveMatchedPendingMatches: () => void
     collectionId?: string
+    persistence?: ElectricPersistenceConfig
     testHooks?: ElectricTestHooks
   }
 ): SyncConfig<T> {
@@ -799,8 +877,11 @@ function createElectricSync<T extends Row<unknown>>(
     removePendingMatches,
     resolveMatchedPendingMatches,
     collectionId,
+    persistence: persistenceConfig,
     testHooks,
   } = options
+  const persistence =
+    persistenceConfig && createPersistence<T>(persistenceConfig)
   const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
 
   // Store for the relation schema information
@@ -826,6 +907,31 @@ function createElectricSync<T extends Row<unknown>>(
   return {
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady, truncate, collection } = params
+
+      // Load from persistance adapter if persistence is configured
+      if (persistence) {
+        try {
+          const persistedData = persistence.read()
+          const hasPersistedData =
+            !!persistedData?.value &&
+            Object.keys(persistedData.value).length > 0
+
+          persistence.loadSnapshotInto(
+            begin,
+            (op) => write({ ...op, metadata: {} }),
+            commit
+          )
+
+          // In on-demand mode, mark the collection as ready immediately after loading
+          // from persistence since on-demand works with partial/incremental data
+          // and doesn't require waiting for server sync to be usable
+          if (syncMode === `on-demand` && hasPersistedData) {
+            markReady()
+          }
+        } catch (e) {
+          console.warn(`[ElectricPersistence] load error`, e)
+        }
+      }
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
@@ -876,14 +982,27 @@ function createElectricSync<T extends Row<unknown>>(
         })
       })
 
+      // Read from persistence if available
+      const prev = persistence?.read()
+
+      const computedOffset: Offset | undefined = (() => {
+        const offset = shapeOptions.offset
+        if (offset != null) return offset
+        const lastOffset = prev?.lastOffset as Offset | undefined
+        if (lastOffset != null) return lastOffset
+        if (syncMode === `on-demand`) return `now`
+        return undefined
+      })()
+
+      const computedHandle: string | undefined =
+        shapeOptions.handle ?? prev?.shapeHandle
+
       const stream = new ShapeStream({
         ...shapeOptions,
         // In on-demand mode, we only want to sync changes, so we set the log to `changes_only`
         log: syncMode === `on-demand` ? `changes_only` : undefined,
-        // In on-demand mode, we only need the changes from the point of time the collection was created
-        // so we default to `now` when there is no saved offset.
-        offset:
-          shapeOptions.offset ?? (syncMode === `on-demand` ? `now` : undefined),
+        offset: computedOffset,
+        handle: computedHandle,
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
@@ -934,6 +1053,7 @@ function createElectricSync<T extends Row<unknown>>(
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
         let hasSnapshotEnd = false
+        let hasSyncedChanges = false
 
         for (const message of messages) {
           // Add message to current batch buffer (for race condition handling)
@@ -1009,6 +1129,7 @@ function createElectricSync<T extends Row<unknown>>(
               newSnapshots.push(parseSnapshotMessage(message))
             }
             hasSnapshotEnd = true
+            if (persistenceConfig) hasSyncedChanges = true
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
@@ -1023,6 +1144,9 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             truncate()
+
+            // Clear persistence storage on truncate
+            if (persistence) persistence.clear()
 
             // Reset the loadSubset deduplication state since we're starting fresh
             // This ensures that previously loaded predicates don't prevent refetching after truncate
@@ -1096,6 +1220,10 @@ function createElectricSync<T extends Row<unknown>>(
             }
           }
 
+          if (persistence && hasSyncedChanges) {
+            persistence.saveCollectionSnapshot(collection, stream)
+          }
+
           // Clear the current batch buffer since we're now up-to-date
           currentBatchMessages.setState(() => [])
 
@@ -1110,7 +1238,7 @@ function createElectricSync<T extends Row<unknown>>(
           }
 
           // Always commit txids when we receive up-to-date, regardless of transaction state
-          seenTxids.setState((currentTxids) => {
+          seenTxids.setState((currentTxids: Set<Txid>) => {
             const clonedSeen = new Set<Txid>(currentTxids)
             if (newTxids.size > 0) {
               debug(
