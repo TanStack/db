@@ -266,7 +266,7 @@ export const firebaseTodoCollection = createCollection(
   firebaseCollectionOptions({
     id: `todos`,
     firestore,
-    collectionName: `todos`,
+    collectionPath: `todos`,
     getKey: (item) => item.id,
     schema: selectTodoSchema,
     rowUpdateMode: `partial`,
@@ -284,7 +284,7 @@ export const firebaseConfigCollection = createCollection(
   firebaseCollectionOptions({
     id: `config`,
     firestore,
-    collectionName: `config`,
+    collectionPath: `config`,
     getKey: (item) => item.id,
     schema: selectConfigSchema,
     rowUpdateMode: `partial`,
