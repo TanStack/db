@@ -19,7 +19,7 @@ let defaultIndexType: IndexConstructor<any> | null = null
 // Dev mode detection settings - ON by default in non-production
 let devModeConfig: IndexDevModeConfig = {
   enabled: true,
-  collectionSizeThreshold: 100,
+  collectionSizeThreshold: 1000,
   slowQueryThresholdMs: 10,
   onSuggestion: null,
 }
