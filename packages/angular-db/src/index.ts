@@ -32,10 +32,10 @@ export interface InjectLiveQueryResult<
   state: Signal<Map<TKey, TResult>>
   /** A signal containing the results as an array */
   data: Signal<Array<TResult>>
-  /** A signal containing the underlying collection instance */
-  collection: Signal<Collection<TResult, TKey, TUtils>>
+  /** A signal containing the underlying collection instance (null for disabled queries) */
+  collection: Signal<Collection<TResult, TKey, TUtils> | null>
   /** A signal containing the current status of the collection */
-  status: Signal<CollectionStatus>
+  status: Signal<CollectionStatus | `disabled`>
   /** A signal indicating whether the collection is currently loading */
   isLoading: Signal<boolean>
   /** A signal indicating whether the collection is ready */
@@ -67,41 +67,13 @@ export function injectLiveQuery<
     params: TParams
     q: InitialQueryBuilder
   }) => QueryBuilder<TContext> | undefined | null
-}): {
-  state: Signal<Map<string | number, GetResult<TContext>>>
-  data: Signal<Array<GetResult<TContext>>>
-  collection: Signal<Collection<
-    GetResult<TContext>,
-    string | number,
-    {}
-  > | null>
-  status: Signal<CollectionStatus | `disabled`>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
-}
+}): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
 ): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext> | undefined | null
-): {
-  state: Signal<Map<string | number, GetResult<TContext>>>
-  data: Signal<Array<GetResult<TContext>>>
-  collection: Signal<Collection<
-    GetResult<TContext>,
-    string | number,
-    {}
-  > | null>
-  status: Signal<CollectionStatus | `disabled`>
-  isLoading: Signal<boolean>
-  isReady: Signal<boolean>
-  isIdle: Signal<boolean>
-  isError: Signal<boolean>
-  isCleanedUp: Signal<boolean>
-}
+): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>
 ): InjectLiveQueryResult<GetResult<TContext>>
