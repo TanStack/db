@@ -7,7 +7,7 @@ export type ParsedMoveTag = Array<string>
 export type Position = number
 export type Value = string
 export type MoveOutPattern = {
-  position: Position
+  pos: Position
   value: Value
 }
 
@@ -54,8 +54,8 @@ export function getValue(tag: ParsedMoveTag, position: Position): Value {
 /**
  * Abstraction to extract position and value from a pattern.
  */
-export function getPositionalValue(pattern: MoveOutPattern): {
-  position: number
+function getPositionalValue(pattern: MoveOutPattern): {
+  pos: number
   value: string
 } {
   return pattern
@@ -77,8 +77,8 @@ export function tagMatchesPattern(
   tag: ParsedMoveTag,
   pattern: MoveOutPattern,
 ): boolean {
-  const { position, value } = getPositionalValue(pattern)
-  const tagValue = getValue(tag, position)
+  const { pos, value } = getPositionalValue(pattern)
+  const tagValue = getValue(tag, pos)
   return tagValue === value || tagValue === TAG_WILDCARD
 }
 
@@ -144,8 +144,8 @@ export function findRowsMatchingPattern(
   pattern: MoveOutPattern,
   index: TagIndex,
 ): Set<RowId> {
-  const { position, value } = getPositionalValue(pattern)
-  const positionIndex = index[position]
+  const { pos, value } = getPositionalValue(pattern)
+  const positionIndex = index[pos]
   const rowSet = positionIndex?.get(value)
   return rowSet ?? new Set()
 }
