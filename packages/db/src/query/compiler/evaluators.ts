@@ -7,30 +7,10 @@ import { tryGetOperatorEvaluator } from "./registry.js"
 import type { BasicExpression, Func, PropRef } from "../ir.js"
 import type { NamespacedRow } from "../../types.js"
 
-// Import all operators to ensure they're registered before any compilation happens
-// This ensures auto-registration works correctly
-import "../builder/operators/eq.js"
-import "../builder/operators/gt.js"
-import "../builder/operators/gte.js"
-import "../builder/operators/lt.js"
-import "../builder/operators/lte.js"
-import "../builder/operators/and.js"
-import "../builder/operators/or.js"
-import "../builder/operators/not.js"
-import "../builder/operators/in.js"
-import "../builder/operators/like.js"
-import "../builder/operators/ilike.js"
-import "../builder/operators/upper.js"
-import "../builder/operators/lower.js"
-import "../builder/operators/length.js"
-import "../builder/operators/concat.js"
-import "../builder/operators/coalesce.js"
-import "../builder/operators/add.js"
-import "../builder/operators/subtract.js"
-import "../builder/operators/multiply.js"
-import "../builder/operators/divide.js"
-import "../builder/operators/isNull.js"
-import "../builder/operators/isUndefined.js"
+// Operators are lazily registered when imported by user code.
+// Each operator file (e.g., eq.ts) auto-registers its evaluator on import.
+// If a user uses an operator without importing it, compilation will fail
+// with an UnknownFunctionError guiding them to import it.
 
 /**
  * Converts a 3-valued logic result to a boolean for use in WHERE/HAVING filters.

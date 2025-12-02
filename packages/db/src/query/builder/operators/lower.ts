@@ -1,18 +1,8 @@
 import { Func } from "../../ir.js"
 import { toExpression } from "../ref-proxy.js"
 import { registerOperator } from "../../compiler/registry.js"
-import type { BasicExpression } from "../../ir.js"
 import type { CompiledExpression } from "../../compiler/registry.js"
-
-// ============================================================
-// TYPES
-// ============================================================
-
-// Helper type for any expression-like value
-type ExpressionLike = BasicExpression | any
-
-// Helper type to determine string function return type based on input nullability
-type StringFunctionReturnType<_T> = BasicExpression<string | undefined | null>
+import type { ExpressionLike, StringFunctionReturnType } from "./types.js"
 
 // ============================================================
 // BUILDER FUNCTION

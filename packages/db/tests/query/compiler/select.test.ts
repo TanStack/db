@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest"
 import { processArgument } from "../../../src/query/compiler/select.js"
 import { Aggregate, Func, PropRef, Value } from "../../../src/query/ir.js"
 
+// Import operators to register evaluators (needed for direct IR testing)
+import "../../../src/query/builder/operators/index.js"
+
 describe(`select compiler`, () => {
   // Note: Most of the select compilation logic is tested through the full integration
   // tests in basic.test.ts and other compiler tests. Here we focus on the standalone

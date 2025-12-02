@@ -3,6 +3,9 @@ import { compileExpression } from "../../../src/query/compiler/evaluators.js"
 import { Func, PropRef, Value } from "../../../src/query/ir.js"
 import type { NamespacedRow } from "../../../src/types.js"
 
+// Import operators to register evaluators (needed for direct IR testing)
+import "../../../src/query/builder/operators/index.js"
+
 describe(`evaluators`, () => {
   describe(`compileExpression`, () => {
     it(`handles unknown expression type`, () => {

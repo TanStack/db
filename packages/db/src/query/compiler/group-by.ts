@@ -16,12 +16,10 @@ import type {
 } from "../ir.js"
 import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
 
-// Import all aggregates to ensure they're registered before any compilation happens
-import "../builder/aggregates/sum.js"
-import "../builder/aggregates/count.js"
-import "../builder/aggregates/avg.js"
-import "../builder/aggregates/min.js"
-import "../builder/aggregates/max.js"
+// Aggregates are lazily registered when imported by user code.
+// Each aggregate file (e.g., sum.ts) auto-registers its config on import.
+// If a user uses an aggregate without importing it, compilation will fail
+// with an UnsupportedAggregateFunctionError guiding them to import it.
 
 /**
  * Interface for caching the mapping between GROUP BY expressions and SELECT expressions

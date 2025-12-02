@@ -9,6 +9,9 @@ import type {
 } from "../../../src/query/compiler/registry.js"
 import type { BasicExpression } from "../../../src/query/ir.js"
 
+// Import operators to register evaluators (needed for direct IR testing)
+import "../../../src/query/builder/operators/index.js"
+
 describe(`custom operators`, () => {
   describe(`registerOperator`, () => {
     it(`allows registering a custom "between" operator`, () => {
