@@ -1,19 +1,21 @@
 import { describe, expect, it } from "vitest"
 import { compileSQL } from "../src/sql-compiler"
+import type { IR } from "@tanstack/db"
 
 // Helper to create a value expression
-function val<T>(value: T) {
-  return { type: `val` as const, value }
+function val<T>(value: T): IR.BasicExpression<T> {
+  return { type: `val`, value } as IR.BasicExpression<T>
 }
 
 // Helper to create a reference expression
-function ref(...path: Array<string>) {
-  return { type: `ref` as const, path }
+function ref(...path: Array<string>): IR.BasicExpression {
+  return { type: `ref`, path } as IR.BasicExpression
 }
 
 // Helper to create a function expression
-function func(name: string, args: Array<unknown>) {
-  return { type: `func` as const, name, args }
+
+function func(name: string, args: Array<any>): IR.BasicExpression<boolean> {
+  return { type: `func`, name, args } as IR.BasicExpression<boolean>
 }
 
 describe(`sql-compiler`, () => {
