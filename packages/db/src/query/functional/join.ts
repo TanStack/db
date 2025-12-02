@@ -20,12 +20,33 @@
  *   })
  * )
  * ```
+ *
+ * **Limitation:** Currently only supports simple equi-join conditions like
+ * `eq(a.field, b.field)`. Complex conditions like `and(eq(...), eq(...))`
+ * are not supported - the IR would need to be extended for arbitrary join
+ * conditions.
  */
 
 import type { CollectionImpl } from "../../collection/index.js"
 import { CollectionRef as CollectionRefClass } from "../ir.js"
-import type { JoinClause } from "../ir.js"
+import type { BasicExpression, JoinClause } from "../ir.js"
 import type { JoinShape, JoinClauseResult, ProcessorContext } from "./types.js"
+
+/**
+ * Check if an expression is a binary comparison (eq, neq, lt, gt, etc.)
+ * These have an 'args' array with exactly 2 elements.
+ */
+function isBinaryExpression(
+  expr: BasicExpression<boolean>
+): expr is BasicExpression<boolean> & { args: [unknown, unknown] } {
+  return (
+    expr &&
+    typeof expr === "object" &&
+    "args" in expr &&
+    Array.isArray((expr as any).args) &&
+    (expr as any).args.length === 2
+  )
+}
 
 /**
  * join - Creates a tree-shakable JOIN clause
@@ -61,20 +82,22 @@ export function join(shape: JoinShape): JoinClauseResult {
         )
 
         // Extract left/right from the ON expression
-        // For now, assume it's an eq() expression with two args
-        let left = on
-        let right = on
-        if (on && "args" in on && Array.isArray((on as any).args)) {
-          const args = (on as any).args
-          left = args[0]
-          right = args[1]
+        // The IR expects separate left/right expressions for equi-joins
+        if (!isBinaryExpression(on)) {
+          throw new Error(
+            `Invalid join condition for "${alias}": only binary expressions ` +
+              `like eq(left, right) are supported. Complex conditions like ` +
+              `and(...) or or(...) require IR changes.`
+          )
         }
+
+        const [left, right] = on.args
 
         joinClauses.push({
           from: fromRef,
           type,
-          left,
-          right,
+          left: left as BasicExpression,
+          right: right as BasicExpression,
         })
       }
 

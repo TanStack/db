@@ -33,6 +33,23 @@ class ShapeRegistryImpl implements ShapeRegistry {
     this.processors.set(key, processor)
   }
 
+  /**
+   * Explicit processing order for clauses.
+   * This ensures deterministic behavior regardless of object key order.
+   * Order matters: joins must be processed before where/select can reference joined columns.
+   */
+  private static readonly CLAUSE_ORDER = [
+    "join", // First: establish all sources
+    "where", // Then: filter conditions
+    "groupBy", // Group results
+    "having", // Filter groups
+    "select", // Project columns
+    "orderBy", // Sort results
+    "distinct", // Remove duplicates
+    "limit", // Pagination
+    "offset",
+  ]
+
   process(
     shape: QueryShape,
     ir: Partial<QueryIR>,
@@ -40,7 +57,9 @@ class ShapeRegistryImpl implements ShapeRegistry {
   ): QueryIR {
     let result = { ...ir }
 
-    for (const [key, value] of Object.entries(shape)) {
+    // Process clauses in explicit order for deterministic behavior
+    for (const key of ShapeRegistryImpl.CLAUSE_ORDER) {
+      const value = (shape as Record<string, unknown>)[key]
       if (value === undefined) continue
 
       // Check if it's a ClauseResult (tree-shakable clause function)
@@ -56,6 +75,16 @@ class ShapeRegistryImpl implements ShapeRegistry {
         result = processor(key, value, result, context)
       } else {
         console.warn(`No processor registered for shape key: ${key}`)
+      }
+    }
+
+    // Warn about any keys not in CLAUSE_ORDER (typos or unsupported clauses)
+    for (const key of Object.keys(shape)) {
+      if (
+        !ShapeRegistryImpl.CLAUSE_ORDER.includes(key) &&
+        (shape as Record<string, unknown>)[key] !== undefined
+      ) {
+        console.warn(`Unknown clause key: ${key}`)
       }
     }
 
