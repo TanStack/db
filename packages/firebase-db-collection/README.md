@@ -50,7 +50,7 @@ const todosCollection = createCollection(
   firebaseCollectionOptions<Todo>({
     id: "todos",
     firestore,
-    collectionName: "todos",
+    collectionPath: "todos",
     getKey: (item) => item.id,
   })
 )
@@ -79,7 +79,7 @@ const collection = createCollection(
   firebaseCollectionOptions<Todo>({
     id: "todos",
     firestore,
-    collectionName: "todos",
+    collectionPath: "todos",
     // Convert Firestore Timestamps to JavaScript Dates
     parse: {
       createdAt: (timestamp) => timestamp.toDate(),
@@ -105,7 +105,7 @@ const recentActiveTodos = createCollection(
   firebaseCollectionOptions<Todo>({
     id: "recent-active-todos",
     firestore,
-    collectionName: "todos",
+    collectionPath: "todos",
     queryConstraints: [
       where("completed", "==", false),
       where("createdAt", ">", thirtyDaysAgo),
@@ -125,7 +125,7 @@ const userTodos = createCollection(
   firebaseCollectionOptions<Todo>({
     id: "user-todos",
     firestore,
-    collectionName: "todos",
+    collectionPath: "todos",
     queryBuilder: (baseQuery) =>
       query(
         baseQuery,
@@ -146,7 +146,7 @@ const collection = createCollection(
   firebaseCollectionOptions<Todo>({
     id: "todos",
     firestore,
-    collectionName: "todos",
+    collectionPath: "todos",
     offlinePersistence: {
       enabled: true,
       tabManager: "default", // or 'multiTab' for multi-tab support
@@ -164,7 +164,7 @@ const collection = createCollection(
   firebaseCollectionOptions<Todo>({
     id: "todos",
     firestore,
-    collectionName: "todos",
+    collectionPath: "todos",
     autoId: true, // Firestore will generate IDs
   })
 )
@@ -179,7 +179,7 @@ const collection = createCollection(
   firebaseCollectionOptions<Todo>({
     id: "todos",
     firestore,
-    collectionName: "todos",
+    collectionPath: "todos",
     useTransactions: true, // Updates use runTransaction
   })
 )
@@ -270,7 +270,7 @@ const firestore = testEnv.unauthenticatedContext().firestore()
 | Option                   | Type                  | Default     | Description                            |
 | ------------------------ | --------------------- | ----------- | -------------------------------------- |
 | `firestore`              | `Firestore`           | required    | Firestore instance                     |
-| `collectionName`         | `string`              | required    | Firestore collection name              |
+| `collectionPath`         | `string`              | required    | Firestore collection name              |
 | `pageSize`               | `number`              | `1000`      | Items per page for initial fetch       |
 | `parse`                  | `Conversions`         | `{}`        | Parse Firestore documents to items     |
 | `serialize`              | `Conversions`         | `{}`        | Serialize items to Firestore documents |

@@ -45,7 +45,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
@@ -62,7 +62,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
@@ -94,7 +94,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
@@ -126,7 +126,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
@@ -158,7 +158,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos-1`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
@@ -167,7 +167,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos-2`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
@@ -203,7 +203,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
@@ -230,7 +230,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
@@ -259,7 +259,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
           parse: {
             createdAt: (timestamp: any) => timestamp?.toDate?.() || timestamp,
@@ -292,7 +292,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
@@ -315,7 +315,7 @@ describe(`Firebase Collection Integration`, () => {
         firebaseCollectionOptions<TestTodo>({
           id: `todos`,
           firestore,
-          collectionName: `todos`,
+          collectionPath: `todos`,
           getKey: (item) => item.id,
         })
       )
