@@ -19,14 +19,17 @@ function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
     return false
   }
 
-  // Check if indexing is available (BTreeIndex registered)
+  // Check if indexing is available (MapIndex or BTreeIndex registered)
   if (!isIndexingAvailable()) {
     if (isDevModeEnabled()) {
       console.warn(
         `[TanStack DB] Auto-indexing is enabled but no index type is registered. ` +
-          `Import and register BTreeIndex to enable indexing:\n` +
-          `  import { registerDefaultIndexType, BTreeIndex } from '@tanstack/db/indexing'\n` +
-          `  registerDefaultIndexType(BTreeIndex)`
+          `Import and enable indexing:\n` +
+          `  import { enableIndexing } from '@tanstack/db/indexing'\n` +
+          `  enableIndexing()  // For equality lookups (eq, in)\n` +
+          `  // Or for ORDER BY optimization on large collections:\n` +
+          `  import { enableBTreeIndexing } from '@tanstack/db/indexing'\n` +
+          `  enableBTreeIndexing()`
       )
     }
     return false

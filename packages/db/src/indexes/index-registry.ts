@@ -4,6 +4,8 @@
  * This module provides a way to register index types at runtime,
  * enabling:
  * - Tree-shaking of BTree implementation when indexing isn't used
+ * - MapIndex for lightweight equality lookups (eq, in)
+ * - BTreeIndex for full-featured indexing with sorted iteration
  * - Custom index implementations (register your own index type)
  * - Per-collection or global index configuration
  *
@@ -119,11 +121,15 @@ export function emitIndexSuggestion(suggestion: IndexSuggestion): void {
     devModeConfig.onSuggestion(suggestion)
   } else {
     // Default: log to console with helpful formatting
+    const indexTypeHint = defaultIndexType
+      ? ``
+      : `\n  First, enable indexing: import { enableIndexing } from '@tanstack/db/indexing'; enableIndexing()`
     console.warn(
       `[TanStack DB] Index suggestion for "${suggestion.collectionId}":\n` +
         `  ${suggestion.message}\n` +
-        `  Field: ${suggestion.fieldPath.join(`.`)}\n` +
-        `  Suggested fix: collection.createIndex((row) => row.${suggestion.fieldPath.join(`.`)}, { indexType: BTreeIndex })`
+        `  Field: ${suggestion.fieldPath.join(`.`)}` +
+        indexTypeHint +
+        `\n  Add index: collection.createIndex((row) => row.${suggestion.fieldPath.join(`.`)})`
     )
   }
 }
