@@ -535,10 +535,11 @@ export interface BaseCollectionConfig<
   /**
    * Auto-indexing mode for the collection.
    * When enabled, indexes will be automatically created for simple where expressions.
-   * @default "eager"
+   * @default "off"
    * @description
-   * - "off": No automatic indexing
-   * - "eager": Automatically create indexes for simple where expressions in subscribeChanges (default)
+   * - "off": No automatic indexing (default). Use explicit indexes for better bundle size.
+   * - "eager": Automatically create indexes for simple where expressions in subscribeChanges.
+   *            Requires importing and registering BTreeIndex from '@tanstack/db/indexing'.
    */
   autoIndex?: `off` | `eager`
   /**

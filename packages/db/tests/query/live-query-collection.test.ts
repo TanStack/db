@@ -1950,6 +1950,7 @@ describe(`createLiveQueryCollection`, () => {
           getKey: (item) => item.id,
           syncMode: `on-demand`,
           startSync: true,
+          autoIndex: `eager`, // Enable auto-indexing for orderBy optimization
           sync: {
             sync: ({ markReady, begin, write, commit }) => {
               // Provide minimal initial data
