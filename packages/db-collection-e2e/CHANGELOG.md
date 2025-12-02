@@ -1,5 +1,14 @@
 # @tanstack/db-collection-e2e
 
+## 0.0.13
+
+### Patch Changes
+
+- Updated dependencies [[`1d19d22`](https://github.com/TanStack/db/commit/1d19d2219cbbaef6483845df1c3b078077e4e3bd), [`aebd0fa`](https://github.com/TanStack/db/commit/aebd0fa43345ea28dcdb3f446cdd393de1d1e4b7), [`b3e4e80`](https://github.com/TanStack/db/commit/b3e4e80c4b73d96c15391ac25efb518c7ae7ccbb)]:
+  - @tanstack/electric-db-collection@0.2.11
+  - @tanstack/db@0.5.10
+  - @tanstack/query-db-collection@1.0.5
+
 ## 0.0.12
 
 ### Patch Changes
