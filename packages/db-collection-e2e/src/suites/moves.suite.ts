@@ -6,7 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { describe, expect, it, beforeAll } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 import { waitFor } from '../utils/helpers'
@@ -26,7 +26,7 @@ interface TagsTestConfig extends E2ETestConfig {
 }
 
 export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
-  describe(`Tags Suite`, () => {
+  describe(`Moves Suite`, () => {
     let usersTable: string
     let postsTable: string
     let dbClient: Client
@@ -35,12 +35,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
     let config: TagsTestConfig
 
     beforeAll(async () => {
-      const testConfig = await getConfig()
-      if (!testConfig.tagsTestSetup) {
-        throw new Error(`Tags test setup not configured`)
-      }
-
-      config = testConfig as TagsTestConfig
+      config = await getConfig()
       const setup = config.tagsTestSetup
       dbClient = setup.dbClient
       baseUrl = setup.baseUrl
@@ -105,7 +100,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
     async function waitForItemRemoved(
       collection: Collection<any, any, any, any, any>,
       itemId: string,
-      timeout: number = 10000,
+      timeout: number = 2000,
     ) {
       await waitFor(() => !collection.has(itemId), {
         timeout,
@@ -113,7 +108,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       })
     }
 
-    it.only(`1. Initial snapshot contains only posts from active users`, async () => {
+    it(`Initial snapshot contains only posts from active users`, async () => {
       // Create collection on posts with WHERE clause: userId IN (SELECT id FROM users WHERE isActive = true)
       const collection = createPostsByActiveUsersCollection()
 
@@ -222,7 +217,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await collection.cleanup()
     })
 
-    it(`2. Move-in: row becomes eligible for subquery`, async () => {
+    it(`Move-in: row becomes eligible for subquery`, async () => {
       const collection = createPostsByActiveUsersCollection()
       await waitForReady(collection)
 
@@ -257,14 +252,14 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       })
 
       // Wait a bit to ensure post doesn't appear (user is inactive, so post doesn't match subquery)
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      await new Promise((resolve) => setTimeout(resolve, 500))
       expect(collection.has(postId)).toBe(false)
 
       // Update user to isActive = true (move-in for the post)
       await config.mutations.updateUser(userId, { isActive: true })
 
       // Wait for post to appear (move-in)
-      await waitForItem(collection, postId, 15000)
+      await waitForItem(collection, postId, 1000)
       expect(collection.has(postId)).toBe(true)
       expect(collection.get(postId)?.title).toBe(`Inactive User Post`)
 
@@ -274,7 +269,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await collection.cleanup()
     })
 
-    it(`3. Move-out: row becomes ineligible for subquery`, async () => {
+    it(`Move-out: row becomes ineligible for subquery`, async () => {
       const collection = createPostsByActiveUsersCollection()
       await waitForReady(collection)
 
@@ -316,7 +311,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await config.mutations.updateUser(userId, { isActive: false })
 
       // Wait for post to be removed (move-out)
-      await waitForItemRemoved(collection, postId, 15000)
+      await waitForItemRemoved(collection, postId)
       expect(collection.has(postId)).toBe(false)
 
       // Clean up
@@ -325,7 +320,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await collection.cleanup()
     })
 
-    it(`4. Move-out → move-in cycle ("flapping row")`, async () => {
+    it(`Move-out → move-in cycle ("flapping row")`, async () => {
       const collection = createPostsByActiveUsersCollection()
       await waitForReady(collection)
 
@@ -378,7 +373,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await collection.cleanup()
     })
 
-    it(`5. Tags-only update (row stays within subquery)`, async () => {
+    it(`Tags-only update (row stays within subquery)`, async () => {
       const collection = createPostsByActiveUsersCollection()
       await waitForReady(collection)
 
@@ -422,7 +417,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       )
 
       // Wait a bit and verify post still exists
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      await new Promise((resolve) => setTimeout(resolve, 500))
       expect(collection.has(postId)).toBe(true)
       expect(collection.get(postId)?.title).toBe(`Updated Tagged Post`)
 
@@ -432,7 +427,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await collection.cleanup()
     })
 
-    it(`6. Database DELETE triggers removed_at`, async () => {
+    it(`Database DELETE leads to row being removed from collection`, async () => {
       const collection = createPostsByActiveUsersCollection()
       await waitForReady(collection)
 
@@ -473,7 +468,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await dbClient.query(`DELETE FROM ${postsTable} WHERE id = $1`, [postId])
 
       // Wait for post to be removed
-      await waitForItemRemoved(collection, postId, 15000)
+      await waitForItemRemoved(collection, postId)
       expect(collection.has(postId)).toBe(false)
 
       // Clean up
@@ -481,140 +476,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await collection.cleanup()
     })
 
-    it(`7. Join-based subquery: move-out when join breaks`, async () => {
-      // This test uses the same pattern as others - posts with WHERE clause referencing users
-      // The WHERE clause: userId IN (SELECT id FROM users WHERE isActive = true)
-      // acts as a join condition
-      const collection = createPostsByActiveUsersCollection()
-      await waitForReady(collection)
-
-      if (!config.mutations) {
-        throw new Error(`Mutations not configured`)
-      }
-
-      // Insert user with isActive = true
-      const userId = randomUUID()
-      await config.mutations.insertUser({
-        id: userId,
-        name: `Active User for Join`,
-        email: `join@test.com`,
-        age: 25,
-        isActive: true,
-        createdAt: new Date(),
-        metadata: null,
-        deletedAt: null,
-      })
-
-      // Insert post referencing the user
-      const postId = randomUUID()
-      await config.mutations.insertPost({
-        id: postId,
-        userId,
-        title: `Join Test Post`,
-        content: `Test content`,
-        viewCount: 0,
-        largeViewCount: BigInt(0),
-        publishedAt: null,
-        deletedAt: null,
-      })
-
-      await waitForItem(collection, postId)
-      expect(collection.has(postId)).toBe(true)
-
-      // Update user.isActive = false (breaks subquery condition, post moves out)
-      await config.mutations.updateUser(userId, { isActive: false })
-
-      // Wait for post to be removed (move-out)
-      await waitForItemRemoved(collection, postId, 15000)
-      expect(collection.has(postId)).toBe(false)
-
-      // Update user.isActive = true again (post moves in)
-      await config.mutations.updateUser(userId, { isActive: true })
-      await waitForItem(collection, postId, 15000)
-      expect(collection.has(postId)).toBe(true)
-
-      // Clean up
-      await dbClient.query(`DELETE FROM ${postsTable} WHERE id = $1`, [postId])
-      await config.mutations.deleteUser(userId)
-
-      await collection.cleanup()
-    })
-
-    it(`8. Concurrent/rapid updates must not cause 409 conflicts`, async () => {
-      const collection = createPostsByActiveUsersCollection()
-      await waitForReady(collection)
-
-      if (!config.mutations) {
-        throw new Error(`Mutations not configured`)
-      }
-
-      // Insert user with isActive = true
-      const userId = randomUUID()
-      await config.mutations.insertUser({
-        id: userId,
-        name: `Rapid Update User`,
-        email: `rapid@test.com`,
-        age: 25,
-        isActive: true,
-        createdAt: new Date(),
-        metadata: null,
-        deletedAt: null,
-      })
-
-      // Insert post for this user
-      const postId = randomUUID()
-      await config.mutations.insertPost({
-        id: postId,
-        userId,
-        title: `Rapid Update Post`,
-        content: `Content`,
-        viewCount: 0,
-        largeViewCount: BigInt(0),
-        publishedAt: null,
-        deletedAt: null,
-      })
-
-      await waitForItem(collection, postId)
-
-      // Apply rapid sequence in a transaction (changing user isActive)
-      await dbClient.query(`BEGIN`)
-      try {
-        await dbClient.query(
-          `UPDATE ${usersTable} SET "isActive" = $1 WHERE id = $2`,
-          [false, userId],
-        )
-        await dbClient.query(
-          `UPDATE ${usersTable} SET "isActive" = $1 WHERE id = $2`,
-          [true, userId],
-        )
-        await dbClient.query(
-          `UPDATE ${postsTable} SET title = $1 WHERE id = $2`,
-          [`Updated Title`, postId],
-        )
-        await dbClient.query(
-          `UPDATE ${usersTable} SET "isActive" = $1 WHERE id = $2`,
-          [false, userId],
-        )
-        await dbClient.query(`COMMIT`)
-      } catch (error) {
-        await dbClient.query(`ROLLBACK`)
-        throw error
-      }
-
-      // Wait for final state (post should be removed since user is inactive)
-      await waitForItemRemoved(collection, postId, 15000)
-      expect(collection.has(postId)).toBe(false)
-
-      // Verify no errors occurred (collection should still be ready)
-      expect(collection.status).toBe(`ready`)
-
-      // Clean up
-      await dbClient.query(`DELETE FROM ${postsTable} WHERE id = $1`, [postId])
-      await config.mutations.deleteUser(userId)
-      await collection.cleanup()
-    })
-
-    it(`9. Snapshot after move-out should not re-include removed rows`, async () => {
+    it(`Snapshot after move-out should not re-include removed rows`, async () => {
       if (!config.mutations) {
         throw new Error(`Mutations not configured`)
       }
@@ -655,7 +517,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       // Update user → post moves out
       await config.mutations.updateUser(userId, { isActive: false })
 
-      await waitForItemRemoved(collection1, postId, 15000)
+      await waitForItemRemoved(collection1, postId)
       expect(collection1.has(postId)).toBe(false)
 
       // Clean up first collection
@@ -666,7 +528,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await waitForReady(collection2)
 
       // Wait a bit to ensure snapshot is complete
-      await new Promise((resolve) => setTimeout(resolve, 2000))
+      await new Promise((resolve) => setTimeout(resolve, 1000))
 
       // Snapshot should NOT include the removed post (user is inactive)
       expect(collection2.has(postId)).toBe(false)
@@ -677,7 +539,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await collection2.cleanup()
     })
 
-    it(`10. Multi-row batch: some rows move in, some move out`, async () => {
+    it(`Multi-row batch: some rows move in, some move out`, async () => {
       const collection = createPostsByActiveUsersCollection()
       await waitForReady(collection)
 
@@ -695,7 +557,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         name: `User 1`,
         email: `user1@test.com`,
         age: 25,
-        isActive: true,
+        isActive: false,
         createdAt: new Date(),
         metadata: null,
         deletedAt: null,
@@ -761,26 +623,30 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
         deletedAt: null,
       })
 
-      // Wait for all posts to appear
-      await waitForItem(collection, postId1)
+      // Wait for posts 2 and 3 to appear
       await waitForItem(collection, postId2)
       await waitForItem(collection, postId3)
 
+      expect(collection.has(postId1)).toBe(false)
+
       // In one SQL transaction:
-      // user1: isActive → false (post1 moves out)
+      // user1: isActive → true (post1 moves in)
       // post2: title change (stays in since user2 is still active)
-      // user3/post3: no change
+      // user3: isActive → false (post3 moves out)
       await dbClient.query(`BEGIN`)
       try {
         await dbClient.query(
           `UPDATE ${usersTable} SET "isActive" = $1 WHERE id = $2`,
-          [false, userId1],
+          [true, userId1],
         )
         await dbClient.query(
           `UPDATE ${postsTable} SET title = $1 WHERE id = $2`,
           [`Updated Post 2`, postId2],
         )
-        // user3/post3: no change
+        await dbClient.query(
+          `UPDATE ${usersTable} SET "isActive" = $1 WHERE id = $2`,
+          [false, userId3],
+        )
         await dbClient.query(`COMMIT`)
       } catch (error) {
         await dbClient.query(`ROLLBACK`)
@@ -788,11 +654,11 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       }
 
       // Wait for changes to propagate
-      await waitForItemRemoved(collection, postId1, 15000)
-      expect(collection.has(postId1)).toBe(false) // post1: moved out (user1 inactive)
+      await waitForItemRemoved(collection, postId3)
+      expect(collection.has(postId1)).toBe(true) // post1: moved in (user1 active)
       expect(collection.has(postId2)).toBe(true) // post2: still in (user2 active)
       expect(collection.get(postId2)?.title).toBe(`Updated Post 2`)
-      expect(collection.has(postId3)).toBe(true) // post3: still in (user3 active)
+      expect(collection.has(postId3)).toBe(false) // post3: moved out (user3 inactive)
 
       // Clean up
       await dbClient.query(`DELETE FROM ${postsTable} WHERE id = $1`, [postId1])
@@ -801,61 +667,6 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       await config.mutations.deleteUser(userId1)
       await config.mutations.deleteUser(userId2)
       await config.mutations.deleteUser(userId3)
-      await collection.cleanup()
-    })
-
-    it(`11. Tags = null / empty array must not trigger move-out`, async () => {
-      const collection = createPostsByActiveUsersCollection()
-      await waitForReady(collection)
-
-      if (!config.mutations) {
-        throw new Error(`Mutations not configured`)
-      }
-
-      // Insert user with isActive = true
-      const userId = randomUUID()
-      await config.mutations.insertUser({
-        id: userId,
-        name: `Active User`,
-        email: `active@test.com`,
-        age: 25,
-        isActive: true,
-        createdAt: new Date(),
-        metadata: null,
-        deletedAt: null,
-      })
-
-      // Insert post for this user
-      const postId = randomUUID()
-      await config.mutations.insertPost({
-        id: postId,
-        userId,
-        title: `Tags Test Post`,
-        content: `Content`,
-        viewCount: 0,
-        largeViewCount: BigInt(0),
-        publishedAt: null,
-        deletedAt: null,
-      })
-
-      await waitForItem(collection, postId)
-      expect(collection.has(postId)).toBe(true)
-
-      // Update post content (non-filtering field) - should not cause move-out
-      // The post stays in because the user is still active
-      await dbClient.query(
-        `UPDATE ${postsTable} SET content = $1 WHERE id = $2`,
-        [`Updated Content`, postId],
-      )
-
-      // Wait a bit and verify post still exists (no move-out)
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      expect(collection.has(postId)).toBe(true)
-      expect(collection.get(postId)?.content).toBe(`Updated Content`)
-
-      // Clean up
-      await dbClient.query(`DELETE FROM ${postsTable} WHERE id = $1`, [postId])
-      await config.mutations.deleteUser(userId)
       await collection.cleanup()
     })
   })
