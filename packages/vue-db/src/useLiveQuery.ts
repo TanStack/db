@@ -251,12 +251,30 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Vue hooks
     if (typeof unwrappedParam === `function`) {
-      // Check if query function returns null/undefined (disabled query)
-      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
-      const result = unwrappedParam(queryBuilder)
+      // We need to check if the query function might return null/undefined
+      // without actually calling it with BaseQueryBuilder (which doesn't work well with Vue's reactivity)
+      // So we wrap it and let createLiveQueryCollection handle errors
+      let checkedForNull = false
+      let isNullQuery = false
 
-      if (result === undefined || result === null) {
-        // Disabled query - return null
+      const checkQuery = () => {
+        if (!checkedForNull) {
+          try {
+            const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+            const result = unwrappedParam(queryBuilder)
+            isNullQuery = result === undefined || result === null
+            checkedForNull = true
+          } catch {
+            // If checking fails, assume it's a normal query
+            isNullQuery = false
+            checkedForNull = true
+          }
+        }
+        return isNullQuery
+      }
+
+      // Check once at creation time
+      if (checkQuery()) {
         return null
       }
 
