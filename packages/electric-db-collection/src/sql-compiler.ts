@@ -150,15 +150,21 @@ function compileFunction(
       const otherArgIndex = nullArgIndex === 0 ? 1 : 0
       const otherArg = args[otherArgIndex]
 
-      if (name === `eq`) {
-        // Transform eq(col, null) to "col IS NULL"
+      if (
+        name === `eq` &&
+        otherArg &&
+        !isNullValue(otherArg) &&
+        (otherArg.type === `ref` || otherArg.type === `func`)
+      ) {
+        // Transform eq(col, null/undefined) or eq(func(...), null/undefined) to "expr IS NULL"
         // This is the semantically correct behavior in SQL
-        if (otherArg) {
-          return `${compileBasicExpression(otherArg, params)} IS NULL`
-        }
+        // We only allow ref and func types - comparing a literal to null (e.g., eq(42, null))
+        // is almost certainly a mistake and should throw
+        return `${compileBasicExpression(otherArg, params)} IS NULL`
       }
 
       // For other comparison operators (gt, lt, gte, lte, like, ilike),
+      // or eq where both args are null/undefined,
       // null comparisons don't make semantic sense in SQL (they always evaluate to UNKNOWN)
       throw new Error(
         `Cannot use null/undefined value with '${name}' operator. ` +

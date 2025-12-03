@@ -221,6 +221,35 @@ describe(`sql-compiler`, () => {
           })
         ).toThrow(`Cannot use null/undefined value with 'gt' operator`)
       })
+
+      it(`should throw error for eq(null, null)`, () => {
+        // Both args are null - this is nonsensical and would cause missing params
+        expect(() =>
+          compileSQL({
+            where: func(`eq`, [val(null), val(null)]),
+          })
+        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      })
+
+      it(`should throw error for eq(null, literal)`, () => {
+        // Comparing null to a literal is nonsensical (always evaluates to UNKNOWN)
+        expect(() =>
+          compileSQL({
+            where: func(`eq`, [val(null), val(42)]),
+          })
+        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      })
+
+      it(`should handle eq(col, null) in OR clause`, () => {
+        const result = compileSQL({
+          where: func(`or`, [
+            func(`eq`, [ref(`deletedAt`), val(null)]),
+            func(`eq`, [ref(`status`), val(`active`)]),
+          ]),
+        })
+        expect(result.where).toBe(`"deletedAt" IS NULL OR "status" = $1`)
+        expect(result.params).toEqual({ "1": `active` })
+      })
     })
 
     describe(`isNull/isUndefined operators`, () => {

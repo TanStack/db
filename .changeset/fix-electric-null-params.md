@@ -8,5 +8,5 @@ When comparison operators were used with null/undefined values, the SQL compiler
 
 Now:
 
-- `eq(col, null)` transforms to `"col" IS NULL` syntax
-- Other comparisons (gt, lt, gte, lte, like, ilike) with null throw a clear error since null comparisons don't make semantic sense in SQL
+- `eq(col, null)` and `eq(col, undefined)` transform to `"col" IS NULL` syntax
+- Other comparisons (gt, lt, gte, lte, like, ilike) with null/undefined throw a clear error since null comparisons don't make semantic sense in SQL
