@@ -561,9 +561,10 @@ export class CollectionStateManager<
               break
             case `update`: {
               if (rowUpdateMode === `partial`) {
+                const currentVal = this.syncedData.get(key)
                 const updatedValue = Object.assign(
                   {},
-                  this.syncedData.get(key),
+                  currentVal,
                   operation.value
                 )
                 this.syncedData.set(key, updatedValue)

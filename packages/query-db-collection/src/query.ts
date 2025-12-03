@@ -799,8 +799,8 @@ export function queryCollectionOptions(
 
           begin()
 
-          // Helper function for shallow equality check of objects
-          const shallowEqual = (
+          // Helper function for deep equality check of objects
+          const deepEqual = (
             obj1: Record<string, any>,
             obj2: Record<string, any>
           ): boolean => {
@@ -809,13 +809,34 @@ export function queryCollectionOptions(
             const keys2 = Object.keys(obj2)
 
             // If number of keys is different, objects are not equal
-            if (keys1.length !== keys2.length) return false
+            if (keys1.length !== keys2.length) {
+              return false
+            }
 
             // Check if all keys in obj1 have the same values in obj2
             return keys1.every((key) => {
-              // Skip comparing functions and complex objects deeply
-              if (typeof obj1[key] === `function`) return true
-              return obj1[key] === obj2[key]
+              const val1 = obj1[key]
+              const val2 = obj2[key]
+
+              // Skip comparing functions
+              if (typeof val1 === `function`) return true
+
+              // For objects (including arrays), recursively compare
+              if (
+                val1 !== null &&
+                val2 !== null &&
+                typeof val1 === `object` &&
+                typeof val2 === `object`
+              ) {
+                // Handle arrays
+                if (Array.isArray(val1) !== Array.isArray(val2)) {
+                  return false
+                }
+                return deepEqual(val1, val2)
+              }
+
+              // For primitives, use strict equality
+              return val1 === val2
             })
           }
 
@@ -827,7 +848,7 @@ export function queryCollectionOptions(
                 write({ type: `delete`, value: oldItem })
               }
             } else if (
-              !shallowEqual(
+              !deepEqual(
                 oldItem as Record<string, any>,
                 newItem as Record<string, any>
               )
