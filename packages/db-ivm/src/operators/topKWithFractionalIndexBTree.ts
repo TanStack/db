@@ -10,7 +10,6 @@ import {
 import type { IStreamBuilder, PipedOperator } from "../types.js"
 import type {
   IndexedValue,
-  TaggedValue,
   TopK,
   TopKChanges,
   TopKWithFractionalIndexOptions,
@@ -249,8 +248,8 @@ export class TopKWithFractionalIndexBTreeOperator<
   protected override createTopK(
     offset: number,
     limit: number,
-    comparator: (a: TaggedValue<K, T>, b: TaggedValue<K, T>) => number
-  ): TopK<TaggedValue<K, T>> {
+    comparator: (a: [K, T], b: [K, T]) => number
+  ): TopK<[K, T]> {
     if (BTree === undefined) {
       throw new Error(
         `B+ tree not loaded. You need to call loadBTree() before using TopKWithFractionalIndexBTreeOperator.`
