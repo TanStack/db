@@ -172,7 +172,12 @@ export interface QueryCollectionConfig<
    * @param params Object containing transaction and collection information
    * @returns Promise that can return { refetch?: boolean } to control whether to refetch after delete, or void
    */
-  onDelete?: DeleteMutationFn<T, TKey, UtilsRecord, { refetch?: boolean } | void>
+  onDelete?: DeleteMutationFn<
+    T,
+    TKey,
+    UtilsRecord,
+    { refetch?: boolean } | void
+  >
 }
 
 /**
