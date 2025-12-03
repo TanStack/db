@@ -193,6 +193,10 @@ export function createCollection(
   // Attach utils to collection
   if (options.utils) {
     collection.utils = options.utils
+    // Allow utils to trigger sync start for write operations
+    if (typeof options.utils._setCollection === `function`) {
+      options.utils._setCollection(collection)
+    }
   } else {
     collection.utils = {}
   }
@@ -313,11 +317,6 @@ export class CollectionImpl<
     // Only start sync immediately if explicitly enabled
     if (config.startSync === true) {
       this._sync.startSync()
-    }
-
-    // Allow utils to trigger sync start for write operations
-    if (typeof config.utils?._setCollection === `function`) {
-      config.utils._setCollection(this)
     }
   }
 
