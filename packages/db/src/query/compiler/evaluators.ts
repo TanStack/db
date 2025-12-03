@@ -163,6 +163,38 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
   switch (func.name) {
     // Comparison operators
     case `eq`: {
+      // Check at compile time if one argument is a literal null/undefined value
+      // If so, transform to isNull semantics (return true/false, not UNKNOWN)
+      // This matches SQL behavior where eq(col, null) is transformed to IS NULL
+      const argExprA = func.args[0]
+      const argExprB = func.args[1]
+      const aIsLiteralNull =
+        argExprA?.type === `val` &&
+        (argExprA.value === null || argExprA.value === undefined)
+      const bIsLiteralNull =
+        argExprB?.type === `val` &&
+        (argExprB.value === null || argExprB.value === undefined)
+
+      if (aIsLiteralNull && bIsLiteralNull) {
+        // eq(null, null) or eq(undefined, undefined) - always true
+        return () => true
+      } else if (aIsLiteralNull) {
+        // eq(null, col) - check if col value is null/undefined
+        const argB = compiledArgs[1]!
+        return (data) => {
+          const b = argB(data)
+          return b === null || b === undefined
+        }
+      } else if (bIsLiteralNull) {
+        // eq(col, null) - check if col value is null/undefined
+        const argA = compiledArgs[0]!
+        return (data) => {
+          const a = argA(data)
+          return a === null || a === undefined
+        }
+      }
+
+      // Standard equality comparison (no literal nulls)
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
