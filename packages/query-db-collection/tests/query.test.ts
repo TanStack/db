@@ -2541,7 +2541,7 @@ describe(`QueryCollection`, () => {
       await collection.cleanup()
     })
 
-    it(`should be no-op when sync has not started (no observer created)`, async () => {
+    it(`should auto-start sync when utils are accessed`, async () => {
       const queryKey = [`refetch-test-no-sync`]
       const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
 
@@ -2556,9 +2556,15 @@ describe(`QueryCollection`, () => {
         })
       )
 
-      // Refetch should be no-op because observer doesn't exist yet
+      // Collection starts idle
+      expect(collection.status).toBe(`idle`)
+
+      // Accessing utils auto-starts sync, so refetch will work
       await collection.utils.refetch()
-      expect(queryFn).not.toHaveBeenCalled()
+
+      // Sync was started and queryFn was called
+      expect(collection.status).toBe(`ready`)
+      expect(queryFn).toHaveBeenCalled()
 
       await collection.cleanup()
     })

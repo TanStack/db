@@ -193,10 +193,6 @@ export function createCollection(
   // Attach utils to collection
   if (options.utils) {
     collection.utils = options.utils
-    // Allow utils to trigger sync start for write operations
-    if (typeof options.utils._setCollection === `function`) {
-      options.utils._setCollection(collection)
-    }
   } else {
     collection.utils = {}
   }
@@ -214,9 +210,17 @@ export class CollectionImpl<
   public id: string
   public config: CollectionConfig<TOutput, TKey, TSchema>
 
-  // Utilities namespace
-  // This is populated by createCollection
-  public utils: Record<string, Fn> = {}
+  // Utilities namespace - stored privately, accessed via getter that validates collection state
+  private _utils: Record<string, Fn> = {}
+
+  public get utils(): Record<string, Fn> {
+    this._lifecycle.validateCollectionUsable(`utils`)
+    return this._utils
+  }
+
+  public set utils(value: Record<string, Fn>) {
+    this._utils = value
+  }
 
   // Managers
   private _events: CollectionEventsManager

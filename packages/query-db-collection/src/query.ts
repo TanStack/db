@@ -213,26 +213,20 @@ interface QueryCollectionState {
 }
 
 /**
- * Minimal interface for collection reference needed by utils
- * to auto-start sync when write operations are called
- */
-interface CollectionRef {
-  status: `idle` | `loading` | `ready` | `error` | `cleaned-up`
-  startSyncImmediate: () => void
-}
-
-/**
  * Implementation class for QueryCollectionUtils with explicit dependency injection
  * for better testability and architectural clarity
  */
 class QueryCollectionUtilsImpl {
   private state: QueryCollectionState
   private refetchFn: RefetchFn
-  private _writeUtils: ReturnType<typeof createWriteUtils>
-  private _collection: CollectionRef | null = null
 
   // Write methods
   public refetch: RefetchFn
+  public writeInsert: any
+  public writeUpdate: any
+  public writeDelete: any
+  public writeUpsert: any
+  public writeBatch: any
 
   constructor(
     state: QueryCollectionState,
@@ -241,67 +235,14 @@ class QueryCollectionUtilsImpl {
   ) {
     this.state = state
     this.refetchFn = refetch
-    this._writeUtils = writeUtils
 
     // Initialize methods to use passed dependencies
     this.refetch = refetch
-  }
-
-  /**
-   * Called by the collection after creation to allow utils to trigger sync start.
-   * This enables write operations to work even before sync is explicitly started.
-   * @internal
-   */
-  public _setCollection(collection: CollectionRef): void {
-    this._collection = collection
-  }
-
-  /**
-   * Ensures sync is started before write operations.
-   * This allows writes to work on collections that haven't been explicitly preloaded.
-   */
-  private _ensureSyncStarted(): void {
-    if (this._collection) {
-      const status = this._collection.status
-      if (status === `idle` || status === `cleaned-up`) {
-        this._collection.startSyncImmediate()
-      }
-    }
-  }
-
-  public writeInsert(
-    ...args: Parameters<ReturnType<typeof createWriteUtils>[`writeInsert`]>
-  ) {
-    this._ensureSyncStarted()
-    return this._writeUtils.writeInsert(...args)
-  }
-
-  public writeUpdate(
-    ...args: Parameters<ReturnType<typeof createWriteUtils>[`writeUpdate`]>
-  ) {
-    this._ensureSyncStarted()
-    return this._writeUtils.writeUpdate(...args)
-  }
-
-  public writeDelete(
-    ...args: Parameters<ReturnType<typeof createWriteUtils>[`writeDelete`]>
-  ) {
-    this._ensureSyncStarted()
-    return this._writeUtils.writeDelete(...args)
-  }
-
-  public writeUpsert(
-    ...args: Parameters<ReturnType<typeof createWriteUtils>[`writeUpsert`]>
-  ) {
-    this._ensureSyncStarted()
-    return this._writeUtils.writeUpsert(...args)
-  }
-
-  public writeBatch(
-    ...args: Parameters<ReturnType<typeof createWriteUtils>[`writeBatch`]>
-  ) {
-    this._ensureSyncStarted()
-    return this._writeUtils.writeBatch(...args)
+    this.writeInsert = writeUtils.writeInsert
+    this.writeUpdate = writeUtils.writeUpdate
+    this.writeDelete = writeUtils.writeDelete
+    this.writeUpsert = writeUtils.writeUpsert
+    this.writeBatch = writeUtils.writeBatch
   }
 
   public async clearError() {
