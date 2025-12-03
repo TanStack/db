@@ -177,3 +177,18 @@ function range(start: number, end: number): Array<number> {
   for (let i = start; i < end; i++) out.push(i)
   return out
 }
+
+/**
+ * Compares two keys (string | number) in a consistent, deterministic way.
+ * Handles mixed types by ordering strings before numbers.
+ */
+export function compareKeys(a: string | number, b: string | number): number {
+  // Same type: compare directly
+  if (typeof a === typeof b) {
+    if (a < b) return -1
+    if (a > b) return 1
+    return 0
+  }
+  // Different types: strings come before numbers
+  return typeof a === `string` ? -1 : 1
+}
