@@ -253,13 +253,52 @@ export interface Subscription extends EventEmitter<SubscriptionEvents> {
   readonly status: SubscriptionStatus
 }
 
+/**
+ * Cursor expressions for pagination, passed separately from the main `where` clause.
+ * The sync layer can choose to use cursor-based pagination (combining these with the where)
+ * or offset-based pagination (ignoring these and using the `offset` parameter).
+ *
+ * Neither expression includes the main `where` clause - they are cursor-specific only.
+ */
+export type CursorExpressions = {
+  /**
+   * Expression for rows greater than (after) the cursor value.
+   * For multi-column orderBy, this is a composite cursor using OR of conditions.
+   * Example for [col1 ASC, col2 DESC] with values [v1, v2]:
+   *   or(gt(col1, v1), and(eq(col1, v1), lt(col2, v2)))
+   */
+  whereFrom: BasicExpression<boolean>
+  /**
+   * Expression for rows equal to the current cursor value (first orderBy column only).
+   * Used to handle tie-breaking/duplicates at the boundary.
+   * Example: eq(col1, v1) or for Dates: and(gte(col1, v1), lt(col1, v1+1ms))
+   */
+  whereCurrent: BasicExpression<boolean>
+  /**
+   * The key of the last item that was loaded.
+   * Can be used by sync layers for tracking or deduplication.
+   */
+  lastKey?: string | number
+}
+
 export type LoadSubsetOptions = {
-  /** The where expression to filter the data */
+  /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
   /** The order by clause to sort the data */
   orderBy?: OrderBy
   /** The limit of the data to load */
   limit?: number
+  /**
+   * Cursor expressions for cursor-based pagination.
+   * These are separate from `where` - the sync layer should combine them if using cursor-based pagination.
+   * Neither expression includes the main `where` clause.
+   */
+  cursor?: CursorExpressions
+  /**
+   * Row offset for offset-based pagination.
+   * The sync layer can use this instead of `cursor` if it prefers offset-based pagination.
+   */
+  offset?: number
   /**
    * The subscription that triggered the load.
    * Advanced sync implementations can use this for:

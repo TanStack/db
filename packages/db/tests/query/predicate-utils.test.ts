@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isLimitSubset,
+  isOffsetLimitSubset,
   isOrderBySubset,
   isPredicateSubset,
   isWhereSubset,
@@ -647,6 +648,86 @@ describe(`isLimitSubset`, () => {
   })
 })
 
+describe(`isOffsetLimitSubset`, () => {
+  it(`should return true when subset range is within superset range (same offset)`, () => {
+    expect(
+      isOffsetLimitSubset({ offset: 0, limit: 5 }, { offset: 0, limit: 10 })
+    ).toBe(true)
+    expect(
+      isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 0, limit: 10 })
+    ).toBe(true)
+  })
+
+  it(`should return true when subset starts later but is still within superset range`, () => {
+    // superset loads rows [0, 10), subset loads rows [5, 10) - subset is within superset
+    expect(
+      isOffsetLimitSubset({ offset: 5, limit: 5 }, { offset: 0, limit: 10 })
+    ).toBe(true)
+  })
+
+  it(`should return false when subset extends beyond superset range`, () => {
+    // superset loads rows [0, 10), subset loads rows [5, 15) - subset extends beyond
+    expect(
+      isOffsetLimitSubset({ offset: 5, limit: 10 }, { offset: 0, limit: 10 })
+    ).toBe(false)
+  })
+
+  it(`should return false when subset is completely outside superset range`, () => {
+    // superset loads rows [0, 10), subset loads rows [20, 30) - no overlap
+    expect(
+      isOffsetLimitSubset({ offset: 20, limit: 10 }, { offset: 0, limit: 10 })
+    ).toBe(false)
+  })
+
+  it(`should return false when superset starts after subset`, () => {
+    // superset loads rows [10, 20), subset loads rows [0, 10) - superset starts too late
+    expect(
+      isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 10, limit: 10 })
+    ).toBe(false)
+  })
+
+  it(`should return true when superset is unlimited`, () => {
+    expect(isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 0 })).toBe(
+      true
+    )
+    expect(isOffsetLimitSubset({ offset: 20, limit: 10 }, { offset: 0 })).toBe(
+      true
+    )
+  })
+
+  it(`should return false when superset is unlimited but starts after subset`, () => {
+    // superset loads rows [10, ∞), subset loads rows [0, 10) - superset starts too late
+    expect(isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 10 })).toBe(
+      false
+    )
+  })
+
+  it(`should return false when subset is unlimited but superset has a limit`, () => {
+    expect(isOffsetLimitSubset({ offset: 0 }, { offset: 0, limit: 10 })).toBe(
+      false
+    )
+  })
+
+  it(`should return true when both are unlimited and superset starts at or before subset`, () => {
+    expect(isOffsetLimitSubset({ offset: 10 }, { offset: 0 })).toBe(true)
+    expect(isOffsetLimitSubset({ offset: 10 }, { offset: 10 })).toBe(true)
+  })
+
+  it(`should return false when both are unlimited but superset starts after subset`, () => {
+    expect(isOffsetLimitSubset({ offset: 0 }, { offset: 10 })).toBe(false)
+  })
+
+  it(`should default offset to 0 when undefined`, () => {
+    expect(isOffsetLimitSubset({ limit: 5 }, { limit: 10 })).toBe(true)
+    expect(isOffsetLimitSubset({ offset: 0, limit: 5 }, { limit: 10 })).toBe(
+      true
+    )
+    expect(isOffsetLimitSubset({ limit: 5 }, { offset: 0, limit: 10 })).toBe(
+      true
+    )
+  })
+})
+
 describe(`isPredicateSubset`, () => {
   it(`should check all components for unlimited superset`, () => {
     // For unlimited supersets, where-subset logic applies
@@ -755,6 +836,138 @@ describe(`isPredicateSubset`, () => {
       limit: 20,
     }
     expect(isPredicateSubset(subset, superset)).toBe(false)
+  })
+
+  describe(`with offset`, () => {
+    it(`should return true when subset offset+limit is within superset range`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 5,
+        limit: 5,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      // subset loads rows [5, 10), superset loads rows [0, 10) - subset is within
+      expect(isPredicateSubset(subset, superset)).toBe(true)
+    })
+
+    it(`should return false when subset is at different offset outside superset range`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 20,
+        limit: 10,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      // subset loads rows [20, 30), superset loads rows [0, 10) - no overlap
+      expect(isPredicateSubset(subset, superset)).toBe(false)
+    })
+
+    it(`should return false when subset extends beyond superset even with same where`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 5,
+        limit: 10,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      // subset loads rows [5, 15), superset loads rows [0, 10) - subset extends beyond
+      expect(isPredicateSubset(subset, superset)).toBe(false)
+    })
+
+    it(`should return true for unlimited superset with any subset offset`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 100,
+        limit: 10,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        // No limit - unlimited
+      }
+      expect(isPredicateSubset(subset, superset)).toBe(true)
+    })
+
+    it(`should return false when superset has offset that starts after subset needs`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 5,
+        limit: 10,
+      }
+      // subset needs rows [0, 10), superset only has rows [5, 15)
+      expect(isPredicateSubset(subset, superset)).toBe(false)
+    })
+
+    it(`should handle pagination correctly - page 2 not subset of page 1`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      // Page 1: offset 0, limit 10
+      const page1: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      // Page 2: offset 10, limit 10
+      const page2: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 10,
+        limit: 10,
+      }
+      // Page 2 is NOT a subset of page 1 (different rows)
+      expect(isPredicateSubset(page2, page1)).toBe(false)
+      // Page 1 is NOT a subset of page 2 (different rows)
+      expect(isPredicateSubset(page1, page2)).toBe(false)
+    })
+
+    it(`should return true when superset covers multiple pages`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      // Superset: offset 0, limit 30 (covers pages 1-3)
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 30,
+      }
+      // Page 2: offset 10, limit 10
+      const page2: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 10,
+        limit: 10,
+      }
+      // Page 2 IS a subset of superset (rows 10-19 within 0-29)
+      expect(isPredicateSubset(page2, superset)).toBe(true)
+    })
   })
 })
 

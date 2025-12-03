@@ -415,6 +415,8 @@ export function createPaginationTestSuite(
             .limit(10),
         )
 
+        console.log(`[QUERY DEBUG] query:`, query)
+
         await query.preload()
         await waitForQueryData(query, { minSize: 10 })
 
@@ -433,10 +435,14 @@ export function createPaginationTestSuite(
           }
         }
 
+        console.log(`[QUERY DEBUG] setting window`)
+
         // Move to second page using setWindow
         // IMPORTANT: setWindow returns a Promise when loading is required,
         // or `true` if data is already available. We verify loading occurs.
         const setWindowResult = query.utils.setWindow({ offset: 10, limit: 10 })
+
+        console.log(`[QUERY DEBUG] setWindowResult:`, setWindowResult)
 
         // In on-demand mode, moving to offset 10 should trigger loading
         // since only the first 10 records were initially loaded
@@ -446,9 +452,13 @@ export function createPaginationTestSuite(
         }
         await waitForQueryData(query, { minSize: 10 })
 
+        console.log(`[QUERY DEBUG] waited for data`, setWindowResult)
+
         // Get second page
         const secondPage = Array.from(query.state.values())
         expect(secondPage).toHaveLength(10)
+
+        console.log(`[QUERY DEBUG] second page:`, secondPage)
 
         // Verify second page ordering
         for (let i = 1; i < secondPage.length; i++) {

@@ -65,6 +65,7 @@ export {
   minusWherePredicates,
   isOrderBySubset,
   isLimitSubset,
+  isOffsetLimitSubset,
   isPredicateSubset,
 } from './predicate-utils.js'
 

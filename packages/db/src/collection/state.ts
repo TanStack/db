@@ -6,11 +6,12 @@ import type {
   ChangeMessage,
   CollectionConfig,
   OptimisticChangeMessage,
-} from '../types'
-import type { CollectionImpl } from './index.js'
-import type { CollectionLifecycleManager } from './lifecycle'
-import type { CollectionChangesManager } from './changes'
-import type { CollectionIndexesManager } from './indexes'
+} from "../types"
+import type { CollectionImpl } from "./index.js"
+import type { CollectionLifecycleManager } from "./lifecycle"
+import type { CollectionChangesManager } from "./changes"
+import type { CollectionIndexesManager } from "./indexes"
+import type { CollectionEventsManager } from "./events"
 
 interface PendingSyncedTransaction<
   T extends object = Record<string, unknown>,
@@ -37,6 +38,7 @@ export class CollectionStateManager<
   public lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   public changes!: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
   public indexes!: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
+  private _events!: CollectionEventsManager
 
   // Core state - make public for testing
   public transactions: SortedMap<string, Transaction<any>>
@@ -79,11 +81,13 @@ export class CollectionStateManager<
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
     changes: CollectionChangesManager<TOutput, TKey, TSchema, TInput>
     indexes: CollectionIndexesManager<TOutput, TKey, TSchema, TInput>
+    events: CollectionEventsManager
   }) {
     this.collection = deps.collection
     this.lifecycle = deps.lifecycle
     this.changes = deps.changes
     this.indexes = deps.indexes
+    this._events = deps.events
   }
 
   /**
@@ -525,6 +529,12 @@ export class CollectionStateManager<
           for (const key of changedKeys) {
             currentVisibleState.delete(key)
           }
+
+          // 4) Emit truncate event so subscriptions can reset their cursor tracking state
+          this._events.emit(`truncate`, {
+            type: `truncate`,
+            collection: this.collection,
+          })
         }
 
         for (const operation of transaction.operations) {
