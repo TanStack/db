@@ -383,7 +383,13 @@ export function firebaseCollectionOptions<
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync: SyncConfig<TItem, TKey> = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady } = params
+      const {
+        begin,
+        write,
+        commit,
+        markReady,
+        collection: dbCollection,
+      } = params
 
       const eventBuffer: Array<BufferedEvent> = []
       let isInitialFetchComplete = false
@@ -428,10 +434,16 @@ export function firebaseCollectionOptions<
           },
           (error) => {
             if (error.code === `aborted`) {
-              console.warn(`Firestore listener aborted`, error)
+              console.warn(
+                `[${dbCollection.id}] Firestore listener aborted`,
+                error
+              )
               return
             }
-            console.error(`Firestore listener error:`, error)
+            console.error(
+              `[${dbCollection.id}] Firestore listener error:`,
+              error
+            )
             handleFirestoreError(error, `real-time sync`)
           }
         )
@@ -543,7 +555,7 @@ export function firebaseCollectionOptions<
           isInitialFetchComplete = true
           processBufferedEvents()
         } catch (error) {
-          console.error(`Sync failed:`, error)
+          console.error(`[${dbCollection.id}] Sync failed:`, error)
           cancelSnapshot()
           throw error
         } finally {
@@ -559,7 +571,9 @@ export function firebaseCollectionOptions<
       }
     },
     rowUpdateMode,
-    getSyncMetadata: undefined,
+    getSyncMetadata: () => ({
+      collectionPath,
+    }),
   }
 
   return {
