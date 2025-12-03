@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@v5.0.1
         with:
           fetch-depth: 0
       - name: Setup Tools
@@ -62,8 +62,6 @@ jobs:
               --body "Automated documentation update from release" \
               --base main \
               --head "$BRANCH"
-
-            gh pr merge "$BRANCH" --auto --squash
           else
             echo "No changes in generated docs"
           fi

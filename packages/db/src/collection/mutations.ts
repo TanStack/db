@@ -163,17 +163,19 @@ export class CollectionMutationsManager<
 
     const items = Array.isArray(data) ? data : [data]
     const mutations: Array<PendingMutation<TOutput>> = []
+    const keysInCurrentBatch = new Set<TKey>()
 
     // Create mutations for each item
     items.forEach((item) => {
       // Validate the data against the schema if one exists
       const validatedData = this.validateData(item, `insert`)
 
-      // Check if an item with this ID already exists in the collection
+      // Check if an item with this ID already exists in the collection or in the current batch
       const key = this.config.getKey(validatedData)
-      if (this.state.has(key)) {
+      if (this.state.has(key) || keysInCurrentBatch.has(key)) {
         throw new DuplicateKeyError(key)
       }
+      keysInCurrentBatch.add(key)
       const globalKey = this.generateGlobalKey(key, item)
 
       const mutation: PendingMutation<TOutput, `insert`> = {

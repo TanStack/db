@@ -8,10 +8,10 @@ title: electricCollectionOptions
 ## Call Signature
 
 ```ts
-function electricCollectionOptions<T>(config): CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord> & object;
+function electricCollectionOptions<T>(config): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord>, "utils"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:293](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L293)
+Defined in: [packages/electric-db-collection/src/electric.ts:427](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L427)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -33,17 +33,17 @@ Configuration options for the Electric collection
 
 ### Returns
 
-`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `string` \| `number`, `T`, `UtilsRecord`\> & `object`
+`Omit`\<`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `string` \| `number`, `T`, `UtilsRecord`\>, `"utils"`\> & `object`
 
 Collection options with utilities
 
 ## Call Signature
 
 ```ts
-function electricCollectionOptions<T>(config): CollectionConfig<T, string | number, never, UtilsRecord> & object;
+function electricCollectionOptions<T>(config): Omit<CollectionConfig<T, string | number, never, UtilsRecord>, "utils"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:304](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L304)
+Defined in: [packages/electric-db-collection/src/electric.ts:438](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L438)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -65,6 +65,6 @@ Configuration options for the Electric collection
 
 ### Returns
 
-`CollectionConfig`\<`T`, `string` \| `number`, `never`, `UtilsRecord`\> & `object`
+`Omit`\<`CollectionConfig`\<`T`, `string` \| `number`, `never`, `UtilsRecord`\>, `"utils"`\> & `object`
 
 Collection options with utilities

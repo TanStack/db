@@ -567,6 +567,51 @@ describe(`Collection`, () => {
     }).not.toThrow()
   })
 
+  it(`should not allow bulk inserting documents with duplicate IDs in the same batch`, async () => {
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `bulk-duplicate-id-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+
+    // Try to bulk insert documents with duplicate IDs within the same batch
+    expect(() => {
+      tx.mutate(() =>
+        collection.insert([
+          { id: 1, value: `first` },
+          { id: 1, value: `second` }, // Same ID - should throw
+        ])
+      )
+    }).toThrow(DuplicateKeyError)
+
+    // Should be able to bulk insert documents with different IDs
+    const tx2 = createTransaction({ mutationFn })
+    expect(() => {
+      tx2.mutate(() =>
+        collection.insert([
+          { id: 2, value: `first` },
+          { id: 3, value: `second` },
+        ])
+      )
+    }).not.toThrow()
+
+    // Verify both items were inserted
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `first` })
+    expect(collection.state.get(3)).toEqual({ id: 3, value: `second` })
+  })
+
   it(`should support operation handler functions`, async () => {
     // Create mock handler functions
     const onInsertMock = vi.fn()

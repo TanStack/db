@@ -221,9 +221,11 @@ export function createFilterFunction<T extends object>(
 export function createFilterFunctionFromExpression<T extends object>(
   expression: BasicExpression<boolean>
 ): (item: T) => boolean {
+  // Compile expression once when filter function is created, not on every invocation
+  const evaluator = compileSingleRowExpression(expression)
+
   return (item: T): boolean => {
     try {
-      const evaluator = compileSingleRowExpression(expression)
       const result = evaluator(item as Record<string, unknown>)
       return toBooleanPredicate(result)
     } catch {

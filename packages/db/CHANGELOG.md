@@ -1,5 +1,123 @@
 # @tanstack/db
 
+## 0.5.10
+
+### Patch Changes
+
+- Type utils in collection options as specific type (e.g. ElectricCollectionUtils) instead of generic UtilsRecord. ([#940](https://github.com/TanStack/db/pull/940))
+
+- Fix proxy to handle frozen objects correctly. Previously, creating a proxy for a frozen object (such as data from state management libraries that freeze their state) would throw a TypeError when attempting to modify properties via the proxy. The proxy now uses an unfrozen internal copy as the Proxy target, allowing modifications to be tracked correctly while preserving the immutability of the original object. ([#933](https://github.com/TanStack/db/pull/933))
+
+  Also adds support for `Object.seal()` and `Object.preventExtensions()` on proxies, allowing these operations to work correctly on change-tracking proxies.
+
+## 0.5.9
+
+### Patch Changes
+
+- Fix bulk insert not detecting duplicate keys within the same batch. Previously, when inserting multiple items with the same key in a single bulk insert operation, later items would silently overwrite earlier ones. Now, a `DuplicateKeyError` is thrown when duplicate keys are detected within the same batch. ([#929](https://github.com/TanStack/db/pull/929))
+
+## 0.5.8
+
+### Patch Changes
+
+- Fix pagination with Date orderBy values when backend has higher precision than JavaScript's millisecond precision. When loading duplicate values during cursor-based pagination, Date values now use a 1ms range query (`gte`/`lt`) instead of exact equality (`eq`) to correctly match all rows that fall within the same millisecond, even if the backend (e.g., PostgreSQL) stores them with microsecond precision. ([#913](https://github.com/TanStack/db/pull/913))
+
+- Fixed incorrect deduplication of limited queries with different where clauses. Previously, a query like `{where: searchFilter, limit: 10}` could be incorrectly deduplicated against a prior query `{where: undefined, limit: 10}`, causing search/filter results to only show cached data. Now, limited queries are only deduplicated when their where clauses are structurally equal. ([#914](https://github.com/TanStack/db/pull/914))
+
+## 0.5.7
+
+### Patch Changes
+
+- Fix change tracking for array items accessed via iteration methods (find, forEach, for...of, etc.) ([#910](https://github.com/TanStack/db/pull/910))
+
+  Previously, modifications to array items retrieved via iteration methods were not tracked by the change proxy because these methods returned raw array elements instead of proxied versions. This caused `getChanges()` to return an empty object, which in turn caused `createOptimisticAction`'s `mutationFn` to never be called when using patterns like:
+
+  ```ts
+  collection.update(id, (draft) => {
+    const item = draft.items.find((x) => x.id === targetId)
+    if (item) {
+      item.value = newValue // This change was not tracked!
+    }
+  })
+  ```
+
+  The fix adds proxy handling for array iteration methods similar to how Map/Set iteration is already handled, ensuring that callbacks receive proxied elements and returned elements are properly proxied.
+
+  Also refactors proxy.ts for improved readability by extracting helper functions and hoisting constants to module scope.
+
+## 0.5.6
+
+### Patch Changes
+
+- Fix scheduler handling of lazy left-join/live-query dependencies: treat non-enqueued lazy deps as satisfied to avoid unresolved-dependency deadlocks, and block only when a dep actually has pending work. ([#898](https://github.com/TanStack/db/pull/898))
+
+## 0.5.5
+
+### Patch Changes
+
+- Fix data loss on component remount by implementing reference counting for QueryObserver lifecycle ([#870](https://github.com/TanStack/db/pull/870))
+
+  **What changed vs main:**
+
+  Previously, when live query subscriptions unsubscribed, there was no tracking of which rows were still needed by other active queries. This caused data loss during remounts.
+
+  This PR adds reference counting infrastructure to properly manage QueryObserver lifecycle:
+  1. Pass same predicates to `unloadSubset` that were passed to `loadSubset`
+  2. Use them to compute the queryKey (via `generateQueryKeyFromOptions`)
+  3. Use existing machinery (`queryToRows` map) to find rows that query loaded
+  4. Decrement the ref count
+  5. GC rows where count reaches 0 (no longer referenced by any active query)
+
+  **Impact:**
+  - Navigation back to previously loaded pages shows cached data immediately
+  - No unnecessary refetches during quick remounts (< gcTime)
+  - Multiple live queries with identical predicates correctly share QueryObservers
+  - Proper row-level cleanup when last subscriber leaves
+  - TanStack Query's cache lifecycle (gcTime) is fully respected
+  - No data leakage from in-flight requests when unsubscribing
+
+## 0.5.4
+
+### Patch Changes
+
+- Fix progressive mode to use fetchSnapshot and atomic swap ([#852](https://github.com/TanStack/db/pull/852))
+
+  Progressive mode was broken because `requestSnapshot()` injected snapshots into the stream in causally correct position, which didn't work properly with the `full` mode stream. This release fixes progressive mode by:
+
+  **Core Changes:**
+  - Use `fetchSnapshot()` during initial sync to fetch and apply snapshots immediately in sync transactions
+  - Buffer all stream messages during initial sync (renamed flag to `isBufferingInitialSync`)
+  - Perform atomic swap on first `up-to-date`: truncate snapshot data → apply buffered messages → mark ready
+  - Track txids/snapshots only after atomic swap (enables correct optimistic transaction confirmation)
+
+  **Test Infrastructure:**
+  - Added `ELECTRIC_TEST_HOOKS` symbol for test control (hidden from public API)
+  - Added `progressiveTestControl.releaseInitialSync()` to E2E test config for explicit transition control
+  - Created comprehensive progressive mode E2E test suite (8 tests):
+    - Explicit snapshot phase and atomic swap validation
+    - Txid tracking behavior (Electric-only)
+    - Multiple concurrent snapshots with deduplication
+    - Incremental updates after swap
+    - Predicate handling and resilience tests
+
+  **Bug Fixes:**
+  - Fixed type errors in test files
+  - All 166 unit tests + 95 E2E tests passing
+
+- Improved error messages when invalid source types are passed to `.from()` or `.join()` methods. When users mistakenly pass a string, null, array, or other invalid type instead of an object with a collection, they now receive a clear, actionable error message with an example of the correct usage (e.g., `.from({ todos: todosCollection })`). ([#875](https://github.com/TanStack/db/pull/875))
+
+- Migrated paced mutations implementation from `@tanstack/pacer` to `@tanstack/pacer-lite`. The lite version provides the same core functionality with minimal overhead and no external dependencies, making it more suitable for library use. This is an internal implementation change with no impact on the public API - all paced mutation strategies (debounce, throttle, queue) continue to work exactly as before. ([#880](https://github.com/TanStack/db/pull/880))
+
+- Add warning when calling `.preload()` on collections with `on-demand` syncMode. In on-demand mode, data is only loaded when queries request it, so calling `.preload()` on the collection itself is a no-op. Users should create a live query and call `.preload()` on that instead. ([#871](https://github.com/TanStack/db/pull/871))
+
+## 0.5.3
+
+### Patch Changes
+
+- Pass all operators in where clauses to the collection's loadSubset function ([#851](https://github.com/TanStack/db/pull/851))
+
+- Improve type of mutations in transactions ([#854](https://github.com/TanStack/db/pull/854))
+
 ## 0.5.2
 
 ### Patch Changes

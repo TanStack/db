@@ -19,7 +19,6 @@ import {
   generateSeedData,
 } from "../../db-collection-e2e/src/index"
 import { applyPredicates, buildQueryKey } from "./query-filter"
-import type { LoadSubsetOptions } from "@tanstack/db"
 import type {
   Comment as E2EComment,
   Post as E2EPost,
@@ -94,9 +93,7 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: (opts) => buildQueryKey(`users`, opts),
         syncMode: `on-demand`,
         queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.users, options)
           return Promise.resolve(filtered)
         },
@@ -112,9 +109,7 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: (opts) => buildQueryKey(`posts`, opts),
         syncMode: `on-demand`,
         queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.posts, options)
           return Promise.resolve(filtered)
         },
@@ -130,9 +125,7 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: (opts) => buildQueryKey(`comments`, opts),
         syncMode: `on-demand`,
         queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.comments, options)
           return Promise.resolve(filtered)
         },
@@ -167,24 +160,33 @@ describe(`Query Collection E2E Tests`, () => {
       // Mutations for Query collections - modify seed data and invalidate queries
       mutations: {
         insertUser: async (user) => {
+          console.log(`[mutation] insertUser called, id=${user.id}`)
           seedData.users.push(user)
+          console.log(`[mutation] calling invalidateQueries`)
           await queryClient.invalidateQueries({ queryKey: [`e2e`, `users`] })
+          console.log(`[mutation] invalidateQueries completed`)
         },
         updateUser: async (id, updates) => {
+          console.log(`[mutation] updateUser called, id=${id}`)
           const userIndex = seedData.users.findIndex((u) => u.id === id)
           if (userIndex !== -1) {
             seedData.users[userIndex] = {
               ...seedData.users[userIndex]!,
               ...updates,
             }
+            console.log(`[mutation] calling invalidateQueries`)
             await queryClient.invalidateQueries({ queryKey: [`e2e`, `users`] })
+            console.log(`[mutation] invalidateQueries completed`)
           }
         },
         deleteUser: async (id) => {
+          console.log(`[mutation] deleteUser called, id=${id}`)
           const userIndex = seedData.users.findIndex((u) => u.id === id)
           if (userIndex !== -1) {
             seedData.users.splice(userIndex, 1)
+            console.log(`[mutation] calling invalidateQueries`)
             await queryClient.invalidateQueries({ queryKey: [`e2e`, `users`] })
+            console.log(`[mutation] invalidateQueries completed`)
           }
         },
         insertPost: async (post) => {

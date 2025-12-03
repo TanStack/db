@@ -24,9 +24,9 @@ export interface LocalOnlyCollectionConfig<
   TSchema extends StandardSchemaV1 = never,
   TKey extends string | number = string | number,
 > extends Omit<
-    BaseCollectionConfig<T, TKey, TSchema, LocalOnlyCollectionUtils>,
-    `gcTime` | `startSync`
-  > {
+  BaseCollectionConfig<T, TKey, TSchema, LocalOnlyCollectionUtils>,
+  `gcTime` | `startSync`
+> {
   /**
    * Optional initial data to populate the collection with on creation
    * This data will be applied during the initial sync process

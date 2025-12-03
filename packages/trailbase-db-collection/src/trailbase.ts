@@ -89,9 +89,9 @@ export interface TrailBaseCollectionConfig<
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
 > extends Omit<
-    BaseCollectionConfig<TItem, TKey>,
-    `onInsert` | `onUpdate` | `onDelete`
-  > {
+  BaseCollectionConfig<TItem, TKey>,
+  `onInsert` | `onUpdate` | `onDelete`
+> {
   /**
    * Record API name
    */

@@ -25,6 +25,7 @@ title: "@tanstack/query-db-collection"
 ## Interfaces
 
 - [QueryCollectionConfig](../interfaces/QueryCollectionConfig.md)
+- [QueryCollectionMeta](../interfaces/QueryCollectionMeta.md)
 - [QueryCollectionUtils](../interfaces/QueryCollectionUtils.md)
 
 ## Type Aliases

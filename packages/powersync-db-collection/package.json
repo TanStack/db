@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/powersync-db-collection",
   "description": "PowerSync collection for TanStack DB",
-  "version": "0.1.6",
+  "version": "0.1.14",
   "dependencies": {
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
@@ -13,8 +13,8 @@
     "@powersync/common": "^1.41.0"
   },
   "devDependencies": {
-    "@powersync/common": "^1.42.0",
-    "@powersync/node": "^0.14.1",
+    "@powersync/common": "^1.43.1",
+    "@powersync/node": "^0.14.3",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4"
   },
@@ -37,7 +37,7 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.22.0",
+  "packageManager": "pnpm@10.24.0",
   "author": "POWERSYNC",
   "license": "MIT",
   "repository": {
