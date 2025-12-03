@@ -240,6 +240,20 @@ describe(`sql-compiler`, () => {
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
       })
 
+      it(`should produce identical output for eq(col, null) and isNull(col)`, () => {
+        // Ensure eq(col, null) produces exactly the same SQL as isNull(col)
+        const eqResult = compileSQL({
+          where: func(`eq`, [ref(`email`), val(null)]),
+        })
+        const isNullResult = compileSQL({
+          where: func(`isNull`, [ref(`email`)]),
+        })
+        expect(eqResult.where).toBe(isNullResult.where)
+        expect(eqResult.params).toEqual(isNullResult.params)
+        expect(eqResult.where).toBe(`"email" IS NULL`)
+        expect(eqResult.params).toEqual({})
+      })
+
       it(`should handle eq(col, null) in OR clause`, () => {
         const result = compileSQL({
           where: func(`or`, [

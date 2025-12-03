@@ -707,6 +707,18 @@ export function createPredicatesTestSuite(
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
 
+        // First verify the existing isNull test pattern works
+        const isNullQuery = createLiveQueryCollection((q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) => isNull(user.email))
+        )
+        await isNullQuery.preload()
+        await waitForQueryData(isNullQuery, { minSize: 1, timeout: 5000 })
+        const isNullResults = Array.from(isNullQuery.state.values())
+        await isNullQuery.cleanup()
+
+        // Now test eq(col, null) produces same results
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
@@ -714,10 +726,12 @@ export function createPredicatesTestSuite(
         )
 
         await query.preload()
-        await waitForQueryData(query, { minSize: 1 })
+        await waitForQueryData(query, { minSize: 1, timeout: 5000 })
 
         const results = Array.from(query.state.values())
         expect(results.length).toBeGreaterThan(0)
+        // Should return same count as isNull query
+        expect(results.length).toBe(isNullResults.length)
         assertAllItemsMatch(query, (u) => u.email === null)
 
         await query.cleanup()
@@ -737,7 +751,7 @@ export function createPredicatesTestSuite(
         )
 
         await query.preload()
-        await waitForQueryData(query, { minSize: 1 })
+        await waitForQueryData(query, { minSize: 1, timeout: 5000 })
 
         const results = Array.from(query.state.values())
         expect(results.length).toBeGreaterThan(0)
