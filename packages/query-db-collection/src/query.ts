@@ -144,25 +144,35 @@ export interface QueryCollectionConfig<
    * Optional asynchronous handler called when items are inserted into the collection
    * Allows persisting changes to a backend and optionally controlling refetch behavior
    * @param params Object containing transaction and collection information
-   * @returns Promise that can return { refetch?: boolean } to control whether to refetch after insert
+   * @returns Promise that can return { refetch?: boolean } to control whether to refetch after insert, or void
    */
-  onInsert?: InsertMutationFn<T, TKey, UtilsRecord, { refetch?: boolean }>
+  onInsert?: InsertMutationFn<
+    T,
+    TKey,
+    UtilsRecord,
+    { refetch?: boolean } | void
+  >
 
   /**
    * Optional asynchronous handler called when items are updated in the collection
    * Allows persisting changes to a backend and optionally controlling refetch behavior
    * @param params Object containing transaction and collection information
-   * @returns Promise that can return { refetch?: boolean } to control whether to refetch after update
+   * @returns Promise that can return { refetch?: boolean } to control whether to refetch after update, or void
    */
-  onUpdate?: UpdateMutationFn<T, TKey, UtilsRecord, { refetch?: boolean }>
+  onUpdate?: UpdateMutationFn<
+    T,
+    TKey,
+    UtilsRecord,
+    { refetch?: boolean } | void
+  >
 
   /**
    * Optional asynchronous handler called when items are deleted from the collection
    * Allows persisting changes to a backend and optionally controlling refetch behavior
    * @param params Object containing transaction and collection information
-   * @returns Promise that can return { refetch?: boolean } to control whether to refetch after delete
+   * @returns Promise that can return { refetch?: boolean } to control whether to refetch after delete, or void
    */
-  onDelete?: DeleteMutationFn<T, TKey, UtilsRecord, { refetch?: boolean }>
+  onDelete?: DeleteMutationFn<T, TKey, UtilsRecord, { refetch?: boolean } | void>
 }
 
 /**
