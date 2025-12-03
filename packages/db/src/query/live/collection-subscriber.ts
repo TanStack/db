@@ -162,10 +162,22 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
+    // For on-demand sync mode, we need to track the initial loadSubset promise
+    // so that the live query collection shows isLoading=true until data arrives.
+    // For eager sync mode, data is already available so we don't need to track it.
+    const isOnDemand = this.collection.config.syncMode === `on-demand`
+
+    // Create subscription without includeInitialState - we'll handle it manually
+    // to control whether the loadSubset promise is tracked
     const subscription = this.collection.subscribeChanges(sendChanges, {
-      includeInitialState,
+      includeInitialState: !isOnDemand && includeInitialState,
       whereExpression,
     })
+
+    // For on-demand sources with initial state, manually request snapshot with tracking
+    if (isOnDemand && includeInitialState) {
+      subscription.requestSnapshot({ trackLoadSubsetPromise: true })
+    }
 
     return subscription
   }
