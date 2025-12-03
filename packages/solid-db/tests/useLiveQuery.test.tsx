@@ -1748,4 +1748,113 @@ describe(`Query Collections`, () => {
       expect(result.status()).toBe(`ready`)
     })
   })
+
+  describe(`Disabled queries`, () => {
+    it(`should handle callback returning undefined with proper state`, async () => {
+      return createRoot(async (dispose) => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `disabled-undefined-test`,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          })
+        )
+
+        const [enabled, setEnabled] = createSignal(false)
+        const rendered = renderHook(
+          (props: { enabled: Accessor<boolean> }) => {
+            return useLiveQuery((q) => {
+              if (!props.enabled()) return undefined
+              return q
+                .from({ collection })
+                .where(({ collection: c }) => gt(c.age, 30))
+                .select(({ collection: c }) => ({
+                  id: c.id,
+                  name: c.name,
+                  age: c.age,
+                }))
+            })
+          },
+          { initialProps: [{ enabled }] }
+        )
+
+        // When callback returns undefined, should return disabled state
+        expect(rendered.result.state.size).toBe(0)
+        expect(rendered.result.data).toEqual([])
+        expect(rendered.result.collection()).toBeNull()
+        expect(rendered.result.status()).toBe(`disabled`)
+        expect(rendered.result.isLoading()).toBe(false)
+        expect(rendered.result.isReady()).toBe(true)
+
+        // Enable the query
+        setEnabled(true)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+
+        await waitFor(() => {
+          expect(rendered.result.state.size).toBe(1) // Only John Smith (age 35)
+        })
+        expect(rendered.result.data).toHaveLength(1)
+        expect(rendered.result.isReady()).toBe(true)
+
+        // Disable the query again
+        setEnabled(false)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+
+        expect(rendered.result.status()).toBe(`disabled`)
+        expect(rendered.result.isReady()).toBe(true)
+
+        dispose()
+      })
+    })
+
+    it(`should handle callback returning null with proper state`, async () => {
+      return createRoot(async (dispose) => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `disabled-null-test`,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          })
+        )
+
+        const [enabled, setEnabled] = createSignal(false)
+        const rendered = renderHook(
+          (props: { enabled: Accessor<boolean> }) => {
+            return useLiveQuery((q) => {
+              if (!props.enabled()) return null
+              return q
+                .from({ collection })
+                .where(({ collection: c }) => gt(c.age, 30))
+                .select(({ collection: c }) => ({
+                  id: c.id,
+                  name: c.name,
+                  age: c.age,
+                }))
+            })
+          },
+          { initialProps: [{ enabled }] }
+        )
+
+        // When callback returns null, should return disabled state
+        expect(rendered.result.state.size).toBe(0)
+        expect(rendered.result.data).toEqual([])
+        expect(rendered.result.collection()).toBeNull()
+        expect(rendered.result.status()).toBe(`disabled`)
+        expect(rendered.result.isLoading()).toBe(false)
+        expect(rendered.result.isReady()).toBe(true)
+
+        // Enable the query
+        setEnabled(true)
+        await new Promise((resolve) => setTimeout(resolve, 10))
+
+        await waitFor(() => {
+          expect(rendered.result.state.size).toBe(1)
+        })
+        expect(rendered.result.data).toHaveLength(1)
+        expect(rendered.result.isReady()).toBe(true)
+
+        dispose()
+      })
+    })
+  })
 })

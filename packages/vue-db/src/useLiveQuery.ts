@@ -110,9 +110,17 @@ export interface UseLiveQueryReturnWithCollection<
  * //   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
  * // </ul>
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
+  deps?: Array<MaybeRefOrGetter<unknown>>
+): UseLiveQueryReturn<GetResult<TContext>>
+
+// Overload 1b: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder
+  ) => QueryBuilder<TContext> | undefined | null,
   deps?: Array<MaybeRefOrGetter<unknown>>
 ): UseLiveQueryReturn<GetResult<TContext>>
 
@@ -210,15 +218,18 @@ export function useLiveQuery(
   const collection = computed(() => {
     // First check if the original parameter might be a ref/getter
     // by seeing if toValue returns something different than the original
+    // NOTE: Don't call toValue on functions - toValue treats functions as getters and calls them!
     let unwrappedParam = configOrQueryOrCollection
-    try {
-      const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
-      if (potentiallyUnwrapped !== configOrQueryOrCollection) {
-        unwrappedParam = potentiallyUnwrapped
+    if (typeof configOrQueryOrCollection !== `function`) {
+      try {
+        const potentiallyUnwrapped = toValue(configOrQueryOrCollection)
+        if (potentiallyUnwrapped !== configOrQueryOrCollection) {
+          unwrappedParam = potentiallyUnwrapped
+        }
+      } catch {
+        // If toValue fails, use original parameter
+        unwrappedParam = configOrQueryOrCollection
       }
-    } catch {
-      // If toValue fails, use original parameter
-      unwrappedParam = configOrQueryOrCollection
     }
 
     // Check if it's already a collection by checking for specific collection methods
@@ -243,10 +254,31 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Vue hooks
     if (typeof unwrappedParam === `function`) {
-      return createLiveQueryCollection({
-        query: unwrappedParam,
-        startSync: true,
-      })
+      // To avoid calling the query function twice, we wrap it to handle null/undefined returns
+      // The wrapper will be called once by createLiveQueryCollection
+      const wrappedQuery = (q: InitialQueryBuilder) => {
+        const result = unwrappedParam(q)
+        // If the query function returns null/undefined, throw a special error
+        // that we'll catch to return null collection
+        if (result === undefined || result === null) {
+          throw new Error(`__DISABLED_QUERY__`)
+        }
+        return result
+      }
+
+      try {
+        return createLiveQueryCollection({
+          query: wrappedQuery,
+          startSync: true,
+        })
+      } catch (error) {
+        // Check if this is our special disabled query marker
+        if (error instanceof Error && error.message === `__DISABLED_QUERY__`) {
+          return null
+        }
+        // Re-throw other errors
+        throw error
+      }
     } else {
       return createLiveQueryCollection({
         ...unwrappedParam,
@@ -265,7 +297,9 @@ export function useLiveQuery(
   const data = computed(() => internalData)
 
   // Track collection status reactively
-  const status = ref(collection.value.status)
+  const status = ref(
+    collection.value ? collection.value.status : (`disabled` as const)
+  )
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
@@ -281,6 +315,18 @@ export function useLiveQuery(
   // Watch for collection changes and subscribe to updates
   watchEffect((onInvalidate) => {
     const currentCollection = collection.value
+
+    // Handle null collection (disabled query)
+    if (!currentCollection) {
+      status.value = `disabled` as const
+      state.clear()
+      internalData.length = 0
+      if (currentUnsubscribe) {
+        currentUnsubscribe()
+        currentUnsubscribe = null
+      }
+      return
+    }
 
     // Update status ref whenever the effect runs
     status.value = currentCollection.status
@@ -366,7 +412,9 @@ export function useLiveQuery(
     collection: computed(() => collection.value),
     status: computed(() => status.value),
     isLoading: computed(() => status.value === `loading`),
-    isReady: computed(() => status.value === `ready`),
+    isReady: computed(
+      () => status.value === `ready` || status.value === `disabled`
+    ),
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),
