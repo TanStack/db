@@ -27,6 +27,7 @@ type RequestSnapshotOptions = {
 type RequestLimitedSnapshotOptions = {
   orderBy: OrderBy
   limit: number
+  offset?: number
   minValue?: any
 }
 
@@ -243,6 +244,7 @@ export class CollectionSubscription
   requestLimitedSnapshot({
     orderBy,
     limit,
+    offset,
     minValue,
   }: RequestLimitedSnapshotOptions) {
     if (!limit) throw new Error(`limit is required`)
@@ -347,6 +349,7 @@ export class CollectionSubscription
     const loadOptions1: LoadSubsetOptions = {
       where: whereWithValueFilter,
       limit,
+      offset,
       orderBy,
       subscription: this,
     }

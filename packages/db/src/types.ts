@@ -260,6 +260,8 @@ export type LoadSubsetOptions = {
   orderBy?: OrderBy
   /** The limit of the data to load */
   limit?: number
+  /** The offset to start loading from */
+  offset?: number
   /**
    * The subscription that triggered the load.
    * Advanced sync implementations can use this for:

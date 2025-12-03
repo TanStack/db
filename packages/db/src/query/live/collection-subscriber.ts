@@ -195,10 +195,10 @@ export class CollectionSubscriber<
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
-    // Load the first `offset + limit` values from the index
-    // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
+    // Load the items from the collection that fall into the requested range: [offset, offset + limit[
     subscription.requestLimitedSnapshot({
-      limit: offset + limit,
+      limit,
+      offset,
       orderBy: normalizedOrderBy,
     })
 

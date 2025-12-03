@@ -478,7 +478,7 @@ export function extractSimpleComparisons(
  * Good starting point for simple use cases.
  *
  * @param options - The LoadSubsetOptions from ctx.meta
- * @returns Pre-parsed filters, sorts, and limit
+ * @returns Pre-parsed filters, sorts, limit, and offset
  *
  * @example
  * ```typescript
@@ -491,7 +491,8 @@ export function extractSimpleComparisons(
  *       parsed.filters.map(f => [`${f.field.join('.')}_${f.operator}`, f.value])
  *     ),
  *     sort: parsed.sorts.map(s => `${s.field.join('.')}:${s.direction}`).join(','),
- *     limit: parsed.limit
+ *     limit: parsed.limit,
+ *     offset: parsed.offset
  *   })
  * }
  * ```
@@ -502,6 +503,7 @@ export function parseLoadSubsetOptions(
         where?: BasicExpression<boolean>
         orderBy?: OrderBy
         limit?: number
+        offset?: number
       }
     | undefined
     | null
@@ -509,6 +511,7 @@ export function parseLoadSubsetOptions(
   filters: Array<SimpleComparison>
   sorts: Array<ParsedOrderBy>
   limit?: number
+  offset?: number
 } {
   if (!options) {
     return { filters: [], sorts: [] }
@@ -518,5 +521,6 @@ export function parseLoadSubsetOptions(
     filters: extractSimpleComparisons(options.where),
     sorts: parseOrderByExpression(options.orderBy),
     limit: options.limit,
+    offset: options.offset,
   }
 }
