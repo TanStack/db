@@ -1,4 +1,4 @@
-# Handling `eq(col, null)` with 3-Valued Logic
+# Handling Null Values in Comparison Operators
 
 ## Background
 
@@ -10,102 +10,61 @@ This was an intentional breaking change to align local query evaluation with SQL
 
 ## The Problem
 
-After PR #765, an inconsistency emerged between the SQL compiler and JavaScript evaluator when handling `eq(col, null)`:
+When using cursor-based pagination (e.g., `useLiveInfiniteQuery`), if a cursor column has a `null` value, the next page query would generate something like `gt(col, null)`. This caused invalid SQL queries with missing parameters because `serialize(null)` returns an empty string.
 
-### SQL Compiler Behavior
-
-When `eq(col, null)` is compiled to SQL for Electric proxy queries, we faced a choice:
-
-1. Generate `"col" = $1` with `null` as the parameter → But `serialize(null)` returns empty string, causing invalid queries with missing params (the original bug)
-2. Generate `"col" = NULL` → Always returns UNKNOWN in SQL, matching 3-valued logic but returning no rows
-3. Transform to `"col" IS NULL` → Returns rows where col is null
-
-We chose option 3 because option 1 was broken and option 2 would silently return no results.
-
-### JavaScript Evaluator Behavior (Before Fix)
-
-The JS evaluator followed strict 3-valued logic:
-```javascript
-case `eq`: {
-  return (data) => {
-    const a = argA(data)
-    const b = argB(data)
-    if (isUnknown(a) || isUnknown(b)) {
-      return null  // UNKNOWN
-    }
-    return a === b
-  }
-}
+Example of the bug:
 ```
-
-### The Inconsistency
-
-This created a frustrating user experience:
-
-1. User writes: `eq(user.email, null)`
-2. SQL compiler generates: `"email" IS NULL` → Data loads from Electric
-3. JS evaluator returns: `null` (UNKNOWN) → `toBooleanPredicate(null)` = `false` → All rows filtered out
-4. Result: Data loads but immediately disappears
+subset__where="projectId" = $1 AND "name" > $2
+subset__params={"1":"uuid..."} // missing $2!
+```
 
 ## The Solution
 
-We modified the JS evaluator to detect **literal null values** at compile time and transform them to `isNull` semantics:
+All comparison operators (`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`) now throw a clear error when used with `null` or `undefined` values:
 
-```javascript
-case `eq`: {
-  const argExprA = func.args[0]
-  const argExprB = func.args[1]
-  const aIsLiteralNull = argExprA?.type === `val` &&
-    (argExprA.value === null || argExprA.value === undefined)
-  const bIsLiteralNull = argExprB?.type === `val` &&
-    (argExprB.value === null || argExprB.value === undefined)
-
-  if (aIsLiteralNull && bIsLiteralNull) {
-    // eq(null, null) - always true
-    return () => true
-  } else if (aIsLiteralNull) {
-    // eq(null, col) - check if col is null/undefined
-    return (data) => argB(data) === null || argB(data) === undefined
-  } else if (bIsLiteralNull) {
-    // eq(col, null) - check if col is null/undefined
-    return (data) => argA(data) === null || argA(data) === undefined
-  }
-
-  // Standard 3-valued logic for column-to-column comparisons
-  // ...
-}
+```
+Cannot use null/undefined value with 'eq' operator.
+Comparisons with null always evaluate to UNKNOWN in SQL.
+Use isNull() or isUndefined() to check for null values,
+or filter out null values before building the query.
 ```
 
-## Why This Approach?
+## Why Not Transform `eq(col, null)` to `IS NULL`?
 
-### 1. Consistency Between SQL and JS
+We considered automatically transforming `eq(col, null)` to `IS NULL` syntax, but decided against it for these reasons:
 
-Both the SQL compiler and JS evaluator now handle `eq(col, null)` the same way - as an IS NULL check. Data that loads from the server won't be unexpectedly filtered out locally.
+1. **Consistency with 3-valued logic design**: PR #765 explicitly documented that `eq(col, null)` should return UNKNOWN and users should use `isNull()` instead.
 
-### 2. Preserves 3-Valued Logic Where It Matters
+2. **Explicitness**: Requiring users to write `isNull(col)` makes the intent clear and avoids confusion about SQL null semantics.
 
-3-valued logic still applies for **column-to-column comparisons**:
+3. **Runtime null values**: If we transformed literal `null` to `IS NULL`, users might expect `eq(col, variable)` where `variable` is `null` at runtime to also work like `IS NULL`. But we can't distinguish these cases at the IR level, and silently returning no results (UNKNOWN) would be confusing.
+
+## Correct Usage
+
+### Checking for null values
 
 ```typescript
-// 3-valued logic applies - returns UNKNOWN if either column is null
-eq(user.email, manager.email)
+// Correct - use isNull()
+q.where(({ user }) => isNull(user.email))
+
+// Correct - use isUndefined()
+q.where(({ user }) => isUndefined(user.deletedAt))
+
+// Correct - negate with not()
+q.where(({ user }) => not(isNull(user.email)))
 ```
 
-This is the important case for 3-valued logic - when you're comparing two columns and one might unexpectedly be null in the data.
-
-### 3. Handles Dynamic Values Gracefully
-
-If a user has a dynamic filter value that might be null:
+### Handling dynamic values that might be null
 
 ```typescript
 const filterValue = getUserInput() // might be null
-q.where(({ user }) => eq(user.name, filterValue))
-```
 
-With strict 3-valued logic, this would silently return no results when `filterValue` is null. With our fix, it correctly returns rows where `name` is null.
+// Option 1: Filter out null values before building the query
+if (filterValue !== null) {
+  q.where(({ user }) => eq(user.name, filterValue))
+}
 
-Without this fix, users would need to write:
-```typescript
+// Option 2: Handle null case explicitly
 q.where(({ user }) =>
   filterValue === null
     ? isNull(user.name)
@@ -113,36 +72,34 @@ q.where(({ user }) =>
 )
 ```
 
-### 4. Follows User Intent
+### Cursor-based pagination
 
-When a user explicitly writes `eq(col, null)`, they almost certainly mean "find rows where col is null". The strict 3-valued interpretation (return UNKNOWN, filter out all rows) is technically correct but practically useless.
+The original bug was caused by cursor columns having null values. The fix is to ensure cursor columns are never null:
 
-## The Distinction
-
-| Expression | Behavior | Rationale |
-|------------|----------|-----------|
-| `eq(col, null)` | Returns `true` if col is null | User explicitly asked for null comparison |
-| `eq(col, variable)` where variable is null | Returns `true` if col is null | Same as above - the null is a literal value in the IR |
-| `eq(col1, col2)` where col2 is null at runtime | Returns `null` (UNKNOWN) | 3-valued logic - null in data is unexpected |
-
-The key insight is that **literal null values** (type `val` in the IR) represent intentional null comparisons, while **null column values** at runtime represent missing/unknown data where 3-valued logic is appropriate.
-
-## Other Comparison Operators
-
-For other operators (`gt`, `lt`, `gte`, `lte`, `like`, `ilike`), comparing with null doesn't have a sensible interpretation like "IS NULL", so the SQL compiler throws an error:
-
-```
-Cannot use null/undefined value with 'gt' operator. Use isNull() or isUndefined() to check for null/undefined values.
+```typescript
+// Add a secondary orderBy on a non-nullable column (like primary key)
+q.orderBy(({ user }) => [
+  asc(user.name),      // might be null
+  asc(user.id),        // never null - ensures valid cursor
+])
 ```
 
-This guides users toward the correct approach while allowing `eq(col, null)` to work intuitively.
+## 3-Valued Logic Behavior
+
+With the current implementation, 3-valued logic applies consistently:
+
+| Expression | Result |
+|------------|--------|
+| `eq(col, null)` | **Error** - use `isNull(col)` |
+| `eq(col, value)` where `col` is null at runtime | `null` (UNKNOWN) |
+| `eq(col1, col2)` where either is null at runtime | `null` (UNKNOWN) |
+| `isNull(col)` | `true` or `false` |
+
+The UNKNOWN result from 3-valued logic causes rows to be filtered out (not included in WHERE clause results), matching SQL behavior.
 
 ## Summary
 
-This is a pragmatic middle-ground that:
-- Maintains SQL/JS consistency for `eq(col, null)`
-- Preserves 3-valued logic for column-to-column comparisons
-- Handles dynamic null values gracefully
-- Follows user intent when they explicitly compare to null
-
-The alternative (strict 3-valued logic everywhere) would require users to always use `isNull()` and handle dynamic values explicitly, which is more error-prone and less intuitive.
+- All comparison operators throw errors for null/undefined values
+- Use `isNull()` or `isUndefined()` to check for null values
+- 3-valued logic applies when column values are null at runtime
+- Cursor-based pagination should use non-nullable columns or add a secondary sort key

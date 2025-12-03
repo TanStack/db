@@ -378,72 +378,36 @@ describe(`evaluators`, () => {
 
       describe(`comparison operators`, () => {
         describe(`eq (equality)`, () => {
-          it(`handles eq with literal null and literal null (IS NULL semantics)`, () => {
+          it(`handles eq with null and null (3-valued logic)`, () => {
             const func = new Func(`eq`, [new Value(null), new Value(null)])
             const compiled = compileExpression(func)
 
-            // eq(null, null) returns true - both nulls are equal in IS NULL semantics
-            expect(compiled({})).toBe(true)
+            // In 3-valued logic, null = null returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
           })
 
-          it(`handles eq with literal null and literal value (IS NULL semantics)`, () => {
+          it(`handles eq with null and value (3-valued logic)`, () => {
             const func = new Func(`eq`, [new Value(null), new Value(5)])
             const compiled = compileExpression(func)
 
-            // eq(null, 5) means "is 5 null?" - returns false
-            expect(compiled({})).toBe(false)
+            // In 3-valued logic, null = value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
           })
 
-          it(`handles eq with literal value and literal null (IS NULL semantics)`, () => {
+          it(`handles eq with value and null (3-valued logic)`, () => {
             const func = new Func(`eq`, [new Value(5), new Value(null)])
             const compiled = compileExpression(func)
 
-            // eq(5, null) means "is 5 null?" - returns false
-            expect(compiled({})).toBe(false)
+            // In 3-valued logic, value = null returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
           })
 
-          it(`handles eq with literal undefined and literal value (IS NULL semantics)`, () => {
+          it(`handles eq with undefined and value (3-valued logic)`, () => {
             const func = new Func(`eq`, [new Value(undefined), new Value(5)])
             const compiled = compileExpression(func)
 
-            // eq(undefined, 5) means "is 5 undefined?" - returns false
-            expect(compiled({})).toBe(false)
-          })
-
-          it(`handles eq with column value that is null and literal null (IS NULL semantics)`, () => {
-            const func = new Func(`eq`, [
-              new PropRef([`user`, `email`]),
-              new Value(null),
-            ])
-            const compiled = compileExpression(func)
-
-            // eq(col, null) where col is null returns true
-            expect(compiled({ user: { email: null } })).toBe(true)
-            // eq(col, null) where col is undefined returns true
-            expect(compiled({ user: { email: undefined } })).toBe(true)
-            // eq(col, null) where col has a value returns false
-            expect(compiled({ user: { email: `test@example.com` } })).toBe(
-              false
-            )
-          })
-
-          it(`handles eq with columns that both have null values (3-valued logic)`, () => {
-            // When comparing two column references (not literal nulls),
-            // 3-valued logic still applies
-            const func = new Func(`eq`, [
-              new PropRef([`user`, `email`]),
-              new PropRef([`other`, `email`]),
-            ])
-            const compiled = compileExpression(func)
-
-            // When both columns are null, return UNKNOWN (null) per 3-valued logic
-            expect(
-              compiled({ user: { email: null }, other: { email: null } })
-            ).toBe(null)
-            // When one column is null, return UNKNOWN (null)
-            expect(
-              compiled({ user: { email: null }, other: { email: `test` } })
-            ).toBe(null)
+            // In 3-valued logic, undefined = value returns UNKNOWN (null)
+            expect(compiled({})).toBe(null)
           })
 
           it(`handles eq with matching values`, () => {

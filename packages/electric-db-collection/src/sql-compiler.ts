@@ -141,31 +141,15 @@ function compileFunction(
 
   // Handle comparison operators with null/undefined values
   // These would create invalid queries with missing params (e.g., "col = $1" with empty params)
+  // In SQL, all comparisons with NULL return UNKNOWN, so these are almost always mistakes
   if (isComparisonOp(name)) {
     const nullArgIndex = args.findIndex((arg: IR.BasicExpression) =>
       isNullValue(arg)
     )
 
     if (nullArgIndex !== -1) {
-      const otherArgIndex = nullArgIndex === 0 ? 1 : 0
-      const otherArg = args[otherArgIndex]
-
-      if (
-        name === `eq` &&
-        otherArg &&
-        !isNullValue(otherArg) &&
-        (otherArg.type === `ref` || otherArg.type === `func`)
-      ) {
-        // Transform eq(col, null/undefined) or eq(func(...), null/undefined) to "expr IS NULL"
-        // This is the semantically correct behavior in SQL
-        // We only allow ref and func types - comparing a literal to null (e.g., eq(42, null))
-        // is almost certainly a mistake and should throw
-        return `${compileBasicExpression(otherArg, params)} IS NULL`
-      }
-
-      // For other comparison operators (gt, lt, gte, lte, like, ilike),
-      // or eq where both args are null/undefined,
-      // null comparisons don't make semantic sense in SQL (they always evaluate to UNKNOWN)
+      // All comparison operators (including eq) throw an error for null values
+      // Users should use isNull() or isUndefined() to check for null values
       throw new Error(
         `Cannot use null/undefined value with '${name}' operator. ` +
           `Comparisons with null always evaluate to UNKNOWN in SQL. ` +
