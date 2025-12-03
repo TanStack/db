@@ -81,10 +81,11 @@ describe(`PowerSync Integration`, () => {
 
       // Verify the collection state contains our items
       expect(collection.size).toBe(3)
-      expect(collection.toArray.map((entry) => entry.name)).deep.equals([
+      // Sort by name since keys are random UUIDs
+      expect(collection.toArray.map((entry) => entry.name).sort()).deep.equals([
         `one`,
-        `two`,
         `three`,
+        `two`,
       ])
     })
 
@@ -110,12 +111,10 @@ describe(`PowerSync Integration`, () => {
       await vi.waitFor(
         () => {
           expect(collection.size).toBe(4)
-          expect(collection.toArray.map((entry) => entry.name)).deep.equals([
-            `one`,
-            `two`,
-            `three`,
-            `four`,
-          ])
+          // Sort by name since keys are random UUIDs
+          expect(
+            collection.toArray.map((entry) => entry.name).sort()
+          ).deep.equals([`four`, `one`, `three`, `two`])
         },
         { timeout: 1000 }
       )
@@ -129,11 +128,10 @@ describe(`PowerSync Integration`, () => {
       await vi.waitFor(
         () => {
           expect(collection.size).toBe(3)
-          expect(collection.toArray.map((entry) => entry.name)).deep.equals([
-            `one`,
-            `three`,
-            `four`,
-          ])
+          // Sort by name since keys are random UUIDs
+          expect(
+            collection.toArray.map((entry) => entry.name).sort()
+          ).deep.equals([`four`, `one`, `three`])
         },
         { timeout: 1000 }
       )
@@ -148,11 +146,10 @@ describe(`PowerSync Integration`, () => {
       await vi.waitFor(
         () => {
           expect(collection.size).toBe(3)
-          expect(collection.toArray.map((entry) => entry.name)).deep.equals([
-            `updated`,
-            `three`,
-            `four`,
-          ])
+          // Sort by name since keys are random UUIDs
+          expect(
+            collection.toArray.map((entry) => entry.name).sort()
+          ).deep.equals([`four`, `three`, `updated`])
         },
         { timeout: 1000 }
       )

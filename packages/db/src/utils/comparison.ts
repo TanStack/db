@@ -189,3 +189,21 @@ export function areValuesEqual(a: any, b: any): boolean {
   // Different types or not Uint8Arrays
   return false
 }
+
+/**
+ * Compares two keys (string | number) for deterministic ordering.
+ * Strings come before numbers, then sorted within type.
+ */
+export function compareKeys<TKey extends string | number>(
+  a: TKey,
+  b: TKey
+): number {
+  // Same type: compare directly
+  if (typeof a === typeof b) {
+    if (a < b) return -1
+    if (a > b) return 1
+    return 0
+  }
+  // Different types: strings come before numbers
+  return typeof a === `string` ? -1 : 1
+}

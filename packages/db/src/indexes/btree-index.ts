@@ -1,5 +1,9 @@
 import { BTree } from "../utils/btree.js"
-import { defaultComparator, normalizeValue } from "../utils/comparison.js"
+import {
+  compareKeys,
+  defaultComparator,
+  normalizeValue,
+} from "../utils/comparison.js"
 import { BaseIndex } from "./base-index.js"
 import type { CompareOptions } from "../query/builder/types.js"
 import type { BasicExpression } from "../query/ir.js"
@@ -261,7 +265,8 @@ export class BTreeIndex<
     n: number,
     nextPair: (k?: any) => [any, any] | undefined,
     from?: any,
-    filterFn?: (key: TKey) => boolean
+    filterFn?: (key: TKey) => boolean,
+    reversed: boolean = false
   ): Array<TKey> {
     const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
@@ -271,13 +276,24 @@ export class BTreeIndex<
     while ((pair = nextPair(key)) !== undefined && result.length < n) {
       key = pair[0]
       const keys = this.valueMap.get(key)
-      if (keys) {
-        const it = keys.values()
-        let ks: TKey | undefined
-        while (result.length < n && (ks = it.next().value)) {
+      if (keys && keys.size > 0) {
+        // Fast path: single key doesn't need sorting
+        if (keys.size === 1) {
+          const ks = keys.values().next().value as TKey
           if (!keysInResult.has(ks) && (filterFn?.(ks) ?? true)) {
             result.push(ks)
             keysInResult.add(ks)
+          }
+        } else {
+          // Sort keys for deterministic order, reverse if needed
+          const sorted = Array.from(keys).sort(compareKeys)
+          if (reversed) sorted.reverse()
+          for (const ks of sorted) {
+            if (result.length >= n) break
+            if (!keysInResult.has(ks) && (filterFn?.(ks) ?? true)) {
+              result.push(ks)
+              keysInResult.add(ks)
+            }
           }
         }
       }
@@ -309,7 +325,7 @@ export class BTreeIndex<
     filterFn?: (key: TKey) => boolean
   ): Array<TKey> {
     const nextPair = (k?: any) => this.orderedEntries.nextLowerPair(k)
-    return this.takeInternal(n, nextPair, from, filterFn)
+    return this.takeInternal(n, nextPair, from, filterFn, true)
   }
 
   /**
