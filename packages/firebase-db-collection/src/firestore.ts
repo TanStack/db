@@ -181,6 +181,24 @@ export interface FirebaseCollectionConfig<
    * @default false
    */
   useTransactions?: boolean
+
+  /**
+   * Optional handler called when items are inserted.
+   * Firebase handles the persistence automatically.
+   */
+  onInsert?: (params: InsertMutationFnParams<TItem, TKey>) => Promise<void>
+
+  /**
+   * Optional handler called when items are updated.
+   * Firebase handles the persistence automatically.
+   */
+  onUpdate?: (params: UpdateMutationFnParams<TItem, TKey>) => Promise<void>
+
+  /**
+   * Optional handler called when items are deleted.
+   * Firebase handles the persistence automatically.
+   */
+  onDelete?: (params: DeleteMutationFnParams<TItem, TKey>) => Promise<void>
 }
 
 export interface FirebaseCollectionUtils extends UtilsRecord {
@@ -325,7 +343,10 @@ export function firebaseCollectionOptions<
   TKey extends string = string,
 >(
   config: FirebaseCollectionConfig<TItem, TRecord, TKey, never>
-): CollectionConfig<TItem, TKey> & { utils: FirebaseCollectionUtils }
+): CollectionConfig<TItem, TKey> & {
+  utils: FirebaseCollectionUtils
+  schema: never
+}
 
 // With schema
 export function firebaseCollectionOptions<
@@ -348,6 +369,9 @@ export function firebaseCollectionOptions<
     includeMetadataChanges = false,
     queryBuilder,
     useTransactions = false,
+    onInsert: userOnInsert,
+    onUpdate: userOnUpdate,
+    onDelete: userOnDelete,
     ...restConfig
   } = config
 
@@ -583,6 +607,12 @@ export function firebaseCollectionOptions<
     onInsert: async (
       params: InsertMutationFnParams<TItem, TKey>
     ): Promise<Array<TKey>> => {
+      // Call user handler first if provided
+      if (userOnInsert) {
+        await userOnInsert(params)
+      }
+
+      // Always persist to Firestore
       if (autoId) {
         // Can't batch with auto-generated IDs
         const ids = await Promise.all(
@@ -606,6 +636,7 @@ export function firebaseCollectionOptions<
         )
 
         await waitForPendingWrites(firestore)
+        await waitForSync()
         return ids
       } else {
         // Use batched approach
@@ -632,10 +663,17 @@ export function firebaseCollectionOptions<
         )
 
         await waitForPendingWrites(firestore)
+        await waitForSync()
         return params.transaction.mutations.map((m) => getKey(m.modified))
       }
     },
     onUpdate: async (params: UpdateMutationFnParams<TItem, TKey>) => {
+      // Call user handler first if provided
+      if (userOnUpdate) {
+        await userOnUpdate(params)
+      }
+
+      // Always persist to Firestore
       if (useTransactions) {
         // Use transactions for stronger consistency
         await Promise.all(
@@ -685,8 +723,15 @@ export function firebaseCollectionOptions<
       }
 
       await waitForPendingWrites(firestore)
+      await waitForSync()
     },
     onDelete: async (params: DeleteMutationFnParams<TItem, TKey>) => {
+      // Call user handler first if provided
+      if (userOnDelete) {
+        await userOnDelete(params)
+      }
+
+      // Always persist to Firestore
       const operations = params.transaction.mutations.map((mutation) => {
         const { type, key } = mutation
         if (type !== `delete`) {
@@ -705,6 +750,7 @@ export function firebaseCollectionOptions<
       )
 
       await waitForPendingWrites(firestore)
+      await waitForSync()
     },
     utils: {
       cancel: cancelSnapshot,

@@ -1,34 +1,36 @@
-export class FirestoreIntegrationError extends Error {
+import { TanStackDBError } from "@tanstack/db"
+
+export class FirestoreIntegrationError extends TanStackDBError {
   constructor(message: string) {
     super(message)
-    this.name = "FirestoreIntegrationError"
+    this.name = `FirestoreIntegrationError`
   }
 }
 
 export class TimeoutWaitingForIdsError extends FirestoreIntegrationError {
   constructor(ids: string) {
     super(`Timeout waiting for document IDs: ${ids}`)
-    this.name = "TimeoutWaitingForIdsError"
+    this.name = `TimeoutWaitingForIdsError`
   }
 }
 
 export class ExpectedInsertTypeError extends FirestoreIntegrationError {
   constructor(type: string) {
     super(`Expected insert type but got: ${type}`)
-    this.name = "ExpectedInsertTypeError"
+    this.name = `ExpectedInsertTypeError`
   }
 }
 
 export class ExpectedUpdateTypeError extends FirestoreIntegrationError {
   constructor(type: string) {
     super(`Expected update type but got: ${type}`)
-    this.name = "ExpectedUpdateTypeError"
+    this.name = `ExpectedUpdateTypeError`
   }
 }
 
 export class ExpectedDeleteTypeError extends FirestoreIntegrationError {
   constructor(type: string) {
     super(`Expected delete type but got: ${type}`)
-    this.name = "ExpectedDeleteTypeError"
+    this.name = `ExpectedDeleteTypeError`
   }
 }
