@@ -702,6 +702,79 @@ export function createPredicatesTestSuite(
         await query.cleanup()
       })
 
+      it(`should filter with eq(col, null) same as isNull()`, async () => {
+        // eq(col, null) should be transformed to IS NULL and work correctly
+        const config = await getConfig()
+        const usersCollection = config.collections.onDemand.users
+
+        const query = createLiveQueryCollection((q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) => eq(user.email, null))
+        )
+
+        await query.preload()
+        await waitForQueryData(query, { minSize: 1 })
+
+        const results = Array.from(query.state.values())
+        expect(results.length).toBeGreaterThan(0)
+        assertAllItemsMatch(query, (u) => u.email === null)
+
+        await query.cleanup()
+      })
+
+      it(`should filter with eq(col, null) in AND clause`, async () => {
+        // Tests that eq(col, null) works correctly when combined with other predicates
+        const config = await getConfig()
+        const usersCollection = config.collections.onDemand.users
+
+        const query = createLiveQueryCollection((q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) =>
+              and(eq(user.email, null), eq(user.isActive, true))
+            )
+        )
+
+        await query.preload()
+        await waitForQueryData(query, { minSize: 1 })
+
+        const results = Array.from(query.state.values())
+        expect(results.length).toBeGreaterThan(0)
+        assertAllItemsMatch(
+          query,
+          (u) => u.email === null && u.isActive === true
+        )
+
+        await query.cleanup()
+      })
+
+      it(`should filter with eq(col, null) in OR clause`, async () => {
+        // Tests that eq(col, null) works correctly in OR with other predicates
+        const config = await getConfig()
+        const usersCollection = config.collections.onDemand.users
+
+        const query = createLiveQueryCollection((q) =>
+          q
+            .from({ user: usersCollection })
+            .where(({ user }) =>
+              or(eq(user.email, null), eq(user.name, `Alice 0`))
+            )
+        )
+
+        await query.preload()
+        await waitForQueryData(query, { minSize: 1 })
+
+        const results = Array.from(query.state.values())
+        expect(results.length).toBeGreaterThan(0)
+        assertAllItemsMatch(
+          query,
+          (u) => u.email === null || u.name === `Alice 0`
+        )
+
+        await query.cleanup()
+      })
+
       it(`should filter with not(isNull()) on nullable field`, async () => {
         const config = await getConfig()
         const usersCollection = config.collections.onDemand.users
