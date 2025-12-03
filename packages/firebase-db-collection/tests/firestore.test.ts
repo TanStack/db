@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { initializeTestEnvironment } from "@firebase/rules-unit-testing"
 import { createCollection } from "@tanstack/db"
+import { z } from "zod"
 import { firebaseCollectionOptions } from "../src/firestore"
 import type { RulesTestEnvironment } from "@firebase/rules-unit-testing"
 import type { Firestore } from "firebase/firestore"
@@ -12,6 +13,14 @@ interface TestTodo {
   createdAt?: Date
   updatedAt?: Date
 }
+
+const testTodoSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  completed: z.boolean(),
+  createdAt: z.date().nullish(),
+  updatedAt: z.date().nullish(),
+})
 
 describe(`Firebase Collection Integration`, () => {
   let testEnv: RulesTestEnvironment
@@ -59,7 +68,8 @@ describe(`Firebase Collection Integration`, () => {
 
     it(`should insert items and sync them`, async () => {
       const collection = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos`,
           firestore,
           collectionPath: `todos`,
@@ -91,7 +101,8 @@ describe(`Firebase Collection Integration`, () => {
 
     it(`should update items`, async () => {
       const collection = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos`,
           firestore,
           collectionPath: `todos`,
@@ -123,7 +134,8 @@ describe(`Firebase Collection Integration`, () => {
 
     it(`should delete items`, async () => {
       const collection = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos`,
           firestore,
           collectionPath: `todos`,
@@ -155,7 +167,8 @@ describe(`Firebase Collection Integration`, () => {
     it(`should sync changes between collections`, async () => {
       // Create two collections pointing to the same Firestore collection
       const collection1 = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos-1`,
           firestore,
           collectionPath: `todos`,
@@ -164,7 +177,8 @@ describe(`Firebase Collection Integration`, () => {
       )
 
       const collection2 = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos-2`,
           firestore,
           collectionPath: `todos`,
@@ -200,7 +214,8 @@ describe(`Firebase Collection Integration`, () => {
   describe(`Batch Operations`, () => {
     it(`should handle batch inserts within limit`, async () => {
       const collection = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos`,
           firestore,
           collectionPath: `todos`,
@@ -227,7 +242,8 @@ describe(`Firebase Collection Integration`, () => {
 
     it(`should handle batch operations exceeding Firestore limit`, async () => {
       const collection = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos`,
           firestore,
           collectionPath: `todos`,
@@ -256,7 +272,8 @@ describe(`Firebase Collection Integration`, () => {
   describe(`Type Conversions`, () => {
     it(`should handle date conversions`, async () => {
       const collection = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos`,
           firestore,
           collectionPath: `todos`,
@@ -289,7 +306,8 @@ describe(`Firebase Collection Integration`, () => {
       // This would require setting up security rules
       // For now, we'll test basic error handling
       const collection = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos`,
           firestore,
           collectionPath: `todos`,
@@ -312,7 +330,8 @@ describe(`Firebase Collection Integration`, () => {
   describe(`Cleanup`, () => {
     it(`should properly clean up listeners`, async () => {
       const collection = createCollection(
-        firebaseCollectionOptions<TestTodo>({
+        firebaseCollectionOptions({
+          schema: testTodoSchema,
           id: `todos`,
           firestore,
           collectionPath: `todos`,

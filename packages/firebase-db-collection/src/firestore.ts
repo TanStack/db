@@ -21,6 +21,7 @@ import {
   FirestoreIntegrationError,
 } from "./errors"
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -28,6 +29,7 @@ import type {
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
   CollectionReference,
   DocumentData,
@@ -43,6 +45,12 @@ import type {
   WithFieldValue,
 } from "firebase/firestore"
 import type { FirebaseConversion, FirebaseConversions, ShapeOf } from "./types"
+
+type InferSchemaOutput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends object
+    ? StandardSchemaV1.InferOutput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
 
 const FIRESTORE_BATCH_LIMIT = 500
 
@@ -93,10 +101,11 @@ export interface FirebaseCollectionConfig<
   TItem extends ShapeOf<TRecord>,
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string = string,
+  TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-    CollectionConfig<TItem, TKey>,
-    `sync` | `onInsert` | `onUpdate` | `onDelete`
-  > {
+  BaseCollectionConfig<TItem, TKey, TSchema, UtilsRecord, any>,
+  `sync` | `onInsert` | `onUpdate` | `onDelete`
+> {
   /**
    * Firestore instance
    */
@@ -296,13 +305,36 @@ class ExponentialBackoff {
   }
 }
 
+// Overload: with schema
+export function firebaseCollectionOptions<TSchema extends StandardSchemaV1>(
+  config: FirebaseCollectionConfig<
+    InferSchemaOutput<TSchema>,
+    InferSchemaOutput<TSchema>,
+    string,
+    TSchema
+  > & { schema: TSchema }
+): CollectionConfig<InferSchemaOutput<TSchema>, string, TSchema> & {
+  utils: FirebaseCollectionUtils
+  schema: TSchema
+}
+
+// Without schema
 export function firebaseCollectionOptions<
   TItem extends ShapeOf<TRecord>,
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string = string,
 >(
-  config: FirebaseCollectionConfig<TItem, TRecord, TKey>
-): CollectionConfig<TItem, TKey> & { utils: FirebaseCollectionUtils } {
+  config: FirebaseCollectionConfig<TItem, TRecord, TKey, never>
+): CollectionConfig<TItem, TKey> & { utils: FirebaseCollectionUtils }
+
+// With schema
+export function firebaseCollectionOptions<
+  TItem extends ShapeOf<TRecord>,
+  TRecord extends ShapeOf<TItem> = TItem,
+  TKey extends string = string,
+>(
+  config: FirebaseCollectionConfig<TItem, TRecord, TKey, any>
+): CollectionConfig<TItem, TKey, any> & { utils: FirebaseCollectionUtils } {
   const {
     firestore,
     collectionPath,
