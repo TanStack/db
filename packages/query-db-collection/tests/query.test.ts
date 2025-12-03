@@ -1622,11 +1622,11 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`1`)).toBe(false)
     })
 
-    it(`should allow write operations on on-demand collections without startSync`, async () => {
-      // This test verifies that on-demand collections can perform write operations
+    it(`should auto-start sync when write operations are called on idle collections`, async () => {
+      // This test verifies that write operations automatically start sync
       // even when startSync is not explicitly set to true.
-      // See: https://github.com/TanStack/db/issues/xyz - SyncNotInitializedError
-      // was thrown when trying to writeUpsert on on-demand collections
+      // This fixes SyncNotInitializedError when trying to writeUpsert on
+      // collections that haven't been preloaded yet.
 
       const queryKey = [`on-demand-write-test`]
       const queryFn = vi.fn().mockResolvedValue([])
@@ -1638,21 +1638,22 @@ describe(`QueryCollection`, () => {
         queryFn,
         getKey,
         syncMode: `on-demand`,
-        // Note: startSync is NOT set to true - this was the bug scenario
+        // Note: startSync is NOT set to true - sync should auto-start on write
       }
 
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
 
-      // On-demand collections should be ready immediately
-      await vi.waitFor(() => {
-        expect(collection.status).toBe(`ready`)
-      })
+      // Collection starts in idle state (sync not started yet)
+      expect(collection.status).toBe(`idle`)
+      expect(queryFn).not.toHaveBeenCalled()
 
-      // Write operations should work without throwing SyncNotInitializedError
+      // Write operation should auto-start sync and work without error
       const newItem: TestItem = { id: `1`, name: `Item 1`, value: 10 }
       collection.utils.writeInsert(newItem)
 
+      // After write, collection should be ready (sync was auto-started)
+      expect(collection.status).toBe(`ready`)
       expect(collection.size).toBe(1)
       expect(collection.get(`1`)).toEqual(newItem)
 
@@ -1684,6 +1685,9 @@ describe(`QueryCollection`, () => {
       expect(collection.size).toBe(3)
       expect(collection.get(`3`)?.name).toBe(`Item 3`)
       expect(collection.get(`4`)?.name).toBe(`Item 4`)
+
+      // queryFn should still not be called since no data was loaded via loadSubset
+      expect(queryFn).not.toHaveBeenCalled()
     })
 
     it(`should handle sync method errors appropriately`, async () => {
@@ -3006,16 +3010,17 @@ describe(`QueryCollection`, () => {
       const options = queryCollectionOptions(config)
       const collection = createCollection(options)
 
-      // On-demand collections are ready immediately (sync auto-starts for write support)
-      // but no data is loaded until loadSubset is called
-      expect(collection.status).toBe(`ready`)
+      // Collection should be idle initially
+      expect(collection.status).toBe(`idle`)
       expect(queryFn).not.toHaveBeenCalled()
       expect(collection.size).toBe(0)
 
-      // Preload is a no-op for on-demand collections (logs a warning)
+      // Preload should resolve immediately without calling queryFn
+      // since there's no initial query in on-demand mode
       await collection.preload()
 
-      // Collection should still be ready with no data loaded
+      // After preload, collection should be ready
+      // but queryFn should NOT have been called and collection should still be empty
       expect(collection.status).toBe(`ready`)
       expect(queryFn).not.toHaveBeenCalled()
       expect(collection.size).toBe(0)
