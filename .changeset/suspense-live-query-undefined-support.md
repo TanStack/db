@@ -2,13 +2,13 @@
 "@tanstack/react-db": patch
 ---
 
-Improve error message when `useLiveSuspenseQuery` receives `undefined` from query callback.
+Improve runtime error message and documentation when `useLiveSuspenseQuery` receives `undefined` from query callback.
 
 Following TanStack Query's `useSuspenseQuery` design, `useLiveSuspenseQuery` intentionally does not support disabled queries (when callback returns `undefined` or `null`). This maintains the type guarantee that `data` is always `T` (not `T | undefined`), which is a core benefit of using Suspense.
 
 **What changed:**
 
-The error message is now more helpful and explains the design decision:
+1. **Improved runtime error message** with clear guidance:
 
 ```
 useLiveSuspenseQuery does not support disabled queries (callback returned undefined/null).
@@ -17,6 +17,8 @@ Solutions:
 1) Use conditional rendering - don't render the component until the condition is met.
 2) Use useLiveQuery instead, which supports disabled queries with the 'isEnabled' flag.
 ```
+
+2. **Enhanced JSDoc documentation** with detailed `@remarks` section explaining the design decision, showing both incorrect (❌) and correct (✅) patterns
 
 **Why this matters:**
 

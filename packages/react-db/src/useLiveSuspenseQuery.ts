@@ -12,14 +12,6 @@ import type {
   SingleResult,
 } from "@tanstack/db"
 
-// Unique symbol for type-level error messages
-declare const TypeException: unique symbol
-
-// Custom compile-time error for disabled queries
-type DisabledQueryError = {
-  [TypeException]: `❌ useLiveSuspenseQuery does not support disabled queries (returning undefined/null).\n\n✅ Solution 1: Use conditional rendering\n   Don't render this component until data is ready:\n   {userId ? <Profile userId={userId} /> : <div>No user</div>}\n\n✅ Solution 2: Use useLiveQuery instead\n   It supports the 'isEnabled' flag for conditional queries:\n   useLiveQuery((q) => userId ? q.from(...) : undefined, [userId])`
-}
-
 /**
  * Create a live query with React Suspense support
  * @param queryFn - Query function that defines what data to fetch
@@ -159,38 +151,11 @@ export function useLiveSuspenseQuery<
   collection: Collection<TResult, TKey, TUtils> & SingleResult
 }
 
-// "Poison pill" overloads - catch disabled queries and show custom compile-time error
-// These MUST come AFTER the specific overloads so TypeScript tries them last
-export function useLiveSuspenseQuery<TContext extends Context>(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) => QueryBuilder<TContext> | undefined | null,
-  deps?: Array<unknown>
-): DisabledQueryError
-
-export function useLiveSuspenseQuery<TContext extends Context>(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) => LiveQueryCollectionConfig<TContext> | undefined | null,
-  deps?: Array<unknown>
-): DisabledQueryError
-
-export function useLiveSuspenseQuery<
-  TResult extends object,
-  TKey extends string | number,
-  TUtils extends Record<string, any>,
->(
-  queryFn: (
-    q: InitialQueryBuilder
-  ) => Collection<TResult, TKey, TUtils> | undefined | null,
-  deps?: Array<unknown>
-): DisabledQueryError
-
 // Implementation - uses useLiveQuery internally and adds Suspense logic
 export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
   deps: Array<unknown> = []
-): DisabledQueryError | { state: any; data: any; collection: any } {
+) {
   const promiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const hasBeenReadyRef = useRef(false)
