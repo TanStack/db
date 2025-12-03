@@ -1812,4 +1812,105 @@ describe(`Query Collections`, () => {
       expect(status.value).toBe(`ready`)
     })
   })
+
+  describe(`Disabled queries`, () => {
+    it(`should handle callback returning undefined with proper state`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-undefined-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const enabled = ref(false)
+      const result = useLiveQuery(
+        (q) => {
+          if (!enabled.value) return undefined
+          return q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            }))
+        },
+        [() => enabled.value]
+      )
+
+      // When callback returns undefined, should return disabled state
+      expect(result.state.value.size).toBe(0)
+      expect(result.data.value).toEqual([])
+      expect(result.collection.value).toBeNull()
+      expect(result.status.value).toBe(`disabled`)
+      expect(result.isLoading.value).toBe(false)
+      expect(result.isReady.value).toBe(true)
+
+      // Enable the query
+      enabled.value = true
+      await waitFor(() => {
+        expect(result.collection.value).not.toBeNull()
+      })
+
+      await waitFor(() => {
+        expect(result.state.value.size).toBe(1) // Only John Smith (age 35)
+      })
+      expect(result.data.value).toHaveLength(1)
+      expect(result.isReady.value).toBe(true)
+
+      // Disable the query again
+      enabled.value = false
+      await waitFor(() => {
+        expect(result.status.value).toBe(`disabled`)
+      })
+      expect(result.isReady.value).toBe(true)
+    })
+
+    it(`should handle callback returning null with proper state`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `disabled-null-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        })
+      )
+
+      const enabled = ref(false)
+      const result = useLiveQuery(
+        (q) => {
+          if (!enabled.value) return null
+          return q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            }))
+        },
+        [() => enabled.value]
+      )
+
+      // When callback returns null, should return disabled state
+      expect(result.state.value.size).toBe(0)
+      expect(result.data.value).toEqual([])
+      expect(result.collection.value).toBeNull()
+      expect(result.status.value).toBe(`disabled`)
+      expect(result.isLoading.value).toBe(false)
+      expect(result.isReady.value).toBe(true)
+
+      // Enable the query
+      enabled.value = true
+      await waitFor(() => {
+        expect(result.collection.value).not.toBeNull()
+      })
+
+      await waitFor(() => {
+        expect(result.state.value.size).toBe(1)
+      })
+      expect(result.data.value).toHaveLength(1)
+      expect(result.isReady.value).toBe(true)
+    })
+  })
 })

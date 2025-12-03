@@ -1031,4 +1031,119 @@ describe(`injectLiveQuery`, () => {
       })
     })
   })
+
+  describe(`disabled queries`, () => {
+    it(`should handle query function returning undefined with proper state`, async () => {
+      await TestBed.runInInjectionContext(async () => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `disabled-test-undefined-angular`,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          })
+        )
+
+        const enabled = signal(false)
+
+        const result = injectLiveQuery({
+          params: () => ({ enabled: enabled() }),
+          query: ({ params, q }) => {
+            if (!params.enabled) return undefined
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => eq(persons.isActive, true))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+              }))
+          },
+        })
+
+        await waitForAngularUpdate()
+
+        // When disabled, status should be 'disabled' and isReady should be true
+        expect(result.status()).toBe(`disabled`)
+        expect(result.isReady()).toBe(true)
+        expect(result.isLoading()).toBe(false)
+        expect(result.isIdle()).toBe(false)
+        expect(result.isError()).toBe(false)
+        expect(result.collection()).toBeNull()
+        expect(result.data()).toEqual([])
+        expect(result.state().size).toBe(0)
+
+        // Enable the query
+        enabled.set(true)
+        await waitForAngularUpdate()
+
+        // Should now be ready with data
+        expect(result.status()).toBe(`ready`)
+        expect(result.isReady()).toBe(true)
+        expect(result.isLoading()).toBe(false)
+        expect(result.collection()).not.toBeNull()
+        expect(result.data().length).toBeGreaterThan(0)
+      })
+    })
+
+    it(`should handle query function returning null with proper state`, async () => {
+      await TestBed.runInInjectionContext(async () => {
+        const collection = createCollection(
+          mockSyncCollectionOptions<Person>({
+            id: `disabled-test-null-angular`,
+            getKey: (person: Person) => person.id,
+            initialData: initialPersons,
+          })
+        )
+
+        const enabled = signal(false)
+
+        const result = injectLiveQuery({
+          params: () => ({ enabled: enabled() }),
+          query: ({ params, q }) => {
+            if (!params.enabled) return null
+            return q
+              .from({ persons: collection })
+              .where(({ persons }) => gt(persons.age, 25))
+              .select(({ persons }) => ({
+                id: persons.id,
+                name: persons.name,
+                age: persons.age,
+              }))
+          },
+        })
+
+        await waitForAngularUpdate()
+
+        // When disabled, status should be 'disabled' and isReady should be true
+        expect(result.status()).toBe(`disabled`)
+        expect(result.isReady()).toBe(true)
+        expect(result.isLoading()).toBe(false)
+        expect(result.isIdle()).toBe(false)
+        expect(result.isError()).toBe(false)
+        expect(result.collection()).toBeNull()
+        expect(result.data()).toEqual([])
+        expect(result.state().size).toBe(0)
+
+        // Enable the query
+        enabled.set(true)
+        await waitForAngularUpdate()
+
+        // Should now be ready with data
+        expect(result.status()).toBe(`ready`)
+        expect(result.isReady()).toBe(true)
+        expect(result.isLoading()).toBe(false)
+        expect(result.collection()).not.toBeNull()
+        expect(result.data().length).toBeGreaterThan(0)
+
+        // Disable again
+        enabled.set(false)
+        await waitForAngularUpdate()
+
+        // Should go back to disabled state
+        expect(result.status()).toBe(`disabled`)
+        expect(result.isReady()).toBe(true)
+        expect(result.collection()).toBeNull()
+        expect(result.data()).toEqual([])
+      })
+    })
+  })
 })
