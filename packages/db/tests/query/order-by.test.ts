@@ -2568,6 +2568,7 @@ describe(`OrderBy with duplicate values`, () => {
       it(`should correctly advance window when there are duplicate values loaded from sync layer`, async () => {
         // Create test data that reproduces the specific bug described:
         // Items with many duplicates at value 5, then normal progression
+        // Note: loadSubset now receives cursor expressions (whereFrom/whereCurrent) separately from where
         const allTestData: Array<TestItem> = [
           { id: 1, a: 1, keep: true },
           { id: 2, a: 2, keep: true },
@@ -2640,11 +2641,56 @@ describe(`OrderBy with duplicate values`, () => {
                           }
                         }
 
-                        // Return a slice from 0 to limit
+                        // Apply cursor expressions if present (cursor-based pagination)
+                        // For proper cursor-based pagination:
+                        // - whereCurrent should load ALL ties (no limit)
+                        // - whereFrom should load with remaining limit
+                        if (options.cursor) {
+                          const { whereFrom, whereCurrent } = options.cursor
+                          const { limit } = options
+                          try {
+                            // Get ALL rows matching whereCurrent (no limit for ties)
+                            const whereCurrentFn =
+                              createFilterFunctionFromExpression(whereCurrent)
+                            const currentData =
+                              filteredData.filter(whereCurrentFn)
+
+                            // Get rows matching whereFrom with limit (for next page data)
+                            const whereFromFn =
+                              createFilterFunctionFromExpression(whereFrom)
+                            const fromData = filteredData.filter(whereFromFn)
+                            const limitedFromData = limit
+                              ? fromData.slice(0, limit)
+                              : fromData
+
+                            // Combine: current rows + from rows (deduplicated)
+                            const seenIds = new Set<number>()
+                            filteredData = []
+                            for (const item of currentData) {
+                              if (!seenIds.has(item.id)) {
+                                seenIds.add(item.id)
+                                filteredData.push(item)
+                              }
+                            }
+                            for (const item of limitedFromData) {
+                              if (!seenIds.has(item.id)) {
+                                seenIds.add(item.id)
+                                filteredData.push(item)
+                              }
+                            }
+                            // Re-sort after combining
+                            filteredData.sort((a, b) => a.a - b.a)
+                          } catch (error) {
+                            console.log(`Error applying cursor:`, error)
+                          }
+                        }
+
+                        // Return data (limit already applied when cursor is present)
                         const { limit } = options
-                        const dataToLoad = limit
-                          ? filteredData.slice(0, limit)
-                          : filteredData
+                        const dataToLoad =
+                          limit && !options.cursor
+                            ? filteredData.slice(0, limit)
+                            : filteredData
 
                         dataToLoad.forEach((item) => {
                           write({
@@ -2710,8 +2756,8 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 9, a: 5, keep: true },
           { id: 10, a: 5, keep: true },
         ])
-        // we expect 2 new loadSubset calls (1 for data equal to max value and one for data greater than max value)
-        expect(loadSubsetCallCount).toBe(3)
+        // we expect 1 new loadSubset call (cursor expressions for whereFrom/whereCurrent are now combined in single call)
+        expect(loadSubsetCallCount).toBe(2)
 
         // Now move to third page (offset 10, limit 5)
         // It should advance past the duplicate 5s
@@ -2739,12 +2785,13 @@ describe(`OrderBy with duplicate values`, () => {
         // We expect no more loadSubset calls because when we loaded the previous page
         // we asked for all data equal to max value and LIMIT values greater than max value
         // and the LIMIT values greater than max value already loaded the next page
-        expect(loadSubsetCallCount).toBe(3)
+        expect(loadSubsetCallCount).toBe(2)
       })
 
       it(`should correctly advance window when there are duplicate values loaded from both local collection and sync layer`, async () => {
         // Create test data that reproduces the specific bug described:
         // Items with many duplicates at value 5, then normal progression
+        // Note: loadSubset now receives cursor expressions (whereFrom/whereCurrent) separately from where
         const allTestData: Array<TestItem> = [
           { id: 1, a: 1, keep: true },
           { id: 2, a: 2, keep: true },
@@ -2764,7 +2811,7 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 16, a: 16, keep: true },
         ]
 
-        // Start with only the first 5 items in the local collection
+        // Start with the first 10 items in the local collection (includes all duplicates)
         const initialData = allTestData.slice(0, 10)
         let loadSubsetCallCount = 0
 
@@ -2817,11 +2864,56 @@ describe(`OrderBy with duplicate values`, () => {
                           }
                         }
 
-                        // Return a slice from 0 to limit
+                        // Apply cursor expressions if present (cursor-based pagination)
+                        // For proper cursor-based pagination:
+                        // - whereCurrent should load ALL ties (no limit)
+                        // - whereFrom should load with remaining limit
+                        if (options.cursor) {
+                          const { whereFrom, whereCurrent } = options.cursor
+                          const { limit } = options
+                          try {
+                            // Get ALL rows matching whereCurrent (no limit for ties)
+                            const whereCurrentFn =
+                              createFilterFunctionFromExpression(whereCurrent)
+                            const currentData =
+                              filteredData.filter(whereCurrentFn)
+
+                            // Get rows matching whereFrom with limit (for next page data)
+                            const whereFromFn =
+                              createFilterFunctionFromExpression(whereFrom)
+                            const fromData = filteredData.filter(whereFromFn)
+                            const limitedFromData = limit
+                              ? fromData.slice(0, limit)
+                              : fromData
+
+                            // Combine: current rows + from rows (deduplicated)
+                            const seenIds = new Set<number>()
+                            filteredData = []
+                            for (const item of currentData) {
+                              if (!seenIds.has(item.id)) {
+                                seenIds.add(item.id)
+                                filteredData.push(item)
+                              }
+                            }
+                            for (const item of limitedFromData) {
+                              if (!seenIds.has(item.id)) {
+                                seenIds.add(item.id)
+                                filteredData.push(item)
+                              }
+                            }
+                            // Re-sort after combining
+                            filteredData.sort((a, b) => a.a - b.a)
+                          } catch (error) {
+                            console.log(`Error applying cursor:`, error)
+                          }
+                        }
+
+                        // Return data (limit already applied when cursor is present)
                         const { limit } = options
-                        const dataToLoad = limit
-                          ? filteredData.slice(0, limit)
-                          : filteredData
+                        const dataToLoad =
+                          limit && !options.cursor
+                            ? filteredData.slice(0, limit)
+                            : filteredData
 
                         dataToLoad.forEach((item) => {
                           write({
@@ -2887,8 +2979,8 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 9, a: 5, keep: true },
           { id: 10, a: 5, keep: true },
         ])
-        // we expect 2 new loadSubset calls (1 for data equal to max value and one for data greater than max value)
-        expect(loadSubsetCallCount).toBe(3)
+        // we expect 1 new loadSubset call (cursor expressions for whereFrom/whereCurrent are now combined in single call)
+        expect(loadSubsetCallCount).toBe(2)
 
         // Now move to third page (offset 10, limit 5)
         // It should advance past the duplicate 5s
@@ -2916,7 +3008,7 @@ describe(`OrderBy with duplicate values`, () => {
         // We expect no more loadSubset calls because when we loaded the previous page
         // we asked for all data equal to max value and LIMIT values greater than max value
         // and the LIMIT values greater than max value already loaded the next page
-        expect(loadSubsetCallCount).toBe(3)
+        expect(loadSubsetCallCount).toBe(2)
       })
     })
   }
@@ -2960,8 +3052,9 @@ describe(`OrderBy with Date values and precision differences`, () => {
 
     const initialData = testData.slice(0, 5)
 
-    // Track the WHERE clauses sent to loadSubset
-    const loadSubsetWhereClauses: Array<any> = []
+    // Track the cursor expressions sent to loadSubset
+    // Note: cursor expressions are now passed separately from where (whereFrom/whereCurrent/lastKey)
+    const loadSubsetCursors: Array<any> = []
 
     const sourceCollection = createCollection(
       mockSyncCollectionOptions<TestItemWithDate>({
@@ -2981,8 +3074,8 @@ describe(`OrderBy with Date values and precision differences`, () => {
 
             return {
               loadSubset: (options) => {
-                // Capture the WHERE clause for inspection
-                loadSubsetWhereClauses.push(options.where)
+                // Capture the cursor for inspection (now contains whereFrom/whereCurrent/lastKey)
+                loadSubsetCursors.push(options.cursor)
 
                 return new Promise<void>((resolve) => {
                   setTimeout(() => {
@@ -3000,6 +3093,42 @@ describe(`OrderBy with Date values and precision differences`, () => {
                         filteredData = sortedData.filter(filterFn)
                       } catch {
                         filteredData = sortedData
+                      }
+                    }
+
+                    // Apply cursor expressions if present
+                    if (options.cursor) {
+                      const { whereFrom, whereCurrent } = options.cursor
+                      try {
+                        const whereFromFn =
+                          createFilterFunctionFromExpression(whereFrom)
+                        const fromData = filteredData.filter(whereFromFn)
+
+                        const whereCurrentFn =
+                          createFilterFunctionFromExpression(whereCurrent)
+                        const currentData = filteredData.filter(whereCurrentFn)
+
+                        // Combine and deduplicate
+                        const seenIds = new Set<number>()
+                        filteredData = []
+                        for (const item of currentData) {
+                          if (!seenIds.has(item.id)) {
+                            seenIds.add(item.id)
+                            filteredData.push(item)
+                          }
+                        }
+                        for (const item of fromData) {
+                          if (!seenIds.has(item.id)) {
+                            seenIds.add(item.id)
+                            filteredData.push(item)
+                          }
+                        }
+                        filteredData.sort(
+                          (a, b) =>
+                            a.createdAt.getTime() - b.createdAt.getTime()
+                        )
+                      } catch (error) {
+                        console.log(`Error applying cursor:`, error)
                       }
                     }
 
@@ -3042,21 +3171,22 @@ describe(`OrderBy with Date values and precision differences`, () => {
     const results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
     expect(results.map((r) => r.id)).toEqual([1, 2, 3, 4, 5])
 
-    // Clear tracked clauses before moving to next page
-    loadSubsetWhereClauses.length = 0
+    // Clear tracked cursors before moving to next page
+    loadSubsetCursors.length = 0
 
     // Move to next page - this should trigger the Date precision handling
     const moveToSecondPage = collection.utils.setWindow({ offset: 5, limit: 5 })
     await moveToSecondPage
 
-    // Find the WHERE clause that queries for the "equal values" (the minValue query)
-    // With the fix, this should be: and(gte(createdAt, baseTime), lt(createdAt, baseTime+1ms))
+    // Find the cursor that contains the "whereCurrent" expression (the minValue query)
+    // With the fix, whereCurrent should be: and(gte(createdAt, baseTime), lt(createdAt, baseTime+1ms))
     // Without the fix, this would be: eq(createdAt, baseTime)
-    const equalValuesQuery = loadSubsetWhereClauses.find((clause) => {
-      if (!clause) return false
-      // Check if it's an 'and' with 'gte' and 'lt' (the fix)
-      if (clause.name === `and` && clause.args?.length === 2) {
-        const [first, second] = clause.args
+    const cursorWithDateRange = loadSubsetCursors.find((cursor) => {
+      if (!cursor?.whereCurrent) return false
+      const whereCurrent = cursor.whereCurrent
+      // Check if whereCurrent is an 'and' with 'gte' and 'lt' (the fix)
+      if (whereCurrent.name === `and` && whereCurrent.args?.length === 2) {
+        const [first, second] = whereCurrent.args
         return first?.name === `gte` && second?.name === `lt`
       }
       return false
@@ -3064,7 +3194,8 @@ describe(`OrderBy with Date values and precision differences`, () => {
 
     // The fix should produce a range query (and(gte, lt)) for Date values
     // instead of an exact equality query (eq)
-    expect(equalValuesQuery).toBeDefined()
+    expect(cursorWithDateRange).toBeDefined()
+    const equalValuesQuery = cursorWithDateRange.whereCurrent
     expect(equalValuesQuery.name).toBe(`and`)
     expect(equalValuesQuery.args[0].name).toBe(`gte`)
     expect(equalValuesQuery.args[1].name).toBe(`lt`)
