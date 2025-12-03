@@ -52,7 +52,7 @@ export type FullSyncState = Required<SyncState>
  */
 export interface LiveQueryCollectionConfig<
   TContext extends Context,
-  TResult extends object = GetResult<TContext>,
+  TResult extends object = GetResult<TContext> & object,
 > {
   /**
    * Unique identifier for the collection
