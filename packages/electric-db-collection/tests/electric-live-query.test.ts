@@ -1198,8 +1198,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // The existing live query re-requests its data after truncate
-    // After must-refetch, the query requests data again (1 initial + 2 after truncate)
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
+    // After must-refetch, the query requests data again (1 initial + 1 after truncate)
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
 
     // Create the same live query again after reset
     // This should NOT be deduped because the reset cleared the deduplication state,
@@ -1218,8 +1218,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Should have more calls - the different query triggered a new request
-    // 1 initial + 2 after must-refetch + 1 for new query = 4
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(4)
+    // 1 initial + 1 after must-refetch + 1 for new query = 3
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
   })
 
   it(`should deduplicate unlimited queries regardless of orderBy`, async () => {
