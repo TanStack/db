@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createCollection } from "../../src/collection/index.js"
+import { mutations } from "../../src/index.js"
 import { createLiveQueryCollection, eq, isNull } from "../../src/query/index.js"
 import { createTransaction } from "../../src/transactions.js"
 import { createOptimisticAction } from "../../src/optimistic-action.js"
@@ -29,6 +30,7 @@ function setupLiveQueryCollections(id: string) {
   const users = createCollection<User>({
     id: `${id}-users`,
     getKey: (user) => user.id,
+    mutations,
     startSync: true,
     sync: {
       sync: ({ begin, commit, markReady }) => {
@@ -42,6 +44,7 @@ function setupLiveQueryCollections(id: string) {
   const tasks = createCollection<Task>({
     id: `${id}-tasks`,
     getKey: (task) => task.id,
+    mutations,
     startSync: true,
     sync: {
       sync: ({ begin, commit, markReady }) => {
@@ -224,6 +227,7 @@ describe(`live query scheduler`, () => {
     const collectionA = createCollection<{ id: number; value: string }>({
       id: `diamond-A`,
       getKey: (row) => row.id,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, commit, markReady }) => {
@@ -237,6 +241,7 @@ describe(`live query scheduler`, () => {
     const collectionB = createCollection<{ id: number; value: string }>({
       id: `diamond-B`,
       getKey: (row) => row.id,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, commit, markReady }) => {
@@ -320,6 +325,7 @@ describe(`live query scheduler`, () => {
     const collectionA = createCollection<{ id: number; value: string }>({
       id: `hybrid-A`,
       getKey: (row) => row.id,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, commit, markReady }) => {
@@ -333,6 +339,7 @@ describe(`live query scheduler`, () => {
     const collectionB = createCollection<{ id: number; value: string }>({
       id: `hybrid-B`,
       getKey: (row) => row.id,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, commit, markReady }) => {
@@ -403,6 +410,7 @@ describe(`live query scheduler`, () => {
     const collectionA = createCollection<{ id: number; value: string }>({
       id: `ordering-A`,
       getKey: (row) => row.id,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, commit, markReady }) => {
@@ -416,6 +424,7 @@ describe(`live query scheduler`, () => {
     const collectionB = createCollection<{ id: number; value: string }>({
       id: `ordering-B`,
       getKey: (row) => row.id,
+      mutations,
       startSync: true,
       sync: {
         sync: ({ begin, commit, markReady }) => {
@@ -474,6 +483,7 @@ describe(`live query scheduler`, () => {
     const baseCollection = createCollection<User>({
       id: `loader-users`,
       getKey: (user) => user.id,
+      mutations,
       sync: {
         sync: () => () => {},
       },

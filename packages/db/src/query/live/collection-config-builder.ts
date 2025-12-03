@@ -5,6 +5,7 @@ import {
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
 } from "../../errors.js"
+import { mutationPlugin } from "../../collection/mutations.js"
 import { transactionScopedScheduler } from "../../scheduler.js"
 import { getActiveTransaction } from "../../transactions.js"
 import { CollectionSubscriber } from "./collection-subscriber.js"
@@ -204,7 +205,11 @@ export class CollectionConfigBuilder<
   getConfig(): CollectionConfigSingleRowOption<TResult> & {
     utils: LiveQueryCollectionUtils
   } {
-    return {
+    // Determine if mutations are enabled based on presence of handlers
+    const hasMutationHandlers =
+      this.config.onInsert || this.config.onUpdate || this.config.onDelete
+
+    const baseConfig = {
       id: this.id,
       getKey:
         this.config.getKey ||
@@ -214,9 +219,6 @@ export class CollectionConfigBuilder<
       defaultStringCollation: this.compareOptions,
       gcTime: this.config.gcTime || 5000, // 5 seconds by default for live queries
       schema: this.config.schema,
-      onInsert: this.config.onInsert,
-      onUpdate: this.config.onUpdate,
-      onDelete: this.config.onDelete,
       startSync: this.config.startSync,
       singleResult: this.query.singleResult,
       utils: {
@@ -229,6 +231,23 @@ export class CollectionConfigBuilder<
           hasJoins: this.hasJoins(this.query),
         },
       },
+    }
+
+    // Add mutation handlers if present
+    if (hasMutationHandlers) {
+      return {
+        ...baseConfig,
+        mutations: mutationPlugin,
+        onInsert: this.config.onInsert,
+        onUpdate: this.config.onUpdate,
+        onDelete: this.config.onDelete,
+      } as CollectionConfigSingleRowOption<TResult> & {
+        utils: LiveQueryCollectionUtils
+      }
+    }
+
+    return baseConfig as CollectionConfigSingleRowOption<TResult> & {
+      utils: LiveQueryCollectionUtils
     }
   }
 

@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
 import { Store } from "@tanstack/store"
+import { mutations } from "@tanstack/db"
 import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
@@ -294,6 +295,7 @@ export function trailBaseCollectionOptions<
     ...config,
     sync,
     getKey,
+    mutations,
     onInsert: async (
       params: InsertMutationFnParams<TItem, TKey>
     ): Promise<Array<number | string>> => {

@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection, liveQueryCollectionOptions } from "../src/index"
+import {
+  createCollection,
+  liveQueryCollectionOptions,
+  mutations,
+} from "../src/index"
 import { sum } from "../src/query/builder/functions"
 import { localOnlyCollectionOptions } from "../src/local-only"
 import { createTransaction } from "../src/transactions"
@@ -22,6 +26,7 @@ describe(`LocalOnly Collection`, () => {
       localOnlyCollectionOptions({
         id: `test-local-only`,
         getKey: (item: TestItem) => item.id,
+        mutations,
       })
     )
   })
@@ -234,6 +239,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-schema`,
           getKey: (item: TestItem) => item.id,
+          mutations,
         })
       )
 
@@ -258,6 +264,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-custom-callbacks`,
           getKey: (item: TestItem) => item.id,
+          mutations,
           onInsert: onInsertSpy,
         })
       )
@@ -289,6 +296,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-custom-update`,
           getKey: (item: TestItem) => item.id,
+          mutations,
           onUpdate: onUpdateSpy,
         })
       )
@@ -323,6 +331,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-custom-delete`,
           getKey: (item: TestItem) => item.id,
+          mutations,
           onDelete: onDeleteSpy,
         })
       )
@@ -353,6 +362,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-no-callbacks`,
           getKey: (item: TestItem) => item.id,
+          mutations,
         })
       )
 
@@ -379,6 +389,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-initial-data`,
           getKey: (item: TestItem) => item.id,
+          mutations,
           initialData: initialItems,
         })
       )
@@ -395,6 +406,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-empty-initial-data`,
           getKey: (item: TestItem) => item.id,
+          mutations,
           initialData: [],
         })
       )
@@ -408,6 +420,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-no-initial-data`,
           getKey: (item: TestItem) => item.id,
+          mutations,
         })
       )
 
@@ -422,6 +435,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-initial-plus-more`,
           getKey: (item: TestItem) => item.id,
+          mutations,
           initialData: initialItems,
         })
       )
@@ -450,6 +464,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `numbers`,
           getKey: (item) => item.id,
+          mutations,
           initialData: [
             { id: 0, number: 15 },
             { id: 1, number: 15 },
@@ -517,6 +532,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `other-collection`,
           getKey: (item) => item.id,
+          mutations,
         })
       )
 

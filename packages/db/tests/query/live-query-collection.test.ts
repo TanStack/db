@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Temporal } from "temporal-polyfill"
 import { createCollection } from "../../src/collection/index.js"
+import { mutations } from "../../src/index.js"
 import {
   and,
   createLiveQueryCollection,
@@ -348,6 +349,7 @@ describe(`createLiveQueryCollection`, () => {
     const sourceCollection = createCollection<User>({
       id: `delayed-source-collection`,
       getKey: (user) => user.id,
+      mutations,
       startSync: false, // Don't start sync immediately
       sync: {
         sync: ({ begin, commit, write, markReady }) => {
@@ -800,6 +802,7 @@ describe(`createLiveQueryCollection`, () => {
         const base = createCollection<{ id: string; created_at: number }>({
           id: `delayed-inserts`,
           getKey: (item) => item.id,
+          mutations,
           startSync: true,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -861,6 +864,7 @@ describe(`createLiveQueryCollection`, () => {
         const base = createCollection<{ id: string; created_at: number }>({
           id: `delayed-inserts-many`,
           getKey: (item) => item.id,
+          mutations,
           startSync: true,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
@@ -930,6 +934,7 @@ describe(`createLiveQueryCollection`, () => {
         }>({
           id: `queued-optimistic-updates`,
           getKey: (todo) => todo.id,
+          mutations,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
               syncBegin = begin
@@ -1032,6 +1037,7 @@ describe(`createLiveQueryCollection`, () => {
         }>({
           id: `commit-blocked`,
           getKey: (todo) => todo.id,
+          mutations,
           sync: {
             sync: ({ begin, write, commit, markReady }) => {
               begin()
@@ -1079,6 +1085,7 @@ describe(`createLiveQueryCollection`, () => {
       const sourceCollection = createCollection<{ id: string; value: string }>({
         id: `source`,
         getKey: (item) => item.id,
+        mutations,
         sync: {
           sync: ({ markReady }) => {
             markReady()

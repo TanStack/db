@@ -9,6 +9,7 @@ import {
   eq,
   gt,
   lte,
+  mutations,
 } from "@tanstack/db"
 import { useEffect } from "react"
 import { useLiveQuery } from "../src/useLiveQuery"
@@ -1126,6 +1127,7 @@ describe(`Query Collections`, () => {
         id: `has-loaded-test`,
         getKey: (person: Person) => person.id,
         startSync: false, // Don't start sync immediately
+        mutations,
         sync: {
           sync: ({ begin, commit, markReady }) => {
             beginFn = begin
@@ -1232,6 +1234,7 @@ describe(`Query Collections`, () => {
         id: `status-change-has-loaded-test`,
         getKey: (person: Person) => person.id,
         startSync: false,
+        mutations,
         sync: {
           sync: ({ begin, commit, markReady }) => {
             beginFn = begin
@@ -1363,6 +1366,7 @@ describe(`Query Collections`, () => {
         id: `join-has-loaded-persons`,
         getKey: (person: Person) => person.id,
         startSync: false,
+        mutations,
         sync: {
           sync: ({ begin, commit, markReady }) => {
             personBeginFn = begin
@@ -1380,6 +1384,7 @@ describe(`Query Collections`, () => {
         id: `join-has-loaded-issues`,
         getKey: (issue: Issue) => issue.id,
         startSync: false,
+        mutations,
         sync: {
           sync: ({ begin, commit, markReady }) => {
             issueBeginFn = begin
@@ -1465,6 +1470,7 @@ describe(`Query Collections`, () => {
         id: `params-has-loaded-test`,
         getKey: (person: Person) => person.id,
         startSync: false,
+        mutations,
         sync: {
           sync: ({ begin, commit, markReady }) => {
             beginFn = begin
@@ -1564,6 +1570,7 @@ describe(`Query Collections`, () => {
         id: `eager-execution-test`,
         getKey: (person: Person) => person.id,
         startSync: false,
+        mutations,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             syncBegin = begin
@@ -1680,6 +1687,7 @@ describe(`Query Collections`, () => {
         id: `eager-filter-test`,
         getKey: (person: Person) => person.id,
         startSync: false,
+        mutations,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             syncBegin = begin
@@ -1789,6 +1797,7 @@ describe(`Query Collections`, () => {
         id: `eager-join-persons`,
         getKey: (person: Person) => person.id,
         startSync: false,
+        mutations,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             userSyncBegin = begin
@@ -1806,6 +1815,7 @@ describe(`Query Collections`, () => {
         id: `eager-join-issues`,
         getKey: (issue: Issue) => issue.id,
         startSync: false,
+        mutations,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             issueSyncBegin = begin
@@ -1913,6 +1923,7 @@ describe(`Query Collections`, () => {
         id: `ready-no-data-test`,
         getKey: (person: Person) => person.id,
         startSync: false,
+        mutations,
         sync: {
           sync: ({ markReady }) => {
             syncMarkReady = markReady

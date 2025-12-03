@@ -1,5 +1,6 @@
 import type { IStreamBuilder } from "@tanstack/db-ivm"
 import type { Collection } from "./collection/index.js"
+import type { MutationsPlugin } from "./collection/mutations.js"
 import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type { Transaction } from "./transactions"
 import type { BasicExpression, OrderBy } from "./query/ir.js"
@@ -435,7 +436,11 @@ export type CollectionStatus =
 
 export type SyncMode = `eager` | `on-demand`
 
-export interface BaseCollectionConfig<
+/**
+ * Core collection configuration without mutation handlers.
+ * This is the base that both mutable and read-only collections share.
+ */
+export interface CoreCollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   // Let TSchema default to `never` such that if a user provides T explicitly and no schema
@@ -444,7 +449,6 @@ export interface BaseCollectionConfig<
   // requires either T to be provided or a schema to be provided but not both!
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = any,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
@@ -505,6 +509,28 @@ export interface BaseCollectionConfig<
    * The exact implementation of the sync mode is up to the sync implementation.
    */
   syncMode?: SyncMode
+
+  /**
+   * Specifies how to compare data in the collection.
+   * This should be configured to match data ordering on the backend.
+   * E.g., when using the Electric DB collection these options
+   *       should match the database's collation settings.
+   */
+  defaultStringCollation?: StringCollationConfig
+
+  utils?: TUtils
+}
+
+/**
+ * Mutation handlers configuration.
+ * Only available when mutations are enabled.
+ */
+export interface MutationHandlersConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+  TReturn = any,
+> {
   /**
    * Optional asynchronous handler function called before an insert operation
    * @param params Object containing transaction and collection information
@@ -591,6 +617,7 @@ export interface BaseCollectionConfig<
    * }
    */
   onUpdate?: UpdateMutationFn<T, TKey, TUtils, TReturn>
+
   /**
    * Optional asynchronous handler function called before a delete operation
    * @param params Object containing transaction and collection information
@@ -634,26 +661,127 @@ export interface BaseCollectionConfig<
    * }
    */
   onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
-
-  /**
-   * Specifies how to compare data in the collection.
-   * This should be configured to match data ordering on the backend.
-   * E.g., when using the Electric DB collection these options
-   *       should match the database's collation settings.
-   */
-  defaultStringCollation?: StringCollationConfig
-
-  utils?: TUtils
 }
 
-export interface CollectionConfig<
+/**
+ * Configuration for a mutable collection (mutations)
+ * Allows onInsert, onUpdate, onDelete handlers
+ */
+export interface MutableCollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
-> extends BaseCollectionConfig<T, TKey, TSchema, TUtils> {
-  sync: SyncConfig<T, TKey>
+  TReturn = any,
+>
+  extends
+    CoreCollectionConfig<T, TKey, TSchema, TUtils>,
+    MutationHandlersConfig<T, TKey, TUtils, TReturn> {
+  /**
+   * Enable mutations (insert, update, delete) on this collection.
+   * Import and pass `mutations` to enable mutation handlers.
+   *
+   * @example
+   * ```ts
+   * import { createCollection, mutations } from "@tanstack/db"
+   *
+   * const collection = createCollection({
+   *   mutations,
+   *   onInsert: async ({ transaction }) => { ... }
+   * })
+   * ```
+   */
+  mutations: MutationsPlugin
 }
+
+/**
+ * Configuration for a read-only collection (no mutations plugin provided)
+ * Does NOT allow onInsert, onUpdate, onDelete handlers
+ */
+export interface ReadOnlyCollectionConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+  TUtils extends UtilsRecord = UtilsRecord,
+> extends CoreCollectionConfig<T, TKey, TSchema, TUtils> {
+  /**
+   * When not provided or undefined, the collection is read-only.
+   * Import and pass `mutations` to enable mutations.
+   */
+  mutations?: undefined
+  /** Not available on read-only collections. Pass `mutations` to enable. */
+  onInsert?: never
+  /** Not available on read-only collections. Pass `mutations` to enable. */
+  onUpdate?: never
+  /** Not available on read-only collections. Pass `mutations` to enable. */
+  onDelete?: never
+}
+
+/**
+ * @deprecated Use MutableCollectionConfig or ReadOnlyCollectionConfig instead.
+ * This is kept for backwards compatibility.
+ */
+export interface BaseCollectionConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+  TUtils extends UtilsRecord = UtilsRecord,
+  TReturn = any,
+>
+  extends
+    CoreCollectionConfig<T, TKey, TSchema, TUtils>,
+    MutationHandlersConfig<T, TKey, TUtils, TReturn> {
+  /**
+   * Enable mutations (insert, update, delete) on this collection.
+   * Import and pass `mutations` to enable.
+   */
+  mutations?: MutationsPlugin
+}
+
+/**
+ * Collection configuration - discriminated union based on `mutations` option.
+ *
+ * When `mutations` is provided:
+ * - Mutation handlers (onInsert, onUpdate, onDelete) can be provided
+ * - The collection will have insert(), update(), delete() methods
+ *
+ * When `mutations` is undefined (default):
+ * - Mutation handlers are NOT allowed (TypeScript will error)
+ * - The collection is read-only (no insert/update/delete methods)
+ * - Smaller bundle size as mutation code is tree-shaken
+ *
+ * @example
+ * ```ts
+ * // Read-only collection (mutations tree-shaken)
+ * const readOnly = createCollection({
+ *   id: "users",
+ *   getKey: (u) => u.id,
+ *   sync: { sync: () => {} }
+ * })
+ *
+ * // Mutable collection (import mutations)
+ * import { mutations } from "@tanstack/db"
+ * const mutable = createCollection({
+ *   id: "users",
+ *   getKey: (u) => u.id,
+ *   sync: { sync: () => {} },
+ *   mutations,
+ *   onInsert: async ({ transaction }) => { ... }
+ * })
+ * ```
+ */
+export type CollectionConfig<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+  TUtils extends UtilsRecord = UtilsRecord,
+> =
+  | (MutableCollectionConfig<T, TKey, TSchema, TUtils> & {
+      sync: SyncConfig<T, TKey>
+    })
+  | (ReadOnlyCollectionConfig<T, TKey, TSchema, TUtils> & {
+      sync: SyncConfig<T, TKey>
+    })
 
 export type SingleResult = {
   singleResult: true

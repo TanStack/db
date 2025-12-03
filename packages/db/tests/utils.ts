@@ -1,4 +1,5 @@
 import { expect } from "vitest"
+import { mutations } from "../src/index.js"
 import type {
   CollectionConfig,
   MutationFnParams,
@@ -247,6 +248,7 @@ export function mockSyncCollectionOptions<
     sync,
     ...(config.syncMode ? { syncMode: config.syncMode } : {}),
     startSync: true,
+    mutations,
     onInsert: async (_params: MutationFnParams<T>) => {
       // TODO
       await awaitSync()
@@ -329,6 +331,7 @@ export function mockSyncCollectionOptionsNoInitialState<
       },
     },
     startSync: false,
+    mutations,
     onInsert: async (_params: MutationFnParams<T>) => {
       // TODO
       await awaitSync()

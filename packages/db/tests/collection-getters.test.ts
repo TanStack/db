@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createTransaction } from "../src/transactions"
 import { createCollection } from "../src/collection/index.js"
+import { mutations } from "../src/index.js"
 import type { CollectionImpl } from "../src/collection/index.js"
 import type { SyncConfig } from "../src/types"
 
@@ -30,6 +31,7 @@ describe(`Collection getters`, () => {
     const config = {
       id: `test-collection`,
       getKey: (val: Item) => val.id,
+      mutations,
       sync: mockSync,
       startSync: true,
     }
@@ -63,6 +65,7 @@ describe(`Collection getters`, () => {
       const emptyCollection = createCollection({
         id: `empty-collection`,
         getKey: (val: Item) => val.id,
+        mutations,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -80,6 +83,7 @@ describe(`Collection getters`, () => {
       const syncCollection = createCollection<{ id: string; name: string }>({
         id: `sync-size-test`,
         getKey: (val) => val.id,
+        mutations,
         startSync: true,
         sync: {
           sync: (callbacks) => {
