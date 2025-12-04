@@ -733,6 +733,38 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           [5, 52_000],
         ])
       })
+
+      it(`handles deletion from partial page with limit larger than data`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .limit(20) // Limit larger than number of employees (5)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            }))
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(5)
+        expect(results[0]!.name).toBe(`Diana`)
+
+        // Delete Diana (the highest paid employee, first in DESC order)
+        const dianaData = employeeData.find((e) => e.id === 4)!
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `delete`,
+          value: dianaData,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+        expect(newResults).toHaveLength(4)
+        expect(newResults[0]!.name).toBe(`Bob`)
+      })
     })
 
     describe(`OrderBy with Joins`, () => {

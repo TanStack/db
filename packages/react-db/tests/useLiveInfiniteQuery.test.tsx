@@ -368,6 +368,137 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(result.current.pages[1]).toHaveLength(10)
   })
 
+  it(`should handle deletion from partial page with descending order`, async () => {
+    // Create only 5 items - fewer than the pageSize of 20
+    const posts = createMockPosts(5)
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `partial-page-deletion-desc-test`,
+        getKey: (post: Post) => post.id,
+        initialData: posts,
+      })
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`),
+        {
+          pageSize: 20,
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 20 ? lastPage.length : undefined,
+        }
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    // Should have all 5 items on one page (partial page)
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.data).toHaveLength(5)
+    expect(result.current.hasNextPage).toBe(false)
+
+    // Verify the first item (most recent by createdAt descending)
+    const firstItemId = result.current.data[0]!.id
+    expect(firstItemId).toBe(`1`) // Post 1 has the highest createdAt
+
+    // Delete the first item (the one that appears first in descending order)
+    act(() => {
+      collection.utils.begin()
+      collection.utils.write({
+        type: `delete`,
+        value: posts[0]!, // Post 1
+      })
+      collection.utils.commit()
+    })
+
+    // The deleted item should disappear from the result
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(4)
+    })
+
+    // Verify the deleted item is no longer in the data
+    expect(
+      result.current.data.find((p) => p.id === firstItemId)
+    ).toBeUndefined()
+
+    // Verify the new first item is Post 2
+    expect(result.current.data[0]!.id).toBe(`2`)
+
+    // Still should have 1 page with 4 items
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(4)
+    expect(result.current.hasNextPage).toBe(false)
+  })
+
+  it(`should handle deletion from partial page with ascending order`, async () => {
+    // Create only 5 items - fewer than the pageSize of 20
+    const posts = createMockPosts(5)
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `partial-page-deletion-asc-test`,
+        getKey: (post: Post) => post.id,
+        initialData: posts,
+      })
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `asc`), // ascending order
+        {
+          pageSize: 20,
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 20 ? lastPage.length : undefined,
+        }
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    // Should have all 5 items on one page (partial page)
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.data).toHaveLength(5)
+    expect(result.current.hasNextPage).toBe(false)
+
+    // In ascending order, Post 5 has the lowest createdAt and appears first
+    const firstItemId = result.current.data[0]!.id
+    expect(firstItemId).toBe(`5`) // Post 5 has the lowest createdAt
+
+    // Delete the first item (the one that appears first in ascending order)
+    act(() => {
+      collection.utils.begin()
+      collection.utils.write({
+        type: `delete`,
+        value: posts[4]!, // Post 5 (index 4 in array)
+      })
+      collection.utils.commit()
+    })
+
+    // The deleted item should disappear from the result
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(4)
+    })
+
+    // Verify the deleted item is no longer in the data
+    expect(
+      result.current.data.find((p) => p.id === firstItemId)
+    ).toBeUndefined()
+
+    // Still should have 1 page with 4 items
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(4)
+    expect(result.current.hasNextPage).toBe(false)
+  })
+
   it(`should work with where clauses`, async () => {
     const posts = createMockPosts(50)
     const collection = createCollection(
