@@ -1117,11 +1117,13 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
 
-    it(`source collection isLoadingSubset is independent`, async () => {
-      let resolveLoadSubset: () => void
-      const loadSubsetPromise = new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
+    it(`source collection isLoadingSubset is independent from live query after initial load`, async () => {
+      // This test verifies that AFTER the initial subscription load completes,
+      // direct loadSubset calls on the source collection don't affect the live query's
+      // isLoadingSubset state.
+
+      let loadSubsetCallCount = 0
+      const resolvers: Array<() => void> = []
 
       const sourceCollection = createCollection<{ id: string; value: number }>({
         id: `source`,
@@ -1134,7 +1136,12 @@ describe(`createLiveQueryCollection`, () => {
             commit()
             markReady()
             return {
-              loadSubset: () => loadSubsetPromise,
+              loadSubset: () => {
+                loadSubsetCallCount++
+                return new Promise<void>((resolve) => {
+                  resolvers.push(resolve)
+                })
+              },
             }
           },
         },
@@ -1145,21 +1152,184 @@ describe(`createLiveQueryCollection`, () => {
         startSync: true,
       })
 
-      await liveQuery.preload()
+      // Wait for the subscription to be set up
+      await flushPromises()
 
-      // Calling loadSubset directly on source collection sets its own isLoadingSubset
+      // The initial load is in progress
+      expect(loadSubsetCallCount).toBe(1)
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // Resolve the initial load
+      resolvers[0]!()
+      await flushPromises()
+
+      // Now the live query's initial load is complete
+      expect(liveQuery.isLoadingSubset).toBe(false)
+      expect(liveQuery.isReady()).toBe(true)
+
+      // Calling loadSubset DIRECTLY on source collection sets its own isLoadingSubset
       sourceCollection._sync.loadSubset({})
+      expect(loadSubsetCallCount).toBe(2)
       expect(sourceCollection.isLoadingSubset).toBe(true)
 
-      // But live query isLoadingSubset tracks subscription-driven loads, not direct loadSubset calls
-      // so it remains false unless subscriptions trigger loads via predicate pushdown
+      // But live query isLoadingSubset tracks subscription-driven loads, not direct calls
+      // so it remains false (the second loadSubset was not via the live query subscription)
       expect(liveQuery.isLoadingSubset).toBe(false)
 
-      resolveLoadSubset!()
-      await new Promise((resolve) => setTimeout(resolve, 10))
+      // Resolve the direct call
+      resolvers[1]!()
+      await flushPromises()
 
       expect(sourceCollection.isLoadingSubset).toBe(false)
       expect(liveQuery.isLoadingSubset).toBe(false)
+    })
+
+    it(`live query should not be ready until first loadSubset completes for on-demand sync`, async () => {
+      // This test verifies that when using on-demand sync mode, the live query
+      // collection stays in 'loading' status until the first loadSubset completes,
+      // rather than immediately becoming 'ready' when the source collection is ready.
+
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `on-demand-ready-test`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // For on-demand sync, markReady is called immediately
+            // but no data is loaded yet
+            markReady()
+
+            return {
+              loadSubset: () => {
+                // Return a promise that simulates async data loading
+                return loadSubsetPromise.then(() => {
+                  begin()
+                  write({ type: `insert`, value: { id: 1, value: 100 } })
+                  write({ type: `insert`, value: { id: 2, value: 200 } })
+                  commit()
+                })
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      // Wait a tick for the subscription to be set up and loadSubset to be called
+      await flushPromises()
+
+      // The source collection is ready, but the live query should NOT be ready yet
+      // because the first loadSubset is still in progress
+      expect(sourceCollection.isReady()).toBe(true)
+      expect(liveQuery.status).toBe(`loading`)
+      expect(liveQuery.isReady()).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // Now resolve the loadSubset promise
+      resolveLoadSubset!()
+      await flushPromises()
+
+      // Now the live query should be ready with data
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.isReady()).toBe(true)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+      expect(liveQuery.size).toBe(2)
+    })
+
+    it(`subsequent loadSubset calls should not affect live query ready status`, async () => {
+      // This test verifies that after the first loadSubset completes,
+      // subsequent loadSubset calls (e.g., from windowing) do NOT change
+      // the live query's ready status back to loading.
+
+      let loadSubsetCount = 0
+      let resolveLoadSubset: () => void
+
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `subsequent-loadsubset-test`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            markReady()
+
+            return {
+              loadSubset: () => {
+                loadSubsetCount++
+                const promise = new Promise<void>((resolve) => {
+                  resolveLoadSubset = resolve
+                })
+
+                return promise.then(() => {
+                  begin()
+                  // Add more items for each loadSubset call
+                  const baseId = (loadSubsetCount - 1) * 2
+                  write({
+                    type: `insert`,
+                    value: { id: baseId + 1, value: baseId + 1 },
+                  })
+                  write({
+                    type: `insert`,
+                    value: { id: baseId + 2, value: baseId + 2 },
+                  })
+                  commit()
+                })
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .orderBy(({ item }) => item.value, `asc`)
+            .limit(2)
+            .offset(0),
+        startSync: true,
+      })
+
+      await flushPromises()
+
+      // First loadSubset is in progress
+      expect(liveQuery.status).toBe(`loading`)
+      expect(loadSubsetCount).toBe(1)
+
+      // Complete the first loadSubset
+      resolveLoadSubset!()
+      await flushPromises()
+
+      // Now live query should be ready
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.isReady()).toBe(true)
+
+      // Trigger a second loadSubset by changing the window
+      liveQuery.utils.setWindow({ offset: 2, limit: 2 })
+      await flushPromises()
+
+      // Even though a second loadSubset is in progress, status should stay 'ready'
+      expect(loadSubsetCount).toBeGreaterThan(1)
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.isReady()).toBe(true)
+
+      // Complete the second loadSubset
+      resolveLoadSubset!()
+      await flushPromises()
+
+      // Status should still be ready
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.isReady()).toBe(true)
     })
   })
 

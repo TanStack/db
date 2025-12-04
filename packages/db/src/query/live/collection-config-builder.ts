@@ -99,6 +99,14 @@ export class CollectionConfigBuilder<
   // Error state tracking
   private isInErrorState = false
 
+  // Track whether we've already marked the live query as ready
+  // Used to ensure we only wait for the first loadSubset, not subsequent ones
+  private hasMarkedReady = false
+
+  // Track whether we've set up the loadingSubset listener
+  // Prevents duplicate listeners when updateLiveQueryStatus is called multiple times
+  private hasSetupLoadingListener = false
+
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
 
@@ -611,6 +619,10 @@ export class CollectionConfigBuilder<
       // The scheduler's listener Set would otherwise keep a strong reference to this builder
       this.unsubscribeFromSchedulerClears?.()
       this.unsubscribeFromSchedulerClears = undefined
+
+      // Reset ready state tracking for potential restart
+      this.hasMarkedReady = false
+      this.hasSetupLoadingListener = false
     }
   }
 
@@ -788,15 +800,42 @@ export class CollectionConfigBuilder<
   private updateLiveQueryStatus(config: SyncMethods<TResult>) {
     const { markReady } = config
 
-    // Don't update status if already in error
-    if (this.isInErrorState) {
+    // Don't update status if already in error or already marked ready
+    if (this.isInErrorState || this.hasMarkedReady) {
       return
     }
 
-    // Mark ready when all source collections are ready
-    if (this.allCollectionsReady()) {
-      markReady()
+    // Check if all source collections are ready
+    if (!this.allCollectionsReady()) {
+      return
     }
+
+    // If the live query is currently loading a subset (e.g., initial on-demand load),
+    // wait for it to complete before marking ready. This ensures that for on-demand
+    // sync mode, the live query isn't marked ready until the first data is loaded.
+    // We only wait for the FIRST loadSubset - subsequent loads (pagination/windowing)
+    // should not affect the ready status.
+    if (this.liveQueryCollection?.isLoadingSubset) {
+      // Set up a one-time listener if we haven't already
+      if (!this.hasSetupLoadingListener) {
+        this.hasSetupLoadingListener = true
+        const unsubscribe = this.liveQueryCollection.on(
+          `loadingSubset:change`,
+          (event) => {
+            if (!event.isLoadingSubset) {
+              unsubscribe()
+              // Re-check and mark ready now that loading is complete
+              this.updateLiveQueryStatus(config)
+            }
+          }
+        )
+      }
+      return
+    }
+
+    // Mark ready when all source collections are ready and no initial loading is in progress
+    this.hasMarkedReady = true
+    markReady()
   }
 
   /**

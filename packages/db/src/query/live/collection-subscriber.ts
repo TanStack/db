@@ -61,10 +61,11 @@ export class CollectionSubscriber<
         this.alias
       )
 
-      subscription = this.subscribeToMatchingChanges(
+      const result = this.subscribeToMatchingChanges(
         whereExpression,
         includeInitialState
       )
+      subscription = result.subscription
     }
 
     const trackLoadPromise = () => {
@@ -84,8 +85,10 @@ export class CollectionSubscriber<
       }
     }
 
-    // It can be that we are not yet subscribed when the first `loadSubset` call happens (i.e. the initial query).
-    // So we also check the status here and if it's `loadingSubset` then we track the load promise
+    // For on-demand sources with initial state, we need to track the initial loadSubset.
+    // The subscription status will be 'loadingSubset' if there's a pending load.
+    // For on-demand sources, requestSnapshot was called with trackLoadSubsetPromise: true,
+    // so the status should be 'loadingSubset' unless data arrived synchronously.
     if (subscription.status === `loadingSubset`) {
       trackLoadPromise()
     }
@@ -155,19 +158,34 @@ export class CollectionSubscriber<
   private subscribeToMatchingChanges(
     whereExpression: BasicExpression<boolean> | undefined,
     includeInitialState: boolean = false
-  ) {
+  ): { subscription: CollectionSubscription } {
     const sendChanges = (
       changes: Array<ChangeMessage<any, string | number>>
     ) => {
       this.sendChangesToPipeline(changes)
     }
 
+    // Track whether this is an on-demand source with initial state requested.
+    // For on-demand sync mode, we need to track the initial loadSubset promise
+    // so that the live query collection shows isLoading=true until data arrives.
+    const isOnDemandWithInitialState =
+      this.collection.config.syncMode === `on-demand` && includeInitialState
+
+    // For on-demand sources, we create the subscription WITHOUT includeInitialState
+    // and then manually call requestSnapshot with trackLoadSubsetPromise: true.
+    // This is because the default includeInitialState path calls requestSnapshot
+    // with trackLoadSubsetPromise: false, which doesn't track loading state.
     const subscription = this.collection.subscribeChanges(sendChanges, {
-      includeInitialState,
+      includeInitialState: !isOnDemandWithInitialState && includeInitialState,
       whereExpression,
     })
 
-    return subscription
+    // For on-demand sources with initial state, manually request snapshot with tracking
+    if (isOnDemandWithInitialState) {
+      subscription.requestSnapshot({ trackLoadSubsetPromise: true })
+    }
+
+    return { subscription }
   }
 
   private subscribeToOrderedChanges(
