@@ -1,4 +1,5 @@
 import { QueryObserver, hashKey } from "@tanstack/query-core"
+import { deepEquals } from "@tanstack/db"
 import {
   GetKeyRequiredError,
   QueryClientRequiredError,
@@ -799,26 +800,6 @@ export function queryCollectionOptions(
 
           begin()
 
-          // Helper function for shallow equality check of objects
-          const shallowEqual = (
-            obj1: Record<string, any>,
-            obj2: Record<string, any>
-          ): boolean => {
-            // Get all keys from both objects
-            const keys1 = Object.keys(obj1)
-            const keys2 = Object.keys(obj2)
-
-            // If number of keys is different, objects are not equal
-            if (keys1.length !== keys2.length) return false
-
-            // Check if all keys in obj1 have the same values in obj2
-            return keys1.every((key) => {
-              // Skip comparing functions and complex objects deeply
-              if (typeof obj1[key] === `function`) return true
-              return obj1[key] === obj2[key]
-            })
-          }
-
           currentSyncedItems.forEach((oldItem, key) => {
             const newItem = newItemsMap.get(key)
             if (!newItem) {
@@ -826,12 +807,7 @@ export function queryCollectionOptions(
               if (needToRemove) {
                 write({ type: `delete`, value: oldItem })
               }
-            } else if (
-              !shallowEqual(
-                oldItem as Record<string, any>,
-                newItem as Record<string, any>
-              )
-            ) {
+            } else if (!deepEquals(oldItem, newItem)) {
               // Only update if there are actual differences in the properties
               write({ type: `update`, value: newItem })
             }

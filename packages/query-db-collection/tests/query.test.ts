@@ -2112,6 +2112,98 @@ describe(`QueryCollection`, () => {
       expect(todo?.id).toBe(1)
       expect(todo?.id).not.toBe(clientId)
     })
+
+    it(`should not rollback object field updates after server response with refetch: false`, async () => {
+      const queryKey = [`object-field-update-test`]
+
+      type Todo = {
+        id: string
+        metadata: { createdBy: string }
+      }
+
+      const serverTodos: Array<Todo> = [
+        { id: `1`, metadata: { createdBy: `user1` } },
+      ]
+
+      const queryFn = vi
+        .fn()
+        .mockImplementation(() => Promise.resolve([...serverTodos]))
+
+      async function updateTodo(id: string, changes: Partial<Todo>) {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        const todo = serverTodos.find((t) => t.id === id)
+        if (todo) {
+          Object.assign(todo, changes)
+        }
+        return todo
+      }
+
+      const todosCollection = createCollection(
+        queryCollectionOptions<Todo>({
+          id: `object-field-update-test`,
+          queryKey,
+          queryFn,
+          queryClient,
+          getKey: (item: Todo) => item.id,
+          startSync: true,
+          onUpdate: async ({ transaction }) => {
+            const updates = transaction.mutations.map((m) => ({
+              id: m.key as string,
+              changes: m.changes,
+            }))
+
+            const serverItems = await Promise.all(
+              updates.map((update) => updateTodo(update.id, update.changes))
+            )
+
+            todosCollection.utils.writeBatch(() => {
+              serverItems.forEach((serverItem) => {
+                if (serverItem) {
+                  todosCollection.utils.writeUpdate(serverItem)
+                }
+              })
+            })
+
+            return { refetch: false }
+          },
+        })
+      )
+
+      await vi.waitFor(() => {
+        expect(todosCollection.status).toBe(`ready`)
+      })
+
+      // Verify initial state
+      expect(todosCollection.get(`1`)?.metadata.createdBy).toBe(`user1`)
+
+      // Update 1: change metadata from user1 to user456
+      todosCollection.update(`1`, (draft) => {
+        draft.metadata = { createdBy: `user456` }
+      })
+
+      // Wait for mutation to complete
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Verify Update 1 worked
+      expect(todosCollection.get(`1`)?.metadata.createdBy).toBe(`user456`)
+      expect(
+        todosCollection._state.syncedData.get(`1`)?.metadata.createdBy
+      ).toBe(`user456`)
+
+      // Update 2: change metadata from user456 to user789
+      todosCollection.update(`1`, (draft) => {
+        draft.metadata = { createdBy: `user789` }
+      })
+
+      // Wait for mutation to complete
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Verify Update 2 persisted correctly
+      expect(
+        todosCollection._state.syncedData.get(`1`)?.metadata.createdBy
+      ).toBe(`user789`)
+      expect(todosCollection.get(`1`)?.metadata.createdBy).toBe(`user789`)
+    })
   })
 
   it(`should call markReady when queryFn returns an empty array`, async () => {
