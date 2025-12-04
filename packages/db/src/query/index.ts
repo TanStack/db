@@ -12,36 +12,53 @@ export {
   type InferResultType,
 } from "./builder/index.js"
 
-// Expression functions exports
+// Expression functions exports - now from operator modules for tree-shaking
 export {
-  // Operators
+  // Comparison operators
   eq,
   gt,
   gte,
   lt,
   lte,
+  // Boolean operators
   and,
   or,
   not,
+  // Array/pattern operators
   inArray,
   like,
   ilike,
+  // Null checking
   isUndefined,
   isNull,
-  // Functions
+  // String functions
   upper,
   lower,
   length,
   concat,
   coalesce,
+  // Math functions
   add,
-  // Aggregates
-  count,
-  avg,
-  sum,
-  min,
-  max,
-} from "./builder/functions.js"
+  subtract,
+  multiply,
+  divide,
+} from "./builder/operators/index.js"
+
+// Aggregates - now from aggregate modules for tree-shaking
+export { count, avg, sum, min, max } from "./builder/aggregates/index.js"
+
+// Types for custom operators and aggregates
+// Custom operators: create a Func with your own factory as the 3rd argument
+// Custom aggregates: create an Aggregate with your own config as the 3rd argument
+export {
+  Func,
+  Aggregate,
+  type EvaluatorFactory,
+  type CompiledExpression,
+  type AggregateConfig,
+  type AggregateFactory,
+  type ValueExtractor,
+} from "./ir.js"
 
 // Ref proxy utilities
 export type { Ref } from "./builder/types.js"

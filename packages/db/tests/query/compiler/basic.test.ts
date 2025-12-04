@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest"
 import { D2, MultiSet, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../../../src/query/compiler/index.js"
-import { CollectionRef, Func, PropRef, Value } from "../../../src/query/ir.js"
+import { CollectionRef, PropRef, Value } from "../../../src/query/ir.js"
+import { and, eq, gt } from "../../../src/query/builder/operators/index.js"
 import type { QueryIR } from "../../../src/query/ir.js"
 import type { CollectionImpl } from "../../../src/collection/index.js"
 
@@ -172,7 +173,7 @@ describe(`Query2 Compiler`, () => {
           name: new PropRef([`users`, `name`]),
           age: new PropRef([`users`, `age`]),
         },
-        where: [new Func(`gt`, [new PropRef([`users`, `age`]), new Value(20)])],
+        where: [gt(new PropRef([`users`, `age`]), new Value(20))],
       }
 
       const graph = new D2()
@@ -234,10 +235,10 @@ describe(`Query2 Compiler`, () => {
           name: new PropRef([`users`, `name`]),
         },
         where: [
-          new Func(`and`, [
-            new Func(`gt`, [new PropRef([`users`, `age`]), new Value(20)]),
-            new Func(`eq`, [new PropRef([`users`, `active`]), new Value(true)]),
-          ]),
+          and(
+            gt(new PropRef([`users`, `age`]), new Value(20)),
+            eq(new PropRef([`users`, `active`]), new Value(true))
+          ),
         ],
       }
 
