@@ -1,5 +1,17 @@
 # @tanstack/db
 
+## 0.5.11
+
+### Patch Changes
+
+- fix(db): compile filter expression once in createFilterFunctionFromExpression ([#954](https://github.com/TanStack/db/pull/954))
+
+  Fixed a performance issue in `createFilterFunctionFromExpression` where the expression was being recompiled on every filter call. This only affected realtime change event filtering for pushed-down predicates at the collection level when using orderBy + limit. The core query engine was not affected as it already compiled predicates once.
+
+- fix(query-db-collection): use deep equality for object field comparison in query observer ([#967](https://github.com/TanStack/db/pull/967))
+
+  Fixed an issue where updating object fields (non-primitives) with `refetch: false` in `onUpdate` handlers would cause the value to rollback to the previous state every other update. The query observer was using shallow equality (`===`) to compare items, which compares object properties by reference rather than by value. This caused the observer to incorrectly detect differences and write stale data back to syncedData. Now uses `deepEquals` for proper value comparison.
+
 ## 0.5.10
 
 ### Patch Changes
