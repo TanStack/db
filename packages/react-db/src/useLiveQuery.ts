@@ -1,9 +1,10 @@
-import { useRef, useSyncExternalStore } from "react"
+import { useContext, useMemo, useRef, useSyncExternalStore } from "react"
 import {
   BaseQueryBuilder,
   CollectionImpl,
   createLiveQueryCollection,
 } from "@tanstack/db"
+import { HydrationContext } from "./hydration"
 import type {
   Collection,
   CollectionConfigSingleRowOption,
@@ -19,6 +20,38 @@ import type {
 } from "@tanstack/db"
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
+
+/**
+ * Options for useLiveQuery hook
+ */
+export interface UseLiveQueryOptions {
+  /**
+   * Unique identifier for this query. Required for SSR/RSC hydration to work.
+   * Must match the id used in prefetchLiveQuery on the server.
+   */
+  id?: string
+
+  /**
+   * Garbage collection time in milliseconds
+   * @default 1
+   */
+  gcTime?: number
+}
+
+/**
+ * Hook to get hydrated data for a query from HydrationBoundary context
+ * @internal
+ */
+function useHydratedData<T = any>(id: string | undefined): T | undefined {
+  const hydrationState = useContext(HydrationContext)
+
+  return useMemo(() => {
+    if (!id || !hydrationState) return undefined
+
+    const query = hydrationState.queries.find((q) => q.id === id)
+    return query?.data as T | undefined
+  }, [id, hydrationState])
+}
 
 export type UseLiveQueryStatus = CollectionStatus | `disabled`
 
@@ -325,6 +358,22 @@ export function useLiveQuery(
     typeof configOrQueryOrCollection.startSyncImmediate === `function` &&
     typeof configOrQueryOrCollection.id === `string`
 
+  // Extract id from config object (not from collections or functions)
+  // Only config objects support id for SSR hydration matching
+  const queryId =
+    !isCollection &&
+    typeof configOrQueryOrCollection === `object` &&
+    configOrQueryOrCollection !== null &&
+    `id` in configOrQueryOrCollection
+      ? configOrQueryOrCollection.id
+      : undefined
+
+  // Check for hydrated data using the hook
+  const hydratedData = useHydratedData(queryId)
+
+  // Get hydration context to check if SSR/hydration is being used
+  const hydrationState = useContext(HydrationContext)
+
   // Use refs to cache collection and track dependencies
   const collectionRef = useRef<Collection<object, string | number, {}> | null>(
     null
@@ -504,30 +553,100 @@ export function useLiveQuery(
       const config: CollectionConfigSingleRowOption<any, any, any> =
         snapshot.collection.config
       const singleResult = config.singleResult
+
+      // Check if we should use hydrated data
+      // Use hydrated data if:
+      // 1. We have hydrated data
+      // 2. The collection is empty (no data loaded yet)
+      const collectionHasData = entries.length > 0
+      const shouldUseHydratedData =
+        hydratedData !== undefined && !collectionHasData
+
+      // Dev-mode hint: warn if hydrationState exists (SSR setup) but query has id and no matching data
+      // This catches the case where HydrationBoundary is present but this specific query wasn't prefetched
+      if (
+        process.env.NODE_ENV !== `production` &&
+        hydrationState && // Only warn if we're in an SSR environment with HydrationBoundary
+        queryId &&
+        !collectionHasData &&
+        hydratedData === undefined
+      ) {
+        console.warn(
+          `TanStack DB: no hydrated data found for id "${queryId}" — did you prefetch this query on the server with prefetchLiveQuery()?`
+        )
+      }
+
       let stateCache: Map<string | number, unknown> | null = null
       let dataCache: Array<unknown> | null = null
 
-      returnedRef.current = {
-        get state() {
-          if (!stateCache) {
-            stateCache = new Map(entries)
-          }
-          return stateCache
-        },
-        get data() {
-          if (!dataCache) {
-            dataCache = entries.map(([, value]) => value)
-          }
-          return singleResult ? dataCache[0] : dataCache
-        },
-        collection: snapshot.collection,
-        status: snapshot.collection.status,
-        isLoading: snapshot.collection.status === `loading`,
-        isReady: snapshot.collection.status === `ready`,
-        isIdle: snapshot.collection.status === `idle`,
-        isError: snapshot.collection.status === `error`,
-        isCleanedUp: snapshot.collection.status === `cleaned-up`,
-        isEnabled: true,
+      // If we have hydrated data and collection is empty/loading, use hydrated data
+      if (shouldUseHydratedData) {
+        returnedRef.current = {
+          get state() {
+            // Convert hydrated data array to Map (assuming getKey from config if available)
+            if (!stateCache) {
+              const hydrated = Array.isArray(hydratedData)
+                ? hydratedData
+                : [hydratedData]
+              stateCache = new Map(
+                hydrated.map((item, index) => {
+                  // Try to use getKey if available, otherwise use index
+                  const key =
+                    typeof config.getKey === `function`
+                      ? config.getKey(item)
+                      : index
+                  return [key, item]
+                })
+              )
+            }
+            return stateCache
+          },
+          get data() {
+            // Mirror the non-hydrated path's singleResult semantics
+            if (singleResult) {
+              return Array.isArray(hydratedData)
+                ? hydratedData[0]
+                : hydratedData
+            }
+            // Ensure array when singleResult is false
+            return Array.isArray(hydratedData) ? hydratedData : [hydratedData]
+          },
+          collection: snapshot.collection,
+          // Keep status consistent with the underlying collection
+          status: snapshot.collection.status,
+          isLoading: snapshot.collection.status === `loading`,
+          // Consider hydrated data as "ready enough" for UI
+          isReady:
+            snapshot.collection.status === `ready` || shouldUseHydratedData,
+          isIdle: snapshot.collection.status === `idle`,
+          isError: snapshot.collection.status === `error`,
+          isCleanedUp: snapshot.collection.status === `cleaned-up`,
+          isEnabled: true,
+        }
+      } else {
+        // Normal case: use collection data
+        returnedRef.current = {
+          get state() {
+            if (!stateCache) {
+              stateCache = new Map(entries)
+            }
+            return stateCache
+          },
+          get data() {
+            if (!dataCache) {
+              dataCache = entries.map(([, value]) => value)
+            }
+            return singleResult ? dataCache[0] : dataCache
+          },
+          collection: snapshot.collection,
+          status: snapshot.collection.status,
+          isLoading: snapshot.collection.status === `loading`,
+          isReady: snapshot.collection.status === `ready`,
+          isIdle: snapshot.collection.status === `idle`,
+          isError: snapshot.collection.status === `error`,
+          isCleanedUp: snapshot.collection.status === `cleaned-up`,
+          isEnabled: true,
+        }
       }
     }
 

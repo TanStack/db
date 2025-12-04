@@ -41,6 +41,26 @@
         "default": "./dist/cjs/index.cjs"
       }
     },
+    "./server": {
+      "import": {
+        "types": "./dist/esm/server.d.ts",
+        "default": "./dist/esm/server.js"
+      },
+      "require": {
+        "types": "./dist/cjs/server.d.cts",
+        "default": "./dist/cjs/server.cjs"
+      }
+    },
+    "./hydration": {
+      "import": {
+        "types": "./dist/esm/hydration.d.ts",
+        "default": "./dist/esm/hydration.js"
+      },
+      "require": {
+        "types": "./dist/cjs/hydration.d.cts",
+        "default": "./dist/cjs/hydration.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [

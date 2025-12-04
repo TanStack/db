@@ -4,6 +4,16 @@ export * from "./useLiveSuspenseQuery"
 export * from "./usePacedMutations"
 export * from "./useLiveInfiniteQuery"
 
+// Re-export SSR/RSC hydration utilities (public API only)
+export { createServerContext, prefetchLiveQuery, dehydrate } from "./server"
+export type {
+  ServerContext,
+  DehydratedQuery,
+  DehydratedState,
+  PrefetchLiveQueryOptions,
+} from "./server"
+export { HydrationBoundary } from "./hydration"
+
 // Re-export everything from @tanstack/db
 export * from "@tanstack/db"
 
