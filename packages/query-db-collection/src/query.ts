@@ -12,10 +12,13 @@ import type {
   BaseCollectionConfig,
   ChangeMessage,
   CollectionConfig,
+  DeleteMutationFn,
   DeleteMutationFnParams,
+  InsertMutationFn,
   InsertMutationFnParams,
   LoadSubsetOptions,
   SyncConfig,
+  UpdateMutationFn,
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
@@ -67,7 +70,10 @@ export interface QueryCollectionConfig<
   TKey extends string | number = string | number,
   TSchema extends StandardSchemaV1 = never,
   TQueryData = Awaited<ReturnType<TQueryFn>>,
-> extends BaseCollectionConfig<T, TKey, TSchema> {
+> extends Omit<
+    BaseCollectionConfig<T, TKey, TSchema, UtilsRecord, any>,
+    `onInsert` | `onUpdate` | `onDelete`
+  > {
   /** The query key used by TanStack Query to identify this query */
   queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>
   /** Function that fetches data from the server. Must return the complete collection state */
@@ -134,6 +140,45 @@ export interface QueryCollectionConfig<
    * }
    */
   meta?: Record<string, unknown>
+
+  /**
+   * Optional asynchronous handler called when items are inserted into the collection
+   * Allows persisting changes to a backend and optionally controlling refetch behavior
+   * @param params Object containing transaction and collection information
+   * @returns Promise that can return { refetch?: boolean } to control whether to refetch after insert, or void
+   */
+  onInsert?: InsertMutationFn<
+    T,
+    TKey,
+    UtilsRecord,
+    { refetch?: boolean } | void
+  >
+
+  /**
+   * Optional asynchronous handler called when items are updated in the collection
+   * Allows persisting changes to a backend and optionally controlling refetch behavior
+   * @param params Object containing transaction and collection information
+   * @returns Promise that can return { refetch?: boolean } to control whether to refetch after update, or void
+   */
+  onUpdate?: UpdateMutationFn<
+    T,
+    TKey,
+    UtilsRecord,
+    { refetch?: boolean } | void
+  >
+
+  /**
+   * Optional asynchronous handler called when items are deleted from the collection
+   * Allows persisting changes to a backend and optionally controlling refetch behavior
+   * @param params Object containing transaction and collection information
+   * @returns Promise that can return { refetch?: boolean } to control whether to refetch after delete, or void
+   */
+  onDelete?: DeleteMutationFn<
+    T,
+    TKey,
+    UtilsRecord,
+    { refetch?: boolean } | void
+  >
 }
 
 /**
@@ -519,13 +564,8 @@ export function queryCollectionOptions<
 }
 
 export function queryCollectionOptions(
-  config: QueryCollectionConfig<Record<string, unknown>>
-): CollectionConfig<
-  Record<string, unknown>,
-  string | number,
-  never,
-  QueryCollectionUtils
-> & {
+  config: QueryCollectionConfig<any, any, any, any, any, any, any>
+): CollectionConfig<any, any, any, any> & {
   utils: QueryCollectionUtils
 } {
   const {
