@@ -11,7 +11,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn): object;
 ```
 
-Defined in: [useLiveQuery.ts:80](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L80)
+Defined in: [useLiveQuery.ts:84](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L84)
 
 Create a live query using a query function
 
@@ -150,10 +150,154 @@ return (
 ## Call Signature
 
 ```ts
+function useLiveQuery<TContext>(queryFn): object;
+```
+
+Defined in: [useLiveQuery.ts:99](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L99)
+
+Create a live query using a query function
+
+### Type Parameters
+
+#### TContext
+
+`TContext` *extends* `Context`
+
+### Parameters
+
+#### queryFn
+
+(`q`) => `QueryBuilder`\<`TContext`\> \| `null` \| `undefined`
+
+Query function that defines what data to fetch
+
+### Returns
+
+`object`
+
+Object with reactive data, state, and status information
+
+#### collection
+
+```ts
+collection: Accessor<
+  | Collection<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }, string | number, {
+}, StandardSchemaV1<unknown, unknown>, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>
+| null>;
+```
+
+#### data
+
+```ts
+data: { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }[];
+```
+
+#### isCleanedUp
+
+```ts
+isCleanedUp: Accessor<boolean>;
+```
+
+#### isError
+
+```ts
+isError: Accessor<boolean>;
+```
+
+#### isIdle
+
+```ts
+isIdle: Accessor<boolean>;
+```
+
+#### isLoading
+
+```ts
+isLoading: Accessor<boolean>;
+```
+
+#### isReady
+
+```ts
+isReady: Accessor<boolean>;
+```
+
+#### state
+
+```ts
+state: ReactiveMap<string | number, { [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+```
+
+#### status
+
+```ts
+status: Accessor<CollectionStatus | "disabled">;
+```
+
+### Examples
+
+```ts
+// Basic query with object syntax
+const todosQuery = useLiveQuery((q) =>
+  q.from({ todos: todosCollection })
+   .where(({ todos }) => eq(todos.completed, false))
+   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+)
+```
+
+```ts
+// With dependencies that trigger re-execution
+const todosQuery = useLiveQuery(
+  (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => gt(todos.priority, minPriority())),
+)
+```
+
+```ts
+// Join pattern
+const personIssues = useLiveQuery((q) =>
+  q.from({ issues: issueCollection })
+   .join({ persons: personCollection }, ({ issues, persons }) =>
+     eq(issues.userId, persons.id)
+   )
+   .select(({ issues, persons }) => ({
+     id: issues.id,
+     title: issues.title,
+     userName: persons.name
+   }))
+)
+```
+
+```ts
+// Handle loading and error states
+const todosQuery = useLiveQuery((q) =>
+  q.from({ todos: todoCollection })
+)
+
+return (
+  <Switch>
+    <Match when={todosQuery.isLoading()}>
+      <div>Loading...</div>
+    </Match>
+    <Match when={todosQuery.isError()}>
+      <div>Error: {todosQuery.status()}</div>
+    </Match>
+    <Match when={todosQuery.isReady()}>
+      <For each={todosQuery.data()}>
+        {(todo) => <li key={todo.id}>{todo.text}</li>}
+      </For>
+    </Match>
+  </Switch>
+)
+```
+
+## Call Signature
+
+```ts
 function useLiveQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveQuery.ts:135](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L135)
+Defined in: [useLiveQuery.ts:158](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L158)
 
 Create a live query using configuration object
 
@@ -279,7 +423,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveQuery.ts:185](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L185)
+Defined in: [useLiveQuery.ts:208](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L208)
 
 Subscribe to an existing live query collection
 
