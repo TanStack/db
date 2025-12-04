@@ -800,14 +800,6 @@ export function queryCollectionOptions(
 
           begin()
 
-          // Helper function for deep equality check of objects
-          const itemsEqual = (
-            obj1: Record<string, any>,
-            obj2: Record<string, any>
-          ): boolean => {
-            return deepEquals(obj1, obj2)
-          }
-
           currentSyncedItems.forEach((oldItem, key) => {
             const newItem = newItemsMap.get(key)
             if (!newItem) {
@@ -815,12 +807,7 @@ export function queryCollectionOptions(
               if (needToRemove) {
                 write({ type: `delete`, value: oldItem })
               }
-            } else if (
-              !itemsEqual(
-                oldItem as Record<string, any>,
-                newItem as Record<string, any>
-              )
-            ) {
+            } else if (!deepEquals(oldItem, newItem)) {
               // Only update if there are actual differences in the properties
               write({ type: `update`, value: newItem })
             }
