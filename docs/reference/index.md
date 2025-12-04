@@ -236,6 +236,7 @@ title: "@tanstack/db"
 - [createPacedMutations](../functions/createPacedMutations.md)
 - [createTransaction](../functions/createTransaction.md)
 - [debounceStrategy](../functions/debounceStrategy.md)
+- [deepEquals](../functions/deepEquals.md)
 - [eq](../functions/eq.md)
 - [extractFieldPath](../functions/extractFieldPath.md)
 - [extractSimpleComparisons](../functions/extractSimpleComparisons.md)
