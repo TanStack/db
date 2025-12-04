@@ -745,6 +745,12 @@ function deepCopyQuery(query: QueryIR): QueryIR {
           type: joinClause.type,
           left: joinClause.left,
           right: joinClause.right,
+          additionalConditions: joinClause.additionalConditions
+            ? joinClause.additionalConditions.map((cond) => ({
+                left: cond.left,
+                right: cond.right,
+              }))
+            : undefined,
           from:
             joinClause.from.type === `collectionRef`
               ? new CollectionRefClass(

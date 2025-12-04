@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import {
+  and,
   concat,
   createLiveQueryCollection,
   eq,
@@ -1725,6 +1726,369 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
     expect(result.join2!.other).toBe(30)
   })
 }
+
+test(`should handle compound join conditions with and()`, () => {
+  // Tests issue #593: joining on multiple fields simultaneously
+  const productsCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-products-canary`,
+      getKey: (p: any) => p.productId,
+      initialData: [
+        { productId: 1, region: `A`, sku: `sku1`, title: `A1` },
+        { productId: 3, region: `C`, sku: `sku2`, title: `C2` },
+      ],
+    })
+  )
+
+  const inventoriesCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-inventories-canary`,
+      getKey: (i: any) => i.inventoryId,
+      initialData: [
+        { inventoryId: 1, region: `A`, sku: `sku1`, quantity: 10 },
+        { inventoryId: 2, region: `C`, sku: `sku2`, quantity: 30 },
+      ],
+    })
+  )
+
+  const joinQuery = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ product: productsCollection })
+        .join({ inventory: inventoriesCollection }, ({ product, inventory }) =>
+          and(
+            eq(product.region, inventory.region),
+            eq(product.sku, inventory.sku)
+          )
+        )
+        .select(({ product, inventory }) => ({
+          productId: product.productId,
+          title: product.title,
+          region: product.region,
+          sku: product.sku,
+          quantity: inventory!.quantity, // Non-null: INNER join guarantees both sides exist
+        })),
+  })
+
+  expect(joinQuery.size).toBe(2)
+
+  // Verify actual row contents
+  const results = Array.from(joinQuery.values())
+  expect(results).toContainEqual({
+    productId: 1,
+    title: `A1`,
+    region: `A`,
+    sku: `sku1`,
+    quantity: 10,
+  })
+  expect(results).toContainEqual({
+    productId: 3,
+    title: `C2`,
+    region: `C`,
+    sku: `sku2`,
+    quantity: 30,
+  })
+})
+
+test(`should not match on partial field matches in compound joins`, () => {
+  // Test that BOTH conditions must match, not just one
+  const productsCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-products-partial`,
+      getKey: (p: any) => p.productId,
+      initialData: [
+        { productId: 1, region: `A`, sku: `sku1`, name: `Product A1` },
+        { productId: 2, region: `A`, sku: `sku2`, name: `Product A2` },
+        { productId: 3, region: `B`, sku: `sku1`, name: `Product B1` },
+      ],
+    })
+  )
+
+  const inventoriesCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-inventories-partial`,
+      getKey: (i: any) => i.inventoryId,
+      initialData: [
+        { inventoryId: 1, region: `A`, sku: `sku1`, quantity: 100 },
+        // No inventory for region=A, sku=sku2
+        // No inventory for region=B, sku=sku1
+      ],
+    })
+  )
+
+  const joinQuery = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ product: productsCollection })
+        .join(
+          { inventory: inventoriesCollection },
+          ({ product, inventory }) =>
+            and(
+              eq(product.region, inventory.region),
+              eq(product.sku, inventory.sku)
+            ),
+          `inner` // Use INNER join to exclude non-matches
+        )
+        .select(({ product, inventory }) => ({
+          productId: product.productId,
+          name: product.name,
+          quantity: inventory.quantity,
+        })),
+  })
+
+  // Only Product 1 matches (both region=A AND sku=sku1)
+  // Product 2 has region=A but sku=sku2 (no match)
+  // Product 3 has sku=sku1 but region=B (no match)
+  expect(joinQuery.size).toBe(1)
+
+  const results = Array.from(joinQuery.values())
+  expect(results).toEqual([
+    {
+      productId: 1,
+      name: `Product A1`,
+      quantity: 100,
+    },
+  ])
+})
+
+test(`should handle compound joins with LEFT join type`, () => {
+  // Test LEFT join preserves all left rows even without matches
+  const productsCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-products-left`,
+      getKey: (p: any) => p.productId,
+      initialData: [
+        { productId: 1, region: `A`, sku: `sku1`, name: `Product A1` },
+        { productId: 2, region: `B`, sku: `sku2`, name: `Product B2` },
+        { productId: 3, region: `C`, sku: `sku3`, name: `Product C3` },
+      ],
+    })
+  )
+
+  const inventoriesCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-inventories-left`,
+      getKey: (i: any) => i.inventoryId,
+      initialData: [
+        { inventoryId: 1, region: `A`, sku: `sku1`, quantity: 50 },
+        // No inventory for Product 2 or 3
+      ],
+    })
+  )
+
+  const joinQuery = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ product: productsCollection })
+        .join(
+          { inventory: inventoriesCollection },
+          ({ product, inventory }) =>
+            and(
+              eq(product.region, inventory.region),
+              eq(product.sku, inventory.sku)
+            ),
+          `left`
+        )
+        .select(({ product, inventory }) => ({
+          productId: product.productId,
+          name: product.name,
+          quantity: inventory?.quantity,
+        })),
+  })
+
+  // All 3 products should appear (LEFT join preserves left rows)
+  expect(joinQuery.size).toBe(3)
+
+  const results = Array.from(joinQuery.values())
+  expect(results).toContainEqual({
+    productId: 1,
+    name: `Product A1`,
+    quantity: 50,
+  })
+  expect(results).toContainEqual({
+    productId: 2,
+    name: `Product B2`,
+    quantity: undefined, // No matching inventory
+  })
+  expect(results).toContainEqual({
+    productId: 3,
+    name: `Product C3`,
+    quantity: undefined, // No matching inventory
+  })
+})
+
+test(`should handle null values in compound join conditions`, () => {
+  // Test how null values behave in compound joins
+  const productsCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-products-null`,
+      getKey: (p: any) => p.productId,
+      initialData: [
+        { productId: 1, region: `A`, sku: `sku1`, name: `Product 1` },
+        { productId: 2, region: `A`, sku: `sku2`, name: `Product 2` },
+      ],
+    })
+  )
+
+  const inventoriesCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-inventories-null`,
+      getKey: (i: any) => i.inventoryId,
+      initialData: [
+        { inventoryId: 1, region: `A`, sku: `sku1`, quantity: 10 },
+        { inventoryId: 2, region: `A`, sku: `sku3`, quantity: 20 }, // Different SKU
+      ],
+    })
+  )
+
+  const joinQuery = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ product: productsCollection })
+        .join(
+          { inventory: inventoriesCollection },
+          ({ product, inventory }) =>
+            and(
+              eq(product.region, inventory.region),
+              eq(product.sku, inventory.sku)
+            ),
+          `inner`
+        )
+        .select(({ product, inventory }) => ({
+          productId: product.productId,
+          name: product.name,
+          sku: product.sku,
+          quantity: inventory.quantity,
+        })),
+  })
+
+  // Only Product 1 matches (region='A' AND sku='sku1')
+  // Product 2 has region='A' but sku='sku2', which doesn't match any inventory
+  expect(joinQuery.size).toBe(1)
+
+  const results = Array.from(joinQuery.values())
+  expect(results).toEqual([
+    {
+      productId: 1,
+      name: `Product 1`,
+      sku: `sku1`,
+      quantity: 10,
+    },
+  ])
+})
+
+test(`should handle compound joins with 3+ conditions`, () => {
+  // Test joining on 3 fields simultaneously
+  const ordersCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-orders-multi`,
+      getKey: (o: any) => o.orderId,
+      initialData: [
+        {
+          orderId: 1,
+          tenantId: `acme`,
+          region: `us-west`,
+          warehouseId: `wh1`,
+          total: 100,
+        },
+        {
+          orderId: 2,
+          tenantId: `globex`,
+          region: `us-east`,
+          warehouseId: `wh2`,
+          total: 200,
+        },
+        {
+          orderId: 3,
+          tenantId: `acme`,
+          region: `us-west`,
+          warehouseId: `wh1`,
+          total: 150,
+        },
+      ],
+    })
+  )
+
+  const shipmentsCollection = createCollection(
+    mockSyncCollectionOptions({
+      id: `test-shipments-multi`,
+      getKey: (s: any) => s.shipmentId,
+      initialData: [
+        {
+          shipmentId: 1,
+          tenantId: `acme`,
+          region: `us-west`,
+          warehouseId: `wh1`,
+          status: `shipped`,
+        },
+        {
+          shipmentId: 2,
+          tenantId: `globex`,
+          region: `us-east`,
+          warehouseId: `wh2`,
+          status: `pending`,
+        },
+        {
+          shipmentId: 3,
+          tenantId: `acme`,
+          region: `us-west`,
+          warehouseId: `wh1`,
+          status: `delivered`,
+        },
+      ],
+    })
+  )
+
+  const joinQuery = createLiveQueryCollection({
+    startSync: true,
+    query: (q) =>
+      q
+        .from({ order: ordersCollection })
+        .join({ shipment: shipmentsCollection }, ({ order, shipment }) =>
+          and(
+            eq(order.tenantId, shipment.tenantId),
+            eq(order.region, shipment.region),
+            eq(order.warehouseId, shipment.warehouseId)
+          )
+        )
+        .select(({ order, shipment }) => ({
+          orderId: order.orderId,
+          total: order.total,
+          status: shipment!.status, // Non-null: Default join guarantees both sides exist
+          tenantId: order.tenantId,
+        })),
+  })
+
+  // Order 1 matches shipments 1 and 3 (acme, us-west, wh1) = 2 matches
+  // Order 2 matches shipment 2 (globex, us-east, wh2) = 1 match
+  // Order 3 matches shipments 1 and 3 (acme, us-west, wh1) = 2 matches
+  // Total: 5 matches
+  expect(joinQuery.size).toBe(5)
+
+  const results = Array.from(joinQuery.values())
+
+  // Order 1 matches both shipment 1 and 3
+  expect(
+    results.filter((r) => r.orderId === 1 && r.tenantId === `acme`).length
+  ).toBe(2)
+
+  // Order 2 matches shipment 2
+  expect(results).toContainEqual({
+    orderId: 2,
+    total: 200,
+    status: `pending`,
+    tenantId: `globex`,
+  })
+
+  // Order 3 matches both shipment 1 and 3
+  expect(
+    results.filter((r) => r.orderId === 3 && r.tenantId === `acme`).length
+  ).toBe(2)
+})
 
 describe(`Query JOIN Operations`, () => {
   createJoinTests(`off`)

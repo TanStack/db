@@ -96,6 +96,40 @@ export function processJoins(
 }
 
 /**
+ * Creates a join key extractor function that handles both single and composite conditions.
+ *
+ * Fast path: Single condition returns primitive value (no serialization overhead)
+ * Composite path: Multiple conditions serialize to JSON string for consistent hashing
+ */
+function createJoinKeyExtractor(
+  compiledConditions: Array<(namespacedRow: NamespacedRow) => any>
+): (namespacedRow: NamespacedRow) => any {
+  // Fast path: single condition, return primitive value directly
+  if (compiledConditions.length === 1) {
+    return compiledConditions[0]!
+  }
+
+  // Composite path: extract all values and serialize
+  return (namespacedRow: NamespacedRow) => {
+    const parts: Array<any> = []
+
+    for (const extractor of compiledConditions) {
+      const value = extractor(namespacedRow)
+
+      // If any value is null/undefined, entire composite key is null
+      if (value == null) {
+        return null
+      }
+
+      parts.push(value)
+    }
+
+    // Serialize to string for consistent hashing in IVM operator
+    return JSON.stringify(parts)
+  }
+}
+
+/**
  * Processes a single join clause with lazy loading optimization.
  * For LEFT/RIGHT/INNER joins, marks one side as "lazy" (loads on-demand based on join keys).
  */
@@ -167,24 +201,52 @@ function processJoin(
     joinedCollection
   )
 
-  // Analyze which source each expression refers to and swap if necessary
-  const availableSources = Object.keys(sources)
-  const { mainExpr, joinedExpr } = analyzeJoinExpressions(
-    joinClause.left,
-    joinClause.right,
-    availableSources,
-    joinedSource
-  )
+  // Collect all condition pairs (primary + additional)
+  const conditionPairs: Array<{
+    left: BasicExpression
+    right: BasicExpression
+  }> = [
+    { left: joinClause.left, right: joinClause.right },
+    ...(joinClause.additionalConditions || []),
+  ]
 
-  // Pre-compile the join expressions
-  const compiledMainExpr = compileExpression(mainExpr)
-  const compiledJoinedExpr = compileExpression(joinedExpr)
+  // Analyze and compile each condition pair
+  const availableSources = Object.keys(sources)
+  const compiledMainExprs: Array<(row: NamespacedRow) => any> = []
+  const compiledJoinedExprs: Array<(row: NamespacedRow) => any> = []
+
+  // Store analyzed expressions for primary condition (used for lazy loading check)
+  let primaryMainExpr: BasicExpression | null = null
+  let primaryJoinedExpr: BasicExpression | null = null
+
+  for (let i = 0; i < conditionPairs.length; i++) {
+    const { left, right } = conditionPairs[i]!
+    const { mainExpr, joinedExpr } = analyzeJoinExpressions(
+      left,
+      right,
+      availableSources,
+      joinedSource
+    )
+
+    // Save the analyzed primary expressions for lazy loading optimization
+    if (i === 0) {
+      primaryMainExpr = mainExpr
+      primaryJoinedExpr = joinedExpr
+    }
+
+    compiledMainExprs.push(compileExpression(mainExpr))
+    compiledJoinedExprs.push(compileExpression(joinedExpr))
+  }
+
+  // Create composite key extractors (fast path for single condition)
+  const mainKeyExtractor = createJoinKeyExtractor(compiledMainExprs)
+  const joinedKeyExtractor = createJoinKeyExtractor(compiledJoinedExprs)
 
   // Prepare the main pipeline for joining
   let mainPipeline = pipeline.pipe(
     map(([currentKey, namespacedRow]) => {
       // Extract the join key from the main source expression
-      const mainKey = compiledMainExpr(namespacedRow)
+      const mainKey = mainKeyExtractor(namespacedRow)
 
       // Return [joinKey, [originalKey, namespacedRow]]
       return [mainKey, [currentKey, namespacedRow]] as [
@@ -201,7 +263,7 @@ function processJoin(
       const namespacedRow: NamespacedRow = { [joinedSource]: row }
 
       // Extract the join key from the joined source expression
-      const joinedKey = compiledJoinedExpr(namespacedRow)
+      const joinedKey = joinedKeyExtractor(namespacedRow)
 
       // Return [joinKey, [originalKey, namespacedRow]]
       return [joinedKey, [currentKey, namespacedRow]] as [
@@ -226,12 +288,16 @@ function processJoin(
       lazyFrom.type === `queryRef` &&
       (lazyFrom.query.limit || lazyFrom.query.offset)
 
+    // Use analyzed primary expressions (potentially swapped by analyzeJoinExpressions)
     // If join expressions contain computed values (like concat functions)
     // we don't optimize the join because we don't have an index over the computed values
     const hasComputedJoinExpr =
-      mainExpr.type === `func` || joinedExpr.type === `func`
+      primaryMainExpr!.type === `func` || primaryJoinedExpr!.type === `func`
 
-    if (!limitedSubquery && !hasComputedJoinExpr) {
+    // Disable lazy loading for compound joins (multiple conditions)
+    const hasCompoundJoin = conditionPairs.length > 1
+
+    if (!limitedSubquery && !hasComputedJoinExpr && !hasCompoundJoin) {
       // This join can be optimized by having the active collection
       // dynamically load keys into the lazy collection
       // based on the value of the joinKey and by looking up
@@ -247,10 +313,11 @@ function processJoin(
       const activePipeline =
         activeSource === `main` ? mainPipeline : joinedPipeline
 
+      // Use primaryJoinedExpr for lazy loading index lookup
       const lazySourceJoinExpr =
         activeSource === `main`
-          ? (joinedExpr as PropRef)
-          : (mainExpr as PropRef)
+          ? (primaryJoinedExpr as PropRef)
+          : (primaryMainExpr as PropRef)
 
       const followRefResult = followRef(
         rawQuery,

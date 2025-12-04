@@ -36,8 +36,12 @@ export type Join = Array<JoinClause>
 export interface JoinClause {
   from: CollectionRef | QueryRef
   type: `left` | `right` | `inner` | `outer` | `full` | `cross`
-  left: BasicExpression
+  left: BasicExpression // Primary join condition (always present)
   right: BasicExpression
+  additionalConditions?: Array<{
+    left: BasicExpression
+    right: BasicExpression
+  }>
 }
 
 export type Where =
