@@ -10,7 +10,6 @@ import {
 import type { IStreamBuilder, PipedOperator } from '../types.js'
 import type {
   IndexedValue,
-  TaggedValue,
   TopK,
   TopKChanges,
   TopKWithFractionalIndexOptions,
@@ -243,14 +242,14 @@ class TopKTree<V> implements TopK<V> {
  * and only updates indices when elements move position
  */
 export class TopKWithFractionalIndexBTreeOperator<
-  K,
+  K extends string | number,
   T,
 > extends TopKWithFractionalIndexOperator<K, T> {
   protected override createTopK(
     offset: number,
     limit: number,
-    comparator: (a: TaggedValue<K, T>, b: TaggedValue<K, T>) => number,
-  ): TopK<TaggedValue<K, T>> {
+    comparator: (a: [K, T], b: [K, T]) => number,
+  ): TopK<[K, T]> {
     if (BTree === undefined) {
       throw new Error(
         `B+ tree not loaded. You need to call loadBTree() before using TopKWithFractionalIndexBTreeOperator.`,
@@ -275,7 +274,7 @@ export class TopKWithFractionalIndexBTreeOperator<
  * @param options - An optional object containing limit and offset properties
  * @returns A piped operator that orders the elements and limits the number of results
  */
-export function topKWithFractionalIndexBTree<KType, T>(
+export function topKWithFractionalIndexBTree<KType extends string | number, T>(
   comparator: (a: T, b: T) => number,
   options?: TopKWithFractionalIndexOptions,
 ): PipedOperator<[KType, T], [KType, IndexedValue<T>]> {

@@ -2,11 +2,7 @@ import { generateKeyBetween } from 'fractional-indexing'
 import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { MultiSet } from '../multiset.js'
-import {
-  binarySearch,
-  diffHalfOpen,
-  globalObjectIdGenerator,
-} from '../utils.js'
+import { binarySearch, compareKeys, diffHalfOpen } from '../utils.js'
 import type { HRange } from '../utils.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
@@ -239,17 +235,18 @@ class TopKArray<V> implements TopK<V> {
  * This operator maintains fractional indices for sorted elements
  * and only updates indices when elements move position
  */
-export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
-  [K, T],
-  [K, IndexedValue<T>]
-> {
+export class TopKWithFractionalIndexOperator<
+  K extends string | number,
+  T,
+> extends UnaryOperator<[K, T], [K, IndexedValue<T>]> {
   #index: Map<K, number> = new Map() // maps keys to their multiplicity
 
   /**
    * topK data structure that supports insertions and deletions
    * and returns changes to the topK.
+   * Elements are stored as [key, value] tuples for stable tie-breaking.
    */
-  #topK: TopK<TaggedValue<K, T>>
+  #topK: TopK<[K, T]>
 
   constructor(
     id: number,
@@ -261,21 +258,11 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
     super(id, inputA, output)
     const limit = options.limit ?? Infinity
     const offset = options.offset ?? 0
-    const compareTaggedValues = (
-      a: TaggedValue<K, T>,
-      b: TaggedValue<K, T>,
-    ) => {
-      // First compare on the value
-      const valueComparison = comparator(getVal(a), getVal(b))
-      if (valueComparison !== 0) {
-        return valueComparison
-      }
-      // If the values are equal, compare on the tag (object identity)
-      const tieBreakerA = getTag(a)
-      const tieBreakerB = getTag(b)
-      return tieBreakerA - tieBreakerB
-    }
-    this.#topK = this.createTopK(offset, limit, compareTaggedValues)
+    this.#topK = this.createTopK(
+      offset,
+      limit,
+      createKeyedComparator(comparator),
+    )
     options.setSizeCallback?.(() => this.#topK.size)
     options.setWindowFn?.(this.moveTopK.bind(this))
   }
@@ -283,8 +270,8 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
   protected createTopK(
     offset: number,
     limit: number,
-    comparator: (a: TaggedValue<K, T>, b: TaggedValue<K, T>) => number,
-  ): TopK<TaggedValue<K, T>> {
+    comparator: (a: [K, T], b: [K, T]) => number,
+  ): TopK<[K, T]> {
     return new TopKArray(offset, limit, comparator)
   }
 
@@ -336,20 +323,18 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
   ): void {
     const { oldMultiplicity, newMultiplicity } = this.addKey(key, multiplicity)
 
-    let res: TopKChanges<TaggedValue<K, T>> = {
+    let res: TopKChanges<[K, T]> = {
       moveIn: null,
       moveOut: null,
     }
     if (oldMultiplicity <= 0 && newMultiplicity > 0) {
       // The value was invisible but should now be visible
       // Need to insert it into the array of sorted values
-      const taggedValue = tagValue(key, value)
-      res = this.#topK.insert(taggedValue)
+      res = this.#topK.insert([key, value])
     } else if (oldMultiplicity > 0 && newMultiplicity <= 0) {
       // The value was visible but should now be invisible
       // Need to remove it from the array of sorted values
-      const taggedValue = tagValue(key, value)
-      res = this.#topK.delete(taggedValue)
+      res = this.#topK.delete([key, value])
     } else {
       // The value was invisible and it remains invisible
       // or it was visible and remains visible
@@ -363,28 +348,22 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
   }
 
   private handleMoveIn(
-    moveIn: IndexedValue<TaggedValue<K, T>> | null,
+    moveIn: IndexedValue<[K, T]> | null,
     result: Array<[[K, IndexedValue<T>], number]>,
   ) {
     if (moveIn) {
-      const index = getIndex(moveIn)
-      const taggedValue = getValue(moveIn)
-      const k = getKey(taggedValue)
-      const val = getVal(taggedValue)
-      result.push([[k, [val, index]], 1])
+      const [[key, value], index] = moveIn
+      result.push([[key, [value, index]], 1])
     }
   }
 
   private handleMoveOut(
-    moveOut: IndexedValue<TaggedValue<K, T>> | null,
+    moveOut: IndexedValue<[K, T]> | null,
     result: Array<[[K, IndexedValue<T>], number]>,
   ) {
     if (moveOut) {
-      const index = getIndex(moveOut)
-      const taggedValue = getValue(moveOut)
-      const k = getKey(taggedValue)
-      const val = getVal(taggedValue)
-      result.push([[k, [val, index]], -1])
+      const [[key, value], index] = moveOut
+      result.push([[key, [value, index]], -1])
     }
   }
 
@@ -417,7 +396,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
  * @param options - An optional object containing limit and offset properties
  * @returns A piped operator that orders the elements and limits the number of results
  */
-export function topKWithFractionalIndex<KType, T>(
+export function topKWithFractionalIndex<KType extends string | number, T>(
   comparator: (a: T, b: T) => number,
   options?: TopKWithFractionalIndexOptions,
 ): PipedOperator<[KType, T], [KType, IndexedValue<T>]> {
@@ -461,21 +440,21 @@ export function getIndex<V>(indexedVal: IndexedValue<V>): FractionalIndex {
   return indexedVal[1]
 }
 
-export type Tag = number
-export type TaggedValue<K, V> = [K, V, Tag]
-
-function tagValue<K, V>(key: K, value: V): TaggedValue<K, V> {
-  return [key, value, globalObjectIdGenerator.getId(key)]
-}
-
-function getKey<K, V>(tieBreakerTaggedValue: TaggedValue<K, V>): K {
-  return tieBreakerTaggedValue[0]
-}
-
-function getVal<K, V>(tieBreakerTaggedValue: TaggedValue<K, V>): V {
-  return tieBreakerTaggedValue[1]
-}
-
-function getTag<K, V>(tieBreakerTaggedValue: TaggedValue<K, V>): Tag {
-  return tieBreakerTaggedValue[2]
+/**
+ * Creates a comparator for [key, value] tuples that first compares values,
+ * then uses the row key as a stable tie-breaker.
+ */
+function createKeyedComparator<K extends string | number, T>(
+  comparator: (a: T, b: T) => number,
+): (a: [K, T], b: [K, T]) => number {
+  return ([aKey, aVal], [bKey, bVal]) => {
+    // First compare on the value
+    const valueComparison = comparator(aVal, bVal)
+    if (valueComparison !== 0) {
+      return valueComparison
+    }
+    // If the values are equal, use the row key as tie-breaker
+    // This provides stable, deterministic ordering since keys are string | number
+    return compareKeys(aKey, bKey)
+  }
 }
