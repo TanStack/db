@@ -1,8 +1,8 @@
-import { defineConfig } from "vite"
-import solid from "vite-plugin-solid"
-import tailwindcss from "@tailwindcss/vite"
-import { tanstackStart } from "@tanstack/solid-start/plugin/vite"
-import viteTsConfigPaths from "vite-tsconfig-paths"
+import { defineConfig } from 'vite'
+import solid from 'vite-plugin-solid'
+import tailwindcss from '@tailwindcss/vite'
+import { tanstackStart } from '@tanstack/solid-start/plugin/vite'
+import viteTsConfigPaths from 'vite-tsconfig-paths'
 
 // https://vitejs.dev/config/
 export default defineConfig({

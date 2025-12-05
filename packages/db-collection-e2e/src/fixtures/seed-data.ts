@@ -1,4 +1,4 @@
-import type { Comment, Post, SeedDataResult, User } from "../types"
+import type { Comment, Post, SeedDataResult, User } from '../types'
 
 // Cache UUIDs for deterministic behavior across test runs
 const uuidCache = new Map<string, string>()
@@ -14,7 +14,7 @@ function generateId(prefix: string, index: number): string {
     // Create a valid UUID v4 format
     uuidCache.set(
       key,
-      `${hex.slice(0, 8)}-0000-4000-8000-${hex.padStart(12, `0`)}`
+      `${hex.slice(0, 8)}-0000-4000-8000-${hex.padStart(12, `0`)}`,
     )
   }
   return uuidCache.get(key)!

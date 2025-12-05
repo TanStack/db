@@ -3,13 +3,13 @@
  * Uses expression helpers to implement proper predicate push-down
  */
 
-import { parseLoadSubsetOptions } from "@tanstack/db"
+import { parseLoadSubsetOptions } from '@tanstack/db'
 import type {
   IR,
   LoadSubsetOptions,
   ParsedOrderBy,
   SimpleComparison,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 const DEBUG_VERBOSE = process.env.DEBUG_QUERY_PUSH === `1`
 const DEBUG_SUMMARY =
@@ -39,13 +39,13 @@ const SIMPLE_OPERATORS = new Set([
  */
 export function buildQueryKey(
   namespace: string,
-  options: LoadSubsetOptions | undefined
+  options: LoadSubsetOptions | undefined,
 ) {
   return [`e2e`, namespace, serializeLoadSubsetOptions(options)]
 }
 
 export function serializeLoadSubsetOptions(
-  options: LoadSubsetOptions | undefined
+  options: LoadSubsetOptions | undefined,
 ): unknown {
   if (!options) {
     return null
@@ -142,7 +142,7 @@ function serializeValue(value: unknown): unknown {
       Object.entries(value as Record<string, unknown>).map(([key, val]) => [
         key,
         serializeValue(val),
-      ])
+      ]),
     )
   }
 
@@ -152,7 +152,7 @@ function serializeValue(value: unknown): unknown {
 type Predicate<T> = (item: T) => boolean
 
 function isBasicExpression(
-  expr: IR.BasicExpression | null | undefined
+  expr: IR.BasicExpression | null | undefined,
 ): expr is IR.BasicExpression {
   return expr != null
 }
@@ -162,7 +162,7 @@ function isBasicExpression(
  */
 export function applyPredicates<T>(
   data: Array<T>,
-  options: LoadSubsetOptions | undefined
+  options: LoadSubsetOptions | undefined,
 ): Array<T> {
   if (!options) return data
 
@@ -188,7 +188,7 @@ export function applyPredicates<T>(
       if (DEBUG_SUMMARY) {
         console.log(
           `[query-filter] parseLoadSubsetOptions failed unexpectedly`,
-          error
+          error,
         )
       }
       limit = options.limit
@@ -217,7 +217,7 @@ export function applyPredicates<T>(
 
     if (DEBUG_SUMMARY) {
       console.log(
-        `[query-filter] complex where clause detected, will filter using buildExpressionPredicate`
+        `[query-filter] complex where clause detected, will filter using buildExpressionPredicate`,
       )
     }
   }
@@ -286,7 +286,7 @@ export function applyPredicates<T>(
  */
 function buildFilterPredicate<T>(
   where: IR.BasicExpression<boolean> | undefined,
-  filters: Array<SimpleComparison>
+  filters: Array<SimpleComparison>,
 ): Predicate<T> | undefined {
   if (!where) {
     return undefined
@@ -310,7 +310,7 @@ function buildFilterPredicate<T>(
 }
 
 function buildSimplePredicate<T>(
-  filters: Array<SimpleComparison>
+  filters: Array<SimpleComparison>,
 ): Predicate<T> {
   return (item: T) =>
     filters.every((comparison) => evaluateSimpleComparison(comparison, item))
@@ -318,7 +318,7 @@ function buildSimplePredicate<T>(
 
 function evaluateSimpleComparison<T>(
   comparison: SimpleComparison,
-  item: T
+  item: T,
 ): boolean {
   const actualValue = getFieldValue(item, comparison.field)
   const expectedValue = comparison.value
@@ -363,7 +363,7 @@ function evaluateSimpleComparison<T>(
       return actualValue !== undefined
     default:
       throw new Error(
-        `Unsupported simple comparison operator: ${comparison.operator}`
+        `Unsupported simple comparison operator: ${comparison.operator}`,
       )
   }
 }
@@ -376,7 +376,7 @@ function isSimpleExpression(expr: IR.BasicExpression): boolean {
   if (expr.name === `and`) {
     return expr.args.every(
       (arg): arg is IR.BasicExpression =>
-        Boolean(arg) && arg.type === `func` && isSimpleExpression(arg)
+        Boolean(arg) && arg.type === `func` && isSimpleExpression(arg),
     )
   }
 
@@ -406,7 +406,7 @@ function isSimpleExpression(expr: IR.BasicExpression): boolean {
 }
 
 function buildExpressionPredicate<T>(
-  expr: IR.BasicExpression<boolean>
+  expr: IR.BasicExpression<boolean>,
 ): Predicate<T> {
   return (item: T) => Boolean(evaluateExpression(expr, item))
 }
@@ -520,7 +520,7 @@ function evaluateFunction(name: string, args: Array<any>): any {
 function evaluateLike(
   value: any,
   pattern: any,
-  caseInsensitive: boolean
+  caseInsensitive: boolean,
 ): boolean | null {
   // In 3-valued logic, if value or pattern is null/undefined, return UNKNOWN (null)
   if (
@@ -569,7 +569,7 @@ function compareValues(
   a: any,
   b: any,
   direction: `asc` | `desc`,
-  nulls?: `first` | `last`
+  nulls?: `first` | `last`,
 ): number {
   const aNull = a === null || a === undefined
   const bNull = b === null || b === undefined

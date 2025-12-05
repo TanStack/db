@@ -1,13 +1,13 @@
-import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and, eq, gt, gte, lt } from "../query/builder/functions.js"
-import { Value } from "../query/ir.js"
-import { EventEmitter } from "../event-emitter.js"
+import { ensureIndexForExpression } from '../indexes/auto-index.js'
+import { and, eq, gt, gte, lt } from '../query/builder/functions.js'
+import { Value } from '../query/ir.js'
+import { EventEmitter } from '../event-emitter.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
-} from "./change-events.js"
-import type { BasicExpression, OrderBy } from "../query/ir.js"
-import type { IndexInterface } from "../indexes/base-index.js"
+} from './change-events.js'
+import type { BasicExpression, OrderBy } from '../query/ir.js'
+import type { IndexInterface } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
   LoadSubsetOptions,
@@ -15,8 +15,8 @@ import type {
   SubscriptionEvents,
   SubscriptionStatus,
   SubscriptionUnsubscribedEvent,
-} from "../types.js"
-import type { CollectionImpl } from "./index.js"
+} from '../types.js'
+import type { CollectionImpl } from './index.js'
 
 type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
@@ -72,7 +72,7 @@ export class CollectionSubscription
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
     private callback: (changes: Array<ChangeMessage<any, any>>) => void,
-    private options: CollectionSubscriptionOptions
+    private options: CollectionSubscriptionOptions,
   ) {
     super()
     if (options.onUnsubscribe) {
@@ -85,7 +85,7 @@ export class CollectionSubscription
     }
 
     const callbackWithSentKeysTracking = (
-      changes: Array<ChangeMessage<any, any>>
+      changes: Array<ChangeMessage<any, any>>,
     ) => {
       callback(changes)
       this.trackSentKeys(changes)
@@ -224,7 +224,7 @@ export class CollectionSubscription
 
     // Only send changes that have not been sent yet
     const filteredSnapshot = snapshot.filter(
-      (change) => !this.sentKeys.has(change.key)
+      (change) => !this.sentKeys.has(change.key),
     )
 
     this.snapshotSent = true
@@ -249,7 +249,7 @@ export class CollectionSubscription
 
     if (!this.orderByIndex) {
       throw new Error(
-        `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`
+        `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`,
       )
     }
 
@@ -301,7 +301,7 @@ export class CollectionSubscription
         const keysGreaterThanMin = index.take(
           limit - keys.length,
           minValue,
-          filterFn
+          filterFn,
         )
         keys.push(...keysGreaterThanMin)
       } else {
@@ -369,7 +369,7 @@ export class CollectionSubscription
         const minValuePlus1ms = new Date(minValue.getTime() + 1)
         exactValueFilter = and(
           gte(expression, new Value(minValue)),
-          lt(expression, new Value(minValuePlus1ms))
+          lt(expression, new Value(minValuePlus1ms)),
         )
       } else {
         exactValueFilter = eq(expression, new Value(minValue))

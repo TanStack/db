@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { Temporal } from "temporal-polyfill"
-import { deepEquals } from "../src/utils"
-import { isPromiseLike } from "../src/utils/type-guards"
+import { describe, expect, it } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
+import { deepEquals } from '../src/utils'
+import { isPromiseLike } from '../src/utils/type-guards'
 
 describe(`deepEquals`, () => {
   describe(`primitives`, () => {

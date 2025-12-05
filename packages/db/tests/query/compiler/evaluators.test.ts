@@ -1,14 +1,14 @@
-import { describe, expect, it } from "vitest"
-import { compileExpression } from "../../../src/query/compiler/evaluators.js"
-import { Func, PropRef, Value } from "../../../src/query/ir.js"
-import type { NamespacedRow } from "../../../src/types.js"
+import { describe, expect, it } from 'vitest'
+import { compileExpression } from '../../../src/query/compiler/evaluators.js'
+import { Func, PropRef, Value } from '../../../src/query/ir.js'
+import type { NamespacedRow } from '../../../src/types.js'
 
 describe(`evaluators`, () => {
   describe(`compileExpression`, () => {
     it(`handles unknown expression type`, () => {
       const unknownExpr = { type: `unknown` } as any
       expect(() => compileExpression(unknownExpr)).toThrow(
-        `Unknown expression type: unknown`
+        `Unknown expression type: unknown`,
       )
     })
 
@@ -16,7 +16,7 @@ describe(`evaluators`, () => {
       it(`throws error for empty reference path`, () => {
         const emptyRef = new PropRef([])
         expect(() => compileExpression(emptyRef)).toThrow(
-          `Reference path cannot be empty`
+          `Reference path cannot be empty`,
         )
       })
 
@@ -75,7 +75,7 @@ describe(`evaluators`, () => {
       it(`throws error for unknown function`, () => {
         const unknownFunc = new Func(`unknownFunc`, [])
         expect(() => compileExpression(unknownFunc)).toThrow(
-          `Unknown function: unknownFunc`
+          `Unknown function: unknownFunc`,
         )
       })
 

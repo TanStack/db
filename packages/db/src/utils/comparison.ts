@@ -1,4 +1,4 @@
-import type { CompareOptions } from "../query/builder/types"
+import type { CompareOptions } from '../query/builder/types'
 
 // WeakMap to store stable IDs for objects
 const objectIds = new WeakMap<object, number>()
@@ -84,7 +84,7 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
 export const descComparator = (
   a: unknown,
   b: unknown,
-  opts: CompareOptions
+  opts: CompareOptions,
 ): number => {
   return ascComparator(b, a, {
     ...opts,
@@ -93,7 +93,7 @@ export const descComparator = (
 }
 
 export function makeComparator(
-  opts: CompareOptions
+  opts: CompareOptions,
 ): (a: any, b: any) => number {
   return (a, b) => {
     if (opts.direction === `asc`) {

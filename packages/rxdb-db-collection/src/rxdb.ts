@@ -5,23 +5,23 @@ import {
   lastOfArray,
   prepareQuery,
   rxStorageWriteErrorToRxError,
-} from "rxdb/plugins/core"
-import DebugModule from "debug"
-import { stripRxdbFields } from "./helper"
+} from 'rxdb/plugins/core'
+import DebugModule from 'debug'
+import { stripRxdbFields } from './helper'
 import type {
   FilledMangoQuery,
   RxCollection,
   RxDocumentData,
-} from "rxdb/plugins/core"
-import type { Subscription } from "rxjs"
+} from 'rxdb/plugins/core'
+import type { Subscription } from 'rxjs'
 
 import type {
   BaseCollectionConfig,
   CollectionConfig,
   InferSchemaOutput,
   SyncConfig,
-} from "@tanstack/db"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from '@tanstack/db'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 const debug = DebugModule.debug(`ts/db:rxdb`)
 
@@ -87,7 +87,7 @@ export type RxDBCollectionConfig<
 
 // Overload for when schema is provided
 export function rxdbCollectionOptions<T extends StandardSchemaV1>(
-  config: RxDBCollectionConfig<InferSchemaOutput<T>, T>
+  config: RxDBCollectionConfig<InferSchemaOutput<T>, T>,
 ): CollectionConfig<InferSchemaOutput<T>, string, T> & {
   schema: T
 }
@@ -96,7 +96,7 @@ export function rxdbCollectionOptions<T extends StandardSchemaV1>(
 export function rxdbCollectionOptions<T extends object>(
   config: RxDBCollectionConfig<T> & {
     schema?: never // prohibit schema
-  }
+  },
 ): CollectionConfig<T, string> & {
   schema?: never // no schema in the result
 }
@@ -143,9 +143,9 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
             query = {
               selector: {
                 $or: [
-                  { "_meta.lwt": { $gt: cursor._meta.lwt } },
+                  { '_meta.lwt': { $gt: cursor._meta.lwt } },
                   {
-                    "_meta.lwt": cursor._meta.lwt,
+                    '_meta.lwt': cursor._meta.lwt,
                     [primaryPath]: {
                       $gt: getKey(cursor),
                     },
@@ -153,14 +153,14 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
                 ],
                 _deleted: false,
               },
-              sort: [{ "_meta.lwt": `asc` }, { [primaryPath]: `asc` }],
+              sort: [{ '_meta.lwt': `asc` }, { [primaryPath]: `asc` }],
               limit: syncBatchSize,
               skip: 0,
             }
           } else {
             query = {
               selector: { _deleted: false },
-              sort: [{ "_meta.lwt": `asc` }, { [primaryPath]: `asc` }],
+              sort: [{ '_meta.lwt': `asc` }, { [primaryPath]: `asc` }],
               limit: syncBatchSize,
               skip: 0,
             }
@@ -174,7 +174,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
            */
           const preparedQuery = prepareQuery<Row>(
             rxCollection.storageInstance.schema,
-            query
+            query,
           )
           const result = await rxCollection.storageInstance.query(preparedQuery)
           const docs = result.documents
@@ -228,7 +228,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
         const subs = getFromMapOrCreate(
           OPEN_RXDB_SUBSCRIPTIONS,
           rxCollection,
-          () => new Set()
+          () => new Set(),
         )
         subs.add(sub)
       }
@@ -253,7 +253,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
         const subs = getFromMapOrCreate(
           OPEN_RXDB_SUBSCRIPTIONS,
           rxCollection,
-          () => new Set()
+          () => new Set(),
         )
         subs.delete(sub)
         sub.unsubscribe()
@@ -280,7 +280,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
     onUpdate: async (params) => {
       debug(`update`, params)
       const mutations = params.transaction.mutations.filter(
-        (m) => m.type === `update`
+        (m) => m.type === `update`,
       )
 
       for (const mutation of mutations) {
@@ -296,7 +296,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
     onDelete: async (params) => {
       debug(`delete`, params)
       const mutations = params.transaction.mutations.filter(
-        (m) => m.type === `delete`
+        (m) => m.type === `delete`,
       )
       const ids = mutations.map((mutation) => getKey(mutation.original))
       return rxCollection.bulkRemove(ids).then((result) => {

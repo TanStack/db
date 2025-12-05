@@ -1,6 +1,6 @@
-import { useCallback, useMemo, useRef } from "react"
-import { createPacedMutations } from "@tanstack/db"
-import type { PacedMutationsConfig, Transaction } from "@tanstack/db"
+import { useCallback, useMemo, useRef } from 'react'
+import { createPacedMutations } from '@tanstack/db'
+import type { PacedMutationsConfig, Transaction } from '@tanstack/db'
 
 /**
  * React hook for managing paced mutations with timing strategies.
@@ -94,7 +94,7 @@ export function usePacedMutations<
   TVariables = unknown,
   T extends object = Record<string, unknown>,
 >(
-  config: PacedMutationsConfig<TVariables, T>
+  config: PacedMutationsConfig<TVariables, T>,
 ): (variables: TVariables) => Transaction<T> {
   // Keep refs to the latest callbacks so we can call them without recreating the instance
   const onMutateRef = useRef(config.onMutate)

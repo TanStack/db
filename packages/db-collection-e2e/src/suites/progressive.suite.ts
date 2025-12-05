@@ -8,15 +8,15 @@
  * - Txid tracking behavior
  */
 
-import { describe, expect, it } from "vitest"
-import { createLiveQueryCollection, eq, gt } from "@tanstack/db"
-import { waitFor, waitForQueryData } from "../utils/helpers"
-import type { E2ETestConfig, User } from "../types"
-import type { Collection } from "@tanstack/db"
-import type { ElectricCollectionUtils } from "@tanstack/electric-db-collection"
+import { describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, eq, gt } from '@tanstack/db'
+import { waitFor, waitForQueryData } from '../utils/helpers'
+import type { E2ETestConfig, User } from '../types'
+import type { Collection } from '@tanstack/db'
+import type { ElectricCollectionUtils } from '@tanstack/electric-db-collection'
 
 export function createProgressiveTestSuite(
-  getConfig: () => Promise<E2ETestConfig>
+  getConfig: () => Promise<E2ETestConfig>,
 ) {
   describe(`Progressive Mode Suite`, () => {
     describe(`Basic Progressive Mode`, () => {
@@ -40,7 +40,7 @@ export function createProgressiveTestSuite(
         // If already ready, we can't test the explicit transition
         if (initialStatus === `ready`) {
           console.log(
-            `Progressive collection already ready, skipping explicit transition test`
+            `Progressive collection already ready, skipping explicit transition test`,
           )
           return
         }
@@ -52,7 +52,7 @@ export function createProgressiveTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: progressiveUsers })
-            .where(({ user }) => eq(user.age, 25))
+            .where(({ user }) => eq(user.age, 25)),
         )
 
         await query.preload()
@@ -121,7 +121,7 @@ export function createProgressiveTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: progressiveUsers })
-            .where(({ user }) => eq(user.age, 25))
+            .where(({ user }) => eq(user.age, 25)),
         )
 
         await query.preload()
@@ -162,7 +162,7 @@ export function createProgressiveTestSuite(
           // All original items should still be present
           beforeSwapItems.forEach((originalUser) => {
             const stillPresent = afterSwapItems.some(
-              (u) => u.id === originalUser.id
+              (u) => u.id === originalUser.id,
             )
             expect(stillPresent).toBe(true)
           })
@@ -193,13 +193,13 @@ export function createProgressiveTestSuite(
         const query1 = createLiveQueryCollection((q) =>
           q
             .from({ user: progressiveUsers })
-            .where(({ user }) => eq(user.age, 25))
+            .where(({ user }) => eq(user.age, 25)),
         )
 
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ user: progressiveUsers })
-            .where(({ user }) => gt(user.age, 30))
+            .where(({ user }) => gt(user.age, 30)),
         )
 
         await Promise.all([query1.preload(), query2.preload()])
@@ -320,7 +320,7 @@ export function createProgressiveTestSuite(
             .from({ user: progressiveUsers })
             .where(({ user }) => gt(user.age, 25))
             .orderBy(({ user }) => [user.age, `asc`])
-            .limit(5)
+            .limit(5),
         )
 
         await query.preload()
@@ -369,8 +369,8 @@ export function createProgressiveTestSuite(
           createLiveQueryCollection((q) =>
             q
               .from({ user: progressiveUsers })
-              .where(({ user }) => eq(user.age, 30))
-          )
+              .where(({ user }) => eq(user.age, 30)),
+          ),
         )
 
         // Execute concurrently
@@ -379,8 +379,8 @@ export function createProgressiveTestSuite(
         // Wait for data
         await Promise.all(
           queries.map((q) =>
-            waitForQueryData(q, { minSize: 1, timeout: 10000 })
-          )
+            waitForQueryData(q, { minSize: 1, timeout: 10000 }),
+          ),
         )
 
         // Release initial sync to allow completion
@@ -431,7 +431,7 @@ export function createProgressiveTestSuite(
         // Should be in loading state (snapshot phase)
         if (progressiveUsers.status !== `loading`) {
           console.log(
-            `Collection already ready, cannot test snapshot phase txid behavior`
+            `Collection already ready, cannot test snapshot phase txid behavior`,
           )
           return
         }
@@ -478,7 +478,7 @@ export function createProgressiveTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: progressiveUsers })
-            .where(({ user }) => eq(user.id, snapshotPhaseUser.id))
+            .where(({ user }) => eq(user.id, snapshotPhaseUser.id)),
         )
 
         await query.preload()
@@ -559,7 +559,7 @@ export function createProgressiveTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: progressiveUsers })
-            .where(({ user }) => eq(user.age, 25))
+            .where(({ user }) => eq(user.age, 25)),
         )
 
         await query.preload()

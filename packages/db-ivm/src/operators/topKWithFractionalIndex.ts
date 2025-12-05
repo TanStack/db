@@ -1,22 +1,22 @@
-import { generateKeyBetween } from "fractional-indexing"
-import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
-import { StreamBuilder } from "../d2.js"
-import { MultiSet } from "../multiset.js"
+import { generateKeyBetween } from 'fractional-indexing'
+import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
+import { StreamBuilder } from '../d2.js'
+import { MultiSet } from '../multiset.js'
 import {
   binarySearch,
   diffHalfOpen,
   globalObjectIdGenerator,
-} from "../utils.js"
-import type { HRange } from "../utils.js"
-import type { DifferenceStreamReader } from "../graph.js"
-import type { IStreamBuilder, PipedOperator } from "../types.js"
+} from '../utils.js'
+import type { HRange } from '../utils.js'
+import type { DifferenceStreamReader } from '../graph.js'
+import type { IStreamBuilder, PipedOperator } from '../types.js'
 
 export interface TopKWithFractionalIndexOptions {
   limit?: number
   offset?: number
   setSizeCallback?: (getSize: () => number) => void
   setWindowFn?: (
-    windowFn: (options: { offset?: number; limit?: number }) => void
+    windowFn: (options: { offset?: number; limit?: number }) => void,
   ) => void
 }
 
@@ -61,7 +61,7 @@ class TopKArray<V> implements TopK<V> {
   constructor(
     offset: number,
     limit: number,
-    comparator: (a: V, b: V) => number
+    comparator: (a: V, b: V) => number,
   ) {
     this.#topKStart = offset
     this.#topKEnd = offset + limit
@@ -229,7 +229,7 @@ class TopKArray<V> implements TopK<V> {
 
   #findIndex(value: V): number {
     return binarySearch(this.#sortedValues, indexedValue(value, ``), (a, b) =>
-      this.#comparator(getValue(a), getValue(b))
+      this.#comparator(getValue(a), getValue(b)),
     )
   }
 }
@@ -256,14 +256,14 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
     inputA: DifferenceStreamReader<[K, T]>,
     output: DifferenceStreamWriter<[K, IndexedValue<T>]>,
     comparator: (a: T, b: T) => number,
-    options: TopKWithFractionalIndexOptions
+    options: TopKWithFractionalIndexOptions,
   ) {
     super(id, inputA, output)
     const limit = options.limit ?? Infinity
     const offset = options.offset ?? 0
     const compareTaggedValues = (
       a: TaggedValue<K, T>,
-      b: TaggedValue<K, T>
+      b: TaggedValue<K, T>,
     ) => {
       // First compare on the value
       const valueComparison = comparator(getVal(a), getVal(b))
@@ -283,7 +283,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
   protected createTopK(
     offset: number,
     limit: number,
-    comparator: (a: TaggedValue<K, T>, b: TaggedValue<K, T>) => number
+    comparator: (a: TaggedValue<K, T>, b: TaggedValue<K, T>) => number,
   ): TopK<TaggedValue<K, T>> {
     return new TopKArray(offset, limit, comparator)
   }
@@ -295,7 +295,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
   moveTopK({ offset, limit }: { offset?: number; limit?: number }) {
     if (!(this.#topK instanceof TopKArray)) {
       throw new Error(
-        `Cannot move B+-tree implementation of TopK with fractional index`
+        `Cannot move B+-tree implementation of TopK with fractional index`,
       )
     }
 
@@ -332,7 +332,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
     key: K,
     value: T,
     multiplicity: number,
-    result: Array<[[K, IndexedValue<T>], number]>
+    result: Array<[[K, IndexedValue<T>], number]>,
   ): void {
     const { oldMultiplicity, newMultiplicity } = this.addKey(key, multiplicity)
 
@@ -364,7 +364,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
 
   private handleMoveIn(
     moveIn: IndexedValue<TaggedValue<K, T>> | null,
-    result: Array<[[K, IndexedValue<T>], number]>
+    result: Array<[[K, IndexedValue<T>], number]>,
   ) {
     if (moveIn) {
       const index = getIndex(moveIn)
@@ -377,7 +377,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
 
   private handleMoveOut(
     moveOut: IndexedValue<TaggedValue<K, T>> | null,
-    result: Array<[[K, IndexedValue<T>], number]>
+    result: Array<[[K, IndexedValue<T>], number]>,
   ) {
     if (moveOut) {
       const index = getIndex(moveOut)
@@ -394,7 +394,7 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
 
   private addKey(
     key: K,
-    multiplicity: number
+    multiplicity: number,
   ): { oldMultiplicity: number; newMultiplicity: number } {
     const oldMultiplicity = this.getMultiplicity(key)
     const newMultiplicity = oldMultiplicity + multiplicity
@@ -419,23 +419,23 @@ export class TopKWithFractionalIndexOperator<K, T> extends UnaryOperator<
  */
 export function topKWithFractionalIndex<KType, T>(
   comparator: (a: T, b: T) => number,
-  options?: TopKWithFractionalIndexOptions
+  options?: TopKWithFractionalIndexOptions,
 ): PipedOperator<[KType, T], [KType, IndexedValue<T>]> {
   const opts = options || {}
 
   return (
-    stream: IStreamBuilder<[KType, T]>
+    stream: IStreamBuilder<[KType, T]>,
   ): IStreamBuilder<[KType, IndexedValue<T>]> => {
     const output = new StreamBuilder<[KType, IndexedValue<T>]>(
       stream.graph,
-      new DifferenceStreamWriter<[KType, IndexedValue<T>]>()
+      new DifferenceStreamWriter<[KType, IndexedValue<T>]>(),
     )
     const operator = new TopKWithFractionalIndexOperator<KType, T>(
       stream.graph.getNextOperatorId(),
       stream.connectReader(),
       output.writer,
       comparator,
-      opts
+      opts,
     )
     stream.graph.addOperator(operator)
     return output
@@ -448,7 +448,7 @@ export type IndexedValue<V> = [V, FractionalIndex]
 
 export function indexedValue<V>(
   value: V,
-  index: FractionalIndex
+  index: FractionalIndex,
 ): IndexedValue<V> {
   return [value, index]
 }

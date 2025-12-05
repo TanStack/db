@@ -1,9 +1,9 @@
-import { compileSingleRowExpression } from "../query/compiler/evaluators.js"
-import { comparisonFunctions } from "../query/builder/functions.js"
-import { DEFAULT_COMPARE_OPTIONS, deepEquals } from "../utils.js"
-import type { RangeQueryOptions } from "./btree-index.js"
-import type { CompareOptions } from "../query/builder/types.js"
-import type { BasicExpression, OrderByDirection } from "../query/ir.js"
+import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
+import { comparisonFunctions } from '../query/builder/functions.js'
+import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
+import type { RangeQueryOptions } from './btree-index.js'
+import type { CompareOptions } from '../query/builder/types.js'
+import type { BasicExpression, OrderByDirection } from '../query/ir.js'
 
 /**
  * Operations that indexes can support, imported from available comparison functions
@@ -46,12 +46,12 @@ export interface IndexInterface<
   take: (
     n: number,
     from?: TKey,
-    filterFn?: (key: TKey) => boolean
+    filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
   takeReversed: (
     n: number,
     from?: TKey,
-    filterFn?: (key: TKey) => boolean
+    filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
 
   get keyCount(): number
@@ -90,7 +90,7 @@ export abstract class BaseIndex<
     id: number,
     expression: BasicExpression,
     name?: string,
-    options?: any
+    options?: any,
   ) {
     this.id = id
     this.expression = expression
@@ -109,12 +109,12 @@ export abstract class BaseIndex<
   abstract take(
     n: number,
     from?: TKey,
-    filterFn?: (key: TKey) => boolean
+    filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeReversed(
     n: number,
     from?: TKey,
-    filterFn?: (key: TKey) => boolean
+    filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract get keyCount(): number
   abstract equalityLookup(value: any): Set<TKey>
@@ -155,7 +155,7 @@ export abstract class BaseIndex<
 
     return deepEquals(
       thisCompareOptionsWithoutDirection,
-      compareOptionsWithoutDirection
+      compareOptionsWithoutDirection,
     )
   }
 
@@ -203,7 +203,7 @@ export type IndexConstructor<TKey extends string | number = string | number> =
     id: number,
     expression: BasicExpression,
     name?: string,
-    options?: any
+    options?: any,
   ) => BaseIndex<TKey>
 
 /**

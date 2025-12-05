@@ -3,17 +3,17 @@ import {
   isChangeMessage,
   isControlMessage,
   isVisibleInSnapshot,
-} from "@electric-sql/client"
-import { Store } from "@tanstack/store"
-import DebugModule from "debug"
-import { DeduplicatedLoadSubset } from "@tanstack/db"
+} from '@electric-sql/client'
+import { Store } from '@tanstack/store'
+import DebugModule from 'debug'
+import { DeduplicatedLoadSubset } from '@tanstack/db'
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
   TimeoutWaitingForMatchError,
   TimeoutWaitingForTxIdError,
-} from "./errors"
-import { compileSQL } from "./sql-compiler"
+} from './errors'
+import { compileSQL } from './sql-compiler'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -24,8 +24,8 @@ import type {
   SyncMode,
   UpdateMutationFnParams,
   UtilsRecord,
-} from "@tanstack/db"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from '@tanstack/db'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ControlMessage,
   GetExtensions,
@@ -33,10 +33,10 @@ import type {
   PostgresSnapshot,
   Row,
   ShapeStreamOptions,
-} from "@electric-sql/client"
+} from '@electric-sql/client'
 
 // Re-export for user convenience in custom match functions
-export { isChangeMessage, isControlMessage } from "@electric-sql/client"
+export { isChangeMessage, isControlMessage } from '@electric-sql/client'
 
 const debug = DebugModule.debug(`ts/db:electric`)
 
@@ -66,7 +66,7 @@ export type Txid = number
  * indicating if the mutation has been synchronized
  */
 export type MatchFunction<T extends Row<unknown>> = (
-  message: Message<T>
+  message: Message<T>,
 ) => boolean
 
 /**
@@ -197,7 +197,7 @@ export interface ElectricCollectionConfig<
       T,
       string | number,
       ElectricCollectionUtils<T>
-    >
+    >,
   ) => Promise<MatchingStrategy>
 
   /**
@@ -232,7 +232,7 @@ export interface ElectricCollectionConfig<
       T,
       string | number,
       ElectricCollectionUtils<T>
-    >
+    >,
   ) => Promise<MatchingStrategy>
 
   /**
@@ -266,24 +266,24 @@ export interface ElectricCollectionConfig<
       T,
       string | number,
       ElectricCollectionUtils<T>
-    >
+    >,
   ) => Promise<MatchingStrategy>
 }
 
 function isUpToDateMessage<T extends Row<unknown>>(
-  message: Message<T>
+  message: Message<T>,
 ): message is ControlMessage & { up_to_date: true } {
   return isControlMessage(message) && message.headers.control === `up-to-date`
 }
 
 function isMustRefetchMessage<T extends Row<unknown>>(
-  message: Message<T>
+  message: Message<T>,
 ): message is ControlMessage & { headers: { control: `must-refetch` } } {
   return isControlMessage(message) && message.headers.control === `must-refetch`
 }
 
 function isSnapshotEndMessage<T extends Row<unknown>>(
-  message: Message<T>
+  message: Message<T>,
 ): message is SnapshotEndMessage {
   return isControlMessage(message) && message.headers.control === `snapshot-end`
 }
@@ -298,7 +298,7 @@ function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
 
 // Check if a message contains txids in its headers
 function hasTxids<T extends Row<unknown>>(
-  message: Message<T>
+  message: Message<T>,
 ): message is Message<T> & { headers: { txids?: Array<Txid> } } {
   return `txids` in message.headers && Array.isArray(message.headers.txids)
 }
@@ -347,7 +347,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         // and completed the atomic swap while waiting for the snapshot
         if (!isBufferingInitialSync()) {
           debug(
-            `${collectionId ? `[${collectionId}] ` : ``}Ignoring snapshot - sync completed while fetching`
+            `${collectionId ? `[${collectionId}] ` : ``}Ignoring snapshot - sync completed while fetching`,
           )
           return
         }
@@ -367,13 +367,13 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           commit()
 
           debug(
-            `${collectionId ? `[${collectionId}] ` : ``}Applied snapshot with ${rows.length} rows`
+            `${collectionId ? `[${collectionId}] ` : ``}Applied snapshot with ${rows.length} rows`,
           )
         }
       } catch (error) {
         debug(
           `${collectionId ? `[${collectionId}] ` : ``}Error fetching snapshot: %o`,
-          error
+          error,
         )
         throw error
       }
@@ -400,7 +400,7 @@ export type AwaitTxIdFn = (txId: Txid, timeout?: number) => Promise<boolean>
  */
 export type AwaitMatchFn<T extends Row<unknown>> = (
   matchFn: MatchFunction<T>,
-  timeout?: number
+  timeout?: number,
 ) => Promise<boolean>
 
 /**
@@ -427,7 +427,7 @@ export interface ElectricCollectionUtils<
 export function electricCollectionOptions<T extends StandardSchemaV1>(
   config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
     schema: T
-  }
+  },
 ): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T>, `utils`> & {
   id?: string
   utils: ElectricCollectionUtils<InferSchemaOutput<T>>
@@ -438,7 +438,7 @@ export function electricCollectionOptions<T extends StandardSchemaV1>(
 export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T> & {
     schema?: never // prohibit schema
-  }
+  },
 ): Omit<CollectionConfig<T, string | number>, `utils`> & {
   id?: string
   utils: ElectricCollectionUtils<T>
@@ -446,7 +446,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 }
 
 export function electricCollectionOptions<T extends Row<unknown>>(
-  config: ElectricCollectionConfig<T, any>
+  config: ElectricCollectionConfig<T, any>,
 ): Omit<
   CollectionConfig<T, string | number, any, ElectricCollectionUtils<T>>,
   `utils`
@@ -501,7 +501,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
         matchesToResolve.push(matchId)
         debug(
           `${config.id ? `[${config.id}] ` : ``}awaitMatch resolved on up-to-date for match %s`,
-          matchId
+          matchId,
         )
       }
     })
@@ -527,11 +527,11 @@ export function electricCollectionOptions<T extends Row<unknown>>(
    */
   const awaitTxId: AwaitTxIdFn = async (
     txId: Txid,
-    timeout: number = 5000
+    timeout: number = 5000,
   ): Promise<boolean> => {
     debug(
       `${config.id ? `[${config.id}] ` : ``}awaitTxId called with txid %d`,
-      txId
+      txId,
     )
     if (typeof txId !== `number`) {
       throw new ExpectedNumberInAwaitTxIdError(typeof txId, config.id)
@@ -543,7 +543,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 
     // Then check if the txid is in any of the seen snapshots
     const hasSnapshot = seenSnapshots.state.some((snapshot) =>
-      isVisibleInSnapshot(txId, snapshot)
+      isVisibleInSnapshot(txId, snapshot),
     )
     if (hasSnapshot) return true
 
@@ -558,7 +558,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
         if (seenTxids.state.has(txId)) {
           debug(
             `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o`,
-            txId
+            txId,
           )
           clearTimeout(timeoutId)
           unsubscribeSeenTxids()
@@ -569,13 +569,13 @@ export function electricCollectionOptions<T extends Row<unknown>>(
 
       const unsubscribeSeenSnapshots = seenSnapshots.subscribe(() => {
         const visibleSnapshot = seenSnapshots.state.find((snapshot) =>
-          isVisibleInSnapshot(txId, snapshot)
+          isVisibleInSnapshot(txId, snapshot),
         )
         if (visibleSnapshot) {
           debug(
             `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o in snapshot %o`,
             txId,
-            visibleSnapshot
+            visibleSnapshot,
           )
           clearTimeout(timeoutId)
           unsubscribeSeenSnapshots()
@@ -594,10 +594,10 @@ export function electricCollectionOptions<T extends Row<unknown>>(
    */
   const awaitMatch: AwaitMatchFn<any> = async (
     matchFn: MatchFunction<any>,
-    timeout: number = 3000
+    timeout: number = 3000,
   ): Promise<boolean> => {
     debug(
-      `${config.id ? `[${config.id}] ` : ``}awaitMatch called with custom function`
+      `${config.id ? `[${config.id}] ` : ``}awaitMatch called with custom function`,
     )
 
     return new Promise((resolve, reject) => {
@@ -623,7 +623,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
       const checkMatch = (message: Message<any>) => {
         if (matchFn(message)) {
           debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitMatch found matching message, waiting for up-to-date`
+            `${config.id ? `[${config.id}] ` : ``}awaitMatch found matching message, waiting for up-to-date`,
           )
           // Mark as matched but don't resolve yet - wait for up-to-date
           pendingMatches.setState((current) => {
@@ -643,7 +643,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
       for (const message of currentBatchMessages.state) {
         if (matchFn(message)) {
           debug(
-            `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in current batch, waiting for up-to-date`
+            `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in current batch, waiting for up-to-date`,
           )
           // Register match as already matched
           pendingMatches.setState((current) => {
@@ -681,7 +681,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
    * Process matching strategy and wait for synchronization
    */
   const processMatchingStrategy = async (
-    result: MatchingStrategy
+    result: MatchingStrategy,
   ): Promise<void> => {
     // Only wait if result contains txid
     if (result && `txid` in result) {
@@ -703,7 +703,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           any,
           string | number,
           ElectricCollectionUtils<T>
-        >
+        >,
       ) => {
         const handlerResult = await config.onInsert!(params)
         await processMatchingStrategy(handlerResult)
@@ -717,7 +717,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           any,
           string | number,
           ElectricCollectionUtils<T>
-        >
+        >,
       ) => {
         const handlerResult = await config.onUpdate!(params)
         await processMatchingStrategy(handlerResult)
@@ -731,7 +731,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           any,
           string | number,
           ElectricCollectionUtils<T>
-        >
+        >,
       ) => {
         const handlerResult = await config.onDelete!(params)
         await processMatchingStrategy(handlerResult)
@@ -788,7 +788,7 @@ function createElectricSync<T extends Row<unknown>>(
     resolveMatchedPendingMatches: () => void
     collectionId?: string
     testHooks?: ElectricTestHooks
-  }
+  },
 ): SyncConfig<T> {
   const {
     seenTxids,
@@ -858,7 +858,7 @@ function createElectricSync<T extends Row<unknown>>(
           },
           {
             once: true,
-          }
+          },
         )
         if (shapeOptions.signal.aborted) {
           abortController.abort()
@@ -900,7 +900,7 @@ function createElectricSync<T extends Row<unknown>>(
               `An error occurred while syncing collection: ${collection.id}, \n` +
                 `it has been marked as ready to avoid blocking apps waiting for '.preload()' to finish. \n` +
                 `You can provide an 'onError' handler on the shapeOptions to handle this error, and this message will not be logged.`,
-              errorParams
+              errorParams,
             )
           }
 
@@ -965,7 +965,7 @@ function createElectricSync<T extends Row<unknown>>(
                 // If matchFn throws, clean up and reject the promise
                 clearTimeout(match.timeoutId)
                 match.reject(
-                  err instanceof Error ? err : new Error(String(err))
+                  err instanceof Error ? err : new Error(String(err)),
                 )
                 matchesToRemove.push(matchId)
                 debug(`matchFn error: %o`, err)
@@ -1013,7 +1013,7 @@ function createElectricSync<T extends Row<unknown>>(
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
             debug(
-              `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`
+              `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
             )
 
             // Start a transaction and truncate the collection
@@ -1040,7 +1040,7 @@ function createElectricSync<T extends Row<unknown>>(
           // PROGRESSIVE MODE: Atomic swap on first up-to-date
           if (isBufferingInitialSync() && hasUpToDate) {
             debug(
-              `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`
+              `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`,
             )
 
             // Start atomic swap transaction
@@ -1063,7 +1063,7 @@ function createElectricSync<T extends Row<unknown>>(
                 // Extract txids from buffered messages (will be committed to store after transaction)
                 if (hasTxids(bufferedMsg)) {
                   bufferedMsg.headers.txids?.forEach((txid) =>
-                    newTxids.add(txid)
+                    newTxids.add(txid),
                   )
                 }
               } else if (isSnapshotEndMessage(bufferedMsg)) {
@@ -1080,7 +1080,7 @@ function createElectricSync<T extends Row<unknown>>(
             bufferedMessages.length = 0
 
             debug(
-              `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Atomic swap complete, now in normal sync mode`
+              `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Atomic swap complete, now in normal sync mode`,
             )
           } else {
             // Normal mode or on-demand: commit transaction if one was started
@@ -1115,7 +1115,7 @@ function createElectricSync<T extends Row<unknown>>(
             if (newTxids.size > 0) {
               debug(
                 `${collectionId ? `[${collectionId}] ` : ``}new txids synced from pg %O`,
-                Array.from(newTxids)
+                Array.from(newTxids),
               )
             }
             newTxids.forEach((txid) => clonedSeen.add(txid))
@@ -1129,8 +1129,8 @@ function createElectricSync<T extends Row<unknown>>(
             newSnapshots.forEach((snapshot) =>
               debug(
                 `${collectionId ? `[${collectionId}] ` : ``}new snapshot synced from pg %o`,
-                snapshot
-              )
+                snapshot,
+              ),
             )
             newSnapshots.length = 0
             return seen

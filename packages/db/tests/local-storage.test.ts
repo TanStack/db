@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import superjson from "superjson"
-import { createCollection } from "../src/index"
-import { localStorageCollectionOptions } from "../src/local-storage"
-import { createTransaction } from "../src/transactions"
-import { StorageKeyRequiredError } from "../src/errors"
-import type { StorageEventApi } from "../src/local-storage"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import superjson from 'superjson'
+import { createCollection } from '../src/index'
+import { localStorageCollectionOptions } from '../src/local-storage'
+import { createTransaction } from '../src/transactions'
+import { StorageKeyRequiredError } from '../src/errors'
+import type { StorageEventApi } from '../src/local-storage'
 
 // Mock storage implementation for testing that properly implements Storage interface
 class MockStorage implements Storage {
@@ -42,14 +42,14 @@ class MockStorageEventApi implements StorageEventApi {
 
   addEventListener(
     type: `storage`,
-    listener: (event: StorageEvent) => void
+    listener: (event: StorageEvent) => void,
   ): void {
     this.listeners.push(listener)
   }
 
   removeEventListener(
     type: `storage`,
-    listener: (event: StorageEvent) => void
+    listener: (event: StorageEvent) => void,
   ): void {
     const index = this.listeners.indexOf(listener)
     if (index > -1) {
@@ -93,7 +93,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       expect(collection).toBeDefined()
@@ -131,7 +131,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (item: any) => item.id,
-        })
+        }),
       ).toThrow(StorageKeyRequiredError)
     })
 
@@ -185,7 +185,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (item) => item.id,
           parser: superjson,
-        })
+        }),
       )
 
       const todo: Todo = {
@@ -203,7 +203,7 @@ describe(`localStorage collection`, () => {
       expect(storedData).toBeDefined()
 
       const parsed = superjson.parse<Record<string, { data: Todo }>>(
-        storedData!
+        storedData!,
       )
 
       expect(parsed[`s:1`]?.data.title).toBe(`superjson`)
@@ -216,7 +216,7 @@ describe(`localStorage collection`, () => {
     it(`should load existing data from storage on initialization`, () => {
       // Pre-populate storage with new versioned format
       const existingTodos = {
-        "s:1": {
+        's:1': {
           versionKey: `test-version-1`,
           data: {
             id: `1`,
@@ -235,7 +235,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -258,7 +258,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Should initialize with empty collection
@@ -272,7 +272,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Should initialize with empty collection
@@ -289,7 +289,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
           // No onInsert, onUpdate, or onDelete handlers provided
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -351,7 +351,7 @@ describe(`localStorage collection`, () => {
           onInsert: insertSpy,
           onUpdate: updateSpy,
           onDelete: deleteSpy,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -407,7 +407,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
           onInsert: () => Promise.resolve({ success: true }),
-        })
+        }),
       )
 
       const todo: Todo = {
@@ -438,7 +438,7 @@ describe(`localStorage collection`, () => {
     it(`should perform update operations and update storage`, async () => {
       // Pre-populate storage
       const initialData = {
-        "s:1": {
+        's:1': {
           versionKey: `initial-version`,
           data: {
             id: `1`,
@@ -457,7 +457,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
           onUpdate: () => Promise.resolve({ success: true }),
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -483,7 +483,7 @@ describe(`localStorage collection`, () => {
     it(`should perform delete operations and update storage`, async () => {
       // Pre-populate storage
       const initialData = {
-        "s:1": {
+        's:1': {
           versionKey: `test-version`,
           data: {
             id: `1`,
@@ -502,7 +502,7 @@ describe(`localStorage collection`, () => {
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
           onDelete: () => Promise.resolve({ success: true }),
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -531,7 +531,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -539,7 +539,7 @@ describe(`localStorage collection`, () => {
 
       // Simulate data being added from another tab
       const newTodoData = {
-        "1": {
+        '1': {
           versionKey: `from-other-tab`,
           data: {
             id: `1`,
@@ -580,7 +580,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Create a mock storage event for different key
@@ -609,7 +609,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Create a mock storage event from different storage area
@@ -640,7 +640,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       collection.utils.clearStorage()
@@ -655,7 +655,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       expect(collection.utils.getStorageSize()).toBe(0)
@@ -689,7 +689,7 @@ describe(`localStorage collection`, () => {
     it(`should detect version key changes for updates`, () => {
       // Pre-populate storage
       const initialData = {
-        "s:1": {
+        's:1': {
           versionKey: `version-1`,
           data: {
             id: `1`,
@@ -707,7 +707,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -718,7 +718,7 @@ describe(`localStorage collection`, () => {
 
       // Simulate change from another tab with different version key but same data
       const updatedData = {
-        "s:1": {
+        's:1': {
           versionKey: `version-2`, // Different version key
           data: {
             id: `1`,
@@ -755,7 +755,7 @@ describe(`localStorage collection`, () => {
 
       // Pre-populate storage
       const initialData = {
-        "s:1": {
+        's:1': {
           versionKey: `version-1`,
           data: {
             id: `1`,
@@ -773,7 +773,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to changes to monitor
@@ -781,7 +781,7 @@ describe(`localStorage collection`, () => {
 
       // Simulate "change" from another tab with same version key
       const sameData = {
-        "s:1": {
+        's:1': {
           versionKey: `version-1`, // Same version key
           data: {
             id: `1`,
@@ -819,7 +819,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       // Subscribe to trigger sync
@@ -882,7 +882,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const collection2 = createCollection(
@@ -891,7 +891,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription1 = collection1.subscribeChanges(() => {})
@@ -944,7 +944,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1002,7 +1002,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1050,7 +1050,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1104,7 +1104,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1152,7 +1152,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1215,7 +1215,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1272,7 +1272,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1287,7 +1287,7 @@ describe(`localStorage collection`, () => {
 
         // Simulate another tab making a change while local mutation is in progress
         const remoteData = {
-          "s:local": {
+          's:local': {
             versionKey: `local-version`,
             data: {
               id: `local`,
@@ -1296,7 +1296,7 @@ describe(`localStorage collection`, () => {
               createdAt: new Date(),
             },
           },
-          "s:remote": {
+          's:remote': {
             versionKey: `remote-version`,
             data: {
               id: `remote`,
@@ -1337,7 +1337,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1353,7 +1353,7 @@ describe(`localStorage collection`, () => {
 
         // Simulate another tab updating the item
         const remoteData = {
-          "s:1": {
+          's:1': {
             versionKey: `remote-version-1`,
             data: {
               id: `1`,
@@ -1402,7 +1402,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         // Don't subscribe - collection sync may not be initialized yet
@@ -1449,7 +1449,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1528,7 +1528,7 @@ describe(`localStorage collection`, () => {
             storage: failingStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1556,7 +1556,7 @@ describe(`localStorage collection`, () => {
             storage: mockStorage,
             storageEventApi: mockStorageEventApi,
             getKey: (todo) => todo.id,
-          })
+          }),
         )
 
         const subscription = collection.subscribeChanges(() => {})
@@ -1631,7 +1631,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1690,7 +1690,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1753,7 +1753,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1815,7 +1815,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1872,15 +1872,15 @@ describe(`localStorage collection`, () => {
       // Pre-populate storage with numeric IDs (simulating existing data)
       // Numeric keys are stored with "n:" prefix
       const existingData = {
-        "n:1": {
+        'n:1': {
           versionKey: `version-1`,
           data: { id: 1, title: `First Todo`, completed: false },
         },
-        "n:2": {
+        'n:2': {
           versionKey: `version-2`,
           data: { id: 2, title: `Second Todo`, completed: false },
         },
-        "n:3": {
+        'n:3': {
           versionKey: `version-3`,
           data: { id: 3, title: `Third Todo`, completed: false },
         },
@@ -1894,7 +1894,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -1937,22 +1937,22 @@ describe(`localStorage collection`, () => {
       // Pre-populate storage with numeric IDs (simulating existing data)
       // Numeric keys are stored with "n:" prefix
       const existingData = {
-        "n:1": {
+        'n:1': {
           versionKey: `version-1`,
           data: { id: 1, title: `First Todo`, completed: false },
         },
-        "n:2": {
+        'n:2': {
           versionKey: `version-2`,
           data: { id: 2, title: `Second Todo`, completed: false },
         },
-        "n:3": {
+        'n:3': {
           versionKey: `version-3`,
           data: { id: 3, title: `Third Todo`, completed: false },
         },
       }
       mockStorage.setItem(
         `numeric-todos-reload-delete`,
-        JSON.stringify(existingData)
+        JSON.stringify(existingData),
       )
 
       // Create collection - this will load the existing data
@@ -1962,7 +1962,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -2005,7 +2005,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})
@@ -2060,7 +2060,7 @@ describe(`localStorage collection`, () => {
           storage: mockStorage,
           storageEventApi: mockStorageEventApi,
           getKey: (todo) => todo.id,
-        })
+        }),
       )
 
       const subscription = collection.subscribeChanges(() => {})

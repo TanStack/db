@@ -1,11 +1,11 @@
-import type { IR, LoadSubsetOptions } from "@tanstack/db"
+import type { IR, LoadSubsetOptions } from '@tanstack/db'
 
 /**
  * Serializes LoadSubsetOptions into a stable, hashable format for query keys
  * @internal
  */
 export function serializeLoadSubsetOptions(
-  options: LoadSubsetOptions | undefined
+  options: LoadSubsetOptions | undefined,
 ): string | undefined {
   if (!options) {
     return undefined
@@ -120,7 +120,7 @@ function serializeValue(value: unknown): unknown {
       Object.entries(value as Record<string, unknown>).map(([key, val]) => [
         key,
         serializeValue(val),
-      ])
+      ]),
     )
   }
 

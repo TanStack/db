@@ -1,5 +1,5 @@
-import { describe, expect, test } from "vitest"
-import { optimizeQuery } from "../../src/query/optimizer.js"
+import { describe, expect, test } from 'vitest'
+import { optimizeQuery } from '../../src/query/optimizer.js'
 import {
   Aggregate,
   CollectionRef,
@@ -7,8 +7,8 @@ import {
   PropRef,
   QueryRef,
   Value,
-} from "../../src/query/ir.js"
-import type { QueryIR } from "../../src/query/ir.js"
+} from '../../src/query/ir.js'
+import type { QueryIR } from '../../src/query/ir.js'
 
 // Mock collection for testing
 const mockCollection = {
@@ -131,7 +131,7 @@ describe(`Query Optimizer`, () => {
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
         expect(optimized.from.query.where![0]).toEqual(
-          createEq(createPropRef(`u`, `department_id`), createValue(1))
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -198,7 +198,7 @@ describe(`Query Optimizer`, () => {
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
         expect(optimized.from.query.where![0]).toEqual(
-          createEq(createPropRef(`u`, `department_id`), createValue(1))
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
 
@@ -210,7 +210,7 @@ describe(`Query Optimizer`, () => {
           expect(joinClause.from.query.where).toHaveLength(1)
           if (joinClause.from.query.where) {
             expect(joinClause.from.query.where[0]).toEqual(
-              createGt(createPropRef(`p`, `views`), createValue(100))
+              createGt(createPropRef(`p`, `views`), createValue(100)),
             )
           }
         }
@@ -239,7 +239,7 @@ describe(`Query Optimizer`, () => {
       // The main query should have the multi-source where clause
       expect(optimized.where).toHaveLength(1)
       expect(optimized.where![0]).toEqual(
-        createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`))
+        createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
       )
 
       // The from should be a QueryRef with the single-source where clause
@@ -247,7 +247,7 @@ describe(`Query Optimizer`, () => {
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
         expect(optimized.from.query.where![0]).toEqual(
-          createEq(createPropRef(`u`, `department_id`), createValue(1))
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -268,7 +268,7 @@ describe(`Query Optimizer`, () => {
         where: [
           createAnd(
             createEq(createPropRef(`u`, `department_id`), createValue(1)),
-            createGt(createPropRef(`u`, `id`), createValue(100))
+            createGt(createPropRef(`u`, `id`), createValue(100)),
           ),
         ],
       }
@@ -303,7 +303,7 @@ describe(`Query Optimizer`, () => {
         where: [
           createOr(
             createEq(createPropRef(`u`, `department_id`), createValue(1)),
-            createEq(createPropRef(`u`, `department_id`), createValue(2))
+            createEq(createPropRef(`u`, `department_id`), createValue(2)),
           ),
         ],
       }
@@ -339,9 +339,9 @@ describe(`Query Optimizer`, () => {
           createAnd(
             createAnd(
               createEq(createPropRef(`u`, `department_id`), createValue(1)),
-              createGt(createPropRef(`u`, `id`), createValue(100))
+              createGt(createPropRef(`u`, `id`), createValue(100)),
             ),
-            createLt(createPropRef(`u`, `age`), createValue(65))
+            createLt(createPropRef(`u`, `age`), createValue(65)),
           ),
         ],
       }
@@ -385,7 +385,7 @@ describe(`Query Optimizer`, () => {
         having: [
           createGt(
             createAgg(`count`, createPropRef(`p`, `id`)),
-            createValue(5)
+            createValue(5),
           ),
         ],
         orderBy: [
@@ -448,7 +448,7 @@ describe(`Query Optimizer`, () => {
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
         expect(optimized.from.query.where![0]).toEqual(
-          createEq(createPropRef(`u`, `department_id`), createValue(1))
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -467,7 +467,7 @@ describe(`Query Optimizer`, () => {
         where: [
           createGt(
             createAgg(`count`, createPropRef(`p`, `id`)),
-            createValue(5)
+            createValue(5),
           ),
         ],
       }
@@ -485,8 +485,8 @@ describe(`Query Optimizer`, () => {
           expect(joinClause.from.query.where![0]).toEqual(
             createGt(
               createAgg(`count`, createPropRef(`p`, `id`)),
-              createValue(5)
-            )
+              createValue(5),
+            ),
           )
         }
       }
@@ -507,7 +507,7 @@ describe(`Query Optimizer`, () => {
           createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
           createGt(
             createPropRef(`u`, `created_at`),
-            createPropRef(`p`, `created_at`)
+            createPropRef(`p`, `created_at`),
           ),
         ],
       }
@@ -566,7 +566,7 @@ describe(`Query Optimizer`, () => {
             from: new CollectionRef(mockCollection, `u`),
             where: [createGt(createPropRef(`u`, `id`), createValue(10))],
           },
-          `u`
+          `u`,
         ),
         where: [createLt(createPropRef(`u`, `age`), createValue(50))],
       }
@@ -641,7 +641,7 @@ describe(`Query Optimizer`, () => {
       // Multi-source clause should remain in main query
       expect(optimized.where).toHaveLength(1)
       expect(optimized.where![0]).toEqual(
-        createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`))
+        createEq(createPropRef(`u`, `id`), createPropRef(`p`, `user_id`)),
       )
 
       // Single-source clauses should be moved to subqueries
@@ -714,7 +714,7 @@ describe(`Query Optimizer`, () => {
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
         expect(optimized.from.query.where![0]).toEqual(
-          createEq(createPropRef(`u`, `department_id`), createValue(1))
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -745,7 +745,7 @@ describe(`Query Optimizer`, () => {
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toHaveLength(1)
         expect(optimized.from.query.where![0]).toEqual(
-          createEq(createPropRef(`u`, `department_id`), createValue(1))
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -760,7 +760,7 @@ describe(`Query Optimizer`, () => {
             from: new CollectionRef(mockCollection, `u`),
             where: [createGt(createPropRef(`u`, `id`), createValue(10))],
           },
-          `u`
+          `u`,
         ),
         join: [
           {
@@ -802,11 +802,11 @@ describe(`Query Optimizer`, () => {
                 from: new CollectionRef(mockCollection, `u`),
                 where: [createGt(createPropRef(`u`, `id`), createValue(10))],
               },
-              `u`
+              `u`,
             ),
             where: [createLt(createPropRef(`u`, `age`), createValue(50))],
           },
-          `u`
+          `u`,
         ),
         join: [
           {
@@ -835,10 +835,10 @@ describe(`Query Optimizer`, () => {
         // Verify both conditions are in the combined expression
         const combinedWhere = innerQuery.where![0] as any
         expect(combinedWhere.args).toContainEqual(
-          createLt(createPropRef(`u`, `age`), createValue(50))
+          createLt(createPropRef(`u`, `age`), createValue(50)),
         )
         expect(combinedWhere.args).toContainEqual(
-          createEq(createPropRef(`u`, `department_id`), createValue(1))
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -852,10 +852,10 @@ describe(`Query Optimizer`, () => {
               {
                 from: new CollectionRef(mockCollection, `u`),
               },
-              `u`
+              `u`,
             ),
           },
-          `u`
+          `u`,
         ),
         join: [
           {
@@ -869,7 +869,7 @@ describe(`Query Optimizer`, () => {
       }
 
       const { optimizedQuery: optimized } = optimizeQuery(
-        queryWithRedundantSubqueries
+        queryWithRedundantSubqueries,
       )
 
       // Redundant nested subqueries should be removed, leaving a direct reference to the collection
@@ -878,7 +878,7 @@ describe(`Query Optimizer`, () => {
         expect(optimized.from.query.from.type).toBe(`collectionRef`)
         expect(optimized.from.query.where).toHaveLength(1)
         expect(optimized.from.query.where![0]).toEqual(
-          createEq(createPropRef(`u`, `department_id`), createValue(1))
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -890,7 +890,7 @@ describe(`Query Optimizer`, () => {
             from: new CollectionRef(mockCollection, `u`),
             where: [createGt(createPropRef(`u`, `age`), createValue(25))],
           },
-          `u`
+          `u`,
         ),
         join: [
           {
@@ -899,7 +899,7 @@ describe(`Query Optimizer`, () => {
                 from: new CollectionRef(mockCollection, `p`),
                 where: [createGt(createPropRef(`p`, `views`), createValue(50))],
               },
-              `p`
+              `p`,
             ),
             type: `inner`,
             left: createPropRef(`u`, `id`),
@@ -918,7 +918,7 @@ describe(`Query Optimizer`, () => {
       // Multi-source clause should remain in main query
       expect(optimized.where).toHaveLength(1)
       expect(optimized.where![0]).toEqual(
-        createEq(createPropRef(`u`, `id`), createPropRef(`p`, `author_id`))
+        createEq(createPropRef(`u`, `id`), createPropRef(`p`, `author_id`)),
       )
 
       // Single-source clauses should be pushed to their respective subqueries and combined
@@ -964,11 +964,11 @@ describe(`Query Optimizer`, () => {
                 from: new CollectionRef(mockCollection, `u`),
                 where: [createGt(createPropRef(`u`, `id`), createValue(10))],
               },
-              `u`
+              `u`,
             ),
             select: { name: createPropRef(`u`, `name`) }, // This makes the subquery non-redundant
           },
-          `u`
+          `u`,
         ),
         join: [
           {
@@ -982,7 +982,7 @@ describe(`Query Optimizer`, () => {
       }
 
       const { optimizedQuery: optimized } = optimizeQuery(
-        queryWithMeaningfulSubqueries
+        queryWithMeaningfulSubqueries,
       )
 
       // Should preserve the subquery with SELECT clause and push WHERE clause down at least one level
@@ -992,7 +992,7 @@ describe(`Query Optimizer`, () => {
         expect(optimized.from.query.select).toBeDefined()
         // The new WHERE clause should be pushed to this level or deeper
         expect(optimized.from.query.where).toContainEqual(
-          createEq(createPropRef(`u`, `department_id`), createValue(1))
+          createEq(createPropRef(`u`, `department_id`), createValue(1)),
         )
       }
     })
@@ -1060,7 +1060,7 @@ describe(`Query Optimizer`, () => {
             from: new CollectionRef(mockCollection, `u`),
             where: [createGt(createPropRef(`u`, `age`), createValue(18))],
           },
-          `u`
+          `u`,
         ),
         join: [
           {
@@ -1075,8 +1075,8 @@ describe(`Query Optimizer`, () => {
             createEq(createPropRef(`u`, `department_id`), createValue(1)),
             createOr(
               createGt(createPropRef(`u`, `salary`), createValue(50000)),
-              createEq(createPropRef(`u`, `role`), createValue(`manager`))
-            )
+              createEq(createPropRef(`u`, `role`), createValue(`manager`)),
+            ),
           ),
         ],
       }
@@ -1096,7 +1096,7 @@ describe(`Query Optimizer`, () => {
         // Verify it contains the original condition and the new conditions
         const combinedWhere = optimized.from.query.where![0] as any
         expect(combinedWhere.args).toContainEqual(
-          createGt(createPropRef(`u`, `age`), createValue(18))
+          createGt(createPropRef(`u`, `age`), createValue(18)),
         )
       }
     })
@@ -1127,11 +1127,11 @@ describe(`Query Optimizer`, () => {
         where: [
           createEq(
             createPropRef(`main_users`, `department_id`),
-            createValue(1)
+            createValue(1),
           ), // Should only affect main_users context
           createEq(
             createPropRef(`other_users`, `department_id`),
-            createValue(2)
+            createValue(2),
           ), // Should only affect other_users context
         ],
       }
@@ -1145,7 +1145,10 @@ describe(`Query Optimizer`, () => {
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(createPropRef(`main_users`, `department_id`), createValue(1))
+          createEq(
+            createPropRef(`main_users`, `department_id`),
+            createValue(1),
+          ),
         )
       }
 
@@ -1158,8 +1161,8 @@ describe(`Query Optimizer`, () => {
           expect(joinClause.from.query.where).toContainEqual(
             createEq(
               createPropRef(`other_users`, `department_id`),
-              createValue(2)
-            )
+              createValue(2),
+            ),
           )
         }
       }
@@ -1196,7 +1199,7 @@ describe(`Query Optimizer`, () => {
       // would change the aggregation results
       expect(optimized.where).toHaveLength(1)
       expect(optimized.where![0]).toEqual(
-        createGt(createPropRef(`stats`, `user_count`), createValue(5))
+        createGt(createPropRef(`stats`, `user_count`), createValue(5)),
       )
     })
 
@@ -1237,7 +1240,7 @@ describe(`Query Optimizer`, () => {
       // would change which users are in the "top 10"
       expect(optimized.where).toHaveLength(1)
       expect(optimized.where![0]).toEqual(
-        createEq(createPropRef(`top_users`, `department_id`), createValue(1))
+        createEq(createPropRef(`top_users`, `department_id`), createValue(1)),
       )
     })
 
@@ -1264,7 +1267,7 @@ describe(`Query Optimizer`, () => {
         where: [
           createEq(
             createPropRef(`filtered_users`, `department_id`),
-            createValue(1)
+            createValue(1),
           ), // Can be pushed down safely
         ],
       }
@@ -1278,8 +1281,8 @@ describe(`Query Optimizer`, () => {
         expect(optimized.from.query.where).toContainEqual(
           createEq(
             createPropRef(`filtered_users`, `department_id`),
-            createValue(1)
-          )
+            createValue(1),
+          ),
         )
       }
     })
@@ -1295,7 +1298,7 @@ describe(`Query Optimizer`, () => {
         having: [
           createGt(
             createAgg(`avg`, createPropRef(`u`, `salary`)),
-            createValue(50000)
+            createValue(50000),
           ),
         ],
       }
@@ -1313,7 +1316,7 @@ describe(`Query Optimizer`, () => {
         where: [
           createGt(
             createPropRef(`dept_stats`, `avg_salary`),
-            createValue(60000)
+            createValue(60000),
           ),
         ],
       }
@@ -1323,7 +1326,7 @@ describe(`Query Optimizer`, () => {
       // Should not optimize due to HAVING clause
       expect(optimized.where).toHaveLength(1)
       expect(optimized.where![0]).toEqual(
-        createGt(createPropRef(`dept_stats`, `avg_salary`), createValue(60000))
+        createGt(createPropRef(`dept_stats`, `avg_salary`), createValue(60000)),
       )
     })
 
@@ -1346,7 +1349,7 @@ describe(`Query Optimizer`, () => {
         where: [
           createEq(
             createPropRef(`computed_users`, `department_id`),
-            createValue(1)
+            createValue(1),
           ),
         ],
       }
@@ -1358,8 +1361,8 @@ describe(`Query Optimizer`, () => {
       expect(optimized.where![0]).toEqual(
         createEq(
           createPropRef(`computed_users`, `department_id`),
-          createValue(1)
-        )
+          createValue(1),
+        ),
       )
     })
 
@@ -1392,7 +1395,7 @@ describe(`Query Optimizer`, () => {
         where: [
           createEq(
             createPropRef(`sorted_users`, `department_id`),
-            createValue(1)
+            createValue(1),
           ),
         ],
       }
@@ -1406,8 +1409,8 @@ describe(`Query Optimizer`, () => {
         expect(optimized.from.query.where).toContainEqual(
           createEq(
             createPropRef(`sorted_users`, `department_id`),
-            createValue(1)
-          )
+            createValue(1),
+          ),
         )
       }
     })
@@ -1453,14 +1456,14 @@ describe(`Query Optimizer`, () => {
       // Only the unsafe clause should remain
       expect(optimized.where).toHaveLength(1)
       expect(optimized.where![0]).toEqual(
-        createGt(createPropRef(`dept_stats`, `user_count`), createValue(10))
+        createGt(createPropRef(`dept_stats`, `user_count`), createValue(10)),
       )
 
       // Safe subquery should be optimized
       expect(optimized.from.type).toBe(`queryRef`)
       if (optimized.from.type === `queryRef`) {
         expect(optimized.from.query.where).toContainEqual(
-          createEq(createPropRef(`users`, `department_id`), createValue(1))
+          createEq(createPropRef(`users`, `department_id`), createValue(1)),
         )
       }
     })
@@ -1492,7 +1495,7 @@ describe(`Query Optimizer`, () => {
           createGt(createPropRef(`p`, `views`), createValue(100)), // Can push down
           createEq(
             createPropRef(`stats`, `department_id`),
-            createPropRef(`p`, `author_dept`)
+            createPropRef(`p`, `author_dept`),
           ), // Multi-source
         ],
       }
@@ -1511,7 +1514,7 @@ describe(`Query Optimizer`, () => {
       // The stats clause and multi-source clause should remain BUT be combined into ONE
       console.log(
         `Remaining WHERE clauses: ${optimized.where?.length || 0}`,
-        JSON.stringify(optimized.where, null, 2)
+        JSON.stringify(optimized.where, null, 2),
       )
       expect(optimized.where).toBeDefined()
       // This is the KEY assertion - all remaining clauses should be combined
@@ -1549,12 +1552,12 @@ describe(`Query Optimizer`, () => {
           // This is an AND expression that can't be pushed down
           createAnd(
             createGt(createPropRef(`stats`, `user_count`), createValue(5)),
-            createEq(createPropRef(`stats`, `department_id`), createValue(1))
+            createEq(createPropRef(`stats`, `department_id`), createValue(1)),
           ),
           createGt(createPropRef(`p`, `views`), createValue(100)), // Can push down
           createEq(
             createPropRef(`stats`, `department_id`),
-            createPropRef(`p`, `author_dept`)
+            createPropRef(`p`, `author_dept`),
           ), // Multi-source
         ],
       }
@@ -1651,7 +1654,7 @@ describe(`Query Optimizer`, () => {
       expect(optimizedQuery.where![0]).toEqual({
         expression: createEq(
           createPropRef(`teamMember`, `user_id`),
-          createValue(100)
+          createValue(100),
         ),
         residual: true,
       })
@@ -1669,7 +1672,7 @@ describe(`Query Optimizer`, () => {
           expect(optimizedQuery.where).toContainEqual({
             expression: createEq(
               createPropRef(`teamMember`, `user_id`),
-              createValue(100)
+              createValue(100),
             ),
             residual: true,
           })
@@ -1717,7 +1720,7 @@ describe(`Query Optimizer`, () => {
       expect(optimizedQuery.where![0]).toEqual({
         expression: createEq(
           createPropRef(`user`, `department_id`),
-          createValue(1)
+          createValue(1),
         ),
         residual: true,
       })
@@ -1732,7 +1735,7 @@ describe(`Query Optimizer`, () => {
           expect(optimizedQuery.where).toContainEqual({
             expression: createEq(
               createPropRef(`user`, `department_id`),
-              createValue(1)
+              createValue(1),
             ),
             residual: true,
           })
@@ -1780,7 +1783,7 @@ describe(`Query Optimizer`, () => {
       expect(optimizedQuery.where![0]).toEqual({
         expression: createGt(
           createPropRef(`payment`, `amount`),
-          createValue(100)
+          createValue(100),
         ),
         residual: true,
       })
@@ -1798,7 +1801,7 @@ describe(`Query Optimizer`, () => {
           expect(optimizedQuery.where).toContainEqual({
             expression: createGt(
               createPropRef(`payment`, `amount`),
-              createValue(100)
+              createValue(100),
             ),
             residual: true,
           })
@@ -1848,7 +1851,7 @@ describe(`Query Optimizer`, () => {
       if (optimizedQuery.join![0]?.from.type === `queryRef`) {
         const deptSubquery = optimizedQuery.join![0].from.query
         expect(deptSubquery.where).toContainEqual(
-          createEq(createPropRef(`dept`, `budget`), createValue(100000))
+          createEq(createPropRef(`dept`, `budget`), createValue(100000)),
         )
       }
     })

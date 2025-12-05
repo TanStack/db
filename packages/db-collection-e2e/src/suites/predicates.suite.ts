@@ -5,7 +5,7 @@
  * across different data types.
  */
 
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from 'vitest'
 import {
   and,
   createLiveQueryCollection,
@@ -21,13 +21,13 @@ import {
   lte,
   not,
   or,
-} from "@tanstack/db"
-import { assertAllItemsMatch, assertCollectionSize } from "../utils/assertions"
-import { waitForQueryData } from "../utils/helpers"
-import type { E2ETestConfig } from "../types"
+} from '@tanstack/db'
+import { assertAllItemsMatch, assertCollectionSize } from '../utils/assertions'
+import { waitForQueryData } from '../utils/helpers'
+import type { E2ETestConfig } from '../types'
 
 export function createPredicatesTestSuite(
-  getConfig: () => Promise<E2ETestConfig>
+  getConfig: () => Promise<E2ETestConfig>,
 ) {
   describe(`Predicates Suite`, () => {
     describe(`Equality Operators`, () => {
@@ -38,7 +38,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.name, `Alice 0`))
+            .where(({ user }) => eq(user.name, `Alice 0`)),
         )
 
         await query.preload()
@@ -59,7 +59,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.age, 25))
+            .where(({ user }) => eq(user.age, 25)),
         )
 
         await query.preload()
@@ -76,7 +76,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.isActive, true))
+            .where(({ user }) => eq(user.isActive, true)),
         )
 
         await query.preload()
@@ -98,7 +98,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.id, testUserId))
+            .where(({ user }) => eq(user.id, testUserId)),
         )
 
         await query.preload()
@@ -118,7 +118,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => isNull(user.email))
+            .where(({ user }) => isNull(user.email)),
         )
 
         await query.preload()
@@ -140,7 +140,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => not(eq(user.name, `Alice 0`)))
+            .where(({ user }) => not(eq(user.name, `Alice 0`))),
         )
 
         await query.preload()
@@ -160,7 +160,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => not(isNull(user.email)))
+            .where(({ user }) => not(isNull(user.email))),
         )
 
         await query.preload()
@@ -182,7 +182,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 50))
+            .where(({ user }) => gt(user.age, 50)),
         )
 
         await query.preload()
@@ -199,7 +199,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gte(user.age, 50))
+            .where(({ user }) => gte(user.age, 50)),
         )
 
         await query.preload()
@@ -216,7 +216,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => lt(user.age, 30))
+            .where(({ user }) => lt(user.age, 30)),
         )
 
         await query.preload()
@@ -233,7 +233,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => lte(user.age, 30))
+            .where(({ user }) => lte(user.age, 30)),
         )
 
         await query.preload()
@@ -250,7 +250,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ post: postsCollection })
-            .where(({ post }) => gt(post.viewCount, 100))
+            .where(({ post }) => gt(post.viewCount, 100)),
         )
 
         await query.preload()
@@ -270,7 +270,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ post: postsCollection })
-            .where(({ post }) => eq(post.largeViewCount, targetBigInt))
+            .where(({ post }) => eq(post.largeViewCount, targetBigInt)),
         )
 
         await query.preload()
@@ -299,7 +299,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ post: postsCollection })
-            .where(({ post }) => gt(post.largeViewCount, thresholdBigInt))
+            .where(({ post }) => gt(post.largeViewCount, thresholdBigInt)),
         )
 
         await query.preload()
@@ -328,7 +328,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => like(user.name, `Alice%`))
+            .where(({ user }) => like(user.name, `Alice%`)),
         )
 
         await query.preload()
@@ -349,7 +349,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => ilike(user.name, `alice%`))
+            .where(({ user }) => ilike(user.name, `alice%`)),
         )
 
         await query.preload()
@@ -359,7 +359,7 @@ export function createPredicatesTestSuite(
         expect(results.length).toBeGreaterThan(0)
         // Should match names starting with "Alice" (case-insensitive)
         assertAllItemsMatch(query, (u) =>
-          u.name.toLowerCase().startsWith(`alice`)
+          u.name.toLowerCase().startsWith(`alice`),
         )
 
         await query.cleanup()
@@ -372,7 +372,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => like(user.email, `%@example.com`))
+            .where(({ user }) => like(user.email, `%@example.com`)),
         )
 
         await query.preload()
@@ -383,7 +383,7 @@ export function createPredicatesTestSuite(
         // Should match emails ending with @example.com
         assertAllItemsMatch(
           query,
-          (u) => u.email?.endsWith(`@example.com`) ?? false
+          (u) => u.email?.endsWith(`@example.com`) ?? false,
         )
 
         await query.cleanup()
@@ -396,7 +396,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => like(user.email, `user%0@example.com`))
+            .where(({ user }) => like(user.email, `user%0@example.com`)),
         )
 
         await query.preload()
@@ -407,7 +407,7 @@ export function createPredicatesTestSuite(
         // Should match emails like user0@example.com, user10@example.com, user20@example.com, etc.
         assertAllItemsMatch(
           query,
-          (u) => (u.email?.match(/^user.*0@example\.com$/) ?? null) !== null
+          (u) => (u.email?.match(/^user.*0@example\.com$/) ?? null) !== null,
         )
 
         await query.cleanup()
@@ -420,7 +420,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => like(lower(user.name), `%alice%`))
+            .where(({ user }) => like(lower(user.name), `%alice%`)),
         )
 
         await query.preload()
@@ -430,7 +430,7 @@ export function createPredicatesTestSuite(
         expect(results.length).toBeGreaterThan(0)
         // Should match names containing "alice" (case-insensitive via lower())
         assertAllItemsMatch(query, (u) =>
-          u.name.toLowerCase().includes(`alice`)
+          u.name.toLowerCase().includes(`alice`),
         )
 
         await query.cleanup()
@@ -443,7 +443,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => ilike(lower(user.name), `%bob%`))
+            .where(({ user }) => ilike(lower(user.name), `%bob%`)),
         )
 
         await query.preload()
@@ -472,9 +472,9 @@ export function createPredicatesTestSuite(
             .where(({ post }) =>
               or(
                 like(lower(post.title), `%${searchLower}%`),
-                like(lower(post.content ?? ``), `%${searchLower}%`)
-              )
-            )
+                like(lower(post.content ?? ``), `%${searchLower}%`),
+              ),
+            ),
         )
 
         await query.preload()
@@ -487,7 +487,7 @@ export function createPredicatesTestSuite(
           query,
           (p) =>
             p.title.toLowerCase().includes(searchLower) ||
-            (p.content?.toLowerCase().includes(searchLower) ?? false)
+            (p.content?.toLowerCase().includes(searchLower) ?? false),
         )
 
         await query.cleanup()
@@ -501,7 +501,7 @@ export function createPredicatesTestSuite(
           q
             .from({ user: usersCollection })
             .where(({ user }) => like(lower(user.name), `%alice%`))
-            .orderBy(({ user }) => user.name, `asc`)
+            .orderBy(({ user }) => user.name, `asc`),
         )
 
         await query.preload()
@@ -510,7 +510,7 @@ export function createPredicatesTestSuite(
         const results = Array.from(query.state.values())
         expect(results.length).toBeGreaterThan(0)
         assertAllItemsMatch(query, (u) =>
-          u.name.toLowerCase().includes(`alice`)
+          u.name.toLowerCase().includes(`alice`),
         )
 
         // Verify ordering
@@ -530,7 +530,7 @@ export function createPredicatesTestSuite(
             .from({ user: usersCollection })
             .where(({ user }) => like(lower(user.name), `%alice%`))
             .orderBy(({ user }) => user.name, `asc`) // Required when using LIMIT
-            .limit(5)
+            .limit(5),
         )
 
         await query.preload()
@@ -540,7 +540,7 @@ export function createPredicatesTestSuite(
         // Should respect limit
         expect(results.length).toBeLessThanOrEqual(5)
         assertAllItemsMatch(query, (u) =>
-          u.name.toLowerCase().includes(`alice`)
+          u.name.toLowerCase().includes(`alice`),
         )
 
         await query.cleanup()
@@ -553,7 +553,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => like(user.name, `NonExistent%`))
+            .where(({ user }) => like(user.name, `NonExistent%`)),
         )
 
         await query.preload()
@@ -573,8 +573,8 @@ export function createPredicatesTestSuite(
           q
             .from({ user: usersCollection })
             .where(({ user }) =>
-              inArray(user.name, [`Alice 0`, `bob 1`, `Charlie 2`])
-            )
+              inArray(user.name, [`Alice 0`, `bob 1`, `Charlie 2`]),
+            ),
         )
 
         await query.preload()
@@ -592,7 +592,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => inArray(user.age, [25, 30, 35]))
+            .where(({ user }) => inArray(user.age, [25, 30, 35])),
         )
 
         await query.preload()
@@ -616,7 +616,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => inArray(user.id, userIds))
+            .where(({ user }) => inArray(user.id, userIds)),
         )
 
         await query.preload()
@@ -634,7 +634,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => inArray(user.id, []))
+            .where(({ user }) => inArray(user.id, [])),
         )
 
         await query.preload()
@@ -658,7 +658,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ post: postsCollection })
-            .where(({ post }) => inArray(post.largeViewCount, targetBigInts))
+            .where(({ post }) => inArray(post.largeViewCount, targetBigInts)),
         )
 
         await query.preload()
@@ -689,7 +689,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => isNull(user.email))
+            .where(({ user }) => isNull(user.email)),
         )
 
         await query.preload()
@@ -709,7 +709,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => not(isNull(user.email)))
+            .where(({ user }) => not(isNull(user.email))),
         )
 
         await query.preload()
@@ -729,7 +729,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => isNull(user.deletedAt))
+            .where(({ user }) => isNull(user.deletedAt)),
         )
 
         await query.preload()
@@ -751,7 +751,9 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => and(gt(user.age, 25), eq(user.isActive, true)))
+            .where(({ user }) =>
+              and(gt(user.age, 25), eq(user.isActive, true)),
+            ),
         )
 
         await query.preload()
@@ -768,7 +770,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => or(eq(user.age, 25), eq(user.age, 30)))
+            .where(({ user }) => or(eq(user.age, 25), eq(user.age, 30))),
         )
 
         await query.preload()
@@ -788,16 +790,16 @@ export function createPredicatesTestSuite(
             .where(({ user }) =>
               and(
                 or(eq(user.age, 25), eq(user.age, 30)),
-                eq(user.isActive, true)
-              )
-            )
+                eq(user.isActive, true),
+              ),
+            ),
         )
 
         await query.preload()
 
         assertAllItemsMatch(
           query,
-          (u) => (u.age === 25 || u.age === 30) && u.isActive === true
+          (u) => (u.age === 25 || u.age === 30) && u.isActive === true,
         )
 
         await query.cleanup()
@@ -810,7 +812,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => not(eq(user.isActive, true)))
+            .where(({ user }) => not(eq(user.isActive, true))),
         )
 
         await query.preload()
@@ -829,7 +831,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.age, 25))
+            .where(({ user }) => eq(user.age, 25)),
         )
 
         await query.preload()
@@ -851,7 +853,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => isNull(user.deletedAt))
+            .where(({ user }) => isNull(user.deletedAt)),
         )
 
         await query.preload()
@@ -874,7 +876,7 @@ export function createPredicatesTestSuite(
           q
             .from({ user: usersCollection })
             .where(({ user }) => gt(user.age, 25))
-            .where(({ user }) => eq(user.isActive, true))
+            .where(({ user }) => eq(user.isActive, true)),
         )
 
         await query.preload()
@@ -896,7 +898,7 @@ export function createPredicatesTestSuite(
 
         // Query with NO where clause - loads all data
         const query = createLiveQueryCollection(
-          (q) => q.from({ user: usersCollection })
+          (q) => q.from({ user: usersCollection }),
           // No where, no limit, no orderBy
         )
 
@@ -917,7 +919,7 @@ export function createPredicatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.age, 999))
+            .where(({ user }) => eq(user.age, 999)),
         )
 
         await query.preload()
@@ -935,9 +937,9 @@ export function createPredicatesTestSuite(
           q.from({ user: usersCollection }).where(({ user }) =>
             and(
               eq(user.age, 25),
-              eq(user.age, 30) // Impossible: age can't be both 25 and 30
-            )
-          )
+              eq(user.age, 30), // Impossible: age can't be both 25 and 30
+            ),
+          ),
         )
 
         await query.preload()

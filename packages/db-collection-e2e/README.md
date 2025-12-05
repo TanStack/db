@@ -152,14 +152,14 @@ Create `e2e/setup.ts` in your collection package. See real examples:
 Example structure:
 
 ```typescript
-import { createCollection } from "@tanstack/db"
-import { yourCollectionOptions } from "../src"
+import { createCollection } from '@tanstack/db'
+import { yourCollectionOptions } from '../src'
 import type {
   E2ETestConfig,
   User,
   Post,
   Comment,
-} from "../../db-collection-e2e/src/types"
+} from '../../db-collection-e2e/src/types'
 
 export async function createYourE2EConfig(options: {
   schema: string
@@ -171,19 +171,19 @@ export async function createYourE2EConfig(options: {
   const eagerUsers = createCollection(
     yourCollectionOptions({
       id: `your-e2e-users-eager-${Date.now()}`,
-      syncMode: "eager",
+      syncMode: 'eager',
       getKey: (item: User) => item.id,
       startSync: false,
-    })
+    }),
   )
 
   const onDemandUsers = createCollection(
     yourCollectionOptions({
       id: `your-e2e-users-ondemand-${Date.now()}`,
-      syncMode: "on-demand",
+      syncMode: 'on-demand',
       getKey: (item: User) => item.id,
       startSync: false,
-    })
+    }),
   )
 
   // ... create posts and comments collections similarly
@@ -219,18 +219,18 @@ export async function createYourE2EConfig(options: {
 Create `e2e/your-collection.e2e.test.ts`:
 
 ```typescript
-import { describe, it, expect } from "vitest"
-import { createCollection } from "@tanstack/db"
-import { yourCollectionOptions } from "../src"
+import { describe, it, expect } from 'vitest'
+import { createCollection } from '@tanstack/db'
+import { yourCollectionOptions } from '../src'
 
-describe("Your Collection E2E", () => {
-  it("should create collection", async () => {
+describe('Your Collection E2E', () => {
+  it('should create collection', async () => {
     const collection = createCollection(
       yourCollectionOptions({
-        id: "test-collection",
+        id: 'test-collection',
         getKey: (item: any) => item.id,
         startSync: false,
-      })
+      }),
     )
 
     expect(collection).toBeDefined()
@@ -248,7 +248,7 @@ Update your `vite.config.ts` to include e2e tests:
 ```typescript
 const config = defineConfig({
   test: {
-    include: ["tests/**/*.test.ts", "e2e/**/*.e2e.test.ts"],
+    include: ['tests/**/*.test.ts', 'e2e/**/*.e2e.test.ts'],
     // Remove dir: './tests' if present
   },
 })
@@ -274,9 +274,9 @@ Tests basic where clause functionality with ~20 test scenarios:
 **Example Test:**
 
 ```typescript
-it("should filter with eq() on number field", async () => {
+it('should filter with eq() on number field', async () => {
   const query = createLiveQueryCollection((q) =>
-    q.from({ user: usersCollection }).where(({ user }) => eq(user.age, 25))
+    q.from({ user: usersCollection }).where(({ user }) => eq(user.age, 25)),
   )
   await query.preload()
 
@@ -300,14 +300,14 @@ Tests ordering and pagination with ~15 test scenarios:
 **Example Test:**
 
 ```typescript
-it("should sort ascending by single field", async () => {
+it('should sort ascending by single field', async () => {
   const query = createLiveQueryCollection((q) =>
-    q.from({ user: usersCollection }).orderBy(({ user }) => user.age, "asc")
+    q.from({ user: usersCollection }).orderBy(({ user }) => user.age, 'asc'),
   )
   await query.preload()
 
   const results = Array.from(query.state.values())
-  assertSorted(results, "age", "asc")
+  assertSorted(results, 'age', 'asc')
 })
 ```
 
@@ -326,18 +326,18 @@ Tests multi-collection joins with ~12 test scenarios:
 **Example Test:**
 
 ```typescript
-it("should join Users and Posts", async () => {
+it('should join Users and Posts', async () => {
   const query = createLiveQueryCollection((q) =>
     q
       .from({ user: usersCollection })
       .join({ post: postsCollection }, ({ user, post }) =>
-        eq(user.id, post.userId)
+        eq(user.id, post.userId),
       )
       .select(({ user, post }) => ({
         id: post.id,
         userName: user.name,
         postTitle: post.title,
-      }))
+      })),
   )
   await query.preload()
 
