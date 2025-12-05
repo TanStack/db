@@ -135,11 +135,9 @@ describe(`Operators`, () => {
       expect(updateResult.messageCount).toBeGreaterThan(0) // Should have some changes
 
       // Check that only the affected key (null) produces messages
-      assertOnlyKeysAffected(
-        `topKFractional update`,
-        updateResult.messages,
-        [3]
-      )
+      assertOnlyKeysAffected(`topKFractional update`, updateResult.messages, [
+        3,
+      ])
 
       // Check that the update messages maintain lexicographic order on their own
       if (updateResult.messages.length > 0) {

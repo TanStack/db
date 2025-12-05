@@ -3,9 +3,9 @@ import type { OrderByDirection } from "../query/ir"
 import type { IndexInterface, IndexOperation, IndexStats } from "./base-index"
 import type { RangeQueryOptions } from "./btree-index"
 
-export class ReverseIndex<
-  TKey extends string | number,
-> implements IndexInterface<TKey> {
+export class ReverseIndex<TKey extends string | number>
+  implements IndexInterface<TKey>
+{
   private originalIndex: IndexInterface<TKey>
 
   constructor(index: IndexInterface<TKey>) {

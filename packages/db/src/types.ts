@@ -13,9 +13,9 @@ export interface CollectionLike<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > extends Pick<
-  Collection<T, TKey>,
-  `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
-> {}
+    Collection<T, TKey>,
+    `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
+  > {}
 
 /**
  * StringSortOpts - Options for string sorting behavior
@@ -727,10 +727,8 @@ export interface SubscribeChangesOptions {
   whereExpression?: BasicExpression<boolean>
 }
 
-export interface SubscribeChangesSnapshotOptions extends Omit<
-  SubscribeChangesOptions,
-  `includeInitialState`
-> {
+export interface SubscribeChangesSnapshotOptions
+  extends Omit<SubscribeChangesOptions, `includeInitialState`> {
   orderBy?: OrderBy
   limit?: number
 }

@@ -1,11 +1,11 @@
-import { createCollection, localOnlyCollectionOptions } from '@tanstack/db';
+import { createCollection, localOnlyCollectionOptions } from '@tanstack/db'
 
 interface Todo {
-  id: number;
-  text: string;
-  projectID: number;
-  completed: boolean;
-  created_at: Date;
+  id: number
+  text: string
+  projectID: number
+  completed: boolean
+  created_at: Date
 }
 
 export const todosCollection = createCollection(
@@ -41,5 +41,5 @@ export const todosCollection = createCollection(
         created_at: new Date(),
       },
     ],
-  }),
-);
+  })
+)
