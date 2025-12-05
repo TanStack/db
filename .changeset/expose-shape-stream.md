@@ -1,5 +1,5 @@
 ---
-"@tanstack/electric-db-collection": minor
+'@tanstack/electric-db-collection': minor
 ---
 
 feat(electric-db-collection): expose underlying ShapeStream via shapeStream getter
