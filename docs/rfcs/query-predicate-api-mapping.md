@@ -86,11 +86,36 @@ createCollection(
 
 ---
 
-## Option 1: Schema-Aware Typed Filter Extraction
+## Design Principle: Reuse Existing Collection Types
+
+**Key insight**: The collection already knows its item type `T` via `QueryCollectionConfig<T>`.
+We should NOT require users to repeat type annotations - all type inference should flow
+automatically from the collection's existing type parameter.
+
+```typescript
+// ❌ BAD - requires user to manually specify type
+const filters = extractTypedFilters<AccountExternalData>(ctx.meta.loadSubsetOptions);
+
+// ✅ GOOD - type flows from collection definition
+queryCollectionOptions({
+  // Collection already knows T = AccountExternalData from getKey, queryFn return type, etc.
+  predicates: { accountId: 'in' },  // Validated against T's fields
+  queryFn: (ctx, { accountId }) => {
+    // accountId automatically typed as ExternalAccountId[]
+    // (T['accountId'] = ExternalAccountId, 'in' operator = array)
+  }
+})
+```
+
+---
+
+## Option 1: Declarative Required Predicates (Recommended)
 
 ### Concept
 
-Leverage the collection's item type to generate a typed filter extraction helper that knows about all valid field names and their types.
+Allow collections to declare their required predicates upfront. The system validates them
+and passes typed values to `queryFn`. **Types are automatically inferred from the collection's
+item type `T` - no manual type annotations needed.**
 
 ### API Design
 
@@ -104,105 +129,19 @@ const accountExternalDataCollection = createCollection(
   queryCollectionOptions({
     syncMode: "on-demand",
     queryKey: ["accounts", "externalData"],
-    queryFn: async (ctx) => {
-      // Schema-aware typed extraction
-      const filters = extractTypedFilters<AccountExternalData>(
-        ctx.meta.loadSubsetOptions
-      );
 
-      // ✅ Type error if field doesn't exist on AccountExternalData
-      // ✅ Returns ExternalAccountId[] automatically
-      const accountIds = filters.requireIn('accountId');
-
-      return fetchAccountsExternalData(accountIds);
+    // Declare predicates - field names are validated against T
+    // ✅ 'accountId' autocompletes and type-checks against AccountExternalData
+    // ❌ 'acountId' would be a compile error (typo!)
+    predicates: {
+      accountId: 'in',
     },
-    getKey: (data) => data.accountId,
-    queryClient,
-  })
-);
-```
 
-### Implementation Sketch
-
-```typescript
-type FilterExtractor<T> = {
-  // For 'in' operator - returns array of the field type
-  requireIn<K extends keyof T & string>(field: K): Array<T[K]>;
-  optionalIn<K extends keyof T & string>(field: K): Array<T[K]> | undefined;
-
-  // For 'eq' operator - returns the field type
-  requireEq<K extends keyof T & string>(field: K): T[K];
-  optionalEq<K extends keyof T & string>(field: K): T[K] | undefined;
-
-  // For range operators
-  requireGt<K extends keyof T & string>(field: K): T[K];
-  requireLt<K extends keyof T & string>(field: K): T[K];
-  // ... etc
-};
-
-function extractTypedFilters<T extends object>(
-  options: LoadSubsetOptions | undefined
-): FilterExtractor<T> {
-  const { filters } = parseLoadSubsetOptions(options);
-
-  return {
-    requireIn(field) {
-      const filter = filters.find(
-        f => f.field.length === 1 && f.field[0] === field && f.operator === 'in'
-      );
-      if (!filter) {
-        throw new Error(`Required 'in' filter for field '${field}' not found`);
-      }
-      return filter.value;
-    },
-    optionalIn(field) {
-      const filter = filters.find(
-        f => f.field.length === 1 && f.field[0] === field && f.operator === 'in'
-      );
-      return filter?.value;
-    },
-    // ... other methods
-  };
-}
-```
-
-### Pros
-- ✅ Type-safe field names (caught at compile time)
-- ✅ Return types inferred from schema
-- ✅ Minimal API surface change
-- ✅ Can be implemented as a utility without changing core
-- ✅ Gradual adoption - existing code continues to work
-
-### Cons
-- ❌ Still requires manual extraction calls inside queryFn
-- ❌ Cannot statically verify that queries provide required filters
-- ❌ Runtime errors still possible if filter not provided by query
-
----
-
-## Option 2: Declarative Required Predicates
-
-### Concept
-
-Allow collections to declare their required predicates upfront, with the system validating them and passing typed values to queryFn.
-
-### API Design
-
-```typescript
-const accountExternalDataCollection = createCollection(
-  queryCollectionOptions({
-    syncMode: "on-demand",
-    queryKey: ["accounts", "externalData"],
-
-    // Declare required predicates
-    requiredPredicates: {
-      accountId: 'in',  // or { operator: 'in', required: true }
-    } as const,
-
-    // queryFn receives typed predicates object
-    queryFn: async (ctx, predicates) => {
-      // ✅ predicates.accountId is typed as ExternalAccountId[]
-      return fetchAccountsExternalData(predicates.accountId);
+    // queryFn receives typed predicates - NO manual type annotation needed!
+    queryFn: async (ctx, { accountId }) => {
+      // ✅ accountId is automatically ExternalAccountId[]
+      // (inferred from T['accountId'] + 'in' operator)
+      return fetchAccountsExternalData(accountId);
     },
 
     getKey: (data) => data.accountId,
@@ -211,7 +150,7 @@ const accountExternalDataCollection = createCollection(
 );
 ```
 
-### Advanced Version with Full Type Inference
+### With Optional Predicates
 
 ```typescript
 const accountExternalDataCollection = createCollection(
@@ -219,14 +158,14 @@ const accountExternalDataCollection = createCollection(
     syncMode: "on-demand",
     queryKey: ["accounts", "externalData"],
 
-    // Type-safe predicate declarations
-    predicates: definePredicates<AccountExternalData>()
-      .require('accountId', 'in')    // ExternalAccountId[]
-      .optional('status', 'eq'),      // string | undefined
+    predicates: {
+      accountId: 'in',                              // Required
+      status: { operator: 'eq', required: false },  // Optional
+    },
 
     queryFn: async (ctx, { accountId, status }) => {
-      // accountId: ExternalAccountId[] (required)
-      // status: string | undefined (optional)
+      // accountId: ExternalAccountId[] (always present)
+      // status: string | undefined (may be absent)
       return fetchAccountsExternalData(accountId, status);
     },
 
@@ -236,62 +175,77 @@ const accountExternalDataCollection = createCollection(
 );
 ```
 
-### Implementation Approach
+### How Types Flow (Implementation)
 
 ```typescript
-type OperatorValueType<T, Op extends string> =
-  Op extends 'in' ? Array<T> :
-  Op extends 'eq' | 'gt' | 'gte' | 'lt' | 'lte' ? T :
-  never;
-
-type PredicateDefinition<T extends object> = {
-  [K in keyof T]?: {
-    operator: 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in';
-    required?: boolean;
+// The key insight: T is already known from the collection config
+type QueryCollectionConfig<
+  T extends object,  // <-- This is already inferred from getKey, queryFn return, etc.
+  // ...
+> = {
+  // Predicates keys are constrained to keyof T
+  predicates?: {
+    [K in keyof T]?: PredicateOperator | { operator: PredicateOperator; required?: boolean }
   };
-};
 
-type PredicateValues<T extends object, P extends PredicateDefinition<T>> = {
-  [K in keyof P]: P[K] extends { operator: infer Op extends string; required: true }
-    ? OperatorValueType<T[K & keyof T], Op>
-    : P[K] extends { operator: infer Op extends string }
-    ? OperatorValueType<T[K & keyof T], Op> | undefined
-    : never;
-};
-
-interface QueryCollectionConfig<
-  T extends object,
-  P extends PredicateDefinition<T> = {},
-  // ... other generics
-> {
-  requiredPredicates?: P;
+  // queryFn's second arg is automatically typed based on predicates + T
   queryFn: (
     ctx: QueryFunctionContext,
-    predicates: PredicateValues<T, P>
+    predicates: InferPredicateValues<T, typeof predicates>
   ) => Promise<T[]>;
-  // ...
+}
+
+// Type computation happens automatically:
+// 1. predicates: { accountId: 'in' }
+// 2. T = AccountExternalData, so T['accountId'] = ExternalAccountId
+// 3. 'in' operator means Array<T['accountId']> = ExternalAccountId[]
+// 4. queryFn receives { accountId: ExternalAccountId[] }
+```
+
+### Shorthand Syntax Options
+
+```typescript
+// Option A: String shorthand (required by default)
+predicates: {
+  accountId: 'in',      // Required, ExternalAccountId[]
+  category: 'eq',       // Required, string
+}
+
+// Option B: Object for optional + extra config
+predicates: {
+  accountId: { operator: 'in' },                    // Required (default)
+  status: { operator: 'eq', required: false },      // Optional
+  price: { operator: 'gt', required: false },       // Optional
+}
+
+// Option C: Tuple shorthand [operator, required?]
+predicates: {
+  accountId: ['in'],           // Required
+  status: ['eq', false],       // Optional
 }
 ```
 
 ### Pros
-- ✅ Fully type-safe predicate access
+- ✅ Zero manual type annotations - everything inferred from T
+- ✅ Field names validated at compile time (typos caught!)
+- ✅ Fully type-safe predicate values in queryFn
 - ✅ Declarative - clear what the collection needs
-- ✅ Could enable compile-time validation of queries
 - ✅ Self-documenting API requirements
+- ✅ Could enable compile-time query validation (future)
 
 ### Cons
-- ❌ Larger API surface change
-- ❌ Complex type machinery
-- ❌ Migration effort for existing collections
-- ❌ Doesn't handle complex predicate patterns (nested fields, OR conditions)
+- ❌ API surface change to QueryCollectionConfig
+- ❌ Additional generic type parameter complexity internally
+- ❌ Doesn't handle complex predicates (nested fields, OR conditions)
 
 ---
 
-## Option 3: Predicate Mapper Function
+## Option 2: Predicate Mapper Function
 
 ### Concept
 
-Add a separate `mapPredicates` function that transforms raw LoadSubsetOptions into typed args, keeping queryFn focused on data fetching.
+Add a `mapPredicates` function that transforms `LoadSubsetOptions` into typed args.
+**The mapper receives a typed helper that knows about `T`, so no manual type annotations needed.**
 
 ### API Design
 
@@ -301,15 +255,18 @@ const accountExternalDataCollection = createCollection(
     syncMode: "on-demand",
     queryKey: ["accounts", "externalData"],
 
-    // Transform predicates to typed args
-    mapPredicates: (opts): ExternalAccountId[] => {
-      const filters = extractTypedFilters<AccountExternalData>(opts);
+    // mapPredicates receives a typed helper based on T
+    mapPredicates: (opts, filters) => {
+      // filters.requireIn knows valid field names from T
+      // ✅ 'accountId' autocompletes
+      // ❌ 'acountId' would be compile error
       return filters.requireIn('accountId');
+      // Returns ExternalAccountId[] (inferred from T['accountId'])
     },
 
-    // queryFn receives the mapped args
+    // queryFn receives the return type of mapPredicates
     queryFn: async (ctx, accountIds) => {
-      // ✅ accountIds is typed as ExternalAccountId[]
+      // ✅ accountIds is ExternalAccountId[] (inferred, not annotated!)
       return fetchAccountsExternalData(accountIds);
     },
 
@@ -319,76 +276,98 @@ const accountExternalDataCollection = createCollection(
 );
 ```
 
-### With Validation
+### With Multiple Fields
 
 ```typescript
-const accountExternalDataCollection = createCollection(
+const collection = createCollection(
   queryCollectionOptions({
     syncMode: "on-demand",
-    queryKey: ["accounts", "externalData"],
+    queryKey: ["products"],
 
-    mapPredicates: {
-      // Schema for validation
-      schema: z.object({
-        accountIds: z.array(z.string().brand('ExternalAccountId')),
-      }),
-      // Transform function
-      transform: (opts) => {
-        const filters = parseLoadSubsetOptions(opts);
-        const inFilter = filters.filters.find(
-          f => f.field[0] === 'accountId' && f.operator === 'in'
-        );
-        return { accountIds: inFilter?.value ?? [] };
-      },
+    mapPredicates: (opts, filters) => ({
+      // All field names validated against Product type
+      categoryIds: filters.requireIn('categoryId'),   // string[]
+      minPrice: filters.optionalGt('price'),          // number | undefined
+      maxPrice: filters.optionalLt('price'),          // number | undefined
+    }),
+
+    queryFn: async (ctx, { categoryIds, minPrice, maxPrice }) => {
+      // All types inferred from T and operators
+      return api.getProducts({ categoryIds, minPrice, maxPrice });
     },
 
-    queryFn: async (ctx, { accountIds }) => {
-      return fetchAccountsExternalData(accountIds);
-    },
-
-    getKey: (data) => data.accountId,
+    getKey: (data) => data.id,
     queryClient,
   })
 );
+```
+
+### How the Typed Helper Works
+
+```typescript
+// The filters helper is automatically typed based on T
+type TypedFilters<T> = {
+  requireIn<K extends keyof T & string>(field: K): Array<T[K]>;
+  optionalIn<K extends keyof T & string>(field: K): Array<T[K]> | undefined;
+  requireEq<K extends keyof T & string>(field: K): T[K];
+  optionalEq<K extends keyof T & string>(field: K): T[K] | undefined;
+  requireGt<K extends keyof T & string>(field: K): T[K];
+  // ... etc
+};
+
+// In QueryCollectionConfig<T>:
+mapPredicates?: (
+  opts: LoadSubsetOptions | undefined,
+  filters: TypedFilters<T>  // <-- Automatically typed based on T!
+) => TArgs;
+
+queryFn: (ctx: Context, args: TArgs) => Promise<T[]>;  // TArgs inferred from mapPredicates
 ```
 
 ### Pros
-- ✅ Clean separation of concerns
+- ✅ Zero manual type annotations
+- ✅ Field names validated at compile time
 - ✅ Full control over mapping logic
 - ✅ Can handle complex transformations
-- ✅ Typed args in queryFn
-- ✅ Optional schema validation
+- ✅ Flexible - return any shape from mapPredicates
 
 ### Cons
-- ❌ Still requires writing mapping code
-- ❌ No compile-time query validation
+- ❌ Still requires writing mapping code (but it's type-safe!)
 - ❌ Two functions to maintain (mapPredicates + queryFn)
+- ❌ No compile-time query validation
 
 ---
 
-## Option 4: Collection Parameters (Query Builder Integration)
+## Option 3: Collection Parameters (Query Builder Integration)
 
 ### Concept
 
-Allow collections to declare explicit typed parameters that must be provided when used in queries. This enables compile-time checking that queries provide required data.
+Collections declare a "parameter" - a field they need values for. The query builder
+validates that queries provide this parameter. **Types flow from the collection's
+item type - the parameter field must be a valid field of `T`.**
 
 ### API Design
 
 ```typescript
-// Define collection with typed parameter
+interface AccountExternalData {
+  accountId: ExternalAccountId;
+  data: object;
+}
+
+// Define collection with parameter requirement
 const accountExternalDataCollection = createCollection(
   queryCollectionOptions({
     syncMode: "on-demand",
     queryKey: ["accounts", "externalData"],
 
-    // Declare the parameter this collection needs
-    parameter: {
-      name: 'accountIds',
-      type: {} as ExternalAccountId[],  // Type marker
-    },
+    // Declare parameter - field name validated against T
+    // ✅ 'accountId' is a valid field of AccountExternalData
+    // ❌ 'acountId' would be compile error
+    parameter: 'accountId',  // Will receive ExternalAccountId[] (T['accountId'][])
 
-    // queryFn receives typed parameter
-    queryFn: async (ctx, accountIds: ExternalAccountId[]) => {
+    // queryFn receives typed parameter - type inferred from T['accountId']
+    queryFn: async (ctx, accountIds) => {
+      // ✅ accountIds is ExternalAccountId[] (no annotation needed!)
       return fetchAccountsExternalData(accountIds);
     },
 
@@ -397,14 +376,14 @@ const accountExternalDataCollection = createCollection(
   })
 );
 
-// Query builder knows about required parameters
+// Query builder validates parameter is provided
 createCollection(
   liveQueryCollectionOptions({
     query: (q) =>
       q.from({
         data: accountExternalDataCollection,
-        // ✅ Type checked - must provide ExternalAccountId[]
-        accountIds: q
+        // ✅ Type checked - must provide values assignable to ExternalAccountId
+        accountId: q
           .from({ account: accountCollection })
           .select(({ account }) => account.externalId),
       }),
@@ -422,10 +401,8 @@ createCollection(
       q.from({ account: accountCollection })
        .with({
          data: accountExternalDataCollection,
-         // Bind parameter from query context
-         using: ({ account }) => ({
-           accountIds: account.externalId  // Auto-collected into array
-         })
+         // Parameter binding - type checked!
+         using: ({ account }) => account.externalId  // Must be ExternalAccountId
        })
        .select(({ account, data }) => ({ ...account, ...data })),
     startSync: true,
@@ -433,58 +410,63 @@ createCollection(
 );
 ```
 
-### Implementation Considerations
+### How Types Flow
 
-This would require:
-1. New generic type parameter on collection config for parameters
-2. Query builder changes to accept and validate parameters
-3. Runtime collection of parameter values during query execution
-4. Predicate generation from parameters (for caching/deduplication)
+```typescript
+// Collection knows T = AccountExternalData
+// parameter: 'accountId' means:
+//   1. Validate 'accountId' ∈ keyof T ✓
+//   2. Parameter type = Array<T['accountId']> = ExternalAccountId[]
+//   3. queryFn receives (ctx, accountIds: ExternalAccountId[])
+
+// In query builder:
+// q.from({ data: collection, accountId: subquery })
+//   1. Check collection has parameter 'accountId'
+//   2. Check subquery result type assignable to ExternalAccountId
+//   3. Compile error if types don't match!
+```
 
 ### Pros
-- ✅ Compile-time validation that queries provide required data
+- ✅ Zero manual type annotations
+- ✅ Compile-time validation in query builder (queries MUST provide parameter)
 - ✅ Clean, declarative API
 - ✅ Clear separation between "what data is needed" and "how to fetch it"
 - ✅ Enables smart batching of requests
 
 ### Cons
-- ❌ Significant query builder changes
-- ❌ New concept to learn
-- ❌ May not cover all predicate patterns (complex WHERE clauses)
+- ❌ Significant query builder changes required
+- ❌ New concept to learn (parameterized collections)
+- ❌ Only works for single-field parameters (not complex predicates)
 - ❌ Breaking change to collection config types
 
 ---
 
-## Option 5: Predicate Adapters (Reusable Patterns)
+## Option 4: Predicate Adapters (Reusable Patterns)
 
 ### Concept
 
 Create reusable predicate adapter patterns for common API integration scenarios.
+**Adapters are typed based on the collection's `T`, no manual annotations needed.**
 
 ### API Design
 
 ```typescript
-// Define reusable adapter
-const byIds = createPredicateAdapter({
-  field: 'accountId' as const,
-  operator: 'in' as const,
-  required: true,
-  transform: (ids: ExternalAccountId[]) => ({
-    queryParams: { ids: ids.join(',') },
-  }),
-});
-
+// Adapters know about T when attached to a collection
 const accountExternalDataCollection = createCollection(
   queryCollectionOptions({
     syncMode: "on-demand",
     queryKey: ["accounts", "externalData"],
 
-    // Use the adapter
-    predicateAdapter: byIds,
+    // Adapter field names validated against T
+    adapter: byField('accountId', 'in', {
+      transform: (ids) => ({ ids: ids.join(',') })
+      // ids is ExternalAccountId[] - inferred from T['accountId']
+    }),
 
     // queryFn receives transformed value
-    queryFn: async (ctx, { queryParams }) => {
-      return fetch(`/api/accounts?${new URLSearchParams(queryParams)}`);
+    queryFn: async (ctx, { ids }) => {
+      // ids is string (from transform return type)
+      return fetch(`/api/accounts?ids=${ids}`).then(r => r.json());
     },
 
     getKey: (data) => data.accountId,
@@ -496,211 +478,124 @@ const accountExternalDataCollection = createCollection(
 ### Composable Adapters
 
 ```typescript
-// Compose multiple adapters
-const accountDataAdapter = composeAdapters(
-  byField('accountId', 'in', { required: true }),
-  byField('status', 'eq', { required: false }),
-  withPagination(),
-);
-
+// Compose multiple field adapters
 const collection = createCollection(
   queryCollectionOptions({
     syncMode: "on-demand",
-    queryKey: ["accounts", "externalData"],
-    predicateAdapter: accountDataAdapter,
+    queryKey: ["products"],
+
+    adapter: composeAdapters(
+      // Field names validated against Product type
+      byField('categoryId', 'in'),      // string[]
+      byField('price', 'gt', { as: 'minPrice' }),  // number
+      byField('price', 'lt', { as: 'maxPrice' }),  // number
+      withPagination(),
+    ),
+
     queryFn: async (ctx, params) => {
-      // params is typed based on composed adapters
-      // { accountId: ExternalAccountId[], status?: string, page?: number, limit?: number }
-      return api.fetchAccounts(params);
+      // params: { categoryId: string[], minPrice: number, maxPrice: number, page?: number, limit?: number }
+      return api.fetchProducts(params);
     },
-    getKey: (data) => data.accountId,
+
+    getKey: (data) => data.id,
     queryClient,
   })
 );
 ```
 
-### Pre-built Adapters Library
+### Pre-built Adapters for Common Backends
 
 ```typescript
-import {
-  restApiAdapter,
-  graphqlAdapter,
-  hasuraAdapter,
-  supabaseAdapter
-} from '@tanstack/db-adapters';
+import { restApiAdapter, hasuraAdapter } from '@tanstack/db-adapters';
 
-// REST API with standard query params
+// REST API - auto-converts predicates to query params
 const collection = createCollection(
   queryCollectionOptions({
-    predicateAdapter: restApiAdapter({
-      baseUrl: '/api/products',
-      mapping: {
-        category: 'category',
-        price: { gt: 'min_price', lt: 'max_price' },
-      }
+    adapter: restApiAdapter('/api/products', {
+      // Field mappings validated against T
+      category: 'cat',
+      price: { gt: 'min_price', lt: 'max_price' },
     }),
     queryFn: async (ctx, { url }) => fetch(url).then(r => r.json()),
-    // ...
+    getKey: (data) => data.id,
+    queryClient,
   })
 );
 
-// GraphQL/Hasura style
+// Hasura/GraphQL - auto-converts to where clause
 const collection = createCollection(
   queryCollectionOptions({
-    predicateAdapter: hasuraAdapter<Product>(),
+    adapter: hasuraAdapter(),  // Uses T for field validation
     queryFn: async (ctx, { where, order_by, limit }) => {
       return graphql.query({ query: PRODUCTS_QUERY, variables: { where, order_by, limit } });
     },
-    // ...
-  })
-);
-```
-
-### Pros
-- ✅ Reusable patterns across collections
-- ✅ Can create ecosystem of adapters for common backends
-- ✅ Type-safe with good inference
-- ✅ Flexible composition
-
-### Cons
-- ❌ Another abstraction layer
-- ❌ May not cover all edge cases
-- ❌ Learning curve for adapter patterns
-
----
-
-## Option 6: Enhanced parseLoadSubsetOptions with Schema
-
-### Concept
-
-Enhance the existing `parseLoadSubsetOptions` to accept a schema/type parameter for better type inference.
-
-### API Design
-
-```typescript
-import { parseLoadSubsetOptions } from '@tanstack/db';
-
-const accountExternalDataCollection = createCollection(
-  queryCollectionOptions({
-    syncMode: "on-demand",
-    queryKey: ["accounts", "externalData"],
-    queryFn: async (ctx) => {
-      // Pass schema type for type-safe access
-      const parsed = parseLoadSubsetOptions<AccountExternalData>(
-        ctx.meta.loadSubsetOptions,
-        {
-          // Declare expected filters with their operators
-          expect: {
-            accountId: { operator: 'in', required: true },
-            status: { operator: 'eq', required: false },
-          }
-        }
-      );
-
-      // ✅ Type safe: parsed.filters.accountId is ExternalAccountId[]
-      // ✅ Type safe: parsed.filters.status is string | undefined
-      // ✅ Throws if accountId filter missing (required: true)
-
-      return fetchAccountsExternalData(
-        parsed.filters.accountId,
-        parsed.filters.status
-      );
-    },
-    getKey: (data) => data.accountId,
+    getKey: (data) => data.id,
     queryClient,
   })
 );
 ```
 
-### Implementation
-
-```typescript
-type ExpectedFilters<T> = {
-  [K in keyof T]?: {
-    operator: 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in';
-    required?: boolean;
-  };
-};
-
-type ParsedFilters<T, E extends ExpectedFilters<T>> = {
-  [K in keyof E]: E[K] extends { operator: infer Op; required: true }
-    ? OperatorValueType<T[K & keyof T], Op & string>
-    : E[K] extends { operator: infer Op }
-    ? OperatorValueType<T[K & keyof T], Op & string> | undefined
-    : never;
-};
-
-function parseLoadSubsetOptions<
-  T extends object,
-  E extends ExpectedFilters<T> = {}
->(
-  options: LoadSubsetOptions | undefined,
-  config?: { expect?: E }
-): {
-  filters: ParsedFilters<T, E>;
-  sorts: ParsedOrderBy[];
-  limit?: number;
-} {
-  // Implementation validates and extracts typed filters
-}
-```
-
 ### Pros
-- ✅ Minimal API change - enhances existing function
-- ✅ Backward compatible
-- ✅ Opt-in type safety
-- ✅ Validation at parse time
+- ✅ Zero manual type annotations
+- ✅ Field names validated at compile time
+- ✅ Reusable patterns across collections
+- ✅ Ecosystem potential (adapters for Supabase, Prisma, etc.)
+- ✅ Flexible composition
 
 ### Cons
-- ❌ Still inside queryFn (not declarative at collection level)
-- ❌ No compile-time query validation
-- ❌ Slightly verbose declaration
+- ❌ Another abstraction layer to learn
+- ❌ May not cover all edge cases
+- ❌ Adapter library maintenance burden
 
 ---
 
 ## Recommendation
 
-Based on the analysis, I recommend a **phased approach**:
+Based on the analysis, I recommend **Option 1: Declarative Required Predicates** as the primary solution.
 
-### Phase 1: Enhanced Type-Safe Extraction (Low effort, high value)
+### Why Option 1?
 
-Implement **Option 6** (Enhanced parseLoadSubsetOptions) as it:
-- Requires minimal changes
-- Is backward compatible
-- Provides immediate type safety benefits
-- Can be shipped quickly
+1. **Zero manual type annotations** - Types flow from `T`
+2. **Minimal API change** - Just add `predicates` to config
+3. **Compile-time field validation** - Typos caught immediately
+4. **Declarative** - Clear what the collection needs
+5. **Simple mental model** - No new concepts beyond "declare what you need"
 
-```typescript
-// Quick win - type-safe extraction
-const parsed = parseLoadSubsetOptions<AccountExternalData>(
-  ctx.meta.loadSubsetOptions,
-  { expect: { accountId: { operator: 'in', required: true } } }
-);
-```
-
-### Phase 2: Declarative Predicates (Medium effort)
-
-Implement **Option 2** (Declarative Required Predicates) to allow collections to declare their requirements upfront:
+### Proposed API
 
 ```typescript
-// Declarative requirements
-const collection = createCollection(
+const accountExternalDataCollection = createCollection(
   queryCollectionOptions({
-    requiredPredicates: { accountId: 'in' },
-    queryFn: async (ctx, { accountId }) => { /* typed */ },
+    syncMode: "on-demand",
+    queryKey: ["accounts", "externalData"],
+
+    // Declare predicates - field names validated against T
+    predicates: {
+      accountId: 'in',  // Required, ExternalAccountId[]
+    },
+
+    // queryFn receives typed predicates
+    queryFn: async (ctx, { accountId }) => {
+      // accountId is ExternalAccountId[] - automatically inferred!
+      return fetchAccountsExternalData(accountId);
+    },
+
+    getKey: (data) => data.accountId,
+    queryClient,
   })
 );
 ```
 
-### Phase 3: Query Builder Integration (Higher effort, highest value)
+### Future Enhancement: Query Builder Integration (Option 3)
 
-Implement **Option 4** (Collection Parameters) for compile-time query validation:
+Once Option 1 is stable, Option 3 (Collection Parameters) could be added for
+compile-time query validation:
 
 ```typescript
-// Full type safety across query boundaries
+// Future: queries that don't provide required predicates fail at compile time
 q.from({
   data: accountExternalDataCollection,
-  accountIds: subquery.select(x => x.id), // Compile-time checked
+  accountId: subquery.select(x => x.externalId),  // Type checked!
 })
 ```
 
@@ -709,21 +604,47 @@ q.from({
 ## Open Questions
 
 1. **How should nested field paths be handled?** (e.g., `user.address.city`)
+   - Could use dot notation: `predicates: { 'address.city': 'eq' }`
+   - Or nested objects: `predicates: { address: { city: 'eq' } }`
 
 2. **Should we support OR conditions in required predicates?**
+   - Current design assumes AND-ed predicates
+   - OR might need different API: `predicates: { $or: [{ status: 'eq' }, { priority: 'eq' }] }`
 
-3. **How do collection parameters interact with predicate pushdown optimization?**
+3. **How do declared predicates interact with predicate pushdown optimization?**
+   - Declared predicates should inform what can be pushed down
+   - May enable more aggressive optimization
 
-4. **Should parameters be passed via join conditions vs explicit args?**
+4. **What happens if a query doesn't provide all required predicates?**
+   - Runtime error (current behavior)?
+   - TypeScript error (with Option 3)?
+   - Or both?
 
 5. **How do we handle dynamic/runtime-determined predicates?**
+   - Some use cases need predicates that vary based on runtime conditions
+   - May need escape hatch for complex scenarios
+
+6. **Should `predicates` be mutually exclusive with raw `loadSubsetOptions` access?**
+   - Or can they coexist for migration/flexibility?
+
+---
+
+## Comparison Summary
+
+| Option | Manual Types | Field Validation | Compile-Time Query Check | Effort |
+|--------|--------------|------------------|--------------------------|--------|
+| 1. Declarative Predicates | ❌ None | ✅ Yes | ❌ No | Low |
+| 2. Mapper Function | ❌ None | ✅ Yes | ❌ No | Low |
+| 3. Collection Parameters | ❌ None | ✅ Yes | ✅ Yes | High |
+| 4. Predicate Adapters | ❌ None | ✅ Yes | ❌ No | Medium |
 
 ---
 
 ## Related Work
 
-- TanStack Query's `meta` typing via module augmentation
-- Prisma's typed query builder
-- tRPC's end-to-end type safety
-- GraphQL's typed variables
-- Drizzle ORM's type-safe query builder
+- **TanStack Query** - `meta` typing via module augmentation
+- **Prisma** - Typed query builder with compile-time field validation
+- **tRPC** - End-to-end type safety between client and server
+- **Drizzle ORM** - Type-safe SQL query builder
+- **Zod** - Runtime schema validation with TypeScript inference
+- **GraphQL Code Generator** - Types generated from schema

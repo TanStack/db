@@ -1,12 +1,12 @@
 /**
  * Implementation Sketches for Query Predicate to API Mapping
  *
- * This file contains TypeScript implementation sketches for the various
- * options discussed in query-predicate-api-mapping.md
+ * KEY PRINCIPLE: All types flow from the collection's item type T.
+ * Users should NEVER need to manually specify types.
  */
 
 // =============================================================================
-// SETUP: Types used across all examples
+// SETUP: Example types
 // =============================================================================
 
 type ExternalAccountId = string & { __brand: 'ExternalAccountId' }
@@ -18,627 +18,460 @@ interface Account {
 interface AccountExternalData {
   accountId: ExternalAccountId
   data: object
+  status?: string
+}
+
+interface Product {
+  id: string
+  categoryId: string
+  price: number
+  name: string
 }
 
 declare function fetchAccountsExternalData(
-  ids: ExternalAccountId[]
+  ids: ExternalAccountId[],
+  status?: string
 ): Promise<AccountExternalData[]>
 
 // Placeholder types from the library
 type LoadSubsetOptions = {
-  where?: BasicExpression<boolean>
-  orderBy?: OrderBy
+  where?: unknown
+  orderBy?: unknown
   limit?: number
 }
-type BasicExpression<T> = unknown
-type OrderBy = unknown
 type QueryFunctionContext = { meta: { loadSubsetOptions?: LoadSubsetOptions } }
 type QueryClient = unknown
-type Collection<T> = unknown
-type QueryCollectionConfig<T> = unknown
 
 // =============================================================================
-// OPTION 1: Schema-Aware Typed Filter Extraction
+// OPTION 1: Declarative Required Predicates (RECOMMENDED)
 // =============================================================================
 
-namespace Option1 {
-  // The extraction helper type
-  type FilterExtractor<T> = {
+namespace Option1_DeclarativePredicates {
+  // ---------------------------------------------------------------------------
+  // Type utilities
+  // ---------------------------------------------------------------------------
+
+  type PredicateOperator = 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in'
+
+  // Map operator to value type
+  type OperatorValueType<TField, Op extends PredicateOperator> = Op extends 'in'
+    ? Array<TField>
+    : TField
+
+  // Predicate spec: either shorthand string or full object
+  type PredicateSpec =
+    | PredicateOperator // shorthand, required by default
+    | { operator: PredicateOperator; required?: boolean }
+
+  // Normalize shorthand to full spec
+  type NormalizeSpec<S extends PredicateSpec> = S extends PredicateOperator
+    ? { operator: S; required: true }
+    : S
+
+  // Predicates declaration constrained to keys of T
+  type PredicatesDeclaration<T extends object> = {
+    [K in keyof T]?: PredicateSpec
+  }
+
+  // Compute the values object from predicates declaration
+  type PredicateValues<
+    T extends object,
+    P extends PredicatesDeclaration<T>,
+  > = {
+    [K in keyof P as P[K] extends undefined ? never : K]: NormalizeSpec<
+      NonNullable<P[K]>
+    > extends { operator: infer Op extends PredicateOperator; required: true }
+      ? OperatorValueType<K extends keyof T ? T[K] : never, Op>
+      : NormalizeSpec<NonNullable<P[K]>> extends {
+            operator: infer Op extends PredicateOperator
+          }
+        ? OperatorValueType<K extends keyof T ? T[K] : never, Op> | undefined
+        : never
+  }
+
+  // ---------------------------------------------------------------------------
+  // Collection config with predicates
+  // ---------------------------------------------------------------------------
+
+  interface QueryCollectionConfig<
+    T extends object,
+    P extends PredicatesDeclaration<T> = Record<string, never>,
+  > {
+    syncMode?: 'eager' | 'on-demand'
+    queryKey: unknown[]
+    predicates?: P
+    // queryFn signature changes based on whether predicates is defined
+    queryFn: P extends Record<string, never>
+      ? (ctx: QueryFunctionContext) => Promise<T[]>
+      : (ctx: QueryFunctionContext, predicates: PredicateValues<T, P>) => Promise<T[]>
+    getKey: (item: T) => string | number
+    queryClient: QueryClient
+  }
+
+  // Factory function that infers T from getKey/queryFn and P from predicates
+  function queryCollectionOptions<
+    T extends object,
+    P extends PredicatesDeclaration<T> = Record<string, never>,
+  >(config: QueryCollectionConfig<T, P>): QueryCollectionConfig<T, P> {
+    return config
+  }
+
+  // ---------------------------------------------------------------------------
+  // Usage examples
+  // ---------------------------------------------------------------------------
+
+  // Example 1: Simple required predicate
+  const example1 = queryCollectionOptions({
+    syncMode: 'on-demand',
+    queryKey: ['accounts', 'externalData'],
+
+    // ✅ 'accountId' autocompletes and type-checks against AccountExternalData
+    // ❌ 'acountId' would be a compile error (typo!)
+    predicates: {
+      accountId: 'in',
+    },
+
+    // ✅ accountId is automatically ExternalAccountId[]
+    // No manual type annotation needed!
+    queryFn: async (ctx, { accountId }) => {
+      return fetchAccountsExternalData(accountId)
+    },
+
+    getKey: (data: AccountExternalData) => data.accountId,
+    queryClient: {} as QueryClient,
+  })
+
+  // Example 2: Required + optional predicates
+  const example2 = queryCollectionOptions({
+    syncMode: 'on-demand',
+    queryKey: ['accounts', 'externalData'],
+
+    predicates: {
+      accountId: 'in', // Required
+      status: { operator: 'eq', required: false }, // Optional
+    },
+
+    queryFn: async (ctx, { accountId, status }) => {
+      // accountId: ExternalAccountId[] (always present)
+      // status: string | undefined (may be absent)
+      return fetchAccountsExternalData(accountId, status)
+    },
+
+    getKey: (data: AccountExternalData) => data.accountId,
+    queryClient: {} as QueryClient,
+  })
+
+  // Example 3: Multiple predicates for products
+  const example3 = queryCollectionOptions({
+    syncMode: 'on-demand',
+    queryKey: ['products'],
+
+    predicates: {
+      categoryId: 'in', // string[]
+      price: { operator: 'gt', required: false }, // number | undefined
+    },
+
+    queryFn: async (ctx, { categoryId, price }) => {
+      // categoryId: string[]
+      // price: number | undefined
+      const params = new URLSearchParams()
+      params.set('categories', categoryId.join(','))
+      if (price !== undefined) {
+        params.set('min_price', String(price))
+      }
+      const response = await fetch(`/api/products?${params}`)
+      return response.json()
+    },
+
+    getKey: (data: Product) => data.id,
+    queryClient: {} as QueryClient,
+  })
+
+  // Example 4: No predicates (backward compatible)
+  const example4 = queryCollectionOptions({
+    syncMode: 'eager',
+    queryKey: ['all-products'],
+
+    // No predicates - queryFn has original signature
+    queryFn: async (ctx) => {
+      const response = await fetch('/api/products')
+      return response.json()
+    },
+
+    getKey: (data: Product) => data.id,
+    queryClient: {} as QueryClient,
+  })
+}
+
+// =============================================================================
+// OPTION 2: Predicate Mapper Function
+// =============================================================================
+
+namespace Option2_MapperFunction {
+  // ---------------------------------------------------------------------------
+  // Typed filter helper (automatically knows about T)
+  // ---------------------------------------------------------------------------
+
+  type TypedFilters<T extends object> = {
     requireIn<K extends keyof T & string>(field: K): Array<T[K]>
     optionalIn<K extends keyof T & string>(field: K): Array<T[K]> | undefined
     requireEq<K extends keyof T & string>(field: K): T[K]
     optionalEq<K extends keyof T & string>(field: K): T[K] | undefined
     requireGt<K extends keyof T & string>(field: K): T[K]
-    requireLt<K extends keyof T & string>(field: K): T[K]
     optionalGt<K extends keyof T & string>(field: K): T[K] | undefined
+    requireLt<K extends keyof T & string>(field: K): T[K]
     optionalLt<K extends keyof T & string>(field: K): T[K] | undefined
   }
 
-  // Implementation
-  function extractTypedFilters<T extends object>(
-    options: LoadSubsetOptions | undefined
-  ): FilterExtractor<T> {
-    // const { filters } = parseLoadSubsetOptions(options)
-    const filters: Array<{
-      field: string[]
-      operator: string
-      value: unknown
-    }> = []
+  // ---------------------------------------------------------------------------
+  // Collection config with mapPredicates
+  // ---------------------------------------------------------------------------
 
-    const findFilter = (field: string, operator: string) =>
-      filters.find(
-        (f) =>
-          f.field.length === 1 && f.field[0] === field && f.operator === operator
-      )
-
-    return {
-      requireIn(field) {
-        const filter = findFilter(field, 'in')
-        if (!filter) {
-          throw new Error(`Required 'in' filter for field '${field}' not found`)
-        }
-        return filter.value as any
-      },
-      optionalIn(field) {
-        return findFilter(field, 'in')?.value as any
-      },
-      requireEq(field) {
-        const filter = findFilter(field, 'eq')
-        if (!filter) {
-          throw new Error(`Required 'eq' filter for field '${field}' not found`)
-        }
-        return filter.value as any
-      },
-      optionalEq(field) {
-        return findFilter(field, 'eq')?.value as any
-      },
-      requireGt(field) {
-        const filter = findFilter(field, 'gt')
-        if (!filter) {
-          throw new Error(`Required 'gt' filter for field '${field}' not found`)
-        }
-        return filter.value as any
-      },
-      requireLt(field) {
-        const filter = findFilter(field, 'lt')
-        if (!filter) {
-          throw new Error(`Required 'lt' filter for field '${field}' not found`)
-        }
-        return filter.value as any
-      },
-      optionalGt(field) {
-        return findFilter(field, 'gt')?.value as any
-      },
-      optionalLt(field) {
-        return findFilter(field, 'lt')?.value as any
-      },
-    }
-  }
-
-  // Usage example
-  async function exampleUsage(ctx: QueryFunctionContext) {
-    const filters = extractTypedFilters<AccountExternalData>(
-      ctx.meta.loadSubsetOptions
-    )
-
-    // ✅ Type error if field doesn't exist: filters.requireIn('nonexistent')
-    // ✅ Returns ExternalAccountId[] automatically
-    const accountIds = filters.requireIn('accountId')
-
-    return fetchAccountsExternalData(accountIds)
-  }
-}
-
-// =============================================================================
-// OPTION 2: Declarative Required Predicates
-// =============================================================================
-
-namespace Option2 {
-  // Type utilities
-  type OperatorValueType<T, Op extends string> = Op extends 'in'
-    ? Array<T>
-    : Op extends 'eq' | 'gt' | 'gte' | 'lt' | 'lte'
-      ? T
-      : never
-
-  type PredicateSpec = {
-    operator: 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in'
-    required?: boolean
-  }
-
-  type PredicateDefinition<T extends object> = {
-    [K in keyof T]?: PredicateSpec | 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in'
-  }
-
-  // Normalize shorthand ('in') to full spec ({ operator: 'in', required: true })
-  type NormalizeSpec<S> = S extends string
-    ? { operator: S; required: true }
-    : S extends PredicateSpec
-      ? S
-      : never
-
-  type PredicateValues<
-    T extends object,
-    P extends PredicateDefinition<T>,
-  > = {
-    [K in keyof P as P[K] extends undefined ? never : K]: NormalizeSpec<
-      P[K]
-    > extends {
-      operator: infer Op extends string
-      required: true
-    }
-      ? OperatorValueType<K extends keyof T ? T[K] : never, Op>
-      : NormalizeSpec<P[K]> extends { operator: infer Op extends string }
-        ? OperatorValueType<K extends keyof T ? T[K] : never, Op> | undefined
-        : never
-  }
-
-  // Extended config type
-  interface QueryCollectionConfigWithPredicates<
-    T extends object,
-    P extends PredicateDefinition<T> = Record<string, never>,
-  > {
+  interface QueryCollectionConfig<T extends object, TArgs = void> {
     syncMode?: 'eager' | 'on-demand'
     queryKey: unknown[]
-    requiredPredicates?: P
-    queryFn: (
-      ctx: QueryFunctionContext,
-      predicates: PredicateValues<T, P>
-    ) => Promise<T[]>
+    // mapPredicates receives typed helper based on T
+    mapPredicates?: (
+      opts: LoadSubsetOptions | undefined,
+      filters: TypedFilters<T>
+    ) => TArgs
+    // queryFn receives TArgs (inferred from mapPredicates return type)
+    queryFn: TArgs extends void
+      ? (ctx: QueryFunctionContext) => Promise<T[]>
+      : (ctx: QueryFunctionContext, args: TArgs) => Promise<T[]>
     getKey: (item: T) => string | number
     queryClient: QueryClient
   }
 
-  // Factory function
-  function queryCollectionOptions<
-    T extends object,
-    P extends PredicateDefinition<T> = Record<string, never>,
-  >(config: QueryCollectionConfigWithPredicates<T, P>) {
+  function queryCollectionOptions<T extends object, TArgs = void>(
+    config: QueryCollectionConfig<T, TArgs>
+  ): QueryCollectionConfig<T, TArgs> {
     return config
   }
 
-  // Usage example
-  const exampleConfig = queryCollectionOptions<
-    AccountExternalData,
-    { accountId: 'in'; status: { operator: 'eq'; required: false } }
-  >({
+  // ---------------------------------------------------------------------------
+  // Usage examples
+  // ---------------------------------------------------------------------------
+
+  // Example 1: Simple mapper
+  const example1 = queryCollectionOptions({
     syncMode: 'on-demand',
     queryKey: ['accounts', 'externalData'],
-    requiredPredicates: {
-      accountId: 'in',
-      status: { operator: 'eq', required: false },
+
+    mapPredicates: (opts, filters) => {
+      // ✅ 'accountId' autocompletes
+      // ❌ 'acountId' would be compile error
+      return filters.requireIn('accountId')
+      // Returns ExternalAccountId[] (inferred from T['accountId'])
     },
-    queryFn: async (ctx, predicates) => {
-      // ✅ predicates.accountId is ExternalAccountId[]
-      // ✅ predicates.status is string | undefined
-      return fetchAccountsExternalData(predicates.accountId)
-    },
-    getKey: (data) => data.accountId,
-    queryClient: {} as QueryClient,
-  })
-}
 
-// =============================================================================
-// OPTION 3: Predicate Mapper Function
-// =============================================================================
-
-namespace Option3 {
-  interface QueryCollectionConfigWithMapper<T extends object, TArgs> {
-    syncMode?: 'eager' | 'on-demand'
-    queryKey: unknown[]
-    mapPredicates: (options: LoadSubsetOptions | undefined) => TArgs
-    queryFn: (ctx: QueryFunctionContext, args: TArgs) => Promise<T[]>
-    getKey: (item: T) => string | number
-    queryClient: QueryClient
-  }
-
-  function queryCollectionOptions<T extends object, TArgs>(
-    config: QueryCollectionConfigWithMapper<T, TArgs>
-  ) {
-    return config
-  }
-
-  // Usage example
-  const exampleConfig = queryCollectionOptions<
-    AccountExternalData,
-    ExternalAccountId[]
-  >({
-    syncMode: 'on-demand',
-    queryKey: ['accounts', 'externalData'],
-    mapPredicates: (opts) => {
-      // Use Option1's extractTypedFilters here
-      // const filters = extractTypedFilters<AccountExternalData>(opts)
-      // return filters.requireIn('accountId')
-      return [] as ExternalAccountId[] // placeholder
-    },
+    // ✅ accountIds is ExternalAccountId[] (inferred from mapPredicates)
     queryFn: async (ctx, accountIds) => {
-      // ✅ accountIds is typed as ExternalAccountId[]
       return fetchAccountsExternalData(accountIds)
     },
-    getKey: (data) => data.accountId,
+
+    getKey: (data: AccountExternalData) => data.accountId,
+    queryClient: {} as QueryClient,
+  })
+
+  // Example 2: Complex mapping to object
+  const example2 = queryCollectionOptions({
+    syncMode: 'on-demand',
+    queryKey: ['products'],
+
+    mapPredicates: (opts, filters) => ({
+      categoryIds: filters.requireIn('categoryId'), // string[]
+      minPrice: filters.optionalGt('price'), // number | undefined
+      maxPrice: filters.optionalLt('price'), // number | undefined
+    }),
+
+    queryFn: async (ctx, { categoryIds, minPrice, maxPrice }) => {
+      // All types inferred automatically
+      const params = new URLSearchParams()
+      params.set('categories', categoryIds.join(','))
+      if (minPrice !== undefined) params.set('min_price', String(minPrice))
+      if (maxPrice !== undefined) params.set('max_price', String(maxPrice))
+      const response = await fetch(`/api/products?${params}`)
+      return response.json()
+    },
+
+    getKey: (data: Product) => data.id,
     queryClient: {} as QueryClient,
   })
 }
 
 // =============================================================================
-// OPTION 4: Collection Parameters (Query Builder Integration)
+// OPTION 3: Collection Parameters (Query Builder Integration)
 // =============================================================================
 
-namespace Option4 {
-  // Parameter definition
-  interface CollectionParameter<TName extends string, TType> {
-    name: TName
-    type: TType
-    required?: boolean
-  }
+namespace Option3_CollectionParameters {
+  // ---------------------------------------------------------------------------
+  // Parameterized collection types
+  // ---------------------------------------------------------------------------
 
-  // Collection config with parameter
-  interface ParameterizedCollectionConfig<
+  interface QueryCollectionConfig<
     T extends object,
-    TParam extends CollectionParameter<string, unknown>,
+    TParam extends keyof T & string = never,
   > {
     syncMode?: 'eager' | 'on-demand'
     queryKey: unknown[]
-    parameter: TParam
-    queryFn: (ctx: QueryFunctionContext, param: TParam['type']) => Promise<T[]>
+    // Parameter field must be a valid key of T
+    parameter?: TParam
+    // queryFn receives array of T[TParam] when parameter is defined
+    queryFn: [TParam] extends [never]
+      ? (ctx: QueryFunctionContext) => Promise<T[]>
+      : (ctx: QueryFunctionContext, values: Array<T[TParam]>) => Promise<T[]>
     getKey: (item: T) => string | number
     queryClient: QueryClient
   }
 
-  // Query builder types
+  // Collection with parameter info embedded in type
   interface ParameterizedCollection<
     T extends object,
-    TParamName extends string,
-    TParamType,
+    TParam extends keyof T & string,
   > {
     __item: T
-    __paramName: TParamName
-    __paramType: TParamType
+    __param: TParam
+    __paramType: T[TParam]
   }
 
-  // From clause that accepts parameters
-  type FromWithParams<TSource> = TSource extends ParameterizedCollection<
-    infer T,
-    infer TParamName,
-    infer TParamType
-  >
-    ? { [K in TParamName]: TParamType } & { collection: TSource }
-    : { collection: TSource }
-
-  // Factory
-  function createParameterizedCollection<
+  function queryCollectionOptions<
     T extends object,
-    TParamName extends string,
-    TParamType,
-  >(
-    config: ParameterizedCollectionConfig<
-      T,
-      CollectionParameter<TParamName, TParamType>
-    >
-  ): ParameterizedCollection<T, TParamName, TParamType> {
-    return {} as any
+    TParam extends keyof T & string = never,
+  >(config: QueryCollectionConfig<T, TParam>) {
+    return config as unknown as ParameterizedCollection<T, TParam>
   }
 
-  // Usage example
-  const accountExternalDataCollection = createParameterizedCollection<
+  // ---------------------------------------------------------------------------
+  // Query builder types (conceptual)
+  // ---------------------------------------------------------------------------
+
+  // From clause that requires parameter for parameterized collections
+  type FromSource<TCollection> = TCollection extends ParameterizedCollection<
+    infer T,
+    infer TParam
+  >
+    ? {
+        [alias: string]: TCollection
+      } & {
+        // Must provide the parameter!
+        [K in TParam]: Array<T[TParam]> | SubqueryProducingType<T[TParam]>
+      }
+    : { [alias: string]: TCollection }
+
+  type SubqueryProducingType<T> = { __produces: T }
+
+  // ---------------------------------------------------------------------------
+  // Usage examples
+  // ---------------------------------------------------------------------------
+
+  // Define collection with parameter
+  const accountExternalDataCollection = queryCollectionOptions<
     AccountExternalData,
-    'accountIds',
-    ExternalAccountId[]
+    'accountId'
   >({
     syncMode: 'on-demand',
     queryKey: ['accounts', 'externalData'],
-    parameter: {
-      name: 'accountIds',
-      type: [] as ExternalAccountId[],
-    },
+
+    // Parameter field validated against AccountExternalData
+    parameter: 'accountId',
+
+    // queryFn receives ExternalAccountId[] (inferred from T['accountId'])
     queryFn: async (ctx, accountIds) => {
-      // ✅ accountIds is ExternalAccountId[]
       return fetchAccountsExternalData(accountIds)
     },
+
     getKey: (data) => data.accountId,
     queryClient: {} as QueryClient,
   })
 
-  // In query builder (conceptual)
+  // In query builder (conceptual):
   // q.from({
   //   data: accountExternalDataCollection,
-  //   accountIds: subquery.select(x => x.externalId)  // Type checked!
+  //   accountId: subquery.select(x => x.externalId),  // Type checked!
   // })
 }
 
 // =============================================================================
-// OPTION 5: Predicate Adapters
+// IMPLEMENTATION: Core type utilities for Option 1
 // =============================================================================
 
-namespace Option5 {
-  // Adapter definition
-  interface PredicateAdapter<TInput, TOutput> {
-    extract: (options: LoadSubsetOptions | undefined) => TInput
-    transform: (input: TInput) => TOutput
-    validate?: (input: TInput) => void
-  }
+namespace Implementation {
+  /**
+   * These are the core type utilities needed to implement Option 1.
+   * They demonstrate how types flow from T without manual annotations.
+   */
 
-  // Helper to create adapters
-  function createFieldAdapter<
-    T extends object,
-    K extends keyof T & string,
-    Op extends 'eq' | 'in' | 'gt' | 'lt',
-    TOutput,
-  >(config: {
-    field: K
-    operator: Op
-    required?: boolean
-    transform: (
-      value: Op extends 'in' ? Array<T[K]> : T[K]
-    ) => TOutput
-  }): PredicateAdapter<Op extends 'in' ? Array<T[K]> : T[K], TOutput> {
-    return {
-      extract: (options) => {
-        // Extract from loadSubsetOptions
-        return undefined as any // placeholder
-      },
-      transform: config.transform,
-      validate: config.required
-        ? (input) => {
-            if (input === undefined) {
-              throw new Error(`Required field '${config.field}' not provided`)
-            }
-          }
-        : undefined,
-    }
-  }
+  type PredicateOperator = 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in'
 
-  // Compose multiple adapters
-  function composeAdapters<TAdapters extends Record<string, PredicateAdapter<any, any>>>(
-    adapters: TAdapters
-  ): PredicateAdapter<
-    { [K in keyof TAdapters]: ReturnType<TAdapters[K]['extract']> },
-    { [K in keyof TAdapters]: ReturnType<TAdapters[K]['transform']> }
-  > {
-    return {
-      extract: (options) => {
-        const result: any = {}
-        for (const [key, adapter] of Object.entries(adapters)) {
-          result[key] = adapter.extract(options)
-        }
-        return result
-      },
-      transform: (input) => {
-        const result: any = {}
-        for (const [key, adapter] of Object.entries(adapters)) {
-          result[key] = adapter.transform((input as any)[key])
-        }
-        return result
-      },
-    }
-  }
+  // Map operator to resulting value type
+  type OperatorToValueType<TFieldType, Op extends PredicateOperator> =
+    Op extends 'in' ? Array<TFieldType> : TFieldType
 
-  // Config with adapter
-  interface QueryCollectionConfigWithAdapter<T extends object, TOutput> {
-    syncMode?: 'eager' | 'on-demand'
-    queryKey: unknown[]
-    predicateAdapter: PredicateAdapter<any, TOutput>
-    queryFn: (ctx: QueryFunctionContext, params: TOutput) => Promise<T[]>
-    getKey: (item: T) => string | number
-    queryClient: QueryClient
-  }
+  // Predicate spec can be shorthand or full object
+  type PredicateSpec =
+    | PredicateOperator
+    | { operator: PredicateOperator; required?: boolean }
 
-  // Usage example
-  const byAccountIds = createFieldAdapter<AccountExternalData, 'accountId', 'in', { ids: string }>({
-    field: 'accountId',
-    operator: 'in',
-    required: true,
-    transform: (ids) => ({ ids: ids.join(',') }),
-  })
-
-  const exampleConfig: QueryCollectionConfigWithAdapter<AccountExternalData, { ids: string }> = {
-    syncMode: 'on-demand',
-    queryKey: ['accounts', 'externalData'],
-    predicateAdapter: byAccountIds,
-    queryFn: async (ctx, { ids }) => {
-      // ✅ ids is string
-      const response = await fetch(`/api/accounts?ids=${ids}`)
-      return response.json()
-    },
-    getKey: (data) => data.accountId,
-    queryClient: {} as QueryClient,
-  }
-}
-
-// =============================================================================
-// OPTION 6: Enhanced parseLoadSubsetOptions with Schema
-// =============================================================================
-
-namespace Option6 {
-  type OperatorValueType<T, Op extends string> = Op extends 'in'
-    ? Array<T>
-    : Op extends 'eq' | 'gt' | 'gte' | 'lt' | 'lte'
-      ? T
+  // Extract operator from spec
+  type ExtractOperator<S extends PredicateSpec> = S extends PredicateOperator
+    ? S
+    : S extends { operator: infer Op extends PredicateOperator }
+      ? Op
       : never
 
-  type ExpectedFilter = {
-    operator: 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in'
-    required?: boolean
+  // Check if spec is required
+  type IsRequired<S extends PredicateSpec> = S extends PredicateOperator
+    ? true // Shorthand is required by default
+    : S extends { required: false }
+      ? false
+      : true // Object without required: false is required
+
+  // Predicates must be valid keys of T
+  type PredicatesFor<T extends object> = {
+    [K in keyof T]?: PredicateSpec
   }
 
-  type ExpectedFilters<T> = {
-    [K in keyof T]?: ExpectedFilter
-  }
-
-  type ParsedFilters<T, E extends ExpectedFilters<T>> = {
-    [K in keyof E]: E[K] extends { operator: infer Op extends string; required: true }
-      ? OperatorValueType<K extends keyof T ? T[K] : never, Op>
-      : E[K] extends { operator: infer Op extends string }
-        ? OperatorValueType<K extends keyof T ? T[K] : never, Op> | undefined
+  // Compute predicate values object
+  type ComputePredicateValues<
+    T extends object,
+    P extends PredicatesFor<T>,
+  > = {
+    // Only include keys that are defined in P
+    [K in keyof P as P[K] extends undefined ? never : K]:
+      // Get the field type from T
+      K extends keyof T
+        ? // Get operator from the predicate spec
+          ExtractOperator<NonNullable<P[K]>> extends infer Op extends PredicateOperator
+          ? // Map to value type
+            IsRequired<NonNullable<P[K]>> extends true
+            ? OperatorToValueType<T[K], Op>
+            : OperatorToValueType<T[K], Op> | undefined
+          : never
         : never
   }
 
-  interface ParsedResult<T, E extends ExpectedFilters<T>> {
-    filters: ParsedFilters<T, E>
-    sorts: Array<{ field: string[]; direction: 'asc' | 'desc' }>
-    limit?: number
+  // ---------------------------------------------------------------------------
+  // Example: Show type computation
+  // ---------------------------------------------------------------------------
+
+  type ExamplePredicates = {
+    accountId: 'in'
+    status: { operator: 'eq'; required: false }
   }
 
-  // Enhanced parseLoadSubsetOptions
-  function parseLoadSubsetOptions<
-    T extends object,
-    E extends ExpectedFilters<T> = Record<string, never>,
-  >(
-    options: LoadSubsetOptions | undefined,
-    config?: { expect?: E }
-  ): ParsedResult<T, E> {
-    const rawFilters: Array<{
-      field: string[]
-      operator: string
-      value: unknown
-    }> = [] // Would come from actual parsing
+  // This computes to:
+  // {
+  //   accountId: ExternalAccountId[]  // Required array
+  //   status: string | undefined       // Optional single value
+  // }
+  type ExampleValues = ComputePredicateValues<AccountExternalData, ExamplePredicates>
 
-    const filters: Record<string, unknown> = {}
-
-    if (config?.expect) {
-      for (const [fieldName, spec] of Object.entries(config.expect)) {
-        const filter = rawFilters.find(
-          (f) =>
-            f.field.length === 1 &&
-            f.field[0] === fieldName &&
-            f.operator === (spec as ExpectedFilter).operator
-        )
-
-        if ((spec as ExpectedFilter).required && !filter) {
-          throw new Error(
-            `Required filter '${fieldName}' with operator '${(spec as ExpectedFilter).operator}' not found`
-          )
-        }
-
-        filters[fieldName] = filter?.value
-      }
-    }
-
-    return {
-      filters: filters as ParsedFilters<T, E>,
-      sorts: [],
-      limit: options?.limit,
-    }
+  // Verify the types
+  const _check: ExampleValues = {
+    accountId: ['abc' as ExternalAccountId], // ExternalAccountId[]
+    status: undefined, // string | undefined
   }
-
-  // Usage example
-  async function exampleUsage(ctx: QueryFunctionContext) {
-    const parsed = parseLoadSubsetOptions<
-      AccountExternalData,
-      {
-        accountId: { operator: 'in'; required: true }
-        status: { operator: 'eq'; required: false }
-      }
-    >(ctx.meta.loadSubsetOptions, {
-      expect: {
-        accountId: { operator: 'in', required: true },
-        status: { operator: 'eq', required: false },
-      },
-    })
-
-    // ✅ parsed.filters.accountId is ExternalAccountId[] (required, never undefined)
-    // ✅ parsed.filters.status is string | undefined (optional)
-
-    return fetchAccountsExternalData(parsed.filters.accountId)
-  }
-}
-
-// =============================================================================
-// BONUS: Hybrid Approach - Combining Options
-// =============================================================================
-
-namespace HybridApproach {
-  /**
-   * This combines the best of several options:
-   * - Declarative predicate requirements (Option 2)
-   * - Type-safe extraction (Option 1/6)
-   * - Clean queryFn signature (Option 3)
-   */
-
-  type Operator = 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'in'
-
-  type OperatorValueType<T, Op extends Operator> = Op extends 'in'
-    ? Array<T>
-    : T
-
-  // Builder pattern for declaring predicates
-  class PredicateBuilder<
-    T extends object,
-    TRequired extends Record<string, unknown> = Record<string, never>,
-    TOptional extends Record<string, unknown> = Record<string, never>,
-  > {
-    private _required: Array<{ field: string; operator: Operator }> = []
-    private _optional: Array<{ field: string; operator: Operator }> = []
-
-    require<K extends keyof T & string, Op extends Operator>(
-      field: K,
-      operator: Op
-    ): PredicateBuilder<
-      T,
-      TRequired & { [P in K]: OperatorValueType<T[K], Op> },
-      TOptional
-    > {
-      this._required.push({ field, operator })
-      return this as any
-    }
-
-    optional<K extends keyof T & string, Op extends Operator>(
-      field: K,
-      operator: Op
-    ): PredicateBuilder<
-      T,
-      TRequired,
-      TOptional & { [P in K]: OperatorValueType<T[K], Op> | undefined }
-    > {
-      this._optional.push({ field, operator })
-      return this as any
-    }
-
-    build(): {
-      required: typeof this._required
-      optional: typeof this._optional
-      _types: { required: TRequired; optional: TOptional }
-    } {
-      return {
-        required: this._required,
-        optional: this._optional,
-        _types: {} as any,
-      }
-    }
-  }
-
-  function definePredicates<T extends object>() {
-    return new PredicateBuilder<T>()
-  }
-
-  // Config type
-  type PredicatesResult<B> = B extends PredicateBuilder<any, infer R, infer O>
-    ? R & O
-    : never
-
-  interface QueryCollectionConfigHybrid<
-    T extends object,
-    TBuilder extends PredicateBuilder<T, any, any>,
-  > {
-    syncMode?: 'eager' | 'on-demand'
-    queryKey: unknown[]
-    predicates: ReturnType<TBuilder['build']>
-    queryFn: (
-      ctx: QueryFunctionContext,
-      params: PredicatesResult<TBuilder>
-    ) => Promise<T[]>
-    getKey: (item: T) => string | number
-    queryClient: QueryClient
-  }
-
-  // Usage
-  const predicates = definePredicates<AccountExternalData>()
-    .require('accountId', 'in')
-    .optional('data', 'eq')
-    .build()
-
-  // The queryFn would receive:
-  // { accountId: ExternalAccountId[], data: object | undefined }
 }
 
 export {}
