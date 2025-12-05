@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 Enhanced multi-column orderBy support with lazy loading and composite cursor optimization.

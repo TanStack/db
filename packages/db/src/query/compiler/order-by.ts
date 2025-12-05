@@ -139,7 +139,7 @@ export function processOrderBy(
       const followRefResult = followRef(
         rawQuery,
         firstOrderByExpression,
-        collection
+        collection,
       )
 
       if (followRefResult) {
@@ -147,7 +147,7 @@ export function processOrderBy(
         const fieldName = followRefResult.path[0]
         const compareOpts = buildCompareOptions(
           firstClause,
-          followRefCollection
+          followRefCollection,
         )
 
         if (fieldName) {
@@ -156,14 +156,14 @@ export function processOrderBy(
             followRefResult.path,
             followRefCollection,
             compareOpts,
-            compare
+            compare,
           )
         }
 
         // First column value extractor - used for index cursor
         firstColumnValueExtractor = compileExpression(
           new PropRef(followRefResult.path),
-          true
+          true,
         ) as CompiledSingleRowExpression
 
         index = findIndexForField(
@@ -193,7 +193,7 @@ export function processOrderBy(
       // Build value extractors for all columns (must all be ref expressions for multi-column)
       // Check if all orderBy expressions are ref types (required for multi-column extraction)
       const allColumnsAreRefs = orderByClause.every(
-        (clause) => clause.expression.type === `ref`
+        (clause) => clause.expression.type === `ref`,
       )
 
       // Create extractors for all columns if they're all refs
@@ -207,13 +207,13 @@ export function processOrderBy(
             if (followResult) {
               return compileExpression(
                 new PropRef(followResult.path),
-                true
+                true,
               ) as CompiledSingleRowExpression
             }
             // Fallback for refs that don't follow
             return compileExpression(
               clause.expression,
-              true
+              true,
             ) as CompiledSingleRowExpression
           })
         : undefined
@@ -222,7 +222,7 @@ export function processOrderBy(
       // This compares ALL orderBy columns for proper ordering
       const comparator = (
         a: Record<string, unknown> | null | undefined,
-        b: Record<string, unknown> | null | undefined
+        b: Record<string, unknown> | null | undefined,
       ) => {
         if (orderByClause.length === 1) {
           // Single column: extract and compare
@@ -233,7 +233,7 @@ export function processOrderBy(
         if (allColumnExtractors) {
           // Multi-column with all refs: extract all values and compare
           const extractAll = (
-            row: Record<string, unknown> | null | undefined
+            row: Record<string, unknown> | null | undefined,
           ) => {
             if (!row) return row
             return allColumnExtractors.map((extractor) => extractor(row))

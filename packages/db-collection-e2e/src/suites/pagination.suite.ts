@@ -140,7 +140,7 @@ export function createPaginationTestSuite(
           q
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.isActive, `desc`)
-            .orderBy(({ user }) => user.age, `asc`)
+            .orderBy(({ user }) => user.age, `asc`),
         )
 
         await query.preload()
@@ -158,7 +158,7 @@ export function createPaginationTestSuite(
           if (prev.isActive !== curr.isActive) {
             // true (1) should come before false (0) in desc order
             expect(prev.isActive ? 1 : 0).toBeGreaterThanOrEqual(
-              curr.isActive ? 1 : 0
+              curr.isActive ? 1 : 0,
             )
           } else {
             // If isActive is same, age should be ascending
@@ -181,7 +181,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.isActive, `desc`)
             .orderBy(({ user }) => user.age, `asc`)
-            .limit(10)
+            .limit(10),
         )
 
         await query.preload()
@@ -197,7 +197,7 @@ export function createPaginationTestSuite(
 
           if (prev.isActive !== curr.isActive) {
             expect(prev.isActive ? 1 : 0).toBeGreaterThanOrEqual(
-              curr.isActive ? 1 : 0
+              curr.isActive ? 1 : 0,
             )
           } else {
             expect(prev.age).toBeLessThanOrEqual(curr.age)
@@ -217,7 +217,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.isActive, `desc`)
             .orderBy(({ user }) => user.age, `asc`)
-            .limit(15)
+            .limit(15),
         )
 
         await query1.preload()
@@ -232,7 +232,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.isActive, `desc`)
             .orderBy(({ user }) => user.age, `asc`)
-            .limit(30)
+            .limit(30),
         )
 
         await query2.preload()
@@ -253,7 +253,7 @@ export function createPaginationTestSuite(
 
           if (prev.isActive !== curr.isActive) {
             expect(prev.isActive ? 1 : 0).toBeGreaterThanOrEqual(
-              curr.isActive ? 1 : 0
+              curr.isActive ? 1 : 0,
             )
           } else {
             expect(prev.age).toBeLessThanOrEqual(curr.age)
@@ -275,7 +275,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.isActive, `desc`)
             .orderBy(({ user }) => user.age, `asc`)
-            .limit(50)
+            .limit(50),
         )
 
         await query.preload()
@@ -297,7 +297,7 @@ export function createPaginationTestSuite(
           } else if (foundInactive) {
             // Found active after inactive - this is wrong
             throw new Error(
-              `Found active user after inactive user in desc order`
+              `Found active user after inactive user in desc order`,
             )
           }
         }
@@ -306,7 +306,7 @@ export function createPaginationTestSuite(
         if (activeUsers.length > 1) {
           for (let i = 1; i < activeUsers.length; i++) {
             expect(activeUsers[i - 1]!.age).toBeLessThanOrEqual(
-              activeUsers[i]!.age
+              activeUsers[i]!.age,
             )
           }
         }
@@ -314,7 +314,7 @@ export function createPaginationTestSuite(
         if (inactiveUsers.length > 1) {
           for (let i = 1; i < inactiveUsers.length; i++) {
             expect(inactiveUsers[i - 1]!.age).toBeLessThanOrEqual(
-              inactiveUsers[i]!.age
+              inactiveUsers[i]!.age,
             )
           }
         }
@@ -332,7 +332,7 @@ export function createPaginationTestSuite(
             .from({ post: postsCollection })
             .orderBy(({ post }) => post.userId, `asc`)
             .orderBy(({ post }) => post.viewCount, `desc`)
-            .limit(20)
+            .limit(20),
         )
 
         await query.preload()
@@ -355,7 +355,7 @@ export function createPaginationTestSuite(
           } else {
             // userId decreased - this is wrong
             throw new Error(
-              `userId should be ascending but ${prev.userId} > ${curr.userId}`
+              `userId should be ascending but ${prev.userId} > ${curr.userId}`,
             )
           }
         }
@@ -374,7 +374,7 @@ export function createPaginationTestSuite(
             .orderBy(({ user }) => user.isActive, `desc`)
             .orderBy(({ user }) => user.age, `asc`)
             .orderBy(({ user }) => user.name, `asc`)
-            .limit(25)
+            .limit(25),
         )
 
         await query.preload()
@@ -390,7 +390,7 @@ export function createPaginationTestSuite(
 
           if (prev.isActive !== curr.isActive) {
             expect(prev.isActive ? 1 : 0).toBeGreaterThanOrEqual(
-              curr.isActive ? 1 : 0
+              curr.isActive ? 1 : 0,
             )
           } else if (prev.age !== curr.age) {
             expect(prev.age).toBeLessThanOrEqual(curr.age)
@@ -412,7 +412,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.age, `asc`)
             .orderBy(({ user }) => user.name, `asc`)
-            .limit(10)
+            .limit(10),
         )
 
         await query.preload()
@@ -483,7 +483,7 @@ export function createPaginationTestSuite(
             .orderBy(({ user }) => user.age, `asc`)
             .orderBy(({ user }) => user.name, `asc`)
             .limit(10)
-            .offset(20)
+            .offset(20),
         )
 
         await query.preload()
@@ -533,7 +533,7 @@ export function createPaginationTestSuite(
             .from({ post: postsCollection })
             .orderBy(({ post }) => post.userId, `asc`)
             .orderBy(({ post }) => post.viewCount, `desc`)
-            .limit(10)
+            .limit(10),
         )
 
         await query.preload()
@@ -565,7 +565,7 @@ export function createPaginationTestSuite(
             expect(prev.viewCount).toBeGreaterThanOrEqual(curr.viewCount)
           } else {
             throw new Error(
-              `userId should be ascending but ${prev.userId} > ${curr.userId}`
+              `userId should be ascending but ${prev.userId} > ${curr.userId}`,
             )
           }
         }
@@ -584,7 +584,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.age, `asc`)
             .orderBy(({ user }) => user.name, `asc`)
-            .limit(20)
+            .limit(20),
         )
 
         await query.preload()
@@ -654,7 +654,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.age, `asc`)
             .orderBy(({ user }) => user.name, `asc`)
-            .limit(5)
+            .limit(5),
         )
 
         await query.preload()
@@ -673,7 +673,7 @@ export function createPaginationTestSuite(
         // when we need to load data we don't have yet. This proves loading was triggered.
         // If it returned `true`, it would mean data was already available (no loading needed).
         expect(
-          setWindowResult === true || setWindowResult instanceof Promise
+          setWindowResult === true || setWindowResult instanceof Promise,
         ).toBe(true)
 
         if (setWindowResult !== true) {
@@ -700,12 +700,12 @@ export function createPaginationTestSuite(
         if (lastItemFirstPage.age === firstItemSecondPage.age) {
           // Same age value, so name should be greater or equal
           expect(
-            firstItemSecondPage.name.localeCompare(lastItemFirstPage.name)
+            firstItemSecondPage.name.localeCompare(lastItemFirstPage.name),
           ).toBeGreaterThanOrEqual(0)
         } else {
           // Different age, page 2 first should have greater or equal age
           expect(firstItemSecondPage.age).toBeGreaterThanOrEqual(
-            lastItemFirstPage.age
+            lastItemFirstPage.age,
           )
         }
 

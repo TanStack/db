@@ -2075,7 +2075,7 @@ describe(`createLiveQueryCollection`, () => {
         q
           .from({ item: baseCollection })
           .orderBy(({ item }) => item.age, `asc`)
-          .limit(10)
+          .limit(10),
       )
 
       // Trigger sync which will call loadSubset
@@ -2086,7 +2086,7 @@ describe(`createLiveQueryCollection`, () => {
 
       // Find the call that has orderBy (the limited snapshot request)
       const callWithOrderBy = capturedOptions.find(
-        (opt) => opt.orderBy !== undefined
+        (opt) => opt.orderBy !== undefined,
       )
       expect(callWithOrderBy).toBeDefined()
       expect(callWithOrderBy?.orderBy).toHaveLength(1)
@@ -2132,7 +2132,7 @@ describe(`createLiveQueryCollection`, () => {
           .from({ item: baseCollection })
           .orderBy(({ item }) => item.department, `asc`)
           .orderBy(({ item }) => item.age, `desc`)
-          .limit(10)
+          .limit(10),
       )
 
       // Trigger sync which will call loadSubset
@@ -2143,7 +2143,7 @@ describe(`createLiveQueryCollection`, () => {
 
       // Find the call that has orderBy with multiple columns
       const callWithMultiOrderBy = capturedOptions.find(
-        (opt) => opt.orderBy !== undefined && opt.orderBy.length > 1
+        (opt) => opt.orderBy !== undefined && opt.orderBy.length > 1,
       )
 
       // Multi-column orderBy should be passed to loadSubset so the sync layer

@@ -1,8 +1,8 @@
-import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and, eq, gte, lt } from "../query/builder/functions.js"
-import { Value } from "../query/ir.js"
-import { EventEmitter } from "../event-emitter.js"
-import { buildCursor } from "../utils/cursor.js"
+import { ensureIndexForExpression } from '../indexes/auto-index.js'
+import { and, eq, gte, lt } from '../query/builder/functions.js'
+import { Value } from '../query/ir.js'
+import { EventEmitter } from '../event-emitter.js'
+import { buildCursor } from '../utils/cursor.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -324,7 +324,7 @@ export class CollectionSubscription
         const keysGreaterThanMin = index.take(
           limit - keys.length,
           minValueForIndex,
-          filterFn
+          filterFn,
         )
         keys.push(...keysGreaterThanMin)
       } else {
