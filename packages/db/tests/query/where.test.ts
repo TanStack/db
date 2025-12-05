@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, test } from "vitest"
-import { createLiveQueryCollection } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { beforeEach, describe, expect, test } from 'vitest'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 import {
   add,
   and,
@@ -21,7 +21,7 @@ import {
   not,
   or,
   upper,
-} from "../../src/query/builder/functions.js"
+} from '../../src/query/builder/functions.js'
 
 // Sample data types for comprehensive testing
 type Employee = {
@@ -228,7 +228,7 @@ function createEmployeesCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (emp) => emp.id,
       initialData: sampleEmployees,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -339,7 +339,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         expect(highEarners.size).toBe(3) // Alice (75k), Charlie (85k), Diana (95k)
         expect(highEarners.toArray.every((emp) => emp.salary > 70000)).toBe(
-          true
+          true,
         )
 
         // Test with age
@@ -430,7 +430,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(exactMatch.toArray.some((emp) => emp.salary === 65000)).toBe(
-          true
+          true,
         ) // Bob
       })
 
@@ -450,7 +450,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         expect(juniorSalary.size).toBe(2) // Eve (55k), Frank (45k)
         expect(juniorSalary.toArray.every((emp) => emp.salary < 60000)).toBe(
-          true
+          true,
         )
 
         // Test with age
@@ -505,12 +505,12 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         expect(modestSalary.size).toBe(3) // Bob, Eve, Frank
         expect(modestSalary.toArray.every((emp) => emp.salary <= 65000)).toBe(
-          true
+          true,
         )
 
         // Test boundary condition
         expect(modestSalary.toArray.some((emp) => emp.salary === 65000)).toBe(
-          true
+          true,
         ) // Bob
       })
     })
@@ -529,7 +529,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
             q
               .from({ emp: employeesCollection })
               .where(({ emp }) =>
-                and(eq(emp.active, true), gt(emp.salary, 70000))
+                and(eq(emp.active, true), gt(emp.salary, 70000)),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -542,8 +542,8 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
         expect(activeHighEarners.size).toBe(2) // Alice (75k), Diana (95k)
         expect(
           activeHighEarners.toArray.every(
-            (emp) => emp.active && emp.salary > 70000
-          )
+            (emp) => emp.active && emp.salary > 70000,
+          ),
         ).toBe(true)
 
         // Test with three conditions
@@ -556,8 +556,8 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
                 and(
                   eq(emp.active, true),
                   gte(emp.age, 25),
-                  lte(emp.salary, 75000)
-                )
+                  lte(emp.salary, 75000),
+                ),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -594,7 +594,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
             q
               .from({ emp: employeesCollection })
               .where(({ emp }) =>
-                or(eq(emp.department_id, 1), eq(emp.department_id, 3))
+                or(eq(emp.department_id, 1), eq(emp.department_id, 3)),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -639,7 +639,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         expect(notHighEarners.size).toBe(3) // Bob, Eve, Frank
         expect(notHighEarners.toArray.every((emp) => emp.salary <= 70000)).toBe(
-          true
+          true,
         )
       })
 
@@ -654,9 +654,9 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
                   eq(emp.active, true),
                   or(
                     and(eq(emp.department_id, 1), gt(emp.salary, 70000)),
-                    and(eq(emp.department_id, 2), lt(emp.age, 30))
-                  )
-                )
+                    and(eq(emp.department_id, 2), lt(emp.age, 30)),
+                  ),
+                ),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -753,8 +753,8 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
         expect(specificDepartments.size).toBe(4) // Alice, Bob, Charlie, Eve
         expect(
           specificDepartments.toArray.every(
-            (emp) => emp.department_id === 1 || emp.department_id === 2
-          )
+            (emp) => emp.department_id === 1 || emp.department_id === 2,
+          ),
         ).toBe(true)
 
         // Test with specific IDs
@@ -913,7 +913,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         expect(shortNames.size).toBe(2) // Bob (3), Eve (3)
         expect(
-          shortNames.toArray.every((emp) => emp.first_name.length < 4)
+          shortNames.toArray.every((emp) => emp.first_name.length < 4),
         ).toBe(true)
 
         const longNames = createLiveQueryCollection({
@@ -939,7 +939,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
             q
               .from({ emp: employeesCollection })
               .where(({ emp }) =>
-                eq(concat(emp.first_name, ` `, emp.last_name), `Alice Johnson`)
+                eq(concat(emp.first_name, ` `, emp.last_name), `Alice Johnson`),
               )
               .select(({ emp }) => ({ id: emp.id, name: emp.name })),
         })
@@ -955,7 +955,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
             q
               .from({ emp: employeesCollection })
               .where(({ emp }) =>
-                like(coalesce(emp.email, `no-email@company.com`), `%no-email%`)
+                like(coalesce(emp.email, `no-email@company.com`), `%no-email%`),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -992,7 +992,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         expect(salaryPlusBonus.size).toBe(3) // Alice (85k), Charlie (95k), Diana (105k)
         expect(
-          salaryPlusBonus.toArray.every((emp) => emp.salary + 10000 > 80000)
+          salaryPlusBonus.toArray.every((emp) => emp.salary + 10000 > 80000),
         ).toBe(true)
 
         // Test age calculation
@@ -1032,9 +1032,9 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
                   eq(emp.active, true),
                   or(
                     and(gte(emp.salary, 70000), lt(emp.age, 35)),
-                    eq(emp.department_id, 2)
-                  )
-                )
+                    eq(emp.department_id, 2),
+                  ),
+                ),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -1217,7 +1217,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
             id: `empty-employees`,
             getKey: (emp) => emp.id,
             initialData: [],
-          })
+          }),
         )
 
         const emptyQuery = createLiveQueryCollection({
@@ -1259,7 +1259,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
             q
               .from({ emp: employeesCollection })
               .where(({ emp }) =>
-                and(gte(emp.salary, 60000), lte(emp.salary, 80000))
+                and(gte(emp.salary, 60000), lte(emp.salary, 80000)),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -1271,8 +1271,8 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
         expect(salaryRange.size).toBe(2) // Bob (65k), Alice (75k)
         expect(
           salaryRange.toArray.every(
-            (emp) => emp.salary >= 60000 && emp.salary <= 80000
-          )
+            (emp) => emp.salary >= 60000 && emp.salary <= 80000,
+          ),
         ).toBe(true)
       })
 
@@ -1288,11 +1288,11 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
                     eq(emp.active, true),
                     or(
                       and(eq(emp.department_id, 1), gt(emp.salary, 70000)),
-                      and(eq(emp.department_id, 2), lt(emp.age, 30))
-                    )
+                      and(eq(emp.department_id, 2), lt(emp.age, 30)),
+                    ),
                   ),
-                  and(eq(emp.active, false), gt(emp.age, 35))
-                )
+                  and(eq(emp.active, false), gt(emp.age, 35)),
+                ),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -1332,7 +1332,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         const resultArray = result.toArray
         expect(
-          resultArray.every((emp) => emp.active && emp.salary > 70000)
+          resultArray.every((emp) => emp.active && emp.salary > 70000),
         ).toBe(true)
 
         const names = resultArray.map((emp) => emp.name).sort()
@@ -1365,8 +1365,8 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
         const resultArray = result.toArray
         expect(
           resultArray.every(
-            (emp) => emp.active && emp.salary >= 65000 && emp.age < 35
-          )
+            (emp) => emp.active && emp.salary >= 65000 && emp.age < 35,
+          ),
         ).toBe(true)
 
         const names = resultArray.map((emp) => emp.name).sort()
@@ -1470,7 +1470,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
             q
               .from({ emp: employeesCollection })
               .where(({ emp }) =>
-                eq(emp.contact?.address?.city, `San Francisco`)
+                eq(emp.contact?.address?.city, `San Francisco`),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -1481,7 +1481,7 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         expect(sfEmployees.size).toBe(2) // Alice and Diana
         expect(
-          sfEmployees.toArray.every((e) => e.city === `San Francisco`)
+          sfEmployees.toArray.every((e) => e.city === `San Francisco`),
         ).toBe(true)
       })
 
@@ -1534,8 +1534,8 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
                 and(
                   eq(emp.active, true),
                   eq(emp.contact?.address?.state, `CA`),
-                  gte(emp.profile?.experience.years, 5)
-                )
+                  gte(emp.profile?.experience.years, 5),
+                ),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -1562,8 +1562,8 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
               .where(({ emp }) =>
                 and(
                   gt(emp.salary, 60000),
-                  inArray(`Python`, emp.profile?.skills)
-                )
+                  inArray(`Python`, emp.profile?.skills),
+                ),
               )
               .select(({ emp }) => ({
                 id: emp.id,
@@ -1694,8 +1694,8 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
               .where(({ emp }) =>
                 or(
                   eq(emp.contact?.address?.city, `San Francisco`),
-                  inArray(`Python`, emp.profile?.skills)
-                )
+                  inArray(`Python`, emp.profile?.skills),
+                ),
               )
               .select(({ emp }) => ({
                 id: emp.id,

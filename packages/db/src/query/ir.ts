@@ -2,9 +2,9 @@
 This is the intermediate representation of the query.
 */
 
-import type { CompareOptions } from "./builder/types"
-import type { Collection, CollectionImpl } from "../collection/index.js"
-import type { NamespacedRow } from "../types"
+import type { CompareOptions } from './builder/types'
+import type { Collection, CollectionImpl } from '../collection/index.js'
+import type { NamespacedRow } from '../types'
 
 export interface QueryIR {
   from: From
@@ -73,7 +73,7 @@ export class CollectionRef extends BaseExpression {
   public type = `collectionRef` as const
   constructor(
     public collection: CollectionImpl,
-    public alias: string
+    public alias: string,
   ) {
     super()
   }
@@ -83,7 +83,7 @@ export class QueryRef extends BaseExpression {
   public type = `queryRef` as const
   constructor(
     public query: QueryIR,
-    public alias: string
+    public alias: string,
   ) {
     super()
   }
@@ -92,7 +92,7 @@ export class QueryRef extends BaseExpression {
 export class PropRef<T = any> extends BaseExpression<T> {
   public type = `ref` as const
   constructor(
-    public path: Array<string> // path to the property in the collection, with the alias as the first element
+    public path: Array<string>, // path to the property in the collection, with the alias as the first element
   ) {
     super()
   }
@@ -101,7 +101,7 @@ export class PropRef<T = any> extends BaseExpression<T> {
 export class Value<T = any> extends BaseExpression<T> {
   public type = `val` as const
   constructor(
-    public value: T // any js value
+    public value: T, // any js value
   ) {
     super()
   }
@@ -111,7 +111,7 @@ export class Func<T = any> extends BaseExpression<T> {
   public type = `func` as const
   constructor(
     public name: string, // such as eq, gt, lt, upper, lower, etc.
-    public args: Array<BasicExpression>
+    public args: Array<BasicExpression>,
   ) {
     super()
   }
@@ -126,7 +126,7 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   public type = `agg` as const
   constructor(
     public name: string, // such as count, avg, sum, min, max, etc.
-    public args: Array<BasicExpression>
+    public args: Array<BasicExpression>,
   ) {
     super()
   }
@@ -163,7 +163,7 @@ export function getWhereExpression(where: Where): BasicExpression<boolean> {
  * HAVING clauses can contain aggregates, unlike regular WHERE clauses
  */
 export function getHavingExpression(
-  having: Having
+  having: Having,
 ): BasicExpression | Aggregate {
   return typeof having === `object` && `expression` in having
     ? having.expression
@@ -185,14 +185,14 @@ export function isResidualWhere(where: Where): boolean {
  * Create a residual Where clause from an expression
  */
 export function createResidualWhere(
-  expression: BasicExpression<boolean>
+  expression: BasicExpression<boolean>,
 ): Where {
   return { expression, residual: true }
 }
 
 function getRefFromAlias(
   query: QueryIR,
-  alias: string
+  alias: string,
 ): CollectionRef | QueryRef | void {
   if (query.from.alias === alias) {
     return query.from
@@ -213,7 +213,7 @@ function getRefFromAlias(
 export function followRef(
   query: QueryIR,
   ref: PropRef<any>,
-  collection: Collection
+  collection: Collection,
 ): { collection: Collection; path: Array<string> } | void {
   if (ref.path.length === 0) {
     return

@@ -3,7 +3,7 @@ import {
   InvalidStorageObjectFormatError,
   SerializationError,
   StorageKeyRequiredError,
-} from "./errors"
+} from './errors'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
@@ -14,8 +14,8 @@ import type {
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
-} from "./types"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from './types'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 /**
  * Storage API interface - subset of DOM Storage that we need
@@ -28,11 +28,11 @@ export type StorageApi = Pick<Storage, `getItem` | `setItem` | `removeItem`>
 export type StorageEventApi = {
   addEventListener: (
     type: `storage`,
-    listener: (event: StorageEvent) => void
+    listener: (event: StorageEvent) => void,
   ) => void
   removeEventListener: (
     type: `storage`,
-    listener: (event: StorageEvent) => void
+    listener: (event: StorageEvent) => void,
   ) => void
 }
 
@@ -132,14 +132,14 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
 function validateJsonSerializable(
   parser: Parser,
   value: any,
-  operation: string
+  operation: string,
 ): void {
   try {
     parser.stringify(value)
   } catch (error) {
     throw new SerializationError(
       operation,
-      error instanceof Error ? error.message : String(error)
+      error instanceof Error ? error.message : String(error),
     )
   }
 }
@@ -319,7 +319,7 @@ export function localStorageCollectionOptions<
 >(
   config: LocalStorageCollectionConfig<InferSchemaOutput<T>, T, TKey> & {
     schema: T
-  }
+  },
 ): CollectionConfig<
   InferSchemaOutput<T>,
   TKey,
@@ -339,7 +339,7 @@ export function localStorageCollectionOptions<
 >(
   config: LocalStorageCollectionConfig<T, never, TKey> & {
     schema?: never // prohibit schema
-  }
+  },
 ): CollectionConfig<T, TKey, never, LocalStorageCollectionUtils> & {
   id: string
   utils: LocalStorageCollectionUtils
@@ -347,7 +347,7 @@ export function localStorageCollectionOptions<
 }
 
 export function localStorageCollectionOptions(
-  config: LocalStorageCollectionConfig<any, any, string | number>
+  config: LocalStorageCollectionConfig<any, any, string | number>,
 ): Omit<
   CollectionConfig<any, string | number, any, LocalStorageCollectionUtils>,
   `id`
@@ -388,7 +388,7 @@ export function localStorageCollectionOptions(
     storageEventApi,
     parser,
     config.getKey,
-    lastKnownData
+    lastKnownData,
   )
 
   /**
@@ -396,7 +396,7 @@ export function localStorageCollectionOptions(
    * @param dataMap - Map of items with version tracking to save to storage
    */
   const saveToStorage = (
-    dataMap: Map<string | number, StoredItem<any>>
+    dataMap: Map<string | number, StoredItem<any>>,
   ): void => {
     try {
       // Convert Map to object format for storage
@@ -409,7 +409,7 @@ export function localStorageCollectionOptions(
     } catch (error) {
       console.error(
         `[LocalStorageCollection] Error saving data to storage key "${config.storageKey}":`,
-        error
+        error,
       )
       throw error
     }
@@ -631,7 +631,7 @@ export function localStorageCollectionOptions(
 function loadFromStorage<T extends object>(
   storageKey: string,
   storage: StorageApi,
-  parser: Parser
+  parser: Parser,
 ): Map<string | number, StoredItem<T>> {
   try {
     const rawData = storage.getItem(storageKey)
@@ -671,7 +671,7 @@ function loadFromStorage<T extends object>(
   } catch (error) {
     console.warn(
       `[LocalStorageCollection] Error loading data from storage key "${storageKey}":`,
-      error
+      error,
     )
     return new Map()
   }
@@ -693,7 +693,7 @@ function createLocalStorageSync<T extends object>(
   storageEventApi: StorageEventApi,
   parser: Parser,
   _getKey: (item: T) => string | number,
-  lastKnownData: Map<string | number, StoredItem<T>>
+  lastKnownData: Map<string | number, StoredItem<T>>,
 ): SyncConfig<T> & {
   manualTrigger?: () => void
   collection: any
@@ -710,7 +710,7 @@ function createLocalStorageSync<T extends object>(
    */
   const findChanges = (
     oldData: Map<string | number, StoredItem<T>>,
-    newData: Map<string | number, StoredItem<T>>
+    newData: Map<string | number, StoredItem<T>>,
   ): Array<{
     type: `insert` | `update` | `delete`
     key: string | number

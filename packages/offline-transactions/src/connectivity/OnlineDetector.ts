@@ -1,4 +1,4 @@
-import type { OnlineDetector } from "../types"
+import type { OnlineDetector } from '../types'
 
 export class DefaultOnlineDetector implements OnlineDetector {
   private listeners: Set<() => void> = new Set()
@@ -32,7 +32,7 @@ export class DefaultOnlineDetector implements OnlineDetector {
       window.removeEventListener(`online`, this.handleOnline)
       document.removeEventListener(
         `visibilitychange`,
-        this.handleVisibilityChange
+        this.handleVisibilityChange,
       )
     }
   }

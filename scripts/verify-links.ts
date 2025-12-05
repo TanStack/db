@@ -1,8 +1,8 @@
-import { existsSync, readFileSync, statSync } from "node:fs"
-import path, { resolve } from "node:path"
-import { glob } from "tinyglobby"
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import path, { resolve } from 'node:path'
+import { glob } from 'tinyglobby'
 // @ts-ignore - markdown-link-extractor is not typed
-import markdownLinkExtractor from "markdown-link-extractor"
+import markdownLinkExtractor from 'markdown-link-extractor'
 
 function isRelativeLink(link: string) {
   return (
@@ -25,7 +25,7 @@ function normalizePath(p: string): string {
 function fileExistsForLink(
   link: string,
   markdownFile: string,
-  errors: Array<any>
+  errors: Array<any>,
 ): boolean {
   // Remove hash if present
   const filePart = link.split(`#`)[0]
@@ -62,7 +62,7 @@ function fileExistsForLink(
     // Transform /docs/framework/{framework}/examples/ to /examples/{framework}/
     absPath = absPath.replace(
       /\/docs\/framework\/([^/]+)\/examples\//,
-      `/examples/$1/`
+      `/examples/$1/`,
     )
     // For examples, we want to check if the directory exists
     exists = existsSync(absPath) && statSync(absPath).isDirectory()
@@ -121,7 +121,7 @@ async function findMarkdownLinks() {
     console.log(`\n❌ Found ${errors.length} broken links:`)
     errors.forEach((err) => {
       console.log(
-        `${err.link}\n  in:    ${err.markdownFile}\n  path:  ${err.resolvedPath}\n  why:   ${err.reason}\n`
+        `${err.link}\n  in:    ${err.markdownFile}\n  path:  ${err.resolvedPath}\n  why:   ${err.reason}\n`,
       )
     })
     process.exit(1)

@@ -3,9 +3,9 @@ import {
   isWhereSubset,
   minusWherePredicates,
   unionWherePredicates,
-} from "./predicate-utils.js"
-import type { BasicExpression } from "./ir.js"
-import type { LoadSubsetOptions } from "../types.js"
+} from './predicate-utils.js'
+import type { BasicExpression } from './ir.js'
+import type { LoadSubsetOptions } from '../types.js'
 
 /**
  * Deduplicated wrapper for a loadSubset function.
@@ -34,7 +34,7 @@ import type { LoadSubsetOptions } from "../types.js"
 export class DeduplicatedLoadSubset {
   // The underlying loadSubset function to wrap
   private readonly _loadSubset: (
-    options: LoadSubsetOptions
+    options: LoadSubsetOptions,
   ) => true | Promise<void>
 
   // An optional callback function that is invoked when a loadSubset call is deduplicated.
@@ -101,7 +101,7 @@ export class DeduplicatedLoadSubset {
     // Check against limited calls
     if (options.limit !== undefined) {
       const alreadyLoaded = this.limitedCalls.some((loaded) =>
-        isPredicateSubset(options, loaded)
+        isPredicateSubset(options, loaded),
       )
 
       if (alreadyLoaded) {
@@ -113,7 +113,7 @@ export class DeduplicatedLoadSubset {
     // Check against in-flight calls using the same subset logic as resolved calls
     // This prevents duplicate requests when concurrent calls have subset relationships
     const matchingInflight = this.inflightCalls.find((inflight) =>
-      isPredicateSubset(options, inflight.options)
+      isPredicateSubset(options, inflight.options),
     )
 
     if (matchingInflight !== undefined) {

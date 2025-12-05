@@ -7,8 +7,8 @@ import {
   ref,
   toValue,
   watchEffect,
-} from "vue"
-import { createLiveQueryCollection } from "@tanstack/db"
+} from 'vue'
+import { createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
@@ -18,8 +18,8 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   QueryBuilder,
-} from "@tanstack/db"
-import type { ComputedRef, MaybeRefOrGetter } from "vue"
+} from '@tanstack/db'
+import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
 /**
  * Return type for useLiveQuery hook
@@ -113,15 +113,15 @@ export interface UseLiveQueryReturnWithCollection<
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<MaybeRefOrGetter<unknown>>
+  deps?: Array<MaybeRefOrGetter<unknown>>,
 ): UseLiveQueryReturn<GetResult<TContext>>
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
   queryFn: (
-    q: InitialQueryBuilder
+    q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-  deps?: Array<MaybeRefOrGetter<unknown>>
+  deps?: Array<MaybeRefOrGetter<unknown>>,
 ): UseLiveQueryReturn<GetResult<TContext>>
 
 /**
@@ -159,7 +159,7 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<MaybeRefOrGetter<unknown>>
+  deps?: Array<MaybeRefOrGetter<unknown>>,
 ): UseLiveQueryReturn<GetResult<TContext>>
 
 /**
@@ -207,13 +207,13 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: MaybeRefOrGetter<Collection<TResult, TKey, TUtils>>
+  liveQueryCollection: MaybeRefOrGetter<Collection<TResult, TKey, TUtils>>,
 ): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
 
 // Implementation
 export function useLiveQuery(
   configOrQueryOrCollection: any,
-  deps: Array<MaybeRefOrGetter<unknown>> = []
+  deps: Array<MaybeRefOrGetter<unknown>> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = computed(() => {
     // First check if the original parameter might be a ref/getter
@@ -298,12 +298,12 @@ export function useLiveQuery(
 
   // Track collection status reactively
   const status = ref(
-    collection.value ? collection.value.status : (`disabled` as const)
+    collection.value ? collection.value.status : (`disabled` as const),
   )
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     internalData.length = 0
     internalData.push(...Array.from(currentCollection.values()))
@@ -377,7 +377,7 @@ export function useLiveQuery(
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     currentUnsubscribe = subscription.unsubscribe.bind(subscription)
@@ -413,7 +413,7 @@ export function useLiveQuery(
     status: computed(() => status.value),
     isLoading: computed(() => status.value === `loading`),
     isReady: computed(
-      () => status.value === `ready` || status.value === `disabled`
+      () => status.value === `ready` || status.value === `disabled`,
     ),
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),

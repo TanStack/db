@@ -1,22 +1,22 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { QueryClient } from "@tanstack/query-core"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { QueryClient } from '@tanstack/query-core'
 import {
   createCollection,
   createLiveQueryCollection,
   eq,
   ilike,
   or,
-} from "@tanstack/db"
-import { queryCollectionOptions } from "../src/query"
-import type { QueryFunctionContext } from "@tanstack/query-core"
+} from '@tanstack/db'
+import { queryCollectionOptions } from '../src/query'
+import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
   Collection,
   DeleteMutationFnParams,
   InsertMutationFnParams,
   TransactionWithMutations,
   UpdateMutationFnParams,
-} from "@tanstack/db"
-import type { QueryCollectionConfig, QueryCollectionUtils } from "../src/query"
+} from '@tanstack/db'
+import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
 
 interface TestItem {
   id: string
@@ -87,7 +87,7 @@ describe(`QueryCollection`, () => {
       {
         timeout: 1000, // Give it a reasonable timeout
         interval: 50, // Check frequently
-      }
+      },
     )
 
     // Additional wait for internal processing if necessary
@@ -192,7 +192,7 @@ describe(`QueryCollection`, () => {
       .mockImplementation(() => {})
 
     const queryFn: (
-      context: QueryFunctionContext<any>
+      context: QueryFunctionContext<any>,
     ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValueOnce([initialItem])
@@ -225,7 +225,7 @@ describe(`QueryCollection`, () => {
 
     // Verify the error was logged correctly
     const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
-      call[0].includes(`[QueryCollection] Error observing query`)
+      call[0].includes(`[QueryCollection] Error observing query`),
     )
     expect(errorCallArgs).toBeDefined()
     expect(errorCallArgs?.[1]).toBe(testError)
@@ -246,7 +246,7 @@ describe(`QueryCollection`, () => {
 
     // Mock queryFn to return invalid data (not an array of objects)
     const queryFn: (
-      context: QueryFunctionContext<any>
+      context: QueryFunctionContext<any>,
     ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValue(`not an array` as any)
@@ -270,8 +270,8 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => {
       const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
         call[0].includes(
-          `@tanstack/query-db-collection: queryFn must return an array of objects`
-        )
+          `@tanstack/query-db-collection: queryFn must return an array of objects`,
+        ),
       )
       expect(errorCallArgs).toBeDefined()
     })
@@ -291,7 +291,7 @@ describe(`QueryCollection`, () => {
     // Second query returns a new object with the same properties (different reference)
     // Third query returns an object with an actual change
     const queryFn: (
-      context: QueryFunctionContext<any>
+      context: QueryFunctionContext<any>,
     ) => Promise<Array<TestItem>> = vi
       .fn()
       .mockResolvedValueOnce([initialItem])
@@ -445,7 +445,7 @@ describe(`QueryCollection`, () => {
 
     // Verify queryFn was called with the correct context, including the meta object
     expect(queryFn).toHaveBeenCalledWith(
-      expect.objectContaining({ meta: { ...meta, loadSubsetOptions: {} } })
+      expect.objectContaining({ meta: { ...meta, loadSubsetOptions: {} } }),
     )
   })
 
@@ -505,7 +505,7 @@ describe(`QueryCollection`, () => {
               }),
             }),
           }),
-        })
+        }),
       )
     })
 
@@ -566,7 +566,7 @@ describe(`QueryCollection`, () => {
               }),
             }),
           }),
-        })
+        }),
       )
     })
   })
@@ -651,8 +651,8 @@ describe(`QueryCollection`, () => {
       await vi.waitFor(() => {
         const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
           call[0].includes(
-            `@tanstack/query-db-collection: select() must return an array of objects`
-          )
+            `@tanstack/query-db-collection: select() must return an array of objects`,
+          ),
         )
         expect(errorCallArgs).toBeDefined()
       })
@@ -688,7 +688,7 @@ describe(`QueryCollection`, () => {
 
       // Verify that the query cache state exists along with its metadata
       const initialCache = queryClient.getQueryData(
-        queryKey
+        queryKey,
       ) as MetaDataType<TestItem>
       expect(initialCache).toEqual(initialMetaData)
     })
@@ -1737,7 +1737,7 @@ describe(`QueryCollection`, () => {
       collection.utils.writeInsert(newItem)
 
       const cacheAfterInsert = queryClient.getQueryData(
-        queryKey
+        queryKey,
       ) as Array<TestItem>
       expect(cacheAfterInsert).toHaveLength(3)
       expect(cacheAfterInsert).toContainEqual(newItem)
@@ -1746,7 +1746,7 @@ describe(`QueryCollection`, () => {
       collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
 
       const cacheAfterUpdate = queryClient.getQueryData(
-        queryKey
+        queryKey,
       ) as Array<TestItem>
       expect(cacheAfterUpdate).toHaveLength(3)
       const updatedItem = cacheAfterUpdate.find((item) => item.id === `1`)
@@ -1756,7 +1756,7 @@ describe(`QueryCollection`, () => {
       collection.utils.writeDelete(`2`)
 
       const cacheAfterDelete = queryClient.getQueryData(
-        queryKey
+        queryKey,
       ) as Array<TestItem>
       expect(cacheAfterDelete).toHaveLength(2)
       expect(cacheAfterDelete).not.toContainEqual({
@@ -1769,7 +1769,7 @@ describe(`QueryCollection`, () => {
       collection.utils.writeUpsert({ id: `4`, name: `Item 4`, value: 40 })
 
       const cacheAfterUpsert = queryClient.getQueryData(
-        queryKey
+        queryKey,
       ) as Array<TestItem>
       expect(cacheAfterUpsert).toHaveLength(3)
       expect(cacheAfterUpsert).toContainEqual({
@@ -1795,13 +1795,13 @@ describe(`QueryCollection`, () => {
       })
 
       const cacheAfterBatch = queryClient.getQueryData(
-        queryKey
+        queryKey,
       ) as Array<TestItem>
       expect(cacheAfterBatch).toHaveLength(4) // 3 - 1 (delete) + 1 (insert) + 1 (upsert) = 4
 
       // Verify specific changes from batch
       expect(cacheAfterBatch).not.toContainEqual(
-        expect.objectContaining({ id: `1` })
+        expect.objectContaining({ id: `1` }),
       )
       expect(cacheAfterBatch).toContainEqual({
         id: `5`,
@@ -1860,7 +1860,7 @@ describe(`QueryCollection`, () => {
 
       // Verify cache wasn't modified
       const cacheAfterError = queryClient.getQueryData(
-        queryKey
+        queryKey,
       ) as Array<TestItem>
       expect(cacheAfterError).toEqual(initialCache)
       expect(cacheAfterError).toHaveLength(2)
@@ -1875,7 +1875,7 @@ describe(`QueryCollection`, () => {
 
       // Verify cache wasn't modified
       const cacheAfterBatchError = queryClient.getQueryData(
-        queryKey
+        queryKey,
       ) as Array<TestItem>
       expect(cacheAfterBatchError).toEqual(initialCache)
       expect(cacheAfterBatchError).toHaveLength(2)
@@ -2077,7 +2077,7 @@ describe(`QueryCollection`, () => {
 
             return { refetch: false }
           },
-        })
+        }),
       )
 
       await vi.waitFor(() => {
@@ -2153,7 +2153,7 @@ describe(`QueryCollection`, () => {
             }))
 
             const serverItems = await Promise.all(
-              updates.map((update) => updateTodo(update.id, update.changes))
+              updates.map((update) => updateTodo(update.id, update.changes)),
             )
 
             todosCollection.utils.writeBatch(() => {
@@ -2166,7 +2166,7 @@ describe(`QueryCollection`, () => {
 
             return { refetch: false }
           },
-        })
+        }),
       )
 
       await vi.waitFor(() => {
@@ -2187,7 +2187,7 @@ describe(`QueryCollection`, () => {
       // Verify Update 1 worked
       expect(todosCollection.get(`1`)?.metadata.createdBy).toBe(`user456`)
       expect(
-        todosCollection._state.syncedData.get(`1`)?.metadata.createdBy
+        todosCollection._state.syncedData.get(`1`)?.metadata.createdBy,
       ).toBe(`user456`)
 
       // Update 2: change metadata from user456 to user789
@@ -2200,7 +2200,7 @@ describe(`QueryCollection`, () => {
 
       // Verify Update 2 persisted correctly
       expect(
-        todosCollection._state.syncedData.get(`1`)?.metadata.createdBy
+        todosCollection._state.syncedData.get(`1`)?.metadata.createdBy,
       ).toBe(`user789`)
       expect(todosCollection.get(`1`)?.metadata.createdBy).toBe(`user789`)
     })
@@ -2232,7 +2232,7 @@ describe(`QueryCollection`, () => {
       {
         timeout: 1000,
         interval: 50,
-      }
+      },
     )
 
     // Verify the collection is empty but ready
@@ -2248,7 +2248,7 @@ describe(`QueryCollection`, () => {
       { id: `2`, name: `Cached Item 2` },
     ]
     const queryFn: (
-      context: QueryFunctionContext<any>
+      context: QueryFunctionContext<any>,
     ) => Promise<Array<TestItem>> = vi.fn().mockReturnValue(initialItems)
     await queryClient.prefetchQuery({ queryKey, queryFn })
 
@@ -2262,12 +2262,12 @@ describe(`QueryCollection`, () => {
         getKey,
         startSync: true,
         staleTime: 60000, // uses the prefetched value without a refetch
-      })
+      }),
     )
     expect(collection.status).toBe(`ready`)
     expect(collection.size).toBe(2)
     expect(Array.from(collection.values())).toEqual(
-      expect.arrayContaining(initialItems)
+      expect.arrayContaining(initialItems),
     )
   })
 
@@ -2493,7 +2493,7 @@ describe(`QueryCollection`, () => {
         getKey,
         retry: false,
         startSync: true,
-      })
+      }),
     )
 
     await vi.waitFor(() => {
@@ -2501,7 +2501,7 @@ describe(`QueryCollection`, () => {
     })
 
     await expect(
-      collection.utils.refetch({ throwOnError: true })
+      collection.utils.refetch({ throwOnError: true }),
     ).rejects.toThrow(testError)
 
     // Should not throw when throwOnError is false
@@ -2523,7 +2523,7 @@ describe(`QueryCollection`, () => {
           queryFn,
           getKey,
           startSync: true,
-        })
+        }),
       )
 
       await vi.waitFor(() => {
@@ -2552,7 +2552,7 @@ describe(`QueryCollection`, () => {
           getKey,
           enabled: false,
           startSync: true,
-        })
+        }),
       )
 
       // Query should not auto-fetch due to enabled: false
@@ -2577,7 +2577,7 @@ describe(`QueryCollection`, () => {
           queryFn,
           getKey,
           startSync: false,
-        })
+        }),
       )
 
       // Refetch should be no-op because observer doesn't exist yet
@@ -2592,7 +2592,7 @@ describe(`QueryCollection`, () => {
     // Helper to create test collection with common configuration
     const createErrorHandlingTestCollection = (
       testId: string,
-      queryFn: ReturnType<typeof vi.fn>
+      queryFn: ReturnType<typeof vi.fn>,
     ) => {
       const config: QueryCollectionConfig<TestItem> = {
         id: testId,
@@ -2621,7 +2621,7 @@ describe(`QueryCollection`, () => {
 
       const collection = createErrorHandlingTestCollection(
         `error-tracking-test`,
-        queryFn
+        queryFn,
       )
 
       // Wait for initial success - no errors
@@ -2670,7 +2670,7 @@ describe(`QueryCollection`, () => {
 
       const collection = createErrorHandlingTestCollection(
         `clear-error-test`,
-        queryFn
+        queryFn,
       )
 
       // Wait for initial error
@@ -2711,7 +2711,7 @@ describe(`QueryCollection`, () => {
 
       const collection = createErrorHandlingTestCollection(
         `functionality-with-errors-test`,
-        queryFn
+        queryFn,
       )
 
       await vi.waitFor(() => {
@@ -2818,7 +2818,7 @@ describe(`QueryCollection`, () => {
 
       const collection = createErrorHandlingTestCollection(
         `error-persistence-cleanup-test`,
-        queryFn
+        queryFn,
       )
 
       // Wait for collection to be ready (even with error)
@@ -2871,7 +2871,7 @@ describe(`QueryCollection`, () => {
           expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
           expect(collection.utils.isError).toBe(true)
         },
-        { timeout: 2000 }
+        { timeout: 2000 },
       )
 
       // Error count should only increment once after all retries are exhausted
@@ -2891,7 +2891,7 @@ describe(`QueryCollection`, () => {
         () => {
           expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
         },
-        { timeout: 2000 }
+        { timeout: 2000 },
       )
 
       // Error count should now be 2 (two post-retry failures)
@@ -3188,7 +3188,7 @@ describe(`QueryCollection`, () => {
         () => {
           expect(collection.status).toBe(`ready`)
         },
-        { timeout: 2000 }
+        { timeout: 2000 },
       )
 
       // Should have called queryFn 3 times (initial + 2 retries)
@@ -3490,7 +3490,7 @@ describe(`QueryCollection`, () => {
           q
             .from({ item: collection })
             .where(({ item }) =>
-              or(eq(item.category, `A`), eq(item.category, `B`))
+              or(eq(item.category, `A`), eq(item.category, `B`)),
             )
             .select(({ item }) => ({ id: item.id, name: item.name })),
       })
@@ -4438,7 +4438,7 @@ describe(`QueryCollection`, () => {
 
       // Verify query data is in the cache
       const cachedData = testQueryClient.getQueryData(
-        queryKey
+        queryKey,
       ) as Array<TestItem>
       expect(cachedData).toBeDefined()
       expect(cachedData).toEqual(items)

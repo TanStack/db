@@ -4,7 +4,7 @@
  */
 export function assert(
   condition: unknown,
-  message?: string
+  message?: string,
 ): asserts condition {
   if (!condition) {
     throw new Error(message || `Assertion failed`)
@@ -17,7 +17,7 @@ export function assert(
 export class DefaultMap<K, V> extends Map<K, V> {
   constructor(
     private defaultValue: () => V,
-    entries?: Iterable<[K, V]>
+    entries?: Iterable<[K, V]>,
   ) {
     super(entries)
   }
@@ -60,7 +60,7 @@ export function chunkedArrayPush(array: Array<unknown>, other: Array<unknown>) {
 export function binarySearch<T>(
   array: Array<T>,
   value: T,
-  comparator: (a: T, b: T) => number
+  comparator: (a: T, b: T) => number,
 ): number {
   let low = 0
   let high = array.length
@@ -138,7 +138,7 @@ export function* concatIterable<T>(
 
 export function* mapIterable<T, U>(
   it: Iterable<T>,
-  fn: (t: T) => U
+  fn: (t: T) => U,
 ): Iterable<U> {
   for (const t of it) {
     yield fn(t)

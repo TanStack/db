@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { LocalStorageAdapter, startOfflineExecutor } from "../src/index"
-import type { OfflineConfig } from "../src/types"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { LocalStorageAdapter, startOfflineExecutor } from '../src/index'
+import type { OfflineConfig } from '../src/types'
 
 describe(`OfflineExecutor`, () => {
   let mockCollection: any
@@ -19,7 +19,7 @@ describe(`OfflineExecutor`, () => {
 
     config = {
       collections: {
-        "test-collection": mockCollection,
+        'test-collection': mockCollection,
       },
       mutationFns: {
         syncData: mockMutationFn,

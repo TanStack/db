@@ -3,8 +3,8 @@ import type {
   SerializedError,
   SerializedMutation,
   SerializedOfflineTransaction,
-} from "../types"
-import type { Collection, PendingMutation } from "@tanstack/db"
+} from '../types'
+import type { Collection, PendingMutation } from '@tanstack/db'
 
 export class TransactionSerializer {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -13,7 +13,7 @@ export class TransactionSerializer {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(
-    collections: Record<string, Collection<any, any, any, any, any>>
+    collections: Record<string, Collection<any, any, any, any, any>>,
   ) {
     this.collections = collections
     // Create reverse lookup from collection.id to registry key
@@ -28,7 +28,7 @@ export class TransactionSerializer {
       ...transaction,
       createdAt: transaction.createdAt,
       mutations: transaction.mutations.map((mutation) =>
-        this.serializeMutation(mutation)
+        this.serializeMutation(mutation),
       ),
     }
     // Convert the whole object to JSON, handling dates
@@ -52,13 +52,13 @@ export class TransactionSerializer {
           return new Date(value)
         }
         return value
-      }
+      },
     )
 
     return {
       ...parsed,
       mutations: parsed.mutations.map((mutationData) =>
-        this.deserializeMutation(mutationData)
+        this.deserializeMutation(mutationData),
       ),
     }
   }
@@ -67,7 +67,7 @@ export class TransactionSerializer {
     const registryKey = this.collectionIdToKey.get(mutation.collection.id)
     if (!registryKey) {
       throw new Error(
-        `Collection with id ${mutation.collection.id} not found in registry`
+        `Collection with id ${mutation.collection.id} not found in registry`,
       )
     }
 

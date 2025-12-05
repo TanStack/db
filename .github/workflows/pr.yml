@@ -51,17 +51,17 @@ jobs:
       - name: Compressed Size Action - DB Package
         uses: preactjs/compressed-size-action@v2
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          pattern: "./packages/db/dist/**/*.{js,mjs}"
-          comment-key: "db-package-size"
-          build-script: "build:minified"
+          repo-token: '${{ secrets.GITHUB_TOKEN }}'
+          pattern: './packages/db/dist/**/*.{js,mjs}'
+          comment-key: 'db-package-size'
+          build-script: 'build:minified'
       - name: Compressed Size Action - React DB Package
         uses: preactjs/compressed-size-action@v2
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          pattern: "./packages/react-db/dist/**/*.{js,mjs}"
-          comment-key: "react-db-package-size"
-          build-script: "build:minified"
+          repo-token: '${{ secrets.GITHUB_TOKEN }}'
+          pattern: './packages/react-db/dist/**/*.{js,mjs}'
+          comment-key: 'react-db-package-size'
+          build-script: 'build:minified'
   build-example:
     name: Build Example Site
     runs-on: ubuntu-latest

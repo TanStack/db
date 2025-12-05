@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from 'vitest'
 import {
   count,
   createCollection,
@@ -6,10 +6,10 @@ import {
   createOptimisticAction,
   eq,
   gt,
-} from "@tanstack/db"
-import { nextTick, ref, watchEffect } from "vue"
-import { useLiveQuery } from "../src/useLiveQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
+} from '@tanstack/db'
+import { nextTick, ref, watchEffect } from 'vue'
+import { useLiveQuery } from '../src/useLiveQuery'
+import { mockSyncCollectionOptions } from '../../db/tests/utils'
 
 type Person = {
   id: string
@@ -105,7 +105,7 @@ describe(`Query Collections`, () => {
         id: `test-persons`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { state, data } = useLiveQuery((q) =>
@@ -116,7 +116,7 @@ describe(`Query Collections`, () => {
           id: persons.id,
           name: persons.name,
           age: persons.age,
-        }))
+        })),
     )
 
     // Wait for Vue reactivity to update
@@ -139,7 +139,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { state, data } = useLiveQuery((q) =>
@@ -150,7 +150,7 @@ describe(`Query Collections`, () => {
           id: c.id,
           name: c.name,
         }))
-        .orderBy(({ collection: c }) => c.id, `asc`)
+        .orderBy(({ collection: c }) => c.id, `asc`),
     )
 
     // Wait for collection to sync
@@ -206,7 +206,7 @@ describe(`Query Collections`, () => {
           id: `4`,
           name: `Kyle Doe`,
         }),
-      ])
+      ]),
     )
 
     // Update the person
@@ -243,7 +243,7 @@ describe(`Query Collections`, () => {
           id: `4`,
           name: `Kyle Doe 2`,
         }),
-      ])
+      ]),
     )
 
     // Delete the person
@@ -280,7 +280,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create issue collection
@@ -289,20 +289,20 @@ describe(`Query Collections`, () => {
         id: `issue-collection-test`,
         getKey: (issue: Issue) => issue.id,
         initialData: initialIssues,
-      })
+      }),
     )
 
     const { state } = useLiveQuery((q) =>
       q
         .from({ issues: issueCollection })
         .join({ persons: personCollection }, ({ issues, persons }) =>
-          eq(issues.userId, persons.id)
+          eq(issues.userId, persons.id),
         )
         .select(({ issues, persons }) => ({
           id: issues.id,
           title: issues.title,
           name: persons.name,
-        }))
+        })),
     )
 
     // Wait for collections to sync
@@ -399,7 +399,7 @@ describe(`Query Collections`, () => {
         id: `params-change-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const minAge = ref(30)
@@ -414,7 +414,7 @@ describe(`Query Collections`, () => {
             name: c.name,
             age: c.age,
           })),
-      [minAge]
+      [minAge],
     )
 
     // Wait for collection to sync
@@ -466,7 +466,7 @@ describe(`Query Collections`, () => {
         id: `optimistic-changes-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Initial query
@@ -480,7 +480,7 @@ describe(`Query Collections`, () => {
             name: c.name,
             team: c.team,
           }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+          .orderBy(({ collection: c }) => c.id, `asc`),
       )
 
     // Wait for collection to sync
@@ -494,7 +494,7 @@ describe(`Query Collections`, () => {
         .select(({ queryResult }) => ({
           team: queryResult.team,
           count: count(queryResult.id),
-        }))
+        })),
     )
 
     // Wait for grouped query to sync
@@ -568,7 +568,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test-bug`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create issue collection
@@ -577,7 +577,7 @@ describe(`Query Collections`, () => {
         id: `issue-collection-test-bug`,
         getKey: (issue: Issue) => issue.id,
         initialData: initialIssues,
-      })
+      }),
     )
 
     // Render the hook with a query that joins persons and issues
@@ -585,13 +585,13 @@ describe(`Query Collections`, () => {
       q
         .from({ issues: issueCollection })
         .join({ persons: personCollection }, ({ issues, persons }) =>
-          eq(issues.userId, persons.id)
+          eq(issues.userId, persons.id),
         )
         .select(({ issues, persons }) => ({
           id: issues.id,
           title: issues.title,
           name: persons.name,
-        }))
+        })),
     )
 
     const { state } = queryResult
@@ -701,7 +701,7 @@ describe(`Query Collections`, () => {
         id: `pre-created-collection-test-vue`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create a live query collection beforehand
@@ -747,7 +747,7 @@ describe(`Query Collections`, () => {
         id: `collection-1-vue`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const collection2 = createCollection(
@@ -772,7 +772,7 @@ describe(`Query Collections`, () => {
             team: `team3`,
           },
         ],
-      })
+      }),
     )
 
     // Create two different live query collections
@@ -867,7 +867,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       // Initially isReady should be false (collection is in idle state)
@@ -902,7 +902,7 @@ describe(`Query Collections`, () => {
           id: `pre-created-is-ready-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       // Create a live query collection that's already syncing
@@ -984,7 +984,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       expect(isReady.value).toBe(false)
@@ -1034,7 +1034,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       // Initially should be true
@@ -1078,7 +1078,7 @@ describe(`Query Collections`, () => {
           id: `live-updates-is-ready-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { isReady } = useLiveQuery((q) =>
@@ -1088,7 +1088,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       await waitForVueUpdate()
@@ -1157,13 +1157,13 @@ describe(`Query Collections`, () => {
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             name: persons.name,
-          }))
+          })),
       )
 
       expect(isReady.value).toBe(false)
@@ -1229,7 +1229,7 @@ describe(`Query Collections`, () => {
               id: c.id,
               name: c.name,
             })),
-        [minAge]
+        [minAge],
       )
 
       expect(isReady.value).toBe(false)
@@ -1288,7 +1288,7 @@ describe(`Query Collections`, () => {
           .select(({ collection: c }) => ({
             id: c.id,
             name: c.name,
-          }))
+          })),
       )
 
       // Initially should be loading
@@ -1357,7 +1357,7 @@ describe(`Query Collections`, () => {
           .select(({ collection: c }) => ({
             id: c.id,
             name: c.name,
-          }))
+          })),
       )
 
       // Initially should be loading
@@ -1402,7 +1402,7 @@ describe(`Query Collections`, () => {
         id: `config-querybuilder-test-vue`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create a pre-built QueryBuilder instance
@@ -1465,7 +1465,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       // Initially isLoading should be true
@@ -1571,7 +1571,7 @@ describe(`Query Collections`, () => {
             id: persons.id,
             name: persons.name,
             team: persons.team,
-          }))
+          })),
       )
 
       // Start sync
@@ -1684,13 +1684,13 @@ describe(`Query Collections`, () => {
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             userName: persons.name,
-          }))
+          })),
       )
 
       // Start sync for both
@@ -1781,7 +1781,7 @@ describe(`Query Collections`, () => {
           .select(({ persons }) => ({
             id: persons.id,
             name: persons.name,
-          }))
+          })),
       )
 
       // Initially isLoading should be true
@@ -1820,7 +1820,7 @@ describe(`Query Collections`, () => {
           id: `disabled-undefined-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const enabled = ref(false)
@@ -1836,7 +1836,7 @@ describe(`Query Collections`, () => {
               age: persons.age,
             }))
         },
-        [() => enabled.value]
+        [() => enabled.value],
       )
 
       // When callback returns undefined, should return disabled state
@@ -1873,7 +1873,7 @@ describe(`Query Collections`, () => {
           id: `disabled-null-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const enabled = ref(false)
@@ -1889,7 +1889,7 @@ describe(`Query Collections`, () => {
               age: persons.age,
             }))
         },
-        [() => enabled.value]
+        [() => enabled.value],
       )
 
       // When callback returns null, should return disabled state

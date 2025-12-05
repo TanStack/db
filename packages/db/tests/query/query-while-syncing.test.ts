@@ -1,7 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest"
-import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { createTransaction } from "../../src/transactions.js"
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { createTransaction } from '../../src/transactions.js'
 
 // Sample user type for tests
 type User = {
@@ -303,7 +303,7 @@ describe(`Query while syncing`, () => {
               .join(
                 { dept: departmentsCollection },
                 ({ user, dept }) => eq(user.department_id, dept.id),
-                `inner`
+                `inner`,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -423,7 +423,7 @@ describe(`Query while syncing`, () => {
             q
               .from({ user: usersCollection })
               .leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
-                eq(user.department_id, dept.id)
+                eq(user.department_id, dept.id),
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -551,12 +551,12 @@ describe(`Query while syncing`, () => {
               .join(
                 { c2: collection2 },
                 ({ c1, c2 }) => eq(c1.id, c2.id),
-                `inner`
+                `inner`,
               )
               .join(
                 { c3: collection3 },
                 ({ c1, c3 }) => eq(c1.id, c3.id),
-                `inner`
+                `inner`,
               )
               .select(({ c1 }) => ({
                 id: c1.id,
@@ -882,7 +882,7 @@ describe(`Query while syncing`, () => {
               .join(
                 { dept: departmentsCollection },
                 ({ user, dept }) => eq(user.department_id, dept.id),
-                `inner`
+                `inner`,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,

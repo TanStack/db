@@ -1,9 +1,9 @@
-import type { IStreamBuilder } from "@tanstack/db-ivm"
-import type { Collection } from "./collection/index.js"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { Transaction } from "./transactions"
-import type { BasicExpression, OrderBy } from "./query/ir.js"
-import type { EventEmitter } from "./event-emitter.js"
+import type { IStreamBuilder } from '@tanstack/db-ivm'
+import type { Collection } from './collection/index.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { Transaction } from './transactions'
+import type { BasicExpression, OrderBy } from './query/ir.js'
+import type { EventEmitter } from './event-emitter.js'
 
 /**
  * Interface for a collection-like object that provides the necessary methods
@@ -13,9 +13,9 @@ export interface CollectionLike<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 > extends Pick<
-    Collection<T, TKey>,
-    `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
-  > {}
+  Collection<T, TKey>,
+  `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
+> {}
 
 /**
  * StringSortOpts - Options for string sorting behavior
@@ -124,7 +124,7 @@ export type MutationFnParams<T extends object = Record<string, unknown>> = {
 }
 
 export type MutationFn<T extends object = Record<string, unknown>> = (
-  params: MutationFnParams<T>
+  params: MutationFnParams<T>,
 ) => Promise<any>
 
 /**
@@ -238,9 +238,9 @@ export interface SubscriptionUnsubscribedEvent {
  * All subscription events
  */
 export type SubscriptionEvents = {
-  "status:change": SubscriptionStatusChangeEvent
-  "status:ready": SubscriptionStatusEvent<`ready`>
-  "status:loadingSubset": SubscriptionStatusEvent<`loadingSubset`>
+  'status:change': SubscriptionStatusChangeEvent
+  'status:ready': SubscriptionStatusEvent<`ready`>
+  'status:loadingSubset': SubscriptionStatusEvent<`loadingSubset`>
   unsubscribed: SubscriptionUnsubscribedEvent
 }
 
@@ -334,7 +334,7 @@ export interface OptimisticChangeMessage<
  * This follows the standard-schema specification: https://github.com/standard-schema/standard-schema
  */
 export type StandardSchema<T> = StandardSchemaV1 & {
-  "~standard": {
+  '~standard': {
     types?: {
       input: T
       output: T
@@ -727,8 +727,10 @@ export interface SubscribeChangesOptions {
   whereExpression?: BasicExpression<boolean>
 }
 
-export interface SubscribeChangesSnapshotOptions
-  extends Omit<SubscribeChangesOptions, `includeInitialState`> {
+export interface SubscribeChangesSnapshotOptions extends Omit<
+  SubscribeChangesOptions,
+  `includeInitialState`
+> {
   orderBy?: OrderBy
   limit?: number
 }

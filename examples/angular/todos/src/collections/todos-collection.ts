@@ -41,5 +41,5 @@ export const todosCollection = createCollection(
         created_at: new Date(),
       },
     ],
-  })
+  }),
 )

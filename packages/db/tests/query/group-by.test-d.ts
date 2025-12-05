@@ -1,7 +1,7 @@
-import { describe, expectTypeOf, test } from "vitest"
-import { createLiveQueryCollection } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { describe, expectTypeOf, test } from 'vitest'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 import {
   and,
   avg,
@@ -14,7 +14,7 @@ import {
   min,
   or,
   sum,
-} from "../../src/query/builder/functions.js"
+} from '../../src/query/builder/functions.js'
 
 // Sample data types for comprehensive GROUP BY testing
 type Order = {
@@ -64,7 +64,7 @@ function createOrdersCollection() {
       id: `test-orders`,
       getKey: (order) => order.id,
       initialData: sampleOrders,
-    })
+    }),
   )
 }
 
@@ -300,7 +300,7 @@ describe(`Query GROUP BY Types`, () => {
             avg_amount: avg(orders.amount),
           }))
           .having(({ orders }) =>
-            and(gt(count(orders.id), 1), gte(sum(orders.amount), 450))
+            and(gt(count(orders.id), 1), gte(sum(orders.amount), 450)),
           ),
     })
 
@@ -329,7 +329,7 @@ describe(`Query GROUP BY Types`, () => {
             min_amount: min(orders.amount),
           }))
           .having(({ orders }) =>
-            or(gt(count(orders.id), 2), lt(min(orders.amount), 100))
+            or(gt(count(orders.id), 2), lt(min(orders.amount), 100)),
           ),
     })
 

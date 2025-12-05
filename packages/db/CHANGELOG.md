@@ -197,7 +197,7 @@
   **Example:**
 
   ```typescript
-  import { parseLoadSubsetOptions } from "@tanstack/db"
+  import { parseLoadSubsetOptions } from '@tanstack/db'
   // or from "@tanstack/query-db-collection" (re-exported for convenience)
 
   queryFn: async (ctx) => {
@@ -208,8 +208,8 @@
     // Build API request from parsed filters
     const params = new URLSearchParams()
     parsed.filters.forEach(({ field, operator, value }) => {
-      if (operator === "eq") {
-        params.set(field.join("."), String(value))
+      if (operator === 'eq') {
+        params.set(field.join('.'), String(value))
       }
     })
 
@@ -300,7 +300,7 @@
       q
         .from({ profile: profiles })
         .join({ user: users }, ({ profile, user }) =>
-          eq(profile.userId, user.id)
+          eq(profile.userId, user.id),
         ),
     getKey: (profile) => profile.id, // Each profile has unique ID
   })
@@ -313,7 +313,7 @@
       q
         .from({ user: users })
         .join({ comment: comments }, ({ user, comment }) =>
-          eq(user.id, comment.userId)
+          eq(user.id, comment.userId),
         ),
     getKey: (item) => item.userId, // Multiple comments share same userId!
   })
@@ -357,11 +357,11 @@
 
   // Check sync status
   if (collection.utils.isFetching) {
-    console.log("Syncing with server...")
+    console.log('Syncing with server...')
   }
 
   if (collection.utils.isRefetching) {
-    console.log("Background refresh in progress")
+    console.log('Background refresh in progress')
   }
 
   // Show last update time
@@ -370,7 +370,7 @@
 
   // Check error state (now using getters)
   if (collection.utils.isError) {
-    console.error("Sync failed:", collection.utils.lastError)
+    console.error('Sync failed:', collection.utils.lastError)
     console.log(`Failed ${collection.utils.errorCount} times`)
   }
   ```
@@ -459,7 +459,7 @@
   import {
     startOfflineExecutor,
     IndexedDBAdapter,
-  } from "@tanstack/offline-transactions"
+  } from '@tanstack/offline-transactions'
 
   const executor = startOfflineExecutor({
     collections: { todos: todoCollection },
@@ -471,18 +471,18 @@
       },
     },
     onStorageFailure: (diagnostic) => {
-      console.warn("Running in online-only mode:", diagnostic.message)
+      console.warn('Running in online-only mode:', diagnostic.message)
     },
   })
 
   // Create offline transaction
   const tx = executor.createOfflineTransaction({
-    mutationFnName: "syncTodos",
+    mutationFnName: 'syncTodos',
     autoCommit: false,
   })
 
   tx.mutate(() => {
-    todoCollection.insert({ id: "1", text: "Buy milk", completed: false })
+    todoCollection.insert({ id: '1', text: 'Buy milk', completed: false })
   })
 
   await tx.commit() // Persists to outbox and syncs when online
@@ -513,13 +513,13 @@
   ```typescript
   const collection = createCollection({
     getKey: (item) => item.id,
-    autoIndex: "eager", // default
+    autoIndex: 'eager', // default
     // ... sync config
   })
 
   // These now automatically create and use indexes:
   collection.subscribeChanges((items) => console.log(items), {
-    whereExpression: eq(row.vehicleDispatch?.date, "2024-01-01"),
+    whereExpression: eq(row.vehicleDispatch?.date, '2024-01-01'),
   })
 
   collection.subscribeChanges((items) => console.log(items), {
@@ -564,7 +564,7 @@
   **Example Usage:**
 
   ```ts
-  import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
+  import { usePacedMutations, debounceStrategy } from '@tanstack/react-db'
 
   const mutate = usePacedMutations({
     mutationFn: async ({ transaction }) => {
@@ -612,8 +612,8 @@
     if (!cache.has(id)) {
       const collection = createCollection(/* ... */)
 
-      collection.on("status:change", ({ status }) => {
-        if (status === "cleaned-up") {
+      collection.on('status:change', ({ status }) => {
+        if (status === 'cleaned-up') {
           cache.delete(id) // This now works!
         }
       })
@@ -665,9 +665,9 @@
   const users = createLiveQueryCollection((q) =>
     q
       .from({ user: usersCollection })
-      .orderBy(({ user }) => user.name, "asc")
+      .orderBy(({ user }) => user.name, 'asc')
       .limit(10)
-      .offset(0)
+      .offset(0),
   )
 
   users.utils.setWindow({ offset: 10, limit: 10 })
@@ -828,15 +828,15 @@
   ```js
   // Before - commit() didn't throw
   await tx.commit()
-  if (tx.state === "failed") {
-    console.error("Failed:", tx.error)
+  if (tx.state === 'failed') {
+    console.error('Failed:', tx.error)
   }
 
   // After - commit() now throws
   try {
     await tx.commit()
   } catch (error) {
-    console.error("Failed:", error)
+    console.error('Failed:', error)
   }
   ```
 
@@ -1176,7 +1176,7 @@
   try {
     collection.insert(data)
   } catch (error) {
-    if (error.message.includes("already exists")) {
+    if (error.message.includes('already exists')) {
       // Handle duplicate key error
     }
   }
@@ -1185,7 +1185,7 @@
   **After:**
 
   ```ts
-  import { DuplicateKeyError } from "@tanstack/db"
+  import { DuplicateKeyError } from '@tanstack/db'
 
   try {
     collection.insert(data)
@@ -1202,14 +1202,14 @@
 
   ```ts
   // Electric collection errors were imported from @tanstack/db
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/db"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/db'
   ```
 
   **After:**
 
   ```ts
   // Now import from the specific adapter package
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/electric-db-collection"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/electric-db-collection'
   ```
 
   ### Unified Error Handling
@@ -1217,14 +1217,14 @@
   **New:**
 
   ```ts
-  import { TanStackDBError } from "@tanstack/db"
+  import { TanStackDBError } from '@tanstack/db'
 
   try {
     // Any TanStack DB operation
   } catch (error) {
     if (error instanceof TanStackDBError) {
       // Handle all TanStack DB errors uniformly
-      console.log("TanStack DB error:", error.message)
+      console.log('TanStack DB error:', error.message)
     }
   }
   ```

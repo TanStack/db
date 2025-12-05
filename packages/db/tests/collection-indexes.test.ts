@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest"
-import mitt from "mitt"
-import { createCollection } from "../src/collection/index.js"
-import { createTransaction } from "../src/transactions"
+import { beforeEach, describe, expect, it } from 'vitest'
+import mitt from 'mitt'
+import { createCollection } from '../src/collection/index.js'
+import { createTransaction } from '../src/transactions'
 import {
   and,
   eq,
@@ -12,11 +12,11 @@ import {
   lt,
   lte,
   or,
-} from "../src/query/builder/functions"
-import { PropRef } from "../src/query/ir"
-import { expectIndexUsage, withIndexTracking } from "./utils"
-import type { Collection } from "../src/collection/index.js"
-import type { MutationFn, PendingMutation } from "../src/types"
+} from '../src/query/builder/functions'
+import { PropRef } from '../src/query/ir'
+import { expectIndexUsage, withIndexTracking } from './utils'
+import type { Collection } from '../src/collection/index.js'
+import type { MutationFn, PendingMutation } from '../src/types'
 
 interface TestItem {
   id: string
@@ -231,7 +231,7 @@ describe(`Collection Indexes`, () => {
         },
         {
           includeInitialState: true,
-        }
+        },
       )
 
       // Clear the changes array
@@ -242,7 +242,7 @@ describe(`Collection Indexes`, () => {
         collection.update(`1`, (draft) => {
           draft.status = `inactive`
           draft.age = 26
-        })
+        }),
       )
       await tx.isPersisted.promise
 
@@ -271,7 +271,7 @@ describe(`Collection Indexes`, () => {
         collection.update(`1`, (draft) => {
           draft.status = `inactive`
           draft.age = 26
-        })
+        }),
       )
       await tx.isPersisted.promise
 
@@ -297,7 +297,7 @@ describe(`Collection Indexes`, () => {
         },
         {
           includeInitialState: true,
-        }
+        },
       )
 
       // Clear the changes
@@ -318,7 +318,7 @@ describe(`Collection Indexes`, () => {
 
       // Ensure all events are the same delete event
       const deleteEvents = changes.filter(
-        (c) => c.type === `delete` && c.key === `1`
+        (c) => c.type === `delete` && c.key === `1`,
       )
       expect(deleteEvents.length).toBe(changes.length) // All events should be the same delete
 
@@ -356,7 +356,7 @@ describe(`Collection Indexes`, () => {
         {
           whereExpression: eq(new PropRef([`status`]), `active`),
           includeInitialState: true,
-        }
+        },
       )
 
       // Clear the changes
@@ -367,7 +367,7 @@ describe(`Collection Indexes`, () => {
       tx1.mutate(() =>
         collection.update(`2`, (draft) => {
           draft.status = `active`
-        })
+        }),
       )
       await tx1.isPersisted.promise
 
@@ -380,7 +380,7 @@ describe(`Collection Indexes`, () => {
       tx2.mutate(() =>
         collection.update(`1`, (draft) => {
           draft.status = `inactive`
-        })
+        }),
       )
       await tx2.isPersisted.promise
 
@@ -402,7 +402,7 @@ describe(`Collection Indexes`, () => {
         },
         {
           whereExpression: eq(new PropRef([`status`]), `active`),
-        }
+        },
       )
 
       // Change inactive item to active (should trigger)
@@ -410,7 +410,7 @@ describe(`Collection Indexes`, () => {
       tx1.mutate(() =>
         collection.update(`2`, (draft) => {
           draft.status = `active`
-        })
+        }),
       )
       await tx1.isPersisted.promise
 
@@ -423,7 +423,7 @@ describe(`Collection Indexes`, () => {
       tx2.mutate(() =>
         collection.update(`1`, (draft) => {
           draft.status = `inactive`
-        })
+        }),
       )
       await tx2.isPersisted.promise
 
@@ -688,7 +688,7 @@ describe(`Collection Indexes`, () => {
         const result = collection.currentStateAsChanges({
           where: and(
             gt(new PropRef([`age`]), 25),
-            lt(new PropRef([`age`]), 35)
+            lt(new PropRef([`age`]), 35),
           ),
         })!
 
@@ -720,7 +720,7 @@ describe(`Collection Indexes`, () => {
         const result = collection.currentStateAsChanges({
           where: and(
             eq(new PropRef([`status`]), `active`),
-            gte(new PropRef([`age`]), 25)
+            gte(new PropRef([`age`]), 25),
           ),
         })!
 
@@ -823,7 +823,7 @@ describe(`Collection Indexes`, () => {
         const result = collection.currentStateAsChanges({
           where: or(
             and(gte(new PropRef([`age`]), 25), lte(new PropRef([`age`]), 30)),
-            eq(new PropRef([`status`]), `pending`)
+            eq(new PropRef([`status`]), `pending`),
           ),
         })!
 
@@ -862,7 +862,7 @@ describe(`Collection Indexes`, () => {
         const result = collection.currentStateAsChanges({
           where: and(
             eq(new PropRef([`status`]), `active`), // Can optimize with index
-            gt(new PropRef([`age`]), 24) // Can also optimize - will be AND combined
+            gt(new PropRef([`age`]), 24), // Can also optimize - will be AND combined
           ),
         })!
 
@@ -886,7 +886,7 @@ describe(`Collection Indexes`, () => {
         const result = collection.currentStateAsChanges({
           where: and(
             eq(new PropRef([`age`]), 25), // Has index
-            eq(new PropRef([`name`]), `Alice`) // No index on name
+            eq(new PropRef([`name`]), `Alice`), // No index on name
           ),
         })!
 
@@ -930,7 +930,7 @@ describe(`Collection Indexes`, () => {
         const result = collection.currentStateAsChanges({
           where: and(
             gt(length(new PropRef([`name`])), 4), // Complex - can't optimize (Alice=5, Charlie=7, Diana=5)
-            gt(length(new PropRef([`status`])), 6) // Complex - can't optimize (only "inactive" = 8 > 6)
+            gt(length(new PropRef([`status`])), 6), // Complex - can't optimize (only "inactive" = 8 > 6)
           ),
         })!
 
@@ -954,7 +954,7 @@ describe(`Collection Indexes`, () => {
         const result = collection.currentStateAsChanges({
           where: or(
             gt(length(new PropRef([`name`])), 6), // Complex - can't optimize (only Charlie has name length 7 > 6)
-            gt(length(new PropRef([`status`])), 7) // Complex - can't optimize (only Bob has status "inactive" = 8 > 7)
+            gt(length(new PropRef([`status`])), 7), // Complex - can't optimize (only Bob has status "inactive" = 8 > 7)
           ),
         })!
 
@@ -978,7 +978,7 @@ describe(`Collection Indexes`, () => {
         const result = collection.currentStateAsChanges({
           where: and(
             eq(new PropRef([`name`]), `Alice`),
-            eq(new PropRef([`score`]), 95)
+            eq(new PropRef([`score`]), 95),
           ),
         })!
 
@@ -1003,7 +1003,7 @@ describe(`Collection Indexes`, () => {
         const result1 = collection.currentStateAsChanges({
           where: and(
             eq(new PropRef([`age`]), 25), // Can optimize - has index
-            eq(new PropRef([`name`]), `Alice`) // Can't optimize - no index
+            eq(new PropRef([`name`]), `Alice`), // Can't optimize - no index
           ),
         })
 
@@ -1021,7 +1021,7 @@ describe(`Collection Indexes`, () => {
         const result2 = collection.currentStateAsChanges({
           where: and(
             eq(new PropRef([`name`]), `Alice`), // Can't optimize - no index
-            gt(length(new PropRef([`name`])), 3) // Can't optimize - complex expression
+            gt(length(new PropRef([`name`])), 3), // Can't optimize - complex expression
           ),
         })
 
@@ -1108,7 +1108,7 @@ describe(`Collection Indexes`, () => {
           {
             includeInitialState: true,
             whereExpression: eq(new PropRef([`status`]), `active`),
-          }
+          },
         )
 
         expect(changes).toHaveLength(3) // Initial active items
@@ -1143,7 +1143,7 @@ describe(`Collection Indexes`, () => {
           {
             includeInitialState: true,
             whereExpression: eq(new PropRef([`status`]), `active`),
-          }
+          },
         )
 
         expect(changes).toHaveLength(3) // Initial active items
@@ -1171,7 +1171,7 @@ describe(`Collection Indexes`, () => {
             age: 40,
             status: `active`,
             createdAt: new Date(),
-          })
+          }),
         )
         await tx1.isPersisted.promise
 
@@ -1188,7 +1188,7 @@ describe(`Collection Indexes`, () => {
             age: 35,
             status: `inactive`,
             createdAt: new Date(),
-          })
+          }),
         )
         await tx2.isPersisted.promise
 
@@ -1200,7 +1200,7 @@ describe(`Collection Indexes`, () => {
         tx3.mutate(() =>
           collection.update(`1`, (draft) => {
             draft.status = `inactive`
-          })
+          }),
         )
         await tx3.isPersisted.promise
 
@@ -1224,7 +1224,7 @@ describe(`Collection Indexes`, () => {
           {
             includeInitialState: true,
             whereExpression: gte(new PropRef([`age`]), 30),
-          }
+          },
         )
 
         expect(changes).toHaveLength(2) // Bob (30) and Charlie (35)
@@ -1247,7 +1247,7 @@ describe(`Collection Indexes`, () => {
         tx.mutate(() =>
           collection.update(`4`, (draft) => {
             draft.age = 32
-          })
+          }),
         )
         await tx.isPersisted.promise
 
@@ -1271,7 +1271,7 @@ describe(`Collection Indexes`, () => {
           {
             includeInitialState: true,
             whereExpression: eq(new PropRef([`status`]), `active`),
-          }
+          },
         )
 
         expect(changes).toHaveLength(3) // Initial active items
@@ -1407,14 +1407,14 @@ describe(`Collection Indexes`, () => {
           age: 50,
           status: `active`,
           createdAt: new Date(),
-        })
+        }),
       )
 
       const tx2 = createTransaction({ mutationFn })
       tx2.mutate(() =>
         collection.update(`1`, (draft) => {
           draft.age = 99
-        })
+        }),
       )
 
       const tx3 = createTransaction({ mutationFn })

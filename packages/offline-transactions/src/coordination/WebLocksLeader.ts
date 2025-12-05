@@ -1,4 +1,4 @@
-import { BaseLeaderElection } from "./LeaderElection"
+import { BaseLeaderElection } from './LeaderElection'
 
 export class WebLocksLeader extends BaseLeaderElection {
   private lockName: string
@@ -28,7 +28,7 @@ export class WebLocksLeader extends BaseLeaderElection {
         },
         (lock) => {
           return lock !== null
-        }
+        },
       )
 
       if (!available) {
@@ -52,7 +52,7 @@ export class WebLocksLeader extends BaseLeaderElection {
               }
             })
           }
-        }
+        },
       )
 
       return true

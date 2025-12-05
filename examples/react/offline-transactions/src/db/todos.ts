@@ -1,14 +1,14 @@
-import { createCollection } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { createCollection } from '@tanstack/react-db'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import {
   IndexedDBAdapter,
   LocalStorageAdapter,
   startOfflineExecutor,
-} from "@tanstack/offline-transactions"
-import { z } from "zod"
-import type { PendingMutation } from "@tanstack/db"
-import type { Todo } from "~/utils/todos"
-import { queryClient } from "~/utils/queryClient"
+} from '@tanstack/offline-transactions'
+import { z } from 'zod'
+import type { PendingMutation } from '@tanstack/db'
+import type { Todo } from '~/utils/todos'
+import { queryClient } from '~/utils/queryClient'
 
 /**
  * A utility function to fetch data from a URL with built-in retry logic for non-200 responses.
@@ -29,7 +29,7 @@ import { queryClient } from "~/utils/queryClient"
 export async function fetchWithRetry(
   url: string,
   options: RequestInit = {},
-  retryConfig: { retries?: number; delay?: number; backoff?: number } = {}
+  retryConfig: { retries?: number; delay?: number; backoff?: number } = {},
 ): Promise<Response> {
   const { retries = 6, delay = 1000, backoff = 2 } = retryConfig
 
@@ -45,7 +45,7 @@ export async function fetchWithRetry(
 
       // If it's a non-200 response, log the status and prepare to retry
       console.warn(
-        `Fetch attempt ${i + 1} failed with status: ${response.status}. Retrying...`
+        `Fetch attempt ${i + 1} failed with status: ${response.status}. Retrying...`,
       )
 
       // Wait before the next attempt, with exponential backoff
@@ -57,7 +57,7 @@ export async function fetchWithRetry(
       // Catch network errors and log a message
       console.error(
         `Fetch attempt ${i + 1} failed due to a network error:`,
-        error
+        error,
       )
 
       // Wait before the next attempt, with exponential backoff
@@ -104,7 +104,7 @@ export const todoCollection = createCollection(
     },
     getKey: (item) => item.id,
     schema: todoSchema,
-  })
+  }),
 )
 
 // API client functions
@@ -127,8 +127,8 @@ export const todoAPI = {
             const response = await fetchWithRetry(`/api/todos`, {
               method: `POST`,
               headers: {
-                "Content-Type": `application/json`,
-                "Idempotency-Key": idempotencyKey,
+                'Content-Type': `application/json`,
+                'Idempotency-Key': idempotencyKey,
               },
               body: JSON.stringify({
                 text: todoData.text,
@@ -149,14 +149,14 @@ export const todoAPI = {
               {
                 method: `PUT`,
                 headers: {
-                  "Content-Type": `application/json`,
-                  "Idempotency-Key": idempotencyKey,
+                  'Content-Type': `application/json`,
+                  'Idempotency-Key': idempotencyKey,
                 },
                 body: JSON.stringify({
                   text: todoData.text,
                   completed: todoData.completed,
                 }),
-              }
+              },
             )
 
             if (!response.ok) {
@@ -171,9 +171,9 @@ export const todoAPI = {
               {
                 method: `DELETE`,
                 headers: {
-                  "Idempotency-Key": idempotencyKey,
+                  'Idempotency-Key': idempotencyKey,
                 },
-              }
+              },
             )
 
             if (!response.ok) {
@@ -265,7 +265,7 @@ export async function createIndexedDBOfflineExecutor() {
           code: diagnostic.code,
           message: diagnostic.message,
           error: diagnostic.error,
-        }
+        },
       )
     },
   })
@@ -297,7 +297,7 @@ export async function createLocalStorageOfflineExecutor() {
           code: diagnostic.code,
           message: diagnostic.message,
           error: diagnostic.error,
-        }
+        },
       )
     },
   })

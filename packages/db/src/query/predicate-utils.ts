@@ -1,6 +1,6 @@
-import { Func, Value } from "./ir.js"
-import type { BasicExpression, OrderBy, PropRef } from "./ir.js"
-import type { LoadSubsetOptions } from "../types.js"
+import { Func, Value } from './ir.js'
+import type { BasicExpression, OrderBy, PropRef } from './ir.js'
+import type { LoadSubsetOptions } from '../types.js'
 
 /**
  * Check if one where clause is a logical subset of another.
@@ -20,7 +20,7 @@ import type { LoadSubsetOptions } from "../types.js"
  */
 export function isWhereSubset(
   subset: BasicExpression<boolean> | undefined,
-  superset: BasicExpression<boolean> | undefined
+  superset: BasicExpression<boolean> | undefined,
 ): boolean {
   // undefined/missing where clause means "no filter" (all data)
   // Both undefined means subset relationship holds (all data ⊆ all data)
@@ -44,7 +44,7 @@ export function isWhereSubset(
 }
 
 function makeDisjunction(
-  preds: Array<BasicExpression<boolean>>
+  preds: Array<BasicExpression<boolean>>,
 ): BasicExpression<boolean> {
   if (preds.length === 0) {
     return new Value(false)
@@ -57,14 +57,14 @@ function makeDisjunction(
 
 function convertInToOr(inField: InField) {
   const equalities = inField.values.map(
-    (value) => new Func(`eq`, [inField.ref, new Value(value)])
+    (value) => new Func(`eq`, [inField.ref, new Value(value)]),
   )
   return makeDisjunction(equalities)
 }
 
 function isWhereSubsetInternal(
   subset: BasicExpression<boolean>,
-  superset: BasicExpression<boolean>
+  superset: BasicExpression<boolean>,
 ): boolean {
   // If subset is false it is requesting no data,
   // thus the result set is empty
@@ -83,7 +83,7 @@ function isWhereSubsetInternal(
   // Example: (age > 20) ⊆ (age > 10 AND status = 'active') is false (doesn't imply status condition)
   if (superset.type === `func` && superset.name === `and`) {
     return superset.args.every((arg) =>
-      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>)
+      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>),
     )
   }
 
@@ -91,7 +91,7 @@ function isWhereSubsetInternal(
   if (subset.type === `func` && subset.name === `and`) {
     // For (A AND B) ⊆ C, since (A AND B) implies A, we check if any conjunct implies C
     return subset.args.some((arg) =>
-      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset)
+      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset),
     )
   }
 
@@ -114,7 +114,7 @@ function isWhereSubsetInternal(
   // Handle OR in subset: (A OR B) is subset of C only if both A and B are subsets of C
   if (subset.type === `func` && subset.name === `or`) {
     return subset.args.every((arg) =>
-      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset)
+      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset),
     )
   }
 
@@ -123,7 +123,7 @@ function isWhereSubsetInternal(
   // If subset is contained in any disjunct, it's contained in the union
   if (superset.type === `func` && superset.name === `or`) {
     return superset.args.some((arg) =>
-      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>)
+      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>),
     )
   }
 
@@ -145,7 +145,7 @@ function isWhereSubsetInternal(
         subsetFunc,
         subsetField.value,
         supersetFunc,
-        supersetField.value
+        supersetField.value,
       )
     }
 
@@ -205,8 +205,8 @@ function combineWherePredicates(
   predicates: Array<BasicExpression<boolean>>,
   operation: `and` | `or`,
   simplifyFn: (
-    preds: Array<BasicExpression<boolean>>
-  ) => BasicExpression<boolean> | null
+    preds: Array<BasicExpression<boolean>>,
+  ) => BasicExpression<boolean> | null,
 ): BasicExpression<boolean> {
   const emptyValue = operation === `and` ? true : false
   const identityValue = operation === `and` ? true : false
@@ -293,7 +293,7 @@ function combineWherePredicates(
  * @returns Combined predicate representing the union
  */
 export function unionWherePredicates(
-  predicates: Array<BasicExpression<boolean>>
+  predicates: Array<BasicExpression<boolean>>,
 ): BasicExpression<boolean> {
   return combineWherePredicates(predicates, `or`, unionSameFieldPredicates)
 }
@@ -337,7 +337,7 @@ export function unionWherePredicates(
  */
 export function minusWherePredicates(
   fromPredicate: BasicExpression<boolean> | undefined,
-  subtractPredicate: BasicExpression<boolean> | undefined
+  subtractPredicate: BasicExpression<boolean> | undefined,
 ): BasicExpression<boolean> | null {
   // If nothing to subtract, return the original
   if (subtractPredicate === undefined) {
@@ -367,20 +367,20 @@ export function minusWherePredicates(
   // Try to detect and handle common conditions
   const commonConditions = findCommonConditions(
     fromPredicate,
-    subtractPredicate
+    subtractPredicate,
   )
   if (commonConditions.length > 0) {
     // Extract predicates without common conditions
     const fromWithoutCommon = removeConditions(fromPredicate, commonConditions)
     const subtractWithoutCommon = removeConditions(
       subtractPredicate,
-      commonConditions
+      commonConditions,
     )
 
     // Recursively compute difference on simplified predicates
     const simplifiedDifference = minusWherePredicates(
       fromWithoutCommon,
-      subtractWithoutCommon
+      subtractWithoutCommon,
     )
 
     if (simplifiedDifference !== null) {
@@ -406,7 +406,7 @@ export function minusWherePredicates(
  */
 function minusSameFieldPredicates(
   fromPred: Func,
-  subtractPred: Func
+  subtractPred: Func,
 ): BasicExpression<boolean> | null {
   // Extract field information
   const fromField =
@@ -439,8 +439,8 @@ function minusSameFieldPredicates(
           subtractInField.values,
           v,
           subtractInField.primitiveSet ?? null,
-          subtractInField.areAllPrimitives
-        )
+          subtractInField.areAllPrimitives,
+        ),
     )
 
     if (remainingValues.length === 0) {
@@ -468,7 +468,7 @@ function minusSameFieldPredicates(
     const subtractValue = (subtractField as { ref: PropRef; value: any }).value
 
     const remainingValues = fromInField.values.filter(
-      (v) => !areValuesEqual(v, subtractValue)
+      (v) => !areValuesEqual(v, subtractValue),
     )
 
     if (remainingValues.length === 0) {
@@ -517,7 +517,7 @@ function minusSameFieldPredicates(
       fromPred,
       fromComp.value,
       subtractPred,
-      subtractComp.value
+      subtractComp.value,
     )
     return result
   }
@@ -533,7 +533,7 @@ function minusRangePredicates(
   fromFunc: Func,
   fromValue: any,
   subtractFunc: Func,
-  subtractValue: any
+  subtractValue: any,
 ): BasicExpression<boolean> | null {
   const fromOp = fromFunc.name as `gt` | `gte` | `lt` | `lte` | `eq`
   const subtractOp = subtractFunc.name as `gt` | `gte` | `lt` | `lte` | `eq`
@@ -712,7 +712,7 @@ function minusRangePredicates(
  */
 export function isOrderBySubset(
   subset: OrderBy | undefined,
-  superset: OrderBy | undefined
+  superset: OrderBy | undefined,
 ): boolean {
   // No ordering requirement is always satisfied
   if (!subset || subset.length === 0) {
@@ -742,7 +742,7 @@ export function isOrderBySubset(
     if (
       !areCompareOptionsEqual(
         subClause.compareOptions,
-        superClause.compareOptions
+        superClause.compareOptions,
       )
     ) {
       return false
@@ -767,7 +767,7 @@ export function isOrderBySubset(
  */
 export function isLimitSubset(
   subset: number | undefined,
-  superset: number | undefined
+  superset: number | undefined,
 ): boolean {
   // Unlimited superset satisfies any limit requirement
   if (superset === undefined) {
@@ -800,7 +800,7 @@ export function isLimitSubset(
  */
 export function isPredicateSubset(
   subset: LoadSubsetOptions,
-  superset: LoadSubsetOptions
+  superset: LoadSubsetOptions,
 ): boolean {
   // When the superset has a limit, we can only determine subset relationship
   // if the where clauses are equal (not just subset relationship).
@@ -842,7 +842,7 @@ export function isPredicateSubset(
  */
 function areWhereClausesEqual(
   a: BasicExpression<boolean> | undefined,
-  b: BasicExpression<boolean> | undefined
+  b: BasicExpression<boolean> | undefined,
 ): boolean {
   if (a === undefined && b === undefined) {
     return true
@@ -863,7 +863,7 @@ function areWhereClausesEqual(
  */
 function findCommonConditions(
   predicate1: BasicExpression<boolean>,
-  predicate2: BasicExpression<boolean>
+  predicate2: BasicExpression<boolean>,
 ): Array<BasicExpression<boolean>> {
   const conditions1 = extractAllConditions(predicate1)
   const conditions2 = extractAllConditions(predicate2)
@@ -889,7 +889,7 @@ function findCommonConditions(
  * Extract all individual conditions from a predicate, flattening AND operations.
  */
 function extractAllConditions(
-  predicate: BasicExpression<boolean>
+  predicate: BasicExpression<boolean>,
 ): Array<BasicExpression<boolean>> {
   if (predicate.type === `func` && predicate.name === `and`) {
     const conditions: Array<BasicExpression<boolean>> = []
@@ -908,14 +908,14 @@ function extractAllConditions(
  */
 function removeConditions(
   predicate: BasicExpression<boolean>,
-  conditionsToRemove: Array<BasicExpression<boolean>>
+  conditionsToRemove: Array<BasicExpression<boolean>>,
 ): BasicExpression<boolean> | undefined {
   if (predicate.type === `func` && predicate.name === `and`) {
     const remainingArgs = predicate.args.filter(
       (arg) =>
         !conditionsToRemove.some((cond) =>
-          areExpressionsEqual(arg as BasicExpression<boolean>, cond)
-        )
+          areExpressionsEqual(arg as BasicExpression<boolean>, cond),
+        ),
     )
 
     if (remainingArgs.length === 0) {
@@ -940,7 +940,7 @@ function removeConditions(
  * Flattens nested AND operations to avoid unnecessary nesting.
  */
 function combineConditions(
-  conditions: Array<BasicExpression<boolean>>
+  conditions: Array<BasicExpression<boolean>>,
 ): BasicExpression<boolean> {
   if (conditions.length === 0) {
     return { type: `val`, value: true } as BasicExpression<boolean>
@@ -977,7 +977,7 @@ function combineConditions(
 function findPredicateWithOperator(
   predicates: Array<BasicExpression<boolean>>,
   operator: string,
-  value: any
+  value: any,
 ): BasicExpression<boolean> | undefined {
   return predicates.find((p) => {
     if (p.type === `func`) {
@@ -1012,7 +1012,7 @@ function areExpressionsEqual(a: BasicExpression, b: BasicExpression): boolean {
       return false
     }
     return aFunc.args.every((arg, i) =>
-      areExpressionsEqual(arg, bFunc.args[i]!)
+      areExpressionsEqual(arg, bFunc.args[i]!),
     )
   }
 
@@ -1086,7 +1086,7 @@ function arrayIncludesWithSet(
   array: Array<any>,
   value: any,
   primitiveSet: Set<any> | null,
-  arrayIsAllPrimitives?: boolean
+  arrayIsAllPrimitives?: boolean,
 ): boolean {
   // Fast path: use pre-built Set for O(1) lookup
   if (primitiveSet) {
@@ -1124,7 +1124,7 @@ function minValue(a: any, b: any): any {
 
 function areCompareOptionsEqual(
   a: { direction?: `asc` | `desc`; [key: string]: any },
-  b: { direction?: `asc` | `desc`; [key: string]: any }
+  b: { direction?: `asc` | `desc`; [key: string]: any },
 ): boolean {
   // For now, just compare direction - could be enhanced for other options
   return a.direction === b.direction
@@ -1215,7 +1215,7 @@ function isComparisonSubset(
   subsetFunc: Func,
   subsetValue: any,
   supersetFunc: Func,
-  supersetValue: any
+  supersetValue: any,
 ): boolean {
   const subOp = subsetFunc.name
   const superOp = supersetFunc.name
@@ -1283,7 +1283,7 @@ function isComparisonSubset(
 }
 
 function groupPredicatesByField(
-  predicates: Array<BasicExpression<boolean>>
+  predicates: Array<BasicExpression<boolean>>,
 ): Map<string | null, Array<BasicExpression<boolean>>> {
   const groups = new Map<string | null, Array<BasicExpression<boolean>>>()
 
@@ -1310,7 +1310,7 @@ function groupPredicatesByField(
 }
 
 function unionSameFieldPredicates(
-  predicates: Array<BasicExpression<boolean>>
+  predicates: Array<BasicExpression<boolean>>,
 ): BasicExpression<boolean> | null {
   if (predicates.length === 1) {
     return predicates[0]!
@@ -1436,7 +1436,7 @@ function unionSameFieldPredicates(
           return (p as Func).name === `in`
         }
         return false
-      })!
+      })!,
     )
   }
 

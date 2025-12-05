@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest"
-import { Temporal } from "temporal-polyfill"
+import { describe, expect, it } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import {
   createArrayChangeProxy,
   createChangeProxy,
   withArrayChangeTracking,
   withChangeTracking,
-} from "../src/proxy"
+} from '../src/proxy'
 
 describe(`Proxy Library`, () => {
   describe(`createChangeProxy`, () => {
@@ -139,7 +139,7 @@ describe(`Proxy Library`, () => {
       obj.self = obj // Create circular reference
 
       const { proxy, getChanges } = createChangeProxy(
-        obj as Record<string | symbol, any>
+        obj as Record<string | symbol, any>,
       )
 
       proxy.name = `Jane`
@@ -707,7 +707,7 @@ describe(`Proxy Library`, () => {
         expect.arrayContaining([
           { id: 1, value: `modified` },
           { id: 2, value: `two` },
-        ])
+        ]),
       )
     })
 
@@ -775,7 +775,7 @@ describe(`Proxy Library`, () => {
         expect.arrayContaining([
           { id: 1, value: `one` },
           { id: 2, value: `modified two` },
-        ])
+        ]),
       )
     })
 
@@ -859,7 +859,7 @@ describe(`Proxy Library`, () => {
         expect.arrayContaining([
           { id: 1, value: `modified` },
           { id: 2, value: `two` },
-        ])
+        ]),
       )
       expect(obj1.value).toBe(`one`) // Original unchanged
     })
@@ -924,7 +924,7 @@ describe(`Proxy Library`, () => {
         expect.arrayContaining([
           { id: 1, name: `Alice Admin` },
           { id: 2, name: `Bob` },
-        ])
+        ]),
       )
     })
   })
@@ -1830,7 +1830,7 @@ describe(`Proxy Library`, () => {
 
         // Use find() to get an array item and modify it
         const order = proxy.job.orders.find(
-          (order) => order.orderId === `order-1`
+          (order) => order.orderId === `order-1`,
         )
         if (order) {
           order.orderBinInt = 99

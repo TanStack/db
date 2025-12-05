@@ -1,13 +1,13 @@
-import { describe, expect, it, vi } from "vitest"
-import { createCollection } from "@tanstack/db"
-import { trailBaseCollectionOptions } from "../src/trailbase"
+import { describe, expect, it, vi } from 'vitest'
+import { createCollection } from '@tanstack/db'
+import { trailBaseCollectionOptions } from '../src/trailbase'
 import type {
   Event,
   FilterOrComposite,
   ListResponse,
   Pagination,
   RecordApi,
-} from "trailbase"
+} from 'trailbase'
 
 type Data = {
   id: number | null
@@ -25,7 +25,7 @@ class MockRecordApi<T> implements RecordApi<T> {
       expand?: Array<string>
     }): Promise<ListResponse<T>> => {
       return Promise.resolve({ records: [] })
-    }
+    },
   )
 
   read = vi.fn(
@@ -33,10 +33,10 @@ class MockRecordApi<T> implements RecordApi<T> {
       _id: string | number,
       _opt?: {
         expand?: Array<string>
-      }
+      },
     ): Promise<T> => {
       throw `read`
-    }
+    },
   )
 
   create = vi.fn((_record: T): Promise<string | number> => {
@@ -58,7 +58,7 @@ class MockRecordApi<T> implements RecordApi<T> {
         start: (controller: ReadableStreamDefaultController<Event>) => {
           controller.close()
         },
-      })
+      }),
     )
   })
 }
@@ -124,7 +124,7 @@ describe(`TrailBase Integration`, () => {
     await injectEvent({ Update: updatedRecord })
 
     expect(collection.state).toEqual(
-      new Map([updatedRecord].map((d) => [d.id, d]))
+      new Map([updatedRecord].map((d) => [d.id, d])),
     )
 
     // Await cancellation.
@@ -196,7 +196,7 @@ describe(`TrailBase Integration`, () => {
         }, 1)
 
         return Promise.resolve(records.map((r) => r.id ?? 0))
-      }
+      },
     )
 
     const options = setUp(recordApi)
@@ -231,7 +231,7 @@ describe(`TrailBase Integration`, () => {
         })
         writer.releaseLock()
         return Promise.resolve()
-      }
+      },
     )
 
     collection.update(data.id, (old: Data) => {
@@ -250,7 +250,7 @@ describe(`TrailBase Integration`, () => {
         })
         writer.releaseLock()
         return Promise.resolve()
-      }
+      },
     )
 
     collection.delete(updatedData.id!)
