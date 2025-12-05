@@ -6,12 +6,12 @@ import type {
   ChangeMessage,
   CollectionConfig,
   OptimisticChangeMessage,
-} from "../types"
-import type { CollectionImpl } from "./index.js"
-import type { CollectionLifecycleManager } from "./lifecycle"
-import type { CollectionChangesManager } from "./changes"
-import type { CollectionIndexesManager } from "./indexes"
-import type { CollectionEventsManager } from "./events"
+} from '../types'
+import type { CollectionImpl } from './index.js'
+import type { CollectionLifecycleManager } from './lifecycle'
+import type { CollectionChangesManager } from './changes'
+import type { CollectionIndexesManager } from './indexes'
+import type { CollectionEventsManager } from './events'
 
 interface PendingSyncedTransaction<
   T extends object = Record<string, unknown>,

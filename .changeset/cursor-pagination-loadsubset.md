@@ -1,7 +1,7 @@
 ---
-"@tanstack/db": patch
-"@tanstack/electric-db-collection": patch
-"@tanstack/query-db-collection": patch
+'@tanstack/db': patch
+'@tanstack/electric-db-collection': patch
+'@tanstack/query-db-collection': patch
 ---
 
 Enhanced LoadSubsetOptions with separate cursor expressions and offset for flexible pagination.

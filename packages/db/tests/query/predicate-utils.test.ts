@@ -651,60 +651,60 @@ describe(`isLimitSubset`, () => {
 describe(`isOffsetLimitSubset`, () => {
   it(`should return true when subset range is within superset range (same offset)`, () => {
     expect(
-      isOffsetLimitSubset({ offset: 0, limit: 5 }, { offset: 0, limit: 10 })
+      isOffsetLimitSubset({ offset: 0, limit: 5 }, { offset: 0, limit: 10 }),
     ).toBe(true)
     expect(
-      isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 0, limit: 10 })
+      isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 0, limit: 10 }),
     ).toBe(true)
   })
 
   it(`should return true when subset starts later but is still within superset range`, () => {
     // superset loads rows [0, 10), subset loads rows [5, 10) - subset is within superset
     expect(
-      isOffsetLimitSubset({ offset: 5, limit: 5 }, { offset: 0, limit: 10 })
+      isOffsetLimitSubset({ offset: 5, limit: 5 }, { offset: 0, limit: 10 }),
     ).toBe(true)
   })
 
   it(`should return false when subset extends beyond superset range`, () => {
     // superset loads rows [0, 10), subset loads rows [5, 15) - subset extends beyond
     expect(
-      isOffsetLimitSubset({ offset: 5, limit: 10 }, { offset: 0, limit: 10 })
+      isOffsetLimitSubset({ offset: 5, limit: 10 }, { offset: 0, limit: 10 }),
     ).toBe(false)
   })
 
   it(`should return false when subset is completely outside superset range`, () => {
     // superset loads rows [0, 10), subset loads rows [20, 30) - no overlap
     expect(
-      isOffsetLimitSubset({ offset: 20, limit: 10 }, { offset: 0, limit: 10 })
+      isOffsetLimitSubset({ offset: 20, limit: 10 }, { offset: 0, limit: 10 }),
     ).toBe(false)
   })
 
   it(`should return false when superset starts after subset`, () => {
     // superset loads rows [10, 20), subset loads rows [0, 10) - superset starts too late
     expect(
-      isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 10, limit: 10 })
+      isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 10, limit: 10 }),
     ).toBe(false)
   })
 
   it(`should return true when superset is unlimited`, () => {
     expect(isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 0 })).toBe(
-      true
+      true,
     )
     expect(isOffsetLimitSubset({ offset: 20, limit: 10 }, { offset: 0 })).toBe(
-      true
+      true,
     )
   })
 
   it(`should return false when superset is unlimited but starts after subset`, () => {
     // superset loads rows [10, ∞), subset loads rows [0, 10) - superset starts too late
     expect(isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 10 })).toBe(
-      false
+      false,
     )
   })
 
   it(`should return false when subset is unlimited but superset has a limit`, () => {
     expect(isOffsetLimitSubset({ offset: 0 }, { offset: 0, limit: 10 })).toBe(
-      false
+      false,
     )
   })
 
@@ -720,10 +720,10 @@ describe(`isOffsetLimitSubset`, () => {
   it(`should default offset to 0 when undefined`, () => {
     expect(isOffsetLimitSubset({ limit: 5 }, { limit: 10 })).toBe(true)
     expect(isOffsetLimitSubset({ offset: 0, limit: 5 }, { limit: 10 })).toBe(
-      true
+      true,
     )
     expect(isOffsetLimitSubset({ limit: 5 }, { offset: 0, limit: 10 })).toBe(
-      true
+      true,
     )
   })
 })

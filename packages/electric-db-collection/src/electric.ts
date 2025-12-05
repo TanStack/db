@@ -3,10 +3,10 @@ import {
   isChangeMessage,
   isControlMessage,
   isVisibleInSnapshot,
-} from "@electric-sql/client"
-import { Store } from "@tanstack/store"
-import DebugModule from "debug"
-import { DeduplicatedLoadSubset, and } from "@tanstack/db"
+} from '@electric-sql/client'
+import { Store } from '@tanstack/store'
+import DebugModule from 'debug'
+import { DeduplicatedLoadSubset, and } from '@tanstack/db'
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
@@ -407,7 +407,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         promises.push(stream.requestSnapshot(whereCurrentParams))
 
         debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereCurrent snapshot (all ties)`
+          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereCurrent snapshot (all ties)`,
         )
 
         // Request 2: Rows matching whereFrom (rows > cursor, with limit)
@@ -421,7 +421,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         promises.push(stream.requestSnapshot(whereFromParams))
 
         debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereFrom snapshot (with limit ${limit})`
+          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
         )
 
         // Wait for both requests to complete

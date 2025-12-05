@@ -52,9 +52,9 @@ export interface CollectionTruncateEvent {
 }
 
 export type AllCollectionEvents = {
-  "status:change": CollectionStatusChangeEvent
-  "subscribers:change": CollectionSubscribersChangeEvent
-  "loadingSubset:change": CollectionLoadingSubsetChangeEvent
+  'status:change': CollectionStatusChangeEvent
+  'subscribers:change': CollectionSubscribersChangeEvent
+  'loadingSubset:change': CollectionLoadingSubsetChangeEvent
   truncate: CollectionTruncateEvent
 } & {
   [K in CollectionStatus as `status:${K}`]: CollectionStatusEvent<K>

@@ -3125,7 +3125,7 @@ describe(`OrderBy with Date values and precision differences`, () => {
                         }
                         filteredData.sort(
                           (a, b) =>
-                            a.createdAt.getTime() - b.createdAt.getTime()
+                            a.createdAt.getTime() - b.createdAt.getTime(),
                         )
                       } catch (error) {
                         console.log(`Error applying cursor:`, error)

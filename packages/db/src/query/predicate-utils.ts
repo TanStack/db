@@ -810,7 +810,7 @@ export function isLimitSubset(
  */
 export function isOffsetLimitSubset(
   subset: { offset?: number; limit?: number },
-  superset: { offset?: number; limit?: number }
+  superset: { offset?: number; limit?: number },
 ): boolean {
   const subsetOffset = subset.offset ?? 0
   const supersetOffset = superset.offset ?? 0
