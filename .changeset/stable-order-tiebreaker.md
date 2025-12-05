@@ -1,5 +1,5 @@
 ---
-"@tanstack/db-ivm": patch
+'@tanstack/db-ivm': patch
 ---
 
 Use row keys for stable tie-breaking in ORDER BY operations instead of hash-based object IDs.

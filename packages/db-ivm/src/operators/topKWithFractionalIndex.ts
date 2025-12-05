@@ -238,10 +238,7 @@ class TopKArray<V> implements TopK<V> {
 export class TopKWithFractionalIndexOperator<
   K extends string | number,
   T,
-> extends UnaryOperator<
-  [K, T],
-  [K, IndexedValue<T>]
-> {
+> extends UnaryOperator<[K, T], [K, IndexedValue<T>]> {
   #index: Map<K, number> = new Map() // maps keys to their multiplicity
 
   /**
@@ -261,7 +258,11 @@ export class TopKWithFractionalIndexOperator<
     super(id, inputA, output)
     const limit = options.limit ?? Infinity
     const offset = options.offset ?? 0
-    this.#topK = this.createTopK(offset, limit, createKeyedComparator(comparator))
+    this.#topK = this.createTopK(
+      offset,
+      limit,
+      createKeyedComparator(comparator),
+    )
     options.setSizeCallback?.(() => this.#topK.size)
     options.setWindowFn?.(this.moveTopK.bind(this))
   }
