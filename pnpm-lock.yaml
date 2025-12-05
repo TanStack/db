@@ -19,7 +19,7 @@ overrides:
   '@tanstack/trailbase-db-collection': workspace:*
   '@tanstack/vue-db': workspace:*
 
-pnpmfileChecksum: sha256-PWDKLEtYr7WAzwKAKmFednYERF5OFDKcRonW93aOwc8=
+pnpmfileChecksum: sha256-K2GXbNgIKmiJVeG6Wblkgh1+WRgT9dE2pnYza/gt8+8=
 
 importers:
 
