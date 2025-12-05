@@ -9,7 +9,7 @@ Defined in: [packages/db/src/errors.ts:214](https://github.com/TanStack/db/blob/
 
 ## Extends
 
-- [`CollectionOperationError`](../CollectionOperationError.md)
+- [`CollectionOperationError`](./CollectionOperationError.md)
 
 ## Constructors
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/errors.ts:215](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`CollectionOperationError`](../CollectionOperationError.md).[`constructor`](../CollectionOperationError.md#constructor)
+[`CollectionOperationError`](./CollectionOperationError.md).[`constructor`](./CollectionOperationError.md#constructor)
 
 ## Properties
 
@@ -41,7 +41,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionOperationError`](../CollectionOperationError.md).[`cause`](../CollectionOperationError.md#cause)
+[`CollectionOperationError`](./CollectionOperationError.md).[`cause`](./CollectionOperationError.md#cause)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionOperationError`](../CollectionOperationError.md).[`message`](../CollectionOperationError.md#message)
+[`CollectionOperationError`](./CollectionOperationError.md).[`message`](./CollectionOperationError.md#message)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionOperationError`](../CollectionOperationError.md).[`name`](../CollectionOperationError.md#name)
+[`CollectionOperationError`](./CollectionOperationError.md).[`name`](./CollectionOperationError.md#name)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionOperationError`](../CollectionOperationError.md).[`stack`](../CollectionOperationError.md#stack)
+[`CollectionOperationError`](./CollectionOperationError.md).[`stack`](./CollectionOperationError.md#stack)
 
 ***
 
@@ -107,7 +107,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`CollectionOperationError`](../CollectionOperationError.md).[`stackTraceLimit`](../CollectionOperationError.md#stacktracelimit)
+[`CollectionOperationError`](./CollectionOperationError.md).[`stackTraceLimit`](./CollectionOperationError.md#stacktracelimit)
 
 ## Methods
 
@@ -179,7 +179,7 @@ a();
 
 #### Inherited from
 
-[`CollectionOperationError`](../CollectionOperationError.md).[`captureStackTrace`](../CollectionOperationError.md#capturestacktrace)
+[`CollectionOperationError`](./CollectionOperationError.md).[`captureStackTrace`](./CollectionOperationError.md#capturestacktrace)
 
 ***
 
@@ -211,4 +211,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`CollectionOperationError`](../CollectionOperationError.md).[`prepareStackTrace`](../CollectionOperationError.md#preparestacktrace)
+[`CollectionOperationError`](./CollectionOperationError.md).[`prepareStackTrace`](./CollectionOperationError.md#preparestacktrace)

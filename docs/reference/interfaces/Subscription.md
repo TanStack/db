@@ -12,7 +12,7 @@ Used by sync implementations to track subscription lifecycle
 
 ## Extends
 
-- `EventEmitter`\<[`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)\>
+- `EventEmitter`\<[`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)\>
 
 ## Properties
 
@@ -66,7 +66,7 @@ Emit an event to all listeners
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -78,7 +78,7 @@ Event name to emit
 
 ##### eventPayload
 
-[`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)\[`T`\]
+[`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)\[`T`\]
 
 Event payload
  For use by subclasses - subclasses should wrap this with a public emit if needed
@@ -109,7 +109,7 @@ Unsubscribe from an event
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -151,7 +151,7 @@ Subscribe to an event
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -201,7 +201,7 @@ Subscribe to an event once (automatically unsubscribes after first emission)
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -251,7 +251,7 @@ Wait for an event to be emitted
 
 ##### T
 
-`T` *extends* keyof [`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)
+`T` *extends* keyof [`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)
 
 #### Parameters
 
@@ -269,7 +269,7 @@ Optional timeout in milliseconds
 
 #### Returns
 
-`Promise`\<[`SubscriptionEvents`](../../type-aliases/SubscriptionEvents.md)\[`T`\]\>
+`Promise`\<[`SubscriptionEvents`](../type-aliases/SubscriptionEvents.md)\[`T`\]\>
 
 Promise that resolves with the event payload
 

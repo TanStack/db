@@ -37,7 +37,7 @@ Array of reactive dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveQueryReturn`](../../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
 
 Reactive object with query data, state, and status information
 
@@ -123,7 +123,7 @@ Array of reactive dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveQueryReturn`](../../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
 
 Reactive object with query data, state, and status information
 
@@ -209,7 +209,7 @@ Array of reactive dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveQueryReturn`](../../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
 
 Reactive object with query data, state, and status information
 
@@ -279,7 +279,7 @@ Pre-created query collection to subscribe to (can be a ref)
 
 ### Returns
 
-[`UseLiveQueryReturnWithCollection`](../../interfaces/UseLiveQueryReturnWithCollection.md)\<`TResult`, `TKey`, `TUtils`\>
+[`UseLiveQueryReturnWithCollection`](../interfaces/UseLiveQueryReturnWithCollection.md)\<`TResult`, `TKey`, `TUtils`\>
 
 Reactive object with query data, state, and status information
 

@@ -33,7 +33,7 @@ The WHERE expression to parse
 
 ### options
 
-[`ParseWhereOptions`](../../interfaces/ParseWhereOptions.md)\<`T`\>
+[`ParseWhereOptions`](../interfaces/ParseWhereOptions.md)\<`T`\>
 
 Configuration with handler functions for each operator
 

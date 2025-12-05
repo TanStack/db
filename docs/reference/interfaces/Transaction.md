@@ -153,7 +153,7 @@ aligned with user intent.
 
 ##### mutations
 
-[`PendingMutation`](../PendingMutation.md)\<`any`, [`OperationType`](../../type-aliases/OperationType.md), [`Collection`](../Collection.md)\<`any`, `any`, `any`, `any`, `any`\>\>[]
+[`PendingMutation`](./PendingMutation.md)\<`any`, [`OperationType`](../type-aliases/OperationType.md), [`Collection`](./Collection.md)\<`any`, `any`, `any`, `any`, `any`\>\>[]
 
 Array of new mutations to apply
 
@@ -396,7 +396,7 @@ Defined in: [packages/db/src/transactions.ts:238](https://github.com/TanStack/db
 
 ##### newState
 
-[`TransactionState`](../../type-aliases/TransactionState.md)
+[`TransactionState`](../type-aliases/TransactionState.md)
 
 #### Returns
 

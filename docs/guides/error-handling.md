@@ -177,7 +177,7 @@ const App = () => (
 )
 ```
 
-With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](../live-queries#using-with-react-suspense) for more details.
+With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](./live-queries#using-with-react-suspense) for more details.
 
 ## Transaction Error Handling
 
@@ -810,6 +810,6 @@ const TodoApp = () => {
 
 ## See Also
 
-- [API Reference](../../overview.md#api-reference) - Detailed API documentation
-- [Mutations Guide](../../overview.md#making-optimistic-mutations) - Learn about optimistic updates and rollbacks
+- [API Reference](../overview.md#api-reference) - Detailed API documentation
+- [Mutations Guide](../overview.md#making-optimistic-mutations) - Learn about optimistic updates and rollbacks
 - [TanStack Query Error Handling](https://tanstack.com/query/latest/docs/react/guides/error-handling) - Query-specific error handling

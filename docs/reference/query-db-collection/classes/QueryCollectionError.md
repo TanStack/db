@@ -13,19 +13,19 @@ Defined in: [packages/query-db-collection/src/errors.ts:4](https://github.com/Ta
 
 ## Extended by
 
-- [`QueryKeyRequiredError`](../QueryKeyRequiredError.md)
-- [`QueryFnRequiredError`](../QueryFnRequiredError.md)
-- [`QueryClientRequiredError`](../QueryClientRequiredError.md)
-- [`GetKeyRequiredError`](../GetKeyRequiredError.md)
-- [`SyncNotInitializedError`](../SyncNotInitializedError.md)
-- [`InvalidItemStructureError`](../InvalidItemStructureError.md)
-- [`ItemNotFoundError`](../ItemNotFoundError.md)
-- [`DuplicateKeyInBatchError`](../DuplicateKeyInBatchError.md)
-- [`UpdateOperationItemNotFoundError`](../UpdateOperationItemNotFoundError.md)
-- [`DeleteOperationItemNotFoundError`](../DeleteOperationItemNotFoundError.md)
-- [`InvalidSyncOperationError`](../InvalidSyncOperationError.md)
-- [`UnknownOperationTypeError`](../UnknownOperationTypeError.md)
-- [`MissingKeyFieldError`](../MissingKeyFieldError.md)
+- [`QueryKeyRequiredError`](./QueryKeyRequiredError.md)
+- [`QueryFnRequiredError`](./QueryFnRequiredError.md)
+- [`QueryClientRequiredError`](./QueryClientRequiredError.md)
+- [`GetKeyRequiredError`](./GetKeyRequiredError.md)
+- [`SyncNotInitializedError`](./SyncNotInitializedError.md)
+- [`InvalidItemStructureError`](./InvalidItemStructureError.md)
+- [`ItemNotFoundError`](./ItemNotFoundError.md)
+- [`DuplicateKeyInBatchError`](./DuplicateKeyInBatchError.md)
+- [`UpdateOperationItemNotFoundError`](./UpdateOperationItemNotFoundError.md)
+- [`DeleteOperationItemNotFoundError`](./DeleteOperationItemNotFoundError.md)
+- [`InvalidSyncOperationError`](./InvalidSyncOperationError.md)
+- [`UnknownOperationTypeError`](./UnknownOperationTypeError.md)
+- [`MissingKeyFieldError`](./MissingKeyFieldError.md)
 
 ## Constructors
 

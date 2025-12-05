@@ -13,7 +13,7 @@ LIFO: { addItemsTo: 'back', getItemsFrom: 'back' }
 
 ## Extends
 
-- [`BaseStrategy`](../BaseStrategy.md)\<`"queue"`\>
+- [`BaseStrategy`](./BaseStrategy.md)\<`"queue"`\>
 
 ## Properties
 
@@ -29,7 +29,7 @@ Type discriminator for strategy identification
 
 #### Inherited from
 
-[`BaseStrategy`](../BaseStrategy.md).[`_type`](../BaseStrategy.md#_type)
+[`BaseStrategy`](./BaseStrategy.md).[`_type`](./BaseStrategy.md#_type)
 
 ***
 
@@ -50,7 +50,7 @@ Should be called when the strategy is no longer needed
 
 #### Inherited from
 
-[`BaseStrategy`](../BaseStrategy.md).[`cleanup`](../BaseStrategy.md#cleanup)
+[`BaseStrategy`](./BaseStrategy.md).[`cleanup`](./BaseStrategy.md#cleanup)
 
 ***
 
@@ -74,7 +74,7 @@ Execute a function according to the strategy's timing rules
 
 ##### fn
 
-() => [`Transaction`](../Transaction.md)\<`T`\>
+() => [`Transaction`](./Transaction.md)\<`T`\>
 
 The function to execute
 
@@ -86,7 +86,7 @@ The result of the function execution (if applicable)
 
 #### Inherited from
 
-[`BaseStrategy`](../BaseStrategy.md).[`execute`](../BaseStrategy.md#execute)
+[`BaseStrategy`](./BaseStrategy.md).[`execute`](./BaseStrategy.md#execute)
 
 ***
 

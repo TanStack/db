@@ -22,13 +22,13 @@ execution timing.
 
 ### options
 
-[`ThrottleStrategyOptions`](../../interfaces/ThrottleStrategyOptions.md)
+[`ThrottleStrategyOptions`](../interfaces/ThrottleStrategyOptions.md)
 
 Configuration for throttle behavior
 
 ## Returns
 
-[`ThrottleStrategy`](../../interfaces/ThrottleStrategy.md)
+[`ThrottleStrategy`](../interfaces/ThrottleStrategy.md)
 
 A throttle strategy instance
 

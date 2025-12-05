@@ -35,11 +35,11 @@ const config: LiveQueryCollectionConfig<any, any> = {
 
 ### TContext
 
-`TContext` *extends* [`Context`](../Context.md)
+`TContext` *extends* [`Context`](./Context.md)
 
 ### TResult
 
-`TResult` *extends* `object` = [`GetResult`](../../type-aliases/GetResult.md)\<`TContext`\> & `object`
+`TResult` *extends* `object` = [`GetResult`](../type-aliases/GetResult.md)\<`TContext`\> & `object`
 
 ## Properties
 

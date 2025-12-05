@@ -9,7 +9,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:11](https://github.com/T
 
 ## Extends
 
-- [`QueryCollectionError`](../QueryCollectionError.md)
+- [`QueryCollectionError`](./QueryCollectionError.md)
 
 ## Constructors
 
@@ -27,7 +27,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:12](https://github.com/T
 
 #### Overrides
 
-[`QueryCollectionError`](../QueryCollectionError.md).[`constructor`](../QueryCollectionError.md#constructor)
+[`QueryCollectionError`](./QueryCollectionError.md).[`constructor`](./QueryCollectionError.md#constructor)
 
 ## Properties
 
@@ -41,7 +41,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCollectionError`](../QueryCollectionError.md).[`cause`](../QueryCollectionError.md#cause)
+[`QueryCollectionError`](./QueryCollectionError.md).[`cause`](./QueryCollectionError.md#cause)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCollectionError`](../QueryCollectionError.md).[`message`](../QueryCollectionError.md#message)
+[`QueryCollectionError`](./QueryCollectionError.md).[`message`](./QueryCollectionError.md#message)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCollectionError`](../QueryCollectionError.md).[`name`](../QueryCollectionError.md#name)
+[`QueryCollectionError`](./QueryCollectionError.md).[`name`](./QueryCollectionError.md#name)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCollectionError`](../QueryCollectionError.md).[`stack`](../QueryCollectionError.md#stack)
+[`QueryCollectionError`](./QueryCollectionError.md).[`stack`](./QueryCollectionError.md#stack)
 
 ***
 
@@ -107,7 +107,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`QueryCollectionError`](../QueryCollectionError.md).[`stackTraceLimit`](../QueryCollectionError.md#stacktracelimit)
+[`QueryCollectionError`](./QueryCollectionError.md).[`stackTraceLimit`](./QueryCollectionError.md#stacktracelimit)
 
 ## Methods
 
@@ -179,7 +179,7 @@ a();
 
 #### Inherited from
 
-[`QueryCollectionError`](../QueryCollectionError.md).[`captureStackTrace`](../QueryCollectionError.md#capturestacktrace)
+[`QueryCollectionError`](./QueryCollectionError.md).[`captureStackTrace`](./QueryCollectionError.md#capturestacktrace)
 
 ***
 
@@ -211,4 +211,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`QueryCollectionError`](../QueryCollectionError.md).[`prepareStackTrace`](../QueryCollectionError.md#preparestacktrace)
+[`QueryCollectionError`](./QueryCollectionError.md).[`prepareStackTrace`](./QueryCollectionError.md#preparestacktrace)

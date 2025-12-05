@@ -58,13 +58,13 @@ The type of the item keys
 
 #### config
 
-[`QueryCollectionConfig`](../../interfaces/QueryCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `TQueryFn`, `TError`, `TQueryKey`, `TKey`, `T`, `Awaited`\<`ReturnType`\<`TQueryFn`\>\>\> & `object`
+[`QueryCollectionConfig`](../interfaces/QueryCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `TQueryFn`, `TError`, `TQueryKey`, `TKey`, `T`, `Awaited`\<`ReturnType`\<`TQueryFn`\>\>\> & `object`
 
 Configuration options for the Query collection
 
 ### Returns
 
-`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `TKey`, `T`, [`QueryCollectionUtils`](../../interfaces/QueryCollectionUtils.md)\<`InferSchemaOutput`\<`T`\>, `TKey`, `InferSchemaInput`\<`T`\>, `TError`\>\> & `object`
+`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `TKey`, `T`, [`QueryCollectionUtils`](../interfaces/QueryCollectionUtils.md)\<`InferSchemaOutput`\<`T`\>, `TKey`, `InferSchemaInput`\<`T`\>, `TError`\>\> & `object`
 
 Collection options with utilities for direct writes and manual operations
 
@@ -198,13 +198,13 @@ The type of the item keys
 
 #### config
 
-[`QueryCollectionConfig`](../../interfaces/QueryCollectionConfig.md)\<`T`, `TQueryFn`, `TError`, `TQueryKey`, `TKey`, `never`, `TQueryData`\> & `object`
+[`QueryCollectionConfig`](../interfaces/QueryCollectionConfig.md)\<`T`, `TQueryFn`, `TError`, `TQueryKey`, `TKey`, `never`, `TQueryData`\> & `object`
 
 Configuration options for the Query collection
 
 ### Returns
 
-`CollectionConfig`\<`T`, `TKey`, `never`, [`QueryCollectionUtils`](../../interfaces/QueryCollectionUtils.md)\<`T`, `TKey`, `T`, `TError`\>\> & `object`
+`CollectionConfig`\<`T`, `TKey`, `never`, [`QueryCollectionUtils`](../interfaces/QueryCollectionUtils.md)\<`T`, `TKey`, `T`, `TError`\>\> & `object`
 
 Collection options with utilities for direct writes and manual operations
 
@@ -330,13 +330,13 @@ The type of the item keys
 
 #### config
 
-[`QueryCollectionConfig`](../../interfaces/QueryCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, (`context`) => `Promise`\<`InferSchemaOutput`\<`T`\>[]\>, `TError`, `TQueryKey`, `TKey`, `T`, `InferSchemaOutput`\<`T`\>[]\> & `object`
+[`QueryCollectionConfig`](../interfaces/QueryCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, (`context`) => `Promise`\<`InferSchemaOutput`\<`T`\>[]\>, `TError`, `TQueryKey`, `TKey`, `T`, `InferSchemaOutput`\<`T`\>[]\> & `object`
 
 Configuration options for the Query collection
 
 ### Returns
 
-`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `TKey`, `T`, [`QueryCollectionUtils`](../../interfaces/QueryCollectionUtils.md)\<`InferSchemaOutput`\<`T`\>, `TKey`, `InferSchemaInput`\<`T`\>, `TError`\>\> & `object`
+`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `TKey`, `T`, [`QueryCollectionUtils`](../interfaces/QueryCollectionUtils.md)\<`InferSchemaOutput`\<`T`\>, `TKey`, `InferSchemaInput`\<`T`\>, `TError`\>\> & `object`
 
 Collection options with utilities for direct writes and manual operations
 
@@ -462,13 +462,13 @@ The type of the item keys
 
 #### config
 
-[`QueryCollectionConfig`](../../interfaces/QueryCollectionConfig.md)\<`T`, (`context`) => `Promise`\<`T`[]\>, `TError`, `TQueryKey`, `TKey`, `never`, `T`[]\> & `object`
+[`QueryCollectionConfig`](../interfaces/QueryCollectionConfig.md)\<`T`, (`context`) => `Promise`\<`T`[]\>, `TError`, `TQueryKey`, `TKey`, `never`, `T`[]\> & `object`
 
 Configuration options for the Query collection
 
 ### Returns
 
-`CollectionConfig`\<`T`, `TKey`, `never`, [`QueryCollectionUtils`](../../interfaces/QueryCollectionUtils.md)\<`T`, `TKey`, `T`, `TError`\>\> & `object`
+`CollectionConfig`\<`T`, `TKey`, `never`, [`QueryCollectionUtils`](../interfaces/QueryCollectionUtils.md)\<`T`, `TKey`, `T`, `TError`\>\> & `object`
 
 Collection options with utilities for direct writes and manual operations
 

@@ -27,5 +27,5 @@ Defined in: [packages/db/src/types.ts:674](https://github.com/TanStack/db/blob/m
 
 ### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../UtilsRecord.md) = \{
+`TUtils` *extends* [`UtilsRecord`](./UtilsRecord.md) = \{
 \}

@@ -19,13 +19,13 @@ Simplifies when possible (e.g., age > 10 OR age > 20 → age > 10).
 
 ### predicates
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>[]
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>[]
 
 Array of where predicates to union
 
 ## Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
 
 Combined predicate representing the union
 

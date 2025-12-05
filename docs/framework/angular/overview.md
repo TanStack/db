@@ -11,9 +11,9 @@ npm install @tanstack/angular-db
 
 ## Angular inject function
 
-See the [Angular Functions Reference](../reference/index.md) to see the full list of functions available in the Angular Adapter.
+See the [Angular Functions Reference](./reference/index.md) to see the full list of functions available in the Angular Adapter.
 
-For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../../guides/live-queries).
+For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../guides/live-queries).
 
 ## Basic Usage
 

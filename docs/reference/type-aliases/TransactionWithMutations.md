@@ -48,4 +48,4 @@ With `Omit`:
 
 ### TOperation
 
-`TOperation` *extends* [`OperationType`](../OperationType.md) = [`OperationType`](../OperationType.md)
+`TOperation` *extends* [`OperationType`](./OperationType.md) = [`OperationType`](./OperationType.md)
