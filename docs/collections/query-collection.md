@@ -521,7 +521,7 @@ All direct write methods are available on `collection.utils`:
 
 ## QueryFn and Predicate Push-Down
 
-When using `syncMode: 'on-demand'`, the collection automatically pushes down query predicates (where clauses, orderBy, and limit) to your `queryFn`. This allows you to fetch only the data needed for each specific query, rather than fetching the entire dataset.
+When using `syncMode: 'on-demand'`, the collection automatically pushes down query predicates (where clauses, orderBy, limit, and offset) to your `queryFn`. This allows you to fetch only the data needed for each specific query, rather than fetching the entire dataset.
 
 ### How LoadSubsetOptions Are Passed
 
@@ -530,9 +530,13 @@ LoadSubsetOptions are passed to your `queryFn` via the query context's `meta` pr
 ```typescript
 queryFn: async (ctx) => {
   // Extract LoadSubsetOptions from the context
-  const { limit, where, orderBy } = ctx.meta.loadSubsetOptions
+  const { limit, offset, where, orderBy } = ctx.meta.loadSubsetOptions
 
   // Use these to fetch only the data you need
+  // - where: filter expression (AST)
+  // - orderBy: sort expression (AST)
+  // - limit: maximum number of rows
+  // - offset: number of rows to skip (for pagination)
   // ...
 }
 ```
@@ -572,7 +576,7 @@ const productsCollection = createCollection(
     syncMode: 'on-demand', // Enable predicate push-down
 
     queryFn: async (ctx) => {
-      const { limit, where, orderBy } = ctx.meta.loadSubsetOptions
+      const { limit, offset, where, orderBy } = ctx.meta.loadSubsetOptions
 
       // Parse the expressions into simple format
       const parsed = parseLoadSubsetOptions({ where, orderBy, limit })
@@ -605,6 +609,11 @@ const productsCollection = createCollection(
         params.set('limit', String(parsed.limit))
       }
 
+      // Add offset for pagination
+      if (offset) {
+        params.set('offset', String(offset))
+      }
+
       const response = await fetch(`/api/products?${params}`)
       return response.json()
     },
@@ -629,6 +638,7 @@ const affordableElectronics = createLiveQueryCollection({
 
 // This triggers a queryFn call with:
 // GET /api/products?category=electronics&price_lt=100&sort=price:asc&limit=10
+// When paginating, offset is included: &offset=20
 ```
 
 ### Custom Handlers for Complex APIs
@@ -731,10 +741,11 @@ queryFn: async (ctx) => {
 Convenience function that parses all LoadSubsetOptions at once. Good for simple use cases.
 
 ```typescript
-const { filters, sorts, limit } = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
+const { filters, sorts, limit, offset } = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
 // filters: [{ field: ['category'], operator: 'eq', value: 'electronics' }]
 // sorts: [{ field: ['price'], direction: 'asc', nulls: 'last' }]
 // limit: 10
+// offset: 20 (for pagination)
 ```
 
 #### `parseWhereExpression(expr, options)`
