@@ -1,27 +1,27 @@
 import {
   createSingleRowRefProxy,
   toExpression,
-} from "../query/builder/ref-proxy"
+} from '../query/builder/ref-proxy'
 import {
   compileSingleRowExpression,
   toBooleanPredicate,
-} from "../query/compiler/evaluators.js"
+} from '../query/compiler/evaluators.js'
 import {
   findIndexForField,
   optimizeExpressionWithIndexes,
-} from "../utils/index-optimization.js"
-import { ensureIndexForField } from "../indexes/auto-index.js"
-import { makeComparator } from "../utils/comparison.js"
-import { buildCompareOptions } from "../query/compiler/order-by"
+} from '../utils/index-optimization.js'
+import { ensureIndexForField } from '../indexes/auto-index.js'
+import { makeComparator } from '../utils/comparison.js'
+import { buildCompareOptions } from '../query/compiler/order-by'
 import type {
   ChangeMessage,
   CollectionLike,
   CurrentStateAsChangesOptions,
   SubscribeChangesOptions,
-} from "../types"
-import type { CollectionImpl } from "./index.js"
-import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
-import type { BasicExpression, OrderBy } from "../query/ir.js"
+} from '../types'
+import type { CollectionImpl } from './index.js'
+import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
+import type { BasicExpression, OrderBy } from '../query/ir.js'
 
 /**
  * Returns the current state of the collection as an array of changes
@@ -59,11 +59,11 @@ export function currentStateAsChanges<
   TKey extends string | number,
 >(
   collection: CollectionLike<T, TKey>,
-  options: CurrentStateAsChangesOptions = {}
+  options: CurrentStateAsChangesOptions = {},
 ): Array<ChangeMessage<T>> | void {
   // Helper function to collect filtered results
   const collectFilteredResults = (
-    filterFn?: (value: T) => boolean
+    filterFn?: (value: T) => boolean,
   ): Array<ChangeMessage<T>> => {
     const result: Array<ChangeMessage<T>> = []
     for (const [key, value] of collection.entries()) {
@@ -97,7 +97,7 @@ export function currentStateAsChanges<
       options.orderBy,
       options.limit,
       whereFilter,
-      options.optimizedOnly
+      options.optimizedOnly,
     )
 
     if (orderedKeys === undefined) {
@@ -133,7 +133,7 @@ export function currentStateAsChanges<
     // Try to optimize the query using indexes
     const optimizationResult = optimizeExpressionWithIndexes(
       expression,
-      collection
+      collection,
     )
 
     if (optimizationResult.canOptimize) {
@@ -162,7 +162,7 @@ export function currentStateAsChanges<
     // If anything goes wrong with the where clause, fall back to full scan
     console.warn(
       `${collection.id ? `[${collection.id}] ` : ``}Error processing where clause, falling back to full scan:`,
-      error
+      error,
     )
 
     const filterFn = createFilterFunctionFromExpression(options.where)
@@ -181,7 +181,7 @@ export function currentStateAsChanges<
  * @returns A function that takes an item and returns true if it matches the filter
  */
 export function createFilterFunction<T extends object>(
-  whereCallback: (row: SingleRowRefProxy<T>) => any
+  whereCallback: (row: SingleRowRefProxy<T>) => any,
 ): (item: T) => boolean {
   return (item: T): boolean => {
     try {
@@ -219,7 +219,7 @@ export function createFilterFunction<T extends object>(
  * @returns A function that takes an item and returns true if it matches the filter
  */
 export function createFilterFunctionFromExpression<T extends object>(
-  expression: BasicExpression<boolean>
+  expression: BasicExpression<boolean>,
 ): (item: T) => boolean {
   // Compile expression once when filter function is created, not on every invocation
   const evaluator = compileSingleRowExpression(expression)
@@ -243,7 +243,7 @@ export function createFilterFunctionFromExpression<T extends object>(
  */
 export function createFilteredCallback<T extends object>(
   originalCallback: (changes: Array<ChangeMessage<T>>) => void,
-  options: SubscribeChangesOptions
+  options: SubscribeChangesOptions,
 ): (changes: Array<ChangeMessage<T>>) => void {
   const filterFn = createFilterFunctionFromExpression(options.whereExpression!)
 
@@ -311,7 +311,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
   orderBy: OrderBy,
   limit?: number,
   whereFilter?: (item: T) => boolean,
-  optimizedOnly?: boolean
+  optimizedOnly?: boolean,
 ): Array<TKey> | undefined {
   // For single-column orderBy on a ref expression, try index optimization
   if (orderBy.length === 1) {
@@ -328,7 +328,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         fieldPath[0]!,
         fieldPath,
         collection as CollectionImpl<T, TKey>,
-        compareOpts
+        compareOpts,
       )
 
       // Find the index

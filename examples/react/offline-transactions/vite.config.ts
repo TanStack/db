@@ -1,9 +1,9 @@
-import path from "node:path"
-import { tanstackStart } from "@tanstack/react-start/plugin/vite"
-import { defineConfig } from "vite"
-import tsConfigPaths from "vite-tsconfig-paths"
-import viteReact from "@vitejs/plugin-react"
-import chokidar from "chokidar"
+import path from 'node:path'
+import { tanstackStart } from '@tanstack/react-start/plugin/vite'
+import { defineConfig } from 'vite'
+import tsConfigPaths from 'vite-tsconfig-paths'
+import viteReact from '@vitejs/plugin-react'
+import chokidar from 'chokidar'
 
 function watchWorkspacePackages() {
   return {
@@ -27,7 +27,7 @@ function watchWorkspacePackages() {
 
       watcher.on(`ready`, () => {
         console.log(
-          `[watch-workspace] Initial scan complete. Watching for changes...`
+          `[watch-workspace] Initial scan complete. Watching for changes...`,
         )
         const watchedPaths = watcher.getWatched()
         console.log(`[watch-workspace] Currently watching:`, watchedPaths)

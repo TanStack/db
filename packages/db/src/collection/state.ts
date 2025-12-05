@@ -1,16 +1,16 @@
-import { deepEquals } from "../utils"
-import { SortedMap } from "../SortedMap"
-import type { Transaction } from "../transactions"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+import { deepEquals } from '../utils'
+import { SortedMap } from '../SortedMap'
+import type { Transaction } from '../transactions'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessage,
   CollectionConfig,
   OptimisticChangeMessage,
-} from "../types"
-import type { CollectionImpl } from "./index.js"
-import type { CollectionLifecycleManager } from "./lifecycle"
-import type { CollectionChangesManager } from "./changes"
-import type { CollectionIndexesManager } from "./indexes"
+} from '../types'
+import type { CollectionImpl } from './index.js'
+import type { CollectionLifecycleManager } from './lifecycle'
+import type { CollectionChangesManager } from './changes'
+import type { CollectionIndexesManager } from './indexes'
 
 interface PendingSyncedTransaction<
   T extends object = Record<string, unknown>,
@@ -66,7 +66,7 @@ export class CollectionStateManager<
   constructor(config: CollectionConfig<TOutput, TKey, TSchema>) {
     this.config = config
     this.transactions = new SortedMap<string, Transaction<any>>((a, b) =>
-      a.compareCreatedAt(b)
+      a.compareCreatedAt(b),
     )
 
     // Set up data storage with optional comparison function
@@ -185,7 +185,7 @@ export class CollectionStateManager<
    * Execute a callback for each entry in the collection
    */
   public forEach(
-    callbackfn: (value: TOutput, key: TKey, index: number) => void
+    callbackfn: (value: TOutput, key: TKey, index: number) => void,
   ): void {
     let index = 0
     for (const [key, value] of this.entries()) {
@@ -197,7 +197,7 @@ export class CollectionStateManager<
    * Create a new array with the results of calling a function for each entry in the collection
    */
   public map<U>(
-    callbackfn: (value: TOutput, key: TKey, index: number) => U
+    callbackfn: (value: TOutput, key: TKey, index: number) => U,
   ): Array<U> {
     const result: Array<U> = []
     let index = 0
@@ -213,7 +213,7 @@ export class CollectionStateManager<
    * @returns True if the given collection is this collection, false otherwise
    */
   private isThisCollection(
-    collection: CollectionImpl<any, any, any, any, any>
+    collection: CollectionImpl<any, any, any, any, any>,
   ): boolean {
     return collection === this.collection
   }
@@ -222,7 +222,7 @@ export class CollectionStateManager<
    * Recompute optimistic state from active transactions
    */
   public recomputeOptimisticState(
-    triggeredByUserAction: boolean = false
+    triggeredByUserAction: boolean = false,
   ): void {
     // Skip redundant recalculations when we're in the middle of committing sync transactions
     // While the sync pipeline is replaying a large batch we still want to honour
@@ -257,7 +257,7 @@ export class CollectionStateManager<
             case `update`:
               this.optimisticUpserts.set(
                 mutation.key,
-                mutation.modified as TOutput
+                mutation.modified as TOutput,
               )
               this.optimisticDeletes.delete(mutation.key)
               break
@@ -316,8 +316,8 @@ export class CollectionStateManager<
           // We can infer this by checking if we have no remaining optimistic mutations for this key
           const hasActiveOptimisticMutation = activeTransactions.some((tx) =>
             tx.mutations.some(
-              (m) => this.isThisCollection(m.collection) && m.key === event.key
-            )
+              (m) => this.isThisCollection(m.collection) && m.key === event.key,
+            ),
           )
 
           if (!hasActiveOptimisticMutation) {
@@ -348,10 +348,10 @@ export class CollectionStateManager<
   private calculateSize(): number {
     const syncedSize = this.syncedData.size
     const deletesFromSynced = Array.from(this.optimisticDeletes).filter(
-      (key) => this.syncedData.has(key) && !this.optimisticUpserts.has(key)
+      (key) => this.syncedData.has(key) && !this.optimisticUpserts.has(key),
     ).length
     const upsertsNotInSynced = Array.from(this.optimisticUpserts.keys()).filter(
-      (key) => !this.syncedData.has(key)
+      (key) => !this.syncedData.has(key),
     ).length
 
     return syncedSize - deletesFromSynced + upsertsNotInSynced
@@ -363,7 +363,7 @@ export class CollectionStateManager<
   private collectOptimisticChanges(
     previousUpserts: Map<TKey, TOutput>,
     previousDeletes: Set<TKey>,
-    events: Array<ChangeMessage<TOutput, TKey>>
+    events: Array<ChangeMessage<TOutput, TKey>>,
   ): void {
     const allKeys = new Set([
       ...previousUpserts.keys(),
@@ -377,7 +377,7 @@ export class CollectionStateManager<
       const previousValue = this.getPreviousValue(
         key,
         previousUpserts,
-        previousDeletes
+        previousDeletes,
       )
 
       if (previousValue !== undefined && currentValue === undefined) {
@@ -405,7 +405,7 @@ export class CollectionStateManager<
   private getPreviousValue(
     key: TKey,
     previousUpserts: Map<TKey, TOutput>,
-    previousDeletes: Set<TKey>
+    previousDeletes: Set<TKey>,
   ): TOutput | undefined {
     if (previousDeletes.has(key)) {
       return undefined
@@ -456,7 +456,7 @@ export class CollectionStateManager<
           PendingSyncedTransaction<TOutput, TKey>
         >,
         hasTruncateSync: false,
-      }
+      },
     )
 
     if (!hasPersistingTransaction || hasTruncateSync) {
@@ -545,8 +545,8 @@ export class CollectionStateManager<
                 Object.assign(
                   {},
                   this.syncedMetadata.get(key),
-                  operation.metadata
-                )
+                  operation.metadata,
+                ),
               )
               break
             case `delete`:
@@ -564,7 +564,7 @@ export class CollectionStateManager<
                 const updatedValue = Object.assign(
                   {},
                   this.syncedData.get(key),
-                  operation.value
+                  operation.value,
                 )
                 this.syncedData.set(key, updatedValue)
               } else {
@@ -597,10 +597,10 @@ export class CollectionStateManager<
         // Build re-apply sets from the snapshot taken at the start of this function.
         // This prevents losing optimistic state if transactions complete during truncate processing.
         const reapplyUpserts = new Map<TKey, TOutput>(
-          truncateOptimisticSnapshot!.upserts
+          truncateOptimisticSnapshot!.upserts,
         )
         const reapplyDeletes = new Set<TKey>(
-          truncateOptimisticSnapshot!.deletes
+          truncateOptimisticSnapshot!.deletes,
         )
 
         // Emit inserts for re-applied upserts, skipping any keys that have an optimistic delete.
@@ -679,7 +679,7 @@ export class CollectionStateManager<
                 case `update`:
                   this.optimisticUpserts.set(
                     mutation.key,
-                    mutation.modified as TOutput
+                    mutation.modified as TOutput,
                   )
                   this.optimisticDeletes.delete(mutation.key)
                   break

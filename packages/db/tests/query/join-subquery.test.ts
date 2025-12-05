@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, test } from "vitest"
-import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { beforeEach, describe, expect, test } from 'vitest'
+import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Sample data types for join-subquery testing
 type Issue = {
@@ -151,7 +151,7 @@ function createIssuesCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (issue) => issue.id,
       initialData: sampleIssues,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -162,7 +162,7 @@ function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (user) => user.id,
       initialData: sampleUsers,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -173,7 +173,7 @@ function createProfilesCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (profile) => profile.id,
       initialData: sampleProfiles,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -184,7 +184,7 @@ function createProductsCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (product) => product.id,
       initialData: sampleProducts,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -195,7 +195,7 @@ function createTrialsCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (item) => `${item.productId}-${item.userId}`,
       initialData: sampleTrials,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -225,7 +225,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { user: usersCollection },
                 ({ issue, user }) => eq(issue.userId, user.id),
-                `inner`
+                `inner`,
               )
               .select(({ issue, user }) => ({
                 issue_title: issue.title,
@@ -264,7 +264,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { activeUser: activeUsers },
                 ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-                `left`
+                `left`,
               )
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
@@ -279,7 +279,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
 
         // Issues with active users should have user_name
         const activeUserIssues = results.filter(
-          (r) => r.user_name !== undefined
+          (r) => r.user_name !== undefined,
         )
         expect(activeUserIssues).toHaveLength(4) // Issues 1, 2, 3, 5 have active users
 
@@ -313,7 +313,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
                 { activeUser: activeUsers },
                 ({ longIssue, activeUser }) =>
                   eq(longIssue.userId, activeUser.id),
-                `inner`
+                `inner`,
               )
               .select(({ longIssue, activeUser }) => ({
                 issue_title: longIssue.title,
@@ -371,7 +371,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { engUser: engineeringUsers },
                 ({ issue, engUser }) => eq(issue.userId, engUser.id),
-                `inner`
+                `inner`,
               )
               .select(({ issue, engUser }) => ({
                 issue_title: issue.title,
@@ -407,7 +407,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { activeUser: activeUsers },
                 ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-                `left`
+                `left`,
               )
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
@@ -423,7 +423,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
 
         // Issues with active users should have user data
         const activeUserIssues = results.filter(
-          (r) => r.user_name !== undefined
+          (r) => r.user_name !== undefined,
         )
         expect(activeUserIssues).toHaveLength(4) // Issues 1, 2, 3, 5
 
@@ -449,7 +449,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
                     .where(({ tried }) => eq(tried.userId, 1)),
                 },
                 ({ tried, product }) => eq(tried.productId, product.id),
-                `left`
+                `left`,
               )
               .where(({ product }) => eq(product.id, 1))
               .select(({ product, tried }) => ({
@@ -485,7 +485,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
                     .limit(1),
                 },
                 ({ issue, users }) => eq(issue.userId, users.id),
-                `left`
+                `left`,
               )
               .orderBy(({ issue }) => issue.id, `desc`)
               .limit(1)
@@ -523,7 +523,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { issue: issuesCollection },
                 ({ issue, users }) => eq(issue.userId, users.id),
-                `right`
+                `right`,
               )
               .orderBy(({ issue }) => issue.id, `desc`)
               .limit(1)
@@ -580,7 +580,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { profile: userProfiles },
                 ({ task, profile }) => eq(task.assigneeId, profile.profileId),
-                `inner`
+                `inner`,
               )
               .select(({ task, profile }) => ({
                 id: task.taskId,
@@ -665,7 +665,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { profile: profilesCollection },
                 ({ user, profile }) => eq(user.id, profile.userId),
-                `inner`
+                `inner`,
               )
               .where(({ user }) => eq(user.status, `active`))
               .select(({ user, profile }) => ({
@@ -684,7 +684,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { issue: issuesCollection },
                 ({ activeUser, issue }) => eq(issue.userId, activeUser.userId),
-                `inner`
+                `inner`,
               )
               .select(({ activeUser, issue }) => ({
                 issue_title: issue.title,
@@ -703,7 +703,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         expect(results).toHaveLength(4)
 
         const sortedResults = results.sort((a, b) =>
-          a.issue_title.localeCompare(b.issue_title)
+          a.issue_title.localeCompare(b.issue_title),
         )
 
         // Verify structure - should have both user data AND profile data
@@ -748,7 +748,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { profile: profilesCollection },
                 ({ user, profile }) => eq(user.id, profile.userId),
-                `inner`
+                `inner`,
               )
               .where(({ user }) => eq(user.status, `active`))
               .select(({ user, profile }) => ({
@@ -765,7 +765,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { author: usersWithProfiles },
                 ({ issue, author }) => eq(issue.userId, author.userId),
-                `left`
+                `left`,
               )
               .select(({ issue, author }) => ({
                 issue_id: issue.id,
@@ -802,7 +802,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { profile: profilesCollection },
                 ({ user, profile }) => eq(user.id, profile.userId),
-                `inner`
+                `inner`,
               )
               .select(({ user, profile }) => ({
                 userId: user.id,
@@ -829,7 +829,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .join(
                 { author: activeUsersWithProfiles },
                 ({ issue, author }) => eq(issue.userId, author.id),
-                `inner`
+                `inner`,
               )
               .select(({ issue, author }) => ({
                 issue_title: issue.title,

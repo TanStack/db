@@ -123,15 +123,15 @@
   **Example usage:**
 
   ```tsx
-  import { Suspense } from "react"
-  import { useLiveSuspenseQuery } from "@tanstack/react-db"
+  import { Suspense } from 'react'
+  import { useLiveSuspenseQuery } from '@tanstack/react-db'
 
   function TodoList() {
     // Data is guaranteed to be defined - no isLoading needed
     const { data } = useLiveSuspenseQuery((q) =>
       q
         .from({ todos: todosCollection })
-        .where(({ todos }) => eq(todos.completed, false))
+        .where(({ todos }) => eq(todos.completed, false)),
     )
 
     return (
@@ -207,7 +207,7 @@
   **Example Usage:**
 
   ```ts
-  import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
+  import { usePacedMutations, debounceStrategy } from '@tanstack/react-db'
 
   const mutate = usePacedMutations({
     mutationFn: async ({ transaction }) => {
@@ -284,7 +284,7 @@
   **Example usage:**
 
   ```tsx
-  import { useLiveInfiniteQuery } from "@tanstack/react-db"
+  import { useLiveInfiniteQuery } from '@tanstack/react-db'
 
   function PostList() {
     const { data, pages, fetchNextPage, hasNextPage, isLoading } =
@@ -292,12 +292,12 @@
         (q) =>
           q
             .from({ posts: postsCollection })
-            .orderBy(({ posts }) => posts.createdAt, "desc"),
+            .orderBy(({ posts }) => posts.createdAt, 'desc'),
         {
           pageSize: 20,
           getNextPageParam: (lastPage, allPages) =>
             lastPage.length === 20 ? allPages.length : undefined,
-        }
+        },
       )
 
     if (isLoading) return <div>Loading...</div>

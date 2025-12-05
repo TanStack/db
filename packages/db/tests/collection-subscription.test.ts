@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { createCollection } from "../src/collection/index.js"
-import { flushPromises } from "./utils"
+import { describe, expect, it } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
+import { flushPromises } from './utils'
 
 describe(`CollectionSubscription status tracking`, () => {
   it(`subscription starts with status 'ready'`, () => {

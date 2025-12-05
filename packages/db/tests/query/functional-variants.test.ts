@@ -1,12 +1,12 @@
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test } from 'vitest'
 import {
   count,
   createLiveQueryCollection,
   eq,
   gt,
-} from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+} from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -85,7 +85,7 @@ function createUsersCollection() {
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
-    })
+    }),
   )
 }
 
@@ -95,7 +95,7 @@ function createDepartmentsCollection() {
       id: `test-departments`,
       getKey: (dept) => dept.id,
       initialData: sampleDepartments,
-    })
+    }),
   )
 }
 
@@ -190,7 +190,7 @@ describe(`Functional Variants Query`, () => {
           q
             .from({ user: usersCollection })
             .join({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id)
+              eq(user.department_id, dept.id),
             )
             .fn.select((row) => ({
               employeeInfo: `${row.user.name} works in ${row.dept?.name || `Unknown`}`,
@@ -241,7 +241,7 @@ describe(`Functional Variants Query`, () => {
 
       expect(results).toHaveLength(2) // Alice (25, active) and Eve (28, active)
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Eve`])
+        expect.arrayContaining([`Alice`, `Eve`]),
       )
 
       // Insert user that meets criteria
@@ -310,7 +310,7 @@ describe(`Functional Variants Query`, () => {
       // Should only include: Alice (active, 75k, dept 1), Dave (active, 65k, dept 2)
       expect(results).toHaveLength(2)
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Dave`])
+        expect.arrayContaining([`Alice`, `Dave`]),
       )
 
       // All results should meet all criteria
@@ -337,7 +337,7 @@ describe(`Functional Variants Query`, () => {
       // Should include: Alice (25, active, 75k), Dave (22, active, 65k)
       expect(results).toHaveLength(2)
       expect(results.map((u) => u.name)).toEqual(
-        expect.arrayContaining([`Alice`, `Dave`])
+        expect.arrayContaining([`Alice`, `Dave`]),
       )
 
       results.forEach((user) => {
@@ -494,7 +494,7 @@ describe(`Functional Variants Query`, () => {
           q
             .from({ user: usersCollection })
             .join({ dept: departmentsCollection }, ({ user, dept }) =>
-              eq(user.department_id, dept.id)
+              eq(user.department_id, dept.id),
             )
             .fn.where((row) => row.user.active)
             .fn.where((row) => row.user.salary > 60000)

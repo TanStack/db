@@ -187,7 +187,7 @@ export class SortedMap<TKey, TValue> {
    * @param callbackfn - Function to execute for each entry
    */
   forEach(
-    callbackfn: (value: TValue, key: TKey, map: Map<TKey, TValue>) => void
+    callbackfn: (value: TValue, key: TKey, map: Map<TKey, TValue>) => void,
   ): void {
     for (const key of this.sortedKeys) {
       callbackfn(this.map.get(key)!, key, this.map)

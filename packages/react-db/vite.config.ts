@@ -1,7 +1,7 @@
-import { defineConfig, mergeConfig } from "vitest/config"
-import { tanstackViteConfig } from "@tanstack/config/vite"
-import react from "@vitejs/plugin-react"
-import packageJson from "./package.json"
+import { defineConfig, mergeConfig } from 'vitest/config'
+import { tanstackViteConfig } from '@tanstack/config/vite'
+import react from '@vitejs/plugin-react'
+import packageJson from './package.json'
 
 export default defineConfig(async () => {
   const tanstack = await tanstackViteConfig({

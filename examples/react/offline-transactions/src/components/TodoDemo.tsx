@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react"
-import { useLiveQuery } from "@tanstack/react-db"
-import { createTodoActions, todoCollection } from "~/db/todos"
+import React, { useEffect, useMemo, useState } from 'react'
+import { useLiveQuery } from '@tanstack/react-db'
+import { createTodoActions, todoCollection } from '~/db/todos'
 
 interface TodoDemoProps {
   title: string
@@ -28,7 +28,7 @@ export function TodoDemo({
   const { data: todoList = [], isLoading } = useLiveQuery((q) =>
     q
       .from({ todo: todoCollection })
-      .orderBy(({ todo }) => todo.createdAt, `desc`)
+      .orderBy(({ todo }) => todo.createdAt, `desc`),
   )
 
   // Monitor online status

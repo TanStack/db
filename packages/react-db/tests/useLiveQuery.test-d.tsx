@@ -1,14 +1,14 @@
-import { describe, expectTypeOf, it } from "vitest"
-import { renderHook } from "@testing-library/react"
-import { createCollection } from "../../db/src/collection/index"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
+import { describe, expectTypeOf, it } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { createCollection } from '../../db/src/collection/index'
+import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import {
   createLiveQueryCollection,
   eq,
   liveQueryCollectionOptions,
-} from "../../db/src/query/index"
-import { useLiveQuery } from "../src/useLiveQuery"
-import type { SingleResult } from "../../db/src/types"
+} from '../../db/src/query/index'
+import { useLiveQuery } from '../src/useLiveQuery'
+import type { SingleResult } from '../../db/src/types'
 
 type Person = {
   id: string
@@ -26,7 +26,7 @@ describe(`useLiveQuery type assertions`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: [],
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -34,7 +34,7 @@ describe(`useLiveQuery type assertions`, () => {
         q
           .from({ collection })
           .where(({ collection: c }) => eq(c.id, `3`))
-          .findOne()
+          .findOne(),
       )
     })
 
@@ -47,7 +47,7 @@ describe(`useLiveQuery type assertions`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: [],
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -69,7 +69,7 @@ describe(`useLiveQuery type assertions`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: [],
-      })
+      }),
     )
 
     const options = liveQueryCollectionOptions({
@@ -97,7 +97,7 @@ describe(`useLiveQuery type assertions`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: [],
-      })
+      }),
     )
 
     const liveQueryCollection = createLiveQueryCollection({

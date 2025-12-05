@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection/index.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
 import {
   CollectionInErrorStateError,
   InvalidCollectionStatusTransitionError,
   SyncCleanupError,
-} from "../src/errors"
+} from '../src/errors'
 
 describe(`Collection Error Handling`, () => {
   let originalQueueMicrotask: typeof queueMicrotask
@@ -69,7 +69,7 @@ describe(`Collection Error Handling`, () => {
 
       expect(caughtError).toBeInstanceOf(SyncCleanupError)
       expect(caughtError?.message).toBe(
-        `Collection "error-test-collection" sync cleanup function threw an error: Sync cleanup failed`
+        `Collection "error-test-collection" sync cleanup function threw an error: Sync cleanup failed`,
       )
     })
 
@@ -114,7 +114,7 @@ describe(`Collection Error Handling`, () => {
       // Verify the re-thrown error has proper context and preserved stack
       expect(caughtError).toBeDefined()
       expect(caughtError!.message).toBe(
-        `Collection "stack-trace-test" sync cleanup function threw an error: Original sync error`
+        `Collection "stack-trace-test" sync cleanup function threw an error: Original sync error`,
       )
       expect(caughtError!.stack).toBe(originalStack) // Original stack preserved
       expect(caughtError!.cause).toBe(originalError) // Original error chained
@@ -159,7 +159,7 @@ describe(`Collection Error Handling`, () => {
       // Verify non-Error values are handled properly
       expect(caughtError).toBeDefined()
       expect(caughtError!.message).toBe(
-        `Collection "non-error-test" sync cleanup function threw an error: String error message`
+        `Collection "non-error-test" sync cleanup function threw an error: String error message`,
       )
 
       // No cause or stack preservation for non-Error values
@@ -240,7 +240,7 @@ describe(`Collection Error Handling`, () => {
 
         expect(caughtError).toBeInstanceOf(SyncCleanupError)
         expect(caughtError?.message).toBe(
-          `Collection "multiple-cleanup-test" sync cleanup function threw an error: Cleanup error`
+          `Collection "multiple-cleanup-test" sync cleanup function threw an error: Cleanup error`,
         )
       }
     })
@@ -325,7 +325,7 @@ describe(`Collection Error Handling`, () => {
               markReady()
             },
           },
-        }
+        },
       )
 
       // Wait for initial sync and then cleanup
@@ -399,77 +399,80 @@ describe(`Collection Error Handling`, () => {
 
       // Valid transitions from idle
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`idle`, `loading`)
+        collectionImpl._lifecycle.validateStatusTransition(`idle`, `loading`),
       ).not.toThrow()
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`idle`, `error`)
+        collectionImpl._lifecycle.validateStatusTransition(`idle`, `error`),
       ).not.toThrow()
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`idle`, `cleaned-up`)
+        collectionImpl._lifecycle.validateStatusTransition(
+          `idle`,
+          `cleaned-up`,
+        ),
       ).not.toThrow()
 
       // Valid transitions from loading
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`loading`, `ready`)
+        collectionImpl._lifecycle.validateStatusTransition(`loading`, `ready`),
       ).not.toThrow()
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`loading`, `error`)
+        collectionImpl._lifecycle.validateStatusTransition(`loading`, `error`),
       ).not.toThrow()
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(
           `loading`,
-          `cleaned-up`
-        )
+          `cleaned-up`,
+        ),
       ).not.toThrow()
 
       // Valid transitions from ready
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(
           `ready`,
-          `cleaned-up`
-        )
+          `cleaned-up`,
+        ),
       ).not.toThrow()
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`ready`, `error`)
+        collectionImpl._lifecycle.validateStatusTransition(`ready`, `error`),
       ).not.toThrow()
 
       // Valid transitions from error (allow recovery)
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(
           `error`,
-          `cleaned-up`
-        )
+          `cleaned-up`,
+        ),
       ).not.toThrow()
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`error`, `idle`)
+        collectionImpl._lifecycle.validateStatusTransition(`error`, `idle`),
       ).not.toThrow()
 
       // Valid transitions from cleaned-up (allow restart)
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(
           `cleaned-up`,
-          `loading`
-        )
+          `loading`,
+        ),
       ).not.toThrow()
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(
           `cleaned-up`,
-          `error`
-        )
+          `error`,
+        ),
       ).not.toThrow()
 
       // Allow same-state transitions (idempotent operations)
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`idle`, `idle`)
+        collectionImpl._lifecycle.validateStatusTransition(`idle`, `idle`),
       ).not.toThrow()
       expect(() =>
-        collectionImpl._lifecycle.validateStatusTransition(`ready`, `ready`)
+        collectionImpl._lifecycle.validateStatusTransition(`ready`, `ready`),
       ).not.toThrow()
       expect(() =>
         collectionImpl._lifecycle.validateStatusTransition(
           `cleaned-up`,
-          `cleaned-up`
-        )
+          `cleaned-up`,
+        ),
       ).not.toThrow()
     })
   })

@@ -4,18 +4,18 @@
  * Tests ordering, limits, offsets, and window management
  */
 
-import { describe, expect, it } from "vitest"
-import { createLiveQueryCollection, eq } from "@tanstack/db"
+import { describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, eq } from '@tanstack/db'
 import {
   assertAllItemsMatch,
   assertCollectionSize,
   assertSorted,
-} from "../utils/assertions"
-import { waitForQueryData } from "../utils/helpers"
-import type { E2ETestConfig } from "../types"
+} from '../utils/assertions'
+import { waitForQueryData } from '../utils/helpers'
+import type { E2ETestConfig } from '../types'
 
 export function createPaginationTestSuite(
-  getConfig: () => Promise<E2ETestConfig>
+  getConfig: () => Promise<E2ETestConfig>,
 ) {
   describe(`Pagination Suite`, () => {
     describe(`OrderBy`, () => {
@@ -26,7 +26,7 @@ export function createPaginationTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .orderBy(({ user }) => user.age, `asc`)
+            .orderBy(({ user }) => user.age, `asc`),
         )
 
         await query.preload()
@@ -46,7 +46,7 @@ export function createPaginationTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .orderBy(({ user }) => user.age, `desc`)
+            .orderBy(({ user }) => user.age, `desc`),
         )
 
         await query.preload()
@@ -66,7 +66,7 @@ export function createPaginationTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .orderBy(({ user }) => user.name, `asc`)
+            .orderBy(({ user }) => user.name, `asc`),
         )
 
         await query.preload()
@@ -89,7 +89,7 @@ export function createPaginationTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .orderBy(({ user }) => user.createdAt, `desc`)
+            .orderBy(({ user }) => user.createdAt, `desc`),
         )
 
         await query.preload()
@@ -109,7 +109,7 @@ export function createPaginationTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ post: postsCollection })
-            .orderBy(({ post }) => [post.userId, post.viewCount])
+            .orderBy(({ post }) => [post.userId, post.viewCount]),
         )
 
         await query.preload()
@@ -142,7 +142,7 @@ export function createPaginationTestSuite(
           q
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
-            .limit(10)
+            .limit(10),
         )
 
         await query.preload()
@@ -161,7 +161,7 @@ export function createPaginationTestSuite(
           q
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
-            .limit(0)
+            .limit(0),
         )
 
         await query.preload()
@@ -179,7 +179,7 @@ export function createPaginationTestSuite(
           q
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
-            .limit(1000)
+            .limit(1000),
         )
 
         await query.preload()
@@ -198,7 +198,7 @@ export function createPaginationTestSuite(
           q
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.age, `asc`)
-            .limit(5)
+            .limit(5),
         )
 
         await query.preload()
@@ -222,7 +222,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
             .limit(100) // Need limit with offset
-            .offset(20)
+            .offset(20),
         )
 
         await query.preload()
@@ -243,7 +243,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
             .limit(10)
-            .offset(20)
+            .offset(20),
         )
 
         await query.preload()
@@ -263,7 +263,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
             .limit(100)
-            .offset(200)
+            .offset(200),
         )
 
         await query.preload()
@@ -285,7 +285,7 @@ export function createPaginationTestSuite(
             .where(({ user }) => eq(user.isActive, true))
             .orderBy(({ user }) => user.age, `asc`)
             .limit(10)
-            .offset(5)
+            .offset(5),
         )
 
         await query.preload()
@@ -308,7 +308,7 @@ export function createPaginationTestSuite(
               .from({ user: usersCollection })
               .orderBy(({ user }) => user.id, `asc`)
               .limit(10)
-              .offset(95) // Last 5 records
+              .offset(95), // Last 5 records
         )
 
         await query.preload()
@@ -329,7 +329,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
             .limit(1)
-            .offset(0)
+            .offset(0),
         )
 
         await query.preload()
@@ -351,7 +351,7 @@ export function createPaginationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
             .limit(10)
-            .offset(20)
+            .offset(20),
         )
 
         await query.preload()

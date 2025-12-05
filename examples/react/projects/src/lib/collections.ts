@@ -1,20 +1,20 @@
-import { createCollection } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/query-db-collection"
-import { QueryClient } from "@tanstack/query-core"
+import { createCollection } from '@tanstack/react-db'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import { QueryClient } from '@tanstack/query-core'
 import {
   selectTodoSchema,
   selectProjectSchema,
   selectUsersSchema,
-} from "@/db/schema"
-import { trpc } from "@/lib/trpc-client"
+} from '@/db/schema'
+import { trpc } from '@/lib/trpc-client'
 
 // Create a query client for query collections
 const queryClient = new QueryClient()
 
 export const usersCollection = createCollection(
   queryCollectionOptions({
-    id: "users",
-    queryKey: ["users"],
+    id: 'users',
+    queryKey: ['users'],
     // Poll for updates every 5 seconds
     refetchInterval: 5000,
     queryFn: async () => {
@@ -32,8 +32,8 @@ export const usersCollection = createCollection(
 )
 export const projectCollection = createCollection(
   queryCollectionOptions({
-    id: "projects",
-    queryKey: ["projects"],
+    id: 'projects',
+    queryKey: ['projects'],
     // Poll for updates every 5 seconds
     refetchInterval: 5000,
     queryFn: async () => {
@@ -78,8 +78,8 @@ export const projectCollection = createCollection(
 
 export const todoCollection = createCollection(
   queryCollectionOptions({
-    id: "todos",
-    queryKey: ["todos"],
+    id: 'todos',
+    queryKey: ['todos'],
     // Poll for updates every 5 seconds
     refetchInterval: 5000,
     queryFn: async () => {

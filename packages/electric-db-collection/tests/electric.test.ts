@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   CollectionImpl,
   createCollection,
   createTransaction,
-} from "@tanstack/db"
-import { electricCollectionOptions, isChangeMessage } from "../src/electric"
-import type { ElectricCollectionUtils } from "../src/electric"
+} from '@tanstack/db'
+import { electricCollectionOptions, isChangeMessage } from '../src/electric'
+import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Collection,
   InsertMutationFnParams,
@@ -13,9 +13,9 @@ import type {
   PendingMutation,
   Transaction,
   TransactionWithMutations,
-} from "@tanstack/db"
-import type { Message, Row } from "@electric-sql/client"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from '@tanstack/db'
+import type { Message, Row } from '@electric-sql/client'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
@@ -116,7 +116,7 @@ describe(`Electric Integration`, () => {
     ])
 
     expect(collection.state).toEqual(
-      new Map([[1, { id: 1, name: `Test User` }]])
+      new Map([[1, { id: 1, name: `Test User` }]]),
     )
   })
 
@@ -154,7 +154,7 @@ describe(`Electric Integration`, () => {
       new Map([
         [1, { id: 1, name: `Test User` }],
         [2, { id: 2, name: `Another User` }],
-      ])
+      ]),
     )
   })
 
@@ -185,7 +185,7 @@ describe(`Electric Integration`, () => {
     ])
 
     expect(collection.state).toEqual(
-      new Map([[1, { id: 1, name: `Updated User` }]])
+      new Map([[1, { id: 1, name: `Updated User` }]]),
     )
   })
 
@@ -314,9 +314,9 @@ describe(`Electric Integration`, () => {
       // awaitTxId throws if you pass it a string
       await expect(
         // @ts-expect-error
-        collection.utils.awaitTxId(`123`)
+        collection.utils.awaitTxId(`123`),
       ).rejects.toThrowErrorMatchingInlineSnapshot(
-        `[ExpectedNumberInAwaitTxIdError: [test] Expected number in awaitTxId, received string]`
+        `[ExpectedNumberInAwaitTxIdError: [test] Expected number in awaitTxId, received string]`,
       )
 
       // The txid should be tracked and awaitTxId should resolve immediately
@@ -357,7 +357,7 @@ describe(`Electric Integration`, () => {
 
       // The promise should reject with a timeout error
       await expect(promise).rejects.toThrow(
-        `Timeout waiting for txId: ${unknownTxid}`
+        `Timeout waiting for txId: ${unknownTxid}`,
       )
     })
 
@@ -449,7 +449,7 @@ describe(`Electric Integration`, () => {
         async ({ transaction }: { transaction: Transaction }) => {
           // Persist to fake backend and get txid
           const txid = await fakeBackend.persist(
-            transaction.mutations as Array<PendingMutation<Row>>
+            transaction.mutations as Array<PendingMutation<Row>>,
           )
 
           if (!txid) {
@@ -468,13 +468,13 @@ describe(`Electric Integration`, () => {
           await promise
 
           return Promise.resolve()
-        }
+        },
       )
 
       const tx1 = createTransaction({ mutationFn: testMutationFn })
 
       let transaction = tx1.mutate(() =>
-        collection.insert({ id: 1, name: `Test item 1` })
+        collection.insert({ id: 1, name: `Test item 1` }),
       )
 
       await transaction.isPersisted.promise
@@ -707,7 +707,7 @@ describe(`Electric Integration`, () => {
 
       // The transaction should reject due to timeout
       await expect(tx.isPersisted.promise).rejects.toThrow(
-        `Timeout waiting for txId: 999999`
+        `Timeout waiting for txId: 999999`,
       )
     })
 
@@ -715,7 +715,7 @@ describe(`Electric Integration`, () => {
       // Create a fake backend that returns multiple txids
       const fakeBackend = {
         persist: (
-          mutations: Array<PendingMutation<Row>>
+          mutations: Array<PendingMutation<Row>>,
         ): Promise<Array<number>> => {
           // Simulate multiple items being persisted and each getting a txid
           const txids = mutations.map(() => Math.floor(Math.random() * 10000))
@@ -861,7 +861,7 @@ describe(`Electric Integration`, () => {
         .mockImplementation(async ({ collection: col }) => {
           await col.utils.awaitMatch(
             () => false, // Never matches
-            1 // Short timeout for test
+            1, // Short timeout for test
           )
         })
 
@@ -881,7 +881,7 @@ describe(`Electric Integration`, () => {
 
       // Capture the rejection promise before advancing timers
       const rejectionPromise = expect(tx.isPersisted.promise).rejects.toThrow(
-        `Timeout waiting for custom match function`
+        `Timeout waiting for custom match function`,
       )
 
       // Advance timers to trigger timeout
@@ -937,7 +937,8 @@ describe(`Electric Integration`, () => {
           // Custom match using awaitMatch utility
           await col.utils.awaitMatch(
             (message: any) =>
-              isChangeMessage(message) && message.headers.operation === `delete`
+              isChangeMessage(message) &&
+              message.headers.operation === `delete`,
           )
         })
 
@@ -972,7 +973,7 @@ describe(`Electric Integration`, () => {
         .mockImplementation(async ({ collection: col }) => {
           await col.utils.awaitMatch(
             () => false, // Never matches
-            1 // Short timeout for test
+            1, // Short timeout for test
           )
         })
 
@@ -994,7 +995,7 @@ describe(`Electric Integration`, () => {
 
       // Capture the rejection promise before advancing timers
       const rejectionPromise = expect(tx.isPersisted.promise).rejects.toThrow(
-        `Timeout waiting for custom match function`
+        `Timeout waiting for custom match function`,
       )
 
       // Advance timers to trigger timeout
@@ -1569,18 +1570,18 @@ describe(`Electric Integration`, () => {
 
       // Txids in xip_list (in-progress transactions) should NOT resolve
       await expect(testCollection.utils.awaitTxId(120, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 120`
+        `Timeout waiting for txId: 120`,
       )
       await expect(testCollection.utils.awaitTxId(130, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 130`
+        `Timeout waiting for txId: 130`,
       )
 
       // Txids >= xmax should NOT resolve (not yet assigned)
       await expect(testCollection.utils.awaitTxId(150, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 150`
+        `Timeout waiting for txId: 150`,
       )
       await expect(testCollection.utils.awaitTxId(200, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 200`
+        `Timeout waiting for txId: 200`,
       )
     })
 
@@ -1680,10 +1681,10 @@ describe(`Electric Integration`, () => {
 
       // Txids >= second snapshot's xmax should timeout (not yet assigned)
       await expect(testCollection.utils.awaitTxId(210, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 210`
+        `Timeout waiting for txId: 210`,
       )
       await expect(testCollection.utils.awaitTxId(300, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 300`
+        `Timeout waiting for txId: 300`,
       )
     })
 
@@ -1795,7 +1796,7 @@ describe(`Electric Integration`, () => {
         expect.objectContaining({
           limit: 10,
           params: {},
-        })
+        }),
       )
     })
 
@@ -1842,7 +1843,7 @@ describe(`Electric Integration`, () => {
         expect.objectContaining({
           limit: 20,
           params: {},
-        })
+        }),
       )
       expect(mockRequestSnapshot).not.toHaveBeenCalled()
 
@@ -2170,7 +2171,7 @@ describe(`Electric Integration`, () => {
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
           offset: `now`,
-        })
+        }),
       )
     })
 
@@ -2199,7 +2200,7 @@ describe(`Electric Integration`, () => {
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
           offset: undefined,
-        })
+        }),
       )
     })
 
@@ -2228,7 +2229,7 @@ describe(`Electric Integration`, () => {
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
           offset: undefined,
-        })
+        }),
       )
     })
 
@@ -2257,7 +2258,7 @@ describe(`Electric Integration`, () => {
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
           offset: -1,
-        })
+        }),
       )
     })
   })

@@ -1,8 +1,8 @@
-import { readFileSync, writeFileSync } from "node:fs"
-import { resolve } from "node:path"
-import { fileURLToPath } from "node:url"
-import { generateReferenceDocs } from "@tanstack/config/typedoc"
-import { glob } from "tinyglobby"
+import { readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { generateReferenceDocs } from '@tanstack/config/typedoc'
+import { glob } from 'tinyglobby'
 
 const __dirname = fileURLToPath(new URL(`.`, import.meta.url))
 
@@ -21,7 +21,7 @@ await generateReferenceDocs({
       ],
       tsconfig: resolve(
         __dirname,
-        `../packages/electric-db-collection/tsconfig.docs.json`
+        `../packages/electric-db-collection/tsconfig.docs.json`,
       ),
       outputDir: resolve(__dirname, `../docs/reference/electric-db-collection`),
       exclude: [`packages/db/**/*`],
@@ -33,7 +33,7 @@ await generateReferenceDocs({
       ],
       tsconfig: resolve(
         __dirname,
-        `../packages/query-db-collection/tsconfig.docs.json`
+        `../packages/query-db-collection/tsconfig.docs.json`,
       ),
       outputDir: resolve(__dirname, `../docs/reference/query-db-collection`),
       exclude: [`packages/db/**/*`],
@@ -45,11 +45,11 @@ await generateReferenceDocs({
       ],
       tsconfig: resolve(
         __dirname,
-        `../packages/powersync-db-collection/tsconfig.docs.json`
+        `../packages/powersync-db-collection/tsconfig.docs.json`,
       ),
       outputDir: resolve(
         __dirname,
-        `../docs/reference/powersync-db-collection`
+        `../docs/reference/powersync-db-collection`,
       ),
       exclude: [`packages/db/**/*`],
     },
@@ -81,11 +81,11 @@ await generateReferenceDocs({
       ],
       tsconfig: resolve(
         __dirname,
-        `../packages/trailbase-db-collection/tsconfig.docs.json`
+        `../packages/trailbase-db-collection/tsconfig.docs.json`,
       ),
       outputDir: resolve(
         __dirname,
-        `../docs/reference/trailbase-db-collection`
+        `../docs/reference/trailbase-db-collection`,
       ),
       exclude: [`packages/db/**/*`],
     },
@@ -122,7 +122,7 @@ markdownFiles.forEach((file) => {
   // updatedContent = content.replaceAll(/\]\(\.\//gm, '](../')
   updatedContent = updatedContent.replaceAll(
     /\]\((?!https?:\/\/|\/\/|\/|\.\/|\.\.\/|#)([^)]+)\)/gm,
-    (match, p1) => `](../${p1})`
+    (match, p1) => `](../${p1})`,
   )
 
   // Write the updated content back to the file

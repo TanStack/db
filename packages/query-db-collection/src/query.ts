@@ -1,13 +1,13 @@
-import { QueryObserver, hashKey } from "@tanstack/query-core"
-import { deepEquals } from "@tanstack/db"
+import { QueryObserver, hashKey } from '@tanstack/query-core'
+import { deepEquals } from '@tanstack/db'
 import {
   GetKeyRequiredError,
   QueryClientRequiredError,
   QueryFnRequiredError,
   QueryKeyRequiredError,
-} from "./errors"
-import { createWriteUtils } from "./manual-sync"
-import { serializeLoadSubsetOptions } from "./serialization"
+} from './errors'
+import { createWriteUtils } from './manual-sync'
+import { serializeLoadSubsetOptions } from './serialization'
 import type {
   BaseCollectionConfig,
   ChangeMessage,
@@ -18,7 +18,7 @@ import type {
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
-} from "@tanstack/db"
+} from '@tanstack/db'
 import type {
   FetchStatus,
   QueryClient,
@@ -26,11 +26,11 @@ import type {
   QueryKey,
   QueryObserverOptions,
   QueryObserverResult,
-} from "@tanstack/query-core"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from '@tanstack/query-core'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 // Re-export for external use
-export type { SyncOperation } from "./manual-sync"
+export type { SyncOperation } from './manual-sync'
 
 // Schema output type inference helper (matches electric.ts pattern)
 type InferSchemaOutput<T> = T extends StandardSchemaV1
@@ -60,7 +60,7 @@ type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
 export interface QueryCollectionConfig<
   T extends object = object,
   TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
-    context: QueryFunctionContext<any>
+    context: QueryFunctionContext<any>,
   ) => Promise<any>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
@@ -72,7 +72,7 @@ export interface QueryCollectionConfig<
   queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>
   /** Function that fetches data from the server. Must return the complete collection state */
   queryFn: TQueryFn extends (
-    context: QueryFunctionContext<TQueryKey>
+    context: QueryFunctionContext<TQueryKey>,
   ) => Promise<Array<any>>
     ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>>
     : TQueryFn
@@ -232,7 +232,7 @@ class QueryCollectionUtilsImpl {
   constructor(
     state: QueryCollectionState,
     refetch: RefetchFn,
-    writeUtils: ReturnType<typeof createWriteUtils>
+    writeUtils: ReturnType<typeof createWriteUtils>,
   ) {
     this.state = state
     this.refetchFn = refetch
@@ -270,21 +270,21 @@ class QueryCollectionUtilsImpl {
   public get isFetching() {
     // check if any observer is fetching
     return Array.from(this.state.observers.values()).some(
-      (observer) => observer.getCurrentResult().isFetching
+      (observer) => observer.getCurrentResult().isFetching,
     )
   }
 
   public get isRefetching() {
     // check if any observer is refetching
     return Array.from(this.state.observers.values()).some(
-      (observer) => observer.getCurrentResult().isRefetching
+      (observer) => observer.getCurrentResult().isRefetching,
     )
   }
 
   public get isLoading() {
     // check if any observer is loading
     return Array.from(this.state.observers.values()).some(
-      (observer) => observer.getCurrentResult().isLoading
+      (observer) => observer.getCurrentResult().isLoading,
     )
   }
 
@@ -293,14 +293,14 @@ class QueryCollectionUtilsImpl {
     return Math.max(
       0,
       ...Array.from(this.state.observers.values()).map(
-        (observer) => observer.getCurrentResult().dataUpdatedAt
-      )
+        (observer) => observer.getCurrentResult().dataUpdatedAt,
+      ),
     )
   }
 
   public get fetchStatus(): Array<FetchStatus> {
     return Array.from(this.state.observers.values()).map(
-      (observer) => observer.getCurrentResult().fetchStatus
+      (observer) => observer.getCurrentResult().fetchStatus,
     )
   }
 }
@@ -409,7 +409,7 @@ export function queryCollectionOptions<
   > & {
     schema: T
     select: (data: TQueryData) => Array<InferSchemaInput<T>>
-  }
+  },
 ): CollectionConfig<
   InferSchemaOutput<T>,
   TKey,
@@ -429,7 +429,7 @@ export function queryCollectionOptions<
 export function queryCollectionOptions<
   T extends object,
   TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
-    context: QueryFunctionContext<any>
+    context: QueryFunctionContext<any>,
   ) => Promise<any>,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
@@ -447,7 +447,7 @@ export function queryCollectionOptions<
   > & {
     schema?: never // prohibit schema
     select: (data: TQueryData) => Array<T>
-  }
+  },
 ): CollectionConfig<
   T,
   TKey,
@@ -468,7 +468,7 @@ export function queryCollectionOptions<
   config: QueryCollectionConfig<
     InferSchemaOutput<T>,
     (
-      context: QueryFunctionContext<any>
+      context: QueryFunctionContext<any>,
     ) => Promise<Array<InferSchemaOutput<T>>>,
     TError,
     TQueryKey,
@@ -476,7 +476,7 @@ export function queryCollectionOptions<
     T
   > & {
     schema: T
-  }
+  },
 ): CollectionConfig<
   InferSchemaOutput<T>,
   TKey,
@@ -507,7 +507,7 @@ export function queryCollectionOptions<
     TKey
   > & {
     schema?: never // prohibit schema
-  }
+  },
 ): CollectionConfig<
   T,
   TKey,
@@ -519,7 +519,7 @@ export function queryCollectionOptions<
 }
 
 export function queryCollectionOptions(
-  config: QueryCollectionConfig<Record<string, unknown>>
+  config: QueryCollectionConfig<Record<string, unknown>>,
 ): CollectionConfig<
   Record<string, unknown>,
   string | number,
@@ -663,7 +663,7 @@ export function queryCollectionOptions(
 
     const createQueryFromOpts = (
       opts: LoadSubsetOptions = {},
-      queryFunction: typeof queryFn = queryFn
+      queryFunction: typeof queryFn = queryFn,
     ): true | Promise<void> => {
       // Generate key using common function
       const key = generateQueryKeyFromOptions(opts)
@@ -675,7 +675,7 @@ export function queryCollectionOptions(
         // Increment reference count since another consumer is using this observer
         queryRefCounts.set(
           hashedQueryKey,
-          (queryRefCounts.get(hashedQueryKey) || 0) + 1
+          (queryRefCounts.get(hashedQueryKey) || 0) + 1,
         )
 
         // Get the current result and return based on its state
@@ -739,7 +739,7 @@ export function queryCollectionOptions(
       // Increment reference count for this query
       queryRefCounts.set(
         hashedQueryKey,
-        (queryRefCounts.get(hashedQueryKey) || 0) + 1
+        (queryRefCounts.get(hashedQueryKey) || 0) + 1,
       )
 
       // Create a promise that resolves when the query result is first available
@@ -790,7 +790,7 @@ export function queryCollectionOptions(
           }
 
           const currentSyncedItems: Map<string | number, any> = new Map(
-            collection._state.syncedData.entries()
+            collection._state.syncedData.entries(),
           )
           const newItemsMap = new Map<string | number, any>()
           newItemsArray.forEach((item) => {
@@ -833,7 +833,7 @@ export function queryCollectionOptions(
 
           console.error(
             `[QueryCollection] Error observing query ${String(queryKey)}:`,
-            result.error
+            result.error,
           )
 
           // Mark collection as ready even on error to avoid blocking apps
@@ -849,7 +849,7 @@ export function queryCollectionOptions(
 
     const subscribeToQuery = (
       observer: QueryObserver<Array<any>, any, Array<any>, Array<any>, any>,
-      hashedQueryKey: string
+      hashedQueryKey: string,
     ) => {
       if (!isSubscribed(hashedQueryKey)) {
         const cachedQueryKey = hashToQueryKey.get(hashedQueryKey)!
@@ -889,7 +889,7 @@ export function queryCollectionOptions(
         } else if (subscriberCount === 0) {
           unsubscribeFromQueries()
         }
-      }
+      },
     )
 
     // If syncMode is eager, create the initial query without any predicates
@@ -989,7 +989,7 @@ export function queryCollectionOptions(
       if (refcount > 0) {
         console.warn(
           `[cleanupQueryIfIdle] Invariant violation: refcount=${refcount} but no listeners. Cleaning up to prevent leak.`,
-          { hashedQueryKey }
+          { hashedQueryKey },
         )
       }
 
@@ -1040,7 +1040,7 @@ export function queryCollectionOptions(
         allQueryKeys.map(async (qKey) => {
           await queryClient.cancelQueries({ queryKey: qKey, exact: true })
           queryClient.removeQueries({ queryKey: qKey, exact: true })
-        })
+        }),
       )
     }
 
@@ -1162,7 +1162,7 @@ export function queryCollectionOptions(
 
   // Create write utils using the manual-sync module
   const writeUtils = createWriteUtils<any, string | number, any>(
-    () => writeContext
+    () => writeContext,
   )
 
   // Create wrapper handlers for direct persistence operations that handle refetching

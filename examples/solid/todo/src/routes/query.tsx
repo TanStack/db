@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/solid-router"
-import { useLiveQuery } from "@tanstack/solid-db"
-import { queryConfigCollection, queryTodoCollection } from "../lib/collections"
-import { TodoApp } from "../components/TodoApp"
+import { createFileRoute } from '@tanstack/solid-router'
+import { useLiveQuery } from '@tanstack/solid-db'
+import { queryConfigCollection, queryTodoCollection } from '../lib/collections'
+import { TodoApp } from '../components/TodoApp'
 
 export const Route = createFileRoute(`/query`)({
   component: QueryPage,
@@ -21,11 +21,11 @@ function QueryPage() {
   const { data: todos } = useLiveQuery((q) =>
     q
       .from({ todo: queryTodoCollection })
-      .orderBy(({ todo }) => todo.created_at, `asc`)
+      .orderBy(({ todo }) => todo.created_at, `asc`),
   )
 
   const { data: configData } = useLiveQuery((q) =>
-    q.from({ config: queryConfigCollection })
+    q.from({ config: queryConfigCollection }),
   )
 
   return (

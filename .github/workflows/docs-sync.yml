@@ -3,7 +3,7 @@ name: Sync Generated Docs
 on:
   schedule:
     # Run daily at 2 AM UTC
-    - cron: "0 2 * * *"
+    - cron: '0 2 * * *'
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:

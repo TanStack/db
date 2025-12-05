@@ -1,13 +1,13 @@
-import { describe, expect, it, vi } from "vitest"
-import { act, renderHook } from "@testing-library/react"
+import { describe, expect, it, vi } from 'vitest'
+import { act, renderHook } from '@testing-library/react'
 import {
   createCollection,
   debounceStrategy,
   queueStrategy,
   throttleStrategy,
-} from "@tanstack/db"
-import { usePacedMutations } from "../src/usePacedMutations"
-import { mockSyncCollectionOptionsNoInitialState } from "../../db/tests/utils"
+} from '@tanstack/db'
+import { usePacedMutations } from '../src/usePacedMutations'
+import { mockSyncCollectionOptionsNoInitialState } from '../../db/tests/utils'
 
 type Item = {
   id: number
@@ -22,7 +22,7 @@ describe(`usePacedMutations React hook`, () => {
       mockSyncCollectionOptionsNoInitialState<Item>({
         id: `test`,
         getKey: (item) => item.id,
-      })
+      }),
     )
 
     const preloadPromise = collection.preload()
@@ -38,7 +38,7 @@ describe(`usePacedMutations React hook`, () => {
         },
         mutationFn,
         strategy: debounceStrategy({ wait: 50 }),
-      })
+      }),
     )
 
     let tx
@@ -61,7 +61,7 @@ describe(`usePacedMutations React hook`, () => {
       mockSyncCollectionOptionsNoInitialState<Item>({
         id: `test`,
         getKey: (item) => item.id,
-      })
+      }),
     )
 
     const preloadPromise = collection.preload()
@@ -77,7 +77,7 @@ describe(`usePacedMutations React hook`, () => {
         },
         mutationFn,
         strategy: throttleStrategy({ wait: 50, leading: true }),
-      })
+      }),
     )
 
     let tx
@@ -99,7 +99,7 @@ describe(`usePacedMutations React hook`, () => {
       mockSyncCollectionOptionsNoInitialState<Item>({
         id: `test`,
         getKey: (item) => item.id,
-      })
+      }),
     )
 
     const preloadPromise = collection.preload()
@@ -115,7 +115,7 @@ describe(`usePacedMutations React hook`, () => {
         },
         mutationFn,
         strategy: queueStrategy({ wait: 10 }),
-      })
+      }),
     )
 
     let tx
@@ -147,7 +147,7 @@ describe(`usePacedMutations React hook`, () => {
         ({ wait }) => useCustomHook(wait),
         {
           initialProps: { wait: 3000 },
-        }
+        },
       )
 
       const firstMutate = result.current
@@ -228,7 +228,7 @@ describe(`usePacedMutations React hook`, () => {
 
       const { result, rerender } = renderHook(
         ({ opts }) => useDebouncedTransaction(opts),
-        { initialProps: { opts: { wait: 3000 } } }
+        { initialProps: { opts: { wait: 3000 } } },
       )
 
       const firstMutate = result.current

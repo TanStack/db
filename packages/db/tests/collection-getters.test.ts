@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createTransaction } from "../src/transactions"
-import { createCollection } from "../src/collection/index.js"
-import type { CollectionImpl } from "../src/collection/index.js"
-import type { SyncConfig } from "../src/types"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createTransaction } from '../src/transactions'
+import { createCollection } from '../src/collection/index.js'
+import type { CollectionImpl } from '../src/collection/index.js'
+import type { SyncConfig } from '../src/types'
 
 type Item = { id: string; name: string }
 
@@ -141,7 +141,7 @@ describe(`Collection getters`, () => {
       tx.mutate(() =>
         collection.update(`item1`, (draft) => {
           draft.name = `Updated Item 1`
-        })
+        }),
       )
 
       expect(collection.size).toBe(2) // Size should remain the same for updates
@@ -212,7 +212,7 @@ describe(`Collection getters`, () => {
       tx.mutate(() =>
         collection.update(`item1`, (draft) => {
           draft.name = `Updated Item 1`
-        })
+        }),
       )
 
       const key = `item1`
@@ -294,7 +294,7 @@ describe(`Collection getters`, () => {
       tx.mutate(() =>
         collection.update(`item1`, (draft) => {
           draft.name = `Updated Item 1`
-        })
+        }),
       )
 
       const values = Array.from(collection.values())
@@ -343,7 +343,7 @@ describe(`Collection getters`, () => {
       tx.mutate(() =>
         collection.update(`item1`, (draft) => {
           draft.name = `Updated Item 1`
-        })
+        }),
       )
 
       const entries = Array.from(collection.entries())
@@ -398,7 +398,7 @@ describe(`Collection getters`, () => {
       tx.mutate(() =>
         collection.update(`item1`, (draft) => {
           draft.name = `Updated Item 1`
-        })
+        }),
       )
 
       const key = `item1`

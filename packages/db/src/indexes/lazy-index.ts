@@ -2,14 +2,14 @@ import type {
   BaseIndex,
   IndexConstructor,
   IndexResolver,
-} from "./base-index.js"
-import type { BasicExpression } from "../query/ir.js"
+} from './base-index.js'
+import type { BasicExpression } from '../query/ir.js'
 
 /**
  * Utility to determine if a resolver is a constructor or async loader
  */
 function isConstructor<TKey extends string | number>(
-  resolver: IndexResolver<TKey>
+  resolver: IndexResolver<TKey>,
 ): resolver is IndexConstructor<TKey> {
   // Check if it's a function with a prototype (constructor)
   return (
@@ -23,7 +23,7 @@ function isConstructor<TKey extends string | number>(
  * Resolve index constructor from resolver
  */
 async function resolveIndexConstructor<TKey extends string | number>(
-  resolver: IndexResolver<TKey>
+  resolver: IndexResolver<TKey>,
 ): Promise<IndexConstructor<TKey>> {
   if (isConstructor(resolver)) {
     return resolver
@@ -46,7 +46,7 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
     private name: string | undefined,
     private resolver: IndexResolver<TKey>,
     private options: any,
-    private collectionEntries?: Iterable<[TKey, any]>
+    private collectionEntries?: Iterable<[TKey, any]>,
   ) {
     // For synchronous constructors, resolve immediately
     if (isConstructor(this.resolver)) {
@@ -54,7 +54,7 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
         this.id,
         this.expression,
         this.name,
-        this.options
+        this.options,
       )
       // Build with initial data if provided
       if (this.collectionEntries) {
@@ -92,7 +92,7 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
   getResolved(): BaseIndex<TKey> {
     if (!this.resolvedIndex) {
       throw new Error(
-        `Index ${this.id} has not been resolved yet. Ensure collection is synced.`
+        `Index ${this.id} has not been resolved yet. Ensure collection is synced.`,
       )
     }
     return this.resolvedIndex
@@ -131,7 +131,7 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
 export class IndexProxy<TKey extends string | number = string | number> {
   constructor(
     private indexId: number,
-    private lazyIndex: LazyIndexWrapper<TKey>
+    private lazyIndex: LazyIndexWrapper<TKey>,
   ) {}
 
   /**

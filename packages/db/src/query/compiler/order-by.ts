@@ -1,22 +1,22 @@
-import { orderByWithFractionalIndex } from "@tanstack/db-ivm"
-import { defaultComparator, makeComparator } from "../../utils/comparison.js"
-import { PropRef, followRef } from "../ir.js"
-import { ensureIndexForField } from "../../indexes/auto-index.js"
-import { findIndexForField } from "../../utils/index-optimization.js"
-import { compileExpression } from "./evaluators.js"
-import { replaceAggregatesByRefs } from "./group-by.js"
-import type { CompareOptions } from "../builder/types.js"
-import type { WindowOptions } from "./types.js"
-import type { CompiledSingleRowExpression } from "./evaluators.js"
-import type { OrderBy, OrderByClause, QueryIR, Select } from "../ir.js"
+import { orderByWithFractionalIndex } from '@tanstack/db-ivm'
+import { defaultComparator, makeComparator } from '../../utils/comparison.js'
+import { PropRef, followRef } from '../ir.js'
+import { ensureIndexForField } from '../../indexes/auto-index.js'
+import { findIndexForField } from '../../utils/index-optimization.js'
+import { compileExpression } from './evaluators.js'
+import { replaceAggregatesByRefs } from './group-by.js'
+import type { CompareOptions } from '../builder/types.js'
+import type { WindowOptions } from './types.js'
+import type { CompiledSingleRowExpression } from './evaluators.js'
+import type { OrderBy, OrderByClause, QueryIR, Select } from '../ir.js'
 import type {
   CollectionLike,
   NamespacedAndKeyedStream,
   NamespacedRow,
-} from "../../types.js"
-import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
-import type { IndexInterface } from "../../indexes/base-index.js"
-import type { Collection } from "../../collection/index.js"
+} from '../../types.js'
+import type { IStreamBuilder, KeyValue } from '@tanstack/db-ivm'
+import type { IndexInterface } from '../../indexes/base-index.js'
+import type { Collection } from '../../collection/index.js'
 
 export type OrderByOptimizationInfo = {
   alias: string
@@ -25,7 +25,7 @@ export type OrderByOptimizationInfo = {
   limit: number
   comparator: (
     a: Record<string, unknown> | null | undefined,
-    b: Record<string, unknown> | null | undefined
+    b: Record<string, unknown> | null | undefined,
   ) => number
   valueExtractorForRawRow: (row: Record<string, unknown>) => any
   index: IndexInterface<string | number>
@@ -46,14 +46,14 @@ export function processOrderBy(
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   limit?: number,
-  offset?: number
+  offset?: number,
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
   // Pre-compile all order by expressions
   const compiledOrderBy = orderByClause.map((clause) => {
     const clauseWithoutAggregates = replaceAggregatesByRefs(
       clause.expression,
       selectClause,
-      `__select_results`
+      `__select_results`,
     )
 
     return {
@@ -74,7 +74,7 @@ export function processOrderBy(
     if (orderByClause.length > 1) {
       // For multiple orderBy columns, create a composite key
       return compiledOrderBy.map((compiled) =>
-        compiled.compiledExpression(orderByContext)
+        compiled.compiledExpression(orderByContext),
       )
     } else if (orderByClause.length === 1) {
       // For a single orderBy column, use the value directly
@@ -128,7 +128,7 @@ export function processOrderBy(
       const followRefResult = followRef(
         rawQuery,
         orderByExpression,
-        collection
+        collection,
       )!
 
       const followRefCollection = followRefResult.collection
@@ -140,18 +140,18 @@ export function processOrderBy(
           followRefResult.path,
           followRefCollection,
           compareOpts,
-          compare
+          compare,
         )
       }
 
       const valueExtractorForRawRow = compileExpression(
         new PropRef(followRefResult.path),
-        true
+        true,
       ) as CompiledSingleRowExpression
 
       const comparator = (
         a: Record<string, unknown> | null | undefined,
-        b: Record<string, unknown> | null | undefined
+        b: Record<string, unknown> | null | undefined,
       ) => {
         const extractedA = a ? valueExtractorForRawRow(a) : a
         const extractedB = b ? valueExtractorForRawRow(b) : b
@@ -162,7 +162,7 @@ export function processOrderBy(
         findIndexForField(
           followRefCollection,
           followRefResult.path,
-          compareOpts
+          compareOpts,
         )
 
       if (index && index.supports(`gt`)) {
@@ -204,7 +204,7 @@ export function processOrderBy(
       comparator: compare,
       setSizeCallback,
       setWindowFn: (
-        windowFn: (options: { offset?: number; limit?: number }) => void
+        windowFn: (options: { offset?: number; limit?: number }) => void,
       ) => {
         setWindowFn(
           // We wrap the move function such that we update the orderByOptimizationInfo
@@ -217,10 +217,10 @@ export function processOrderBy(
               orderByOptimizationInfo.limit =
                 options.limit ?? orderByOptimizationInfo.limit
             }
-          }
+          },
         )
       },
-    })
+    }),
     // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
   )
 }
@@ -231,7 +231,7 @@ export function processOrderBy(
  */
 export function buildCompareOptions(
   clause: OrderByClause,
-  collection: CollectionLike<any, any>
+  collection: CollectionLike<any, any>,
 ): CompareOptions {
   if (clause.compareOptions.stringSort !== undefined) {
     return clause.compareOptions

@@ -1,17 +1,17 @@
-import { beforeAll, describe, expect, it } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { topKWithFractionalIndex } from "../../src/operators/topKWithFractionalIndex.js"
+import { beforeAll, describe, expect, it } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { topKWithFractionalIndex } from '../../src/operators/topKWithFractionalIndex.js'
 import {
   loadBTree,
   topKWithFractionalIndexBTree,
-} from "../../src/operators/topKWithFractionalIndexBTree.js"
-import { output } from "../../src/operators/index.js"
+} from '../../src/operators/topKWithFractionalIndexBTree.js'
+import { output } from '../../src/operators/index.js'
 import {
   MessageTracker,
   assertOnlyKeysAffected,
   compareFractionalIndex,
-} from "../test-utils.js"
+} from '../test-utils.js'
 
 // Helper function to check if indices are in lexicographic order
 function checkLexicographicOrder(results: Array<any>) {
@@ -23,7 +23,7 @@ function checkLexicographicOrder(results: Array<any>) {
 
   // Sort by value using the same comparator as in the test
   const sortedByValue = [...valuesWithIndices].sort((a, b) =>
-    a.value.value < b.value.value ? -1 : 1
+    a.value.value < b.value.value ? -1 : 1,
   )
 
   // Check that indices are in the same order as the sorted values
@@ -87,7 +87,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -100,7 +100,7 @@ describe(`Operators`, () => {
           [[3, { id: 3, value: `c` }], 1],
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -113,8 +113,8 @@ describe(`Operators`, () => {
       const initialMessages = initialResult.messages
       expect(
         checkLexicographicOrder(
-          initialMessages.map(([item, mult]) => [item, mult])
-        )
+          initialMessages.map(([item, mult]) => [item, mult]),
+        ),
       ).toBe(true)
 
       tracker.reset()
@@ -124,7 +124,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[3, { id: 3, value: `c` }], -1], // Remove the old value
           [[3, { id: 3, value: `a-` }], 1], // This should now be first
-        ])
+        ]),
       )
       graph.run()
 
@@ -138,7 +138,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `topKFractional update`,
         updateResult.messages,
-        [3]
+        [3],
       )
 
       // Check that the update messages maintain lexicographic order on their own
@@ -162,7 +162,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -175,7 +175,7 @@ describe(`Operators`, () => {
           [[3, { id: 3, value: `c` }], 1],
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -184,8 +184,8 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(5) // Should have all 5 elements
       expect(
         checkLexicographicOrder(
-          initialResult.messages.map(([item, mult]) => [item, mult])
-        )
+          initialResult.messages.map(([item, mult]) => [item, mult]),
+        ),
       ).toBe(true)
 
       tracker.reset()
@@ -204,7 +204,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `topKFractional duplicate keys`,
         updateResult.messages,
-        [6]
+        [6],
       )
 
       // Check that the update messages maintain lexicographic order on their own
@@ -229,7 +229,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           allMessages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -242,7 +242,7 @@ describe(`Operators`, () => {
           [[3, { id: 3, value: `c` }], 1],
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -273,7 +273,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -286,7 +286,7 @@ describe(`Operators`, () => {
           [[3, { id: 3, value: `c` }], 1],
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -303,7 +303,7 @@ describe(`Operators`, () => {
       })
 
       const sortedValues = sortedByIndex.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(sortedValues).toEqual([`b`, `c`, `d`]) // Should be in correct order with offset 1, limit 3
 
@@ -315,7 +315,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [[6, { id: 6, value: `c+` }], 1], // This should be between c and d
-        ])
+        ]),
       )
       graph.run()
 
@@ -344,7 +344,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -357,7 +357,7 @@ describe(`Operators`, () => {
           [[3, { id: 3, value: `c` }], 1],
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -373,7 +373,7 @@ describe(`Operators`, () => {
       })
 
       const initialSortedValues = initialSortedByIndex.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`, `c`, `d`, `e`]) // Should be in lexicographic order
 
@@ -386,7 +386,7 @@ describe(`Operators`, () => {
           [[2, { id: 2, value: `d+` }], 1], // 'b' becomes 'd+'
           [[4, { id: 4, value: `d` }], -1], // Remove old 'd'
           [[4, { id: 4, value: `b+` }], 1], // 'd' becomes 'b+'
-        ])
+        ]),
       )
       graph.run()
 
@@ -399,7 +399,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `topK move positions`,
         updateResult.messages,
-        [2, 4]
+        [2, 4],
       )
 
       // For position swaps, we mainly care that the operation is incremental
@@ -418,7 +418,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -431,7 +431,7 @@ describe(`Operators`, () => {
           [[5, { id: 5, value: `e` }], 1],
           [[7, { id: 7, value: `g` }], 1],
           [[9, { id: 9, value: `i` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -448,7 +448,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[6, { id: 6, value: `f` }], 1],
           [[8, { id: 8, value: `h` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -466,7 +466,7 @@ describe(`Operators`, () => {
           [[3, { id: 3, value: `j` }], 1], // Move 'c' to after 'i'
           [[7, { id: 7, value: `g` }], -1], // Remove old 'g'
           [[7, { id: 7, value: `a-` }], 1], // Move 'g' to before 'a'
-        ])
+        ]),
       )
       graph.run()
 
@@ -479,7 +479,7 @@ describe(`Operators`, () => {
       assertOnlyKeysAffected(
         `topK lexicographic update2`,
         update2Result.messages,
-        [3, 7]
+        [3, 7],
       )
     })
 
@@ -494,7 +494,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -507,7 +507,7 @@ describe(`Operators`, () => {
           [[3, { id: 3, value: `c` }], 1],
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -523,7 +523,7 @@ describe(`Operators`, () => {
       })
 
       const initialSortedValues = initialSortedByIndex.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`, `c`, `d`, `e`]) // Should be in lexicographic order
 
@@ -534,7 +534,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[1, { id: 1, value: `a` }], -1], // Remove old 'a'
           [[1, { id: 1, value: `bb` }], 1], // Move 'a' to after 'b'
-        ])
+        ]),
       )
       graph.run()
 
@@ -550,7 +550,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[1, { id: 1, value: `bb` }], -1], // Remove old 'bb'
           [[1, { id: 1, value: `dd` }], 1], // Move to after 'd'
-        ])
+        ]),
       )
       graph.run()
 
@@ -576,7 +576,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           allMessages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -588,7 +588,7 @@ describe(`Operators`, () => {
           [[3, { id: 3, value: `c` }], 1],
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -609,7 +609,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [[1, { id: 1, value: `a` }], 1], // This should be inserted at the start
-        ])
+        ]),
       )
       graph.run()
 
@@ -632,7 +632,7 @@ describe(`Operators`, () => {
 
       // Convert to array for lexicographic order check
       const currentStateArray = Array.from(currentState.values()).map(
-        ([value, index]) => [[null, [value, index]], 1]
+        ([value, index]) => [[null, [value, index]], 1],
       )
 
       expect(checkLexicographicOrder(currentStateArray)).toBe(true)
@@ -660,7 +660,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value)),
         output((message) => {
           allMessages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -672,7 +672,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -694,7 +694,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[1, { id: 1, value: `a` }], 1], // This should be inserted at the start
           [[2, { id: 2, value: `b` }], 1], // This should be inserted at the start
-        ])
+        ]),
       )
       graph.run()
 
@@ -717,7 +717,7 @@ describe(`Operators`, () => {
 
       // Convert to array for lexicographic order check
       const currentStateArray = Array.from(currentState.values()).map(
-        ([value, index]) => [[null, [value, index]], 1]
+        ([value, index]) => [[null, [value, index]], 1],
       )
 
       expect(checkLexicographicOrder(currentStateArray)).toBe(true)
@@ -752,7 +752,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -766,7 +766,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -777,7 +777,7 @@ describe(`Operators`, () => {
 
       // Verify initial order
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`, `c`])
 
@@ -794,7 +794,7 @@ describe(`Operators`, () => {
 
       // Should now show d, e, f
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`d`, `e`, `f`])
 
@@ -825,7 +825,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -839,7 +839,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -850,7 +850,7 @@ describe(`Operators`, () => {
 
       // Verify initial order
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`d`, `e`, `f`])
 
@@ -867,7 +867,7 @@ describe(`Operators`, () => {
 
       // Should now show d, e, f
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`a`, `b`, `c`])
 
@@ -898,7 +898,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -911,7 +911,7 @@ describe(`Operators`, () => {
           [[3, { id: 3, value: `c` }], 1],
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -920,7 +920,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(2)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`])
 
@@ -933,7 +933,7 @@ describe(`Operators`, () => {
       const moveResult = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`b`, `c`])
 
@@ -946,7 +946,7 @@ describe(`Operators`, () => {
       const moveResult2 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues2 = moveResult2.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues2).toEqual([`c`, `d`])
 
@@ -957,7 +957,7 @@ describe(`Operators`, () => {
       const moveResult3 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues3 = moveResult3.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues3).toEqual([`a`, `b`])
     })
@@ -983,7 +983,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -997,7 +997,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1006,7 +1006,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(2)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`b`, `c`])
 
@@ -1017,7 +1017,7 @@ describe(`Operators`, () => {
       const moveResult = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`b`, `c`, `d`])
 
@@ -1028,7 +1028,7 @@ describe(`Operators`, () => {
       const moveResult2 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues2 = moveResult2.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues2).toEqual([`b`])
     })
@@ -1054,7 +1054,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1065,7 +1065,7 @@ describe(`Operators`, () => {
           [[1, { id: 1, value: `a` }], 1],
           [[2, { id: 2, value: `b` }], 1],
           [[3, { id: 3, value: `c` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1074,7 +1074,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(2)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`])
 
@@ -1085,7 +1085,7 @@ describe(`Operators`, () => {
       const moveResult = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`c`]) // Only 1 element available at offset 2
 
@@ -1096,7 +1096,7 @@ describe(`Operators`, () => {
       const moveResult2 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues2 = moveResult2.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues2).toEqual([]) // No elements available at offset 5
 
@@ -1107,7 +1107,7 @@ describe(`Operators`, () => {
       const moveResult3 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues3 = moveResult3.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues3).toEqual([])
 
@@ -1118,7 +1118,7 @@ describe(`Operators`, () => {
       const moveResult4 = tracker.getResult(compareFractionalIndex)
 
       const moveSortedValues4 = moveResult4.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues4).toEqual([`a`, `b`])
     })
@@ -1143,7 +1143,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1157,7 +1157,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1166,7 +1166,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(6)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`, `c`, `d`, `e`, `f`])
 
@@ -1181,7 +1181,7 @@ describe(`Operators`, () => {
 
       // Should now show only first 3 elements
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`a`, `b`, `c`])
 
@@ -1210,7 +1210,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1224,7 +1224,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1240,7 +1240,7 @@ describe(`Operators`, () => {
 
       // Should now show elements c, d, e
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`c`, `d`, `e`])
 
@@ -1269,7 +1269,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1283,7 +1283,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1292,7 +1292,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(3)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`d`, `e`, `f`])
 
@@ -1304,7 +1304,7 @@ describe(`Operators`, () => {
 
       // Should now show elements b, c (offset 1, limit 2)
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`b`, `c`])
 
@@ -1333,7 +1333,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1347,7 +1347,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1356,7 +1356,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(4)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`c`, `d`, `e`, `f`])
 
@@ -1368,7 +1368,7 @@ describe(`Operators`, () => {
 
       // Should show same elements c, d, e, f (offset 2, no limit)
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`c`, `d`, `e`, `f`])
 
@@ -1397,7 +1397,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1411,7 +1411,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1420,7 +1420,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(6)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`a`, `b`, `c`, `d`, `e`, `f`])
 
@@ -1432,7 +1432,7 @@ describe(`Operators`, () => {
 
       // Should now show elements c, d, e, f (offset 2, no limit)
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`c`, `d`, `e`, `f`])
 
@@ -1461,7 +1461,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1475,7 +1475,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1484,7 +1484,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(3)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`d`, `e`, `f`])
 
@@ -1496,7 +1496,7 @@ describe(`Operators`, () => {
 
       // Should now show elements b, c, d, e, f (offset 1, no limit)
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`b`, `c`, `d`, `e`, `f`])
 
@@ -1526,7 +1526,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1540,7 +1540,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1549,7 +1549,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(2)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`c`, `d`])
 
@@ -1561,7 +1561,7 @@ describe(`Operators`, () => {
 
       // Should now show elements c, d, e, f (offset 2, no limit)
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`c`, `d`, `e`, `f`])
 
@@ -1591,7 +1591,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1605,7 +1605,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1614,7 +1614,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(2)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`b`, `c`])
 
@@ -1626,7 +1626,7 @@ describe(`Operators`, () => {
 
       // Should now show elements d, e, f (offset 3, no limit)
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`d`, `e`, `f`])
 
@@ -1656,7 +1656,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           tracker.addMessage(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -1670,7 +1670,7 @@ describe(`Operators`, () => {
           [[4, { id: 4, value: `d` }], 1],
           [[5, { id: 5, value: `e` }], 1],
           [[6, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -1679,7 +1679,7 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(2)
 
       const initialSortedValues = initialResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(initialSortedValues).toEqual([`d`, `e`])
 
@@ -1691,7 +1691,7 @@ describe(`Operators`, () => {
 
       // Should now show elements b, c, d, e, f (offset 1, no limit)
       const moveSortedValues = moveResult.sortedResults.map(
-        ([_key, [value, _index]]) => value.value
+        ([_key, [value, _index]]) => value.value,
       )
       expect(moveSortedValues).toEqual([`b`, `c`, `d`, `e`, `f`])
 

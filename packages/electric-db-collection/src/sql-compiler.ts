@@ -1,6 +1,6 @@
-import { serialize } from "./pg-serializer"
-import type { SubsetParams } from "@electric-sql/client"
-import type { IR, LoadSubsetOptions } from "@tanstack/db"
+import { serialize } from './pg-serializer'
+import type { SubsetParams } from '@electric-sql/client'
+import type { IR, LoadSubsetOptions } from '@tanstack/db'
 
 export type CompiledSqlRecord = Omit<SubsetParams, `params`> & {
   params?: Array<unknown>
@@ -45,7 +45,7 @@ export function compileSQL<T>(options: LoadSubsetOptions): SubsetParams {
       }
       return acc
     },
-    {} as Record<string, string>
+    {} as Record<string, string>,
   )
 
   return {
@@ -72,7 +72,7 @@ function quoteIdentifier(name: string): string {
  */
 function compileBasicExpression(
   exp: IR.BasicExpression<unknown>,
-  params: Array<unknown>
+  params: Array<unknown>,
 ): string {
   switch (exp.type) {
     case `val`:
@@ -82,7 +82,7 @@ function compileBasicExpression(
       // TODO: doesn't yet support JSON(B) values which could be accessed with nested props
       if (exp.path.length !== 1) {
         throw new Error(
-          `Compiler can't handle nested properties: ${exp.path.join(`.`)}`
+          `Compiler can't handle nested properties: ${exp.path.join(`.`)}`,
         )
       }
       return quoteIdentifier(exp.path[0]!)
@@ -95,14 +95,14 @@ function compileBasicExpression(
 
 function compileOrderBy(orderBy: IR.OrderBy, params: Array<unknown>): string {
   const compiledOrderByClauses = orderBy.map((clause: IR.OrderByClause) =>
-    compileOrderByClause(clause, params)
+    compileOrderByClause(clause, params),
   )
   return compiledOrderByClauses.join(`,`)
 }
 
 function compileOrderByClause(
   clause: IR.OrderByClause,
-  params: Array<unknown>
+  params: Array<unknown>,
 ): string {
   // FIXME: We should handle stringSort and locale.
   //        Correctly supporting them is tricky as it depends on Postgres' collation
@@ -126,14 +126,14 @@ function compileOrderByClause(
 
 function compileFunction(
   exp: IR.Func<unknown>,
-  params: Array<unknown> = []
+  params: Array<unknown> = [],
 ): string {
   const { name, args } = exp
 
   const opName = getOpName(name)
 
   const compiledArgs = args.map((arg: IR.BasicExpression) =>
-    compileBasicExpression(arg, params)
+    compileBasicExpression(arg, params),
   )
 
   // Special case for IS NULL / IS NOT NULL - these are postfix operators

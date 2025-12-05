@@ -137,7 +137,7 @@
         // Specify custom timeout (in milliseconds)
         return { txid: result.txid, timeout: 10000 }
       },
-    })
+    }),
   )
   ```
 
@@ -262,7 +262,7 @@
   **Example Usage:**
 
   ```typescript
-  import { isChangeMessage } from "@tanstack/electric-db-collection"
+  import { isChangeMessage } from '@tanstack/electric-db-collection'
 
   const todosCollection = createCollection(
     electricCollectionOptions({
@@ -274,12 +274,12 @@
         await collection.utils.awaitMatch(
           (message) =>
             isChangeMessage(message) &&
-            message.headers.operation === "insert" &&
+            message.headers.operation === 'insert' &&
             message.value.text === newItem.text,
-          5000 // timeout in ms (optional, defaults to 5000)
+          5000, // timeout in ms (optional, defaults to 5000)
         )
       },
-    })
+    }),
   )
   ```
 
@@ -611,7 +611,7 @@
   try {
     collection.insert(data)
   } catch (error) {
-    if (error.message.includes("already exists")) {
+    if (error.message.includes('already exists')) {
       // Handle duplicate key error
     }
   }
@@ -620,7 +620,7 @@
   **After:**
 
   ```ts
-  import { DuplicateKeyError } from "@tanstack/db"
+  import { DuplicateKeyError } from '@tanstack/db'
 
   try {
     collection.insert(data)
@@ -637,14 +637,14 @@
 
   ```ts
   // Electric collection errors were imported from @tanstack/db
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/db"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/db'
   ```
 
   **After:**
 
   ```ts
   // Now import from the specific adapter package
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/electric-db-collection"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/electric-db-collection'
   ```
 
   ### Unified Error Handling
@@ -652,14 +652,14 @@
   **New:**
 
   ```ts
-  import { TanStackDBError } from "@tanstack/db"
+  import { TanStackDBError } from '@tanstack/db'
 
   try {
     // Any TanStack DB operation
   } catch (error) {
     if (error instanceof TanStackDBError) {
       // Handle all TanStack DB errors uniformly
-      console.log("TanStack DB error:", error.message)
+      console.log('TanStack DB error:', error.message)
     }
   }
   ```

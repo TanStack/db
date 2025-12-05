@@ -1,12 +1,12 @@
-import { describe, expectTypeOf, it } from "vitest"
-import { z } from "zod"
-import { createCollection } from "../src/index"
-import { localStorageCollectionOptions } from "../src/local-storage"
+import { describe, expectTypeOf, it } from 'vitest'
+import { z } from 'zod'
+import { createCollection } from '../src/index'
+import { localStorageCollectionOptions } from '../src/local-storage'
 import type {
   LocalStorageCollectionConfig,
   StorageApi,
   StorageEventApi,
-} from "../src/local-storage"
+} from '../src/local-storage'
 
 type ItemOf<T> = T extends Array<infer U> ? U : T
 
@@ -173,21 +173,21 @@ describe(`LocalStorage collection type resolution tests`, () => {
       onInsert: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ success: true })
       },
       onUpdate: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ success: true })
       },
       onDelete: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].original
+          params.transaction.mutations[0].original,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ success: true })
       },
@@ -286,11 +286,11 @@ describe(`LocalStorage collection type resolution tests`, () => {
     const windowEventApi: {
       addEventListener: (
         type: `storage`,
-        listener: (event: StorageEvent) => void
+        listener: (event: StorageEvent) => void,
       ) => void
       removeEventListener: (
         type: `storage`,
-        listener: (event: StorageEvent) => void
+        listener: (event: StorageEvent) => void,
       ) => void
     } = {
       addEventListener: () => {},
@@ -323,23 +323,23 @@ describe(`LocalStorage collection type resolution tests`, () => {
         schema: testSchemaWithSchema,
         onInsert: (params) => {
           expectTypeOf(
-            params.transaction.mutations[0].modified
+            params.transaction.mutations[0].modified,
           ).toEqualTypeOf<ExpectedType>()
           return Promise.resolve()
         },
         onUpdate: (params) => {
           expectTypeOf(
-            params.transaction.mutations[0].modified
+            params.transaction.mutations[0].modified,
           ).toEqualTypeOf<ExpectedType>()
           return Promise.resolve()
         },
         onDelete: (params) => {
           expectTypeOf(
-            params.transaction.mutations[0].modified
+            params.transaction.mutations[0].modified,
           ).toEqualTypeOf<ExpectedType>()
           return Promise.resolve()
         },
-      })
+      }),
     )
 
     collection.insert({

@@ -26,9 +26,9 @@
   const users = createLiveQueryCollection((q) =>
     q
       .from({ user: usersCollection })
-      .orderBy(({ user }) => user.name, "asc")
+      .orderBy(({ user }) => user.name, 'asc')
       .limit(10)
-      .offset(0)
+      .offset(0),
   )
 
   users.utils.setWindow({ offset: 10, limit: 10 })

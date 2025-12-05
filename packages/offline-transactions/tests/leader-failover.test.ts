@@ -1,14 +1,14 @@
-import { describe, expect, it } from "vitest"
-import { FakeStorageAdapter, createTestOfflineEnvironment } from "./harness"
-import type { TestItem } from "./harness"
-import type { PendingMutation } from "@tanstack/db"
+import { describe, expect, it } from 'vitest'
+import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
+import type { TestItem } from './harness'
+import type { PendingMutation } from '@tanstack/db'
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 const waitUntil = async (
   predicate: () => boolean | Promise<boolean>,
   timeoutMs = 5000,
-  intervalMs = 20
+  intervalMs = 20,
 ) => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {

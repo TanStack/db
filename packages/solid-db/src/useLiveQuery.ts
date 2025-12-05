@@ -5,15 +5,15 @@ import {
   createResource,
   createSignal,
   onCleanup,
-} from "solid-js"
-import { ReactiveMap } from "@solid-primitives/map"
+} from 'solid-js'
+import { ReactiveMap } from '@solid-primitives/map'
 import {
   BaseQueryBuilder,
   CollectionImpl,
   createLiveQueryCollection,
-} from "@tanstack/db"
-import { createStore, reconcile } from "solid-js/store"
-import type { Accessor } from "solid-js"
+} from '@tanstack/db'
+import { createStore, reconcile } from 'solid-js/store'
+import type { Accessor } from 'solid-js'
 import type {
   ChangeMessage,
   Collection,
@@ -23,7 +23,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   QueryBuilder,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 /**
  * Create a live query using a query function
@@ -82,7 +82,7 @@ import type {
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
-  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): {
   state: ReactiveMap<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
@@ -97,7 +97,9 @@ export function useLiveQuery<TContext extends Context>(
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
-  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext> | undefined | null
+  queryFn: (
+    q: InitialQueryBuilder,
+  ) => QueryBuilder<TContext> | undefined | null,
 ): {
   state: ReactiveMap<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
@@ -156,7 +158,7 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: Accessor<LiveQueryCollectionConfig<TContext>>
+  config: Accessor<LiveQueryCollectionConfig<TContext>>,
 ): {
   state: ReactiveMap<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
@@ -210,7 +212,7 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>
+  liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>,
 ): {
   state: ReactiveMap<TKey, TResult>
   data: Array<TResult>
@@ -225,7 +227,7 @@ export function useLiveQuery<
 
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
-  configOrQueryOrCollection: (queryFn?: any) => any
+  configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
   const collection = createMemo(
     () => {
@@ -263,7 +265,7 @@ export function useLiveQuery(
       })
     },
     undefined,
-    { name: `TanstackDBCollectionMemo` }
+    { name: `TanstackDBCollectionMemo` },
   )
 
   // Reactive state that gets updated granularly through change events
@@ -279,15 +281,15 @@ export function useLiveQuery(
     collection() ? collection()!.status : (`disabled` as const),
     {
       name: `TanstackDBStatus`,
-    }
+    },
   )
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     setData((prev) =>
-      reconcile(Array.from(currentCollection.values()))(prev).filter(Boolean)
+      reconcile(Array.from(currentCollection.values()))(prev).filter(Boolean),
     )
   }
 
@@ -345,7 +347,7 @@ export function useLiveQuery(
         },
         {
           includeInitialState: true,
-        }
+        },
       )
 
       currentUnsubscribe = subscription.unsubscribe.bind(subscription)
@@ -364,7 +366,7 @@ export function useLiveQuery(
       })
     },
     undefined,
-    { name: `TanstackDBSyncComputed` }
+    { name: `TanstackDBSyncComputed` },
   )
 
   return {

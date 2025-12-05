@@ -1,16 +1,16 @@
-import { IndexProxy, LazyIndexWrapper } from "../indexes/lazy-index"
+import { IndexProxy, LazyIndexWrapper } from '../indexes/lazy-index'
 import {
   createSingleRowRefProxy,
   toExpression,
-} from "../query/builder/ref-proxy"
-import { BTreeIndex } from "../indexes/btree-index"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { BaseIndex, IndexResolver } from "../indexes/base-index"
-import type { ChangeMessage } from "../types"
-import type { IndexOptions } from "../indexes/index-options"
-import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
-import type { CollectionLifecycleManager } from "./lifecycle"
-import type { CollectionStateManager } from "./state"
+} from '../query/builder/ref-proxy'
+import { BTreeIndex } from '../indexes/btree-index'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { BaseIndex, IndexResolver } from '../indexes/base-index'
+import type { ChangeMessage } from '../types'
+import type { IndexOptions } from '../indexes/index-options'
+import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
+import type { CollectionLifecycleManager } from './lifecycle'
+import type { CollectionStateManager } from './state'
 
 export class CollectionIndexesManager<
   TOutput extends object = Record<string, unknown>,
@@ -41,7 +41,7 @@ export class CollectionIndexesManager<
    */
   public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
-    config: IndexOptions<TResolver> = {}
+    config: IndexOptions<TResolver> = {},
   ): IndexProxy<TKey> {
     this.lifecycle.validateCollectionUsable(`createIndex`)
 
@@ -60,7 +60,7 @@ export class CollectionIndexesManager<
       config.name,
       resolver,
       config.options,
-      this.state.entries()
+      this.state.entries(),
     )
 
     this.lazyIndexes.set(indexId, lazyIndex)
@@ -109,7 +109,7 @@ export class CollectionIndexesManager<
 
         this.resolvedIndexes.set(indexId, resolvedIndex)
         return { indexId, resolvedIndex }
-      }
+      },
     )
 
     await Promise.all(resolutionPromises)
@@ -121,7 +121,7 @@ export class CollectionIndexesManager<
    */
   private async resolveSingleIndex(
     indexId: number,
-    lazyIndex: LazyIndexWrapper<TKey>
+    lazyIndex: LazyIndexWrapper<TKey>,
   ): Promise<BaseIndex<TKey>> {
     const resolvedIndex = await lazyIndex.resolve()
     resolvedIndex.build(this.state.entries())
