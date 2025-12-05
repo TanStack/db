@@ -2247,16 +2247,17 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).toBeDefined()
       expect(result.current.status).toBeDefined()
 
+      // Results are in deterministic key order (id: 1 before id: 2)
       expect(result.current.data).toMatchObject([
-        {
-          id: `2`,
-          name: `Jane Doe`,
-          age: 25,
-        },
         {
           id: `1`,
           name: `John Doe`,
           age: 30,
+        },
+        {
+          id: `2`,
+          name: `Jane Doe`,
+          age: 25,
         },
       ])
 

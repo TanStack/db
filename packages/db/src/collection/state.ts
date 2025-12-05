@@ -43,7 +43,7 @@ export class CollectionStateManager<
   public pendingSyncedTransactions: Array<
     PendingSyncedTransaction<TOutput, TKey>
   > = []
-  public syncedData: Map<TKey, TOutput> | SortedMap<TKey, TOutput>
+  public syncedData: SortedMap<TKey, TOutput>
   public syncedMetadata = new Map<TKey, unknown>()
 
   // Optimistic state tracking - make public for testing
@@ -69,12 +69,9 @@ export class CollectionStateManager<
       a.compareCreatedAt(b),
     )
 
-    // Set up data storage with optional comparison function
-    if (config.compare) {
-      this.syncedData = new SortedMap<TKey, TOutput>(config.compare)
-    } else {
-      this.syncedData = new Map<TKey, TOutput>()
-    }
+    // Set up data storage - always use SortedMap for deterministic iteration.
+    // If a custom compare function is provided, use it; otherwise entries are sorted by key only.
+    this.syncedData = new SortedMap<TKey, TOutput>(config.compare)
   }
 
   setDeps(deps: {
