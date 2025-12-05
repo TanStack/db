@@ -11,9 +11,9 @@ Base strategy interface that all strategy implementations must conform to
 
 ## Extended by
 
-- [`DebounceStrategy`](../DebounceStrategy.md)
-- [`QueueStrategy`](../QueueStrategy.md)
-- [`ThrottleStrategy`](../ThrottleStrategy.md)
+- [`DebounceStrategy`](./DebounceStrategy.md)
+- [`QueueStrategy`](./QueueStrategy.md)
+- [`ThrottleStrategy`](./ThrottleStrategy.md)
 
 ## Type Parameters
 
@@ -72,7 +72,7 @@ Execute a function according to the strategy's timing rules
 
 ##### fn
 
-() => [`Transaction`](../Transaction.md)\<`T`\>
+() => [`Transaction`](./Transaction.md)\<`T`\>
 
 The function to execute
 

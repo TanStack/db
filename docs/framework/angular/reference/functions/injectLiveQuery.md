@@ -37,7 +37,7 @@ Defined in: [index.ts:51](https://github.com/TanStack/db/blob/main/packages/angu
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
 
 ## Call Signature
 
@@ -71,7 +71,7 @@ Defined in: [index.ts:61](https://github.com/TanStack/db/blob/main/packages/angu
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
 
 ## Call Signature
 
@@ -95,7 +95,7 @@ Defined in: [index.ts:71](https://github.com/TanStack/db/blob/main/packages/angu
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
 
 ## Call Signature
 
@@ -119,7 +119,7 @@ Defined in: [index.ts:74](https://github.com/TanStack/db/blob/main/packages/angu
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
 
 ## Call Signature
 
@@ -143,7 +143,7 @@ Defined in: [index.ts:77](https://github.com/TanStack/db/blob/main/packages/angu
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
 
 ## Call Signature
 
@@ -175,4 +175,4 @@ Defined in: [index.ts:80](https://github.com/TanStack/db/blob/main/packages/angu
 
 ### Returns
 
-[`InjectLiveQueryResult`](../../interfaces/InjectLiveQueryResult.md)\<`TResult`, `TKey`, `TUtils`\>
+[`InjectLiveQueryResult`](../interfaces/InjectLiveQueryResult.md)\<`TResult`, `TKey`, `TUtils`\>

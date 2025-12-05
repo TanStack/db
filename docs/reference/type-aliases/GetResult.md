@@ -39,4 +39,4 @@ complex intersection types into readable object types.
 
 ### TContext
 
-`TContext` *extends* [`Context`](../../interfaces/Context.md)
+`TContext` *extends* [`Context`](../interfaces/Context.md)

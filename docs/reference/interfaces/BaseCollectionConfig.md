@@ -9,8 +9,8 @@ Defined in: [packages/db/src/types.ts:438](https://github.com/TanStack/db/blob/m
 
 ## Extended by
 
-- [`CollectionConfig`](../CollectionConfig.md)
-- [`LocalStorageCollectionConfig`](../LocalStorageCollectionConfig.md)
+- [`CollectionConfig`](./CollectionConfig.md)
+- [`LocalStorageCollectionConfig`](./LocalStorageCollectionConfig.md)
 
 ## Type Parameters
 
@@ -28,7 +28,7 @@ Defined in: [packages/db/src/types.ts:438](https://github.com/TanStack/db/blob/m
 
 ### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 ### TReturn
 

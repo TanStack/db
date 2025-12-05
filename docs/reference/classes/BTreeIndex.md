@@ -12,7 +12,7 @@ This maintains items in sorted order and provides efficient range operations
 
 ## Extends
 
-- [`BaseIndex`](../BaseIndex.md)\<`TKey`\>
+- [`BaseIndex`](./BaseIndex.md)\<`TKey`\>
 
 ## Type Parameters
 
@@ -42,7 +42,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:50](https://github.com/TanSt
 
 ##### expression
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
 
 ##### name?
 
@@ -58,7 +58,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:50](https://github.com/TanSt
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`constructor`](../BaseIndex.md#constructor)
+[`BaseIndex`](./BaseIndex.md).[`constructor`](./BaseIndex.md#constructor)
 
 ## Properties
 
@@ -72,7 +72,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:87](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`compareOptions`](../BaseIndex.md#compareoptions)
+[`BaseIndex`](./BaseIndex.md).[`compareOptions`](./BaseIndex.md#compareoptions)
 
 ***
 
@@ -86,7 +86,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:81](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`expression`](../BaseIndex.md#expression)
+[`BaseIndex`](./BaseIndex.md).[`expression`](./BaseIndex.md#expression)
 
 ***
 
@@ -100,7 +100,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:79](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`id`](../BaseIndex.md#id)
+[`BaseIndex`](./BaseIndex.md).[`id`](./BaseIndex.md#id)
 
 ***
 
@@ -114,7 +114,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:86](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`lastUpdated`](../BaseIndex.md#lastupdated)
+[`BaseIndex`](./BaseIndex.md).[`lastUpdated`](./BaseIndex.md#lastupdated)
 
 ***
 
@@ -128,7 +128,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:84](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`lookupCount`](../BaseIndex.md#lookupcount)
+[`BaseIndex`](./BaseIndex.md).[`lookupCount`](./BaseIndex.md#lookupcount)
 
 ***
 
@@ -142,7 +142,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:80](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`name`](../BaseIndex.md#name)
+[`BaseIndex`](./BaseIndex.md).[`name`](./BaseIndex.md#name)
 
 ***
 
@@ -156,7 +156,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:33](https://github.com/TanSt
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`supportedOperations`](../BaseIndex.md#supportedoperations)
+[`BaseIndex`](./BaseIndex.md).[`supportedOperations`](./BaseIndex.md#supportedoperations)
 
 ***
 
@@ -170,7 +170,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:85](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`totalLookupTime`](../BaseIndex.md#totallookuptime)
+[`BaseIndex`](./BaseIndex.md).[`totalLookupTime`](./BaseIndex.md#totallookuptime)
 
 ## Accessors
 
@@ -190,7 +190,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:333](https://github.com/TanS
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`indexedKeysSet`](../BaseIndex.md#indexedkeysset)
+[`BaseIndex`](./BaseIndex.md).[`indexedKeysSet`](./BaseIndex.md#indexedkeysset)
 
 ***
 
@@ -212,7 +212,7 @@ Gets the number of indexed keys
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`keyCount`](../BaseIndex.md#keycount)
+[`BaseIndex`](./BaseIndex.md).[`keyCount`](./BaseIndex.md#keycount)
 
 ***
 
@@ -232,7 +232,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:337](https://github.com/TanS
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`orderedEntriesArray`](../BaseIndex.md#orderedentriesarray)
+[`BaseIndex`](./BaseIndex.md).[`orderedEntriesArray`](./BaseIndex.md#orderedentriesarray)
 
 ***
 
@@ -252,7 +252,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:343](https://github.com/TanS
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`orderedEntriesArrayReversed`](../BaseIndex.md#orderedentriesarrayreversed)
+[`BaseIndex`](./BaseIndex.md).[`orderedEntriesArrayReversed`](./BaseIndex.md#orderedentriesarrayreversed)
 
 ***
 
@@ -272,7 +272,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:350](https://github.com/TanS
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`valueMapData`](../BaseIndex.md#valuemapdata)
+[`BaseIndex`](./BaseIndex.md).[`valueMapData`](./BaseIndex.md#valuemapdata)
 
 ## Methods
 
@@ -302,7 +302,7 @@ Adds a value to the index
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`add`](../BaseIndex.md#add)
+[`BaseIndex`](./BaseIndex.md).[`add`](./BaseIndex.md#add)
 
 ***
 
@@ -328,7 +328,7 @@ Builds the index from a collection of entries
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`build`](../BaseIndex.md#build)
+[`BaseIndex`](./BaseIndex.md).[`build`](./BaseIndex.md#build)
 
 ***
 
@@ -348,7 +348,7 @@ Clears all data from the index
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`clear`](../BaseIndex.md#clear)
+[`BaseIndex`](./BaseIndex.md).[`clear`](./BaseIndex.md#clear)
 
 ***
 
@@ -374,7 +374,7 @@ Performs an equality lookup
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`equalityLookup`](../BaseIndex.md#equalitylookup)
+[`BaseIndex`](./BaseIndex.md).[`equalityLookup`](./BaseIndex.md#equalitylookup)
 
 ***
 
@@ -398,7 +398,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:182](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`evaluateIndexExpression`](../BaseIndex.md#evaluateindexexpression)
+[`BaseIndex`](./BaseIndex.md).[`evaluateIndexExpression`](./BaseIndex.md#evaluateindexexpression)
 
 ***
 
@@ -412,11 +412,11 @@ Defined in: [packages/db/src/indexes/base-index.ts:169](https://github.com/TanSt
 
 #### Returns
 
-[`IndexStats`](../../interfaces/IndexStats.md)
+[`IndexStats`](../interfaces/IndexStats.md)
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`getStats`](../BaseIndex.md#getstats)
+[`BaseIndex`](./BaseIndex.md).[`getStats`](./BaseIndex.md#getstats)
 
 ***
 
@@ -442,7 +442,7 @@ Performs an IN array lookup
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`inArrayLookup`](../BaseIndex.md#inarraylookup)
+[`BaseIndex`](./BaseIndex.md).[`inArrayLookup`](./BaseIndex.md#inarraylookup)
 
 ***
 
@@ -458,7 +458,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:64](https://github.com/TanSt
 
 ##### \_options?
 
-[`BTreeIndexOptions`](../../interfaces/BTreeIndexOptions.md)
+[`BTreeIndexOptions`](../interfaces/BTreeIndexOptions.md)
 
 #### Returns
 
@@ -466,7 +466,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:64](https://github.com/TanSt
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`initialize`](../BaseIndex.md#initialize)
+[`BaseIndex`](./BaseIndex.md).[`initialize`](./BaseIndex.md#initialize)
 
 ***
 
@@ -496,7 +496,7 @@ Performs a lookup operation
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`lookup`](../BaseIndex.md#lookup)
+[`BaseIndex`](./BaseIndex.md).[`lookup`](./BaseIndex.md#lookup)
 
 ***
 
@@ -523,7 +523,7 @@ The direction is ignored because the index can be reversed if the direction is d
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`matchesCompareOptions`](../BaseIndex.md#matchescompareoptions)
+[`BaseIndex`](./BaseIndex.md).[`matchesCompareOptions`](./BaseIndex.md#matchescompareoptions)
 
 ***
 
@@ -541,7 +541,7 @@ Checks if the index matches the provided direction.
 
 ##### direction
 
-[`OrderByDirection`](../../@tanstack/namespaces/IR/type-aliases/OrderByDirection.md)
+[`OrderByDirection`](../@tanstack/namespaces/IR/type-aliases/OrderByDirection.md)
 
 #### Returns
 
@@ -549,7 +549,7 @@ Checks if the index matches the provided direction.
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`matchesDirection`](../BaseIndex.md#matchesdirection)
+[`BaseIndex`](./BaseIndex.md).[`matchesDirection`](./BaseIndex.md#matchesdirection)
 
 ***
 
@@ -573,7 +573,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:134](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`matchesField`](../BaseIndex.md#matchesfield)
+[`BaseIndex`](./BaseIndex.md).[`matchesField`](./BaseIndex.md#matchesfield)
 
 ***
 
@@ -592,7 +592,7 @@ This is more efficient for compound queries like "WHERE a > 5 AND a < 10"
 
 ##### options
 
-[`RangeQueryOptions`](../../interfaces/RangeQueryOptions.md) = `{}`
+[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md) = `{}`
 
 #### Returns
 
@@ -600,7 +600,7 @@ This is more efficient for compound queries like "WHERE a > 5 AND a < 10"
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`rangeQuery`](../BaseIndex.md#rangequery)
+[`BaseIndex`](./BaseIndex.md).[`rangeQuery`](./BaseIndex.md#rangequery)
 
 ***
 
@@ -618,7 +618,7 @@ Performs a reversed range query
 
 ##### options
 
-[`RangeQueryOptions`](../../interfaces/RangeQueryOptions.md) = `{}`
+[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md) = `{}`
 
 #### Returns
 
@@ -626,7 +626,7 @@ Performs a reversed range query
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`rangeQueryReversed`](../BaseIndex.md#rangequeryreversed)
+[`BaseIndex`](./BaseIndex.md).[`rangeQueryReversed`](./BaseIndex.md#rangequeryreversed)
 
 ***
 
@@ -656,7 +656,7 @@ Removes a value from the index
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`remove`](../BaseIndex.md#remove)
+[`BaseIndex`](./BaseIndex.md).[`remove`](./BaseIndex.md#remove)
 
 ***
 
@@ -680,7 +680,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:130](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`supports`](../BaseIndex.md#supports)
+[`BaseIndex`](./BaseIndex.md).[`supports`](./BaseIndex.md#supports)
 
 ***
 
@@ -723,7 +723,7 @@ The next n items after the provided key. Returns the first n items if no from it
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`take`](../BaseIndex.md#take)
+[`BaseIndex`](./BaseIndex.md).[`take`](./BaseIndex.md#take)
 
 ***
 
@@ -766,7 +766,7 @@ The next n items **before** the provided key. Returns the last n items if no fro
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`takeReversed`](../BaseIndex.md#takereversed)
+[`BaseIndex`](./BaseIndex.md).[`takeReversed`](./BaseIndex.md#takereversed)
 
 ***
 
@@ -790,7 +790,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:187](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`trackLookup`](../BaseIndex.md#tracklookup)
+[`BaseIndex`](./BaseIndex.md).[`trackLookup`](./BaseIndex.md#tracklookup)
 
 ***
 
@@ -827,7 +827,7 @@ Updates a value in the index
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`update`](../BaseIndex.md#update)
+[`BaseIndex`](./BaseIndex.md).[`update`](./BaseIndex.md#update)
 
 ***
 
@@ -845,4 +845,4 @@ Defined in: [packages/db/src/indexes/base-index.ts:193](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`updateTimestamp`](../BaseIndex.md#updatetimestamp)
+[`BaseIndex`](./BaseIndex.md).[`updateTimestamp`](./BaseIndex.md#updatetimestamp)

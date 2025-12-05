@@ -11,7 +11,7 @@ LocalStorage collection utilities type
 
 ## Extends
 
-- [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+- [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 ## Indexable
 
@@ -40,7 +40,7 @@ The transaction containing mutations to accept
 
 ###### mutations
 
-[`PendingMutation`](../PendingMutation.md)\<`Record`\<`string`, `unknown`\>, [`OperationType`](../../type-aliases/OperationType.md), [`Collection`](../Collection.md)\<`Record`\<`string`, `unknown`\>, `any`, `any`, `any`, `any`\>\>[]
+[`PendingMutation`](./PendingMutation.md)\<`Record`\<`string`, `unknown`\>, [`OperationType`](../type-aliases/OperationType.md), [`Collection`](./Collection.md)\<`Record`\<`string`, `unknown`\>, `any`, `any`, `any`, `any`\>\>[]
 
 #### Returns
 

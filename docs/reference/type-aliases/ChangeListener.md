@@ -27,7 +27,7 @@ Function type for listening to collection changes
 
 ### changes
 
-[`ChangeMessage`](../../interfaces/ChangeMessage.md)\<`T`, `TKey`\>[]
+[`ChangeMessage`](../interfaces/ChangeMessage.md)\<`T`, `TKey`\>[]
 
 Array of change messages describing what happened
 

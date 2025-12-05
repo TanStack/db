@@ -18,7 +18,7 @@ Used internally by collection operations to join existing transactions
 
 ## Returns
 
-  \| [`Transaction`](../../interfaces/Transaction.md)\<`Record`\<`string`, `unknown`\>\>
+  \| [`Transaction`](../interfaces/Transaction.md)\<`Record`\<`string`, `unknown`\>\>
   \| `undefined`
 
 The active transaction or undefined if none is active

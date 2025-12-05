@@ -22,7 +22,7 @@ The LoadSubsetOptions from ctx.meta
 
 \{
 `limit?`: `number`;
-`orderBy?`: [`OrderBy`](../../@tanstack/namespaces/IR/type-aliases/OrderBy.md);
+`orderBy?`: [`OrderBy`](../@tanstack/namespaces/IR/type-aliases/OrderBy.md);
 `where?`: `BasicExpression`\<`boolean`\>;
 \} | `null` | `undefined`
 

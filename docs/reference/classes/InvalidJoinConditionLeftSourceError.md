@@ -9,7 +9,7 @@ Defined in: [packages/db/src/errors.ts:506](https://github.com/TanStack/db/blob/
 
 ## Extends
 
-- [`JoinError`](../JoinError.md)
+- [`JoinError`](./JoinError.md)
 
 ## Constructors
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/errors.ts:507](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`JoinError`](../JoinError.md).[`constructor`](../JoinError.md#constructor)
+[`JoinError`](./JoinError.md).[`constructor`](./JoinError.md#constructor)
 
 ## Properties
 
@@ -47,7 +47,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](../JoinError.md).[`cause`](../JoinError.md#cause)
+[`JoinError`](./JoinError.md).[`cause`](./JoinError.md#cause)
 
 ***
 
@@ -61,7 +61,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](../JoinError.md).[`message`](../JoinError.md#message)
+[`JoinError`](./JoinError.md).[`message`](./JoinError.md#message)
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](../JoinError.md).[`name`](../JoinError.md#name)
+[`JoinError`](./JoinError.md).[`name`](./JoinError.md#name)
 
 ***
 
@@ -89,7 +89,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](../JoinError.md).[`stack`](../JoinError.md#stack)
+[`JoinError`](./JoinError.md).[`stack`](./JoinError.md#stack)
 
 ***
 
@@ -113,7 +113,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`JoinError`](../JoinError.md).[`stackTraceLimit`](../JoinError.md#stacktracelimit)
+[`JoinError`](./JoinError.md).[`stackTraceLimit`](./JoinError.md#stacktracelimit)
 
 ## Methods
 
@@ -185,7 +185,7 @@ a();
 
 #### Inherited from
 
-[`JoinError`](../JoinError.md).[`captureStackTrace`](../JoinError.md#capturestacktrace)
+[`JoinError`](./JoinError.md).[`captureStackTrace`](./JoinError.md#capturestacktrace)
 
 ***
 
@@ -217,4 +217,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`JoinError`](../JoinError.md).[`prepareStackTrace`](../JoinError.md#preparestacktrace)
+[`JoinError`](./JoinError.md).[`prepareStackTrace`](./JoinError.md#preparestacktrace)

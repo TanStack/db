@@ -88,7 +88,7 @@ losing its `this` context (e.g., `loadSubset: dedupe.loadSubset` in a sync confi
 
 ##### options
 
-[`LoadSubsetOptions`](../../type-aliases/LoadSubsetOptions.md)
+[`LoadSubsetOptions`](../type-aliases/LoadSubsetOptions.md)
 
 The predicate options (where, orderBy, limit)
 

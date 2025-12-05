@@ -12,7 +12,7 @@ for the change events system to work
 
 ## Extends
 
-- `Pick`\<[`Collection`](../Collection.md)\<`T`, `TKey`\>, `"get"` \| `"has"` \| `"entries"` \| `"indexes"` \| `"id"` \| `"compareOptions"`\>
+- `Pick`\<[`Collection`](./Collection.md)\<`T`, `TKey`\>, `"get"` \| `"has"` \| `"entries"` \| `"indexes"` \| `"id"` \| `"compareOptions"`\>
 
 ## Type Parameters
 
@@ -36,7 +36,7 @@ Defined in: [packages/db/src/collection/index.ts:579](https://github.com/TanStac
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`compareOptions`](../../classes/CollectionImpl.md#compareoptions)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`compareOptions`](../classes/CollectionImpl.md#compareoptions)
 
 ***
 
@@ -50,7 +50,7 @@ Defined in: [packages/db/src/collection/index.ts:273](https://github.com/TanStac
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`id`](../../classes/CollectionImpl.md#id)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`id`](../classes/CollectionImpl.md#id)
 
 ***
 

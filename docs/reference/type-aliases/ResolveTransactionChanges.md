@@ -19,7 +19,7 @@ Defined in: [packages/db/src/types.ts:79](https://github.com/TanStack/db/blob/ma
 
 ### TOperation
 
-`TOperation` *extends* [`OperationType`](../OperationType.md) = [`OperationType`](../OperationType.md)
+`TOperation` *extends* [`OperationType`](./OperationType.md) = [`OperationType`](./OperationType.md)
 
 ## Remarks
 
