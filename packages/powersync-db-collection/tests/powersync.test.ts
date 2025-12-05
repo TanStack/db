@@ -113,7 +113,7 @@ describe(`PowerSync Integration`, () => {
           expect(collection.size).toBe(4)
           // Sort by name since keys are random UUIDs
           expect(
-            collection.toArray.map((entry) => entry.name).sort()
+            collection.toArray.map((entry) => entry.name).sort(),
           ).deep.equals([`four`, `one`, `three`, `two`])
         },
         { timeout: 1000 },
@@ -130,7 +130,7 @@ describe(`PowerSync Integration`, () => {
           expect(collection.size).toBe(3)
           // Sort by name since keys are random UUIDs
           expect(
-            collection.toArray.map((entry) => entry.name).sort()
+            collection.toArray.map((entry) => entry.name).sort(),
           ).deep.equals([`four`, `one`, `three`])
         },
         { timeout: 1000 },
@@ -148,7 +148,7 @@ describe(`PowerSync Integration`, () => {
           expect(collection.size).toBe(3)
           // Sort by name since keys are random UUIDs
           expect(
-            collection.toArray.map((entry) => entry.name).sort()
+            collection.toArray.map((entry) => entry.name).sort(),
           ).deep.equals([`four`, `three`, `updated`])
         },
         { timeout: 1000 },

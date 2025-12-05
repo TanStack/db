@@ -1,4 +1,4 @@
-import { compareKeys } from "@tanstack/db-ivm"
+import { compareKeys } from '@tanstack/db-ivm'
 
 /**
  * A Map implementation that keeps its entries sorted based on a comparator function

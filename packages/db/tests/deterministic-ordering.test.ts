@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest"
-import { SortedMap } from "../src/SortedMap"
-import { BTreeIndex } from "../src/indexes/btree-index"
-import { createCollection } from "../src/collection/index.js"
-import { PropRef } from "../src/query/ir"
-import { mockSyncCollectionOptions } from "./utils"
+import { describe, expect, it } from 'vitest'
+import { SortedMap } from '../src/SortedMap'
+import { BTreeIndex } from '../src/indexes/btree-index'
+import { createCollection } from '../src/collection/index.js'
+import { PropRef } from '../src/query/ir'
+import { mockSyncCollectionOptions } from './utils'
 
 /**
  * These tests verify deterministic ordering behavior when values compare as equal.
@@ -19,7 +19,7 @@ describe(`Deterministic Ordering`, () => {
     it(`should maintain deterministic order when values are equal`, () => {
       // All values are the same (priority = 1), so they compare as equal
       const map = new SortedMap<string, { priority: number }>(
-        (a, b) => a.priority - b.priority
+        (a, b) => a.priority - b.priority,
       )
 
       // Insert in "random" order
@@ -34,7 +34,7 @@ describe(`Deterministic Ordering`, () => {
 
     it(`should maintain deterministic order with mixed equal and different values`, () => {
       const map = new SortedMap<string, { priority: number }>(
-        (a, b) => a.priority - b.priority
+        (a, b) => a.priority - b.priority,
       )
 
       // Mix of equal and different priorities
@@ -51,7 +51,7 @@ describe(`Deterministic Ordering`, () => {
 
     it(`should maintain deterministic order with numeric keys`, () => {
       const map = new SortedMap<number, { priority: number }>(
-        (a, b) => a.priority - b.priority
+        (a, b) => a.priority - b.priority,
       )
 
       map.set(30, { priority: 1 })
@@ -64,7 +64,7 @@ describe(`Deterministic Ordering`, () => {
 
     it(`should maintain deterministic order after updates`, () => {
       const map = new SortedMap<string, { priority: number }>(
-        (a, b) => a.priority - b.priority
+        (a, b) => a.priority - b.priority,
       )
 
       map.set(`c`, { priority: 1 })
@@ -80,7 +80,7 @@ describe(`Deterministic Ordering`, () => {
 
     it(`should maintain deterministic order after delete and re-insert`, () => {
       const map = new SortedMap<string, { priority: number }>(
-        (a, b) => a.priority - b.priority
+        (a, b) => a.priority - b.priority,
       )
 
       map.set(`c`, { priority: 1 })
@@ -113,7 +113,7 @@ describe(`Deterministic Ordering`, () => {
       const index = new BTreeIndex<string>(
         1,
         new PropRef([`priority`]),
-        `priority_index`
+        `priority_index`,
       )
 
       // All have same priority
@@ -130,7 +130,7 @@ describe(`Deterministic Ordering`, () => {
       const index = new BTreeIndex<string>(
         1,
         new PropRef([`priority`]),
-        `priority_index`
+        `priority_index`,
       )
 
       index.add(`d`, { priority: 2 })
@@ -148,7 +148,7 @@ describe(`Deterministic Ordering`, () => {
       const index = new BTreeIndex<number>(
         1,
         new PropRef([`priority`]),
-        `priority_index`
+        `priority_index`,
       )
 
       index.add(30, { priority: 1 })
@@ -163,7 +163,7 @@ describe(`Deterministic Ordering`, () => {
       const index = new BTreeIndex<string>(
         1,
         new PropRef([`priority`]),
-        `priority_index`
+        `priority_index`,
       )
 
       index.add(`c`, { priority: 1 })
@@ -179,7 +179,7 @@ describe(`Deterministic Ordering`, () => {
       const index = new BTreeIndex<string>(
         1,
         new PropRef([`priority`]),
-        `priority_index`
+        `priority_index`,
       )
 
       index.add(`c`, { priority: 1 })
@@ -197,7 +197,7 @@ describe(`Deterministic Ordering`, () => {
       const index = new BTreeIndex<string>(
         1,
         new PropRef([`priority`]),
-        `priority_index`
+        `priority_index`,
       )
 
       // Add keys with different priorities
