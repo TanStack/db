@@ -39,8 +39,8 @@
   },
   "scripts": {
     "build": "svelte-package --input ./src --output ./dist --tsconfig ./tsconfig.build.json",
-    "lint": "eslint . --fix",
-    "test": "npx vitest --run",
+    "test:eslint": "eslint . --fix",
+    "test:lib": "npx vitest --run",
     "test:types": "svelte-check --tsconfig ./tsconfig.json"
   },
   "sideEffects": [

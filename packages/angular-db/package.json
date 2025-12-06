@@ -55,8 +55,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "test": "npx vitest --run",
-    "lint": "eslint . --fix"
+    "test:lib": "npx vitest --run",
+    "test:eslint": "eslint . --fix"
   },
   "sideEffects": false,
   "type": "module",

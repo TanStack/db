@@ -45,10 +45,10 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "test": "vitest",
+    "test:lib": "vitest",
     "test:watch": "vitest --watch",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src"
+    "test:eslint": "eslint src"
   },
   "dependencies": {
     "@tanstack/db": "workspace:*"

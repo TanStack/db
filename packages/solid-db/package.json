@@ -50,8 +50,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "test": "vitest --run",
-    "lint": "eslint . --fix"
+    "test:lib": "vitest --run",
+    "test:eslint": "eslint . --fix"
   },
   "sideEffects": false,
   "type": "module",
