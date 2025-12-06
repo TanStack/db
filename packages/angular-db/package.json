@@ -51,7 +51,7 @@
     "rxjs": ">=6.0.0"
   },
   "devDependencies": {
-    "@angular/common": "^19.2.15",
+    "@angular/common": "^20.0.0",
     "@angular/compiler": "^20.0.0",
     "@angular/core": "^19.2.16",
     "@angular/platform-browser": "^19.2.16",
