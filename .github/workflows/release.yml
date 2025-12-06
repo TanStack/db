@@ -43,7 +43,7 @@ jobs:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Generate Docs
         if: steps.changesets.outputs.published == 'true'
-        run: pnpm docs:generate
+        run: pnpm generate-docs
       - name: Commit Generated Docs
         if: steps.changesets.outputs.published == 'true'
         run: |

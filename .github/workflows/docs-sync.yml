@@ -29,7 +29,7 @@ jobs:
         run: pnpm run build
 
       - name: Generate Docs
-        run: pnpm docs:generate
+        run: pnpm generate-docs
 
       - name: Check for changes
         id: check_changes

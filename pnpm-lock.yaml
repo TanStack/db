@@ -4,30 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  '@tanstack/angular-db': workspace:*
-  '@tanstack/db': workspace:*
-  '@tanstack/db-ivm': workspace:*
-  '@tanstack/electric-db-collection': workspace:*
-  '@tanstack/offline-transactions': workspace:*
-  '@tanstack/powersync-db-collection': workspace:*
-  '@tanstack/query-db-collection': workspace:*
-  '@tanstack/react-db': workspace:*
-  '@tanstack/rxdb-db-collection': workspace:*
-  '@tanstack/solid-db': workspace:*
-  '@tanstack/svelte-db': workspace:*
-  '@tanstack/trailbase-db-collection': workspace:*
-  '@tanstack/vue-db': workspace:*
-
-pnpmfileChecksum: sha256-K2GXbNgIKmiJVeG6Wblkgh1+WRgT9dE2pnYza/gt8+8=
-
 importers:
 
   .:
-    dependencies:
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
     devDependencies:
       '@changesets/cli':
         specifier: ^2.29.8
@@ -113,6 +92,9 @@ importers:
       tinyglobby:
         specifier: ^0.2.15
         version: 0.2.15
+      tsx:
+        specifier: ^4.21.0
+        version: 4.21.0
       typescript:
         specifier: ^5.9.2
         version: 5.9.3
@@ -147,10 +129,10 @@ importers:
         specifier: ^20.3.14
         version: 20.3.14(@angular/common@20.3.13(@angular/core@20.3.14(@angular/compiler@20.3.15)(rxjs@7.8.2)(zone.js@0.16.0))(rxjs@7.8.2))(@angular/core@20.3.14(@angular/compiler@20.3.15)(rxjs@7.8.2)(zone.js@0.16.0))(@angular/platform-browser@20.3.14(@angular/common@20.3.13(@angular/core@20.3.14(@angular/compiler@20.3.15)(rxjs@7.8.2)(zone.js@0.16.0))(rxjs@7.8.2))(@angular/core@20.3.14(@angular/compiler@20.3.15)(rxjs@7.8.2)(zone.js@0.16.0)))(rxjs@7.8.2)
       '@tanstack/angular-db':
-        specifier: workspace:*
+        specifier: '>=0.0.0 <1.0.0'
         version: link:../../../packages/angular-db
       '@tanstack/db':
-        specifier: workspace:*
+        specifier: '>=0.0.0 <1.0.0'
         version: link:../../../packages/db
       rxjs:
         specifier: ~7.8.2
@@ -208,13 +190,13 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/offline-transactions':
-        specifier: workspace:*
+        specifier: '>=1.0.1'
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: workspace:*
+        specifier: '>=1.0.6'
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: workspace:*
+        specifier: '>=0.1.55'
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.11
@@ -278,10 +260,10 @@ importers:
   examples/react/paced-mutations-demo:
     dependencies:
       '@tanstack/db':
-        specifier: workspace:*
+        specifier: '>=0.0.0 <1.0.0'
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: workspace:*
+        specifier: '>=0.0.0 <1.0.0'
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -318,10 +300,10 @@ importers:
         specifier: ^5.90.11
         version: 5.90.11
       '@tanstack/query-db-collection':
-        specifier: workspace:*
+        specifier: '>=1.0.6'
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: workspace:*
+        specifier: '>=0.1.55'
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.139.12
@@ -451,16 +433,16 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: workspace:*
+        specifier: '>=0.2.0'
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.11
         version: 5.90.11
       '@tanstack/query-db-collection':
-        specifier: workspace:*
+        specifier: '>=1.0.0'
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: workspace:*
+        specifier: '>=0.1.44'
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.139.12
@@ -469,7 +451,7 @@ importers:
         specifier: ^1.139.12
         version: 1.139.12(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.10)(vite@6.4.1(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@6.4.1(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: workspace:*
+        specifier: '>=0.1.44'
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.5
@@ -572,16 +554,16 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: workspace:*
+        specifier: ^0.2.10
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.11
         version: 5.90.11
       '@tanstack/query-db-collection':
-        specifier: workspace:*
-        version: link:../../../packages/query-db-collection
+        specifier: '>=0.0.0 <1.0.0'
+        version: 0.3.0(@tanstack/db@packages+db)(@tanstack/query-core@5.90.11)(typescript@5.9.3)
       '@tanstack/solid-db':
-        specifier: workspace:*
+        specifier: ^0.1.52
         version: link:../../../packages/solid-db
       '@tanstack/solid-router':
         specifier: ^1.139.12
@@ -590,7 +572,7 @@ importers:
         specifier: ^1.139.12
         version: 1.139.12(@tanstack/react-router@1.139.12(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(solid-js@1.9.10)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.10)(vite@7.2.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.2.6(@types/node@22.18.1)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: workspace:*
+        specifier: ^0.1.53
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.5
@@ -3808,6 +3790,13 @@ packages:
 
   '@tanstack/query-core@5.90.11':
     resolution: {integrity: sha512-f9z/nXhCgWDF4lHqgIE30jxLe4sYv15QodfdPDKYAk7nAEjNcndy4dHz3ezhdUaR23BpWa4I2EH4/DZ0//Uf8A==}
+
+  '@tanstack/query-db-collection@0.3.0':
+    resolution: {integrity: sha512-v1GSFHHLRL9pOsuknfFIxdlDgO04ax0uVSITf+paPiGLfve1hcAGtxXYFbtBRlxXBKe9UMwI+rDEr6uAxcMiSg==}
+    peerDependencies:
+      '@tanstack/db': '*'
+      '@tanstack/query-core': ^5.0.0
+      typescript: '>=4.7'
 
   '@tanstack/react-query@5.90.11':
     resolution: {integrity: sha512-3uyzz01D1fkTLXuxF3JfoJoHQMU2fxsfJwE+6N5hHy0dVNoZOvwKP8Z2k7k1KDeD54N20apcJnG75TBAStIrBA==}
@@ -11883,6 +11872,13 @@ snapshots:
   '@tanstack/pacer-lite@0.1.0': {}
 
   '@tanstack/query-core@5.90.11': {}
+
+  '@tanstack/query-db-collection@0.3.0(@tanstack/db@packages+db)(@tanstack/query-core@5.90.11)(typescript@5.9.3)':
+    dependencies:
+      '@standard-schema/spec': 1.0.0
+      '@tanstack/db': link:packages/db
+      '@tanstack/query-core': 5.90.11
+      typescript: 5.9.3
 
   '@tanstack/react-query@5.90.11(react@19.2.0)':
     dependencies:
