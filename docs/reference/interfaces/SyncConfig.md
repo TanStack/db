@@ -79,7 +79,7 @@ Defined in: [packages/db/src/types.ts:289](https://github.com/TanStack/db/blob/m
 
 ###### collection
 
-[`Collection`](./Collection.md)\<`T`, `TKey`, `any`, `any`, `any`\>
+[`Collection`](Collection.md)\<`T`, `TKey`, `any`, `any`, `any`\>
 
 ###### commit
 

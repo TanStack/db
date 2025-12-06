@@ -9,7 +9,7 @@ Defined in: [packages/db/src/errors.ts:635](https://github.com/TanStack/db/blob/
 
 ## Extends
 
-- [`QueryOptimizerError`](./QueryOptimizerError.md)
+- [`QueryOptimizerError`](QueryOptimizerError.md)
 
 ## Constructors
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/errors.ts:636](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`QueryOptimizerError`](./QueryOptimizerError.md).[`constructor`](./QueryOptimizerError.md#constructor)
+[`QueryOptimizerError`](QueryOptimizerError.md).[`constructor`](QueryOptimizerError.md#constructor)
 
 ## Properties
 
@@ -41,7 +41,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryOptimizerError`](./QueryOptimizerError.md).[`cause`](./QueryOptimizerError.md#cause)
+[`QueryOptimizerError`](QueryOptimizerError.md).[`cause`](QueryOptimizerError.md#cause)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryOptimizerError`](./QueryOptimizerError.md).[`message`](./QueryOptimizerError.md#message)
+[`QueryOptimizerError`](QueryOptimizerError.md).[`message`](QueryOptimizerError.md#message)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryOptimizerError`](./QueryOptimizerError.md).[`name`](./QueryOptimizerError.md#name)
+[`QueryOptimizerError`](QueryOptimizerError.md).[`name`](QueryOptimizerError.md#name)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryOptimizerError`](./QueryOptimizerError.md).[`stack`](./QueryOptimizerError.md#stack)
+[`QueryOptimizerError`](QueryOptimizerError.md).[`stack`](QueryOptimizerError.md#stack)
 
 ***
 
@@ -107,7 +107,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`QueryOptimizerError`](./QueryOptimizerError.md).[`stackTraceLimit`](./QueryOptimizerError.md#stacktracelimit)
+[`QueryOptimizerError`](QueryOptimizerError.md).[`stackTraceLimit`](QueryOptimizerError.md#stacktracelimit)
 
 ## Methods
 
@@ -179,7 +179,7 @@ a();
 
 #### Inherited from
 
-[`QueryOptimizerError`](./QueryOptimizerError.md).[`captureStackTrace`](./QueryOptimizerError.md#capturestacktrace)
+[`QueryOptimizerError`](QueryOptimizerError.md).[`captureStackTrace`](QueryOptimizerError.md#capturestacktrace)
 
 ***
 
@@ -211,4 +211,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`QueryOptimizerError`](./QueryOptimizerError.md).[`prepareStackTrace`](./QueryOptimizerError.md#preparestacktrace)
+[`QueryOptimizerError`](QueryOptimizerError.md).[`prepareStackTrace`](QueryOptimizerError.md#preparestacktrace)

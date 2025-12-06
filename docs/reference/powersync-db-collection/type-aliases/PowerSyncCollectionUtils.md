@@ -31,4 +31,4 @@ Defined in: [definitions.ts:268](https://github.com/TanStack/db/blob/main/packag
 
 #### Returns
 
-[`PowerSyncCollectionMeta`](./PowerSyncCollectionMeta.md)\<`TTable`\>
+[`PowerSyncCollectionMeta`](PowerSyncCollectionMeta.md)\<`TTable`\>

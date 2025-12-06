@@ -103,7 +103,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:70](https://github.com/TanSta
 
 #### Returns
 
-[`IndexStats`](./IndexStats.md)
+[`IndexStats`](IndexStats.md)
 
 ***
 
@@ -223,7 +223,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:43](https://github.com/TanSta
 
 ##### options
 
-[`RangeQueryOptions`](./RangeQueryOptions.md)
+[`RangeQueryOptions`](RangeQueryOptions.md)
 
 #### Returns
 
@@ -243,7 +243,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:44](https://github.com/TanSta
 
 ##### options
 
-[`RangeQueryOptions`](./RangeQueryOptions.md)
+[`RangeQueryOptions`](RangeQueryOptions.md)
 
 #### Returns
 

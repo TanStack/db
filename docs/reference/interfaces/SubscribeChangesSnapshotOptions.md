@@ -9,7 +9,7 @@ Defined in: [packages/db/src/types.ts:730](https://github.com/TanStack/db/blob/m
 
 ## Extends
 
-- `Omit`\<[`SubscribeChangesOptions`](./SubscribeChangesOptions.md), `"includeInitialState"`\>
+- `Omit`\<[`SubscribeChangesOptions`](SubscribeChangesOptions.md), `"includeInitialState"`\>
 
 ## Properties
 
@@ -45,4 +45,4 @@ Pre-compiled expression for filtering changes
 
 #### Inherited from
 
-[`SubscribeChangesOptions`](./SubscribeChangesOptions.md).[`whereExpression`](./SubscribeChangesOptions.md#whereexpression)
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`whereExpression`](SubscribeChangesOptions.md#whereexpression)

@@ -9,7 +9,7 @@ Defined in: [packages/db/src/errors.ts:118](https://github.com/TanStack/db/blob/
 
 ## Extends
 
-- [`CollectionStateError`](./CollectionStateError.md)
+- [`CollectionStateError`](CollectionStateError.md)
 
 ## Constructors
 
@@ -44,7 +44,7 @@ Defined in: [packages/db/src/errors.ts:119](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`CollectionStateError`](./CollectionStateError.md).[`constructor`](./CollectionStateError.md#constructor)
+[`CollectionStateError`](CollectionStateError.md).[`constructor`](CollectionStateError.md#constructor)
 
 ## Properties
 
@@ -58,7 +58,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionStateError`](./CollectionStateError.md).[`cause`](./CollectionStateError.md#cause)
+[`CollectionStateError`](CollectionStateError.md).[`cause`](CollectionStateError.md#cause)
 
 ***
 
@@ -72,7 +72,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionStateError`](./CollectionStateError.md).[`message`](./CollectionStateError.md#message)
+[`CollectionStateError`](CollectionStateError.md).[`message`](CollectionStateError.md#message)
 
 ***
 
@@ -86,7 +86,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionStateError`](./CollectionStateError.md).[`name`](./CollectionStateError.md#name)
+[`CollectionStateError`](CollectionStateError.md).[`name`](CollectionStateError.md#name)
 
 ***
 
@@ -100,7 +100,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionStateError`](./CollectionStateError.md).[`stack`](./CollectionStateError.md#stack)
+[`CollectionStateError`](CollectionStateError.md).[`stack`](CollectionStateError.md#stack)
 
 ***
 
@@ -124,7 +124,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`CollectionStateError`](./CollectionStateError.md).[`stackTraceLimit`](./CollectionStateError.md#stacktracelimit)
+[`CollectionStateError`](CollectionStateError.md).[`stackTraceLimit`](CollectionStateError.md#stacktracelimit)
 
 ## Methods
 
@@ -196,7 +196,7 @@ a();
 
 #### Inherited from
 
-[`CollectionStateError`](./CollectionStateError.md).[`captureStackTrace`](./CollectionStateError.md#capturestacktrace)
+[`CollectionStateError`](CollectionStateError.md).[`captureStackTrace`](CollectionStateError.md#capturestacktrace)
 
 ***
 
@@ -228,4 +228,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`CollectionStateError`](./CollectionStateError.md).[`prepareStackTrace`](./CollectionStateError.md#preparestacktrace)
+[`CollectionStateError`](CollectionStateError.md).[`prepareStackTrace`](CollectionStateError.md#preparestacktrace)

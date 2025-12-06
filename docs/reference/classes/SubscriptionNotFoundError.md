@@ -12,7 +12,7 @@ For subqueries, aliases may be remapped (e.g., 'activeUser' → 'user').
 
 ## Extends
 
-- [`QueryCompilationError`](./QueryCompilationError.md)
+- [`QueryCompilationError`](QueryCompilationError.md)
 
 ## Constructors
 
@@ -52,7 +52,7 @@ Defined in: [packages/db/src/errors.ts:657](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`QueryCompilationError`](./QueryCompilationError.md).[`constructor`](./QueryCompilationError.md#constructor)
+[`QueryCompilationError`](QueryCompilationError.md).[`constructor`](QueryCompilationError.md#constructor)
 
 ## Properties
 
@@ -66,7 +66,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCompilationError`](./QueryCompilationError.md).[`cause`](./QueryCompilationError.md#cause)
+[`QueryCompilationError`](QueryCompilationError.md).[`cause`](QueryCompilationError.md#cause)
 
 ***
 
@@ -80,7 +80,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCompilationError`](./QueryCompilationError.md).[`message`](./QueryCompilationError.md#message)
+[`QueryCompilationError`](QueryCompilationError.md).[`message`](QueryCompilationError.md#message)
 
 ***
 
@@ -94,7 +94,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCompilationError`](./QueryCompilationError.md).[`name`](./QueryCompilationError.md#name)
+[`QueryCompilationError`](QueryCompilationError.md).[`name`](QueryCompilationError.md#name)
 
 ***
 
@@ -108,7 +108,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryCompilationError`](./QueryCompilationError.md).[`stack`](./QueryCompilationError.md#stack)
+[`QueryCompilationError`](QueryCompilationError.md).[`stack`](QueryCompilationError.md#stack)
 
 ***
 
@@ -132,7 +132,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`QueryCompilationError`](./QueryCompilationError.md).[`stackTraceLimit`](./QueryCompilationError.md#stacktracelimit)
+[`QueryCompilationError`](QueryCompilationError.md).[`stackTraceLimit`](QueryCompilationError.md#stacktracelimit)
 
 ## Methods
 
@@ -204,7 +204,7 @@ a();
 
 #### Inherited from
 
-[`QueryCompilationError`](./QueryCompilationError.md).[`captureStackTrace`](./QueryCompilationError.md#capturestacktrace)
+[`QueryCompilationError`](QueryCompilationError.md).[`captureStackTrace`](QueryCompilationError.md#capturestacktrace)
 
 ***
 
@@ -236,4 +236,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`QueryCompilationError`](./QueryCompilationError.md).[`prepareStackTrace`](./QueryCompilationError.md#preparestacktrace)
+[`QueryCompilationError`](QueryCompilationError.md).[`prepareStackTrace`](QueryCompilationError.md#preparestacktrace)

@@ -12,7 +12,7 @@ for the change events system to work
 
 ## Extends
 
-- `Pick`\<[`Collection`](./Collection.md)\<`T`, `TKey`\>, `"get"` \| `"has"` \| `"entries"` \| `"indexes"` \| `"id"` \| `"compareOptions"`\>
+- `Pick`\<[`Collection`](Collection.md)\<`T`, `TKey`\>, `"get"` \| `"has"` \| `"entries"` \| `"indexes"` \| `"id"` \| `"compareOptions"`\>
 
 ## Type Parameters
 
