@@ -22,7 +22,7 @@ Contains information about the original and modified data, as well as metadata
 
 ### TCollection
 
-`TCollection` *extends* [`Collection`](./Collection.md)\<`T`, `any`, `any`, `any`, `any`\> = [`Collection`](./Collection.md)\<`T`, `any`, `any`, `any`, `any`\>
+`TCollection` *extends* [`Collection`](Collection.md)\<`T`, `any`, `any`, `any`, `any`\> = [`Collection`](Collection.md)\<`T`, `any`, `any`, `any`, `any`\>
 
 ## Properties
 

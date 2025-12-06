@@ -13,7 +13,7 @@ npm install @tanstack/vue-db
 
 See the [Vue Functions Reference](./reference/index.md) to see the full list of composables available in the Vue Adapter.
 
-For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../guides/live-queries).
+For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../../guides/live-queries).
 
 ## Basic Usage
 

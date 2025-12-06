@@ -72,35 +72,6 @@ await generateReferenceDocs({
       outputDir: resolve(__dirname, `../docs/framework/svelte/reference`),
       exclude: [`packages/db/**/*`],
     },
-    {
-      name: `trailbase-db-collection`,
-      entryPoints: [
-        resolve(__dirname, `../packages/trailbase-db-collection/src/index.ts`),
-      ],
-      tsconfig: resolve(
-        __dirname,
-        `../packages/trailbase-db-collection/tsconfig.docs.json`,
-      ),
-      outputDir: resolve(
-        __dirname,
-        `../docs/reference/trailbase-db-collection`,
-      ),
-      exclude: [`packages/db/**/*`],
-    },
-    {
-      name: `vue-db`,
-      entryPoints: [resolve(__dirname, `../packages/vue-db/src/index.ts`)],
-      tsconfig: resolve(__dirname, `../packages/vue-db/tsconfig.docs.json`),
-      outputDir: resolve(__dirname, `../docs/framework/vue/reference`),
-      exclude: [`packages/db/**/*`],
-    },
-    {
-      name: `angular-db`,
-      entryPoints: [resolve(__dirname, `../packages/angular-db/src/index.ts`)],
-      tsconfig: resolve(__dirname, `../packages/angular-db/tsconfig.docs.json`),
-      outputDir: resolve(__dirname, `../docs/framework/angular/reference`),
-      exclude: [`packages/db/**/*`],
-    },
   ],
 })
 

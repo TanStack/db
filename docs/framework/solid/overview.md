@@ -13,7 +13,7 @@ npm install @tanstack/solid-db
 
 See the [Solid Functions Reference](./reference/index.md) to see the full list of primitives available in the Solid Adapter.
 
-For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../guides/live-queries).
+For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../../guides/live-queries).
 
 ## Basic Usage
 

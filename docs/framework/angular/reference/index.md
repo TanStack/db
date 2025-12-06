@@ -7,8 +7,8 @@ title: "@tanstack/angular-db"
 
 ## Interfaces
 
-- [InjectLiveQueryResult](./interfaces/InjectLiveQueryResult.md)
+- [InjectLiveQueryResult](interfaces/InjectLiveQueryResult.md)
 
 ## Functions
 
-- [injectLiveQuery](./functions/injectLiveQuery.md)
+- [injectLiveQuery](functions/injectLiveQuery.md)

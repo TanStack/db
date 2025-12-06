@@ -9,7 +9,7 @@ Defined in: [packages/db/src/errors.ts:252](https://github.com/TanStack/db/blob/
 
 ## Extends
 
-- [`MissingHandlerError`](./MissingHandlerError.md)
+- [`MissingHandlerError`](MissingHandlerError.md)
 
 ## Constructors
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/errors.ts:253](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`MissingHandlerError`](./MissingHandlerError.md).[`constructor`](./MissingHandlerError.md#constructor)
+[`MissingHandlerError`](MissingHandlerError.md).[`constructor`](MissingHandlerError.md#constructor)
 
 ## Properties
 
@@ -41,7 +41,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`MissingHandlerError`](./MissingHandlerError.md).[`cause`](./MissingHandlerError.md#cause)
+[`MissingHandlerError`](MissingHandlerError.md).[`cause`](MissingHandlerError.md#cause)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`MissingHandlerError`](./MissingHandlerError.md).[`message`](./MissingHandlerError.md#message)
+[`MissingHandlerError`](MissingHandlerError.md).[`message`](MissingHandlerError.md#message)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`MissingHandlerError`](./MissingHandlerError.md).[`name`](./MissingHandlerError.md#name)
+[`MissingHandlerError`](MissingHandlerError.md).[`name`](MissingHandlerError.md#name)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`MissingHandlerError`](./MissingHandlerError.md).[`stack`](./MissingHandlerError.md#stack)
+[`MissingHandlerError`](MissingHandlerError.md).[`stack`](MissingHandlerError.md#stack)
 
 ***
 
@@ -107,7 +107,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`MissingHandlerError`](./MissingHandlerError.md).[`stackTraceLimit`](./MissingHandlerError.md#stacktracelimit)
+[`MissingHandlerError`](MissingHandlerError.md).[`stackTraceLimit`](MissingHandlerError.md#stacktracelimit)
 
 ## Methods
 
@@ -179,7 +179,7 @@ a();
 
 #### Inherited from
 
-[`MissingHandlerError`](./MissingHandlerError.md).[`captureStackTrace`](./MissingHandlerError.md#capturestacktrace)
+[`MissingHandlerError`](MissingHandlerError.md).[`captureStackTrace`](MissingHandlerError.md#capturestacktrace)
 
 ***
 
@@ -211,4 +211,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`MissingHandlerError`](./MissingHandlerError.md).[`prepareStackTrace`](./MissingHandlerError.md#preparestacktrace)
+[`MissingHandlerError`](MissingHandlerError.md).[`prepareStackTrace`](MissingHandlerError.md#preparestacktrace)

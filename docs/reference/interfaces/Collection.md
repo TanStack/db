@@ -406,7 +406,7 @@ Function that extracts the indexed value from each item
 
 ##### config
 
-[`IndexOptions`](./IndexOptions.md)\<`TResolver`\> = `{}`
+[`IndexOptions`](IndexOptions.md)\<`TResolver`\> = `{}`
 
 Configuration including index type and type-specific options
 
@@ -464,14 +464,14 @@ Returns the current state of the collection as an array of changes
 
 ##### options
 
-[`CurrentStateAsChangesOptions`](./CurrentStateAsChangesOptions.md) = `{}`
+[`CurrentStateAsChangesOptions`](CurrentStateAsChangesOptions.md) = `{}`
 
 Options including optional where filter
 
 #### Returns
 
   \| `void`
-  \| [`ChangeMessage`](./ChangeMessage.md)\<`T`, `string` \| `number`\>[]
+  \| [`ChangeMessage`](ChangeMessage.md)\<`T`, `string` \| `number`\>[]
 
 An array of changes
 
@@ -518,13 +518,13 @@ Single key or array of keys to delete
 
 ##### config?
 
-[`OperationConfig`](./OperationConfig.md)
+[`OperationConfig`](OperationConfig.md)
 
 Optional configuration including metadata
 
 #### Returns
 
-[`Transaction`](./Transaction.md)\<`any`\>
+[`Transaction`](Transaction.md)\<`any`\>
 
 A Transaction object representing the delete operation(s)
 
@@ -707,14 +707,14 @@ Inserts one or more items into the collection
 
 ##### config?
 
-[`InsertConfig`](./InsertConfig.md)
+[`InsertConfig`](InsertConfig.md)
 
 Optional configuration including metadata
 
 #### Returns
 
-  \| [`Transaction`](./Transaction.md)\<`Record`\<`string`, `unknown`\>\>
-  \| [`Transaction`](./Transaction.md)\<`T`\>
+  \| [`Transaction`](Transaction.md)\<`Record`\<`string`, `unknown`\>\>
+  \| [`Transaction`](Transaction.md)\<`T`\>
 
 A Transaction object representing the insert operation(s)
 
@@ -1117,7 +1117,7 @@ Function called when items change
 
 ##### options
 
-[`SubscribeChangesOptions`](./SubscribeChangesOptions.md) = `{}`
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md) = `{}`
 
 Subscription options including includeInitialState and where filter
 
@@ -1220,7 +1220,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](./Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1293,7 +1293,7 @@ Single key or array of keys to update
 
 ###### config
 
-[`OperationConfig`](./OperationConfig.md)
+[`OperationConfig`](OperationConfig.md)
 
 ###### callback
 
@@ -1301,7 +1301,7 @@ Single key or array of keys to update
 
 ##### Returns
 
-[`Transaction`](./Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1373,7 +1373,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](./Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1444,7 +1444,7 @@ Updates one or more items in the collection using a callback function
 
 ###### config
 
-[`OperationConfig`](./OperationConfig.md)
+[`OperationConfig`](OperationConfig.md)
 
 ###### callback
 
@@ -1452,7 +1452,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](./Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 

@@ -9,7 +9,7 @@ Defined in: [packages/db/src/types.ts:649](https://github.com/TanStack/db/blob/m
 
 ## Extends
 
-- [`BaseCollectionConfig`](./BaseCollectionConfig.md)\<`T`, `TKey`, `TSchema`, `TUtils`\>
+- [`BaseCollectionConfig`](BaseCollectionConfig.md)\<`T`, `TKey`, `TSchema`, `TUtils`\>
 
 ## Type Parameters
 
@@ -55,7 +55,7 @@ When enabled, indexes will be automatically created for simple where expressions
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`autoIndex`](./BaseCollectionConfig.md#autoindex)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`autoIndex`](BaseCollectionConfig.md#autoindex)
 
 ***
 
@@ -99,7 +99,7 @@ compare: (x, y) => x.createdAt.getTime() - y.createdAt.getTime()
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`compare`](./BaseCollectionConfig.md#compare)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`compare`](BaseCollectionConfig.md#compare)
 
 ***
 
@@ -118,7 +118,7 @@ E.g., when using the Electric DB collection these options
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`defaultStringCollation`](./BaseCollectionConfig.md#defaultstringcollation)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`defaultStringCollation`](BaseCollectionConfig.md#defaultstringcollation)
 
 ***
 
@@ -135,7 +135,7 @@ when it has no active subscribers. Defaults to 5 minutes (300000ms).
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`gcTime`](./BaseCollectionConfig.md#gctime)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`gcTime`](BaseCollectionConfig.md#gctime)
 
 ***
 
@@ -173,7 +173,7 @@ getKey: (item) => item.uuid
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`getKey`](./BaseCollectionConfig.md#getkey)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`getKey`](BaseCollectionConfig.md#getkey)
 
 ***
 
@@ -187,7 +187,7 @@ Defined in: [packages/db/src/types.ts:451](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`id`](./BaseCollectionConfig.md#id)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`id`](BaseCollectionConfig.md#id)
 
 ***
 
@@ -255,7 +255,7 @@ onDelete: async ({ transaction, collection }) => {
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`onDelete`](./BaseCollectionConfig.md#ondelete)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`onDelete`](BaseCollectionConfig.md#ondelete)
 
 ***
 
@@ -322,7 +322,7 @@ onInsert: async ({ transaction, collection }) => {
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`onInsert`](./BaseCollectionConfig.md#oninsert)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`onInsert`](BaseCollectionConfig.md#oninsert)
 
 ***
 
@@ -390,7 +390,7 @@ onUpdate: async ({ transaction, collection }) => {
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`onUpdate`](./BaseCollectionConfig.md#onupdate)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`onUpdate`](BaseCollectionConfig.md#onupdate)
 
 ***
 
@@ -404,7 +404,7 @@ Defined in: [packages/db/src/types.ts:452](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`schema`](./BaseCollectionConfig.md#schema)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`schema`](BaseCollectionConfig.md#schema)
 
 ***
 
@@ -431,7 +431,7 @@ false
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`startSync`](./BaseCollectionConfig.md#startsync)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`startSync`](BaseCollectionConfig.md#startsync)
 
 ***
 
@@ -467,7 +467,7 @@ The exact implementation of the sync mode is up to the sync implementation.
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`syncMode`](./BaseCollectionConfig.md#syncmode)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`syncMode`](BaseCollectionConfig.md#syncmode)
 
 ***
 
@@ -481,4 +481,4 @@ Defined in: [packages/db/src/types.ts:646](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`BaseCollectionConfig`](./BaseCollectionConfig.md).[`utils`](./BaseCollectionConfig.md#utils)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`utils`](BaseCollectionConfig.md#utils)

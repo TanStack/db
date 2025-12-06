@@ -11,7 +11,7 @@ Base abstract class that all index types extend
 
 ## Extended by
 
-- [`BTreeIndex`](./BTreeIndex.md)
+- [`BTreeIndex`](BTreeIndex.md)
 
 ## Type Parameters
 

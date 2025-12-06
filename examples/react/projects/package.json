@@ -1,5 +1,5 @@
 {
-  "name": "tanstack-start-db-projects-example",
+  "name": "@tanstack/db-example-react-projects",
   "private": true,
   "type": "module",
   "scripts": {

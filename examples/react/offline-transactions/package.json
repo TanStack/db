@@ -1,5 +1,5 @@
 {
-  "name": "tanstack-start-example-basic",
+  "name": "@tanstack/db-example-react-offline-transactions",
   "private": true,
   "sideEffects": false,
   "type": "module",

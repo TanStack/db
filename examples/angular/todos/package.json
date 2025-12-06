@@ -1,5 +1,5 @@
 {
-  "name": "todos",
+  "name": "@tanstack/db-example-angular-todos",
   "version": "0.0.17",
   "scripts": {
     "ng": "ng",

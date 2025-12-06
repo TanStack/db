@@ -7,4 +7,4 @@ title: "@tanstack/solid-db"
 
 ## Functions
 
-- [useLiveQuery](./functions/useLiveQuery.md)
+- [useLiveQuery](functions/useLiveQuery.md)

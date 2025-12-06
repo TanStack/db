@@ -9,13 +9,13 @@ Defined in: [packages/db/src/errors.ts:587](https://github.com/TanStack/db/blob/
 
 ## Extends
 
-- [`StorageError`](./StorageError.md)
+- [`StorageError`](StorageError.md)
 
 ## Extended by
 
-- [`StorageKeyRequiredError`](./StorageKeyRequiredError.md)
-- [`InvalidStorageDataFormatError`](./InvalidStorageDataFormatError.md)
-- [`InvalidStorageObjectFormatError`](./InvalidStorageObjectFormatError.md)
+- [`StorageKeyRequiredError`](StorageKeyRequiredError.md)
+- [`InvalidStorageDataFormatError`](InvalidStorageDataFormatError.md)
+- [`InvalidStorageObjectFormatError`](InvalidStorageObjectFormatError.md)
 
 ## Constructors
 
@@ -39,7 +39,7 @@ Defined in: [packages/db/src/errors.ts:588](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`StorageError`](./StorageError.md).[`constructor`](./StorageError.md#constructor)
+[`StorageError`](StorageError.md).[`constructor`](StorageError.md#constructor)
 
 ## Properties
 
@@ -53,7 +53,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`StorageError`](./StorageError.md).[`cause`](./StorageError.md#cause)
+[`StorageError`](StorageError.md).[`cause`](StorageError.md#cause)
 
 ***
 
@@ -67,7 +67,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`StorageError`](./StorageError.md).[`message`](./StorageError.md#message)
+[`StorageError`](StorageError.md).[`message`](StorageError.md#message)
 
 ***
 
@@ -81,7 +81,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`StorageError`](./StorageError.md).[`name`](./StorageError.md#name)
+[`StorageError`](StorageError.md).[`name`](StorageError.md#name)
 
 ***
 
@@ -95,7 +95,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`StorageError`](./StorageError.md).[`stack`](./StorageError.md#stack)
+[`StorageError`](StorageError.md).[`stack`](StorageError.md#stack)
 
 ***
 
@@ -119,7 +119,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`StorageError`](./StorageError.md).[`stackTraceLimit`](./StorageError.md#stacktracelimit)
+[`StorageError`](StorageError.md).[`stackTraceLimit`](StorageError.md#stacktracelimit)
 
 ## Methods
 
@@ -191,7 +191,7 @@ a();
 
 #### Inherited from
 
-[`StorageError`](./StorageError.md).[`captureStackTrace`](./StorageError.md#capturestacktrace)
+[`StorageError`](StorageError.md).[`captureStackTrace`](StorageError.md#capturestacktrace)
 
 ***
 
@@ -223,4 +223,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`StorageError`](./StorageError.md).[`prepareStackTrace`](./StorageError.md#preparestacktrace)
+[`StorageError`](StorageError.md).[`prepareStackTrace`](StorageError.md#preparestacktrace)

@@ -123,7 +123,7 @@ Get resolved index (throws if not ready)
 
 #### Returns
 
-[`BaseIndex`](./BaseIndex.md)\<`TKey`\>
+[`BaseIndex`](BaseIndex.md)\<`TKey`\>
 
 ***
 
@@ -155,4 +155,4 @@ Resolve the actual index
 
 #### Returns
 
-`Promise`\<[`BaseIndex`](./BaseIndex.md)\<`TKey`\>\>
+`Promise`\<[`BaseIndex`](BaseIndex.md)\<`TKey`\>\>

@@ -297,7 +297,7 @@ return (
 function useLiveQuery<TContext>(config): object;
 ```
 
-Defined in: [useLiveQuery.ts:158](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L158)
+Defined in: [useLiveQuery.ts:160](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L160)
 
 Create a live query using configuration object
 
@@ -423,7 +423,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveQuery.ts:208](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L208)
+Defined in: [useLiveQuery.ts:210](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L210)
 
 Subscribe to an existing live query collection
 

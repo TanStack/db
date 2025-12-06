@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:388](https://github.com/TanStack/db/blob/m
 
 ### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](./UtilsRecord.md) = [`UtilsRecord`](./UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](UtilsRecord.md) = [`UtilsRecord`](UtilsRecord.md)
 
 ### TReturn
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/types.ts:388](https://github.com/TanStack/db/blob/m
 
 ### params
 
-[`InsertMutationFnParams`](./InsertMutationFnParams.md)\<`T`, `TKey`, `TUtils`\>
+[`InsertMutationFnParams`](InsertMutationFnParams.md)\<`T`, `TKey`, `TUtils`\>
 
 ## Returns
 

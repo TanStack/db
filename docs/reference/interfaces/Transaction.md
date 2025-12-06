@@ -153,7 +153,7 @@ aligned with user intent.
 
 ##### mutations
 
-[`PendingMutation`](./PendingMutation.md)\<`any`, [`OperationType`](../type-aliases/OperationType.md), [`Collection`](./Collection.md)\<`any`, `any`, `any`, `any`, `any`\>\>[]
+[`PendingMutation`](PendingMutation.md)\<`any`, [`OperationType`](../type-aliases/OperationType.md), [`Collection`](Collection.md)\<`any`, `any`, `any`, `any`, `any`\>\>[]
 
 Array of new mutations to apply
 
