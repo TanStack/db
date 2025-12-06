@@ -155,6 +155,7 @@ describe(`Electric collection type resolution tests`, () => {
     // This causes a constraint error instead of a type mismatch error.
     // Instead, we test via type assignment which will show a proper type error if the types don't match.
     // Currently this shows that todosCollection.utils is typed as UtilsRecord, not ElectricCollectionUtils<TodoType>
+    // @ts-expect-error
     const testTodosUtils: ElectricCollectionUtils<TodoType> =
       todosCollection.utils
 

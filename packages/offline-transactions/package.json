@@ -6,11 +6,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/db.git",
+    "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/offline-transactions"
-  },
-  "publishConfig": {
-    "access": "public"
   },
   "keywords": [
     "tanstack",
@@ -20,8 +17,18 @@
     "persistence",
     "sync"
   ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "vitest",
+    "test:watch": "vitest --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
   "type": "module",
-  "sideEffects": false,
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -35,21 +42,11 @@
     },
     "./package.json": "./package.json"
   },
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
-  "types": "dist/esm/index.d.ts",
+  "sideEffects": false,
   "files": [
     "dist",
     "src"
   ],
-  "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch",
-    "test": "vitest",
-    "test:watch": "vitest --watch",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src"
-  },
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },

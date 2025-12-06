@@ -3,7 +3,7 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/tanstack/db.git"
+    "url": "git+https://github.com/TanStack/db.git"
   },
   "packageManager": "pnpm@10.24.0",
   "type": "module",
@@ -50,6 +50,7 @@
     "sherif": "^1.9.0",
     "shx": "^0.4.0",
     "tinyglobby": "^0.2.15",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.2",
     "vite": "^7.2.6",
     "vitest": "^3.2.4",
@@ -59,30 +60,5 @@
     "*.{ts,tsx}": [
       "eslint --fix"
     ]
-  },
-  "workspaces": [
-    "packages/*",
-    "examples/*",
-    "examples/react/*"
-  ],
-  "pnpm": {
-    "overrides": {
-      "@tanstack/angular-db": "workspace:*",
-      "@tanstack/db": "workspace:*",
-      "@tanstack/db-ivm": "workspace:*",
-      "@tanstack/electric-db-collection": "workspace:*",
-      "@tanstack/offline-transactions": "workspace:*",
-      "@tanstack/powersync-db-collection": "workspace:*",
-      "@tanstack/query-db-collection": "workspace:*",
-      "@tanstack/react-db": "workspace:*",
-      "@tanstack/rxdb-db-collection": "workspace:*",
-      "@tanstack/solid-db": "workspace:*",
-      "@tanstack/svelte-db": "workspace:*",
-      "@tanstack/trailbase-db-collection": "workspace:*",
-      "@tanstack/vue-db": "workspace:*"
-    }
-  },
-  "dependencies": {
-    "tsx": "^4.21.0"
   }
 }
