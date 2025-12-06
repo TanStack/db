@@ -16,6 +16,7 @@
     "format": "prettier --experimental-cli --ignore-unknown '**/*' --write",
     "lint": "pnpm --filter \"./packages/**\" lint",
     "lint-all": "eslint . --fix",
+    "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test",
     "test:docs": "node scripts/verify-links.ts",
     "generate-docs": "node scripts/generate-docs.ts"
@@ -38,8 +39,10 @@
     "eslint": "^9.39.1",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-react": "^7.37.5",
+    "husky": "^9.1.7",
     "jsdom": "^27.2.0",
     "knip": "^5.70.2",
+    "lint-staged": "^15.5.2",
     "markdown-link-extractor": "^4.0.3",
     "prettier": "^3.7.3",
     "publint": "^0.3.15",
@@ -51,5 +54,10 @@
     "vite": "^7.2.6",
     "vitest": "^3.2.4",
     "zod": "^3.25.76"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix"
+    ]
   }
 }
