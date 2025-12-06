@@ -27,78 +27,42 @@
   "targetDefaults": {
     "test:docs": {
       "cache": true,
-      "inputs": [
-        "{workspaceRoot}/docs/**/*"
-      ]
+      "inputs": ["{workspaceRoot}/docs/**/*"]
     },
     "test:knip": {
       "cache": true,
-      "inputs": [
-        "{workspaceRoot}/**/*"
-      ]
+      "inputs": ["{workspaceRoot}/**/*"]
     },
     "test:sherif": {
       "cache": true,
-      "inputs": [
-        "{workspaceRoot}/**/package.json"
-      ]
+      "inputs": ["{workspaceRoot}/**/package.json"]
     },
     "test:eslint": {
       "cache": true,
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "default",
-        "^production",
-        "{workspaceRoot}/eslint.config.js"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["default", "^production", "{workspaceRoot}/eslint.config.js"]
     },
     "test:lib": {
       "cache": true,
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "default",
-        "^production"
-      ],
-      "outputs": [
-        "{projectRoot}/coverage"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["default", "^production"],
+      "outputs": ["{projectRoot}/coverage"]
     },
     "test:types": {
       "cache": true,
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "default",
-        "^production"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["default", "^production"]
     },
     "build": {
       "cache": true,
-      "dependsOn": [
-        "^build"
-      ],
-      "inputs": [
-        "production",
-        "^production"
-      ],
-      "outputs": [
-        "{projectRoot}/build",
-        "{projectRoot}/dist"
-      ]
+      "dependsOn": ["^build"],
+      "inputs": ["production", "^production"],
+      "outputs": ["{projectRoot}/build", "{projectRoot}/dist"]
     },
     "test:build": {
       "cache": true,
-      "dependsOn": [
-        "build"
-      ],
-      "inputs": [
-        "production"
-      ]
+      "dependsOn": ["build"],
+      "inputs": ["production"]
     }
   }
 }
