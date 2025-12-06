@@ -12,22 +12,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      - name: Checkout
+        uses: actions/checkout@v6.0.1
         with:
-          version: 10.24.0
+          fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Setup Tools
+        uses: tanstack/config/.github/setup@main
 
       - name: Start Docker services
         run: |
