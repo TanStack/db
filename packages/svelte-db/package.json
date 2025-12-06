@@ -16,10 +16,11 @@
     "typescript"
   ],
   "scripts": {
-    "build": "svelte-package --input ./src --output ./dist --tsconfig ./tsconfig.build.json",
-    "test:eslint": "eslint . --fix",
-    "test:lib": "vitest --run",
-    "test:types": "svelte-check --tsconfig ./tsconfig.json"
+    "clean": "premove ./dist ./coverage",
+    "test:eslint": "eslint",
+    "test:lib": "vitest run",
+    "test:types": "svelte-check --tsconfig ./tsconfig.json",
+    "build": "svelte-package --input ./src --output ./dist --tsconfig ./tsconfig.build.json"
   },
   "type": "module",
   "svelte": "./dist/index.js",

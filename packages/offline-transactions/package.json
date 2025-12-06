@@ -18,11 +18,12 @@
     "sync"
   ],
   "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch",
-    "test:lib": "vitest",
+    "clean": "premove ./dist ./coverage",
+    "test:eslint": "eslint",
+    "test:lib": "vitest run",
     "test:types": "tsc --noEmit",
-    "test:eslint": "eslint src"
+    "build": "vite build",
+    "dev": "vite build --watch"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

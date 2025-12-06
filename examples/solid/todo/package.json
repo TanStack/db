@@ -41,7 +41,7 @@
     "vite-plugin-solid": "^2.11.10"
   },
   "scripts": {
-    "build": "vite build",
+    "_build": "vite build",
     "db:ensure-config": "tsx scripts/ensure-default-config.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "tsx scripts/migrate.ts",

@@ -17,11 +17,13 @@
     "typescript"
   ],
   "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch",
-    "test:eslint": "eslint . --fix",
+    "clean": "premove ./dist ./coverage",
+    "test:eslint": "eslint",
     "test:lib": "vitest run",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:types": "tsc --noEmit",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "build": "vite build",
+    "dev": "vite build --watch"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

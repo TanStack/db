@@ -19,10 +19,12 @@
     "differential-dataflow"
   ],
   "scripts": {
+    "clean": "premove ./dist ./coverage",
+    "test:eslint": "eslint",
+    "test:lib": "vitest run",
+    "test:types": "tsc --noEmit",
     "build": "vite build",
-    "dev": "vite build --watch",
-    "test:eslint": "eslint . --fix",
-    "test:lib": "vitest --run"
+    "dev": "vite build --watch"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
