@@ -40,7 +40,6 @@ jobs:
           title: 'ci: Version Packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Generate Docs
         if: steps.changesets.outputs.published == 'true'
         run: pnpm generate-docs
