@@ -21,7 +21,7 @@
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@electric-sql/client": "1.2.0",
+    "@electric-sql/client": "^1.2.0",
     "@solidjs/testing-library": "^0.8.10",
     "@vitest/coverage-istanbul": "^3.2.4",
     "jsdom": "^27.2.0",

@@ -3,11 +3,11 @@
   "description": "RxDB collection for TanStack DB",
   "version": "0.1.43",
   "dependencies": {
-    "rxdb": "16.21.0",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.8.0",
-    "debug": "^4.4.3"
+    "debug": "^4.4.3",
+    "rxdb": "16.21.0"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",

@@ -20,7 +20,7 @@
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@electric-sql/client": "1.2.0",
+    "@electric-sql/client": "^1.2.0",
     "@vitejs/plugin-vue": "^6.0.2",
     "@vitest/coverage-istanbul": "^3.2.4",
     "vue": "^3.5.25"
