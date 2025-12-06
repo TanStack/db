@@ -28,11 +28,7 @@ jobs:
           timeout 60 bash -c 'until docker compose ps | grep -q "healthy"; do sleep 2; done'
 
       - name: Build packages
-        run: |
-          pnpm --filter @tanstack/db-ivm build
-          pnpm --filter @tanstack/db build
-          pnpm --filter @tanstack/electric-db-collection build
-          pnpm --filter @tanstack/query-db-collection build
+        run: pnpm run build:all
 
       - name: Run Electric E2E tests
         run: |

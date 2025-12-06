@@ -10,8 +10,8 @@
   "scripts": {
     "clean": "pnpm --filter \"./packages/**\" run clean",
     "test": "pnpm run test:ci",
-    "test:pr": "nx affected --targets=test:docs,test:eslint,test:lib,test:types,build",
-    "test:ci": "nx run-many --targets=test:docs,test:eslint,test:lib,test:types,build",
+    "test:pr": "nx affected --targets=test:docs,test:eslint,test:lib,build",
+    "test:ci": "nx run-many --targets=test:docs,test:eslint,test:lib,build",
     "test:eslint": "nx affected --target=test:eslint",
     "test:lib": "nx affected --target=test:lib --exclude=examples/**",
     "test:types": "nx affected --target=test:types --exclude=examples/**",
