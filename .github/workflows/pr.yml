@@ -62,31 +62,3 @@ jobs:
           pattern: './packages/react-db/dist/**/*.{js,mjs}'
           comment-key: 'react-db-package-size'
           build-script: 'build:minified'
-  build-example:
-    name: Build Example Site
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5.0.1
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
-      - name: Build Packages
-        run: pnpm run build
-      - name: Build Example Site
-        run: |
-          cd examples/react/todo
-          pnpm build
-  build-starter:
-    name: Build Example Site
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5.0.1
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
-      - name: Build Packages
-        run: pnpm run build
-      - name: Build Starter Site
-        run: |
-          cd examples/react/projects
-          pnpm build
