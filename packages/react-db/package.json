@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/react-db",
-  "version": "0.1.55",
+  "version": "0.1.56",
   "description": "React integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
