@@ -46,7 +46,6 @@
     "eslint": "^9.39.1",
     "eslint-import-resolver-typescript": "^4.4.4",
     "eslint-plugin-react": "^7.37.5",
-    "husky": "^9.1.7",
     "jsdom": "^27.2.0",
     "knip": "^5.70.2",
     "lint-staged": "^15.5.2",
