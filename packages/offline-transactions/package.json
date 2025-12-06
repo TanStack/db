@@ -20,10 +20,9 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "test": "vitest",
-    "test:watch": "vitest --watch",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src"
+    "test:lib": "vitest",
+    "test:types": "tsc --noEmit",
+    "test:eslint": "eslint src"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
@@ -51,9 +50,9 @@
     "@tanstack/db": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
-    "eslint": "^8.57.1",
-    "typescript": "^5.5.4",
+    "@types/node": "^24.6.2",
+    "eslint": "^9.39.1",
+    "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }
 }

@@ -33,7 +33,7 @@ jobs:
         with:
           main-branch-name: main
       - name: Run Checks
-        run: pnpm run build && pnpm run test
+        run: pnpm run test:pr
   preview:
     name: Preview
     runs-on: ubuntu-latest
@@ -45,7 +45,7 @@ jobs:
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
       - name: Build Packages
-        run: pnpm run build
+        run: pnpm run build:all
       - name: Publish Previews
         run: pnpx pkg-pr-new publish --pnpm --compact './packages/*' --template './examples/*/*'
       - name: Compressed Size Action - DB Package
@@ -62,31 +62,3 @@ jobs:
           pattern: './packages/react-db/dist/**/*.{js,mjs}'
           comment-key: 'react-db-package-size'
           build-script: 'build:minified'
-  build-example:
-    name: Build Example Site
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5.0.1
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
-      - name: Build Packages
-        run: pnpm run build
-      - name: Build Example Site
-        run: |
-          cd examples/react/todo
-          pnpm build
-  build-starter:
-    name: Build Example Site
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5.0.1
-      - name: Setup Tools
-        uses: tanstack/config/.github/setup@main
-      - name: Build Packages
-        run: pnpm run build
-      - name: Build Starter Site
-        run: |
-          cd examples/react/projects
-          pnpm build

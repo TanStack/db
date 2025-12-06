@@ -161,9 +161,9 @@ export class UserListComponent {
 }
 ```
 
-> **Note:** React hooks (`useLiveQuery`, `useLiveInfiniteQuery`, `useLiveSuspenseQuery`) accept an optional dependency array parameter to re-execute queries when values change, similar to React's `useEffect`. See the [React Adapter documentation](../framework/react/adapter#dependency-arrays) for details on when and how to use dependency arrays.
+> **Note:** React hooks (`useLiveQuery`, `useLiveInfiniteQuery`, `useLiveSuspenseQuery`) accept an optional dependency array parameter to re-execute queries when values change, similar to React's `useEffect`. See the [React Adapter documentation](../framework/react/overview#dependency-arrays) for details on when and how to use dependency arrays.
 
-For more details on framework integration, see the [React](../framework/react/adapter), [Vue](../framework/vue/adapter), and [Angular](../framework/angular/adapter) adapter documentation.
+For more details on framework integration, see the [React](../framework/react/overview), [Vue](../framework/vue/overview), and [Angular](../framework/angular/overview) adapter documentation.
 
 ### Using with React Suspense
 

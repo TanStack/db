@@ -19,8 +19,8 @@
     "build": "vite build",
     "build:minified": "vite build --minify",
     "dev": "vite build --watch",
-    "test": "vitest --run",
-    "lint": "eslint . --fix"
+    "test:lib": "vitest --run",
+    "test:eslint": "eslint . --fix"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

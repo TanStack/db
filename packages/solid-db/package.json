@@ -18,8 +18,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "test": "vitest --run",
-    "lint": "eslint . --fix"
+    "test:lib": "vitest --run",
+    "test:eslint": "eslint . --fix"
   },
   "type": "module",
   "main": "dist/esm/index.js",

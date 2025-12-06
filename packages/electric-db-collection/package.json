@@ -19,8 +19,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "lint": "eslint . --fix",
-    "test": "vitest run",
+    "test:eslint": "eslint . --fix",
+    "test:lib": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "type": "module",
@@ -46,7 +46,7 @@
     "src"
   ],
   "dependencies": {
-    "@electric-sql/client": "^1.2.0",
+    "@electric-sql/client": "1.2.0",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.8.0",

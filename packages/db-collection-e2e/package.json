@@ -3,7 +3,7 @@
   "private": true,
   "description": "End-to-end test suite for TanStack DB collections",
   "scripts": {
-    "test": "echo 'This package contains shared test suites. Run tests from electric-db-collection or query-db-collection packages.'",
+    "test:lib": "echo 'This package contains shared test suites. Run tests from electric-db-collection or query-db-collection packages.'",
     "docker:up": "docker compose -f docker/docker-compose.yml up -d",
     "docker:down": "docker compose -f docker/docker-compose.yml down --volumes",
     "docker:logs": "docker compose -f docker/docker-compose.yml logs -f"

@@ -19,8 +19,8 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch",
-    "lint": "eslint . --fix",
-    "test": "vitest run",
+    "test:eslint": "eslint . --fix",
+    "test:lib": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "type": "module",

@@ -17,8 +17,8 @@
   ],
   "scripts": {
     "build": "svelte-package --input ./src --output ./dist --tsconfig ./tsconfig.build.json",
-    "lint": "eslint . --fix",
-    "test": "vitest --run",
+    "test:eslint": "eslint . --fix",
+    "test:lib": "vitest --run",
     "test:types": "svelte-check --tsconfig ./tsconfig.json"
   },
   "type": "module",
