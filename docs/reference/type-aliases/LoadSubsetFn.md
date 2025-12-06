@@ -15,7 +15,7 @@ Defined in: [packages/db/src/types.ts:274](https://github.com/TanStack/db/blob/m
 
 ### options
 
-[`LoadSubsetOptions`](./LoadSubsetOptions.md)
+[`LoadSubsetOptions`](LoadSubsetOptions.md)
 
 ## Returns
 

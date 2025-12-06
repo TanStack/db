@@ -9,7 +9,7 @@ Defined in: [packages/db/src/errors.ts:600](https://github.com/TanStack/db/blob/
 
 ## Extends
 
-- [`LocalStorageCollectionError`](./LocalStorageCollectionError.md)
+- [`LocalStorageCollectionError`](LocalStorageCollectionError.md)
 
 ## Constructors
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/errors.ts:601](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`LocalStorageCollectionError`](./LocalStorageCollectionError.md).[`constructor`](./LocalStorageCollectionError.md#constructor)
+[`LocalStorageCollectionError`](LocalStorageCollectionError.md).[`constructor`](LocalStorageCollectionError.md#constructor)
 
 ## Properties
 
@@ -51,7 +51,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`LocalStorageCollectionError`](./LocalStorageCollectionError.md).[`cause`](./LocalStorageCollectionError.md#cause)
+[`LocalStorageCollectionError`](LocalStorageCollectionError.md).[`cause`](LocalStorageCollectionError.md#cause)
 
 ***
 
@@ -65,7 +65,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`LocalStorageCollectionError`](./LocalStorageCollectionError.md).[`message`](./LocalStorageCollectionError.md#message)
+[`LocalStorageCollectionError`](LocalStorageCollectionError.md).[`message`](LocalStorageCollectionError.md#message)
 
 ***
 
@@ -79,7 +79,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`LocalStorageCollectionError`](./LocalStorageCollectionError.md).[`name`](./LocalStorageCollectionError.md#name)
+[`LocalStorageCollectionError`](LocalStorageCollectionError.md).[`name`](LocalStorageCollectionError.md#name)
 
 ***
 
@@ -93,7 +93,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`LocalStorageCollectionError`](./LocalStorageCollectionError.md).[`stack`](./LocalStorageCollectionError.md#stack)
+[`LocalStorageCollectionError`](LocalStorageCollectionError.md).[`stack`](LocalStorageCollectionError.md#stack)
 
 ***
 
@@ -117,7 +117,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`LocalStorageCollectionError`](./LocalStorageCollectionError.md).[`stackTraceLimit`](./LocalStorageCollectionError.md#stacktracelimit)
+[`LocalStorageCollectionError`](LocalStorageCollectionError.md).[`stackTraceLimit`](LocalStorageCollectionError.md#stacktracelimit)
 
 ## Methods
 
@@ -189,7 +189,7 @@ a();
 
 #### Inherited from
 
-[`LocalStorageCollectionError`](./LocalStorageCollectionError.md).[`captureStackTrace`](./LocalStorageCollectionError.md#capturestacktrace)
+[`LocalStorageCollectionError`](LocalStorageCollectionError.md).[`captureStackTrace`](LocalStorageCollectionError.md#capturestacktrace)
 
 ***
 
@@ -221,4 +221,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`LocalStorageCollectionError`](./LocalStorageCollectionError.md).[`prepareStackTrace`](./LocalStorageCollectionError.md#preparestacktrace)
+[`LocalStorageCollectionError`](LocalStorageCollectionError.md).[`prepareStackTrace`](LocalStorageCollectionError.md#preparestacktrace)

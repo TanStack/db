@@ -9,7 +9,7 @@ Defined in: [packages/db/src/types.ts:314](https://github.com/TanStack/db/blob/m
 
 ## Extended by
 
-- [`OptimisticChangeMessage`](./OptimisticChangeMessage.md)
+- [`OptimisticChangeMessage`](OptimisticChangeMessage.md)
 
 ## Type Parameters
 

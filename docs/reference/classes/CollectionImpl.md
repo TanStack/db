@@ -154,7 +154,7 @@ Get resolved indexes for query optimization
 
 ##### Returns
 
-`Map`\<`number`, [`BaseIndex`](./BaseIndex.md)\<`TKey`\>\>
+`Map`\<`number`, [`BaseIndex`](BaseIndex.md)\<`TKey`\>\>
 
 ***
 
@@ -337,7 +337,7 @@ and logarithmic time range queries instead of full scans.
 
 ##### TResolver
 
-`TResolver` *extends* [`IndexResolver`](../type-aliases/IndexResolver.md)\<`TKey`\> = *typeof* [`BTreeIndex`](./BTreeIndex.md)
+`TResolver` *extends* [`IndexResolver`](../type-aliases/IndexResolver.md)\<`TKey`\> = *typeof* [`BTreeIndex`](BTreeIndex.md)
 
 The type of the index resolver (constructor or async loader)
 
@@ -357,7 +357,7 @@ Configuration including index type and type-specific options
 
 #### Returns
 
-[`IndexProxy`](./IndexProxy.md)\<`TKey`\>
+[`IndexProxy`](IndexProxy.md)\<`TKey`\>
 
 An index proxy that provides access to the index when ready
 

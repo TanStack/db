@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:379](https://github.com/TanStack/db/blob/m
 
 ### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](./UtilsRecord.md) = [`UtilsRecord`](./UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](UtilsRecord.md) = [`UtilsRecord`](UtilsRecord.md)
 
 ## Properties
 

@@ -13,7 +13,7 @@ npm install @tanstack/react-db
 
 See the [React Functions Reference](./reference/index.md) to see the full list of hooks available in the React Adapter.
 
-For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../guides/live-queries).
+For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../../guides/live-queries).
 
 ## Basic Usage
 

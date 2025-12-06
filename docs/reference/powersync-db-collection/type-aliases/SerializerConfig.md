@@ -58,7 +58,7 @@ Defined in: [definitions.ts:87](https://github.com/TanStack/db/blob/main/package
 Optional partial serializer object for customizing how individual columns are serialized for SQLite.
 
 This should be a partial map of column keys to serialization functions, following the
-[CustomSQLiteSerializer](./CustomSQLiteSerializer.md) type. Each function receives the column value and returns a value
+[CustomSQLiteSerializer](CustomSQLiteSerializer.md) type. Each function receives the column value and returns a value
 compatible with SQLite storage.
 
 If not provided for a column, the default behavior is used:

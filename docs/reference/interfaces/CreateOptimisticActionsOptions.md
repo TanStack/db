@@ -11,7 +11,7 @@ Options for the createOptimisticAction helper
 
 ## Extends
 
-- `Omit`\<[`TransactionConfig`](./TransactionConfig.md)\<`T`\>, `"mutationFn"`\>
+- `Omit`\<[`TransactionConfig`](TransactionConfig.md)\<`T`\>, `"mutationFn"`\>
 
 ## Type Parameters
 
@@ -35,7 +35,7 @@ Defined in: [packages/db/src/types.ts:169](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`TransactionConfig`](./TransactionConfig.md).[`autoCommit`](./TransactionConfig.md#autocommit)
+[`TransactionConfig`](TransactionConfig.md).[`autoCommit`](TransactionConfig.md#autocommit)
 
 ***
 

@@ -9,7 +9,7 @@ Defined in: [packages/db/src/types.ts:325](https://github.com/TanStack/db/blob/m
 
 ## Extends
 
-- [`ChangeMessage`](./ChangeMessage.md)\<`T`\>
+- [`ChangeMessage`](ChangeMessage.md)\<`T`\>
 
 ## Type Parameters
 
@@ -39,7 +39,7 @@ Defined in: [packages/db/src/types.ts:318](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`ChangeMessage`](./ChangeMessage.md).[`key`](./ChangeMessage.md#key)
+[`ChangeMessage`](ChangeMessage.md).[`key`](ChangeMessage.md#key)
 
 ***
 
@@ -53,7 +53,7 @@ Defined in: [packages/db/src/types.ts:322](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`ChangeMessage`](./ChangeMessage.md).[`metadata`](./ChangeMessage.md#metadata)
+[`ChangeMessage`](ChangeMessage.md).[`metadata`](ChangeMessage.md#metadata)
 
 ***
 
@@ -67,7 +67,7 @@ Defined in: [packages/db/src/types.ts:320](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`ChangeMessage`](./ChangeMessage.md).[`previousValue`](./ChangeMessage.md#previousvalue)
+[`ChangeMessage`](ChangeMessage.md).[`previousValue`](ChangeMessage.md#previousvalue)
 
 ***
 
@@ -81,7 +81,7 @@ Defined in: [packages/db/src/types.ts:321](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`ChangeMessage`](./ChangeMessage.md).[`type`](./ChangeMessage.md#type)
+[`ChangeMessage`](ChangeMessage.md).[`type`](ChangeMessage.md#type)
 
 ***
 
@@ -95,4 +95,4 @@ Defined in: [packages/db/src/types.ts:319](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`ChangeMessage`](./ChangeMessage.md).[`value`](./ChangeMessage.md#value)
+[`ChangeMessage`](ChangeMessage.md).[`value`](ChangeMessage.md#value)

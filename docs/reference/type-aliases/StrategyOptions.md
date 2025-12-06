@@ -17,4 +17,4 @@ Extract the options type from a strategy
 
 ### T
 
-`T` *extends* [`Strategy`](./Strategy.md)
+`T` *extends* [`Strategy`](Strategy.md)

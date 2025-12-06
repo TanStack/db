@@ -11,7 +11,7 @@ Configuration interface for Electric collection options
 
 ## Extends
 
-- `Omit`\<`BaseCollectionConfig`\<`T`, `string` \| `number`, `TSchema`, [`ElectricCollectionUtils`](./ElectricCollectionUtils.md)\<`T`\>, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"syncMode"`\>
+- `Omit`\<`BaseCollectionConfig`\<`T`, `string` \| `number`, `TSchema`, [`ElectricCollectionUtils`](ElectricCollectionUtils.md)\<`T`\>, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"syncMode"`\>
 
 ## Type Parameters
 
@@ -56,7 +56,7 @@ Optional asynchronous handler function called before a delete operation
 
 ##### params
 
-`DeleteMutationFnParams`\<`T`, `string` \| `number`, [`ElectricCollectionUtils`](./ElectricCollectionUtils.md)\<`T`\>\>
+`DeleteMutationFnParams`\<`T`, `string` \| `number`, [`ElectricCollectionUtils`](ElectricCollectionUtils.md)\<`T`\>\>
 
 Object containing transaction and collection information
 
@@ -108,7 +108,7 @@ Optional asynchronous handler function called before an insert operation
 
 ##### params
 
-`InsertMutationFnParams`\<`T`, `string` \| `number`, [`ElectricCollectionUtils`](./ElectricCollectionUtils.md)\<`T`\>\>
+`InsertMutationFnParams`\<`T`, `string` \| `number`, [`ElectricCollectionUtils`](ElectricCollectionUtils.md)\<`T`\>\>
 
 Object containing transaction and collection information
 
@@ -182,7 +182,7 @@ Optional asynchronous handler function called before an update operation
 
 ##### params
 
-`UpdateMutationFnParams`\<`T`, `string` \| `number`, [`ElectricCollectionUtils`](./ElectricCollectionUtils.md)\<`T`\>\>
+`UpdateMutationFnParams`\<`T`, `string` \| `number`, [`ElectricCollectionUtils`](ElectricCollectionUtils.md)\<`T`\>\>
 
 Object containing transaction and collection information
 
