@@ -163,7 +163,13 @@ export class CollectionLifecycleManager<
       }
       // Notify dependents when markReady is called, after status is set
       // This ensures live queries get notified when their dependencies become ready
-      if (this.changes.changeSubscriptions.size > 0) {
+      // Only emit if we've already received data from sync - otherwise we'd trigger
+      // a render with isLoading=false but empty data, causing a flicker before the
+      // actual data arrives (Loading → Empty → Filled instead of Loading → Filled)
+      if (
+        this.changes.changeSubscriptions.size > 0 &&
+        this.state.hasReceivedFirstCommit
+      ) {
         this.changes.emitEmptyReadyEvent()
       }
     }
