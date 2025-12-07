@@ -33,7 +33,7 @@ jobs:
         with:
           main-branch-name: main
       - name: Run Checks
-        run: pnpm run build && pnpm run test
+        run: pnpm run build && pnpm run test && pnpm run test:sherif
   preview:
     name: Preview
     runs-on: ubuntu-latest

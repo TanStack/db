@@ -17,8 +17,8 @@
   "dependencies": {
     "@tailwindcss/vite": "^4.1.17",
     "@tanstack/query-core": "^5.90.11",
-    "@tanstack/query-db-collection": ">=1.0.6",
-    "@tanstack/react-db": ">=0.1.55",
+    "@tanstack/query-db-collection": "^1.0.6",
+    "@tanstack/react-db": "^0.1.55",
     "@tanstack/react-router": "^1.139.12",
     "@tanstack/react-router-devtools": "^1.139.12",
     "@tanstack/react-router-with-query": "^1.130.17",
@@ -34,7 +34,7 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "tailwindcss": "^4.1.17",
-    "vite": "^6.3.5",
+    "vite": "^7.2.6",
     "vite-tsconfig-paths": "^5.1.4",
     "zod": "^4.1.11"
   },
@@ -48,7 +48,7 @@
     "@types/react-dom": "^19.2.3",
     "@typescript-eslint/eslint-plugin": "^8.48.0",
     "@typescript-eslint/parser": "^8.48.0",
-    "@vitejs/plugin-react": "^5.0.4",
+    "@vitejs/plugin-react": "^5.1.1",
     "concurrently": "^9.2.1",
     "drizzle-kit": "^0.31.7",
     "eslint": "^9.39.1",
@@ -56,11 +56,11 @@
     "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-react": "^7.37.5",
     "globals": "^16.5.0",
-    "jsdom": "^27.0.0",
+    "jsdom": "^27.2.0",
     "prettier": "^3.7.3",
     "tsx": "^4.21.0",
     "typescript": "^5.9.2",
-    "vite": "^6.4.1",
+    "vite": "^7.2.6",
     "vitest": "^3.2.4",
     "web-vitals": "^5.1.0"
   }

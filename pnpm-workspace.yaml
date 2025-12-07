@@ -4,4 +4,4 @@ preferWorkspacePackages: true
 
 packages:
   - packages/**
-  - examples/**
+  - examples/**/*
