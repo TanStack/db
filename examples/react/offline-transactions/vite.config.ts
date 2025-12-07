@@ -3,6 +3,7 @@ import { tanstackStart } from '@tanstack/react-start/plugin/vite'
 import { defineConfig } from 'vite'
 import tsConfigPaths from 'vite-tsconfig-paths'
 import viteReact from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
 import chokidar from 'chokidar'
 
 function watchWorkspacePackages() {
@@ -74,5 +75,6 @@ export default defineConfig({
       mode: `spa`, // SPA mode for client-side only offline features
     }),
     viteReact(),
+    tailwindcss(),
   ],
 })
