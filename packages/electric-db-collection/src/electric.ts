@@ -737,19 +737,15 @@ export function electricCollectionOptions<T extends Row<unknown>>(
         >
       ) => {
         // Validate that all values in the transaction can be JSON serialized (if persistence enabled)
-        if (config.persistence) {
+        if (config.persistence)
           params.transaction.mutations.forEach((m) =>
             validateJsonSerializable(m.modified, `insert`)
           )
-        }
         const handlerResult = await config.onInsert!(params)
         await processMatchingStrategy(handlerResult)
 
-        if (persistence) {
-          // called outside stream -> snapshot rows, keep prior cursor
-          persistence.saveCollectionSnapshot(params.collection)
-        }
-
+        // called outside stream -> snapshot rows, keep prior cursor
+        if (persistence) persistence.saveCollectionSnapshot(params.collection)
         return handlerResult
       }
     : undefined
@@ -908,10 +904,15 @@ function createElectricSync<T extends Row<unknown>>(
     sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
       const { begin, write, commit, markReady, truncate, collection } = params
 
-      // Load from persistance adapter if persistence is configured
+      // Load from persistence adapter if persistence is configured
+      // Only keep the lightweight metadata (lastOffset, shapeHandle) after loading
+      // to avoid keeping the heavy collection data in memory
+      let persistedMetadata:
+        | { lastOffset?: unknown; shapeHandle?: string }
+        | undefined
       if (persistence) {
+        const persistedData = persistence.read()
         try {
-          const persistedData = persistence.read()
           const hasPersistedData =
             !!persistedData?.value &&
             Object.keys(persistedData.value).length > 0
@@ -924,9 +925,19 @@ function createElectricSync<T extends Row<unknown>>(
 
           // In on-demand mode, mark the collection as ready immediately after loading
           // from persistence since on-demand works with partial/incremental data
-          // and doesn't require waiting for server sync to be usable
-          if (syncMode === `on-demand` && hasPersistedData) {
-            markReady()
+          // and doesn't require waiting for server sync to be usable.
+          // Also mark ready if the collection was previously marked ready when persisted.
+          const hasPersistedDataOnDemand =
+            syncMode === `on-demand` && hasPersistedData
+          if (hasPersistedDataOnDemand || persistedData?.isReady) markReady()
+          if (persistenceConfig.onPersistenceLoaded)
+            persistenceConfig.onPersistenceLoaded()
+
+          // Extract only the lightweight metadata we need for stream configuration
+          // This allows the heavy `value` data to be garbage collected
+          persistedMetadata = {
+            lastOffset: persistedData?.lastOffset,
+            shapeHandle: persistedData?.shapeHandle,
           }
         } catch (e) {
           console.warn(`[ElectricPersistence] load error`, e)
@@ -982,20 +993,17 @@ function createElectricSync<T extends Row<unknown>>(
         })
       })
 
-      // Read from persistence if available
-      const prev = persistence?.read()
-
       const computedOffset: Offset | undefined = (() => {
         const offset = shapeOptions.offset
         if (offset != null) return offset
-        const lastOffset = prev?.lastOffset as Offset | undefined
+        const lastOffset = persistedMetadata?.lastOffset as Offset | undefined
         if (lastOffset != null) return lastOffset
         if (syncMode === `on-demand`) return `now`
         return undefined
       })()
 
       const computedHandle: string | undefined =
-        shapeOptions.handle ?? prev?.shapeHandle
+        shapeOptions.handle ?? persistedMetadata?.shapeHandle
 
       const stream = new ShapeStream({
         ...shapeOptions,
@@ -1053,7 +1061,6 @@ function createElectricSync<T extends Row<unknown>>(
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
         let hasSnapshotEnd = false
-        let hasSyncedChanges = false
 
         for (const message of messages) {
           // Add message to current batch buffer (for race condition handling)
@@ -1129,7 +1136,6 @@ function createElectricSync<T extends Row<unknown>>(
               newSnapshots.push(parseSnapshotMessage(message))
             }
             hasSnapshotEnd = true
-            if (persistenceConfig) hasSyncedChanges = true
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
@@ -1161,6 +1167,9 @@ function createElectricSync<T extends Row<unknown>>(
         }
 
         if (hasUpToDate || hasSnapshotEnd) {
+          // Track whether we actually committed a transaction
+          let didCommit = false
+
           // PROGRESSIVE MODE: Atomic swap on first up-to-date
           if (isBufferingInitialSync() && hasUpToDate) {
             debug(
@@ -1198,6 +1207,7 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Commit the atomic swap
             commit()
+            didCommit = true
 
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
@@ -1217,12 +1227,14 @@ function createElectricSync<T extends Row<unknown>>(
             if (transactionStarted && shouldCommit) {
               commit()
               transactionStarted = false
+              didCommit = true
             }
           }
 
-          if (persistence && hasSyncedChanges) {
+          // Persist after we've committed a transaction
+          // (didCommit implies there were changes worth persisting)
+          if (persistence && didCommit)
             persistence.saveCollectionSnapshot(collection, stream)
-          }
 
           // Clear the current batch buffer since we're now up-to-date
           currentBatchMessages.setState(() => [])
@@ -1230,6 +1242,10 @@ function createElectricSync<T extends Row<unknown>>(
           if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
             // Mark the collection as ready now that sync is up to date
             wrappedMarkReady(isBufferingInitialSync())
+
+            // Persist isReady state after marking ready
+            if (persistence)
+              persistence.saveCollectionSnapshot(collection, stream)
           }
 
           // Track that we've received the first up-to-date for progressive mode
