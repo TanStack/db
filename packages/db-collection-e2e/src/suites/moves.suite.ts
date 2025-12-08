@@ -610,6 +610,8 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             deletedAt: null,
           })
 
+          await new Promise((resolve) => setTimeout(resolve, 1000))
+
           // Insert posts for these users
           const postId1 = randomUUID()
           const postId2 = randomUUID()
