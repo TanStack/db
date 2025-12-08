@@ -13,11 +13,11 @@ import {
   createDeduplicationTestSuite,
   createJoinsTestSuite,
   createLiveUpdatesTestSuite,
+  createMovesTestSuite,
   createMutationsTestSuite,
   createPaginationTestSuite,
   createPredicatesTestSuite,
   createProgressiveTestSuite,
-  createTagsTestSuite,
   generateSeedData,
 } from '../../db-collection-e2e/src/index'
 import { waitFor } from '../../db-collection-e2e/src/utils/helpers'
@@ -594,5 +594,5 @@ describe(`Electric Collection E2E Tests`, () => {
   createMutationsTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
   createProgressiveTestSuite(getConfig)
-  createTagsTestSuite(getConfig as any)
+  createMovesTestSuite(getConfig as any)
 })
