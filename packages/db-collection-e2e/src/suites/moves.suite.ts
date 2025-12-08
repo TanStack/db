@@ -118,6 +118,24 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
       })
     }
 
+    // Helper to wait for users to be synced to Electric/TanStack DB
+    async function waitForUsersSynced(
+      userIds: Array<string>,
+      timeout: number = 10000,
+    ) {
+      // Use eager collection since it continuously syncs all data
+      const usersCollection = config.collections.eager.users
+      await waitFor(
+        () => {
+          return userIds.every((userId) => usersCollection.has(userId))
+        },
+        {
+          timeout,
+          message: `Users ${userIds.join(', ')} did not sync to collection`,
+        },
+      )
+    }
+
     // Helper function to run all tests for a given sync mode
     function runTestsForSyncMode(syncMode: SyncMode) {
       describe(`${syncMode} mode`, () => {
@@ -166,6 +184,10 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             metadata: null,
             deletedAt: null,
           })
+
+          // Wait for all 3 users to be synced to Electric before inserting posts
+          // This ensures the subquery in the WHERE clause can properly evaluate
+          await waitForUsersSynced([userId1, userId2, userId3])
 
           // Insert posts for these users
           const postId1 = randomUUID()
@@ -251,6 +273,9 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             deletedAt: null,
           })
 
+          // Wait for user to be synced to Electric before inserting post
+          await waitForUsersSynced([userId])
+
           // Insert post for this user
           const postId = randomUUID()
           await config.mutations.insertPost({
@@ -305,6 +330,9 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             deletedAt: null,
           })
 
+          // Wait for user to be synced to Electric before inserting post
+          await waitForUsersSynced([userId])
+
           // Insert post for this user
           const postId = randomUUID()
           await config.mutations.insertPost({
@@ -357,6 +385,9 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             metadata: null,
             deletedAt: null,
           })
+
+          // Wait for user to be synced to Electric before inserting post
+          await waitForUsersSynced([userId])
 
           // Insert post for this user
           const postId = randomUUID()
@@ -412,6 +443,9 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             metadata: null,
             deletedAt: null,
           })
+
+          // Wait for user to be synced to Electric before inserting post
+          await waitForUsersSynced([userId])
 
           // Insert post for this user
           const postId = randomUUID()
@@ -469,6 +503,9 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             deletedAt: null,
           })
 
+          // Wait for user to be synced to Electric before inserting post
+          await waitForUsersSynced([userId])
+
           // Insert post for this user
           const postId = randomUUID()
           await config.mutations.insertPost({
@@ -520,6 +557,9 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             metadata: null,
             deletedAt: null,
           })
+
+          // Wait for user to be synced to Electric before inserting post
+          await waitForUsersSynced([userId])
 
           // Insert post for this user
           const postId = randomUUID()
@@ -610,7 +650,9 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
             deletedAt: null,
           })
 
-          await new Promise((resolve) => setTimeout(resolve, 1000))
+          // Wait for all 3 users to be synced to Electric before inserting posts
+          // This ensures the subquery in the WHERE clause can properly evaluate
+          await waitForUsersSynced([userId1, userId2, userId3])
 
           // Insert posts for these users
           const postId1 = randomUUID()
