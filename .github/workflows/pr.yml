@@ -89,4 +89,5 @@ jobs:
       - name: Build Starter Site
         run: |
           cd examples/react/projects
+          cp .env.example .env
           pnpm build
