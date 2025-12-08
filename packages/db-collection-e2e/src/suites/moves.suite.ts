@@ -680,6 +680,7 @@ export function createMovesTestSuite(getConfig: () => Promise<TagsTestConfig>) {
 
           // Wait for changes to propagate
           await waitForItemRemoved(collection, postId3)
+          await new Promise((resolve) => setTimeout(resolve, 1000))
           expect(collection.has(postId1)).toBe(true) // post1: moved in (user1 active)
           expect(collection.has(postId2)).toBe(true) // post2: still in (user2 active)
           expect(collection.get(postId2)?.title).toBe(`Updated Post 2`)
