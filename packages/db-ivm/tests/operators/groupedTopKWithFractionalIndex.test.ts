@@ -9,9 +9,8 @@ describe(`Operators`, () => {
   describe(`GroupedTopKWithFractionalIndex operator`, () => {
     it(`should maintain separate topK per group`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; group: string; value: number }, string]]
       >()
@@ -69,9 +68,8 @@ describe(`Operators`, () => {
 
     it(`should handle incremental updates within a group`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; group: string; value: number }, string]]
       >()
@@ -129,9 +127,8 @@ describe(`Operators`, () => {
 
     it(`should handle removal of elements from topK`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; group: string; value: number }, string]]
       >()
@@ -181,9 +178,8 @@ describe(`Operators`, () => {
 
     it(`should handle multiple groups independently`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; group: string; value: number }, string]]
       >()
@@ -224,7 +220,9 @@ describe(`Operators`, () => {
       const updateResult = tracker.getResult()
       // Only group1 should be affected
       const affectedGroups = new Set(
-        updateResult.messages.map(([[_key, [value, _idx]], _mult]) => value.group),
+        updateResult.messages.map(
+          ([[_key, [value, _idx]], _mult]) => value.group,
+        ),
       )
       expect(affectedGroups.size).toBe(1)
       expect(affectedGroups.has(`group1`)).toBe(true)
@@ -233,9 +231,8 @@ describe(`Operators`, () => {
 
     it(`should support offset within groups`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; group: string; value: number }, string]]
       >()
@@ -276,9 +273,7 @@ describe(`Operators`, () => {
     it(`should use groupKeyFn to extract group from key with delimiter`, () => {
       const graph = new D2()
       // Use keys with format "group:itemId"
-      const input = graph.newInput<
-        [string, { id: string; value: number }]
-      >()
+      const input = graph.newInput<[string, { id: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; value: number }, string]]
       >()
@@ -330,9 +325,8 @@ describe(`Operators`, () => {
 
     it(`should support infinite limit (no limit)`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; group: string; value: number }, string]]
       >()
@@ -370,9 +364,8 @@ describe(`Operators`, () => {
 
     it(`should maintain fractional indices correctly within groups`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; group: string; value: number }, string]]
       >()
@@ -401,11 +394,13 @@ describe(`Operators`, () => {
       const result = tracker.getResult(compareFractionalIndex)
 
       // Check fractional indices are in correct order
-      const indexedItems = result.sortedResults.map(([key, [value, index]]) => ({
-        key,
-        value: value.value,
-        index,
-      }))
+      const indexedItems = result.sortedResults.map(
+        ([key, [value, index]]) => ({
+          key,
+          value: value.value,
+          index,
+        }),
+      )
 
       // Sort by value to verify fractional indices match sort order
       indexedItems.sort((a, b) => a.value - b.value)
@@ -418,9 +413,8 @@ describe(`Operators`, () => {
 
     it(`should handle setSizeCallback correctly`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       let getSize: (() => number) | undefined
 
       input.pipe(
@@ -456,13 +450,14 @@ describe(`Operators`, () => {
 
     it(`should handle moving window with setWindowFn`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; group: string; value: number }, string]]
       >()
-      let windowFn: ((options: { offset?: number; limit?: number }) => void) | undefined
+      let windowFn:
+        | ((options: { offset?: number; limit?: number }) => void)
+        | undefined
 
       input.pipe(
         groupedTopKWithFractionalIndex((a, b) => a.value - b.value, {
@@ -511,9 +506,8 @@ describe(`Operators`, () => {
 
     it(`should cleanup empty groups`, () => {
       const graph = new D2()
-      const input = graph.newInput<
-        [string, { id: string; group: string; value: number }]
-      >()
+      const input =
+        graph.newInput<[string, { id: string; group: string; value: number }]>()
       const tracker = new MessageTracker<
         [string, [{ id: string; group: string; value: number }, string]]
       >()

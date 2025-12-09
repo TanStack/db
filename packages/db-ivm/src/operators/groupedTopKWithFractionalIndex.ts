@@ -1,10 +1,7 @@
 import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { MultiSet } from '../multiset.js'
-import {
-  TopKArray,
-  createKeyedComparator,
-} from './topKWithFractionalIndex.js'
+import { TopKArray, createKeyedComparator } from './topKWithFractionalIndex.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
 import type {
