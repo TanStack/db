@@ -42,6 +42,84 @@ export interface TopK<V> {
   delete: (value: V) => TopKChanges<V>
 }
 
+/**
+ * Helper class that manages the state for a single topK window.
+ * Encapsulates the multiplicity tracking and topK data structure,
+ * providing a clean interface for processing elements and moving the window.
+ *
+ * This class is used by both TopKWithFractionalIndexOperator (single instance)
+ * and GroupedTopKWithFractionalIndexOperator (one instance per group).
+ */
+export class TopKState<K extends string | number, T> {
+  #multiplicities: Map<K, number> = new Map()
+  #topK: TopK<[K, T]>
+
+  constructor(topK: TopK<[K, T]>) {
+    this.#topK = topK
+  }
+
+  get size(): number {
+    return this.#topK.size
+  }
+
+  get isEmpty(): boolean {
+    return this.#multiplicities.size === 0 && this.#topK.size === 0
+  }
+
+  /**
+   * Process an element update (insert or delete based on multiplicity change).
+   * Returns the changes to the topK window.
+   */
+  processElement(key: K, value: T, multiplicity: number): TopKChanges<[K, T]> {
+    const { oldMultiplicity, newMultiplicity } = this.#updateMultiplicity(
+      key,
+      multiplicity,
+    )
+
+    if (oldMultiplicity <= 0 && newMultiplicity > 0) {
+      // The value was invisible but should now be visible
+      return this.#topK.insert([key, value])
+    } else if (oldMultiplicity > 0 && newMultiplicity <= 0) {
+      // The value was visible but should now be invisible
+      return this.#topK.delete([key, value])
+    }
+    // The value was invisible and remains invisible,
+    // or was visible and remains visible - no topK change
+    return { moveIn: null, moveOut: null }
+  }
+
+  /**
+   * Move the topK window. Only works with TopKArray implementation.
+   */
+  move(options: { offset?: number; limit?: number }): TopKMoveChanges<[K, T]> {
+    if (!(this.#topK instanceof TopKArray)) {
+      throw new Error(
+        `Cannot move B+-tree implementation of TopK with fractional index`,
+      )
+    }
+    return this.#topK.move(options)
+  }
+
+  #updateMultiplicity(
+    key: K,
+    multiplicity: number,
+  ): { oldMultiplicity: number; newMultiplicity: number } {
+    if (multiplicity === 0) {
+      const current = this.#multiplicities.get(key) ?? 0
+      return { oldMultiplicity: current, newMultiplicity: current }
+    }
+
+    const oldMultiplicity = this.#multiplicities.get(key) ?? 0
+    const newMultiplicity = oldMultiplicity + multiplicity
+    if (newMultiplicity === 0) {
+      this.#multiplicities.delete(key)
+    } else {
+      this.#multiplicities.set(key, newMultiplicity)
+    }
+    return { oldMultiplicity, newMultiplicity }
+  }
+}
+
 // Abstraction for fractionally indexed values
 export type FractionalIndex = string
 export type IndexedValue<V> = [V, FractionalIndex]
@@ -277,14 +355,7 @@ export class TopKWithFractionalIndexOperator<
   K extends string | number,
   T,
 > extends UnaryOperator<[K, T], [K, IndexedValue<T>]> {
-  #index: Map<K, number> = new Map() // maps keys to their multiplicity
-
-  /**
-   * topK data structure that supports insertions and deletions
-   * and returns changes to the topK.
-   * Elements are stored as [key, value] tuples for stable tie-breaking.
-   */
-  #topK: TopK<[K, T]>
+  #state: TopKState<K, T>
 
   constructor(
     id: number,
@@ -296,12 +367,9 @@ export class TopKWithFractionalIndexOperator<
     super(id, inputA, output)
     const limit = options.limit ?? Infinity
     const offset = options.offset ?? 0
-    this.#topK = this.createTopK(
-      offset,
-      limit,
-      createKeyedComparator(comparator),
-    )
-    options.setSizeCallback?.(() => this.#topK.size)
+    const topK = this.createTopK(offset, limit, createKeyedComparator(comparator))
+    this.#state = new TopKState(topK)
+    options.setSizeCallback?.(() => this.#state.size)
     options.setWindowFn?.(this.moveTopK.bind(this))
   }
 
@@ -318,18 +386,11 @@ export class TopKWithFractionalIndexOperator<
    * Any changes to the topK are sent to the output.
    */
   moveTopK({ offset, limit }: { offset?: number; limit?: number }) {
-    if (!(this.#topK instanceof TopKArray)) {
-      throw new Error(
-        `Cannot move B+-tree implementation of TopK with fractional index`,
-      )
-    }
-
     const result: Array<[[K, IndexedValue<T>], number]> = []
+    const diff = this.#state.move({ offset, limit })
 
-    const diff = this.#topK.move({ offset, limit })
-
-    diff.moveIns.forEach((moveIn) => this.handleMoveIn(moveIn, result))
-    diff.moveOuts.forEach((moveOut) => this.handleMoveOut(moveOut, result))
+    diff.moveIns.forEach((moveIn) => handleMoveIn(moveIn, result))
+    diff.moveOuts.forEach((moveOut) => handleMoveOut(moveOut, result))
 
     if (diff.changes) {
       // There are changes to the topK
@@ -359,68 +420,35 @@ export class TopKWithFractionalIndexOperator<
     multiplicity: number,
     result: Array<[[K, IndexedValue<T>], number]>,
   ): void {
-    const { oldMultiplicity, newMultiplicity } = this.addKey(key, multiplicity)
-
-    let res: TopKChanges<[K, T]> = {
-      moveIn: null,
-      moveOut: null,
-    }
-    if (oldMultiplicity <= 0 && newMultiplicity > 0) {
-      // The value was invisible but should now be visible
-      // Need to insert it into the array of sorted values
-      res = this.#topK.insert([key, value])
-    } else if (oldMultiplicity > 0 && newMultiplicity <= 0) {
-      // The value was visible but should now be invisible
-      // Need to remove it from the array of sorted values
-      res = this.#topK.delete([key, value])
-    } else {
-      // The value was invisible and it remains invisible
-      // or it was visible and remains visible
-      // so it doesn't affect the topK
-    }
-
-    this.handleMoveIn(res.moveIn, result)
-    this.handleMoveOut(res.moveOut, result)
-
-    return
+    const changes = this.#state.processElement(key, value, multiplicity)
+    handleMoveIn(changes.moveIn, result)
+    handleMoveOut(changes.moveOut, result)
   }
+}
 
-  private handleMoveIn(
-    moveIn: IndexedValue<[K, T]> | null,
-    result: Array<[[K, IndexedValue<T>], number]>,
-  ) {
-    if (moveIn) {
-      const [[key, value], index] = moveIn
-      result.push([[key, [value, index]], 1])
-    }
+/**
+ * Handles a moveIn change by adding it to the result array.
+ */
+function handleMoveIn<K extends string | number, T>(
+  moveIn: IndexedValue<[K, T]> | null,
+  result: Array<[[K, IndexedValue<T>], number]>,
+): void {
+  if (moveIn) {
+    const [[key, value], index] = moveIn
+    result.push([[key, [value, index]], 1])
   }
+}
 
-  private handleMoveOut(
-    moveOut: IndexedValue<[K, T]> | null,
-    result: Array<[[K, IndexedValue<T>], number]>,
-  ) {
-    if (moveOut) {
-      const [[key, value], index] = moveOut
-      result.push([[key, [value, index]], -1])
-    }
-  }
-
-  private getMultiplicity(key: K): number {
-    return this.#index.get(key) ?? 0
-  }
-
-  private addKey(
-    key: K,
-    multiplicity: number,
-  ): { oldMultiplicity: number; newMultiplicity: number } {
-    const oldMultiplicity = this.getMultiplicity(key)
-    const newMultiplicity = oldMultiplicity + multiplicity
-    if (newMultiplicity === 0) {
-      this.#index.delete(key)
-    } else {
-      this.#index.set(key, newMultiplicity)
-    }
-    return { oldMultiplicity, newMultiplicity }
+/**
+ * Handles a moveOut change by adding it to the result array.
+ */
+function handleMoveOut<K extends string | number, T>(
+  moveOut: IndexedValue<[K, T]> | null,
+  result: Array<[[K, IndexedValue<T>], number]>,
+): void {
+  if (moveOut) {
+    const [[key, value], index] = moveOut
+    result.push([[key, [value, index]], -1])
   }
 }
 

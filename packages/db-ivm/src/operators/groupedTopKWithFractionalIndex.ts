@@ -1,15 +1,14 @@
 import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { MultiSet } from '../multiset.js'
-import { TopKArray, createKeyedComparator } from './topKWithFractionalIndex.js'
+import {
+  TopKArray,
+  TopKState,
+  createKeyedComparator,
+} from './topKWithFractionalIndex.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
-import type {
-  IndexedValue,
-  TopK,
-  TopKChanges,
-  TopKMoveChanges,
-} from './topKWithFractionalIndex.js'
+import type { IndexedValue, TopK } from './topKWithFractionalIndex.js'
 
 export interface GroupedTopKWithFractionalIndexOptions<K, T> {
   limit?: number
@@ -26,17 +25,6 @@ export interface GroupedTopKWithFractionalIndexOptions<K, T> {
 }
 
 /**
- * State for a single group in the grouped topK operator.
- * Each group maintains its own multiplicity index and topK data structure.
- */
-type GroupState<K extends string | number, T> = {
-  /** Maps element keys to their multiplicities within this group */
-  multiplicities: Map<K, number>
-  /** The topK data structure for this group */
-  topK: TopK<[K, T]>
-}
-
-/**
  * Operator for grouped fractional indexed topK operations.
  * This operator maintains separate topK windows for each group,
  * allowing per-group limits and ordering.
@@ -49,7 +37,7 @@ export class GroupedTopKWithFractionalIndexOperator<
   K extends string | number,
   T,
 > extends UnaryOperator<[K, T], [K, IndexedValue<T>]> {
-  #groupStates: Map<unknown, GroupState<K, T>> = new Map()
+  #groupStates: Map<unknown, TopKState<K, T>> = new Map()
   #groupKeyFn: (key: K, value: T) => unknown
   #comparator: (a: [K, T], b: [K, T]) => number
   #offset: number
@@ -86,45 +74,23 @@ export class GroupedTopKWithFractionalIndexOperator<
   #getTotalSize(): number {
     let size = 0
     for (const state of this.#groupStates.values()) {
-      size += state.topK.size
+      size += state.size
     }
     return size
   }
 
-  #getOrCreateGroupState(groupKey: unknown): GroupState<K, T> {
+  #getOrCreateGroupState(groupKey: unknown): TopKState<K, T> {
     let state = this.#groupStates.get(groupKey)
     if (!state) {
-      state = {
-        multiplicities: new Map(),
-        topK: this.createTopK(this.#offset, this.#limit, this.#comparator),
-      }
+      const topK = this.createTopK(this.#offset, this.#limit, this.#comparator)
+      state = new TopKState(topK)
       this.#groupStates.set(groupKey, state)
     }
     return state
   }
 
-  #updateMultiplicity(
-    state: GroupState<K, T>,
-    key: K,
-    multiplicity: number,
-  ): { oldMultiplicity: number; newMultiplicity: number } {
-    if (multiplicity === 0) {
-      const current = state.multiplicities.get(key) ?? 0
-      return { oldMultiplicity: current, newMultiplicity: current }
-    }
-
-    const oldMultiplicity = state.multiplicities.get(key) ?? 0
-    const newMultiplicity = oldMultiplicity + multiplicity
-    if (newMultiplicity === 0) {
-      state.multiplicities.delete(key)
-    } else {
-      state.multiplicities.set(key, newMultiplicity)
-    }
-    return { oldMultiplicity, newMultiplicity }
-  }
-
-  #cleanupGroupIfEmpty(groupKey: unknown, state: GroupState<K, T>): void {
-    if (state.multiplicities.size === 0 && state.topK.size === 0) {
+  #cleanupGroupIfEmpty(groupKey: unknown, state: TopKState<K, T>): void {
+    if (state.isEmpty) {
       this.#groupStates.delete(groupKey)
     }
   }
@@ -145,19 +111,10 @@ export class GroupedTopKWithFractionalIndexOperator<
     let hasChanges = false
 
     for (const state of this.#groupStates.values()) {
-      if (!(state.topK instanceof TopKArray)) {
-        throw new Error(
-          `Cannot move B+-tree implementation of GroupedTopK with fractional index`,
-        )
-      }
+      const diff = state.move({ offset: this.#offset, limit: this.#limit })
 
-      const diff: TopKMoveChanges<[K, T]> = state.topK.move({
-        offset: this.#offset,
-        limit: this.#limit,
-      })
-
-      diff.moveIns.forEach((moveIn) => this.#handleMoveIn(moveIn, result))
-      diff.moveOuts.forEach((moveOut) => this.#handleMoveOut(moveOut, result))
+      diff.moveIns.forEach((moveIn) => handleMoveIn(moveIn, result))
+      diff.moveOuts.forEach((moveOut) => handleMoveOut(moveOut, result))
 
       if (diff.changes) {
         hasChanges = true
@@ -192,53 +149,38 @@ export class GroupedTopKWithFractionalIndexOperator<
     const groupKey = this.#groupKeyFn(key, value)
     const state = this.#getOrCreateGroupState(groupKey)
 
-    const { oldMultiplicity, newMultiplicity } = this.#updateMultiplicity(
-      state,
-      key,
-      multiplicity,
-    )
-
-    let res: TopKChanges<[K, T]> = {
-      moveIn: null,
-      moveOut: null,
-    }
-    if (oldMultiplicity <= 0 && newMultiplicity > 0) {
-      // The value was invisible but should now be visible
-      // Need to insert it into the array of sorted values
-      res = state.topK.insert([key, value])
-    } else if (oldMultiplicity > 0 && newMultiplicity <= 0) {
-      // The value was visible but should now be invisible
-      // Need to remove it from the array of sorted values
-      res = state.topK.delete([key, value])
-    }
-    // else: The value was invisible and remains invisible,
-    // or was visible and remains visible - no topK change
-
-    this.#handleMoveIn(res.moveIn, result)
-    this.#handleMoveOut(res.moveOut, result)
+    const changes = state.processElement(key, value, multiplicity)
+    handleMoveIn(changes.moveIn, result)
+    handleMoveOut(changes.moveOut, result)
 
     // Cleanup empty groups to prevent memory leaks
     this.#cleanupGroupIfEmpty(groupKey, state)
   }
+}
 
-  #handleMoveIn(
-    moveIn: IndexedValue<[K, T]> | null,
-    result: Array<[[K, IndexedValue<T>], number]>,
-  ): void {
-    if (moveIn) {
-      const [[key, value], index] = moveIn
-      result.push([[key, [value, index]], 1])
-    }
+/**
+ * Handles a moveIn change by adding it to the result array.
+ */
+function handleMoveIn<K extends string | number, T>(
+  moveIn: IndexedValue<[K, T]> | null,
+  result: Array<[[K, IndexedValue<T>], number]>,
+): void {
+  if (moveIn) {
+    const [[key, value], index] = moveIn
+    result.push([[key, [value, index]], 1])
   }
+}
 
-  #handleMoveOut(
-    moveOut: IndexedValue<[K, T]> | null,
-    result: Array<[[K, IndexedValue<T>], number]>,
-  ): void {
-    if (moveOut) {
-      const [[key, value], index] = moveOut
-      result.push([[key, [value, index]], -1])
-    }
+/**
+ * Handles a moveOut change by adding it to the result array.
+ */
+function handleMoveOut<K extends string | number, T>(
+  moveOut: IndexedValue<[K, T]> | null,
+  result: Array<[[K, IndexedValue<T>], number]>,
+): void {
+  if (moveOut) {
+    const [[key, value], index] = moveOut
+    result.push([[key, [value, index]], -1])
   }
 }
 
