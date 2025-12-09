@@ -511,12 +511,12 @@ describe(`evaluators`, () => {
             // They are different object instances but represent the same moment
             const date1 = new Date(`2024-01-15T10:30:45.123Z`)
             const date2 = new Date(`2024-01-15T10:30:45.123Z`)
-            
+
             // Verify they are different object references
             expect(date1).not.toBe(date2)
             // But they have the same time value
             expect(date1.getTime()).toBe(date2.getTime())
-            
+
             const func = new Func(`eq`, [new Value(date1), new Value(date2)])
             const compiled = compileExpression(func)
 
@@ -528,7 +528,7 @@ describe(`evaluators`, () => {
           it(`handles eq with Date objects with different times`, () => {
             const date1 = new Date(`2024-01-15T10:30:45.123Z`)
             const date2 = new Date(`2024-01-15T10:30:45.124Z`) // 1ms later
-            
+
             const func = new Func(`eq`, [new Value(date1), new Value(date2)])
             const compiled = compileExpression(func)
 
