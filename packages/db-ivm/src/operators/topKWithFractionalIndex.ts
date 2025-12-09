@@ -367,7 +367,11 @@ export class TopKWithFractionalIndexOperator<
     super(id, inputA, output)
     const limit = options.limit ?? Infinity
     const offset = options.offset ?? 0
-    const topK = this.createTopK(offset, limit, createKeyedComparator(comparator))
+    const topK = this.createTopK(
+      offset,
+      limit,
+      createKeyedComparator(comparator),
+    )
     this.#state = new TopKState(topK)
     options.setSizeCallback?.(() => this.#state.size)
     options.setWindowFn?.(this.moveTopK.bind(this))
