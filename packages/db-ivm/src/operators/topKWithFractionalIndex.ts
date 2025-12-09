@@ -42,13 +42,32 @@ export interface TopK<V> {
   delete: (value: V) => TopKChanges<V>
 }
 
+// Abstraction for fractionally indexed values
+export type FractionalIndex = string
+export type IndexedValue<V> = [V, FractionalIndex]
+
+export function indexedValue<V>(
+  value: V,
+  index: FractionalIndex,
+): IndexedValue<V> {
+  return [value, index]
+}
+
+export function getValue<V>(indexedVal: IndexedValue<V>): V {
+  return indexedVal[0]
+}
+
+export function getIndex<V>(indexedVal: IndexedValue<V>): FractionalIndex {
+  return indexedVal[1]
+}
+
 /**
  * Implementation of a topK data structure.
  * Uses a sorted array internally to store the values and keeps a topK window over that array.
  * Inserts and deletes are O(n) operations because worst case an element is inserted/deleted
  * at the start of the array which causes all the elements to shift to the right/left.
  */
-class TopKArray<V> implements TopK<V> {
+export class TopKArray<V> implements TopK<V> {
   #sortedValues: Array<IndexedValue<V>> = []
   #comparator: (a: V, b: V) => number
   #topKStart: number
@@ -227,6 +246,25 @@ class TopKArray<V> implements TopK<V> {
     return binarySearch(this.#sortedValues, indexedValue(value, ``), (a, b) =>
       this.#comparator(getValue(a), getValue(b)),
     )
+  }
+}
+
+/**
+ * Creates a comparator for [key, value] tuples that first compares values,
+ * then uses the row key as a stable tie-breaker.
+ */
+export function createKeyedComparator<K extends string | number, T>(
+  comparator: (a: T, b: T) => number,
+): (a: [K, T], b: [K, T]) => number {
+  return ([aKey, aVal], [bKey, bVal]) => {
+    // First compare on the value
+    const valueComparison = comparator(aVal, bVal)
+    if (valueComparison !== 0) {
+      return valueComparison
+    }
+    // If the values are equal, use the row key as tie-breaker
+    // This provides stable, deterministic ordering since keys are string | number
+    return compareKeys(aKey, bKey)
   }
 }
 
@@ -421,40 +459,3 @@ export function topKWithFractionalIndex<KType extends string | number, T>(
   }
 }
 
-// Abstraction for fractionally indexed values
-export type FractionalIndex = string
-export type IndexedValue<V> = [V, FractionalIndex]
-
-export function indexedValue<V>(
-  value: V,
-  index: FractionalIndex,
-): IndexedValue<V> {
-  return [value, index]
-}
-
-export function getValue<V>(indexedVal: IndexedValue<V>): V {
-  return indexedVal[0]
-}
-
-export function getIndex<V>(indexedVal: IndexedValue<V>): FractionalIndex {
-  return indexedVal[1]
-}
-
-/**
- * Creates a comparator for [key, value] tuples that first compares values,
- * then uses the row key as a stable tie-breaker.
- */
-function createKeyedComparator<K extends string | number, T>(
-  comparator: (a: T, b: T) => number,
-): (a: [K, T], b: [K, T]) => number {
-  return ([aKey, aVal], [bKey, bVal]) => {
-    // First compare on the value
-    const valueComparison = comparator(aVal, bVal)
-    if (valueComparison !== 0) {
-      return valueComparison
-    }
-    // If the values are equal, use the row key as tie-breaker
-    // This provides stable, deterministic ordering since keys are string | number
-    return compareKeys(aKey, bKey)
-  }
-}
