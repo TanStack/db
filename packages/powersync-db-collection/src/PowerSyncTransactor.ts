@@ -1,11 +1,14 @@
 import { sanitizeSQL } from "@powersync/common"
 import DebugModule from "debug"
-import { asPowerSyncRecord, mapOperationToPowerSync } from "./helpers"
 import { PendingOperationStore } from "./PendingOperationStore"
+import { asPowerSyncRecord, mapOperationToPowerSync } from "./helpers"
 import type { AbstractPowerSyncDatabase, LockContext } from "@powersync/common"
 import type { PendingMutation, Transaction } from "@tanstack/db"
-import type { EnhancedPowerSyncCollectionConfig } from "./definitions"
 import type { PendingOperation } from "./PendingOperationStore"
+import type {
+  EnhancedPowerSyncCollectionConfig,
+  PowerSyncCollectionMeta,
+} from "./definitions"
 
 const debug = DebugModule.debug(`ts/db:powersync`)
 
@@ -160,6 +163,13 @@ export class PowerSyncTransactor {
       async (tableName, mutation, serializeValue) => {
         const values = serializeValue(mutation.modified)
         const keys = Object.keys(values).map((key) => sanitizeSQL`${key}`)
+        const queryParameters = Object.values(values)
+
+        const metadataValue = this.processMutationMetadata(mutation)
+        if (metadataValue != null) {
+          keys.push(`_metadata`)
+          queryParameters.push(metadataValue)
+        }
 
         await context.execute(
           `
@@ -168,7 +178,7 @@ export class PowerSyncTransactor {
         VALUES 
             (${keys.map((_) => `?`).join(`, `)})
         `,
-          Object.values(values)
+          queryParameters
         )
       }
     )
@@ -188,6 +198,13 @@ export class PowerSyncTransactor {
       async (tableName, mutation, serializeValue) => {
         const values = serializeValue(mutation.modified)
         const keys = Object.keys(values).map((key) => sanitizeSQL`${key}`)
+        const queryParameters = Object.values(values)
+
+        const metadataValue = this.processMutationMetadata(mutation)
+        if (metadataValue != null) {
+          keys.push(`_metadata`)
+          queryParameters.push(metadataValue)
+        }
 
         await context.execute(
           `
@@ -195,7 +212,7 @@ export class PowerSyncTransactor {
         SET ${keys.map((key) => `${key} = ?`).join(`, `)}
         WHERE id = ?
         `,
-          [...Object.values(values), asPowerSyncRecord(mutation.modified).id]
+          [...queryParameters, asPowerSyncRecord(mutation.modified).id]
         )
       }
     )
@@ -213,12 +230,26 @@ export class PowerSyncTransactor {
       context,
       waitForCompletion,
       async (tableName, mutation) => {
-        await context.execute(
-          `
-        DELETE FROM ${tableName} WHERE id = ?
-        `,
-          [asPowerSyncRecord(mutation.original).id]
-        )
+        const metadataValue = this.processMutationMetadata(mutation)
+        if (metadataValue != null) {
+          /**
+           * Delete operations with metadata require a different approach to handle metadata.
+           * This will delete the record.
+           */
+          await context.execute(
+            `
+            UPDATE ${tableName} SET _deleted = TRUE, _metadata = ? WHERE id = ?
+            `,
+            [metadataValue, asPowerSyncRecord(mutation.original).id]
+          )
+        } else {
+          await context.execute(
+            `
+            DELETE FROM ${tableName} WHERE id = ?
+            `,
+            [asPowerSyncRecord(mutation.original).id]
+          )
+        }
       }
     )
   }
@@ -239,17 +270,8 @@ export class PowerSyncTransactor {
       serializeValue: (value: any) => Record<string, unknown>
     ) => Promise<void>
   ): Promise<PendingOperation | null> {
-    if (
-      typeof (mutation.collection.config as any).utils?.getMeta != `function`
-    ) {
-      throw new Error(`Could not get tableName from mutation's collection config.
-        The provided mutation might not have originated from PowerSync.`)
-    }
-
-    const { tableName, trackedTableName, serializeValue } = (
-      mutation.collection
-        .config as unknown as EnhancedPowerSyncCollectionConfig<any>
-    ).utils.getMeta()
+    const { tableName, trackedTableName, serializeValue } =
+      this.getMutationCollectionMeta(mutation)
 
     await handler(sanitizeSQL`${tableName}`, mutation, serializeValue)
 
@@ -266,6 +288,48 @@ export class PowerSyncTransactor {
       id: diffOperation.id,
       operation: mapOperationToPowerSync(mutation.type),
       timestamp: diffOperation.timestamp,
+    }
+  }
+
+  protected getMutationCollectionMeta(
+    mutation: PendingMutation<any>
+  ): PowerSyncCollectionMeta<any> {
+    if (
+      typeof (mutation.collection.config as any).utils?.getMeta != `function`
+    ) {
+      throw new Error(`Collection is not a PowerSync collection.`)
+    }
+    return (
+      mutation.collection
+        .config as unknown as EnhancedPowerSyncCollectionConfig<any>
+    ).utils.getMeta()
+  }
+
+  /**
+   * Processes collection mutation metadata for persistence to the database.
+   * We only support storing string metadata.
+   * @returns null if no metadata should be stored.
+   */
+  protected processMutationMetadata(
+    mutation: PendingMutation<any>
+  ): string | null {
+    const { metadataIsTracked } = this.getMutationCollectionMeta(mutation)
+    if (!metadataIsTracked) {
+      // If it's not supported, we don't store metadata.
+      if (typeof mutation.metadata != `undefined`) {
+        // Log a warning if metadata is provided but not tracked.
+        this.database.logger.warn(
+          `Metadata provided for collection ${mutation.collection.id} but the PowerSync table does not track metadata. The PowerSync table should be configured with trackMetadata: true.`,
+          mutation.metadata
+        )
+      }
+      return null
+    } else if (typeof mutation.metadata == `undefined`) {
+      return null
+    } else if (typeof mutation.metadata == `string`) {
+      return mutation.metadata
+    } else {
+      return JSON.stringify(mutation.metadata)
     }
   }
 }
