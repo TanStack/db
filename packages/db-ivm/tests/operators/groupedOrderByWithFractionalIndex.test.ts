@@ -57,7 +57,7 @@ describe(`Operators`, () => {
       const groupedValues = new Map<string, Array<number>>()
       for (const [key, [value, _index]] of result.sortedResults) {
         // key is [string, string], extract the first element as the group
-        const group = (key)[0]
+        const group = key[0]
         const list = groupedValues.get(group) ?? []
         list.push(value.value)
         groupedValues.set(group, list)
