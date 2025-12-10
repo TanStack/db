@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
       - name: Setup Tools
@@ -36,11 +36,36 @@ jobs:
         with:
           version: pnpm run changeset:version
           publish: pnpm run changeset:publish
-          commit: "ci: Version Packages"
-          title: "ci: Version Packages"
+          commit: 'ci: Version Packages'
+          title: 'ci: Version Packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Generate Docs
+        if: steps.changesets.outputs.published == 'true'
+        run: pnpm generate-docs
+      - name: Commit Generated Docs
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            BRANCH="docs/auto-update-$(date +%s)"
+            git checkout -b "$BRANCH"
+            git add docs/
+            git commit -m "docs: regenerate API documentation"
+            git push origin "$BRANCH"
+
+            gh pr create \
+              --title "docs: regenerate API documentation" \
+              --body "Automated documentation update from release" \
+              --base main \
+              --head "$BRANCH"
+          else
+            echo "No changes in generated docs"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Comment on PRs about release
         if: steps.changesets.outputs.published == 'true'
         uses: tanstack/config/.github/comment-on-release@main

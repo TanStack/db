@@ -11,7 +11,7 @@ title: localStorageCollectionOptions
 function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, LocalStorageCollectionUtils> & object;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:279](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L279)
+Defined in: [packages/db/src/local-storage.ts:316](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L316)
 
 Creates localStorage collection options for use with a standard Collection
 
@@ -46,13 +46,13 @@ don't participate in the standard mutation handler flow for manual transactions.
 
 #### config
 
-[`LocalStorageCollectionConfig`](../../interfaces/LocalStorageCollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `T`, `TKey`\> & `object`
+[`LocalStorageCollectionConfig`](../interfaces/LocalStorageCollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `T`, `TKey`\> & `object`
 
 Configuration options for the localStorage collection
 
 ### Returns
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`LocalStorageCollectionUtils`](../../interfaces/LocalStorageCollectionUtils.md)\> & `object`
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`LocalStorageCollectionUtils`](../interfaces/LocalStorageCollectionUtils.md)\> & `object`
 
 Collection options with utilities including clearStorage, getStorageSize, and acceptMutations
 
@@ -126,7 +126,7 @@ await tx.commit()
 function localStorageCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, LocalStorageCollectionUtils> & object;
 ```
 
-Defined in: [packages/db/src/local-storage.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L299)
+Defined in: [packages/db/src/local-storage.ts:336](https://github.com/TanStack/db/blob/main/packages/db/src/local-storage.ts#L336)
 
 Creates localStorage collection options for use with a standard Collection
 
@@ -161,13 +161,13 @@ don't participate in the standard mutation handler flow for manual transactions.
 
 #### config
 
-[`LocalStorageCollectionConfig`](../../interfaces/LocalStorageCollectionConfig.md)\<`T`, `never`, `TKey`\> & `object`
+[`LocalStorageCollectionConfig`](../interfaces/LocalStorageCollectionConfig.md)\<`T`, `never`, `TKey`\> & `object`
 
 Configuration options for the localStorage collection
 
 ### Returns
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`LocalStorageCollectionUtils`](../../interfaces/LocalStorageCollectionUtils.md)\> & `object`
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`LocalStorageCollectionUtils`](../interfaces/LocalStorageCollectionUtils.md)\> & `object`
 
 Collection options with utilities including clearStorage, getStorageSize, and acceptMutations
 

@@ -1,6 +1,6 @@
-import { PropRef, Value } from "../ir.js"
-import type { BasicExpression } from "../ir.js"
-import type { RefLeaf } from "./types.js"
+import { PropRef, Value } from '../ir.js'
+import type { BasicExpression } from '../ir.js'
+import type { RefLeaf } from './types.js'
 
 export interface RefProxy<T = any> {
   /** @internal */
@@ -81,7 +81,7 @@ export function createSingleRowRefProxy<
  * Used in callbacks like where, select, etc. to create type-safe references
  */
 export function createRefProxy<T extends Record<string, any>>(
-  aliases: Array<string>
+  aliases: Array<string>,
 ): RefProxy<T> & T {
   const cache = new Map<string, any>()
   let accessId = 0 // Monotonic counter to record evaluation order

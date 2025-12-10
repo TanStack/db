@@ -1,7 +1,7 @@
-import { createServerFileRoute } from "@tanstack/react-start/server"
-import { json } from "@tanstack/react-start"
-import type { TodoUpdate } from "~/utils/todos"
-import { todoService } from "~/utils/todos"
+import { createServerFileRoute } from '@tanstack/react-start/server'
+import { json } from '@tanstack/react-start'
+import type { TodoUpdate } from '~/utils/todos'
+import { todoService } from '~/utils/todos'
 
 export const ServerRoute = createServerFileRoute(`/api/todos/$todoId`).methods({
   GET: async ({ params, request }) => {
@@ -45,7 +45,7 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$todoId`).methods({
       if (error instanceof Error && error.message.includes(`Simulated`)) {
         return json(
           { error: `Network error - please try again` },
-          { status: 503 }
+          { status: 503 },
         )
       }
       return json({ error: `Failed to update todo` }, { status: 500 })
@@ -71,7 +71,7 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$todoId`).methods({
       if (error instanceof Error && error.message.includes(`Simulated`)) {
         return json(
           { error: `Network error - please try again` },
-          { status: 503 }
+          { status: 503 },
         )
       }
       return json({ error: `Failed to delete todo` }, { status: 500 })

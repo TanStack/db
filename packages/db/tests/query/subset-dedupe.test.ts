@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from 'vitest'
 import {
   DeduplicatedLoadSubset,
   cloneOptions,
-} from "../../src/query/subset-dedupe"
-import { Func, PropRef, Value } from "../../src/query/ir"
-import { minusWherePredicates } from "../../src/query/predicate-utils"
-import type { BasicExpression, OrderBy } from "../../src/query/ir"
-import type { LoadSubsetOptions } from "../../src/types"
+} from '../../src/query/subset-dedupe'
+import { Func, PropRef, Value } from '../../src/query/ir'
+import { minusWherePredicates } from '../../src/query/predicate-utils'
+import type { BasicExpression, OrderBy } from '../../src/query/ir'
+import type { LoadSubsetOptions } from '../../src/types'
 
 // Helper functions to build expressions more easily
 function ref(path: string | Array<string>): PropRef {
@@ -153,6 +153,49 @@ describe(`createDeduplicatedLoadSubset`, () => {
       },
     ]
 
+    const whereClause = gt(ref(`age`), val(10))
+
+    // First call: age > 10, orderBy age asc, limit 10
+    await deduplicated.loadSubset({
+      where: whereClause,
+      orderBy: orderBy1,
+      limit: 10,
+    })
+    expect(callCount).toBe(1)
+
+    // Second call: SAME where clause, same orderBy, smaller limit (subset)
+    // For limited queries, where clauses must be EQUAL for subset relationship
+    const result = await deduplicated.loadSubset({
+      where: whereClause, // Same where clause
+      orderBy: orderBy1,
+      limit: 5,
+    })
+    expect(result).toBe(true)
+    expect(callCount).toBe(1) // Should not call - subset of first
+  })
+
+  it(`should NOT dedupe limited calls with different where clauses`, async () => {
+    let callCount = 0
+    const mockLoadSubset = () => {
+      callCount++
+      return Promise.resolve()
+    }
+
+    const deduplicated = new DeduplicatedLoadSubset({
+      loadSubset: mockLoadSubset,
+    })
+
+    const orderBy1: OrderBy = [
+      {
+        expression: ref(`age`),
+        compareOptions: {
+          direction: `asc`,
+          nulls: `last`,
+          stringSort: `lexical`,
+        },
+      },
+    ]
+
     // First call: age > 10, orderBy age asc, limit 10
     await deduplicated.loadSubset({
       where: gt(ref(`age`), val(10)),
@@ -161,14 +204,15 @@ describe(`createDeduplicatedLoadSubset`, () => {
     })
     expect(callCount).toBe(1)
 
-    // Second call: age > 20, orderBy age asc, limit 5 (subset)
-    const result = await deduplicated.loadSubset({
+    // Second call: DIFFERENT where clause (age > 20) - should NOT be deduped
+    // even though age > 20 is "more restrictive" than age > 10,
+    // the top 5 of age > 20 might not be in the top 10 of age > 10
+    await deduplicated.loadSubset({
       where: gt(ref(`age`), val(20)),
       orderBy: orderBy1,
       limit: 5,
     })
-    expect(result).toBe(true)
-    expect(callCount).toBe(1) // Should not call - subset of first
+    expect(callCount).toBe(2) // Should call - different where clause
   })
 
   it(`should call underlying for non-subset limited calls`, async () => {
@@ -461,7 +505,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
       // First call: age > 20 AND status = 'active'
       const firstPredicate = and(
         gt(ref(`age`), val(20)),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
       await deduplicated.loadSubset({ where: firstPredicate })
       expect(callCount).toBe(1)
@@ -470,7 +514,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
       // Second call: age > 10 AND status = 'active' (should request only age > 10 AND age <= 20 AND status = 'active')
       const secondPredicate = and(
         gt(ref(`age`), val(10)),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
 
       const test = minusWherePredicates(secondPredicate, firstPredicate)
@@ -482,7 +526,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
         where: and(
           eq(ref(`status`), val(`active`)),
           gt(ref(`age`), val(10)),
-          lte(ref(`age`), val(20))
+          lte(ref(`age`), val(20)),
         ),
       })
     })
@@ -671,17 +715,20 @@ describe(`createDeduplicatedLoadSubset`, () => {
         },
       ]
 
+      const whereClause = gt(ref(`age`), val(10))
+
       // First limited call
       await deduplicated.loadSubset({
-        where: gt(ref(`age`), val(10)),
+        where: whereClause,
         orderBy: orderBy1,
         limit: 10,
       })
       expect(callCount).toBe(1)
 
-      // Second limited call is a subset (stricter where and smaller limit)
+      // Second limited call is a subset (SAME where clause and smaller limit)
+      // For limited queries, where clauses must be EQUAL for subset relationship
       const subsetOptions = {
-        where: gt(ref(`age`), val(20)),
+        where: whereClause, // Same where clause
         orderBy: orderBy1,
         limit: 5,
       }
@@ -739,6 +786,100 @@ describe(`createDeduplicatedLoadSubset`, () => {
       // Now the callback should have been called exactly once, with the subset options
       expect(onDeduplicate).toHaveBeenCalledTimes(1)
       expect(onDeduplicate).toHaveBeenCalledWith(subsetOptions)
+    })
+  })
+
+  describe(`limited queries with different where clauses`, () => {
+    // When a query has a limit, only the top N rows (by orderBy) are loaded.
+    // A subsequent query with a different where clause cannot reuse that data,
+    // even if the new where clause is "more restrictive", because the filtered
+    // top N might include rows outside the original unfiltered top N.
+
+    it(`should NOT dedupe when where clause differs on limited queries`, async () => {
+      let callCount = 0
+      const calls: Array<LoadSubsetOptions> = []
+      const mockLoadSubset = (options: LoadSubsetOptions) => {
+        callCount++
+        calls.push(options)
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      const orderByCreatedAt: OrderBy = [
+        {
+          expression: ref(`created_at`),
+          compareOptions: {
+            direction: `desc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+          },
+        },
+      ]
+
+      // First query: top 10 items with no filter
+      await deduplicated.loadSubset({
+        where: undefined,
+        orderBy: orderByCreatedAt,
+        limit: 10,
+      })
+      expect(callCount).toBe(1)
+
+      // Second query: top 10 items WITH a filter
+      // This requires a separate request because the filtered top 10
+      // might include items outside the unfiltered top 10
+      const searchWhere = and(eq(ref(`title`), val(`test`)))
+      await deduplicated.loadSubset({
+        where: searchWhere,
+        orderBy: orderByCreatedAt,
+        limit: 10,
+      })
+
+      expect(callCount).toBe(2)
+      expect(calls[1]?.where).toEqual(searchWhere)
+    })
+
+    it(`should dedupe when where clause is identical on limited queries`, async () => {
+      let callCount = 0
+      const mockLoadSubset = () => {
+        callCount++
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      const orderByCreatedAt: OrderBy = [
+        {
+          expression: ref(`created_at`),
+          compareOptions: {
+            direction: `desc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+          },
+        },
+      ]
+
+      // First query: top 10 items with no filter
+      await deduplicated.loadSubset({
+        where: undefined,
+        orderBy: orderByCreatedAt,
+        limit: 10,
+      })
+      expect(callCount).toBe(1)
+
+      // Second query: same where clause (undefined), smaller limit
+      // The top 5 are contained within the already-loaded top 10
+      const result = await deduplicated.loadSubset({
+        where: undefined,
+        orderBy: orderByCreatedAt,
+        limit: 5,
+      })
+      expect(result).toBe(true)
+      expect(callCount).toBe(1)
     })
   })
 })

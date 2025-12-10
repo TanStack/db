@@ -4,10 +4,10 @@
  * Tests using Query collections with mock backend
  */
 
-import { afterAll, afterEach, beforeAll, describe } from "vitest"
-import { createCollection } from "@tanstack/db"
-import { QueryClient } from "@tanstack/query-core"
-import { queryCollectionOptions } from "../src/query"
+import { afterAll, afterEach, beforeAll, describe } from 'vitest'
+import { createCollection } from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
+import { queryCollectionOptions } from '../src/query'
 import {
   createCollationTestSuite,
   createDeduplicationTestSuite,
@@ -17,15 +17,14 @@ import {
   createPaginationTestSuite,
   createPredicatesTestSuite,
   generateSeedData,
-} from "../../db-collection-e2e/src/index"
-import { applyPredicates, buildQueryKey } from "./query-filter"
-import type { LoadSubsetOptions } from "@tanstack/db"
+} from '../../db-collection-e2e/src/index'
+import { applyPredicates, buildQueryKey } from './query-filter'
 import type {
   Comment as E2EComment,
   Post as E2EPost,
   E2ETestConfig,
   User as E2EUser,
-} from "../../db-collection-e2e/src/types"
+} from '../../db-collection-e2e/src/types'
 
 describe(`Query Collection E2E Tests`, () => {
   let config: E2ETestConfig
@@ -56,7 +55,7 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EUser) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const eagerPosts = createCollection(
@@ -69,7 +68,7 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EPost) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const eagerComments = createCollection(
@@ -82,7 +81,7 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EComment) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const onDemandUsers = createCollection(
@@ -94,15 +93,13 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: (opts) => buildQueryKey(`users`, opts),
         syncMode: `on-demand`,
         queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.users, options)
           return Promise.resolve(filtered)
         },
         getKey: (item: E2EUser) => item.id,
         startSync: false,
-      })
+      }),
     )
 
     const onDemandPosts = createCollection(
@@ -112,15 +109,13 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: (opts) => buildQueryKey(`posts`, opts),
         syncMode: `on-demand`,
         queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.posts, options)
           return Promise.resolve(filtered)
         },
         getKey: (item: E2EPost) => item.id,
         startSync: false,
-      })
+      }),
     )
 
     const onDemandComments = createCollection(
@@ -130,15 +125,13 @@ describe(`Query Collection E2E Tests`, () => {
         queryKey: (opts) => buildQueryKey(`comments`, opts),
         syncMode: `on-demand`,
         queryFn: (ctx) => {
-          const options = ctx.meta?.loadSubsetOptions as
-            | LoadSubsetOptions
-            | undefined
+          const options = ctx.meta?.loadSubsetOptions
           const filtered = applyPredicates(seedData.comments, options)
           return Promise.resolve(filtered)
         },
         getKey: (item: E2EComment) => item.id,
         startSync: false,
-      })
+      }),
     )
 
     // Wait for eager collections to load
@@ -167,24 +160,33 @@ describe(`Query Collection E2E Tests`, () => {
       // Mutations for Query collections - modify seed data and invalidate queries
       mutations: {
         insertUser: async (user) => {
+          console.log(`[mutation] insertUser called, id=${user.id}`)
           seedData.users.push(user)
+          console.log(`[mutation] calling invalidateQueries`)
           await queryClient.invalidateQueries({ queryKey: [`e2e`, `users`] })
+          console.log(`[mutation] invalidateQueries completed`)
         },
         updateUser: async (id, updates) => {
+          console.log(`[mutation] updateUser called, id=${id}`)
           const userIndex = seedData.users.findIndex((u) => u.id === id)
           if (userIndex !== -1) {
             seedData.users[userIndex] = {
               ...seedData.users[userIndex]!,
               ...updates,
             }
+            console.log(`[mutation] calling invalidateQueries`)
             await queryClient.invalidateQueries({ queryKey: [`e2e`, `users`] })
+            console.log(`[mutation] invalidateQueries completed`)
           }
         },
         deleteUser: async (id) => {
+          console.log(`[mutation] deleteUser called, id=${id}`)
           const userIndex = seedData.users.findIndex((u) => u.id === id)
           if (userIndex !== -1) {
             seedData.users.splice(userIndex, 1)
+            console.log(`[mutation] calling invalidateQueries`)
             await queryClient.invalidateQueries({ queryKey: [`e2e`, `users`] })
+            console.log(`[mutation] invalidateQueries completed`)
           }
         },
         insertPost: async (post) => {

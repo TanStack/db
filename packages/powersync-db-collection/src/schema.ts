@@ -1,7 +1,7 @@
-import { ColumnType } from "@powersync/common"
-import type { Table } from "@powersync/common"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { ExtractedTable } from "./helpers"
+import { ColumnType } from '@powersync/common'
+import type { Table } from '@powersync/common'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { ExtractedTable } from './helpers'
 
 /**
  * Converts a PowerSync Table instance to a StandardSchemaV1 schema.
@@ -21,12 +21,12 @@ import type { ExtractedTable } from "./helpers"
  * ```
  */
 export function convertTableToSchema<TTable extends Table>(
-  table: TTable
+  table: TTable,
 ): StandardSchemaV1<ExtractedTable<TTable>> {
   type TExtracted = ExtractedTable<TTable>
   // Create validate function that checks types according to column definitions
   const validate = (
-    value: unknown
+    value: unknown,
   ):
     | StandardSchemaV1.SuccessResult<TExtracted>
     | StandardSchemaV1.FailureResult => {
@@ -87,7 +87,7 @@ export function convertTableToSchema<TTable extends Table>(
   }
 
   return {
-    "~standard": {
+    '~standard': {
       version: 1,
       vendor: `powersync`,
       validate,

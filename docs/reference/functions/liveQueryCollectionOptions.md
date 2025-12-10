@@ -18,7 +18,7 @@ Creates live query collection options for use with createCollection
 
 ### TContext
 
-`TContext` *extends* [`Context`](../../interfaces/Context.md)
+`TContext` *extends* [`Context`](../interfaces/Context.md)
 
 ### TResult
 
@@ -28,7 +28,7 @@ Creates live query collection options for use with createCollection
 
 ### config
 
-[`LiveQueryCollectionConfig`](../../interfaces/LiveQueryCollectionConfig.md)\<`TContext`, `TResult`\>
+[`LiveQueryCollectionConfig`](../interfaces/LiveQueryCollectionConfig.md)\<`TContext`, `TResult`\>
 
 Configuration options for the live query collection
 

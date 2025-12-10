@@ -1,13 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router"
-import { eq, useLiveQuery } from "@tanstack/react-db"
-import { useState } from "react"
-import type { Todo } from "@/db/schema"
-import { authClient } from "@/lib/auth-client"
+import { createFileRoute } from '@tanstack/react-router'
+import { eq, useLiveQuery } from '@tanstack/react-db'
+import { useState } from 'react'
+import type { Todo } from '@/db/schema'
+import { authClient } from '@/lib/auth-client'
 import {
   projectCollection,
   todoCollection,
   usersCollection,
-} from "@/lib/collections"
+} from '@/lib/collections'
 
 export const Route = createFileRoute(`/_authenticated/project/$projectId`)({
   component: ProjectPage,

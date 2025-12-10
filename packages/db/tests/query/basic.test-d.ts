@@ -1,9 +1,9 @@
-import { describe, expectTypeOf, test } from "vitest"
-import { z } from "zod"
-import { type } from "arktype"
-import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { describe, expectTypeOf, test } from 'vitest'
+import { z } from 'zod'
+import { type } from 'arktype'
+import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -26,7 +26,7 @@ function createUsersCollection() {
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
-    })
+    }),
   )
 }
 
@@ -65,7 +65,7 @@ describe(`Query Basic Types`, () => {
         age: user.age,
         email: user.email,
         active: user.active,
-      }))
+      })),
     )
 
     const results = liveCollection.toArray
@@ -212,7 +212,7 @@ describe(`Query Basic Types`, () => {
 
   test(`query function syntax with no select returns original type`, () => {
     const liveCollection = createLiveQueryCollection((q) =>
-      q.from({ user: usersCollection }).where(({ user }) => gt(user.age, 20))
+      q.from({ user: usersCollection }).where(({ user }) => gt(user.age, 20)),
     )
 
     const results = liveCollection.toArray
@@ -233,7 +233,7 @@ describe(`Query Basic Types`, () => {
         id: `test-users-optional`,
         getKey: (user) => user.id,
         initialData: [],
-      })
+      }),
     )
 
     const liveCollection = createLiveQueryCollection({
@@ -330,7 +330,7 @@ describe(`Query Basic Types with ArkType Schemas`, () => {
     const userWithOptionalSchema = type({
       id: `number`,
       name: `string`,
-      "inserted_at?": `Date`, // Optional using "field?"
+      'inserted_at?': `Date`, // Optional using "field?"
     })
 
     const usersWithOptionalCollection = createCollection({
@@ -365,7 +365,7 @@ describe(`Query Basic Types with ArkType Schemas`, () => {
     const userWithUnionSchema = type({
       id: `number`,
       name: `string`,
-      "status?": `"active" | "inactive"`, // Union type with optional
+      'status?': `"active" | "inactive"`, // Union type with optional
     })
 
     const usersWithUnionCollection = createCollection({
@@ -402,7 +402,7 @@ describe(`Query Basic Types with ArkType Schemas`, () => {
     const userWithArraySchema = type({
       id: `number`,
       name: `string`,
-      "tags?": `string[]`, // Array type with optional
+      'tags?': `string[]`, // Array type with optional
     })
 
     const usersWithArrayCollection = createCollection({
@@ -440,7 +440,7 @@ describe(`Query Basic Types with ArkType Schemas`, () => {
       id: `number`,
       name: `string > 0`,
       age: `number.integer > 0`,
-      "email?": `string.email`,
+      'email?': `string.email`,
     })
 
     const usersCollection = createCollection({

@@ -1,11 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   CollectionImpl,
   createCollection,
   createTransaction,
-} from "@tanstack/db"
-import { electricCollectionOptions, isChangeMessage } from "../src/electric"
-import type { ElectricCollectionUtils } from "../src/electric"
+} from '@tanstack/db'
+import { electricCollectionOptions, isChangeMessage } from '../src/electric'
+import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Collection,
   InsertMutationFnParams,
@@ -13,16 +13,18 @@ import type {
   PendingMutation,
   Transaction,
   TransactionWithMutations,
-} from "@tanstack/db"
-import type { Message, Row } from "@electric-sql/client"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from '@tanstack/db'
+import type { Message, Row } from '@electric-sql/client'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
 const mockRequestSnapshot = vi.fn()
+const mockFetchSnapshot = vi.fn()
 const mockStream = {
   subscribe: mockSubscribe,
   requestSnapshot: mockRequestSnapshot,
+  fetchSnapshot: mockFetchSnapshot,
 }
 
 vi.mock(`@electric-sql/client`, async () => {
@@ -72,7 +74,13 @@ describe(`Electric Integration`, () => {
     const options = electricCollectionOptions(config)
 
     // Create collection with Electric configuration using the new utility exposure pattern
-    collection = createCollection(options)
+    collection = createCollection(options) as unknown as Collection<
+      Row,
+      string | number,
+      ElectricCollectionUtils,
+      StandardSchemaV1<unknown, unknown>,
+      Row
+    >
   })
 
   it(`should commit an empty transaction when there's an up-to-date`, () => {
@@ -108,7 +116,7 @@ describe(`Electric Integration`, () => {
     ])
 
     expect(collection.state).toEqual(
-      new Map([[1, { id: 1, name: `Test User` }]])
+      new Map([[1, { id: 1, name: `Test User` }]]),
     )
   })
 
@@ -146,7 +154,7 @@ describe(`Electric Integration`, () => {
       new Map([
         [1, { id: 1, name: `Test User` }],
         [2, { id: 2, name: `Another User` }],
-      ])
+      ]),
     )
   })
 
@@ -177,7 +185,7 @@ describe(`Electric Integration`, () => {
     ])
 
     expect(collection.state).toEqual(
-      new Map([[1, { id: 1, name: `Updated User` }]])
+      new Map([[1, { id: 1, name: `Updated User` }]]),
     )
   })
 
@@ -306,9 +314,9 @@ describe(`Electric Integration`, () => {
       // awaitTxId throws if you pass it a string
       await expect(
         // @ts-expect-error
-        collection.utils.awaitTxId(`123`)
+        collection.utils.awaitTxId(`123`),
       ).rejects.toThrowErrorMatchingInlineSnapshot(
-        `[ExpectedNumberInAwaitTxIdError: [test] Expected number in awaitTxId, received string]`
+        `[ExpectedNumberInAwaitTxIdError: [test] Expected number in awaitTxId, received string]`,
       )
 
       // The txid should be tracked and awaitTxId should resolve immediately
@@ -349,7 +357,7 @@ describe(`Electric Integration`, () => {
 
       // The promise should reject with a timeout error
       await expect(promise).rejects.toThrow(
-        `Timeout waiting for txId: ${unknownTxid}`
+        `Timeout waiting for txId: ${unknownTxid}`,
       )
     })
 
@@ -441,7 +449,7 @@ describe(`Electric Integration`, () => {
         async ({ transaction }: { transaction: Transaction }) => {
           // Persist to fake backend and get txid
           const txid = await fakeBackend.persist(
-            transaction.mutations as Array<PendingMutation<Row>>
+            transaction.mutations as Array<PendingMutation<Row>>,
           )
 
           if (!txid) {
@@ -460,13 +468,13 @@ describe(`Electric Integration`, () => {
           await promise
 
           return Promise.resolve()
-        }
+        },
       )
 
       const tx1 = createTransaction({ mutationFn: testMutationFn })
 
       let transaction = tx1.mutate(() =>
-        collection.insert({ id: 1, name: `Test item 1` })
+        collection.insert({ id: 1, name: `Test item 1` }),
       )
 
       await transaction.isPersisted.promise
@@ -673,9 +681,9 @@ describe(`Electric Integration`, () => {
     })
 
     it(`should support custom timeout in matching strategy`, async () => {
-      const onInsert = vi.fn(async () => {
+      const onInsert = vi.fn(() => {
         // Return a txid that will never arrive with a very short timeout
-        return { txid: 999999, timeout: 100 }
+        return Promise.resolve({ txid: 999999, timeout: 100 })
       })
 
       const config = {
@@ -699,7 +707,7 @@ describe(`Electric Integration`, () => {
 
       // The transaction should reject due to timeout
       await expect(tx.isPersisted.promise).rejects.toThrow(
-        `Timeout waiting for txId: 999999`
+        `Timeout waiting for txId: 999999`,
       )
     })
 
@@ -707,7 +715,7 @@ describe(`Electric Integration`, () => {
       // Create a fake backend that returns multiple txids
       const fakeBackend = {
         persist: (
-          mutations: Array<PendingMutation<Row>>
+          mutations: Array<PendingMutation<Row>>,
         ): Promise<Array<number>> => {
           // Simulate multiple items being persisted and each getting a txid
           const txids = mutations.map(() => Math.floor(Math.random() * 10000))
@@ -853,7 +861,7 @@ describe(`Electric Integration`, () => {
         .mockImplementation(async ({ collection: col }) => {
           await col.utils.awaitMatch(
             () => false, // Never matches
-            1 // Short timeout for test
+            1, // Short timeout for test
           )
         })
 
@@ -873,7 +881,7 @@ describe(`Electric Integration`, () => {
 
       // Capture the rejection promise before advancing timers
       const rejectionPromise = expect(tx.isPersisted.promise).rejects.toThrow(
-        `Timeout waiting for custom match function`
+        `Timeout waiting for custom match function`,
       )
 
       // Advance timers to trigger timeout
@@ -929,7 +937,8 @@ describe(`Electric Integration`, () => {
           // Custom match using awaitMatch utility
           await col.utils.awaitMatch(
             (message: any) =>
-              isChangeMessage(message) && message.headers.operation === `delete`
+              isChangeMessage(message) &&
+              message.headers.operation === `delete`,
           )
         })
 
@@ -964,7 +973,7 @@ describe(`Electric Integration`, () => {
         .mockImplementation(async ({ collection: col }) => {
           await col.utils.awaitMatch(
             () => false, // Never matches
-            1 // Short timeout for test
+            1, // Short timeout for test
           )
         })
 
@@ -986,7 +995,7 @@ describe(`Electric Integration`, () => {
 
       // Capture the rejection promise before advancing timers
       const rejectionPromise = expect(tx.isPersisted.promise).rejects.toThrow(
-        `Timeout waiting for custom match function`
+        `Timeout waiting for custom match function`,
       )
 
       // Advance timers to trigger timeout
@@ -1561,18 +1570,18 @@ describe(`Electric Integration`, () => {
 
       // Txids in xip_list (in-progress transactions) should NOT resolve
       await expect(testCollection.utils.awaitTxId(120, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 120`
+        `Timeout waiting for txId: 120`,
       )
       await expect(testCollection.utils.awaitTxId(130, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 130`
+        `Timeout waiting for txId: 130`,
       )
 
       // Txids >= xmax should NOT resolve (not yet assigned)
       await expect(testCollection.utils.awaitTxId(150, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 150`
+        `Timeout waiting for txId: 150`,
       )
       await expect(testCollection.utils.awaitTxId(200, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 200`
+        `Timeout waiting for txId: 200`,
       )
     })
 
@@ -1672,10 +1681,10 @@ describe(`Electric Integration`, () => {
 
       // Txids >= second snapshot's xmax should timeout (not yet assigned)
       await expect(testCollection.utils.awaitTxId(210, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 210`
+        `Timeout waiting for txId: 210`,
       )
       await expect(testCollection.utils.awaitTxId(300, 100)).rejects.toThrow(
-        `Timeout waiting for txId: 300`
+        `Timeout waiting for txId: 300`,
       )
     })
 
@@ -1787,12 +1796,27 @@ describe(`Electric Integration`, () => {
         expect.objectContaining({
           limit: 10,
           params: {},
-        })
+        }),
       )
     })
 
-    it(`should request incremental snapshots in progressive mode when loadSubset is called before sync completes`, async () => {
+    it(`should fetch snapshots in progressive mode when loadSubset is called before sync completes`, async () => {
       vi.clearAllMocks()
+
+      mockSubscribe.mockImplementation((_callback) => {
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({
+        metadata: {},
+        data: [
+          {
+            key: `2`,
+            value: { id: 2, name: `Snapshot User` },
+            headers: { operation: `insert` },
+          },
+        ],
+      })
 
       const config = {
         id: `progressive-snapshot-test`,
@@ -1809,35 +1833,23 @@ describe(`Electric Integration`, () => {
 
       const testCollection = createCollection(electricCollectionOptions(config))
 
-      // Send initial data with snapshot-end (but not up-to-date yet - still syncing)
-      subscriber([
-        {
-          key: `1`,
-          value: { id: 1, name: `Test User` },
-          headers: { operation: `insert` },
-        },
-        {
-          headers: {
-            control: `snapshot-end`,
-            xmin: `100`,
-            xmax: `110`,
-            xip_list: [],
-          },
-        },
-      ])
-
       expect(testCollection.status).toBe(`loading`) // Not ready yet
 
-      // In progressive mode, calling loadSubset should request a snapshot BEFORE full sync completes
+      // In progressive mode, calling loadSubset should fetch a snapshot BEFORE full sync completes
       await testCollection._sync.loadSubset({ limit: 20 })
 
-      // Verify requestSnapshot was called
-      expect(mockRequestSnapshot).toHaveBeenCalledWith(
+      // Verify fetchSnapshot was called (not requestSnapshot)
+      expect(mockFetchSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({
           limit: 20,
           params: {},
-        })
+        }),
       )
+      expect(mockRequestSnapshot).not.toHaveBeenCalled()
+
+      // Verify snapshot data was applied
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.get(2)).toEqual({ id: 2, name: `Snapshot User` })
     })
 
     it(`should not request snapshots when loadSubset is called in eager mode`, async () => {
@@ -1875,6 +1887,23 @@ describe(`Electric Integration`, () => {
     it(`should handle progressive mode syncing in background`, async () => {
       vi.clearAllMocks()
 
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({
+        metadata: {},
+        data: [
+          {
+            key: `2`,
+            value: { id: 2, name: `Snapshot User` },
+            headers: { operation: `insert` },
+          },
+        ],
+      })
+
       const config = {
         id: `progressive-background-sync-test`,
         shapeOptions: {
@@ -1890,43 +1919,60 @@ describe(`Electric Integration`, () => {
 
       const testCollection = createCollection(electricCollectionOptions(config))
 
-      // Send initial data with snapshot-end (but not up-to-date - still syncing)
-      subscriber([
+      // Send stream data during snapshot phase (should be buffered)
+      testSubscriber([
         {
           key: `1`,
           value: { id: 1, name: `Initial User` },
           headers: { operation: `insert` },
         },
-        {
-          headers: {
-            control: `snapshot-end`,
-            xmin: `100`,
-            xmax: `110`,
-            xip_list: [],
-          },
-        },
       ])
 
-      // Collection should have data but not be ready yet
+      // Collection should NOT have the buffered data yet
       expect(testCollection.status).toBe(`loading`)
-      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(1)).toBe(false)
 
-      // Should be able to request more data incrementally before full sync completes
+      // Should be able to fetch snapshot data incrementally before full sync completes
       await testCollection._sync.loadSubset({ limit: 10 })
-      expect(mockRequestSnapshot).toHaveBeenCalled()
+      expect(mockFetchSnapshot).toHaveBeenCalled()
+      expect(mockRequestSnapshot).not.toHaveBeenCalled()
 
-      // Now send up-to-date to complete the sync
-      subscriber([
+      // Snapshot data should be visible
+      expect(testCollection.has(2)).toBe(true)
+
+      // Now send up-to-date to complete the sync (triggers atomic swap)
+      testSubscriber([
         {
           headers: { control: `up-to-date` },
         },
       ])
 
       expect(testCollection.status).toBe(`ready`)
+
+      // After atomic swap, buffered data should be visible, snapshot data cleared
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(2)).toBe(false) // Snapshot data truncated
     })
 
-    it(`should stop requesting snapshots in progressive mode after first up-to-date`, async () => {
+    it(`should stop fetching snapshots in progressive mode after first up-to-date and perform atomic swap`, async () => {
       vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({
+        metadata: {},
+        data: [
+          {
+            key: `2`,
+            value: { id: 2, name: `Snapshot User` },
+            headers: { operation: `insert` },
+          },
+        ],
+      })
 
       const config = {
         id: `progressive-stop-after-sync-test`,
@@ -1943,33 +1989,28 @@ describe(`Electric Integration`, () => {
 
       const testCollection = createCollection(electricCollectionOptions(config))
 
-      // Send initial data with snapshot-end (not up-to-date yet)
-      subscriber([
+      expect(testCollection.status).toBe(`loading`) // Not ready yet in progressive
+
+      // Should be able to fetch data before up-to-date (snapshot phase)
+      vi.clearAllMocks()
+      await testCollection._sync.loadSubset({ limit: 10 })
+      expect(mockFetchSnapshot).toHaveBeenCalledTimes(1)
+      expect(testCollection.has(2)).toBe(true) // Snapshot data applied
+
+      // Send change messages during snapshot phase (should be buffered)
+      testSubscriber([
         {
           key: `1`,
           value: { id: 1, name: `User 1` },
           headers: { operation: `insert` },
         },
-        {
-          headers: {
-            control: `snapshot-end`,
-            xmin: `100`,
-            xmax: `110`,
-            xip_list: [],
-          },
-        },
       ])
 
-      expect(testCollection.status).toBe(`loading`) // Not ready yet in progressive
-      expect(testCollection.has(1)).toBe(true)
+      // Data should NOT be visible yet (buffered)
+      expect(testCollection.has(1)).toBe(false)
 
-      // Should be able to request more data before up-to-date
-      vi.clearAllMocks()
-      await testCollection._sync.loadSubset({ limit: 10 })
-      expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
-
-      // Now send up-to-date to complete the full sync
-      subscriber([
+      // Now send up-to-date to complete the full sync and trigger atomic swap
+      testSubscriber([
         {
           headers: { control: `up-to-date` },
         },
@@ -1977,10 +2018,15 @@ describe(`Electric Integration`, () => {
 
       expect(testCollection.status).toBe(`ready`)
 
-      // Try to request more data - should NOT make a request since full sync is complete
+      // After atomic swap, buffered data should be visible
+      expect(testCollection.has(1)).toBe(true)
+      // Snapshot data should be cleared by truncate, so id:2 should be gone
+      expect(testCollection.has(2)).toBe(false)
+
+      // Try to fetch more data - should NOT make a request since full sync is complete
       vi.clearAllMocks()
       await testCollection._sync.loadSubset({ limit: 10 })
-      expect(mockRequestSnapshot).not.toHaveBeenCalled()
+      expect(mockFetchSnapshot).not.toHaveBeenCalled()
     })
 
     it(`should allow snapshots in on-demand mode even after up-to-date`, async () => {
@@ -2021,6 +2067,84 @@ describe(`Electric Integration`, () => {
       expect(mockRequestSnapshot).toHaveBeenCalled()
     })
 
+    it(`should ignore snapshot data when fetchSnapshot completes after up-to-date in progressive mode`, async () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      let resolveFetchSnapshot!: (value: any) => void
+      const fetchSnapshotPromise = new Promise((resolve) => {
+        resolveFetchSnapshot = resolve as any
+      })
+
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      // Mock fetchSnapshot to return a promise we control
+      mockFetchSnapshot.mockReturnValue(fetchSnapshotPromise)
+
+      const config = {
+        id: `progressive-snapshot-race-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      expect(testCollection.status).toBe(`loading`)
+
+      // Start a loadSubset request (should call fetchSnapshot)
+      const loadSubsetPromise = testCollection._sync.loadSubset({ limit: 10 })
+
+      // Verify fetchSnapshot was called
+      expect(mockFetchSnapshot).toHaveBeenCalled()
+
+      // Before the snapshot completes, send up-to-date to complete the sync
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Buffered User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Sync should be complete now
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.size).toBe(1)
+
+      // Now resolve the fetchSnapshot with data
+      resolveFetchSnapshot({
+        metadata: {},
+        data: [
+          {
+            key: `2`,
+            value: { id: 2, name: `Late Snapshot User` },
+            headers: { operation: `insert` },
+          },
+        ],
+      })
+
+      // Wait for loadSubset to complete
+      await loadSubsetPromise
+
+      // The snapshot data should be IGNORED because sync already completed
+      expect(testCollection.has(2)).toBe(false)
+      expect(testCollection.size).toBe(1) // Still only the buffered user
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Buffered User` })
+    })
+
     it(`should default offset to 'now' in on-demand mode when no offset provided`, async () => {
       vi.clearAllMocks()
 
@@ -2047,7 +2171,7 @@ describe(`Electric Integration`, () => {
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
           offset: `now`,
-        })
+        }),
       )
     })
 
@@ -2076,7 +2200,7 @@ describe(`Electric Integration`, () => {
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
           offset: undefined,
-        })
+        }),
       )
     })
 
@@ -2105,7 +2229,7 @@ describe(`Electric Integration`, () => {
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
           offset: undefined,
-        })
+        }),
       )
     })
 
@@ -2134,21 +2258,31 @@ describe(`Electric Integration`, () => {
       expect(ShapeStream).toHaveBeenCalledWith(
         expect.objectContaining({
           offset: -1,
-        })
+        }),
       )
     })
   })
 
   // Tests for commit and ready behavior with snapshot-end and up-to-date messages
   describe(`Commit and ready behavior`, () => {
-    it(`should commit on snapshot-end in eager mode but not mark ready`, () => {
+    it(`should ignore snapshot-end before first up-to-date in progressive mode`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
       const config = {
-        id: `eager-snapshot-end-test`,
+        id: `progressive-ignore-snapshot-end-test`,
         shapeOptions: {
           url: `http://test-url`,
           params: { table: `test_table` },
         },
-        syncMode: `eager` as const,
+        syncMode: `progressive` as const,
         getKey: (item: Row) => item.id as number,
         startSync: true,
       }
@@ -2156,7 +2290,10 @@ describe(`Electric Integration`, () => {
       const testCollection = createCollection(electricCollectionOptions(config))
 
       // Send data followed by snapshot-end (but no up-to-date)
-      subscriber([
+      // In progressive mode, these messages should be BUFFERED, and snapshot-end
+      // should NOT trigger a commit because the snapshot-end in the log could be
+      // from a significant period before the stream is actually up to date
+      testSubscriber([
         {
           key: `1`,
           value: { id: 1, name: `Test User` },
@@ -2172,21 +2309,74 @@ describe(`Electric Integration`, () => {
         },
       ])
 
-      // Data should be committed (available in state)
-      expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
-
-      // But collection should NOT be marked as ready yet in eager mode
+      // Data should NOT be visible yet (snapshot-end should be ignored before up-to-date)
+      expect(testCollection.has(1)).toBe(false)
       expect(testCollection.status).toBe(`loading`)
 
-      // Now send up-to-date
-      subscriber([
+      // Now send up-to-date (triggers atomic swap)
+      testSubscriber([
         {
           headers: { control: `up-to-date` },
         },
       ])
 
-      // Now it should be ready
+      // Now data should be visible after atomic swap
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+      expect(testCollection.status).toBe(`ready`)
+    })
+
+    it(`should commit on snapshot-end in eager mode AFTER first up-to-date`, () => {
+      const config = {
+        id: `eager-snapshot-end-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `eager` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // First send up-to-date (with initial data) to establish the connection
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `Test User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Data should be committed and collection ready
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.status).toBe(`ready`)
+
+      // Now send more data followed by snapshot-end (simulating incremental snapshot)
+      // After the first up-to-date, snapshot-end SHOULD commit
+      subscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `Second User` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+      ])
+
+      // Data should be committed since we've already received up-to-date
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.get(2)).toEqual({ id: 2, name: `Second User` })
       expect(testCollection.status).toBe(`ready`)
     })
 
@@ -2229,7 +2419,17 @@ describe(`Electric Integration`, () => {
       expect(testCollection.status).toBe(`ready`)
     })
 
-    it(`should commit on snapshot-end in progressive mode but not mark ready`, () => {
+    it(`should buffer changes during snapshot phase in progressive mode until up-to-date`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
       const config = {
         id: `progressive-snapshot-end-test`,
         shapeOptions: {
@@ -2244,7 +2444,8 @@ describe(`Electric Integration`, () => {
       const testCollection = createCollection(electricCollectionOptions(config))
 
       // Send data followed by snapshot-end (but no up-to-date)
-      subscriber([
+      // In progressive mode, these messages should be BUFFERED, not committed
+      testSubscriber([
         {
           key: `1`,
           value: { id: 1, name: `Test User` },
@@ -2260,25 +2461,28 @@ describe(`Electric Integration`, () => {
         },
       ])
 
-      // Data should be committed (available in state)
-      expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+      // Data should NOT be visible yet (it's buffered during snapshot phase)
+      expect(testCollection.has(1)).toBe(false)
 
-      // But collection should NOT be marked as ready yet in progressive mode
+      // Collection should NOT be marked as ready yet in progressive mode
       expect(testCollection.status).toBe(`loading`)
 
-      // Now send up-to-date
-      subscriber([
+      // Now send up-to-date (triggers atomic swap)
+      testSubscriber([
         {
           headers: { control: `up-to-date` },
         },
       ])
 
-      // Now it should be ready
+      // Now data should be visible after atomic swap
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+
+      // And it should be ready
       expect(testCollection.status).toBe(`ready`)
     })
 
-    it(`should commit multiple snapshot-end messages before up-to-date in eager mode`, () => {
+    it(`should NOT commit multiple snapshot-end messages before up-to-date in eager mode`, () => {
       const config = {
         id: `eager-multiple-snapshots-test`,
         shapeOptions: {
@@ -2292,7 +2496,7 @@ describe(`Electric Integration`, () => {
 
       const testCollection = createCollection(electricCollectionOptions(config))
 
-      // First snapshot with data
+      // First snapshot with data - snapshot-end should be ignored before up-to-date
       subscriber([
         {
           key: `1`,
@@ -2309,11 +2513,11 @@ describe(`Electric Integration`, () => {
         },
       ])
 
-      // First data should be committed
-      expect(testCollection.has(1)).toBe(true)
+      // First data should NOT be committed yet (snapshot-end ignored before up-to-date)
+      expect(testCollection.has(1)).toBe(false)
       expect(testCollection.status).toBe(`loading`)
 
-      // Second snapshot with more data
+      // Second snapshot with more data - still before up-to-date, so should be ignored
       subscriber([
         {
           key: `2`,
@@ -2330,19 +2534,22 @@ describe(`Electric Integration`, () => {
         },
       ])
 
-      // Second data should also be committed
-      expect(testCollection.has(2)).toBe(true)
-      expect(testCollection.size).toBe(2)
+      // Second data should also NOT be committed yet
+      expect(testCollection.has(2)).toBe(false)
+      expect(testCollection.size).toBe(0)
       expect(testCollection.status).toBe(`loading`)
 
-      // Finally send up-to-date
+      // Finally send up-to-date - this commits all the pending data
       subscriber([
         {
           headers: { control: `up-to-date` },
         },
       ])
 
-      // Now should be ready
+      // Now all data should be committed and collection ready
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.size).toBe(2)
       expect(testCollection.status).toBe(`ready`)
     })
 

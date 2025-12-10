@@ -5,7 +5,7 @@ title: OperationConfig
 
 # Interface: OperationConfig
 
-Defined in: [packages/db/src/types.ts:328](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L328)
+Defined in: [packages/db/src/types.ts:350](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L350)
 
 ## Properties
 
@@ -15,7 +15,7 @@ Defined in: [packages/db/src/types.ts:328](https://github.com/TanStack/db/blob/m
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:329](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L329)
+Defined in: [packages/db/src/types.ts:351](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L351)
 
 ***
 
@@ -25,6 +25,6 @@ Defined in: [packages/db/src/types.ts:329](https://github.com/TanStack/db/blob/m
 optional optimistic: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:331](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L331)
+Defined in: [packages/db/src/types.ts:353](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L353)
 
 Whether to apply optimistic updates immediately. Defaults to true.

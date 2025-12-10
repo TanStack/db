@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from "react"
-import mitt from "mitt"
+import { useEffect, useMemo, useState } from 'react'
+import mitt from 'mitt'
 import {
   createCollection,
   debounceStrategy,
   queueStrategy,
   throttleStrategy,
   usePacedMutations,
-} from "@tanstack/react-db"
-import type { PendingMutation, Transaction } from "@tanstack/react-db"
+} from '@tanstack/react-db'
+import type { PendingMutation, Transaction } from '@tanstack/react-db'
 
 interface Item {
   id: number
@@ -86,7 +86,7 @@ export function App() {
   const [trailing, setTrailing] = useState(true)
 
   const [transactions, setTransactions] = useState<Array<TrackedTransaction>>(
-    []
+    [],
   )
   const [optimisticState, setOptimisticState] = useState<Item | null>(null)
   const [syncedState, setSyncedState] = useState<Item>(fakeServer.get(1)!)
@@ -130,7 +130,7 @@ export function App() {
             return { ...t, state: `executing` as const, executingAt }
           }
           return t
-        })
+        }),
       )
 
       // Simulate network delay to fake server (random 100-600ms)
@@ -200,7 +200,7 @@ export function App() {
               }
             }
             return t
-          })
+          }),
         )
         // Update optimistic state after completion
         setOptimisticState(itemCollection.get(1))
@@ -213,7 +213,7 @@ export function App() {
               return { ...t, state: `failed` as const, completedAt: Date.now() }
             }
             return t
-          })
+          }),
         )
         // Update optimistic state after failure
         setOptimisticState(itemCollection.get(1))

@@ -1,8 +1,8 @@
-import { DEFAULT_COMPARE_OPTIONS } from "../utils"
-import { BTreeIndex } from "./btree-index"
-import type { CompareOptions } from "../query/builder/types"
-import type { BasicExpression } from "../query/ir"
-import type { CollectionImpl } from "../collection/index.js"
+import { DEFAULT_COMPARE_OPTIONS } from '../utils'
+import { BTreeIndex } from './btree-index'
+import type { CompareOptions } from '../query/builder/types'
+import type { BasicExpression } from '../query/ir'
+import type { CollectionImpl } from '../collection/index.js'
 
 export interface AutoIndexConfig {
   autoIndex?: `off` | `eager`
@@ -25,7 +25,7 @@ export function ensureIndexForField<
   fieldPath: Array<string>,
   collection: CollectionImpl<T, TKey, any, any, any>,
   compareOptions?: CompareOptions,
-  compareFn?: (a: any, b: any) => number
+  compareFn?: (a: any, b: any) => number,
 ) {
   if (!shouldAutoIndex(collection)) {
     return
@@ -39,7 +39,7 @@ export function ensureIndexForField<
   // Check if we already have an index for this field
   const existingIndex = Array.from(collection.indexes.values()).find(
     (index) =>
-      index.matchesField(fieldPath) && index.matchesCompareOptions(compareOpts)
+      index.matchesField(fieldPath) && index.matchesCompareOptions(compareOpts),
   )
 
   if (existingIndex) {
@@ -62,12 +62,12 @@ export function ensureIndexForField<
         name: `auto:${fieldPath.join(`.`)}`,
         indexType: BTreeIndex,
         options: compareFn ? { compareFn, compareOptions: compareOpts } : {},
-      }
+      },
     )
   } catch (error) {
     console.warn(
       `${collection.id ? `[${collection.id}] ` : ``}Failed to create auto-index for field path "${fieldPath.join(`.`)}":`,
-      error
+      error,
     )
   }
 }
@@ -80,7 +80,7 @@ export function ensureIndexForExpression<
   TKey extends string | number,
 >(
   expression: BasicExpression,
-  collection: CollectionImpl<T, TKey, any, any, any>
+  collection: CollectionImpl<T, TKey, any, any, any>,
 ): void {
   if (!shouldAutoIndex(collection)) {
     return
@@ -98,7 +98,7 @@ export function ensureIndexForExpression<
  * Extracts all indexable expressions from a where expression
  */
 function extractIndexableExpressions(
-  expression: BasicExpression
+  expression: BasicExpression,
 ): Array<{ fieldName: string; fieldPath: Array<string> }> {
   const results: Array<{ fieldName: string; fieldPath: Array<string> }> = []
 

@@ -1,17 +1,17 @@
-import { DiffTriggerOperation, sanitizeSQL } from "@powersync/common"
-import { PendingOperationStore } from "./PendingOperationStore"
-import { PowerSyncTransactor } from "./PowerSyncTransactor"
-import { DEFAULT_BATCH_SIZE } from "./definitions"
-import { asPowerSyncRecord, mapOperation } from "./helpers"
-import { convertTableToSchema } from "./schema"
-import { serializeForSQLite } from "./serialization"
+import { DiffTriggerOperation, sanitizeSQL } from '@powersync/common'
+import { PendingOperationStore } from './PendingOperationStore'
+import { PowerSyncTransactor } from './PowerSyncTransactor'
+import { DEFAULT_BATCH_SIZE } from './definitions'
+import { asPowerSyncRecord, mapOperation } from './helpers'
+import { convertTableToSchema } from './schema'
+import { serializeForSQLite } from './serialization'
 import type {
   AnyTableColumnType,
   ExtractedTable,
   ExtractedTableColumns,
   MapBaseColumnType,
   OptionalExtractedTable,
-} from "./helpers"
+} from './helpers'
 import type {
   BasePowerSyncCollectionConfig,
   ConfigWithArbitraryCollectionTypes,
@@ -22,11 +22,11 @@ import type {
   InferPowerSyncOutputType,
   PowerSyncCollectionConfig,
   PowerSyncCollectionUtils,
-} from "./definitions"
-import type { PendingOperation } from "./PendingOperationStore"
-import type { SyncConfig } from "@tanstack/db"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { Table, TriggerDiffRecord } from "@powersync/common"
+} from './definitions'
+import type { PendingOperation } from './PendingOperationStore'
+import type { SyncConfig } from '@tanstack/db'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { Table, TriggerDiffRecord } from '@powersync/common'
 
 /**
  * Creates PowerSync collection options for use with a standard Collection.
@@ -69,7 +69,7 @@ import type { Table, TriggerDiffRecord } from "@powersync/common"
  * ```
  */
 export function powerSyncCollectionOptions<TTable extends Table = Table>(
-  config: BasePowerSyncCollectionConfig<TTable, never> & ConfigWithSQLiteTypes
+  config: BasePowerSyncCollectionConfig<TTable, never> & ConfigWithSQLiteTypes,
 ): EnhancedPowerSyncCollectionConfig<
   TTable,
   OptionalExtractedTable<TTable>,
@@ -134,7 +134,7 @@ export function powerSyncCollectionOptions<
   >,
 >(
   config: BasePowerSyncCollectionConfig<TTable, TSchema> &
-    ConfigWithSQLiteInputType<TTable, TSchema>
+    ConfigWithSQLiteInputType<TTable, TSchema>,
 ): EnhancedPowerSyncCollectionConfig<
   TTable,
   InferPowerSyncOutputType<TTable, TSchema>,
@@ -202,7 +202,7 @@ export function powerSyncCollectionOptions<
   >,
 >(
   config: BasePowerSyncCollectionConfig<TTable, TSchema> &
-    ConfigWithArbitraryCollectionTypes<TTable, TSchema>
+    ConfigWithArbitraryCollectionTypes<TTable, TSchema>,
 ): EnhancedPowerSyncCollectionConfig<
   TTable,
   InferPowerSyncOutputType<TTable, TSchema>,
@@ -280,7 +280,7 @@ export function powerSyncCollectionOptions<
   const pendingOperationStore = PendingOperationStore.GLOBAL
   // Keep the tracked table unique in case of multiple tabs.
   const trackedTableName = `__${viewName}_tracking_${Math.floor(
-    Math.random() * 0xffffffff
+    Math.random() * 0xffffffff,
   )
     .toString(16)
     .padStart(8, `0`)}`
@@ -302,7 +302,7 @@ export function powerSyncCollectionOptions<
       // The sync function needs to be synchronous
       async function start() {
         database.logger.info(
-          `Sync is starting for ${viewName} into ${trackedTableName}`
+          `Sync is starting for ${viewName} into ${trackedTableName}`,
         )
         database.onChangeWithCallback(
           {
@@ -311,7 +311,7 @@ export function powerSyncCollectionOptions<
                 .writeTransaction(async (context) => {
                   begin()
                   const operations = await context.getAll<TriggerDiffRecord>(
-                    `SELECT * FROM ${trackedTableName} ORDER BY timestamp ASC`
+                    `SELECT * FROM ${trackedTableName} ORDER BY timestamp ASC`,
                   )
                   const pendingOperations: Array<PendingOperation> = []
 
@@ -350,7 +350,7 @@ export function powerSyncCollectionOptions<
                 .catch((error) => {
                   database.logger.error(
                     `An error has been detected in the sync handler`,
-                    error
+                    error,
                   )
                 })
             },
@@ -359,7 +359,7 @@ export function powerSyncCollectionOptions<
             signal: abortController.signal,
             triggerImmediate: false,
             tables: [trackedTableName],
-          }
+          },
         )
 
         const disposeTracking = await database.triggers.createDiffTrigger({
@@ -378,7 +378,7 @@ export function powerSyncCollectionOptions<
                 begin()
                 const batchItems = await context.getAll<TableType>(
                   sanitizeSQL`SELECT * FROM ${viewName} LIMIT ? OFFSET ?`,
-                  [syncBatchSize, cursor]
+                  [syncBatchSize, cursor],
                 )
                 currentBatchCount = batchItems.length
                 cursor += currentBatchCount
@@ -392,7 +392,7 @@ export function powerSyncCollectionOptions<
               }
               markReady()
               database.logger.info(
-                `Sync is ready for ${viewName} into ${trackedTableName}`
+                `Sync is ready for ${viewName} into ${trackedTableName}`,
               )
             },
           },
@@ -407,7 +407,7 @@ export function powerSyncCollectionOptions<
             () => {
               disposeTracking()
             },
-            { once: true }
+            { once: true },
           )
         }
       }
@@ -415,13 +415,13 @@ export function powerSyncCollectionOptions<
       start().catch((error) =>
         database.logger.error(
           `Could not start syncing process for ${viewName} into ${trackedTableName}`,
-          error
-        )
+          error,
+        ),
       )
 
       return () => {
         database.logger.info(
-          `Sync has been stopped for ${viewName} into ${trackedTableName}`
+          `Sync has been stopped for ${viewName} into ${trackedTableName}`,
         )
         abortController.abort()
       }
@@ -471,7 +471,7 @@ export function powerSyncCollectionOptions<
             serializer as CustomSQLiteSerializer<
               OutputType,
               ExtractedTableColumns<Table<MapBaseColumnType<OutputType>>>
-            >
+            >,
           ),
       }),
     },

@@ -1,5 +1,5 @@
-import type { QueryIR } from "../ir.js"
-import type { CompilationResult } from "./index.js"
+import type { QueryIR } from '../ir.js'
+import type { CompilationResult } from './index.js'
 
 /**
  * Cache for compiled subqueries to avoid duplicate compilation

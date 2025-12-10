@@ -1,10 +1,10 @@
-import { describe, expect, it } from "vitest"
-import { act, renderHook, waitFor } from "@testing-library/react"
-import { createCollection, createLiveQueryCollection, eq } from "@tanstack/db"
-import { useLiveInfiniteQuery } from "../src/useLiveInfiniteQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
-import { createFilterFunctionFromExpression } from "../../db/src/collection/change-events"
-import type { LoadSubsetOptions } from "@tanstack/db"
+import { describe, expect, it } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
+import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
+import { useLiveInfiniteQuery } from '../src/useLiveInfiniteQuery'
+import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import { createFilterFunctionFromExpression } from '../../db/src/collection/change-events'
+import type { LoadSubsetOptions } from '@tanstack/db'
 
 type Post = {
   id: string
@@ -36,7 +36,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `initial-page-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -54,7 +54,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -86,7 +86,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `multiple-pages-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -99,7 +99,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -145,7 +145,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `no-more-pages-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -158,7 +158,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -204,7 +204,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `empty-results-test`,
         getKey: (post: Post) => post.id,
         initialData: [],
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -217,7 +217,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -239,7 +239,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `live-updates-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -252,7 +252,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -310,7 +310,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `deletions-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -323,7 +323,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -375,7 +375,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `where-clause-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -389,7 +389,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 5,
           getNextPageParam: (lastPage) =>
             lastPage.length === 5 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -428,7 +428,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `deps-change-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result, rerender } = renderHook(
@@ -444,10 +444,10 @@ describe(`useLiveInfiniteQuery`, () => {
             getNextPageParam: (lastPage) =>
               lastPage.length === 5 ? lastPage.length : undefined,
           },
-          [category]
+          [category],
         )
       },
-      { initialProps: { category: `tech` } }
+      { initialProps: { category: `tech` } },
     )
 
     await waitFor(() => {
@@ -486,7 +486,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `page-params-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -500,7 +500,7 @@ describe(`useLiveInfiniteQuery`, () => {
           initialPageParam: 0,
           getNextPageParam: (lastPage, allPages, lastPageParam) =>
             lastPage.length === 10 ? lastPageParam + 1 : undefined,
-        }
+        },
       )
     })
 
@@ -536,7 +536,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `exact-boundary-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -557,7 +557,7 @@ describe(`useLiveInfiniteQuery`, () => {
             // If we have less than a full page left, no more pages
             return totalLoaded
           },
-        }
+        },
       )
     })
 
@@ -592,7 +592,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `concurrent-fetch-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -605,7 +605,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -653,7 +653,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `no-fetch-when-done-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -666,7 +666,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -695,7 +695,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `initial-param-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -709,7 +709,7 @@ describe(`useLiveInfiniteQuery`, () => {
           initialPageParam: 100,
           getNextPageParam: (lastPage, allPages, lastPageParam) =>
             lastPage.length === 10 ? lastPageParam + 1 : undefined,
-        }
+        },
       )
     })
 
@@ -736,7 +736,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `sync-detection-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -749,7 +749,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -821,7 +821,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `immediate-data-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -834,7 +834,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -938,7 +938,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 10,
           getNextPageParam: (lastPage) =>
             lastPage.length === 10 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -966,7 +966,7 @@ describe(`useLiveInfiniteQuery`, () => {
       () => {
         expect(result.current.isFetchingNextPage).toBe(false)
       },
-      { timeout: 200 }
+      { timeout: 200 },
     )
 
     // Should have 2 pages now
@@ -982,7 +982,7 @@ describe(`useLiveInfiniteQuery`, () => {
           id: `pre-created-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
-        })
+        }),
       )
 
       const liveQueryCollection = createLiveQueryCollection({
@@ -1027,7 +1027,7 @@ describe(`useLiveInfiniteQuery`, () => {
           id: `pre-created-multi-page-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
-        })
+        }),
       )
 
       const liveQueryCollection = createLiveQueryCollection({
@@ -1078,7 +1078,7 @@ describe(`useLiveInfiniteQuery`, () => {
           id: `pre-created-reset-1`,
           getKey: (post: Post) => post.id,
           initialData: posts1,
-        })
+        }),
       )
 
       const liveQueryCollection1 = createLiveQueryCollection({
@@ -1098,7 +1098,7 @@ describe(`useLiveInfiniteQuery`, () => {
           id: `pre-created-reset-2`,
           getKey: (post: Post) => post.id,
           initialData: posts2,
-        })
+        }),
       )
 
       const liveQueryCollection2 = createLiveQueryCollection({
@@ -1120,7 +1120,7 @@ describe(`useLiveInfiniteQuery`, () => {
               lastPage.length === 10 ? lastPage.length : undefined,
           })
         },
-        { initialProps: { coll: liveQueryCollection1 } }
+        { initialProps: { coll: liveQueryCollection1 } },
       )
 
       await waitFor(() => {
@@ -1158,7 +1158,7 @@ describe(`useLiveInfiniteQuery`, () => {
           id: `no-orderby-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
-        })
+        }),
       )
 
       // Create collection WITHOUT orderBy
@@ -1220,7 +1220,7 @@ describe(`useLiveInfiniteQuery`, () => {
           id: `mismatched-window-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
-        })
+        }),
       )
 
       const liveQueryCollection = createLiveQueryCollection({
@@ -1261,7 +1261,7 @@ describe(`useLiveInfiniteQuery`, () => {
           id: `pre-created-live-updates-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
-        })
+        }),
       )
 
       const liveQueryCollection = createLiveQueryCollection({
@@ -1334,7 +1334,7 @@ describe(`useLiveInfiniteQuery`, () => {
           id: `router-loader-test`,
           getKey: (post: Post) => post.id,
           initialData: posts,
-        })
+        }),
       )
 
       // Simulate router loader: create and preload collection

@@ -1,5 +1,21 @@
 # @tanstack/offline-transactions
 
+## 1.0.1
+
+### Patch Changes
+
+- Use regular dependency for @tanstack/db instead of peerDependency to match the standard pattern used by other TanStack DB packages and prevent duplicate installations ([#952](https://github.com/TanStack/db/pull/952))
+
+- Updated dependencies [[`c4b9399`](https://github.com/TanStack/db/commit/c4b93997432743d974749683059bf68a082d3e5b), [`a1a484e`](https://github.com/TanStack/db/commit/a1a484ec4d2331d702ab9c4b7e5b02622c76b3dd)]:
+  - @tanstack/db@0.5.11
+
+## 1.0.0
+
+### Patch Changes
+
+- Updated dependencies [[`243a35a`](https://github.com/TanStack/db/commit/243a35a632ee0aca20c3ee12ee2ac2929d8be11d), [`f9d11fc`](https://github.com/TanStack/db/commit/f9d11fc3d7297c61feb3c6876cb2f436edbb5b34), [`7aedf12`](https://github.com/TanStack/db/commit/7aedf12996a67ef64010bca0d78d51c919dd384f), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`f6ac7ea`](https://github.com/TanStack/db/commit/f6ac7eac50ae1334ddb173786a68c9fc732848f9), [`01093a7`](https://github.com/TanStack/db/commit/01093a762cf2f5f308edec7f466d1c3dabb5ea9f)]:
+  - @tanstack/db@0.5.0
+
 ## 0.1.3
 
 ### Patch Changes
@@ -75,7 +91,7 @@
   import {
     startOfflineExecutor,
     IndexedDBAdapter,
-  } from "@tanstack/offline-transactions"
+  } from '@tanstack/offline-transactions'
 
   const executor = startOfflineExecutor({
     collections: { todos: todoCollection },
@@ -87,18 +103,18 @@
       },
     },
     onStorageFailure: (diagnostic) => {
-      console.warn("Running in online-only mode:", diagnostic.message)
+      console.warn('Running in online-only mode:', diagnostic.message)
     },
   })
 
   // Create offline transaction
   const tx = executor.createOfflineTransaction({
-    mutationFnName: "syncTodos",
+    mutationFnName: 'syncTodos',
     autoCommit: false,
   })
 
   tx.mutate(() => {
-    todoCollection.insert({ id: "1", text: "Buy milk", completed: false })
+    todoCollection.insert({ id: '1', text: 'Buy milk', completed: false })
   })
 
   await tx.commit() // Persists to outbox and syncs when online

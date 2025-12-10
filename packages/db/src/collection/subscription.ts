@@ -1,32 +1,39 @@
-import { ensureIndexForExpression } from "../indexes/auto-index.js"
-import { and, eq, gt, lt } from "../query/builder/functions.js"
-import { Value } from "../query/ir.js"
-import { EventEmitter } from "../event-emitter.js"
+import { ensureIndexForExpression } from '../indexes/auto-index.js'
+import { and, eq, gte, lt } from '../query/builder/functions.js'
+import { Value } from '../query/ir.js'
+import { EventEmitter } from '../event-emitter.js'
+import { buildCursor } from '../utils/cursor.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
-} from "./change-events.js"
-import type { BasicExpression, OrderBy } from "../query/ir.js"
-import type { IndexInterface } from "../indexes/base-index.js"
+} from './change-events.js'
+import type { BasicExpression, OrderBy } from '../query/ir.js'
+import type { IndexInterface } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
+  LoadSubsetOptions,
   Subscription,
   SubscriptionEvents,
   SubscriptionStatus,
   SubscriptionUnsubscribedEvent,
-} from "../types.js"
-import type { CollectionImpl } from "./index.js"
+} from '../types.js'
+import type { CollectionImpl } from './index.js'
 
 type RequestSnapshotOptions = {
   where?: BasicExpression<boolean>
   optimizedOnly?: boolean
   trackLoadSubsetPromise?: boolean
+  /** Optional orderBy to pass to loadSubset for backend optimization */
+  orderBy?: OrderBy
+  /** Optional limit to pass to loadSubset for backend optimization */
+  limit?: number
 }
 
 type RequestLimitedSnapshotOptions = {
   orderBy: OrderBy
   limit: number
-  minValue?: any
+  /** All column values for cursor (first value used for local index, all values for sync layer) */
+  minValues?: Array<unknown>
 }
 
 type CollectionSubscriptionOptions = {
@@ -47,6 +54,12 @@ export class CollectionSubscription
   // While `snapshotSent` is false we filter out all changes from subscription to the collection.
   private snapshotSent = false
 
+  /**
+   * Track all loadSubset calls made by this subscription so we can unload them on cleanup.
+   * We store the exact LoadSubsetOptions we passed to loadSubset to ensure symmetric unload.
+   */
+  private loadedSubsets: Array<LoadSubsetOptions> = []
+
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
 
@@ -65,7 +78,7 @@ export class CollectionSubscription
   constructor(
     private collection: CollectionImpl<any, any, any, any, any>,
     private callback: (changes: Array<ChangeMessage<any, any>>) => void,
-    private options: CollectionSubscriptionOptions
+    private options: CollectionSubscriptionOptions,
   ) {
     super()
     if (options.onUnsubscribe) {
@@ -78,7 +91,7 @@ export class CollectionSubscription
     }
 
     const callbackWithSentKeysTracking = (
-      changes: Array<ChangeMessage<any, any>>
+      changes: Array<ChangeMessage<any, any>>,
     ) => {
       callback(changes)
       this.trackSentKeys(changes)
@@ -193,10 +206,17 @@ export class CollectionSubscription
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const syncResult = this.collection._sync.loadSubset({
+    const loadOptions: LoadSubsetOptions = {
       where: stateOpts.where,
       subscription: this,
-    })
+      // Include orderBy and limit if provided so sync layer can optimize the query
+      orderBy: opts?.orderBy,
+      limit: opts?.limit,
+    }
+    const syncResult = this.collection._sync.loadSubset(loadOptions)
+
+    // Track this loadSubset call so we can unload it later
+    this.loadedSubsets.push(loadOptions)
 
     const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
     if (trackLoadSubsetPromise) {
@@ -213,7 +233,7 @@ export class CollectionSubscription
 
     // Only send changes that have not been sent yet
     const filteredSnapshot = snapshot.filter(
-      (change) => !this.sentKeys.has(change.key)
+      (change) => !this.sentKeys.has(change.key),
     )
 
     this.snapshotSent = true
@@ -222,25 +242,35 @@ export class CollectionSubscription
   }
 
   /**
-   * Sends a snapshot that fulfills the `where` clause and all rows are bigger or equal to `minValue`.
+   * Sends a snapshot that fulfills the `where` clause and all rows are bigger or equal to the cursor.
    * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
    * It uses that range index to load the items in the order of the index.
-   * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to `minValue` + limit values greater than `minValue`.
+   *
+   * For multi-column orderBy:
+   * - Uses first value from `minValues` for LOCAL index operations (wide bounds, ensures no missed rows)
+   * - Uses all `minValues` to build a precise composite cursor for SYNC layer loadSubset
+   *
+   * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
    *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
    * Note 2: it does not send keys that have already been sent before.
    */
   requestLimitedSnapshot({
     orderBy,
     limit,
-    minValue,
+    minValues,
   }: RequestLimitedSnapshotOptions) {
     if (!limit) throw new Error(`limit is required`)
 
     if (!this.orderByIndex) {
       throw new Error(
-        `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`
+        `Ordered snapshot was requested but no index was found. You have to call setOrderByIndex before requesting an ordered snapshot.`,
       )
     }
+
+    // Derive first column value from minValues (used for local index operations)
+    const minValue = minValues?.[0]
+    // Cast for index operations (index expects string | number)
+    const minValueForIndex = minValue as string | number | undefined
 
     const index = this.orderByIndex
     const where = this.options.whereExpression
@@ -261,7 +291,7 @@ export class CollectionSubscription
       return whereFilterFn?.(value) ?? true
     }
 
-    let biggestObservedValue = minValue
+    let biggestObservedValue = minValueForIndex
     const changes: Array<ChangeMessage<any, string | number>> = []
 
     // If we have a minValue we need to handle the case
@@ -270,12 +300,16 @@ export class CollectionSubscription
     // so if minValue is 3 then the previous snapshot may not have included all 3s
     // e.g. if it was offset 0 and limit 3 it would only have loaded the first 3
     //      so we load all rows equal to minValue first, to be sure we don't skip any duplicate values
+    //
+    // For multi-column orderBy, we use the first column value for index operations (wide bounds)
+    // This may load some duplicates but ensures we never miss any rows.
     let keys: Array<string | number> = []
-    if (minValue !== undefined) {
-      // First, get all items with the same value as minValue
+    if (minValueForIndex !== undefined) {
+      // First, get all items with the same FIRST COLUMN value as minValue
+      // This provides wide bounds for the local index
       const { expression } = orderBy[0]!
       const allRowsWithMinValue = this.collection.currentStateAsChanges({
-        where: eq(expression, new Value(minValue)),
+        where: eq(expression, new Value(minValueForIndex)),
       })
 
       if (allRowsWithMinValue) {
@@ -289,15 +323,15 @@ export class CollectionSubscription
         // Then get items greater than minValue
         const keysGreaterThanMin = index.take(
           limit - keys.length,
-          minValue,
-          filterFn
+          minValueForIndex,
+          filterFn,
         )
         keys.push(...keysGreaterThanMin)
       } else {
-        keys = index.take(limit, minValue, filterFn)
+        keys = index.take(limit, minValueForIndex, filterFn)
       }
     } else {
-      keys = index.take(limit, minValue, filterFn)
+      keys = index.take(limit, minValueForIndex, filterFn)
     }
 
     const valuesNeeded = () => Math.max(limit - changes.length, 0)
@@ -322,23 +356,28 @@ export class CollectionSubscription
 
     this.callback(changes)
 
+    // Build the WHERE filter for sync layer loadSubset
+    // buildCursor handles both single-column and multi-column cases
     let whereWithValueFilter = where
-    if (typeof minValue !== `undefined`) {
-      // Only request data that we haven't seen yet (i.e. is bigger than the minValue)
-      const { expression, compareOptions } = orderBy[0]!
-      const operator = compareOptions.direction === `asc` ? gt : lt
-      const valueFilter = operator(expression, new Value(minValue))
-      whereWithValueFilter = where ? and(where, valueFilter) : valueFilter
+    if (minValues !== undefined && minValues.length > 0) {
+      const cursor = buildCursor(orderBy, minValues)
+      if (cursor) {
+        whereWithValueFilter = where ? and(where, cursor) : cursor
+      }
     }
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const syncResult = this.collection._sync.loadSubset({
+    const loadOptions1: LoadSubsetOptions = {
       where: whereWithValueFilter,
       limit,
       orderBy,
       subscription: this,
-    })
+    }
+    const syncResult = this.collection._sync.loadSubset(loadOptions1)
+
+    // Track this loadSubset call
+    this.loadedSubsets.push(loadOptions1)
 
     // Make parallel loadSubset calls for values equal to minValue and values greater than minValue
     const promises: Array<Promise<void>> = []
@@ -346,12 +385,28 @@ export class CollectionSubscription
     // First promise: load all values equal to minValue
     if (typeof minValue !== `undefined`) {
       const { expression } = orderBy[0]!
-      const exactValueFilter = eq(expression, new Value(minValue))
 
-      const equalValueResult = this.collection._sync.loadSubset({
+      // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
+      // A JS Date represents a 1ms range, so we query for all values within that range
+      let exactValueFilter
+      if (minValue instanceof Date) {
+        const minValuePlus1ms = new Date(minValue.getTime() + 1)
+        exactValueFilter = and(
+          gte(expression, new Value(minValue)),
+          lt(expression, new Value(minValuePlus1ms)),
+        )
+      } else {
+        exactValueFilter = eq(expression, new Value(minValue))
+      }
+
+      const loadOptions2: LoadSubsetOptions = {
         where: exactValueFilter,
         subscription: this,
-      })
+      }
+      const equalValueResult = this.collection._sync.loadSubset(loadOptions2)
+
+      // Track this loadSubset call
+      this.loadedSubsets.push(loadOptions2)
 
       if (equalValueResult instanceof Promise) {
         promises.push(equalValueResult)
@@ -417,6 +472,13 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
+    // Unload all subsets that this subscription loaded
+    // We pass the exact same LoadSubsetOptions we used for loadSubset
+    for (const options of this.loadedSubsets) {
+      this.collection._sync.unloadSubset(options)
+    }
+    this.loadedSubsets = []
+
     this.emitInner(`unsubscribed`, {
       type: `unsubscribed`,
       subscription: this,

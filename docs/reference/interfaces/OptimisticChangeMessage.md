@@ -5,11 +5,11 @@ title: OptimisticChangeMessage
 
 # Interface: OptimisticChangeMessage\<T\>
 
-Defined in: [packages/db/src/types.ts:303](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L303)
+Defined in: [packages/db/src/types.ts:325](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L325)
 
 ## Extends
 
-- [`ChangeMessage`](../ChangeMessage.md)\<`T`\>
+- [`ChangeMessage`](ChangeMessage.md)\<`T`\>
 
 ## Type Parameters
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/types.ts:303](https://github.com/TanStack/db/blob/m
 optional isActive: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:307](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L307)
+Defined in: [packages/db/src/types.ts:329](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L329)
 
 ***
 
@@ -35,11 +35,11 @@ Defined in: [packages/db/src/types.ts:307](https://github.com/TanStack/db/blob/m
 key: string | number;
 ```
 
-Defined in: [packages/db/src/types.ts:296](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L296)
+Defined in: [packages/db/src/types.ts:318](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L318)
 
 #### Inherited from
 
-[`ChangeMessage`](../ChangeMessage.md).[`key`](../ChangeMessage.md#key)
+[`ChangeMessage`](ChangeMessage.md).[`key`](ChangeMessage.md#key)
 
 ***
 
@@ -49,11 +49,11 @@ Defined in: [packages/db/src/types.ts:296](https://github.com/TanStack/db/blob/m
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:300](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L300)
+Defined in: [packages/db/src/types.ts:322](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L322)
 
 #### Inherited from
 
-[`ChangeMessage`](../ChangeMessage.md).[`metadata`](../ChangeMessage.md#metadata)
+[`ChangeMessage`](ChangeMessage.md).[`metadata`](ChangeMessage.md#metadata)
 
 ***
 
@@ -63,11 +63,11 @@ Defined in: [packages/db/src/types.ts:300](https://github.com/TanStack/db/blob/m
 optional previousValue: T;
 ```
 
-Defined in: [packages/db/src/types.ts:298](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L298)
+Defined in: [packages/db/src/types.ts:320](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L320)
 
 #### Inherited from
 
-[`ChangeMessage`](../ChangeMessage.md).[`previousValue`](../ChangeMessage.md#previousvalue)
+[`ChangeMessage`](ChangeMessage.md).[`previousValue`](ChangeMessage.md#previousvalue)
 
 ***
 
@@ -77,11 +77,11 @@ Defined in: [packages/db/src/types.ts:298](https://github.com/TanStack/db/blob/m
 type: OperationType;
 ```
 
-Defined in: [packages/db/src/types.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L299)
+Defined in: [packages/db/src/types.ts:321](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L321)
 
 #### Inherited from
 
-[`ChangeMessage`](../ChangeMessage.md).[`type`](../ChangeMessage.md#type)
+[`ChangeMessage`](ChangeMessage.md).[`type`](ChangeMessage.md#type)
 
 ***
 
@@ -91,8 +91,8 @@ Defined in: [packages/db/src/types.ts:299](https://github.com/TanStack/db/blob/m
 value: T;
 ```
 
-Defined in: [packages/db/src/types.ts:297](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L297)
+Defined in: [packages/db/src/types.ts:319](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L319)
 
 #### Inherited from
 
-[`ChangeMessage`](../ChangeMessage.md).[`value`](../ChangeMessage.md#value)
+[`ChangeMessage`](ChangeMessage.md).[`value`](ChangeMessage.md#value)

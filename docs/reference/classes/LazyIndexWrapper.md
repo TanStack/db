@@ -39,7 +39,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:43](https://github.com/TanSta
 
 ##### expression
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
 
 ##### name
 
@@ -47,7 +47,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:43](https://github.com/TanSta
 
 ##### resolver
 
-[`IndexResolver`](../../type-aliases/IndexResolver.md)\<`TKey`\>
+[`IndexResolver`](../type-aliases/IndexResolver.md)\<`TKey`\>
 
 ##### options
 
@@ -75,7 +75,7 @@ Get the index expression
 
 #### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
 
 ***
 
@@ -123,7 +123,7 @@ Get resolved index (throws if not ready)
 
 #### Returns
 
-[`BaseIndex`](../BaseIndex.md)\<`TKey`\>
+[`BaseIndex`](BaseIndex.md)\<`TKey`\>
 
 ***
 
@@ -155,4 +155,4 @@ Resolve the actual index
 
 #### Returns
 
-`Promise`\<[`BaseIndex`](../BaseIndex.md)\<`TKey`\>\>
+`Promise`\<[`BaseIndex`](BaseIndex.md)\<`TKey`\>\>

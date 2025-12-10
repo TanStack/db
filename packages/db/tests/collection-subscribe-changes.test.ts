@@ -1,16 +1,16 @@
-import { describe, expect, it, vi } from "vitest"
-import mitt from "mitt"
-import { createCollection } from "../src/collection/index.js"
-import { createTransaction } from "../src/transactions"
-import { eq } from "../src/query/builder/functions"
-import { PropRef } from "../src/query/ir"
+import { describe, expect, it, vi } from 'vitest'
+import mitt from 'mitt'
+import { createCollection } from '../src/collection/index.js'
+import { createTransaction } from '../src/transactions'
+import { eq } from '../src/query/builder/functions'
+import { PropRef } from '../src/query/ir'
 import type {
   ChangeMessage,
   ChangesPayload,
   MutationFn,
   PendingMutation,
   SyncConfig,
-} from "../src/types"
+} from '../src/types'
 
 // Helper function to wait for changes to be processed
 const waitForChanges = () => new Promise((resolve) => setTimeout(resolve, 10))
@@ -294,7 +294,7 @@ describe(`Collection.subscribeChanges`, () => {
       collection.update(item.id, (draft) => {
         draft.value = `updated optimistic value`
         draft.updated = true
-      })
+      }),
     )
 
     // Verify that update was emitted
@@ -437,7 +437,7 @@ describe(`Collection.subscribeChanges`, () => {
     updateTx.mutate(() =>
       collection.update(optItem.id, (draft) => {
         draft.value = `updated optimistic value`
-      })
+      }),
     )
 
     // Verify the optimistic update was emitted
@@ -557,7 +557,7 @@ describe(`Collection.subscribeChanges`, () => {
         { id: 3, value: `batch1` },
         { id: 4, value: `batch2` },
         { id: 5, value: `batch3` },
-      ])
+      ]),
     )
 
     // Verify only the 3 new items were emitted, not the existing ones
@@ -587,7 +587,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx2.mutate(() =>
       collection.update(itemToUpdate.id, (draft) => {
         draft.value = `updated value`
-      })
+      }),
     )
 
     // Verify only the updated item was emitted
@@ -734,7 +734,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx1.mutate(() =>
       collection.update(1, (draft) => {
         draft.status = `active`
-      })
+      }),
     )
 
     // Should emit an insert event for the newly active item
@@ -757,7 +757,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx2.mutate(() =>
       collection.update(2, (draft) => {
         draft.status = `inactive`
-      })
+      }),
     )
 
     // Should emit a delete event for the newly inactive item
@@ -780,7 +780,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx3.mutate(() =>
       collection.update(1, (draft) => {
         draft.value = `updated item1`
-      })
+      }),
     )
 
     // Should emit an update event for the active item
@@ -803,7 +803,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx4.mutate(() =>
       collection.update(2, (draft) => {
         draft.value = `updated inactive item`
-      })
+      }),
     )
 
     // Should not emit any events for inactive items
@@ -849,7 +849,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     await collection.stateWhenReady()
@@ -926,7 +926,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     await collection.stateWhenReady()
@@ -1042,7 +1042,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     await collection.stateWhenReady()
@@ -1182,7 +1182,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx.mutate(() =>
       collection.update(1, (draft) => {
         draft.value = `client-update`
-      })
+      }),
     )
 
     changeEvents.length = 0
@@ -1352,15 +1352,15 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Expect delete for id 1, and insert for id 2
     expect(changeEvents.some((e) => e.type === `delete` && e.key === 1)).toBe(
-      true
+      true,
     )
     expect(
       changeEvents.some(
         (e) =>
           e.type === `insert` &&
           e.key === 2 &&
-          e.value.value === `client-insert`
-      )
+          e.value.value === `client-insert`,
+      ),
     ).toBe(true)
     expect(collection.state.get(2)).toEqual({ id: 2, value: `client-insert` })
   })
@@ -1392,7 +1392,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx.mutate(() =>
       collection.update(1, (draft) => {
         draft.value = `client-update`
-      })
+      }),
     )
 
     changeEvents.length = 0
@@ -1407,7 +1407,7 @@ describe(`Collection.subscribeChanges`, () => {
     const inserts = changeEvents.filter((e) => e.type === `insert`)
     expect(deletes.some((e) => e.key === 1)).toBe(true)
     expect(
-      inserts.some((e) => e.key === 1 && e.value.value === `client-update`)
+      inserts.some((e) => e.key === 1 && e.value.value === `client-update`),
     ).toBe(true)
     expect(collection.state.get(1)).toEqual({ id: 1, value: `client-update` })
   })
@@ -1840,7 +1840,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
       {
         whereExpression: eq(new PropRef([`active`]), true),
-      }
+      },
     )
 
     const { begin, write, commit, markReady } = testSyncFunctions

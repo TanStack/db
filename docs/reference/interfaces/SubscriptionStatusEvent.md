@@ -5,7 +5,7 @@ title: SubscriptionStatusEvent
 
 # Interface: SubscriptionStatusEvent\<T\>
 
-Defined in: [packages/db/src/types.ts:203](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L203)
+Defined in: [packages/db/src/types.ts:222](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L222)
 
 Event emitted when subscription status changes to a specific status
 
@@ -13,7 +13,7 @@ Event emitted when subscription status changes to a specific status
 
 ### T
 
-`T` *extends* [`SubscriptionStatus`](../../type-aliases/SubscriptionStatus.md)
+`T` *extends* [`SubscriptionStatus`](../type-aliases/SubscriptionStatus.md)
 
 ## Properties
 
@@ -23,7 +23,7 @@ Event emitted when subscription status changes to a specific status
 previousStatus: SubscriptionStatus;
 ```
 
-Defined in: [packages/db/src/types.ts:206](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L206)
+Defined in: [packages/db/src/types.ts:225](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L225)
 
 ***
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/types.ts:206](https://github.com/TanStack/db/blob/m
 status: T;
 ```
 
-Defined in: [packages/db/src/types.ts:207](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L207)
+Defined in: [packages/db/src/types.ts:226](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L226)
 
 ***
 
@@ -43,7 +43,7 @@ Defined in: [packages/db/src/types.ts:207](https://github.com/TanStack/db/blob/m
 subscription: Subscription;
 ```
 
-Defined in: [packages/db/src/types.ts:205](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L205)
+Defined in: [packages/db/src/types.ts:224](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L224)
 
 ***
 
@@ -53,4 +53,4 @@ Defined in: [packages/db/src/types.ts:205](https://github.com/TanStack/db/blob/m
 type: `status:${T}`;
 ```
 
-Defined in: [packages/db/src/types.ts:204](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L204)
+Defined in: [packages/db/src/types.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L223)

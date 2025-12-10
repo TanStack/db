@@ -5,14 +5,14 @@ title: BTreeIndex
 
 # Class: BTreeIndex\<TKey\>
 
-Defined in: [packages/db/src/indexes/btree-index.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L30)
+Defined in: [packages/db/src/indexes/btree-index.ts:31](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L31)
 
 B+Tree index for sorted data with range queries
 This maintains items in sorted order and provides efficient range operations
 
 ## Extends
 
-- [`BaseIndex`](../BaseIndex.md)\<`TKey`\>
+- [`BaseIndex`](BaseIndex.md)\<`TKey`\>
 
 ## Type Parameters
 
@@ -32,7 +32,7 @@ new BTreeIndex<TKey>(
 options?): BTreeIndex<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L50)
+Defined in: [packages/db/src/indexes/btree-index.ts:51](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L51)
 
 #### Parameters
 
@@ -42,7 +42,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:50](https://github.com/TanSt
 
 ##### expression
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
 
 ##### name?
 
@@ -58,7 +58,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:50](https://github.com/TanSt
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`constructor`](../BaseIndex.md#constructor)
+[`BaseIndex`](BaseIndex.md).[`constructor`](BaseIndex.md#constructor)
 
 ## Properties
 
@@ -72,7 +72,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:87](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`compareOptions`](../BaseIndex.md#compareoptions)
+[`BaseIndex`](BaseIndex.md).[`compareOptions`](BaseIndex.md#compareoptions)
 
 ***
 
@@ -86,7 +86,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:81](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`expression`](../BaseIndex.md#expression)
+[`BaseIndex`](BaseIndex.md).[`expression`](BaseIndex.md#expression)
 
 ***
 
@@ -100,7 +100,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:79](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`id`](../BaseIndex.md#id)
+[`BaseIndex`](BaseIndex.md).[`id`](BaseIndex.md#id)
 
 ***
 
@@ -114,7 +114,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:86](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`lastUpdated`](../BaseIndex.md#lastupdated)
+[`BaseIndex`](BaseIndex.md).[`lastUpdated`](BaseIndex.md#lastupdated)
 
 ***
 
@@ -128,7 +128,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:84](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`lookupCount`](../BaseIndex.md#lookupcount)
+[`BaseIndex`](BaseIndex.md).[`lookupCount`](BaseIndex.md#lookupcount)
 
 ***
 
@@ -142,7 +142,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:80](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`name`](../BaseIndex.md#name)
+[`BaseIndex`](BaseIndex.md).[`name`](BaseIndex.md#name)
 
 ***
 
@@ -152,11 +152,11 @@ Defined in: [packages/db/src/indexes/base-index.ts:80](https://github.com/TanSta
 readonly supportedOperations: Set<"eq" | "gt" | "gte" | "lt" | "lte" | "in" | "like" | "ilike">;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:33](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L33)
+Defined in: [packages/db/src/indexes/btree-index.ts:34](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L34)
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`supportedOperations`](../BaseIndex.md#supportedoperations)
+[`BaseIndex`](BaseIndex.md).[`supportedOperations`](BaseIndex.md#supportedoperations)
 
 ***
 
@@ -170,7 +170,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:85](https://github.com/TanSta
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`totalLookupTime`](../BaseIndex.md#totallookuptime)
+[`BaseIndex`](BaseIndex.md).[`totalLookupTime`](BaseIndex.md#totallookuptime)
 
 ## Accessors
 
@@ -182,7 +182,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:85](https://github.com/TanSta
 get indexedKeysSet(): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:333](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L333)
+Defined in: [packages/db/src/indexes/btree-index.ts:337](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L337)
 
 ##### Returns
 
@@ -190,7 +190,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:333](https://github.com/TanS
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`indexedKeysSet`](../BaseIndex.md#indexedkeysset)
+[`BaseIndex`](BaseIndex.md).[`indexedKeysSet`](BaseIndex.md#indexedkeysset)
 
 ***
 
@@ -202,7 +202,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:333](https://github.com/TanS
 get keyCount(): number;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:199](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L199)
+Defined in: [packages/db/src/indexes/btree-index.ts:200](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L200)
 
 Gets the number of indexed keys
 
@@ -212,7 +212,7 @@ Gets the number of indexed keys
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`keyCount`](../BaseIndex.md#keycount)
+[`BaseIndex`](BaseIndex.md).[`keyCount`](BaseIndex.md#keycount)
 
 ***
 
@@ -224,7 +224,7 @@ Gets the number of indexed keys
 get orderedEntriesArray(): [any, Set<TKey>][];
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:337](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L337)
+Defined in: [packages/db/src/indexes/btree-index.ts:341](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L341)
 
 ##### Returns
 
@@ -232,7 +232,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:337](https://github.com/TanS
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`orderedEntriesArray`](../BaseIndex.md#orderedentriesarray)
+[`BaseIndex`](BaseIndex.md).[`orderedEntriesArray`](BaseIndex.md#orderedentriesarray)
 
 ***
 
@@ -244,7 +244,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:337](https://github.com/TanS
 get orderedEntriesArrayReversed(): [any, Set<TKey>][];
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:343](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L343)
+Defined in: [packages/db/src/indexes/btree-index.ts:347](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L347)
 
 ##### Returns
 
@@ -252,7 +252,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:343](https://github.com/TanS
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`orderedEntriesArrayReversed`](../BaseIndex.md#orderedentriesarrayreversed)
+[`BaseIndex`](BaseIndex.md).[`orderedEntriesArrayReversed`](BaseIndex.md#orderedentriesarrayreversed)
 
 ***
 
@@ -264,7 +264,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:343](https://github.com/TanS
 get valueMapData(): Map<any, Set<TKey>>;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:350](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L350)
+Defined in: [packages/db/src/indexes/btree-index.ts:354](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L354)
 
 ##### Returns
 
@@ -272,7 +272,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:350](https://github.com/TanS
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`valueMapData`](../BaseIndex.md#valuemapdata)
+[`BaseIndex`](BaseIndex.md).[`valueMapData`](BaseIndex.md#valuemapdata)
 
 ## Methods
 
@@ -282,7 +282,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:350](https://github.com/TanS
 add(key, item): void;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L69)
+Defined in: [packages/db/src/indexes/btree-index.ts:70](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L70)
 
 Adds a value to the index
 
@@ -302,7 +302,7 @@ Adds a value to the index
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`add`](../BaseIndex.md#add)
+[`BaseIndex`](BaseIndex.md).[`add`](BaseIndex.md#add)
 
 ***
 
@@ -312,7 +312,7 @@ Adds a value to the index
 build(entries): void;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:143](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L143)
+Defined in: [packages/db/src/indexes/btree-index.ts:144](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L144)
 
 Builds the index from a collection of entries
 
@@ -328,7 +328,7 @@ Builds the index from a collection of entries
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`build`](../BaseIndex.md#build)
+[`BaseIndex`](BaseIndex.md).[`build`](BaseIndex.md#build)
 
 ***
 
@@ -338,7 +338,7 @@ Builds the index from a collection of entries
 clear(): void;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L154)
+Defined in: [packages/db/src/indexes/btree-index.ts:155](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L155)
 
 Clears all data from the index
 
@@ -348,7 +348,7 @@ Clears all data from the index
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`clear`](../BaseIndex.md#clear)
+[`BaseIndex`](BaseIndex.md).[`clear`](BaseIndex.md#clear)
 
 ***
 
@@ -358,7 +358,7 @@ Clears all data from the index
 equalityLookup(value): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:208](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L208)
+Defined in: [packages/db/src/indexes/btree-index.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L209)
 
 Performs an equality lookup
 
@@ -374,7 +374,7 @@ Performs an equality lookup
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`equalityLookup`](../BaseIndex.md#equalitylookup)
+[`BaseIndex`](BaseIndex.md).[`equalityLookup`](BaseIndex.md#equalitylookup)
 
 ***
 
@@ -398,7 +398,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:182](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`evaluateIndexExpression`](../BaseIndex.md#evaluateindexexpression)
+[`BaseIndex`](BaseIndex.md).[`evaluateIndexExpression`](BaseIndex.md#evaluateindexexpression)
 
 ***
 
@@ -412,11 +412,11 @@ Defined in: [packages/db/src/indexes/base-index.ts:169](https://github.com/TanSt
 
 #### Returns
 
-[`IndexStats`](../../interfaces/IndexStats.md)
+[`IndexStats`](../interfaces/IndexStats.md)
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`getStats`](../BaseIndex.md#getstats)
+[`BaseIndex`](BaseIndex.md).[`getStats`](BaseIndex.md#getstats)
 
 ***
 
@@ -426,7 +426,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:169](https://github.com/TanSt
 inArrayLookup(values): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:318](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L318)
+Defined in: [packages/db/src/indexes/btree-index.ts:322](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L322)
 
 Performs an IN array lookup
 
@@ -442,7 +442,7 @@ Performs an IN array lookup
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`inArrayLookup`](../BaseIndex.md#inarraylookup)
+[`BaseIndex`](BaseIndex.md).[`inArrayLookup`](BaseIndex.md#inarraylookup)
 
 ***
 
@@ -452,13 +452,13 @@ Performs an IN array lookup
 protected initialize(_options?): void;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:64](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L64)
+Defined in: [packages/db/src/indexes/btree-index.ts:65](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L65)
 
 #### Parameters
 
 ##### \_options?
 
-[`BTreeIndexOptions`](../../interfaces/BTreeIndexOptions.md)
+[`BTreeIndexOptions`](../interfaces/BTreeIndexOptions.md)
 
 #### Returns
 
@@ -466,7 +466,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:64](https://github.com/TanSt
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`initialize`](../BaseIndex.md#initialize)
+[`BaseIndex`](BaseIndex.md).[`initialize`](BaseIndex.md#initialize)
 
 ***
 
@@ -476,7 +476,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:64](https://github.com/TanSt
 lookup(operation, value): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:164](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L164)
+Defined in: [packages/db/src/indexes/btree-index.ts:165](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L165)
 
 Performs a lookup operation
 
@@ -496,7 +496,7 @@ Performs a lookup operation
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`lookup`](../BaseIndex.md#lookup)
+[`BaseIndex`](BaseIndex.md).[`lookup`](BaseIndex.md#lookup)
 
 ***
 
@@ -523,7 +523,7 @@ The direction is ignored because the index can be reversed if the direction is d
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`matchesCompareOptions`](../BaseIndex.md#matchescompareoptions)
+[`BaseIndex`](BaseIndex.md).[`matchesCompareOptions`](BaseIndex.md#matchescompareoptions)
 
 ***
 
@@ -541,7 +541,7 @@ Checks if the index matches the provided direction.
 
 ##### direction
 
-[`OrderByDirection`](../../@tanstack/namespaces/IR/type-aliases/OrderByDirection.md)
+[`OrderByDirection`](../@tanstack/namespaces/IR/type-aliases/OrderByDirection.md)
 
 #### Returns
 
@@ -549,7 +549,7 @@ Checks if the index matches the provided direction.
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`matchesDirection`](../BaseIndex.md#matchesdirection)
+[`BaseIndex`](BaseIndex.md).[`matchesDirection`](BaseIndex.md#matchesdirection)
 
 ***
 
@@ -573,7 +573,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:134](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`matchesField`](../BaseIndex.md#matchesfield)
+[`BaseIndex`](BaseIndex.md).[`matchesField`](BaseIndex.md#matchesfield)
 
 ***
 
@@ -583,7 +583,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:134](https://github.com/TanSt
 rangeQuery(options): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:217](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L217)
+Defined in: [packages/db/src/indexes/btree-index.ts:218](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L218)
 
 Performs a range query with options
 This is more efficient for compound queries like "WHERE a > 5 AND a < 10"
@@ -592,7 +592,7 @@ This is more efficient for compound queries like "WHERE a > 5 AND a < 10"
 
 ##### options
 
-[`RangeQueryOptions`](../../interfaces/RangeQueryOptions.md) = `{}`
+[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md) = `{}`
 
 #### Returns
 
@@ -600,7 +600,7 @@ This is more efficient for compound queries like "WHERE a > 5 AND a < 10"
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`rangeQuery`](../BaseIndex.md#rangequery)
+[`BaseIndex`](BaseIndex.md).[`rangeQuery`](BaseIndex.md#rangequery)
 
 ***
 
@@ -610,7 +610,7 @@ This is more efficient for compound queries like "WHERE a > 5 AND a < 10"
 rangeQueryReversed(options): Set<TKey>;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:250](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L250)
+Defined in: [packages/db/src/indexes/btree-index.ts:251](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L251)
 
 Performs a reversed range query
 
@@ -618,7 +618,7 @@ Performs a reversed range query
 
 ##### options
 
-[`RangeQueryOptions`](../../interfaces/RangeQueryOptions.md) = `{}`
+[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md) = `{}`
 
 #### Returns
 
@@ -626,7 +626,7 @@ Performs a reversed range query
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`rangeQueryReversed`](../BaseIndex.md#rangequeryreversed)
+[`BaseIndex`](BaseIndex.md).[`rangeQueryReversed`](BaseIndex.md#rangequeryreversed)
 
 ***
 
@@ -636,7 +636,7 @@ Performs a reversed range query
 remove(key, item): void;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:100](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L100)
+Defined in: [packages/db/src/indexes/btree-index.ts:101](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L101)
 
 Removes a value from the index
 
@@ -656,7 +656,7 @@ Removes a value from the index
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`remove`](../BaseIndex.md#remove)
+[`BaseIndex`](BaseIndex.md).[`remove`](BaseIndex.md#remove)
 
 ***
 
@@ -680,7 +680,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:130](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`supports`](../BaseIndex.md#supports)
+[`BaseIndex`](BaseIndex.md).[`supports`](BaseIndex.md#supports)
 
 ***
 
@@ -693,7 +693,7 @@ take(
    filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:295](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L295)
+Defined in: [packages/db/src/indexes/btree-index.ts:299](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L299)
 
 Returns the next n items after the provided item or the first n items if no from item is provided.
 
@@ -723,7 +723,7 @@ The next n items after the provided key. Returns the first n items if no from it
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`take`](../BaseIndex.md#take)
+[`BaseIndex`](BaseIndex.md).[`take`](BaseIndex.md#take)
 
 ***
 
@@ -736,7 +736,7 @@ takeReversed(
    filterFn?): TKey[];
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:306](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L306)
+Defined in: [packages/db/src/indexes/btree-index.ts:310](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L310)
 
 Returns the next n items **before** the provided item (in descending order) or the last n items if no from item is provided.
 
@@ -766,7 +766,7 @@ The next n items **before** the provided key. Returns the last n items if no fro
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`takeReversed`](../BaseIndex.md#takereversed)
+[`BaseIndex`](BaseIndex.md).[`takeReversed`](BaseIndex.md#takereversed)
 
 ***
 
@@ -790,7 +790,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:187](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`trackLookup`](../BaseIndex.md#tracklookup)
+[`BaseIndex`](BaseIndex.md).[`trackLookup`](BaseIndex.md#tracklookup)
 
 ***
 
@@ -803,7 +803,7 @@ update(
    newItem): void;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:135](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L135)
+Defined in: [packages/db/src/indexes/btree-index.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L136)
 
 Updates a value in the index
 
@@ -827,7 +827,7 @@ Updates a value in the index
 
 #### Overrides
 
-[`BaseIndex`](../BaseIndex.md).[`update`](../BaseIndex.md#update)
+[`BaseIndex`](BaseIndex.md).[`update`](BaseIndex.md#update)
 
 ***
 
@@ -845,4 +845,4 @@ Defined in: [packages/db/src/indexes/base-index.ts:193](https://github.com/TanSt
 
 #### Inherited from
 
-[`BaseIndex`](../BaseIndex.md).[`updateTimestamp`](../BaseIndex.md#updatetimestamp)
+[`BaseIndex`](BaseIndex.md).[`updateTimestamp`](BaseIndex.md#updatetimestamp)

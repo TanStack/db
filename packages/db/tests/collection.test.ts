@@ -1,6 +1,6 @@
-import mitt from "mitt"
-import { describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection/index.js"
+import mitt from 'mitt'
+import { describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
@@ -8,14 +8,14 @@ import {
   MissingDeleteHandlerError,
   MissingInsertHandlerError,
   MissingUpdateHandlerError,
-} from "../src/errors"
-import { createTransaction } from "../src/transactions"
+} from '../src/errors'
+import { createTransaction } from '../src/transactions'
 import {
   flushPromises,
   mockSyncCollectionOptionsNoInitialState,
   withExpectedRejection,
-} from "./utils"
-import type { ChangeMessage, MutationFn, PendingMutation } from "../src/types"
+} from './utils'
+import type { ChangeMessage, MutationFn, PendingMutation } from '../src/types'
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -213,13 +213,13 @@ describe(`Collection`, () => {
 
     // The merged value should immediately contain the new insert
     expect(collection.state).toEqual(
-      new Map([[insertedKey, { id: 1, value: `bar` }]])
+      new Map([[insertedKey, { id: 1, value: `bar` }]]),
     )
 
     // check there's a transaction in peristing state
     expect(
       // @ts-expect-error possibly undefined is ok in test
-      tx.mutations[0].changes
+      tx.mutations[0].changes,
     ).toEqual({
       id: 1,
       value: `bar`,
@@ -264,7 +264,7 @@ describe(`Collection`, () => {
     // optimistic update is gone & synced data & combined state are all updated.
     expect(collection._state.transactions.size).toEqual(0) // Transaction should be cleaned up
     expect(collection.state).toEqual(
-      new Map([[insertedKey, { id: 1, value: `bar` }]])
+      new Map([[insertedKey, { id: 1, value: `bar` }]]),
     )
     expect(collection._state.optimisticUpserts.size).toEqual(0)
 
@@ -297,7 +297,7 @@ describe(`Collection`, () => {
       collection.update([1], (item) => {
         // @ts-expect-error possibly undefined is ok in test
         item[0].value = `bar2`
-      })
+      }),
     )
 
     // The merged value should contain the update.
@@ -313,8 +313,8 @@ describe(`Collection`, () => {
         (item) => {
           item.value = `bar3`
           item.newProp = `new value`
-        }
-      )
+        },
+      ),
     )
 
     // The merged value should contain the update
@@ -336,7 +336,7 @@ describe(`Collection`, () => {
         (item) => {
           item.value = `bar3.1`
           item.newProp = `new value.1`
-        }
+        },
       )
       collection.update(
         insertedKey,
@@ -344,7 +344,7 @@ describe(`Collection`, () => {
         (item) => {
           item.value = `bar3`
           item.newProp = `new value`
-        }
+        },
       )
     })
 
@@ -369,8 +369,8 @@ describe(`Collection`, () => {
             draft.value += `-updated`
             draft.boolean = true
           })
-        }
-      )
+        },
+      ),
     )
 
     // Check bulk updates
@@ -405,7 +405,7 @@ describe(`Collection`, () => {
     tx8.mutate(() =>
       collection.delete(tx8insertKey, {
         metadata: { reason: `test delete` },
-      })
+      }),
     )
     expect(tx8.mutations[0]?.metadata).toEqual({ reason: `test delete` })
     expect(collection.state.has(tx8insertKey)).toBe(false)
@@ -471,7 +471,7 @@ describe(`Collection`, () => {
       collection.insert({
         id: 1,
         value: `bar`,
-      })
+      }),
     )
 
     // The merged value should immediately contain the new insert
@@ -481,7 +481,7 @@ describe(`Collection`, () => {
     expect(
       // @ts-expect-error possibly undefined is ok in test
       Array.from(collection._state.transactions.values())[0].mutations[0]
-        .changes
+        .changes,
     ).toEqual({
       id: 1,
       value: `bar`,
@@ -523,7 +523,7 @@ describe(`Collection`, () => {
     // Throw when trying to delete a non-existent ID
     const tx2 = createTransaction({ mutationFn })
     expect(() =>
-      tx2.mutate(() => collection.delete(`non-existent-id`))
+      tx2.mutate(() => collection.delete(`non-existent-id`)),
     ).toThrow()
 
     // Should not throw when deleting by ID
@@ -567,6 +567,51 @@ describe(`Collection`, () => {
     }).not.toThrow()
   })
 
+  it(`should not allow bulk inserting documents with duplicate IDs in the same batch`, async () => {
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `bulk-duplicate-id-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+
+    // Try to bulk insert documents with duplicate IDs within the same batch
+    expect(() => {
+      tx.mutate(() =>
+        collection.insert([
+          { id: 1, value: `first` },
+          { id: 1, value: `second` }, // Same ID - should throw
+        ]),
+      )
+    }).toThrow(DuplicateKeyError)
+
+    // Should be able to bulk insert documents with different IDs
+    const tx2 = createTransaction({ mutationFn })
+    expect(() => {
+      tx2.mutate(() =>
+        collection.insert([
+          { id: 2, value: `first` },
+          { id: 3, value: `second` },
+        ]),
+      )
+    }).not.toThrow()
+
+    // Verify both items were inserted
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `first` })
+    expect(collection.state.get(3)).toEqual({ id: 3, value: `second` })
+  })
+
   it(`should support operation handler functions`, async () => {
     // Create mock handler functions
     const onInsertMock = vi.fn()
@@ -607,7 +652,7 @@ describe(`Collection`, () => {
     tx.mutate(() =>
       collection.update(1, (draft) => {
         draft.value = `updated value`
-      })
+      }),
     )
 
     // Test delete handler
@@ -782,7 +827,7 @@ describe(`Collection`, () => {
     // Test non-optimistic insert
     const nonOptimisticInsertTx = collection.insert(
       { id: 2, value: `non-optimistic insert` },
-      { optimistic: false }
+      { optimistic: false },
     )
 
     // Debug: Check the mutation was created with optimistic: false
@@ -810,7 +855,7 @@ describe(`Collection`, () => {
       { optimistic: false },
       (draft) => {
         draft.value = `non-optimistic update`
-      }
+      },
     )
 
     // The original value should still be there immediately
@@ -901,7 +946,7 @@ describe(`Collection`, () => {
     // Test explicit optimistic: true
     const explicitOptimisticTx = collection.insert(
       { id: 3, value: `explicit optimistic` },
-      { optimistic: true }
+      { optimistic: true },
     )
 
     // The item should appear immediately
@@ -920,7 +965,7 @@ describe(`Collection`, () => {
       { optimistic: true },
       (draft) => {
         draft.value = `optimistic update`
-      }
+      },
     )
 
     // The update should be reflected immediately
@@ -1212,7 +1257,7 @@ describe(`Collection`, () => {
       mockSyncCollectionOptionsNoInitialState<Row>({
         id: `repro-truncate-open-transaction`,
         getKey: (r) => r.id,
-      })
+      }),
     )
     const preloadPromise = collection.preload()
 

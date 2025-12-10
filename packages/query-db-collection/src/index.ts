@@ -1,11 +1,15 @@
+// Export QueryCollectionMeta from global.ts
+// This ensures the module augmentation in global.ts is processed by TypeScript
+export type { QueryCollectionMeta } from './global'
+
 export {
   queryCollectionOptions,
   type QueryCollectionConfig,
   type QueryCollectionUtils,
   type SyncOperation,
-} from "./query"
+} from './query'
 
-export * from "./errors"
+export * from './errors'
 
 // Re-export expression helpers from @tanstack/db
 export {
@@ -20,4 +24,4 @@ export {
   type SimpleComparison,
   type ParseWhereOptions,
   type ParsedOrderBy,
-} from "@tanstack/db"
+} from '@tanstack/db'

@@ -1,5 +1,170 @@
 # @tanstack/query-db-collection
 
+## 1.0.6
+
+### Patch Changes
+
+- fix(query-db-collection): use deep equality for object field comparison in query observer ([#967](https://github.com/TanStack/db/pull/967))
+
+  Fixed an issue where updating object fields (non-primitives) with `refetch: false` in `onUpdate` handlers would cause the value to rollback to the previous state every other update. The query observer was using shallow equality (`===`) to compare items, which compares object properties by reference rather than by value. This caused the observer to incorrectly detect differences and write stale data back to syncedData. Now uses `deepEquals` for proper value comparison.
+
+- Use regular dependency for @tanstack/db instead of peerDependency to match the standard pattern used by other TanStack DB packages and prevent duplicate installations ([#952](https://github.com/TanStack/db/pull/952))
+
+- Updated dependencies [[`c4b9399`](https://github.com/TanStack/db/commit/c4b93997432743d974749683059bf68a082d3e5b), [`a1a484e`](https://github.com/TanStack/db/commit/a1a484ec4d2331d702ab9c4b7e5b02622c76b3dd)]:
+  - @tanstack/db@0.5.11
+
+## 1.0.5
+
+### Patch Changes
+
+- fix: ensure ctx.meta.loadSubsetOptions type-safety works automatically ([#869](https://github.com/TanStack/db/pull/869))
+
+  The module augmentation for ctx.meta.loadSubsetOptions is now guaranteed to load automatically when importing from @tanstack/query-db-collection. Previously, users needed to explicitly import QueryCollectionMeta or use @ts-ignore to pass ctx.meta?.loadSubsetOptions to parseLoadSubsetOptions.
+
+  Additionally, QueryCollectionMeta is now an interface (instead of a type alias), enabling users to safely extend meta with custom properties via declaration merging:
+
+  ```typescript
+  declare module '@tanstack/query-db-collection' {
+    interface QueryCollectionMeta {
+      myCustomProperty: string
+    }
+  }
+  ```
+
+- Updated dependencies [[`c8a2c16`](https://github.com/TanStack/db/commit/c8a2c16aa528427d5ddd55cda4ee59a5cb369b5f)]:
+  - @tanstack/db@0.5.6
+
+## 1.0.4
+
+### Patch Changes
+
+- Fix data loss on component remount by implementing reference counting for QueryObserver lifecycle ([#870](https://github.com/TanStack/db/pull/870))
+
+  **What changed vs main:**
+
+  Previously, when live query subscriptions unsubscribed, there was no tracking of which rows were still needed by other active queries. This caused data loss during remounts.
+
+  This PR adds reference counting infrastructure to properly manage QueryObserver lifecycle:
+  1. Pass same predicates to `unloadSubset` that were passed to `loadSubset`
+  2. Use them to compute the queryKey (via `generateQueryKeyFromOptions`)
+  3. Use existing machinery (`queryToRows` map) to find rows that query loaded
+  4. Decrement the ref count
+  5. GC rows where count reaches 0 (no longer referenced by any active query)
+
+  **Impact:**
+  - Navigation back to previously loaded pages shows cached data immediately
+  - No unnecessary refetches during quick remounts (< gcTime)
+  - Multiple live queries with identical predicates correctly share QueryObservers
+  - Proper row-level cleanup when last subscriber leaves
+  - TanStack Query's cache lifecycle (gcTime) is fully respected
+  - No data leakage from in-flight requests when unsubscribing
+
+- Updated dependencies [[`077fc1a`](https://github.com/TanStack/db/commit/077fc1a418ca090d7533115888c09f3f609e36b2)]:
+  - @tanstack/db@0.5.5
+
+## 1.0.3
+
+### Patch Changes
+
+- Improved the type of the queryFn's ctx.meta property of the Query Collection to include the loadSubsetOptions ([#857](https://github.com/TanStack/db/pull/857))
+
+- Fixed bug where optimistic state leaked into syncedData when using writeInsert inside onInsert handlers. Previously, when syncing server-generated fields (like IDs or timestamps) using writeInsert within an onInsert handler, the QueryClient cache was updated with combined visible state (including optimistic changes), which triggered the query observer to write optimistic values back to syncedData. Now the cache is correctly updated with only server-confirmed state, ensuring syncedData maintains separation from optimistic state. ([#879](https://github.com/TanStack/db/pull/879))
+
+- Updated dependencies [[`acb3e4f`](https://github.com/TanStack/db/commit/acb3e4f1441e6872ca577e74d92ae2d77deb5938), [`464805d`](https://github.com/TanStack/db/commit/464805d96bad6d0fd741e48fbfc98e90dc58bebe), [`2c2e4db`](https://github.com/TanStack/db/commit/2c2e4dbd781d278347d73373f66d3c51c6388116), [`15c772f`](https://github.com/TanStack/db/commit/15c772f5e42e49000a2d775fd8e4cfda3418243f)]:
+  - @tanstack/db@0.5.4
+
+## 1.0.2
+
+### Patch Changes
+
+- Automatically append predicates to static queryKey in on-demand mode. ([#800](https://github.com/TanStack/db/pull/800))
+
+  When using a static `queryKey` with `syncMode: 'on-demand'`, the system now automatically appends serialized LoadSubsetOptions to create unique cache keys for different predicate combinations. This fixes an issue where all live queries with different predicates would share the same TanStack Query cache entry, causing data to be overwritten.
+
+  **Before:**
+
+  ```typescript
+  // This would cause conflicts between different queries
+  queryCollectionOptions({
+    queryKey: ['products'], // Static key
+    syncMode: 'on-demand',
+    queryFn: async (ctx) => {
+      const { where, limit } = ctx.meta.loadSubsetOptions
+      return fetch(`/api/products?...`).then((r) => r.json())
+    },
+  })
+  ```
+
+  With different live queries filtering by `category='A'` and `category='B'`, both would share the same cache key `['products']`, causing the last query to overwrite the first.
+
+  **After:**
+  Static queryKeys now work correctly in on-demand mode! The system automatically creates unique cache keys:
+  - Query with `category='A'` → `['products', '{"where":{...A...}}']`
+  - Query with `category='B'` → `['products', '{"where":{...B...}}']`
+
+  **Key behaviors:**
+  - ✅ Static queryKeys now work correctly with on-demand mode (automatic serialization)
+  - ✅ Function-based queryKeys continue to work as before (no change)
+  - ✅ Eager mode with static queryKeys unchanged (no automatic serialization)
+  - ✅ Identical predicates correctly reuse the same cache entry
+
+  This makes the documentation example work correctly without requiring users to manually implement function-based queryKeys for predicate push-down.
+
+- Updated dependencies [[`846a830`](https://github.com/TanStack/db/commit/846a8309a243197245f4400a5d53cef5cec6d5d9), [`8e26dcf`](https://github.com/TanStack/db/commit/8e26dcfde600e4a18cd51fbe524560d60ab98d70)]:
+  - @tanstack/db@0.5.3
+
+## 1.0.1
+
+### Patch Changes
+
+- Temporarily remove `loadSubset` call deduplication in query collection. We need to revisit our approach to deduplication to ensure correctness. See https://github.com/TanStack/db/issues/836 for discussion on the proper implementation strategy. ([#840](https://github.com/TanStack/db/pull/840))
+
+- Updated dependencies [[`a83a818`](https://github.com/TanStack/db/commit/a83a8189514d22ca2fcdf34b9cb97206d3c03c38)]:
+  - @tanstack/db@0.5.1
+
+## 1.0.0
+
+### Patch Changes
+
+- Add expression helper utilities for parsing LoadSubsetOptions in queryFn. ([#763](https://github.com/TanStack/db/pull/763))
+
+  When using `syncMode: 'on-demand'`, TanStack DB now provides helper functions to easily parse where clauses, orderBy, and limit predicates into your API's format:
+  - `parseWhereExpression`: Parse where clauses with custom handlers for each operator
+  - `parseOrderByExpression`: Parse order by into simple array format
+  - `extractSimpleComparisons`: Extract simple AND-ed filters
+  - `parseLoadSubsetOptions`: Convenience function to parse all options at once
+  - `walkExpression`, `extractFieldPath`, `extractValue`: Lower-level helpers
+
+  **Example:**
+
+  ```typescript
+  import { parseLoadSubsetOptions } from '@tanstack/db'
+  // or from "@tanstack/query-db-collection" (re-exported for convenience)
+
+  queryFn: async (ctx) => {
+    const { where, orderBy, limit } = ctx.meta.loadSubsetOptions
+
+    const parsed = parseLoadSubsetOptions({ where, orderBy, limit })
+
+    // Build API request from parsed filters
+    const params = new URLSearchParams()
+    parsed.filters.forEach(({ field, operator, value }) => {
+      if (operator === 'eq') {
+        params.set(field.join('.'), String(value))
+      }
+    })
+
+    return fetch(`/api/products?${params}`).then((r) => r.json())
+  }
+  ```
+
+  This eliminates the need to manually traverse expression AST trees when implementing predicate push-down.
+
+- Handle pushed-down predicates ([#763](https://github.com/TanStack/db/pull/763))
+
+- Updated dependencies [[`243a35a`](https://github.com/TanStack/db/commit/243a35a632ee0aca20c3ee12ee2ac2929d8be11d), [`f9d11fc`](https://github.com/TanStack/db/commit/f9d11fc3d7297c61feb3c6876cb2f436edbb5b34), [`7aedf12`](https://github.com/TanStack/db/commit/7aedf12996a67ef64010bca0d78d51c919dd384f), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`28f81b5`](https://github.com/TanStack/db/commit/28f81b5165d0a9566f99c2b6cf0ad09533e1a2cb), [`f6ac7ea`](https://github.com/TanStack/db/commit/f6ac7eac50ae1334ddb173786a68c9fc732848f9), [`01093a7`](https://github.com/TanStack/db/commit/01093a762cf2f5f308edec7f466d1c3dabb5ea9f)]:
+  - @tanstack/db@0.5.0
+
 ## 0.3.0
 
 ### Minor Changes
@@ -34,11 +199,11 @@
 
   // Check sync status
   if (collection.utils.isFetching) {
-    console.log("Syncing with server...")
+    console.log('Syncing with server...')
   }
 
   if (collection.utils.isRefetching) {
-    console.log("Background refresh in progress")
+    console.log('Background refresh in progress')
   }
 
   // Show last update time
@@ -47,7 +212,7 @@
 
   // Check error state (now using getters)
   if (collection.utils.isError) {
-    console.error("Sync failed:", collection.utils.lastError)
+    console.error('Sync failed:', collection.utils.lastError)
     console.log(`Failed ${collection.utils.errorCount} times`)
   }
   ```
@@ -155,8 +320,8 @@
   })
 
   queryCollectionOptions({
-    id: "wallet-accounts",
-    queryKey: ["wallet-accounts"],
+    id: 'wallet-accounts',
+    queryKey: ['wallet-accounts'],
     queryClient: dbQueryClient,
     // staleTime: Infinity is now inherited from defaultOptions
   })
@@ -549,7 +714,7 @@
   try {
     collection.insert(data)
   } catch (error) {
-    if (error.message.includes("already exists")) {
+    if (error.message.includes('already exists')) {
       // Handle duplicate key error
     }
   }
@@ -558,7 +723,7 @@
   **After:**
 
   ```ts
-  import { DuplicateKeyError } from "@tanstack/db"
+  import { DuplicateKeyError } from '@tanstack/db'
 
   try {
     collection.insert(data)
@@ -575,14 +740,14 @@
 
   ```ts
   // Electric collection errors were imported from @tanstack/db
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/db"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/db'
   ```
 
   **After:**
 
   ```ts
   // Now import from the specific adapter package
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/electric-db-collection"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/electric-db-collection'
   ```
 
   ### Unified Error Handling
@@ -590,14 +755,14 @@
   **New:**
 
   ```ts
-  import { TanStackDBError } from "@tanstack/db"
+  import { TanStackDBError } from '@tanstack/db'
 
   try {
     // Any TanStack DB operation
   } catch (error) {
     if (error instanceof TanStackDBError) {
       // Handle all TanStack DB errors uniformly
-      console.log("TanStack DB error:", error.message)
+      console.log('TanStack DB error:', error.message)
     }
   }
   ```

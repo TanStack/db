@@ -1,22 +1,22 @@
-import { randomUUID } from "node:crypto"
-import { tmpdir } from "node:os"
+import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
 import {
   CrudEntry,
   PowerSyncDatabase,
   Schema,
   Table,
   column,
-} from "@powersync/node"
+} from '@powersync/node'
 import {
   createCollection,
   createTransaction,
   eq,
   liveQueryCollectionOptions,
-} from "@tanstack/db"
-import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { powerSyncCollectionOptions } from "../src"
-import { PowerSyncTransactor } from "../src/PowerSyncTransactor"
-import type { AbstractPowerSyncDatabase } from "@powersync/node"
+} from '@tanstack/db'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { powerSyncCollectionOptions } from '../src'
+import { PowerSyncTransactor } from '../src/PowerSyncTransactor'
+import type { AbstractPowerSyncDatabase } from '@powersync/node'
 
 const APP_SCHEMA = new Schema({
   users: new Table({
@@ -60,7 +60,7 @@ describe(`PowerSync Integration`, () => {
         database: db,
         // We get typing and a default validator from this
         table: APP_SCHEMA.props.documents,
-      })
+      }),
     )
     onTestFinished(() => collection.cleanup())
     return collection
@@ -86,10 +86,11 @@ describe(`PowerSync Integration`, () => {
 
       // Verify the collection state contains our items
       expect(collection.size).toBe(3)
-      expect(collection.toArray.map((entry) => entry.name)).deep.equals([
+      // Sort by name since keys are random UUIDs
+      expect(collection.toArray.map((entry) => entry.name).sort()).deep.equals([
         `one`,
-        `two`,
         `three`,
+        `two`,
       ])
     })
 
@@ -115,14 +116,12 @@ describe(`PowerSync Integration`, () => {
       await vi.waitFor(
         () => {
           expect(collection.size).toBe(4)
-          expect(collection.toArray.map((entry) => entry.name)).deep.equals([
-            `one`,
-            `two`,
-            `three`,
-            `four`,
-          ])
+          // Sort by name since keys are random UUIDs
+          expect(
+            collection.toArray.map((entry) => entry.name).sort(),
+          ).deep.equals([`four`, `one`, `three`, `two`])
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
 
       await db.execute(`
@@ -134,13 +133,12 @@ describe(`PowerSync Integration`, () => {
       await vi.waitFor(
         () => {
           expect(collection.size).toBe(3)
-          expect(collection.toArray.map((entry) => entry.name)).deep.equals([
-            `one`,
-            `three`,
-            `four`,
-          ])
+          // Sort by name since keys are random UUIDs
+          expect(
+            collection.toArray.map((entry) => entry.name).sort(),
+          ).deep.equals([`four`, `one`, `three`])
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
 
       await db.execute(`
@@ -153,13 +151,12 @@ describe(`PowerSync Integration`, () => {
       await vi.waitFor(
         () => {
           expect(collection.size).toBe(3)
-          expect(collection.toArray.map((entry) => entry.name)).deep.equals([
-            `updated`,
-            `three`,
-            `four`,
-          ])
+          // Sort by name since keys are random UUIDs
+          expect(
+            collection.toArray.map((entry) => entry.name).sort(),
+          ).deep.equals([`four`, `three`, `updated`])
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
 
@@ -233,7 +230,7 @@ describe(`PowerSync Integration`, () => {
         autoCommit: false,
         mutationFn: async ({ transaction }) => {
           await new PowerSyncTransactor({ database: db }).applyTransaction(
-            transaction
+            transaction,
           )
         },
       })
@@ -265,7 +262,7 @@ describe(`PowerSync Integration`, () => {
         crudEntries
           .reverse()
           .slice(0, 5)
-          .every((crudEntry) => crudEntry.transactionId == lastTransactionId)
+          .every((crudEntry) => crudEntry.transactionId == lastTransactionId),
       ).true
     })
 
@@ -279,7 +276,7 @@ describe(`PowerSync Integration`, () => {
         powerSyncCollectionOptions({
           database: db,
           table: APP_SCHEMA.props.users,
-        })
+        }),
       )
       onTestFinished(() => usersCollection.cleanup())
 
@@ -293,7 +290,7 @@ describe(`PowerSync Integration`, () => {
         autoCommit: false,
         mutationFn: async ({ transaction }) => {
           await new PowerSyncTransactor({ database: db }).applyTransaction(
-            transaction
+            transaction,
           )
         },
       })
@@ -327,7 +324,7 @@ describe(`PowerSync Integration`, () => {
         crudEntries
           .reverse()
           .slice(0, 10)
-          .every((crudEntry) => crudEntry.transactionId == lastTransactionId)
+          .every((crudEntry) => crudEntry.transactionId == lastTransactionId),
       ).true
     })
 
@@ -409,7 +406,7 @@ describe(`PowerSync Integration`, () => {
         autoCommit: false,
         mutationFn: async ({ transaction }) => {
           await new PowerSyncTransactor({ database: db }).applyTransaction(
-            transaction
+            transaction,
           )
         },
       })
@@ -457,7 +454,7 @@ describe(`PowerSync Integration`, () => {
                 id: document.id,
                 name: document.name,
               })),
-        })
+        }),
       )
 
       expect(liveDocuments.size).eq(0)
@@ -484,7 +481,7 @@ describe(`PowerSync Integration`, () => {
         () => {
           expect(Array.from(bookNames)).deep.equals([`book`])
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
   })
@@ -508,7 +505,7 @@ describe(`PowerSync Integration`, () => {
           expect(collectionA.size).eq(3)
           expect(collectionB.size).eq(3)
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
   })
@@ -531,7 +528,7 @@ describe(`PowerSync Integration`, () => {
               FROM sqlite_temp_master 
               WHERE type='table' AND name = ?
             `,
-            [meta.trackedTableName]
+            [meta.trackedTableName],
           )
         })
         return result.count > 0
@@ -549,7 +546,7 @@ describe(`PowerSync Integration`, () => {
         async () => {
           expect(await tableExists()).false
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
   })

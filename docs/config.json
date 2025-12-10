@@ -21,53 +21,6 @@
           "label": "Installation",
           "to": "installation"
         }
-      ],
-      "frameworks": [
-        {
-          "label": "react",
-          "children": [
-            {
-              "label": "React Adapter",
-              "to": "framework/react/adapter"
-            }
-          ]
-        },
-        {
-          "label": "solid",
-          "children": [
-            {
-              "label": "Solid Adapter",
-              "to": "framework/solid/adapter"
-            }
-          ]
-        },
-        {
-          "label": "vue",
-          "children": [
-            {
-              "label": "Vue Adapter",
-              "to": "framework/vue/adapter"
-            }
-          ]
-        },
-        {
-          "label": "svelte",
-          "children": [
-            {
-              "label": "Svelte Adapter",
-              "to": "framework/svelte/adapter"
-            }
-          ]
-        },
-        {
-          "label": "angular",
-          "children": [
-            {
-              "label": "Angular Adapter",
-              "to": "framework/angular/adapter"
-            }
-          ]
-        }
       ]
     },
     {
@@ -80,6 +33,10 @@
         {
           "label": "Mutations",
           "to": "guides/mutations"
+        },
+        {
+          "label": "Schemas",
+          "to": "guides/schemas"
         },
         {
           "label": "Error Handling",
@@ -125,6 +82,31 @@
       ]
     },
     {
+      "label": "Frameworks",
+      "children": [
+        {
+          "label": "React",
+          "to": "framework/react/overview"
+        },
+        {
+          "label": "Vue",
+          "to": "framework/vue/overview"
+        },
+        {
+          "label": "Angular",
+          "to": "framework/angular/overview"
+        },
+        {
+          "label": "Solid",
+          "to": "framework/solid/overview"
+        },
+        {
+          "label": "Svelte",
+          "to": "framework/svelte/overview"
+        }
+      ]
+    },
+    {
       "label": "Community",
       "children": [
         {
@@ -142,7 +124,7 @@
         },
         {
           "label": "Collection",
-          "to": "reference/interfaces/collection"
+          "to": "reference/interfaces/Collection"
         },
         {
           "label": "createCollection",

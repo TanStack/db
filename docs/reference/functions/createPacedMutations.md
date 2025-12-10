@@ -36,7 +36,7 @@ or to handle errors.
 
 ### config
 
-[`PacedMutationsConfig`](../../interfaces/PacedMutationsConfig.md)\<`TVariables`, `T`\>
+[`PacedMutationsConfig`](../interfaces/PacedMutationsConfig.md)\<`TVariables`, `T`\>
 
 Configuration including onMutate, mutationFn and strategy
 
@@ -56,7 +56,7 @@ A function that accepts variables and returns a Transaction
 
 ### Returns
 
-[`Transaction`](../../interfaces/Transaction.md)\<`T`\>
+[`Transaction`](../interfaces/Transaction.md)\<`T`\>
 
 ## Examples
 

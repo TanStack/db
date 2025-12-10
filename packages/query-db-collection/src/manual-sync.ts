@@ -3,9 +3,9 @@ import {
   DuplicateKeyInBatchError,
   SyncNotInitializedError,
   UpdateOperationItemNotFoundError,
-} from "./errors"
-import type { QueryClient } from "@tanstack/query-core"
-import type { ChangeMessage, Collection } from "@tanstack/db"
+} from './errors'
+import type { QueryClient } from '@tanstack/query-core'
+import type { ChangeMessage, Collection } from '@tanstack/db'
 
 // Track active batch operations per context to prevent cross-collection contamination
 const activeBatchContexts = new WeakMap<
@@ -58,7 +58,7 @@ function normalizeOperations<
   ops:
     | SyncOperation<TRow, TKey, TInsertInput>
     | Array<SyncOperation<TRow, TKey, TInsertInput>>,
-  ctx: SyncContext<TRow, TKey>
+  ctx: SyncContext<TRow, TKey>,
 ): Array<NormalizedOperation<TRow, TKey>> {
   const operations = Array.isArray(ops) ? ops : [ops]
   const normalized: Array<NormalizedOperation<TRow, TKey>> = []
@@ -80,7 +80,7 @@ function normalizeOperations<
           // For insert/upsert, validate and resolve the full item first
           const resolved = ctx.collection.validateData(
             item,
-            op.type === `upsert` ? `insert` : op.type
+            op.type === `upsert` ? `insert` : op.type,
           )
           key = ctx.getKey(resolved)
         }
@@ -98,7 +98,7 @@ function validateOperations<
   TKey extends string | number = string | number,
 >(
   operations: Array<NormalizedOperation<TRow, TKey>>,
-  ctx: SyncContext<TRow, TKey>
+  ctx: SyncContext<TRow, TKey>,
 ): void {
   const seenKeys = new Set<TKey>()
 
@@ -133,7 +133,7 @@ export function performWriteOperations<
   operations:
     | SyncOperation<TRow, TKey, TInsertInput>
     | Array<SyncOperation<TRow, TKey, TInsertInput>>,
-  ctx: SyncContext<TRow, TKey>
+  ctx: SyncContext<TRow, TKey>,
 ): void {
   const normalized = normalizeOperations(operations, ctx)
   validateOperations(normalized, ctx)
@@ -160,7 +160,7 @@ export function performWriteOperations<
         const resolved = ctx.collection.validateData(
           updatedItem,
           `update`,
-          op.key
+          op.key,
         )
         ctx.write({
           type: `update`,
@@ -183,7 +183,7 @@ export function performWriteOperations<
         const resolved = ctx.collection.validateData(
           op.data,
           existsInSyncedStore ? `update` : `insert`,
-          op.key
+          op.key,
         )
         if (existsInSyncedStore) {
           ctx.write({
@@ -204,7 +204,7 @@ export function performWriteOperations<
   ctx.commit()
 
   // Update query cache after successful commit
-  const updatedData = ctx.collection.toArray
+  const updatedData = Array.from(ctx.collection._state.syncedData.values())
   ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
 }
 
@@ -300,7 +300,7 @@ export function createWriteUtils<
       const existingBatch = activeBatchContexts.get(ctx)
       if (existingBatch?.isActive) {
         throw new Error(
-          `Cannot nest writeBatch calls. Complete the current batch before starting a new one.`
+          `Cannot nest writeBatch calls. Complete the current batch before starting a new one.`,
         )
       }
 
@@ -326,7 +326,7 @@ export function createWriteUtils<
           typeof result.then === `function`
         ) {
           throw new Error(
-            `writeBatch does not support async callbacks. The callback must be synchronous.`
+            `writeBatch does not support async callbacks. The callback must be synchronous.`,
           )
         }
 

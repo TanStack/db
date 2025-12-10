@@ -26,21 +26,21 @@ until its finds the root field the reference points to.
 
 ### query
 
-[`QueryIR`](../../interfaces/QueryIR.md)
+[`QueryIR`](../interfaces/QueryIR.md)
 
 ### ref
 
-[`PropRef`](../../classes/PropRef.md)\<`any`\>
+[`PropRef`](../classes/PropRef.md)\<`any`\>
 
 ### collection
 
-[`Collection`](../../../../../interfaces/Collection.md)
+[`Collection`](../../../../interfaces/Collection.md)
 
 ## Returns
 
   \| `void`
   \| \{
-  `collection`: [`Collection`](../../../../../interfaces/Collection.md);
+  `collection`: [`Collection`](../../../../interfaces/Collection.md);
   `path`: `string`[];
 \}
 

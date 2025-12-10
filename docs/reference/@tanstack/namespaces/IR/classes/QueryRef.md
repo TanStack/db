@@ -25,7 +25,7 @@ Defined in: [packages/db/src/query/ir.ts:84](https://github.com/TanStack/db/blob
 
 ##### query
 
-[`QueryIR`](../../interfaces/QueryIR.md)
+[`QueryIR`](../interfaces/QueryIR.md)
 
 ##### alias
 

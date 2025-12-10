@@ -1,6 +1,6 @@
-import { EventEmitter } from "../event-emitter.js"
-import type { Collection } from "./index.js"
-import type { CollectionStatus } from "../types.js"
+import { EventEmitter } from '../event-emitter.js'
+import type { Collection } from './index.js'
+import type { CollectionStatus } from '../types.js'
 
 /**
  * Event emitted when the collection status changes
@@ -44,9 +44,9 @@ export interface CollectionLoadingSubsetChangeEvent {
 }
 
 export type AllCollectionEvents = {
-  "status:change": CollectionStatusChangeEvent
-  "subscribers:change": CollectionSubscribersChangeEvent
-  "loadingSubset:change": CollectionLoadingSubsetChangeEvent
+  'status:change': CollectionStatusChangeEvent
+  'subscribers:change': CollectionSubscribersChangeEvent
+  'loadingSubset:change': CollectionLoadingSubsetChangeEvent
 } & {
   [K in CollectionStatus as `status:${K}`]: CollectionStatusEvent<K>
 }
@@ -58,7 +58,7 @@ export type CollectionEvent =
   | CollectionLoadingSubsetChangeEvent
 
 export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
-  event: AllCollectionEvents[T]
+  event: AllCollectionEvents[T],
 ) => void
 
 export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
@@ -78,14 +78,14 @@ export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
    */
   emit<T extends keyof AllCollectionEvents>(
     event: T,
-    eventPayload: AllCollectionEvents[T]
+    eventPayload: AllCollectionEvents[T],
   ): void {
     this.emitInner(event, eventPayload)
   }
 
   emitStatusChange<T extends CollectionStatus>(
     status: T,
-    previousStatus: CollectionStatus
+    previousStatus: CollectionStatus,
   ) {
     this.emit(`status:change`, {
       type: `status:change`,
@@ -106,7 +106,7 @@ export class CollectionEventsManager extends EventEmitter<AllCollectionEvents> {
 
   emitSubscribersChange(
     subscriberCount: number,
-    previousSubscriberCount: number
+    previousSubscriberCount: number,
   ) {
     this.emit(`subscribers:change`, {
       type: `subscribers:change`,

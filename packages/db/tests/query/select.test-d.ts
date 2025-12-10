@@ -1,8 +1,8 @@
-import { describe, expectTypeOf, test } from "vitest"
-import { createCollection } from "../../src/collection/index.js"
-import { createLiveQueryCollection } from "../../src/query/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
-import { upper } from "../../src/query/builder/functions.js"
+import { describe, expectTypeOf, test } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import { upper } from '../../src/query/builder/functions.js'
 
 type User = {
   id: number
@@ -31,7 +31,7 @@ function createUsers() {
       id: `nested-select-users-type`,
       getKey: (u) => u.id,
       initialData: [],
-    })
+    }),
   )
 }
 
@@ -42,7 +42,7 @@ describe(`select types`, () => {
       q.from({ u: users }).select(({ u }) => ({
         id: u.id,
         nameUpper: upper(u.name),
-      }))
+      })),
     )
 
     type Expected = {
@@ -63,7 +63,7 @@ describe(`select types`, () => {
         joinedDate: u.joinedDate,
         name: u.name,
         something: u.something,
-      }))
+      })),
     )
 
     type Expected = {
@@ -87,7 +87,7 @@ describe(`select types`, () => {
           city: u.address?.city,
           coords: u.address?.coordinates,
         },
-      }))
+      })),
     )
 
     type Expected = {

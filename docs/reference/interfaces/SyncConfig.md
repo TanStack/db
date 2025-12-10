@@ -5,7 +5,7 @@ title: SyncConfig
 
 # Interface: SyncConfig\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:263](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L263)
+Defined in: [packages/db/src/types.ts:285](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L285)
 
 ## Type Parameters
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/types.ts:263](https://github.com/TanStack/db/blob/m
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:280](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L280)
+Defined in: [packages/db/src/types.ts:302](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L302)
 
 Get the sync metadata for insert operations
 
@@ -43,7 +43,7 @@ Record containing relation information
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:289](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L289)
+Defined in: [packages/db/src/types.ts:311](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L311)
 
 The row update mode used to sync to the collection.
 
@@ -67,7 +67,7 @@ sync: (params) =>
   | SyncConfigRes;
 ```
 
-Defined in: [packages/db/src/types.ts:267](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L267)
+Defined in: [packages/db/src/types.ts:289](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L289)
 
 #### Parameters
 
@@ -79,7 +79,7 @@ Defined in: [packages/db/src/types.ts:267](https://github.com/TanStack/db/blob/m
 
 ###### collection
 
-[`Collection`](../Collection.md)\<`T`, `TKey`, `any`, `any`, `any`\>
+[`Collection`](Collection.md)\<`T`, `TKey`, `any`, `any`, `any`\>
 
 ###### commit
 
@@ -100,5 +100,5 @@ Defined in: [packages/db/src/types.ts:267](https://github.com/TanStack/db/blob/m
 #### Returns
 
   \| `void`
-  \| [`CleanupFn`](../../type-aliases/CleanupFn.md)
-  \| [`SyncConfigRes`](../../type-aliases/SyncConfigRes.md)
+  \| [`CleanupFn`](../type-aliases/CleanupFn.md)
+  \| [`SyncConfigRes`](../type-aliases/SyncConfigRes.md)

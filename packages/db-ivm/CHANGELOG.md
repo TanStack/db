@@ -1,5 +1,13 @@
 # @tanstack/db-ivm
 
+## 0.1.13
+
+### Patch Changes
+
+- Fix Uint8Array/Buffer comparison to work by content instead of reference. This enables proper equality checks for binary IDs like ULIDs in WHERE clauses using the `eq` function. ([#779](https://github.com/TanStack/db/pull/779))
+
+- Fix bug with setWindow on ordered queries that have no limit. ([#763](https://github.com/TanStack/db/pull/763))
+
 ## 0.1.12
 
 ### Patch Changes
@@ -18,9 +26,9 @@
   const users = createLiveQueryCollection((q) =>
     q
       .from({ user: usersCollection })
-      .orderBy(({ user }) => user.name, "asc")
+      .orderBy(({ user }) => user.name, 'asc')
       .limit(10)
-      .offset(0)
+      .offset(0),
   )
 
   users.utils.setWindow({ offset: 10, limit: 10 })
