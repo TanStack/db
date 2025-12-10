@@ -9,7 +9,7 @@ title: EnhancedPowerSyncCollectionConfig
 type EnhancedPowerSyncCollectionConfig<TTable, OutputType, TSchema> = CollectionConfig<OutputType, string, TSchema> & object;
 ```
 
-Defined in: [definitions.ts:254](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L254)
+Defined in: [definitions.ts:259](https://github.com/powersync-ja/temp-tanstack-db/blob/main/packages/powersync-db-collection/src/definitions.ts#L259)
 
 A CollectionConfig which includes utilities for PowerSync.
 
