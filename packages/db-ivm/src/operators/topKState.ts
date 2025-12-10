@@ -1,5 +1,10 @@
 import { TopKArray } from './topKArray.js'
-import type { IndexedValue, TopK, TopKChanges, TopKMoveChanges } from './topKArray.js';
+import type {
+  IndexedValue,
+  TopK,
+  TopKChanges,
+  TopKMoveChanges,
+} from './topKArray.js'
 
 /**
  * Helper class that manages the state for a single topK window.

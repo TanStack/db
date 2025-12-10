@@ -3,7 +3,7 @@ import { StreamBuilder } from '../d2.js'
 import { MultiSet } from '../multiset.js'
 import { TopKState, handleMoveIn, handleMoveOut } from './topKState.js'
 import { TopKArray, createKeyedComparator } from './topKArray.js'
-import type { IndexedValue, TopK} from './topKArray.js';
+import type { IndexedValue, TopK } from './topKArray.js'
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
 

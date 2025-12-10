@@ -1,15 +1,11 @@
 import { generateKeyBetween } from 'fractional-indexing'
 import { DifferenceStreamWriter } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
-import {
-  TopKWithFractionalIndexOperator,
-} from './topKWithFractionalIndex.js'
+import { TopKWithFractionalIndexOperator } from './topKWithFractionalIndex.js'
 import { getIndex, getValue, indexedValue } from './topKArray.js'
-import type { IndexedValue, TopK, TopKChanges } from './topKArray.js';
+import type { IndexedValue, TopK, TopKChanges } from './topKArray.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
-import type {
-  TopKWithFractionalIndexOptions,
-} from './topKWithFractionalIndex.js'
+import type { TopKWithFractionalIndexOptions } from './topKWithFractionalIndex.js'
 
 interface BTree<Key, Value> {
   nextLowerPair: (key: Key) => [Key, Value] | undefined
