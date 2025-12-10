@@ -367,10 +367,9 @@ describe(`PowerSync Integration`, () => {
       await collection.delete(id, { metadata }).isPersisted.promise
 
       // There should be a crud entries for this
-      const _crudEntries = await db.getAll(`
-        SELECT * FROM ps_crud ORDER BY id`)
-
-      const crudEntries = _crudEntries.map((r) => CrudEntry.fromRow(r))
+      const crudBatch = await db.getCrudBatch(100)
+      expect(crudBatch).toBeDefined()
+      const crudEntries = crudBatch!.crud
 
       // The metadata should be available in the CRUD entries for upload
       const stringifiedMetadata = JSON.stringify(metadata)
