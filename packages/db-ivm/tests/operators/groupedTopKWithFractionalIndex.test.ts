@@ -218,10 +218,10 @@ describe(`Operators`, () => {
       graph.run()
 
       const updateResult = tracker.getResult()
-      
+
       // Should have exactly 2 messages: one removal and one addition
       expect(updateResult.messages.length).toBe(2)
-      
+
       // Find the removal message (multiplicity -1) and addition message (multiplicity 1)
       const removalMessage = updateResult.messages.find(
         ([_item, mult]) => mult === -1,
@@ -229,15 +229,15 @@ describe(`Operators`, () => {
       const additionMessage = updateResult.messages.find(
         ([_item, mult]) => mult === 1,
       )
-      
+
       expect(removalMessage).toBeDefined()
       expect(additionMessage).toBeDefined()
-      
+
       // Check that removal is for value 20 (g1-b)
       const [_removalKey, [removalValue, _removalIdx]] = removalMessage![0]
       expect(removalValue.value).toBe(20)
       expect(removalValue.id).toBe(`g1-b`)
-      
+
       // Check that addition is for value 5 (g1-c)
       const [_additionKey, [additionValue, _additionIdx]] = additionMessage![0]
       expect(additionValue.value).toBe(5)
