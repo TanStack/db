@@ -3,15 +3,11 @@ import { DifferenceStreamWriter } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import {
   TopKWithFractionalIndexOperator,
-  getIndex,
-  getValue,
-  indexedValue,
 } from './topKWithFractionalIndex.js'
+import { getIndex, getValue, indexedValue } from './topKArray.js'
+import type { IndexedValue, TopK, TopKChanges } from './topKArray.js';
 import type { IStreamBuilder, PipedOperator } from '../types.js'
 import type {
-  IndexedValue,
-  TopK,
-  TopKChanges,
   TopKWithFractionalIndexOptions,
 } from './topKWithFractionalIndex.js'
 

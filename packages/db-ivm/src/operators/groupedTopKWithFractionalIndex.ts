@@ -1,14 +1,11 @@
 import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
 import { StreamBuilder } from '../d2.js'
 import { MultiSet } from '../multiset.js'
-import {
-  TopKArray,
-  TopKState,
-  createKeyedComparator,
-} from './topKWithFractionalIndex.js'
+import { TopKState, handleMoveIn, handleMoveOut } from './topKState.js'
+import { TopKArray, createKeyedComparator } from './topKArray.js'
+import type { IndexedValue, TopK} from './topKArray.js';
 import type { DifferenceStreamReader } from '../graph.js'
 import type { IStreamBuilder, PipedOperator } from '../types.js'
-import type { IndexedValue, TopK } from './topKWithFractionalIndex.js'
 
 export interface GroupedTopKWithFractionalIndexOptions<K, T> {
   limit?: number
@@ -111,7 +108,7 @@ export class GroupedTopKWithFractionalIndexOperator<
     let hasChanges = false
 
     for (const state of this.#groupStates.values()) {
-      const diff = state.move({ offset: this.#offset, limit: this.#limit })
+      const diff = state.move({ offset: this.#offset, limit: this.#limit }) // TODO: think we should just pass offset and limit
 
       diff.moveIns.forEach((moveIn) => handleMoveIn(moveIn, result))
       diff.moveOuts.forEach((moveOut) => handleMoveOut(moveOut, result))
@@ -155,32 +152,6 @@ export class GroupedTopKWithFractionalIndexOperator<
 
     // Cleanup empty groups to prevent memory leaks
     this.#cleanupGroupIfEmpty(groupKey, state)
-  }
-}
-
-/**
- * Handles a moveIn change by adding it to the result array.
- */
-function handleMoveIn<K extends string | number, T>(
-  moveIn: IndexedValue<[K, T]> | null,
-  result: Array<[[K, IndexedValue<T>], number]>,
-): void {
-  if (moveIn) {
-    const [[key, value], index] = moveIn
-    result.push([[key, [value, index]], 1])
-  }
-}
-
-/**
- * Handles a moveOut change by adding it to the result array.
- */
-function handleMoveOut<K extends string | number, T>(
-  moveOut: IndexedValue<[K, T]> | null,
-  result: Array<[[K, IndexedValue<T>], number]>,
-): void {
-  if (moveOut) {
-    const [[key, value], index] = moveOut
-    result.push([[key, [value, index]], -1])
   }
 }
 
