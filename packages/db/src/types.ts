@@ -6,6 +6,37 @@ import type { BasicExpression, OrderBy } from "./query/ir.js"
 import type { EventEmitter } from "./event-emitter.js"
 
 /**
+ * Interface for a collection-like object that provides the necessary methods
+ * for the change events system to work
+ */
+export interface CollectionLike<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> extends Pick<
+    Collection<T, TKey>,
+    `get` | `has` | `entries` | `indexes` | `id` | `compareOptions`
+  > {}
+
+/**
+ * StringSortOpts - Options for string sorting behavior
+ *
+ * This discriminated union allows for two types of string sorting:
+ * - **Lexical**: Simple character-by-character comparison (default)
+ * - **Locale**: Locale-aware sorting with optional customization
+ *
+ * The union ensures that locale options are only available when locale sorting is selected.
+ */
+export type StringCollationConfig =
+  | {
+      stringSort?: `lexical`
+    }
+  | {
+      stringSort?: `locale`
+      locale?: string
+      localeOptions?: object
+    }
+
+/**
  * Helper type to extract the output type from a standard schema
  *
  * @internal This is used by the type resolution system
@@ -35,9 +66,9 @@ export type TransactionState = `pending` | `persisting` | `completed` | `failed`
 export type Fn = (...args: Array<any>) => any
 
 /**
- * A record of utility functions that can be attached to a collection
+ * A record of utilities (functions or getters) that can be attached to a collection
  */
-export type UtilsRecord = Record<string, Fn>
+export type UtilsRecord = Record<string, any>
 
 /**
  *
@@ -581,6 +612,14 @@ export interface BaseCollectionConfig<
    * }
    */
   onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+
+  /**
+   * Specifies how to compare data in the collection.
+   * This should be configured to match data ordering on the backend.
+   * E.g., when using the Electric DB collection these options
+   *       should match the database's collation settings.
+   */
+  defaultStringCollation?: StringCollationConfig
 
   utils?: TUtils
 }

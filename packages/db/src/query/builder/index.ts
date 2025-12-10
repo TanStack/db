@@ -469,11 +469,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
 
     const opts: CompareOptions =
       typeof options === `string`
-        ? { direction: options, nulls: `first`, stringSort: `locale` }
+        ? { direction: options, nulls: `first` }
         : {
             direction: options.direction ?? `asc`,
             nulls: options.nulls ?? `first`,
-            stringSort: options.stringSort ?? `locale`,
+            stringSort: options.stringSort,
             locale:
               options.stringSort === `locale` ? options.locale : undefined,
             localeOptions:

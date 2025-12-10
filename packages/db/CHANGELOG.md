@@ -1,5 +1,422 @@
 # @tanstack/db
 
+## 0.4.20
+
+### Patch Changes
+
+- Fix type inference for findOne() when used with join operations ([#749](https://github.com/TanStack/db/pull/749))
+
+  Previously, using `findOne()` with join operations (leftJoin, innerJoin, etc.) resulted in the query type being inferred as `never`, breaking TypeScript type checking:
+
+  ```typescript
+  const query = useLiveQuery(
+    (q) =>
+      q
+        .from({ todo: todoCollection })
+        .leftJoin({ todoOptions: todoOptionsCollection }, ...)
+        .findOne() // Type became 'never'
+  )
+  ```
+
+  **The Fix:**
+
+  Fixed the `MergeContextWithJoinType` type definition to conditionally include the `singleResult` property only when it's explicitly `true`, avoiding type conflicts when `findOne()` is called after joins:
+
+  ```typescript
+  // Before (buggy):
+  singleResult: TContext['singleResult'] extends true ? true : false
+
+  // After (fixed):
+  type PreserveSingleResultFlag<TFlag> = [TFlag] extends [true]
+    ? { singleResult: true }
+    : {}
+
+  // Used as:
+  } & PreserveSingleResultFlag<TContext['singleResult']>
+  ```
+
+  **Why This Works:**
+
+  By using a conditional intersection that omits the property entirely when not needed, we avoid type conflicts. Intersecting `{} & { singleResult: true }` cleanly results in `{ singleResult: true }`, whereas the previous approach created conflicting property types resulting in `never`. The tuple wrapper (`[TFlag]`) ensures robust behavior even if the flag type becomes a union in the future.
+
+  **Impact:**
+  - ✅ `findOne()` now works correctly with all join types
+  - ✅ Type inference works properly in `useLiveQuery` and other contexts
+  - ✅ Both `findOne()` before and after joins work correctly
+  - ✅ All tests pass with no breaking changes (8 new type tests added)
+
+- Improve error messages for custom getKey with joined queries ([#717](https://github.com/TanStack/db/pull/717))
+
+  Enhanced `DuplicateKeySyncError` to provide context-aware guidance when duplicate keys occur with custom `getKey` and joined queries.
+
+  **The Issue:**
+
+  When using custom `getKey` with joins, duplicate keys can occur if the join produces multiple rows with the same key value. This is valid for 1:1 relationships but problematic for 1:many relationships, and the previous error message didn't explain what went wrong or how to fix it.
+
+  **What's New:**
+
+  When a duplicate key error occurs in a live query collection that uses both custom `getKey` and joins, the error message now:
+  - Explains that joined queries can produce multiple rows with the same key
+  - Suggests using a composite key in your `getKey` function
+  - Provides concrete examples of solutions
+  - Helps distinguish between correctly structured 1:1 joins vs problematic 1:many joins
+
+  **Example:**
+
+  ```typescript
+  // ✅ Valid - 1:1 relationship with unique keys
+  const userProfiles = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ profile: profiles })
+        .join({ user: users }, ({ profile, user }) =>
+          eq(profile.userId, user.id)
+        ),
+    getKey: (profile) => profile.id, // Each profile has unique ID
+  })
+  ```
+
+  ```typescript
+  // ⚠️ Problematic - 1:many relationship with duplicate keys
+  const userComments = createLiveQueryCollection({
+    query: (q) =>
+      q
+        .from({ user: users })
+        .join({ comment: comments }, ({ user, comment }) =>
+          eq(user.id, comment.userId)
+        ),
+    getKey: (item) => item.userId, // Multiple comments share same userId!
+  })
+
+  // Enhanced error message:
+  // "Cannot insert document with key "user1" from sync because it already exists.
+  // This collection uses a custom getKey with joined queries. Joined queries can
+  // produce multiple rows with the same key when relationships are not 1:1.
+  // Consider: (1) using a composite key in your getKey function (e.g., `${item.key1}-${item.key2}`),
+  // (2) ensuring your join produces unique rows per key, or (3) removing the
+  // custom getKey to use the default composite key behavior."
+  ```
+
+- Add QueryObserver state utilities and convert error utils to getters ([#742](https://github.com/TanStack/db/pull/742))
+
+  Exposes TanStack Query's QueryObserver state through QueryCollectionUtils, providing visibility into sync status beyond just error states. Also converts existing error state utilities from methods to getters for consistency with TanStack DB/Query patterns.
+
+  **Breaking Changes:**
+  - `lastError()`, `isError()`, and `errorCount()` are now getters instead of methods
+    - Before: `collection.utils.lastError()`
+    - After: `collection.utils.lastError`
+
+  **New Utilities:**
+  - `isFetching` - Check if query is currently fetching (initial or background)
+  - `isRefetching` - Check if query is refetching in background
+  - `isLoading` - Check if query is loading for first time
+  - `dataUpdatedAt` - Get timestamp of last successful data update
+  - `fetchStatus` - Get current fetch status ('fetching' | 'paused' | 'idle')
+
+  **Use Cases:**
+  - Show loading indicators during background refetches
+  - Implement "Last updated X minutes ago" UI patterns
+  - Better understanding of query sync behavior
+
+  **Example Usage:**
+
+  ```ts
+  const collection = queryCollectionOptions({
+    // ... config
+  })
+
+  // Check sync status
+  if (collection.utils.isFetching) {
+    console.log("Syncing with server...")
+  }
+
+  if (collection.utils.isRefetching) {
+    console.log("Background refresh in progress")
+  }
+
+  // Show last update time
+  const lastUpdate = new Date(collection.utils.dataUpdatedAt)
+  console.log(`Last synced: ${lastUpdate.toLocaleTimeString()}`)
+
+  // Check error state (now using getters)
+  if (collection.utils.isError) {
+    console.error("Sync failed:", collection.utils.lastError)
+    console.log(`Failed ${collection.utils.errorCount} times`)
+  }
+  ```
+
+## 0.4.19
+
+### Patch Changes
+
+- Significantly improve localStorage collection performance during rapid mutations ([#760](https://github.com/TanStack/db/pull/760))
+
+  Optimizes localStorage collections to eliminate redundant storage reads, providing dramatic performance improvements for use cases with rapid mutations (e.g., text input with live query rendering).
+
+  **Performance Improvements:**
+  - **67% reduction in localStorage I/O operations** - from 3 reads + 1 write per mutation down to just 1 write
+  - Eliminated 2 JSON parse operations per mutation
+  - Eliminated 1 full collection diff operation per mutation
+  - Leverages in-memory cache (`lastKnownData`) instead of reading from storage on every mutation
+
+  **What Changed:**
+  1. **Mutation handlers** now use in-memory cache instead of loading from storage before mutations
+  2. **Post-mutation sync** eliminated - no longer triggers redundant storage reads after local mutations
+  3. **Manual transactions** (`acceptMutations`) optimized to use in-memory cache
+
+  **Before:** Each mutation performed 3 I/O operations:
+  - `loadFromStorage()` - read + JSON parse
+  - Modify data
+  - `saveToStorage()` - JSON stringify + write
+  - `processStorageChanges()` - another read + parse + diff
+
+  **After:** Each mutation performs 1 I/O operation:
+  - Modify in-memory data ✨ No I/O!
+  - `saveToStorage()` - JSON stringify + write
+
+  **Safety:**
+  - Cross-tab synchronization still works correctly via storage event listeners
+  - All 50 tests pass including 8 new tests specifically for rapid mutations and edge cases
+  - 92.3% code coverage on local-storage.ts
+  - `lastKnownData` cache kept in sync with storage through initial load, mutations, and cross-tab events
+
+  This optimization is particularly impactful for applications with:
+  - Real-time text input with live query rendering
+  - Frequent mutations to localStorage-backed collections
+  - Multiple rapid sequential mutations
+
+## 0.4.18
+
+### Patch Changes
+
+- Fix bug with orderBy that caused queries to skip duplicate values and/or stall on duplicate values. ([#713](https://github.com/TanStack/db/pull/713))
+
+- Validate against duplicate collection aliases in subqueries. Prevents a bug where using the same alias for a collection in both parent and subquery causes empty results or incorrect aggregation values. Now throws a clear `DuplicateAliasInSubqueryError` when this pattern is detected, guiding users to rename the conflicting alias. ([#719](https://github.com/TanStack/db/pull/719))
+
+## 0.4.17
+
+### Patch Changes
+
+- Add offline-transactions package with robust offline-first capabilities ([#559](https://github.com/TanStack/db/pull/559))
+
+  New package `@tanstack/offline-transactions` provides a comprehensive offline-first transaction system with:
+
+  **Core Features:**
+  - Persistent outbox pattern for reliable transaction processing
+  - Leader election for multi-tab coordination (Web Locks API with BroadcastChannel fallback)
+  - Automatic storage capability detection with graceful degradation
+  - Retry logic with exponential backoff and jitter
+  - Sequential transaction processing (FIFO ordering)
+
+  **Storage:**
+  - Automatic fallback chain: IndexedDB → localStorage → online-only
+  - Detects and handles private mode, SecurityError, QuotaExceededError
+  - Custom storage adapter support
+  - Diagnostic callbacks for storage failures
+
+  **Developer Experience:**
+  - TypeScript-first with full type safety
+  - Comprehensive test suite (25 tests covering leader failover, storage failures, e2e scenarios)
+  - Works in all modern browsers and server-side rendering environments
+
+  **@tanstack/db improvements:**
+  - Enhanced duplicate instance detection (dev-only, iframe-aware, with escape hatch)
+  - Better environment detection for SSR and worker contexts
+
+  Example usage:
+
+  ```typescript
+  import {
+    startOfflineExecutor,
+    IndexedDBAdapter,
+  } from "@tanstack/offline-transactions"
+
+  const executor = startOfflineExecutor({
+    collections: { todos: todoCollection },
+    storage: new IndexedDBAdapter(),
+    mutationFns: {
+      syncTodos: async ({ transaction, idempotencyKey }) => {
+        // Sync mutations to backend
+        await api.sync(transaction.mutations, idempotencyKey)
+      },
+    },
+    onStorageFailure: (diagnostic) => {
+      console.warn("Running in online-only mode:", diagnostic.message)
+    },
+  })
+
+  // Create offline transaction
+  const tx = executor.createOfflineTransaction({
+    mutationFnName: "syncTodos",
+    autoCommit: false,
+  })
+
+  tx.mutate(() => {
+    todoCollection.insert({ id: "1", text: "Buy milk", completed: false })
+  })
+
+  await tx.commit() // Persists to outbox and syncs when online
+  ```
+
+## 0.4.16
+
+### Patch Changes
+
+- Enable auto-indexing for nested field paths ([#728](https://github.com/TanStack/db/pull/728))
+
+  Previously, auto-indexes were only created for top-level fields. Queries filtering on nested fields like `vehicleDispatch.date` or `profile.score` were forced to perform full table scans, causing significant performance issues.
+
+  Now, auto-indexes are automatically created for nested field paths of any depth when using `eq()`, `gt()`, `gte()`, `lt()`, `lte()`, or `in()` operations.
+
+  **Performance Impact:**
+
+  Before this fix, filtering on nested fields resulted in expensive full scans:
+  - Query time: ~353ms for 39 executions (from issue #727)
+  - "graph run" and "d2ts join" operations dominated execution time
+
+  After this fix, nested field queries use indexes:
+  - Query time: Sub-millisecond (typical indexed lookup)
+  - Proper index utilization verified through query optimizer
+
+  **Example:**
+
+  ```typescript
+  const collection = createCollection({
+    getKey: (item) => item.id,
+    autoIndex: "eager", // default
+    // ... sync config
+  })
+
+  // These now automatically create and use indexes:
+  collection.subscribeChanges((items) => console.log(items), {
+    whereExpression: eq(row.vehicleDispatch?.date, "2024-01-01"),
+  })
+
+  collection.subscribeChanges((items) => console.log(items), {
+    whereExpression: gt(row.profile?.stats.rating, 4.5),
+  })
+  ```
+
+  **Index Naming:**
+
+  Auto-indexes for nested paths use the format `auto:field.path` to avoid naming conflicts:
+  - `auto:status` for top-level field `status`
+  - `auto:profile.score` for nested field `profile.score`
+  - `auto:metadata.stats.views` for deeply nested field `metadata.stats.views`
+
+  Fixes #727
+
+- Fixed performance issue where using multiple `.where()` calls created multiple filter operators in the query pipeline. The optimizer now implements the missing final step (step 3) of combining remaining WHERE clauses into a single AND expression. This applies to both queries with and without joins: ([#732](https://github.com/TanStack/db/pull/732))
+  - Queries without joins: Multiple WHERE clauses are now combined before compilation
+  - Queries with joins: Remaining WHERE clauses after predicate pushdown are combined
+
+  This reduces filter operators from N to 1, making chained `.where()` calls perform identically to using a single `.where()` with `and()`.
+
+- Add paced mutations with pluggable timing strategies ([#704](https://github.com/TanStack/db/pull/704))
+
+  Introduces a new paced mutations system that enables optimistic mutations with pluggable timing strategies. This provides fine-grained control over when and how mutations are persisted to the backend. Powered by [TanStack Pacer](https://github.com/TanStack/pacer).
+
+  **Key Design:**
+  - **Debounce/Throttle**: Only one pending transaction (collecting mutations) and one persisting transaction (writing to backend) at a time. Multiple rapid mutations automatically merge together.
+  - **Queue**: Each mutation creates a separate transaction, guaranteed to run in the order they're made (FIFO by default, configurable to LIFO).
+
+  **Core Features:**
+  - **Pluggable Strategy System**: Choose from debounce, queue, or throttle strategies to control mutation timing
+  - **Auto-merging Mutations**: Multiple rapid mutations on the same item automatically merge for efficiency (debounce/throttle only)
+  - **Transaction Management**: Full transaction lifecycle tracking (pending → persisting → completed/failed)
+  - **React Hook**: `usePacedMutations` for easy integration in React applications
+
+  **Available Strategies:**
+  - `debounceStrategy`: Wait for inactivity before persisting. Only final state is saved. (ideal for auto-save, search-as-you-type)
+  - `queueStrategy`: Each mutation becomes a separate transaction, processed sequentially in order (defaults to FIFO, configurable to LIFO). All mutations are guaranteed to persist. (ideal for sequential workflows, rate-limited APIs)
+  - `throttleStrategy`: Ensure minimum spacing between executions. Mutations between executions are merged. (ideal for analytics, progress updates)
+
+  **Example Usage:**
+
+  ```ts
+  import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
+
+  const mutate = usePacedMutations({
+    mutationFn: async ({ transaction }) => {
+      await api.save(transaction.mutations)
+    },
+    strategy: debounceStrategy({ wait: 500 }),
+  })
+
+  // Trigger a mutation
+  const tx = mutate(() => {
+    collection.update(id, (draft) => {
+      draft.value = newValue
+    })
+  })
+
+  // Optionally await persistence
+  await tx.isPersisted.promise
+  ```
+
+## 0.4.15
+
+### Patch Changes
+
+- Added support for custom parsers/serializers like superjson in LocalStorage collections ([#730](https://github.com/TanStack/db/pull/730))
+
+## 0.4.14
+
+### Patch Changes
+
+- Fix collection cleanup to fire status:change event with 'cleaned-up' status ([#714](https://github.com/TanStack/db/pull/714))
+
+  Previously, when a collection was garbage collected, event handlers were removed before the status was changed to 'cleaned-up'. This prevented listeners from receiving the status:change event, breaking the collection factory pattern where collections listen for cleanup to remove themselves from a cache.
+
+  Now, the cleanup process:
+  1. Cleans up sync, state, changes, and indexes
+  2. Sets status to 'cleaned-up' (fires the event)
+  3. Finally cleans up event handlers
+
+  This enables the collection factory pattern:
+
+  ```typescript
+  const cache = new Map<string, ReturnType<typeof createCollection>>()
+
+  const getTodoCollection = (id: string) => {
+    if (!cache.has(id)) {
+      const collection = createCollection(/* ... */)
+
+      collection.on("status:change", ({ status }) => {
+        if (status === "cleaned-up") {
+          cache.delete(id) // This now works!
+        }
+      })
+
+      cache.set(id, collection)
+    }
+    return cache.get(id)!
+  }
+  ```
+
+## 0.4.13
+
+### Patch Changes
+
+- Fix synced propagation when preceding mutation was non-optimistic ([#715](https://github.com/TanStack/db/pull/715))
+
+## 0.4.12
+
+### Patch Changes
+
+- Add in-memory fallback for localStorage collections in SSR environments ([#696](https://github.com/TanStack/db/pull/696))
+
+  Prevents errors when localStorage collections are imported on the server by automatically falling back to an in-memory store. This allows isomorphic JavaScript applications to safely import localStorage collection modules without errors during module initialization.
+
+  When localStorage is not available (e.g., in server-side rendering environments), the collection automatically uses an in-memory storage implementation. Data will not persist across page reloads or be shared across tabs when using the in-memory fallback, but the collection will function normally otherwise.
+
+  Fixes #691
+
+- Add support for orderBy and limit in currentStateAsChanges function ([#701](https://github.com/TanStack/db/pull/701))
+
+- Updated dependencies [[`8187c6d`](https://github.com/TanStack/db/commit/8187c6d69c4b498e306ac2eb5fc7115e4f8193a5)]:
+  - @tanstack/db-ivm@0.1.12
+
 ## 0.4.11
 
 ### Patch Changes

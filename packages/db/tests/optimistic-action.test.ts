@@ -58,6 +58,31 @@ describe(`createOptimisticAction`, () => {
     expect(mutationFnMock.mock.calls[0]?.[1]).toHaveProperty(`transaction`)
   })
 
+  it(`should throw if onMutate returns a promise`, () => {
+    const collection = createCollection<{ id: string; text: string }>({
+      id: `async-on-mutate-collection`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: () => {
+          // No-op sync for testing
+        },
+      },
+    })
+
+    const addTodo = createOptimisticAction<string>({
+      onMutate: async (text) => {
+        collection.insert({ id: `1`, text })
+      },
+      mutationFn: async () => {
+        return Promise.resolve()
+      },
+    })
+
+    expect(() => addTodo(`Async Todo`)).toThrowError(
+      `onMutate must be synchronous`
+    )
+  })
+
   // Test with complex object variables
   it(`should handle complex object variables correctly`, async () => {
     // Setup a mock collection

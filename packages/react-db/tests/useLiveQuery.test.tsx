@@ -903,13 +903,13 @@ describe(`Query Collections`, () => {
     await waitFor(() => {
       // Verify optimistic state is immediately reflected
       expect(result.current.state.size).toBe(4)
+      expect(result.current.state.get(`[temp-key,1]`)).toMatchObject({
+        id: `temp-key`,
+        name: `John Doe`,
+        title: `New Issue`,
+      })
+      expect(result.current.state.get(`[4,1]`)).toBeUndefined()
     })
-    expect(result.current.state.get(`[temp-key,1]`)).toMatchObject({
-      id: `temp-key`,
-      name: `John Doe`,
-      title: `New Issue`,
-    })
-    expect(result.current.state.get(`[4,1]`)).toBeUndefined()
 
     // Wait for the transaction to be committed
     await transaction.isPersisted.promise

@@ -1,12 +1,12 @@
 {
   "name": "@tanstack/query-db-collection",
   "description": "TanStack Query collection for TanStack DB",
-  "version": "0.2.32",
+  "version": "0.3.0",
   "dependencies": {
-    "@standard-schema/spec": "^1.0.0",
-    "@tanstack/db": "workspace:*"
+    "@standard-schema/spec": "^1.0.0"
   },
   "devDependencies": {
+    "@tanstack/db": "workspace:*",
     "@tanstack/query-core": "^5.90.5",
     "@vitest/coverage-istanbul": "^3.2.4"
   },
@@ -29,8 +29,9 @@
   ],
   "main": "dist/cjs/index.cjs",
   "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.18.3",
+  "packageManager": "pnpm@10.19.0",
   "peerDependencies": {
+    "@tanstack/db": "*",
     "@tanstack/query-core": "^5.0.0",
     "typescript": ">=4.7"
   },
@@ -52,7 +53,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "npx vitest --run"
+    "test": "npx vitest run",
+    "test:e2e": "npx vitest run --config vitest.e2e.config.ts"
   },
   "sideEffects": false,
   "type": "module",

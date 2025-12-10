@@ -1,21 +1,32 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/query-core"
-import { createCollection } from "@tanstack/db"
+import {
+  createCollection,
+  createLiveQueryCollection,
+  eq,
+  or,
+} from "@tanstack/db"
 import { queryCollectionOptions } from "../src/query"
 import type { QueryFunctionContext } from "@tanstack/query-core"
 import type {
-  CollectionImpl,
+  Collection,
   DeleteMutationFnParams,
   InsertMutationFnParams,
   TransactionWithMutations,
   UpdateMutationFnParams,
 } from "@tanstack/db"
-import type { QueryCollectionConfig } from "../src/query"
+import type { QueryCollectionConfig, QueryCollectionUtils } from "../src/query"
 
 interface TestItem {
   id: string
   name: string
   value?: number
+}
+
+interface CategorisedItem {
+  id: string
+  name: string
+  category: string
 }
 
 const getKey = (item: TestItem) => item.id
@@ -431,7 +442,9 @@ describe(`QueryCollection`, () => {
     })
 
     // Verify queryFn was called with the correct context, including the meta object
-    expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({ meta }))
+    expect(queryFn).toHaveBeenCalledWith(
+      expect.objectContaining({ meta: { ...meta, loadSubsetOptions: {} } })
+    )
   })
 
   describe(`Select method testing`, () => {
@@ -607,21 +620,45 @@ describe(`QueryCollection`, () => {
         mutations: [] as any,
       } as TransactionWithMutations<TestItem, `delete`>
 
-      const insertMockParams: InsertMutationFnParams<TestItem> = {
+      const mockCollection = {
+        utils: {} as QueryCollectionUtils<
+          TestItem,
+          string | number,
+          TestItem,
+          unknown
+        >,
+      } as unknown as Collection<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>,
+        never,
+        TestItem
+      >
+
+      const insertMockParams = {
         transaction: insertTransaction,
-        // @ts-ignore not testing this
-        collection: {} as CollectionImpl,
-      }
-      const updateMockParams: UpdateMutationFnParams<TestItem> = {
+        collection: mockCollection,
+      } as InsertMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+      const updateMockParams = {
         transaction: updateTransaction,
-        // @ts-ignore not testing this
-        collection: {} as CollectionImpl,
-      }
-      const deleteMockParams: DeleteMutationFnParams<TestItem> = {
+        collection: mockCollection,
+      } as UpdateMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+      const deleteMockParams = {
         transaction: deleteTransaction,
-        // @ts-ignore not testing this
-        collection: {} as CollectionImpl,
-      }
+        collection: mockCollection,
+      } as DeleteMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
 
       // Create handlers
       const onInsert = vi.fn().mockResolvedValue(undefined)
@@ -659,62 +696,100 @@ describe(`QueryCollection`, () => {
         mutations: [] as any,
       } as TransactionWithMutations<TestItem, `insert`>
 
-      const insertMockParams: InsertMutationFnParams<TestItem> = {
-        transaction: insertTransaction,
-        // @ts-ignore not testing this
-        collection: {} as CollectionImpl,
-      }
-
       // Create handlers with different return values
       const onInsertDefault = vi.fn().mockResolvedValue(undefined) // Default behavior should refetch
       const onInsertFalse = vi.fn().mockResolvedValue({ refetch: false }) // No refetch
 
-      // Create a spy on the refetch function itself
-      const refetchSpy = vi.fn().mockResolvedValue(undefined)
-
       // Create configs with the handlers
+      const queryFnDefault = vi
+        .fn()
+        .mockResolvedValue([{ id: `1`, name: `Item 1` }])
+      const queryFnFalse = vi
+        .fn()
+        .mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
       const configDefault: QueryCollectionConfig<TestItem> = {
         id: `test-default`,
         queryClient,
         queryKey: [`refetchTest`, `default`],
-        queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+        queryFn: queryFnDefault,
         getKey,
         onInsert: onInsertDefault,
+        startSync: true,
       }
 
       const configFalse: QueryCollectionConfig<TestItem> = {
         id: `test-false`,
         queryClient,
         queryKey: [`refetchTest`, `false`],
-        queryFn: vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }]),
+        queryFn: queryFnFalse,
         getKey,
         onInsert: onInsertFalse,
+        startSync: true,
       }
-
-      // Mock the queryClient.refetchQueries method which is called by collection.utils.refetch()
-      vi.spyOn(queryClient, `refetchQueries`).mockImplementation(refetchSpy)
 
       // Test case 1: Default behavior (undefined return) should trigger refetch
       const optionsDefault = queryCollectionOptions(configDefault)
-      await optionsDefault.onInsert!(insertMockParams)
+      const collectionDefault = createCollection(optionsDefault)
 
-      // Verify handler was called and refetch was triggered
-      expect(onInsertDefault).toHaveBeenCalledWith(insertMockParams)
-      expect(refetchSpy).toHaveBeenCalledTimes(1)
+      // Wait for initial sync
+      await vi.waitFor(() => {
+        expect(collectionDefault.status).toBe(`ready`)
+      })
 
-      // Reset mocks
-      refetchSpy.mockClear()
+      // Clear initial call
+      queryFnDefault.mockClear()
+
+      const insertParamsDefault = {
+        transaction: insertTransaction,
+        collection: collectionDefault,
+      } satisfies InsertMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+
+      await optionsDefault.onInsert!(insertParamsDefault)
+
+      // Verify handler was called and refetch was triggered (queryFn called again)
+      expect(onInsertDefault).toHaveBeenCalledWith(insertParamsDefault)
+      await vi.waitFor(() => {
+        expect(queryFnDefault).toHaveBeenCalledTimes(1)
+      })
 
       // Test case 2: Explicit { refetch: false } should not trigger refetch
       const optionsFalse = queryCollectionOptions(configFalse)
-      await optionsFalse.onInsert!(insertMockParams)
+      const collectionFalse = createCollection(optionsFalse)
 
-      // Verify handler was called but refetch was NOT triggered
-      expect(onInsertFalse).toHaveBeenCalledWith(insertMockParams)
-      expect(refetchSpy).not.toHaveBeenCalled()
+      // Wait for initial sync
+      await vi.waitFor(() => {
+        expect(collectionFalse.status).toBe(`ready`)
+      })
 
-      // Restore original function
-      vi.restoreAllMocks()
+      // Clear initial call
+      queryFnFalse.mockClear()
+
+      const insertParamsFalse = {
+        transaction: insertTransaction,
+        collection: collectionFalse,
+      } satisfies InsertMutationFnParams<
+        TestItem,
+        string | number,
+        QueryCollectionUtils<TestItem, string | number, TestItem, unknown>
+      >
+
+      await optionsFalse.onInsert!(insertParamsFalse)
+
+      // Verify handler was called but refetch was NOT triggered (queryFn not called)
+      expect(onInsertFalse).toHaveBeenCalledWith(insertParamsFalse)
+      // Wait a bit to ensure no refetch happens
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(queryFnFalse).not.toHaveBeenCalled()
+
+      await Promise.all([
+        collectionDefault.cleanup(),
+        collectionFalse.cleanup(),
+      ])
     })
   })
 
@@ -1958,6 +2033,247 @@ describe(`QueryCollection`, () => {
     })
   })
 
+  it(`should use exact targeting when refetching to avoid unintended cascading of related queries`, async () => {
+    // Create multiple collections with related but distinct query keys
+    const queryKey = [`todos`]
+    const queryKey1 = [`todos`, `project-1`]
+    const queryKey2 = [`todos`, `project-2`]
+
+    const mockItems = [{ id: `1`, name: `Item 1` }]
+    const queryFn = vi.fn().mockResolvedValue(mockItems)
+    const queryFn1 = vi.fn().mockResolvedValue(mockItems)
+    const queryFn2 = vi.fn().mockResolvedValue(mockItems)
+
+    const config: QueryCollectionConfig<TestItem> = {
+      id: `all-todos`,
+      queryClient,
+      queryKey: queryKey,
+      queryFn: queryFn,
+      getKey,
+      startSync: true,
+    }
+    const config1: QueryCollectionConfig<TestItem> = {
+      id: `project-1-todos`,
+      queryClient,
+      queryKey: queryKey1,
+      queryFn: queryFn1,
+      getKey,
+      startSync: true,
+    }
+    const config2: QueryCollectionConfig<TestItem> = {
+      id: `project-2-todos`,
+      queryClient,
+      queryKey: queryKey2,
+      queryFn: queryFn2,
+      getKey,
+      startSync: true,
+    }
+
+    const options = queryCollectionOptions(config)
+    const options1 = queryCollectionOptions(config1)
+    const options2 = queryCollectionOptions(config2)
+
+    const collection = createCollection(options)
+    const collection1 = createCollection(options1)
+    const collection2 = createCollection(options2)
+
+    // Wait for initial queries to complete
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(queryFn1).toHaveBeenCalledTimes(1)
+      expect(queryFn2).toHaveBeenCalledTimes(1)
+      expect(collection.status).toBe(`ready`)
+    })
+
+    // Reset call counts to test refetch behavior
+    queryFn.mockClear()
+    queryFn1.mockClear()
+    queryFn2.mockClear()
+
+    // Refetch the target collection with key ['todos', 'project-1']
+    await collection1.utils.refetch()
+
+    // Verify that only the target query was refetched
+    await vi.waitFor(() => {
+      expect(queryFn1).toHaveBeenCalledTimes(1)
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(queryFn2).not.toHaveBeenCalled()
+    })
+
+    // Cleanup
+    await Promise.all([
+      collection.cleanup(),
+      collection1.cleanup(),
+      collection2.cleanup(),
+    ])
+  })
+
+  it(`should use exact targeting when clearError() refetches to avoid unintended cascading`, async () => {
+    const queryKey1 = [`todos`, `project-1`]
+    const queryKey2 = [`todos`, `project-2`]
+
+    const testError = new Error(`Test error`)
+    const mockItems = [{ id: `1`, name: `Item 1` }]
+    const queryFn1 = vi
+      .fn()
+      .mockRejectedValueOnce(testError)
+      .mockResolvedValue(mockItems)
+    const queryFn2 = vi.fn().mockResolvedValue(mockItems)
+
+    const config1: QueryCollectionConfig<TestItem> = {
+      id: `project-1-todos-clear-error`,
+      queryClient,
+      queryKey: queryKey1,
+      queryFn: queryFn1,
+      getKey,
+      startSync: true,
+      retry: false,
+    }
+    const config2: QueryCollectionConfig<TestItem> = {
+      id: `project-2-todos-clear-error`,
+      queryClient,
+      queryKey: queryKey2,
+      queryFn: queryFn2,
+      getKey,
+      startSync: true,
+      retry: false,
+    }
+
+    const options1 = queryCollectionOptions(config1)
+    const options2 = queryCollectionOptions(config2)
+
+    const collection1 = createCollection(options1)
+    const collection2 = createCollection(options2)
+
+    await vi.waitFor(() => {
+      expect(collection1.utils.isError).toBe(true)
+      expect(collection2.status).toBe(`ready`)
+    })
+
+    queryFn1.mockClear()
+    queryFn2.mockClear()
+
+    await collection1.utils.clearError()
+
+    await vi.waitFor(() => {
+      expect(queryFn1).toHaveBeenCalledTimes(1)
+      expect(queryFn2).not.toHaveBeenCalled()
+    })
+
+    await Promise.all([collection1.cleanup(), collection2.cleanup()])
+  })
+
+  it(`should propagate errors when throwOnError is true in refetch`, async () => {
+    const testError = new Error(`Refetch error`)
+    const queryKey = [`throw-on-error-test`]
+    const queryFn = vi.fn().mockRejectedValue(testError)
+
+    await queryClient.prefetchQuery({ queryKey, queryFn })
+
+    const collection = createCollection(
+      queryCollectionOptions({
+        id: `throw-on-error-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        retry: false,
+        startSync: true,
+      })
+    )
+
+    await vi.waitFor(() => {
+      expect(collection.utils.isError).toBe(true)
+    })
+
+    await expect(
+      collection.utils.refetch({ throwOnError: true })
+    ).rejects.toThrow(testError)
+
+    // Should not throw when throwOnError is false
+    await collection.utils.refetch({ throwOnError: false })
+
+    await collection.cleanup()
+  })
+
+  describe(`refetch() behavior`, () => {
+    it(`should refetch when collection is syncing (startSync: true)`, async () => {
+      const queryKey = [`refetch-test-syncing`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-test-syncing`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          startSync: true,
+        })
+      )
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      queryFn.mockClear()
+
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      await collection.cleanup()
+    })
+
+    it(`should refetch even when enabled: false (imperative refetch pattern)`, async () => {
+      const mockItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryKey = [`manual-fetch-test`]
+      const queryFn = vi.fn().mockResolvedValue(mockItems)
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `manual-fetch-test`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          enabled: false,
+          startSync: true,
+        })
+      )
+
+      // Query should not auto-fetch due to enabled: false
+      expect(queryFn).not.toHaveBeenCalled()
+
+      // But manual refetch should work
+      await collection.utils.refetch()
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      await collection.cleanup()
+    })
+
+    it(`should be no-op when sync has not started (no observer created)`, async () => {
+      const queryKey = [`refetch-test-no-sync`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-test-no-sync`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          startSync: false,
+        })
+      )
+
+      // Refetch should be no-op because observer doesn't exist yet
+      await collection.utils.refetch()
+      expect(queryFn).not.toHaveBeenCalled()
+
+      await collection.cleanup()
+    })
+  })
+
   describe(`Error Handling`, () => {
     // Helper to create test collection with common configuration
     const createErrorHandlingTestCollection = (
@@ -1997,33 +2313,33 @@ describe(`QueryCollection`, () => {
       // Wait for initial success - no errors
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
-        expect(collection.utils.lastError()).toBeUndefined()
-        expect(collection.utils.isError()).toBe(false)
-        expect(collection.utils.errorCount()).toBe(0)
+        expect(collection.utils.lastError).toBeUndefined()
+        expect(collection.utils.isError).toBe(false)
+        expect(collection.utils.errorCount).toBe(0)
       })
 
       // First error - count increments
       await collection.utils.refetch()
       await vi.waitFor(() => {
-        expect(collection.utils.lastError()).toBe(errors[0])
-        expect(collection.utils.errorCount()).toBe(1)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.lastError).toBe(errors[0])
+        expect(collection.utils.errorCount).toBe(1)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Second error - count increments again
       await collection.utils.refetch()
       await vi.waitFor(() => {
-        expect(collection.utils.lastError()).toBe(errors[1])
-        expect(collection.utils.errorCount()).toBe(2)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.lastError).toBe(errors[1])
+        expect(collection.utils.errorCount).toBe(2)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Successful refetch resets error state
       await collection.utils.refetch()
       await vi.waitFor(() => {
-        expect(collection.utils.lastError()).toBeUndefined()
-        expect(collection.utils.isError()).toBe(false)
-        expect(collection.utils.errorCount()).toBe(0)
+        expect(collection.utils.lastError).toBeUndefined()
+        expect(collection.utils.isError).toBe(false)
+        expect(collection.utils.errorCount).toBe(0)
         expect(collection.get(`1`)).toEqual(updatedData[0])
       })
     })
@@ -2045,16 +2361,16 @@ describe(`QueryCollection`, () => {
 
       // Wait for initial error
       await vi.waitFor(() => {
-        expect(collection.utils.isError()).toBe(true)
-        expect(collection.utils.errorCount()).toBe(1)
+        expect(collection.utils.isError).toBe(true)
+        expect(collection.utils.errorCount).toBe(1)
       })
 
       // Manual error clearing triggers refetch
       await collection.utils.clearError()
 
-      expect(collection.utils.lastError()).toBeUndefined()
-      expect(collection.utils.isError()).toBe(false)
-      expect(collection.utils.errorCount()).toBe(0)
+      expect(collection.utils.lastError).toBeUndefined()
+      expect(collection.utils.isError).toBe(false)
+      expect(collection.utils.errorCount).toBe(0)
 
       await vi.waitFor(() => {
         expect(collection.get(`1`)).toEqual(recoveryData[0])
@@ -2062,9 +2378,9 @@ describe(`QueryCollection`, () => {
 
       // Refetch on rejection should throw an error
       await expect(collection.utils.clearError()).rejects.toThrow(testError)
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.isError()).toBe(true)
-      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.isError).toBe(true)
+      expect(collection.utils.errorCount).toBe(1)
     })
 
     it(`should maintain collection functionality despite errors and persist error state`, async () => {
@@ -2092,8 +2408,8 @@ describe(`QueryCollection`, () => {
       // Cause error
       await collection.utils.refetch()
       await vi.waitFor(() => {
-        expect(collection.utils.errorCount()).toBe(1)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.errorCount).toBe(1)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Collection operations still work with cached data
@@ -2110,25 +2426,25 @@ describe(`QueryCollection`, () => {
       await flushPromises()
 
       // Manual writes clear error state
-      expect(collection.utils.lastError()).toBeUndefined()
-      expect(collection.utils.isError()).toBe(false)
-      expect(collection.utils.errorCount()).toBe(0)
+      expect(collection.utils.lastError).toBeUndefined()
+      expect(collection.utils.isError).toBe(false)
+      expect(collection.utils.errorCount).toBe(0)
 
       // Create error state again for persistence test
       await collection.utils.refetch()
-      await vi.waitFor(() => expect(collection.utils.isError()).toBe(true))
+      await vi.waitFor(() => expect(collection.utils.isError).toBe(true))
 
-      const originalError = collection.utils.lastError()
-      const originalErrorCount = collection.utils.errorCount()
+      const originalError = collection.utils.lastError
+      const originalErrorCount = collection.utils.errorCount
 
       // Read-only operations don't affect error state
       expect(collection.has(`1`)).toBe(true)
       const changeHandler = vi.fn()
       const subscription = collection.subscribeChanges(changeHandler)
 
-      expect(collection.utils.lastError()).toBe(originalError)
-      expect(collection.utils.isError()).toBe(true)
-      expect(collection.utils.errorCount()).toBe(originalErrorCount)
+      expect(collection.utils.lastError).toBe(originalError)
+      expect(collection.utils.isError).toBe(true)
+      expect(collection.utils.errorCount).toBe(originalErrorCount)
 
       subscription.unsubscribe()
     })
@@ -2168,16 +2484,16 @@ describe(`QueryCollection`, () => {
       // Wait for collection to be ready (even with error)
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Verify custom error is accessible with all its properties
-      const lastError = collection.utils.lastError()
+      const lastError = collection.utils.lastError
       expect(lastError).toBe(customError)
       expect(lastError?.code).toBe(`NETWORK_ERROR`)
       expect(lastError?.message).toBe(`Failed to fetch data`)
       expect(lastError?.details?.retryAfter).toBe(5000)
-      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.errorCount).toBe(1)
     })
 
     it(`should persist error state after collection cleanup`, async () => {
@@ -2194,21 +2510,21 @@ describe(`QueryCollection`, () => {
       // Wait for collection to be ready (even with error)
       await vi.waitFor(() => {
         expect(collection.status).toBe(`ready`)
-        expect(collection.utils.isError()).toBe(true)
+        expect(collection.utils.isError).toBe(true)
       })
 
       // Verify error state before cleanup
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.errorCount).toBe(1)
 
       // Cleanup collection
       await collection.cleanup()
       expect(collection.status).toBe(`cleaned-up`)
 
       // Error state should persist after cleanup
-      expect(collection.utils.isError()).toBe(true)
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.errorCount()).toBe(1)
+      expect(collection.utils.isError).toBe(true)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.errorCount).toBe(1)
     })
 
     it(`should increment errorCount only after final failure when using Query retries`, async () => {
@@ -2239,16 +2555,16 @@ describe(`QueryCollection`, () => {
         () => {
           expect(collection.status).toBe(`ready`) // Should be ready even with error
           expect(queryFn).toHaveBeenCalledTimes(totalAttempts)
-          expect(collection.utils.isError()).toBe(true)
+          expect(collection.utils.isError).toBe(true)
         },
         { timeout: 2000 }
       )
 
       // Error count should only increment once after all retries are exhausted
       // This ensures we track "consecutive post-retry failures," not per-attempt failures
-      expect(collection.utils.errorCount()).toBe(1)
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.isError()).toBe(true)
+      expect(collection.utils.errorCount).toBe(1)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.isError).toBe(true)
 
       // Reset attempt counter for second test
       queryFn.mockClear()
@@ -2265,9 +2581,9 @@ describe(`QueryCollection`, () => {
       )
 
       // Error count should now be 2 (two post-retry failures)
-      expect(collection.utils.errorCount()).toBe(2)
-      expect(collection.utils.lastError()).toBe(testError)
-      expect(collection.utils.isError()).toBe(true)
+      expect(collection.utils.errorCount).toBe(2)
+      expect(collection.utils.lastError).toBe(testError)
+      expect(collection.utils.isError).toBe(true)
     })
   })
 
@@ -2338,6 +2654,888 @@ describe(`QueryCollection`, () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.status).toBe(`ready`)
       expect(collection.size).toBe(items.length)
+    })
+    it(`should allow writeDelete in onDelete handler to write to synced store`, async () => {
+      const queryKey = [`writeDelete-in-onDelete-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const onDelete = vi.fn(async ({ transaction, collection }) => {
+        const deletedItem = transaction.mutations[0]?.original
+        // Call writeDelete inside onDelete handler - this should work without throwing
+        collection.utils.writeDelete(deletedItem.id)
+        return { refetch: false }
+      })
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `writeDelete-in-onDelete-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        onDelete,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.size).toBe(2)
+      })
+
+      const transaction = collection.delete(`1`)
+      await transaction.isPersisted.promise
+
+      // Verify the fix: writeDelete should work, transaction completes, item is deleted
+      expect(transaction.state).toBe(`completed`)
+      expect(onDelete).toHaveBeenCalledTimes(1)
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.size).toBe(1)
+    })
+
+    it(`should transition to ready immediately in on-demand mode without loading data`, async () => {
+      const queryKey = [`preload-on-demand-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `preload-on-demand-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        syncMode: `on-demand`, // No initial query in on-demand mode
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should be idle initially
+      expect(collection.status).toBe(`idle`)
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(collection.size).toBe(0)
+
+      // Preload should resolve immediately without calling queryFn
+      // since there's no initial query in on-demand mode
+      await collection.preload()
+
+      // After preload, collection should be ready
+      // but queryFn should NOT have been called and collection should still be empty
+      expect(collection.status).toBe(`ready`)
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(collection.size).toBe(0)
+
+      // Now if we call loadSubset, it should actually load data
+      await collection._sync.loadSubset({})
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(items.length)
+      })
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+      expect(collection.get(`1`)).toEqual(items[0])
+      expect(collection.get(`2`)).toEqual(items[1])
+    })
+  })
+
+  describe(`QueryClient defaultOptions`, () => {
+    it(`should respect defaultOptions from QueryClient when not overridden`, async () => {
+      // Create a QueryClient with custom defaultOptions
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 10000, // 10 seconds
+            retry: 2,
+            refetchOnWindowFocus: false,
+          },
+        },
+      })
+
+      const queryKey = [`defaultOptionsTest`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Create a collection without specifying staleTime or retry
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `defaultOptionsTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Verify queryFn was called once
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // Verify the query has the correct staleTime from defaultOptions
+      const query = customQueryClient.getQueryCache().find({ queryKey })
+      expect((query?.options as any).staleTime).toBe(10000)
+
+      // Clean up
+      customQueryClient.clear()
+    })
+
+    it(`should override defaultOptions when explicitly provided in queryCollectionOptions`, async () => {
+      // Create a QueryClient with custom defaultOptions
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 10000, // 10 seconds default
+            retry: 2,
+          },
+        },
+      })
+
+      const queryKey = [`overrideOptionsTest`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Create a collection WITH explicit staleTime override
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `overrideOptionsTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        staleTime: 100, // Override to 100ms
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Verify the query uses the overridden staleTime (100ms), not the default (10000ms)
+      const query = customQueryClient.getQueryCache().find({ queryKey })
+      expect((query?.options as any).staleTime).toBe(100)
+
+      // Clean up
+      customQueryClient.clear()
+    })
+
+    it(`should use retry from QueryClient defaultOptions when not overridden`, async () => {
+      let callCount = 0
+      // Create a QueryClient with custom retry defaultOption
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            retry: 2, // Retry 2 times
+            retryDelay: 1, // 1ms delay for fast test
+          },
+        },
+      })
+
+      const queryKey = [`retryDefaultOptionsTest`]
+      const queryFn = vi.fn().mockImplementation(() => {
+        callCount++
+        // Fail on first 2 attempts, succeed on 3rd
+        if (callCount <= 2) {
+          return Promise.reject(new Error(`Attempt ${callCount} failed`))
+        }
+        return Promise.resolve([{ id: `1`, name: `Item 1` }])
+      })
+
+      // Create a collection without specifying retry
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `retryDefaultOptionsTest`,
+        queryClient: customQueryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for the query to eventually succeed (after retries)
+      await vi.waitFor(
+        () => {
+          expect(collection.status).toBe(`ready`)
+        },
+        { timeout: 2000 }
+      )
+
+      // Should have called queryFn 3 times (initial + 2 retries)
+      expect(callCount).toBe(3)
+
+      // Clean up
+      customQueryClient.clear()
+    })
+  })
+
+  describe(`Query Garbage Collection`, () => {
+    const isCategory = (category: `A` | `B` | `C`, where: any) => {
+      return (
+        where &&
+        where.type === `func` &&
+        where.name === `eq` &&
+        where.args[0].path[0] === `category` &&
+        where.args[1].value === category
+      )
+    }
+
+    it(`should delete all rows when a single query is garbage collected`, async () => {
+      const queryKey = [`single-query-gc-test`]
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+        { id: `3`, name: `Item 3` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `single-query-gc-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+        expect(collection.get(`1`)).toEqual(items[0])
+        expect(collection.get(`2`)).toEqual(items[1])
+        expect(collection.get(`3`)).toEqual(items[2])
+      })
+
+      // Verify all items are in the collection
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // Simulate query garbage collection by removing the query from the cache
+      await collection.cleanup()
+
+      // Verify all items are removed
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.has(`2`)).toBe(false)
+      expect(collection.has(`3`)).toBe(false)
+    })
+
+    it(`should only delete non-shared rows when one of multiple overlapping queries is GCed`, async () => {
+      const baseQueryKey = [`overlapping-query-test`]
+
+      // Mock queryFn to return different data based on predicates
+      const queryFn = vi.fn().mockImplementation((context) => {
+        const { meta } = context
+        const loadSubsetOptions = meta?.loadSubsetOptions ?? {}
+        const { where } = loadSubsetOptions
+
+        // Query 1: items 1, 2, 3 (where: { category: 'A' })
+        if (isCategory(`A`, where)) {
+          console.log(`Is category A`)
+          return Promise.resolve([
+            { id: `1`, name: `Item 1` },
+            { id: `2`, name: `Item 2` },
+            { id: `3`, name: `Item 3` },
+          ])
+        }
+
+        // Query 2: items 2, 3, 4 (where: { category: 'B' })
+        if (isCategory(`B`, where)) {
+          return Promise.resolve([
+            { id: `2`, name: `Item 2` },
+            { id: `3`, name: `Item 3` },
+            { id: `4`, name: `Item 4` },
+          ])
+        }
+
+        // Query 3: items 3, 4, 5 (where: { category: 'C' })
+        if (isCategory(`C`, where)) {
+          return Promise.resolve([
+            { id: `3`, name: `Item 3` },
+            { id: `4`, name: `Item 4` },
+            { id: `5`, name: `Item 5` },
+          ])
+        }
+        return Promise.resolve([])
+      })
+
+      const queryKey = (ctx: any) => {
+        if (ctx.where) {
+          return [...baseQueryKey, ctx.where]
+        }
+        return baseQueryKey
+      }
+
+      const config: QueryCollectionConfig<
+        TestItem & { category: `A` | `B` | `C` }
+      > = {
+        id: `overlapping-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Load query 1 with no predicates (items 1, 2, 3)
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query1.preload()
+
+      // Wait for query 1 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+      })
+
+      // Add query 2 with different predicates (items 2, 3, 4)
+      // We abuse the `where` clause being typed as `any` to pass a category
+      // but in real usage this would be some Intermediate Representation of the where clause
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `B`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query2.preload()
+
+      // Wait for query 2 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(4) // Should have items 1, 2, 3, 4
+      })
+
+      // Add query 3 with different predicates
+      const query3 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `C`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query3.preload()
+
+      // Wait for query 3 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(5) // Should have items 1, 2, 3, 4, 5
+      })
+
+      // Verify all items are present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+      expect(collection.has(`4`)).toBe(true)
+      expect(collection.has(`5`)).toBe(true)
+
+      // GC query 1 (no predicates) - should only remove item 1 (unique to query 1)
+      // Items 2 and 3 should remain because they're shared with other queries
+      await query1.cleanup()
+
+      expect(collection.size).toBe(4) // Should have items 2, 3, 4, 5
+
+      // Verify item 1 is removed (it was only in query 1)
+      expect(collection.has(`1`)).toBe(false)
+
+      // Verify shared items are still present
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+      expect(collection.has(`4`)).toBe(true)
+      expect(collection.has(`5`)).toBe(true)
+
+      // GC query 2 (where: { category: 'B' }) - should remove item 2
+      // Items 3 and 4 should remain because they are shared with query 3
+      await query2.cleanup()
+
+      expect(collection.size).toBe(3) // Should have items 3, 4, 5
+
+      // Verify item 2 is removed (it was only in query 2)
+      expect(collection.has(`2`)).toBe(false)
+
+      // Verify items 3 and 4 are still present (shared with query 3)
+      expect(collection.has(`3`)).toBe(true)
+      expect(collection.has(`4`)).toBe(true)
+      expect(collection.has(`5`)).toBe(true)
+
+      // GC query 3 (where: { category: 'C' }) - should remove all remaining items
+      await query3.cleanup()
+
+      expect(collection.size).toBe(0)
+
+      // Verify all items are now removed
+      expect(collection.has(`3`)).toBe(false)
+      expect(collection.has(`4`)).toBe(false)
+      expect(collection.has(`5`)).toBe(false)
+    })
+
+    it(`should handle GC of queries with identical data`, async () => {
+      const baseQueryKey = [`identical-query-test`]
+
+      // Mock queryFn to return the same data for all queries
+      const queryFn = vi.fn().mockImplementation(() => {
+        // All queries return the same data regardless of predicates
+        return Promise.resolve([
+          { id: `1`, name: `Item 1`, category: `A` },
+          { id: `2`, name: `Item 2`, category: `A` },
+          { id: `3`, name: `Item 3`, category: `A` },
+        ])
+      })
+
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `identical-test`,
+        queryClient,
+        queryKey: (ctx) => {
+          if (ctx.where) {
+            return [...baseQueryKey, ctx.where]
+          }
+          return baseQueryKey
+        },
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Load query 1 with no predicates (items 1, 2, 3)
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query1.preload()
+
+      // Wait for query 1 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+      })
+
+      // Add query 2 with different predicates (but returns same data)
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query2.preload()
+
+      // Wait for query 2 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Same data, no new items
+      })
+
+      // Add query 3 with different predicates (but returns same data)
+      const query3 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) =>
+              or(eq(item.category, `A`), eq(item.category, `B`))
+            )
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query3.preload()
+
+      // Wait for query 3 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Same data, no new items
+      })
+
+      // GC query 1 - should not remove any items (all items are shared with other queries)
+      await query1.cleanup()
+
+      expect(collection.size).toBe(3) // Items still present due to other queries
+
+      // All items should still be present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // GC query 2 - should still not remove any items (all items are shared with query 3)
+      await query2.cleanup()
+
+      expect(collection.size).toBe(3) // Items still present due to query 3
+
+      // All items should still be present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // GC query 3 - should remove all items (no more queries reference them)
+      await query3.cleanup()
+
+      expect(collection.size).toBe(0)
+
+      // All items should now be removed
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.has(`2`)).toBe(false)
+      expect(collection.has(`3`)).toBe(false)
+    })
+
+    it(`should handle GC of empty queries gracefully`, async () => {
+      const baseQueryKey = [`empty-query-test`]
+
+      // Mock queryFn to return different data based on predicates
+      const queryFn = vi.fn().mockImplementation((context) => {
+        const { meta } = context
+        const loadSubsetOptions = meta?.loadSubsetOptions || {}
+        const { where } = loadSubsetOptions
+
+        // Query 2: some items (where: { category: 'B' })
+        if (isCategory(`B`, where)) {
+          return Promise.resolve([
+            { id: `1`, name: `Item 1`, category: `B` },
+            { id: `2`, name: `Item 2`, category: `B` },
+          ])
+        }
+
+        return Promise.resolve([])
+      })
+
+      const config: QueryCollectionConfig<TestItem & { category: `A` | `B` }> =
+        {
+          id: `empty-test`,
+          queryClient,
+          queryKey: (ctx) => {
+            if (ctx.where) {
+              return [...baseQueryKey, ctx.where]
+            }
+            return baseQueryKey
+          },
+          queryFn,
+          getKey,
+          startSync: true,
+          syncMode: `on-demand`,
+        }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Load query 1 (returns empty array)
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await query1.preload()
+
+      // Wait for query 1 data to load (still empty)
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0) // Empty query
+      })
+
+      // Add query 2 with different predicates (items 1, 2)
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `B`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query2.preload()
+
+      // Wait for query 2 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2) // Should have items 1, 2
+      })
+
+      // Verify items are present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+
+      // GC empty query 1 - should not affect the collection
+      await query1.cleanup()
+
+      // Collection should still have items from query 2
+      expect(collection.size).toBe(2)
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+
+      // GC non-empty query 2 - should remove its items
+      await query2.cleanup()
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(0)
+      })
+
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.has(`2`)).toBe(false)
+    })
+
+    it(`should handle concurrent GC of multiple queries`, async () => {
+      const baseQueryKey = [`concurrent-query-test`]
+
+      // Mock queryFn to return different data based on predicates
+      const queryFn = vi.fn().mockImplementation((context) => {
+        const { meta } = context
+        const loadSubsetOptions = meta?.loadSubsetOptions || {}
+        const { where } = loadSubsetOptions
+
+        // Query 1: items 1, 2 (no predicates)
+        if (isCategory(`C`, where)) {
+          return Promise.resolve([
+            { id: `1`, name: `Item 1`, category: `C` },
+            { id: `2`, name: `Item 2`, category: `C` },
+          ])
+        }
+
+        // Query 2: items 2, 3 (where: { type: 'A' })
+        if (isCategory(`A`, where)) {
+          return Promise.resolve([
+            { id: `2`, name: `Item 2`, category: `A` },
+            { id: `3`, name: `Item 3`, category: `A` },
+          ])
+        }
+
+        // Query 3: items 3, 4 (where: { type: 'B' })
+        if (isCategory(`B`, where)) {
+          return Promise.resolve([
+            { id: `3`, name: `Item 3`, category: `B` },
+            { id: `4`, name: `Item 4`, category: `B` },
+          ])
+        }
+
+        return Promise.resolve([])
+      })
+
+      const config: QueryCollectionConfig<
+        TestItem & { category: `A` | `B` | `C` }
+      > = {
+        id: `concurrent-test`,
+        queryClient,
+        queryKey: (ctx) => {
+          if (ctx.where) {
+            return [...baseQueryKey, ctx.where]
+          }
+          return baseQueryKey
+        },
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Load query 1 with no predicates (items 1, 2)
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `C`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query1.preload()
+
+      // Wait for query 1 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // Add query 2 with different predicates (items 2, 3)
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query2.preload()
+
+      // Wait for query 2 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3) // Should have items 1, 2, 3
+      })
+
+      // Add query 3 with different predicates
+      const query3 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `B`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query3.preload()
+
+      // Wait for query 3 data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(4) // Should have items 1, 2, 3, 4
+      })
+
+      // GC all queries concurrently
+      const queries = [query1, query2, query3]
+      const proms = queries.map((query) => query.cleanup())
+      await Promise.all(proms)
+
+      // Collection should be empty after all queries are GCed
+      expect(collection.size).toBe(0)
+
+      // Verify all items are removed
+      expect(collection.has(`1`)).toBe(false)
+      expect(collection.has(`2`)).toBe(false)
+      expect(collection.has(`3`)).toBe(false)
+      expect(collection.has(`4`)).toBe(false)
+    })
+
+    it(`should deduplicate queries and handle GC correctly when queries are ordered and have a LIMIT`, async () => {
+      const baseQueryKey = [`deduplication-gc-test`]
+
+      // Mock queryFn to return different data based on predicates
+      const queryFn = vi.fn().mockImplementation((context) => {
+        const { meta } = context
+        const loadSubsetOptions = meta?.loadSubsetOptions ?? {}
+        const { where, limit } = loadSubsetOptions
+
+        // Query 1: all items with category A (no limit)
+        if (isCategory(`A`, where) && !limit) {
+          return Promise.resolve([
+            { id: `1`, name: `Item 1`, category: `A` },
+            { id: `2`, name: `Item 2`, category: `A` },
+            { id: `3`, name: `Item 3`, category: `A` },
+          ])
+        }
+
+        return Promise.resolve([])
+      })
+
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `deduplication-test`,
+        queryClient,
+        queryKey: (ctx) => {
+          const key = [...baseQueryKey]
+          if (ctx.where) {
+            key.push(`where`, JSON.stringify(ctx.where))
+          }
+          if (ctx.limit) {
+            key.push(`limit`, ctx.limit.toString())
+          }
+          if (ctx.orderBy) {
+            key.push(`orderBy`, JSON.stringify(ctx.orderBy))
+          }
+          return key
+        },
+        queryFn,
+        getKey,
+        startSync: true,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection should start empty with on-demand sync mode
+      expect(collection.size).toBe(0)
+
+      // Execute first query: load all rows that belong to category A (returns 3 rows)
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query1.preload()
+
+      // Wait for first query data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(3)
+        expect(queryFn).toHaveBeenCalledTimes(1)
+      })
+
+      // Verify all 3 items are present
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // Execute second query: load rows with category A, limit 2, ordered by ID
+      // This should be deduplicated since we already have all category A data
+      // So it will load the data from the local collection
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .orderBy(({ item }) => item.id, `asc`)
+            .limit(2)
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+      await query2.preload()
+
+      await flushPromises()
+
+      // Second query should still only have been called once
+      // since query2 is deduplicated so it is executed against the local collection
+      // and not via queryFn
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      // Collection should still have all 3 items (deduplication doesn't remove data)
+      expect(collection.size).toBe(3)
+      expect(collection.has(`1`)).toBe(true)
+      expect(collection.has(`2`)).toBe(true)
+      expect(collection.has(`3`)).toBe(true)
+
+      // GC the first query (all category A without limit)
+      await query1.cleanup()
+
+      expect(collection.size).toBe(2) // Should only have items 1 and 2 because they are still referenced by query 2
+
+      // Verify that only row 3 is removed (it was only referenced by query 1)
+      expect(collection.has(`1`)).toBe(true) // Still present (referenced by query 2)
+      expect(collection.has(`2`)).toBe(true) // Still present (referenced by query 2)
+      expect(collection.has(`3`)).toBe(false) // Removed (only referenced by query 1)
+
+      // GC the second query (category A with limit 2)
+      await query2.cleanup()
+
+      // Wait for final GC to process
+      expect(collection.size).toBe(0)
     })
   })
 })

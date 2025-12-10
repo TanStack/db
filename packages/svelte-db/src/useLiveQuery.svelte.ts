@@ -1,5 +1,5 @@
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { flushSync, untrack } from "svelte"
+import { untrack } from "svelte"
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from "svelte/reactivity"
 import { createLiveQueryCollection } from "@tanstack/db"
@@ -68,13 +68,38 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * @param queryFn - Query function that defines what data to fetch
  * @param deps - Array of reactive dependencies that trigger query re-execution when changed
  * @returns Reactive object with query data, state, and status information
+ *
+ * @remarks
+ * **IMPORTANT - Destructuring in Svelte 5:**
+ * Direct destructuring breaks reactivity. To destructure, wrap with `$derived`:
+ *
+ * ❌ **Incorrect** - Loses reactivity:
+ * ```ts
+ * const { data, isLoading } = useLiveQuery(...)
+ * ```
+ *
+ * ✅ **Correct** - Maintains reactivity:
+ * ```ts
+ * // Option 1: Use dot notation (recommended)
+ * const query = useLiveQuery(...)
+ * // Access: query.data, query.isLoading
+ *
+ * // Option 2: Wrap with $derived for destructuring
+ * const query = useLiveQuery(...)
+ * const { data, isLoading } = $derived(query)
+ * ```
+ *
+ * This is a fundamental Svelte 5 limitation, not a library bug. See:
+ * https://github.com/sveltejs/svelte/issues/11002
+ *
  * @example
- * // Basic query with object syntax
+ * // Basic query with object syntax (recommended pattern)
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
  *    .where(({ todos }) => eq(todos.completed, false))
  *    .select(({ todos }) => ({ id: todos.id, text: todos.text }))
  * )
+ * // Access via: todosQuery.data, todosQuery.isLoading, etc.
  *
  * @example
  * // With reactive dependencies
@@ -84,6 +109,14 @@ function toValue<T>(value: MaybeGetter<T>): T {
  *          .where(({ todos }) => gt(todos.priority, minPriority)),
  *   [() => minPriority] // Re-run when minPriority changes
  * )
+ *
+ * @example
+ * // Destructuring with $derived (if needed)
+ * const query = useLiveQuery((q) =>
+ *   q.from({ todos: todosCollection })
+ * )
+ * const { data, isLoading, isError } = $derived(query)
+ * // Now data, isLoading, and isError maintain reactivity
  *
  * @example
  * // Join pattern
@@ -320,10 +353,9 @@ export function useLiveQuery(
     // Listen for the first ready event to catch status transitions
     // that might not trigger change events (fixes async status transition bug)
     currentCollection.onFirstReady(() => {
-      // Use flushSync to ensure Svelte reactivity updates properly
-      flushSync(() => {
-        status = currentCollection.status
-      })
+      // Update status directly - Svelte's reactivity system handles the update automatically
+      // Note: We cannot use flushSync here as it's disallowed inside effects in async mode
+      status = currentCollection.status
     })
 
     // Subscribe to collection changes with granular updates
