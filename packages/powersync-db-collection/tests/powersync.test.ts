@@ -31,7 +31,7 @@ const APP_SCHEMA = new Schema({
     },
     {
       trackMetadata: true,
-    }
+    },
   ),
 })
 
@@ -351,14 +351,14 @@ describe(`PowerSync Integration`, () => {
         },
         {
           metadata,
-        }
+        },
       ).isPersisted.promise
 
       // Now do an update
       await collection.update(
         id,
         { metadata: metadata },
-        (d) => (d.name = `updatedNew`)
+        (d) => (d.name = `updatedNew`),
       ).isPersisted.promise
 
       await collection.delete(id, { metadata }).isPersisted.promise

@@ -1,5 +1,5 @@
 ---
-"@tanstack/powersync-db-collection": patch
+'@tanstack/powersync-db-collection': patch
 ---
 
 Added support for tracking collection operation metadata in PowerSync CrudEntry operations.
@@ -16,7 +16,7 @@ const APP_SCHEMA = new Schema({
     {
       // Metadata tracking must be enabled on the PowerSync table
       trackMetadata: true,
-    }
+    },
   ),
 })
 
@@ -32,8 +32,8 @@ await collection.insert(
   // The string version of this will be present in PowerSync `CrudEntry`s during uploads
   {
     metadata: {
-      extraInfo: "Info",
+      extraInfo: 'Info',
     },
-  }
+  },
 )
 ```
