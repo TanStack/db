@@ -295,6 +295,13 @@ describe(`Operators`, () => {
       // group2 should have values 5, 15 (top 2 by ascending value, ordered by fractional index)
       expect(initialGroupedValues.get(`group2`)).toEqual([5, 15])
 
+      // Capture the fractional index of value 10 before reset
+      const value10Entry = sortedInitialResults.find(
+        ([_key, [value, _index]]) => value.value === 10 && value.group === `group1`,
+      )
+      expect(value10Entry).toBeDefined()
+      const [_value10Key, [_value10Value, value10Idx]] = value10Entry!
+
       tracker.reset()
 
       // Update only group1 - add a better value
@@ -332,13 +339,6 @@ describe(`Operators`, () => {
       expect(additionValue.id).toBe(`g1-c`)
 
       // Check that the fractional index of the added value (5) is smaller than the index of value 10
-      const finalResult = tracker.getResult(compareFractionalIndex)
-      const value10Entry = finalResult.sortedResults.find(
-        ([_key, [value, _index]]) =>
-          value.value === 10 && value.group === `group1`,
-      )
-      expect(value10Entry).toBeDefined()
-      const [_value10Key, [_value10Value, value10Idx]] = value10Entry!
       expect(additionIdx < value10Idx).toBe(true)
     })
 
