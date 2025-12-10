@@ -52,6 +52,7 @@
     "typescript": ">=4.7"
   },
   "devDependencies": {
+    "@tanstack/config": "^0.22.2",
     "@vitest/coverage-istanbul": "^3.2.4",
     "arktype": "^2.1.28",
     "mitt": "^3.0.1",
