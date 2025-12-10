@@ -5,6 +5,7 @@ import { mockSyncCollectionOptions } from '../utils.js'
 import {
   and,
   avg,
+  collect,
   count,
   eq,
   gt,
@@ -1386,4 +1387,241 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 describe(`Query GROUP BY Execution`, () => {
   createGroupByTests(`off`)
   createGroupByTests(`eager`)
+})
+
+describe(`Collect Aggregate Function`, () => {
+  let ordersCollection: ReturnType<typeof createOrdersCollection>
+
+  function createOrdersCollection(autoIndex: `off` | `eager` = `eager`) {
+    return createCollection(
+      mockSyncCollectionOptions<Order>({
+        id: `test-orders-collect`,
+        getKey: (order) => order.id,
+        initialData: sampleOrders,
+        autoIndex,
+      }),
+    )
+  }
+
+  beforeEach(() => {
+    ordersCollection = createOrdersCollection()
+  })
+
+  test(`collect gathers all values into an array`, () => {
+    const ordersByCustomer = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ orders: ordersCollection })
+          .groupBy(({ orders }) => orders.customer_id)
+          .select(({ orders }) => ({
+            customer_id: orders.customer_id,
+            order_ids: collect(orders.id),
+            amounts: collect(orders.amount),
+          })),
+    })
+
+    expect(ordersByCustomer.size).toBe(3) // 3 customers
+
+    // Customer 1: orders 1, 2, 7 (amounts: 100, 200, 400)
+    const customer1 = ordersByCustomer.get(1)
+    expect(customer1).toBeDefined()
+    expect(customer1?.order_ids).toHaveLength(3)
+    expect(customer1?.order_ids).toEqual(expect.arrayContaining([1, 2, 7]))
+    expect(customer1?.amounts).toHaveLength(3)
+    expect(customer1?.amounts).toEqual(expect.arrayContaining([100, 200, 400]))
+
+    // Customer 2: orders 3, 4 (amounts: 150, 300)
+    const customer2 = ordersByCustomer.get(2)
+    expect(customer2).toBeDefined()
+    expect(customer2?.order_ids).toHaveLength(2)
+    expect(customer2?.order_ids).toEqual(expect.arrayContaining([3, 4]))
+    expect(customer2?.amounts).toEqual(expect.arrayContaining([150, 300]))
+
+    // Customer 3: orders 5, 6 (amounts: 250, 75)
+    const customer3 = ordersByCustomer.get(3)
+    expect(customer3).toBeDefined()
+    expect(customer3?.order_ids).toHaveLength(2)
+    expect(customer3?.order_ids).toEqual(expect.arrayContaining([5, 6]))
+    expect(customer3?.amounts).toEqual(expect.arrayContaining([250, 75]))
+  })
+
+  test(`collect works with string values`, () => {
+    const statusesByCustomer = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ orders: ordersCollection })
+          .groupBy(({ orders }) => orders.customer_id)
+          .select(({ orders }) => ({
+            customer_id: orders.customer_id,
+            statuses: collect(orders.status),
+          })),
+    })
+
+    // Customer 1: all completed orders
+    const customer1 = statusesByCustomer.get(1)
+    expect(customer1?.statuses).toHaveLength(3)
+    expect(customer1?.statuses.every((s) => s === `completed`)).toBe(true)
+
+    // Customer 3: pending and cancelled
+    const customer3 = statusesByCustomer.get(3)
+    expect(customer3?.statuses).toHaveLength(2)
+    expect(customer3?.statuses).toEqual(
+      expect.arrayContaining([`pending`, `cancelled`]),
+    )
+  })
+
+  test(`collect combined with other aggregates`, () => {
+    const customerStats = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ orders: ordersCollection })
+          .groupBy(({ orders }) => orders.customer_id)
+          .select(({ orders }) => ({
+            customer_id: orders.customer_id,
+            order_ids: collect(orders.id),
+            order_count: count(orders.id),
+            total_amount: sum(orders.amount),
+            amounts: collect(orders.amount),
+          })),
+    })
+
+    const customer1 = customerStats.get(1)
+    expect(customer1?.order_ids).toHaveLength(3)
+    expect(customer1?.order_count).toBe(3)
+    expect(customer1?.total_amount).toBe(700)
+    expect(customer1?.amounts).toHaveLength(3)
+  })
+
+  test(`collect with live updates - insert`, () => {
+    const ordersByCustomer = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ orders: ordersCollection })
+          .groupBy(({ orders }) => orders.customer_id)
+          .select(({ orders }) => ({
+            customer_id: orders.customer_id,
+            order_ids: collect(orders.id),
+          })),
+    })
+
+    // Initial state
+    const initialCustomer1 = ordersByCustomer.get(1)
+    expect(initialCustomer1?.order_ids).toHaveLength(3)
+
+    // Insert new order for customer 1
+    const newOrder: Order = {
+      id: 8,
+      customer_id: 1,
+      amount: 500,
+      status: `completed`,
+      date: new Date(`2023-03-15`),
+      product_category: `electronics`,
+      quantity: 2,
+      discount: 0,
+      sales_rep_id: 1,
+    }
+
+    ordersCollection.utils.begin()
+    ordersCollection.utils.write({ type: `insert`, value: newOrder })
+    ordersCollection.utils.commit()
+
+    const updatedCustomer1 = ordersByCustomer.get(1)
+    expect(updatedCustomer1?.order_ids).toHaveLength(4)
+    expect(updatedCustomer1?.order_ids).toEqual(
+      expect.arrayContaining([1, 2, 7, 8]),
+    )
+  })
+
+  test(`collect with live updates - delete`, () => {
+    const ordersByCustomer = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ orders: ordersCollection })
+          .groupBy(({ orders }) => orders.customer_id)
+          .select(({ orders }) => ({
+            customer_id: orders.customer_id,
+            order_ids: collect(orders.id),
+          })),
+    })
+
+    // Initial state
+    const initialCustomer3 = ordersByCustomer.get(3)
+    expect(initialCustomer3?.order_ids).toHaveLength(2)
+    expect(initialCustomer3?.order_ids).toEqual(expect.arrayContaining([5, 6]))
+
+    // Delete order 6
+    const orderToDelete = sampleOrders.find((o) => o.id === 6)!
+
+    ordersCollection.utils.begin()
+    ordersCollection.utils.write({ type: `delete`, value: orderToDelete })
+    ordersCollection.utils.commit()
+
+    const updatedCustomer3 = ordersByCustomer.get(3)
+    expect(updatedCustomer3?.order_ids).toHaveLength(1)
+    expect(updatedCustomer3?.order_ids).toEqual([5])
+  })
+
+  test(`collect with WHERE filter`, () => {
+    const completedOrdersByCustomer = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ orders: ordersCollection })
+          .where(({ orders }) => eq(orders.status, `completed`))
+          .groupBy(({ orders }) => orders.customer_id)
+          .select(({ orders }) => ({
+            customer_id: orders.customer_id,
+            order_ids: collect(orders.id),
+          })),
+    })
+
+    // Customer 1: all 3 orders are completed
+    const customer1 = completedOrdersByCustomer.get(1)
+    expect(customer1?.order_ids).toHaveLength(3)
+
+    // Customer 2: only order 4 is completed
+    const customer2 = completedOrdersByCustomer.get(2)
+    expect(customer2?.order_ids).toHaveLength(1)
+    expect(customer2?.order_ids).toEqual([4])
+
+    // Customer 3: no completed orders
+    const customer3 = completedOrdersByCustomer.get(3)
+    expect(customer3).toBeUndefined()
+  })
+
+  test(`collect with multiple column grouping`, () => {
+    const ordersByStatusAndCategory = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ orders: ordersCollection })
+          .groupBy(({ orders }) => [orders.status, orders.product_category])
+          .select(({ orders }) => ({
+            status: orders.status,
+            product_category: orders.product_category,
+            order_ids: collect(orders.id),
+          })),
+    })
+
+    // Completed electronics: orders 1, 2, 4
+    const completedElectronics = ordersByStatusAndCategory.get(
+      `["completed","electronics"]`,
+    )
+    expect(completedElectronics?.order_ids).toHaveLength(3)
+    expect(completedElectronics?.order_ids).toEqual(
+      expect.arrayContaining([1, 2, 4]),
+    )
+
+    // Completed books: order 7
+    const completedBooks = ordersByStatusAndCategory.get(
+      `["completed","books"]`,
+    )
+    expect(completedBooks?.order_ids).toHaveLength(1)
+    expect(completedBooks?.order_ids).toEqual([7])
+  })
 })

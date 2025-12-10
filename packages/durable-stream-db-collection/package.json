@@ -7,7 +7,7 @@
     "@tanstack/db": "workspace:*"
   },
   "peerDependencies": {
-    "@durable-streams/client": ">=0.1.0"
+    "@durable-streams/client": "workspace:*"
   },
   "peerDependenciesMeta": {
     "@durable-streams/client": {

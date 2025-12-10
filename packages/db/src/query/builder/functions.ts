@@ -325,6 +325,16 @@ export function max<T extends ExpressionLike>(arg: T): AggregateReturnType<T> {
 }
 
 /**
+ * Collects all values in a group into an array
+ * Similar to SQL's array_agg or GROUP_CONCAT
+ */
+export function collect<T extends ExpressionLike>(
+  arg: T,
+): Aggregate<Array<ExtractType<T>>> {
+  return new Aggregate(`collect`, [toExpression(arg)])
+}
+
+/**
  * List of comparison function names that can be used with indexes
  */
 export const comparisonFunctions = [
@@ -373,6 +383,7 @@ export const operators = [
   `sum`,
   `min`,
   `max`,
+  `collect`,
 ] as const
 
 export type OperatorName = (typeof operators)[number]
