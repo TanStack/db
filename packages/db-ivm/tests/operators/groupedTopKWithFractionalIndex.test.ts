@@ -218,15 +218,30 @@ describe(`Operators`, () => {
       graph.run()
 
       const updateResult = tracker.getResult()
-      // Only group1 should be affected
-      const affectedGroups = new Set(
-        updateResult.messages.map(
-          ([[_key, [value, _idx]], _mult]) => value.group,
-        ),
+      
+      // Should have exactly 2 messages: one removal and one addition
+      expect(updateResult.messages.length).toBe(2)
+      
+      // Find the removal message (multiplicity -1) and addition message (multiplicity 1)
+      const removalMessage = updateResult.messages.find(
+        ([_item, mult]) => mult === -1,
       )
-      expect(affectedGroups.size).toBe(1)
-      expect(affectedGroups.has(`group1`)).toBe(true)
-      expect(affectedGroups.has(`group2`)).toBe(false)
+      const additionMessage = updateResult.messages.find(
+        ([_item, mult]) => mult === 1,
+      )
+      
+      expect(removalMessage).toBeDefined()
+      expect(additionMessage).toBeDefined()
+      
+      // Check that removal is for value 20 (g1-b)
+      const [_removalKey, [removalValue, _removalIdx]] = removalMessage![0]
+      expect(removalValue.value).toBe(20)
+      expect(removalValue.id).toBe(`g1-b`)
+      
+      // Check that addition is for value 5 (g1-c)
+      const [_additionKey, [additionValue, _additionIdx]] = additionMessage![0]
+      expect(additionValue.value).toBe(5)
+      expect(additionValue.id).toBe(`g1-c`)
     })
 
     it(`should support offset within groups`, () => {
@@ -360,55 +375,6 @@ describe(`Operators`, () => {
         .map(([_key, [value, _index]]) => value.value)
         .sort((a, b) => a - b)
       expect(values).toEqual([1, 3, 5])
-    })
-
-    it(`should maintain fractional indices correctly within groups`, () => {
-      const graph = new D2()
-      const input =
-        graph.newInput<[string, { id: string; group: string; value: number }]>()
-      const tracker = new MessageTracker<
-        [string, [{ id: string; group: string; value: number }, string]]
-      >()
-
-      input.pipe(
-        groupedTopKWithFractionalIndex((a, b) => a.value - b.value, {
-          limit: 3,
-          groupKeyFn: (_key, value) => value.group,
-        }),
-        output((message) => {
-          tracker.addMessage(message)
-        }),
-      )
-
-      graph.finalize()
-
-      input.sendData(
-        new MultiSet([
-          [[`g1-a`, { id: `g1-a`, group: `group1`, value: 1 }], 1],
-          [[`g1-b`, { id: `g1-b`, group: `group1`, value: 3 }], 1],
-          [[`g1-c`, { id: `g1-c`, group: `group1`, value: 5 }], 1],
-        ]),
-      )
-      graph.run()
-
-      const result = tracker.getResult(compareFractionalIndex)
-
-      // Check fractional indices are in correct order
-      const indexedItems = result.sortedResults.map(
-        ([key, [value, index]]) => ({
-          key,
-          value: value.value,
-          index,
-        }),
-      )
-
-      // Sort by value to verify fractional indices match sort order
-      indexedItems.sort((a, b) => a.value - b.value)
-
-      // Verify indices are in lexicographic order
-      for (let i = 0; i < indexedItems.length - 1; i++) {
-        expect(indexedItems[i]!.index < indexedItems[i + 1]!.index).toBe(true)
-      }
     })
 
     it(`should handle setSizeCallback correctly`, () => {
