@@ -297,7 +297,8 @@ describe(`Operators`, () => {
 
       // Capture the fractional index of value 10 before reset
       const value10Entry = sortedInitialResults.find(
-        ([_key, [value, _index]]) => value.value === 10 && value.group === `group1`,
+        ([_key, [value, _index]]) =>
+          value.value === 10 && value.group === `group1`,
       )
       expect(value10Entry).toBeDefined()
       const [_value10Key, [_value10Value, value10Idx]] = value10Entry!
