@@ -280,6 +280,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
     onUpdate: async (params) => {
       debug(`update`, params)
       const mutations = params.transaction.mutations.filter(
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         (m) => m.type === `update`,
       )
 
@@ -296,6 +297,7 @@ export function rxdbCollectionOptions(config: RxDBCollectionConfig<any, any>) {
     onDelete: async (params) => {
       debug(`delete`, params)
       const mutations = params.transaction.mutations.filter(
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
         (m) => m.type === `delete`,
       )
       const ids = mutations.map((mutation) => getKey(mutation.original))
