@@ -21,8 +21,8 @@ describe(`Operators`, () => {
       >()
       const tracker = new MessageTracker<
         [[string, string], [{ id: string; value: number }, string]]
-        >()
-      
+      >()
+
       const groupKeyFn = (key: [string, string]) => key[0]
 
       input.pipe(
@@ -75,7 +75,10 @@ describe(`Operators`, () => {
         [string, [{ id: string; group: string; value: number }, string]]
       >()
 
-      const groupKeyFn = (_key: string, value: { id: string; group: string; value: number }) => value.group
+      const groupKeyFn = (
+        _key: string,
+        value: { id: string; group: string; value: number },
+      ) => value.group
 
       input.pipe(
         groupedOrderByWithFractionalIndex((item) => item.value, {
@@ -152,7 +155,9 @@ describe(`Operators`, () => {
       // Initial should have 2 items (limit 2): values 1 and 3
       const initialResult = tracker.getResult(compareFractionalIndex)
       expect(initialResult.sortedResults.length).toBe(2)
-      const sortedInitialResults = sortByKeyAndIndex(initialResult.sortedResults)
+      const sortedInitialResults = sortByKeyAndIndex(
+        initialResult.sortedResults,
+      )
       const initialValues = sortedInitialResults.map(
         ([_key, [value, _index]]) => value.value,
       )
@@ -244,7 +249,10 @@ describe(`Operators`, () => {
         [string, [{ id: string; group: string; value: number }, string]]
       >()
 
-      const groupKeyFn = (_key: string, value: { id: string; group: string; value: number }) => value.group
+      const groupKeyFn = (
+        _key: string,
+        value: { id: string; group: string; value: number },
+      ) => value.group
 
       input.pipe(
         groupedOrderByWithFractionalIndex((item) => item.value, {
@@ -274,8 +282,13 @@ describe(`Operators`, () => {
       expect(initialResult.sortedResults.length).toBe(4)
 
       // Sort all results by fractional index first, then group by group key
-      const sortedInitialResults = sortByKeyAndIndex(initialResult.sortedResults)
-      const initialGroupedValues = groupResultsByKey(sortedInitialResults, groupKeyFn)
+      const sortedInitialResults = sortByKeyAndIndex(
+        initialResult.sortedResults,
+      )
+      const initialGroupedValues = groupResultsByKey(
+        sortedInitialResults,
+        groupKeyFn,
+      )
 
       // group1 should have values 10, 20 (top 2 by ascending value, ordered by fractional index)
       expect(initialGroupedValues.get(`group1`)).toEqual([10, 20])
@@ -321,7 +334,8 @@ describe(`Operators`, () => {
       // Check that the fractional index of the added value (5) is smaller than the index of value 10
       const finalResult = tracker.getResult(compareFractionalIndex)
       const value10Entry = finalResult.sortedResults.find(
-        ([_key, [value, _index]]) => value.value === 10 && value.group === `group1`,
+        ([_key, [value, _index]]) =>
+          value.value === 10 && value.group === `group1`,
       )
       expect(value10Entry).toBeDefined()
       const [_value10Key, [_value10Value, value10Idx]] = value10Entry!
@@ -420,7 +434,8 @@ describe(`Operators`, () => {
         [string, [{ id: string; value: number }, string]]
       >()
 
-      const groupKeyFn = (key: string, _value: { id: string; value: number }) => key.split(`:`)[0]!
+      const groupKeyFn = (key: string, _value: { id: string; value: number }) =>
+        key.split(`:`)[0]!
 
       input.pipe(
         groupedOrderByWithFractionalIndex((item) => item.value, {
@@ -577,7 +592,9 @@ describe(`Operators`, () => {
 
       // Initial: values 1, 2
       const initialResult = tracker.getResult(compareFractionalIndex)
-      const sortedInitialResults = sortByKeyAndIndex(initialResult.sortedResults)
+      const sortedInitialResults = sortByKeyAndIndex(
+        initialResult.sortedResults,
+      )
       const initialValues = sortedInitialResults.map(
         ([_key, [value, _index]]) => value.value,
       )
