@@ -121,8 +121,8 @@ describe(`Collection Auto-Indexing`, () => {
     subscription.unsubscribe()
   })
 
-  it(`should create auto-indexes by default when autoIndex is not specified`, async () => {
-    const autoIndexCollection = createCollection<TestItem, string>({
+  it(`should not create auto-indexes by default when autoIndex is not specified`, async () => {
+    const noAutoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       startSync: true,
       sync: {
@@ -140,14 +140,14 @@ describe(`Collection Auto-Indexing`, () => {
       },
     })
 
-    await autoIndexCollection.stateWhenReady()
+    await noAutoIndexCollection.stateWhenReady()
 
     // Should have no indexes initially
-    expect(autoIndexCollection.indexes.size).toBe(0)
+    expect(noAutoIndexCollection.indexes.size).toBe(0)
 
     // Subscribe with a where expression
     const changes: Array<any> = []
-    const subscription = autoIndexCollection.subscribeChanges(
+    const subscription = noAutoIndexCollection.subscribeChanges(
       (items) => {
         changes.push(...items)
       },
@@ -158,11 +158,7 @@ describe(`Collection Auto-Indexing`, () => {
     )
 
     // Should have created an auto-index for the status field (default is eager)
-    expect(autoIndexCollection.indexes.size).toBe(1)
-
-    const autoIndex = Array.from(autoIndexCollection.indexes.values())[0]!
-    expect(autoIndex.expression.type).toBe(`ref`)
-    expect((autoIndex.expression as any).path).toEqual([`status`])
+    expect(noAutoIndexCollection.indexes.size).toBe(0)
 
     subscription.unsubscribe()
   })

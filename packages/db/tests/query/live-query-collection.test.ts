@@ -1734,6 +1734,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `source-async-subset-loading`,
           getKey: (item) => item.id,
           syncMode: `on-demand`,
+          autoIndex: `eager`,
           startSync: true,
           sync: {
             sync: ({ markReady, begin, write, commit }) => {
