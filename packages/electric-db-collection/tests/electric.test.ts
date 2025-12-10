@@ -892,6 +892,477 @@ describe(`Electric Integration`, () => {
 
       vi.useRealTimers()
     })
+
+    it(`should find matching message in awaitMatch even when called after up-to-date`, async () => {
+      // This test verifies the fix for the race condition where:
+      // 1. Server receives insert and syncs it via Electric
+      // 2. Electric messages (including up-to-date) are processed
+      // 3. THEN awaitMatch is called - it should still find the message
+
+      let resolveServerCall: () => void
+      const serverCallPromise = new Promise<void>((resolve) => {
+        resolveServerCall = resolve
+      })
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+
+          // Simulate waiting for server call to complete
+          // During this time, Electric messages will arrive and be processed
+          await serverCallPromise
+
+          // Now awaitMatch is called AFTER the messages were processed
+          // This should still find the message in the buffer
+          await col.utils.awaitMatch((message: any) => {
+            return (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.id === item.id
+            )
+          }, 5000)
+        })
+
+      const config = {
+        id: `test-await-match-after-up-to-date`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert - will call onInsert which waits for serverCallPromise
+      const insertPromise = testCollection.insert({
+        id: 42,
+        name: `Race Condition Test`,
+      })
+
+      // Wait for onInsert to start and reach the await serverCallPromise
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Send Electric messages while onInsert is waiting for serverCallPromise
+      // This simulates the race condition where messages arrive while API call is in progress
+      subscriber([
+        {
+          key: `42`,
+          value: { id: 42, name: `Race Condition Test` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      // Wait a tick to ensure messages are processed
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now resolve the server call - awaitMatch will be called AFTER messages were processed
+      resolveServerCall!()
+
+      // Should complete successfully - awaitMatch should find the message in the buffer
+      await insertPromise.isPersisted.promise
+
+      expect(onInsert).toHaveBeenCalled()
+      expect(testCollection.has(42)).toBe(true)
+    })
+
+    it(`should wait for up-to-date when match found during batch processing`, async () => {
+      // This test verifies that if awaitMatch finds a match while the batch
+      // is still being processed (before up-to-date), it waits for up-to-date
+      // before resolving, ensuring data is committed before returning
+
+      let matchFoundTime: number | undefined
+      let resolveTime: number | undefined
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+
+          await col.utils.awaitMatch((message: any) => {
+            if (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.id === item.id
+            ) {
+              matchFoundTime = Date.now()
+              return true
+            }
+            return false
+          }, 5000)
+          resolveTime = Date.now()
+        })
+
+      const config = {
+        id: `test-wait-for-up-to-date`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      const insertPromise = testCollection.insert({
+        id: 100,
+        name: `Wait Test`,
+      })
+
+      // Send insert message first, then up-to-date after a delay
+      // This simulates awaitMatch finding the message before up-to-date
+      setTimeout(() => {
+        subscriber([
+          {
+            key: `100`,
+            value: { id: 100, name: `Wait Test` },
+            headers: { operation: `insert` },
+          },
+        ])
+      }, 50)
+
+      // Send up-to-date after another delay
+      setTimeout(() => {
+        subscriber([{ headers: { control: `up-to-date` } }])
+      }, 150)
+
+      await insertPromise.isPersisted.promise
+
+      expect(onInsert).toHaveBeenCalled()
+      // Match should have been found before resolve (both times should exist)
+      expect(matchFoundTime).toBeDefined()
+      expect(resolveTime).toBeDefined()
+      // Verify that resolve happened AFTER match was found (waited for up-to-date)
+      expect(resolveTime).toBeGreaterThanOrEqual(matchFoundTime!)
+    })
+
+    it(`should clear buffer on new batch and match new messages`, async () => {
+      // Verify that when a new batch arrives, the old buffer is cleared
+      // and awaitMatch correctly matches messages from the new batch
+
+      let resolveServerCall: () => void
+      const serverCallPromise = new Promise<void>((resolve) => {
+        resolveServerCall = resolve
+      })
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+
+          // Simulate API call
+          await serverCallPromise
+
+          await col.utils.awaitMatch((message: any) => {
+            return (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.id === item.id
+            )
+          }, 5000)
+        })
+
+      const config = {
+        id: `test-buffer-clearing`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert for item 201
+      const insertPromise = testCollection.insert({
+        id: 201,
+        name: `Second Item`,
+      })
+
+      // Wait for onInsert to start
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // First batch - insert different item 200 (simulating other sync activity)
+      subscriber([
+        {
+          key: `200`,
+          value: { id: 200, name: `First Item` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Second batch - insert item 201 (our target)
+      subscriber([
+        {
+          key: `201`,
+          value: { id: 201, name: `Second Item` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Resolve server call - awaitMatch should find item 201 in the buffer
+      // even though item 200 from the first batch is no longer in the buffer
+      resolveServerCall!()
+
+      await insertPromise.isPersisted.promise
+
+      expect(testCollection.has(201)).toBe(true)
+    })
+
+    it(`should timeout when no match in committed batch and no new messages`, async () => {
+      // Verify that awaitMatch times out when the message isn't found
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ collection: col }) => {
+          // Look for a message that doesn't exist
+          await col.utils.awaitMatch(
+            (message: any) =>
+              isChangeMessage(message) && message.value.id === 999,
+            100, // Short timeout
+          )
+        })
+
+      const config = {
+        id: `test-no-match-timeout`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send a batch with different items
+      subscriber([
+        {
+          key: `300`,
+          value: { id: 300, name: `Wrong Item` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      // Insert looking for id 999 which doesn't exist
+      const tx = testCollection.insert({ id: 301, name: `Test` })
+
+      await expect(tx.isPersisted.promise).rejects.toThrow(
+        `Timeout waiting for custom match function`,
+      )
+    })
+
+    it(`should resolve multiple awaitMatch calls from same committed batch`, async () => {
+      // Verify that multiple concurrent awaitMatch calls can all find their
+      // respective messages in the same committed batch
+
+      const matches: Array<number> = []
+      const serverCalls: Array<{ resolve: () => void }> = []
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+
+          // Create a promise for this insert's "API call"
+          const serverCallPromise = new Promise<void>((resolve) => {
+            serverCalls.push({ resolve })
+          })
+          await serverCallPromise
+
+          await col.utils.awaitMatch((message: any) => {
+            if (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.id === item.id
+            ) {
+              matches.push(item.id)
+              return true
+            }
+            return false
+          }, 5000)
+        })
+
+      const config = {
+        id: `test-multiple-matches`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start all three inserts concurrently
+      const insert1 = testCollection.insert({ id: 400, name: `Item A` })
+      const insert2 = testCollection.insert({ id: 401, name: `Item B` })
+      const insert3 = testCollection.insert({ id: 402, name: `Item C` })
+
+      // Wait for all onInsert handlers to start
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      // Send batch with all three items (simulating fast sync from server)
+      subscriber([
+        {
+          key: `400`,
+          value: { id: 400, name: `Item A` },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `401`,
+          value: { id: 401, name: `Item B` },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `402`,
+          value: { id: 402, name: `Item C` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      // Resolve all server calls - all awaitMatch calls should find their messages
+      serverCalls.forEach((call) => call.resolve())
+
+      await Promise.all([
+        insert1.isPersisted.promise,
+        insert2.isPersisted.promise,
+        insert3.isPersisted.promise,
+      ])
+
+      expect(matches).toContain(400)
+      expect(matches).toContain(401)
+      expect(matches).toContain(402)
+      expect(testCollection.has(400)).toBe(true)
+      expect(testCollection.has(401)).toBe(true)
+      expect(testCollection.has(402)).toBe(true)
+    })
+
+    it(`should handle awaitMatch across multiple sequential batches`, async () => {
+      // Real-world scenario: continuous sync with multiple batches
+      // Each insert should find its matching message in the committed buffer
+
+      const serverCalls: Array<{ resolve: () => void; id: number }> = []
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+
+          // Create a promise for this insert's "API call"
+          const serverCallPromise = new Promise<void>((resolve) => {
+            serverCalls.push({ resolve, id: item.id })
+          })
+          await serverCallPromise
+
+          await col.utils.awaitMatch((message: any) => {
+            return (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.id === item.id
+            )
+          }, 5000)
+        })
+
+      const config = {
+        id: `test-sequential-batches`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Insert 1 - starts waiting on server call
+      const insert1 = testCollection.insert({ id: 500, name: `Batch 1 Item` })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Batch 1 arrives with item 500
+      subscriber([
+        {
+          key: `500`,
+          value: { id: 500, name: `Batch 1 Item` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Resolve server call for insert 1
+      const call1 = serverCalls.find((c) => c.id === 500)
+      call1?.resolve()
+      await insert1.isPersisted.promise
+      expect(testCollection.has(500)).toBe(true)
+
+      // Insert 2 - starts waiting on server call
+      const insert2 = testCollection.insert({ id: 501, name: `Batch 2 Item` })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Batch 2 arrives (clears batch 1 from buffer)
+      subscriber([
+        {
+          key: `501`,
+          value: { id: 501, name: `Batch 2 Item` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Resolve server call for insert 2
+      const call2 = serverCalls.find((c) => c.id === 501)
+      call2?.resolve()
+      await insert2.isPersisted.promise
+      expect(testCollection.has(501)).toBe(true)
+
+      // Insert 3 - starts waiting on server call
+      const insert3 = testCollection.insert({ id: 502, name: `Batch 3 Item` })
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Batch 3 arrives
+      subscriber([
+        {
+          key: `502`,
+          value: { id: 502, name: `Batch 3 Item` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Resolve server call for insert 3
+      const call3 = serverCalls.find((c) => c.id === 502)
+      call3?.resolve()
+      await insert3.isPersisted.promise
+      expect(testCollection.has(502)).toBe(true)
+    })
   })
 
   // Tests for matching strategies utilities
@@ -912,6 +1383,29 @@ describe(`Electric Integration`, () => {
         headers: { control: `up-to-date` as const },
       }
       expect(isChangeMessage(controlMessage)).toBe(false)
+    })
+
+    it(`should export isChangeMessage and isControlMessage from package index`, async () => {
+      // Verify that the exports are available from the package's public API
+      // This tests the fix for the missing exports in index.ts
+      const exports = await import(`../src/index`)
+
+      expect(typeof exports.isChangeMessage).toBe(`function`)
+      expect(typeof exports.isControlMessage).toBe(`function`)
+
+      // Verify they work correctly
+      const changeMessage = {
+        key: `1`,
+        value: { id: 1, name: `Test` },
+        headers: { operation: `insert` as const },
+      }
+      expect(exports.isChangeMessage(changeMessage)).toBe(true)
+
+      const controlMessage = {
+        headers: { control: `up-to-date` as const },
+      }
+      expect(exports.isControlMessage(controlMessage)).toBe(true)
+      expect(exports.isChangeMessage(controlMessage)).toBe(false)
     })
 
     it(`should provide awaitMatch utility in collection utils`, () => {
