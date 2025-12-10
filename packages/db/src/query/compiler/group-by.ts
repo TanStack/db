@@ -16,7 +16,7 @@ import type {
 } from '../ir.js'
 import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
 
-const { sum, count, avg, min, max } = groupByOperators
+const { sum, count, avg, min, max, collect } = groupByOperators
 
 /**
  * Interface for caching the mapping between GROUP BY expressions and SELECT expressions
@@ -379,6 +379,8 @@ function getAggregateFunction(aggExpr: Aggregate) {
       return min(valueExtractorWithDate)
     case `max`:
       return max(valueExtractorWithDate)
+    case `collect`:
+      return collect(rawValueExtractor)
     default:
       throw new UnsupportedAggregateFunctionError(aggExpr.name)
   }

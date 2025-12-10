@@ -5,3 +5,4 @@ preferWorkspacePackages: true
 packages:
   - packages/**
   - examples/**
+  - ../../durable-streams/durable-streams/packages/**

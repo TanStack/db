@@ -41,6 +41,7 @@ export {
   sum,
   min,
   max,
+  collect,
 } from './builder/functions.js'
 
 // Ref proxy utilities
