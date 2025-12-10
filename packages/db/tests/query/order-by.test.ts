@@ -2591,6 +2591,7 @@ describe(`OrderBy with duplicate values`, () => {
         // Start with only the first 5 items in the local collection
         const initialData = allTestData.slice(0, 5)
         let loadSubsetCallCount = 0
+        const loadSubsetCursors: Array<unknown> = []
 
         const duplicateCollection = createCollection(
           mockSyncCollectionOptions<TestItem>({
@@ -2615,6 +2616,7 @@ describe(`OrderBy with duplicate values`, () => {
                 return {
                   loadSubset: (options) => {
                     loadSubsetCallCount++
+                    loadSubsetCursors.push(options.cursor)
 
                     // Simulate async loading from remote source
                     return new Promise<void>((resolve) => {
@@ -2685,7 +2687,8 @@ describe(`OrderBy with duplicate values`, () => {
                           }
                         }
 
-                        // Return data (limit already applied when cursor is present)
+                        // Apply limit for initial page load (no cursor).
+                        // When cursor is present, limit was already applied in the cursor block above.
                         const { limit } = options
                         const dataToLoad =
                           limit && !options.cursor
@@ -2738,8 +2741,10 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 5, a: 5, keep: true },
         ])
         expect(loadSubsetCallCount).toBe(1)
+        // First loadSubset call (initial page at offset 0) has no cursor
+        expect(loadSubsetCursors[0]).toBeUndefined()
 
-        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset
+        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset with a cursor
         const moveToSecondPage = collection.utils.setWindow({
           offset: 5,
           limit: 5,
@@ -2758,6 +2763,10 @@ describe(`OrderBy with duplicate values`, () => {
         ])
         // we expect 1 new loadSubset call (cursor expressions for whereFrom/whereCurrent are now combined in single call)
         expect(loadSubsetCallCount).toBe(2)
+        // Second loadSubset call (pagination) has a cursor with whereFrom and whereCurrent
+        expect(loadSubsetCursors[1]).toBeDefined()
+        expect(loadSubsetCursors[1]).toHaveProperty(`whereFrom`)
+        expect(loadSubsetCursors[1]).toHaveProperty(`whereCurrent`)
 
         // Now move to third page (offset 10, limit 5)
         // It should advance past the duplicate 5s
@@ -2814,6 +2823,7 @@ describe(`OrderBy with duplicate values`, () => {
         // Start with the first 10 items in the local collection (includes all duplicates)
         const initialData = allTestData.slice(0, 10)
         let loadSubsetCallCount = 0
+        const loadSubsetCursors: Array<unknown> = []
 
         const duplicateCollection = createCollection(
           mockSyncCollectionOptions<TestItem>({
@@ -2838,6 +2848,7 @@ describe(`OrderBy with duplicate values`, () => {
                 return {
                   loadSubset: (options) => {
                     loadSubsetCallCount++
+                    loadSubsetCursors.push(options.cursor)
 
                     // Simulate async loading from remote source
                     return new Promise<void>((resolve) => {
@@ -2908,7 +2919,8 @@ describe(`OrderBy with duplicate values`, () => {
                           }
                         }
 
-                        // Return data (limit already applied when cursor is present)
+                        // Apply limit for initial page load (no cursor).
+                        // When cursor is present, limit was already applied in the cursor block above.
                         const { limit } = options
                         const dataToLoad =
                           limit && !options.cursor
@@ -2961,8 +2973,10 @@ describe(`OrderBy with duplicate values`, () => {
           { id: 5, a: 5, keep: true },
         ])
         expect(loadSubsetCallCount).toBe(1)
+        // First loadSubset call (initial page at offset 0) has no cursor
+        expect(loadSubsetCursors[0]).toBeUndefined()
 
-        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset
+        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset with a cursor
         const moveToSecondPage = collection.utils.setWindow({
           offset: 5,
           limit: 5,
@@ -2981,6 +2995,10 @@ describe(`OrderBy with duplicate values`, () => {
         ])
         // we expect 1 new loadSubset call (cursor expressions for whereFrom/whereCurrent are now combined in single call)
         expect(loadSubsetCallCount).toBe(2)
+        // Second loadSubset call (pagination) has a cursor with whereFrom and whereCurrent
+        expect(loadSubsetCursors[1]).toBeDefined()
+        expect(loadSubsetCursors[1]).toHaveProperty(`whereFrom`)
+        expect(loadSubsetCursors[1]).toHaveProperty(`whereCurrent`)
 
         // Now move to third page (offset 10, limit 5)
         // It should advance past the duplicate 5s
