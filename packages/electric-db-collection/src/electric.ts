@@ -1006,8 +1006,8 @@ function createElectricSync<T extends Row<unknown>>(
       })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
-        let hasUpToDate = false
-        let hasSubsetEnd = false
+        // Track commit point type - up-to-date takes precedence as it also triggers progressive mode atomic swap
+        let commitPoint: `up-to-date` | `subset-end` | null = null
 
         // Clear the current batch buffer at the START of processing a new batch
         // This preserves messages from the previous batch until new ones arrive,
@@ -1089,11 +1089,14 @@ function createElectricSync<T extends Row<unknown>>(
             if (!isBufferingInitialSync()) {
               newSnapshots.push(parseSnapshotMessage(message))
             }
-          } else if (isSubsetEndMessage(message)) {
-            // subset-end marks the end of an injected subset snapshot - treat like up-to-date for commit
-            hasSubsetEnd = true
           } else if (isUpToDateMessage(message)) {
-            hasUpToDate = true
+            // up-to-date takes precedence - also triggers progressive mode atomic swap
+            commitPoint = `up-to-date`
+          } else if (isSubsetEndMessage(message)) {
+            // subset-end triggers commit but not progressive mode atomic swap
+            if (commitPoint !== `up-to-date`) {
+              commitPoint = `subset-end`
+            }
           } else if (isMustRefetchMessage(message)) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
@@ -1112,16 +1115,15 @@ function createElectricSync<T extends Row<unknown>>(
             loadSubsetDedupe?.reset()
 
             // Reset flags so we continue accumulating changes until next up-to-date
-            hasUpToDate = false
-            hasSubsetEnd = false
+            commitPoint = null
             hasReceivedUpToDate = false // Reset for progressive mode (isBufferingInitialSync will reflect this)
             bufferedMessages.length = 0 // Clear buffered messages
           }
         }
 
-        if (hasUpToDate || hasSubsetEnd) {
-          // PROGRESSIVE MODE: Atomic swap on first up-to-date
-          if (isBufferingInitialSync() && hasUpToDate) {
+        if (commitPoint !== null) {
+          // PROGRESSIVE MODE: Atomic swap on first up-to-date (not subset-end)
+          if (isBufferingInitialSync() && commitPoint === `up-to-date`) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`,
             )
@@ -1173,14 +1175,10 @@ function createElectricSync<T extends Row<unknown>>(
               transactionStarted = false
             }
           }
-
-          if (hasUpToDate || (hasSubsetEnd && syncMode === `on-demand`)) {
-            // Mark the collection as ready now that sync is up to date
-            wrappedMarkReady(isBufferingInitialSync())
-          }
+          wrappedMarkReady(isBufferingInitialSync())
 
           // Track that we've received the first up-to-date for progressive mode
-          if (hasUpToDate) {
+          if (commitPoint === `up-to-date`) {
             hasReceivedUpToDate = true
           }
 
@@ -1211,12 +1209,11 @@ function createElectricSync<T extends Row<unknown>>(
             return seen
           })
 
-          // Resolve all matched pending matches on up-to-date or snapshot-end in on-demand mode
+          // Resolve all matched pending matches on up-to-date or subset-end
           // Set batchCommitted BEFORE resolving to avoid timing window where late awaitMatch
           // calls could register as "matched" after resolver pass already ran
-          if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
-            batchCommitted.setState(() => true)
-          }
+          batchCommitted.setState(() => true)
+
           resolveMatchedPendingMatches()
         }
       })
