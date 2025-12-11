@@ -371,12 +371,15 @@ export type ChangeMessageOrDeleteKeyMessage<
   TKey extends string | number = string | number,
 > = Omit<ChangeMessage<T>, `key`> | DeleteKeyMessage<TKey>
 
-export interface OptimisticChangeMessage<
-  T extends object = Record<string, unknown>,
-> extends ChangeMessage<T> {
-  // Is this change message part of an active transaction. Only applies to optimistic changes.
-  isActive?: boolean
-}
+export type OptimisticChangeMessage<T extends object = Record<string, unknown>, TKey extends string | number = string | number> =
+  | (ChangeMessage<T> & {
+      // Is this change message part of an active transaction. Only applies to optimistic changes.
+      isActive?: boolean
+    })
+  | (DeleteKeyMessage<TKey> & {
+      // Is this change message part of an active transaction. Only applies to optimistic changes.
+      isActive?: boolean
+    })
 
 /**
  * The Standard Schema interface.

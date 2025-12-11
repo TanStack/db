@@ -12,11 +12,11 @@ import { deepEquals } from '../utils'
 import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
-  ChangeMessage,
   ChangeMessageOrDeleteKeyMessage,
   CleanupFn,
   CollectionConfig,
   LoadSubsetOptions,
+  OptimisticChangeMessage,
   SyncConfigRes,
 } from '../types'
 import type { CollectionImpl } from './index.js'
@@ -154,13 +154,11 @@ export class CollectionSyncManager<
               }
             }
 
-            const message: ChangeMessage<TOutput> = {
-              // TODO: this type cast is false because now the message may not contain a value field
-              //       will need to fix the types but that's going to spread...
-              ...(messageWithOptionalKey as ChangeMessage<TOutput>),
+            const message = {
+              ...messageWithOptionalKey,
               type: messageType,
               key,
-            }
+            } as OptimisticChangeMessage<TOutput, TKey>
             pendingTransaction.operations.push(message)
 
             if (messageType === `delete`) {
