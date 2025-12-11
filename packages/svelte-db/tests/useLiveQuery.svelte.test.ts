@@ -1852,4 +1852,221 @@ describe(`Query Collections`, () => {
       })
     })
   })
+
+  describe(`findOne() - single result queries`, () => {
+    it(`should return a single row when using findOne() with query function`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-1`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+        )
+
+        flushSync()
+
+        // State should still contain the item as a Map entry
+        expect(query.state.size).toBe(1)
+        expect(query.state.get(`3`)).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+
+        // Data should be a single object, not an array
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+        expect(Array.isArray(query.data)).toBe(false)
+      })
+    })
+
+    it(`should return a single row when using findOne() with config object`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-2`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery({
+          query: (q) =>
+            q
+              .from({ collection })
+              .where(({ collection: c }) => eq(c.id, `3`))
+              .findOne(),
+        })
+
+        flushSync()
+
+        expect(query.state.size).toBe(1)
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+        expect(Array.isArray(query.data)).toBe(false)
+      })
+    })
+
+    it(`should return a single row with pre-created collection using findOne()`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-3`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const liveQueryCollection = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ collection })
+              .where(({ collection: c }) => eq(c.id, `3`))
+              .findOne(),
+        })
+
+        const query = useLiveQuery(liveQueryCollection)
+
+        flushSync()
+
+        expect(query.state.size).toBe(1)
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+        expect(Array.isArray(query.data)).toBe(false)
+      })
+    })
+
+    it(`should return undefined when findOne() matches no rows`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-empty`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `999`)) // Non-existent ID
+            .findOne(),
+        )
+
+        flushSync()
+
+        expect(query.state.size).toBe(0)
+        expect(query.data).toBeUndefined()
+      })
+    })
+
+    it(`should reactively update single result when data changes`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-reactive`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+        )
+
+        flushSync()
+
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+
+        // Update the person
+        collection.utils.begin()
+        collection.utils.write({
+          type: `update`,
+          value: {
+            id: `3`,
+            name: `John Smith Updated`,
+            age: 36,
+            email: `john.smith@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        collection.utils.commit()
+
+        flushSync()
+
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith Updated`,
+          age: 36,
+        })
+        expect(Array.isArray(query.data)).toBe(false)
+      })
+    })
+
+    it(`should transition from single result to undefined when item is deleted`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-delete`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+        )
+
+        flushSync()
+
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+
+        // Delete the person
+        collection.utils.begin()
+        collection.utils.write({
+          type: `delete`,
+          value: {
+            id: `3`,
+            name: `John Smith`,
+            age: 35,
+            email: `john.smith@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        collection.utils.commit()
+
+        flushSync()
+
+        expect(query.data).toBeUndefined()
+        expect(query.state.size).toBe(0)
+      })
+    })
+  })
 })
