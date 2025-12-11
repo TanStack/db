@@ -31,8 +31,7 @@ import type {
 } from './tag-index'
 import type {
   BaseCollectionConfig,
-  ChangeMessage,
-  Collection,
+  ChangeMessageOrDeleteKeyMessage,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -1085,11 +1084,9 @@ function createElectricSync<T extends Row<unknown>>(
    */
   const processMoveOutEvent = (
     patterns: Array<MoveOutPattern>,
-    collection: Collection<T, string | number, any, any, any>,
     begin: () => void,
-    write: (message: Omit<ChangeMessage<T>, `key`>) => void,
+    write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
     transactionStarted: boolean,
-    transactionState: Map<RowId, T>,
   ): boolean => {
     if (tagLength === undefined) {
       debug(
@@ -1113,16 +1110,10 @@ function createElectricSync<T extends Row<unknown>>(
             txStarted = true
           }
 
-          // Get row value from transaction state (uncommitted) or collection
-          const rowValue = transactionState.get(rowId) ?? collection.get(rowId)
-          if (rowValue !== undefined) {
-            write({
-              type: `delete`,
-              value: rowValue,
-            })
-            // Remove from transaction state since we're deleting it
-            transactionState.delete(rowId)
-          }
+          write({
+            type: `delete`,
+            key: rowId,
+          })
         }
       }
     }
@@ -1242,10 +1233,6 @@ function createElectricSync<T extends Row<unknown>>(
         syncMode === `progressive` && !hasReceivedUpToDate
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
 
-      // Track row state during the current transaction to access uncommitted row values
-      // This allows us to handle partial updates correctly by merging with existing state
-      const transactionState = new Map<RowId, T>()
-
       /**
        * Process a change message: handle tags and write the mutation
        */
@@ -1262,60 +1249,20 @@ function createElectricSync<T extends Row<unknown>>(
         const rowId = collection.getKeyFromItem(changeMessage.value)
         const operation = changeMessage.headers.operation
 
-        if (operation === `insert`) {
-          // For insert, store the full row in transaction state
-          transactionState.set(rowId, changeMessage.value)
-
-          if (hasTags) {
-            processTagsForChangeMessage(tags, removedTags, rowId)
-          }
-
-          write({
-            type: `insert`,
-            value: changeMessage.value,
-            metadata: {
-              ...changeMessage.headers,
-            },
-          })
-        } else if (operation === `update`) {
-          // For update, merge with existing state (from transaction state or collection)
-          const existingValue =
-            transactionState.get(rowId) ?? collection.get(rowId)
-
-          // Merge the update with existing value (handles partial updates)
-          const updatedValue =
-            existingValue !== undefined
-              ? Object.assign({}, existingValue, changeMessage.value)
-              : changeMessage.value
-
-          // Store the merged result in transaction state
-          transactionState.set(rowId, updatedValue)
-
-          if (hasTags) {
-            processTagsForChangeMessage(tags, removedTags, rowId)
-          }
-
-          write({
-            type: `update`,
-            value: updatedValue,
-            metadata: {
-              ...changeMessage.headers,
-            },
-          })
-        } else {
-          // Operation is delete
+        if (operation === `delete`) {
           clearTagsForRow(rowId)
-          // Remove from transaction state
-          transactionState.delete(rowId)
-
-          write({
-            type: `delete`,
-            value: changeMessage.value,
-            metadata: {
-              ...changeMessage.headers,
-            },
-          })
+        } else if (hasTags) {
+          processTagsForChangeMessage(tags, removedTags, rowId)
         }
+
+        write({
+          type: changeMessage.headers.operation,
+          value: changeMessage.value,
+          // Include the primary key and relation info in the metadata
+          metadata: {
+            ...changeMessage.headers,
+          },
+        })
       }
 
       // Create deduplicated loadSubset wrapper for non-eager modes
@@ -1424,11 +1371,9 @@ function createElectricSync<T extends Row<unknown>>(
               // Normal processing: process move-out immediately
               transactionStarted = processMoveOutEvent(
                 message.headers.patterns,
-                collection,
                 begin,
                 write,
                 transactionStarted,
-                transactionState,
               )
             }
           } else if (isMustRefetchMessage(message)) {
@@ -1492,18 +1437,15 @@ function createElectricSync<T extends Row<unknown>>(
                 // Process buffered move-out messages during atomic swap
                 processMoveOutEvent(
                   bufferedMsg.headers.patterns,
-                  collection,
                   begin,
                   write,
                   transactionStarted,
-                  transactionState,
                 )
               }
             }
 
             // Commit the atomic swap
             commit()
-            transactionState.clear()
 
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
@@ -1518,7 +1460,6 @@ function createElectricSync<T extends Row<unknown>>(
             if (transactionStarted) {
               commit()
               transactionStarted = false
-              transactionState.clear()
             }
           }
           wrappedMarkReady(isBufferingInitialSync())
