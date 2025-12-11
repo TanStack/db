@@ -24,19 +24,19 @@ export type {
   IndexConstructor,
   IndexStats,
   IndexOperation,
-} from "./indexes/base-index.js"
-export { BaseIndex } from "./indexes/base-index.js"
-export { type IndexOptions } from "./indexes/index-options.js"
+} from './indexes/base-index.js'
+export { BaseIndex } from './indexes/base-index.js'
+export { type IndexOptions } from './indexes/index-options.js'
 
 // Dev mode utilities
 export {
   configureIndexDevMode,
   isDevModeEnabled,
-} from "./indexes/index-registry.js"
+} from './indexes/index-registry.js'
 export type {
   IndexDevModeConfig,
   IndexSuggestion,
-} from "./indexes/index-registry.js"
+} from './indexes/index-registry.js'
 
 // Expression helpers
 export * from './query/expression-helpers.js'

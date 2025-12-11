@@ -4,17 +4,17 @@ import {
 } from '../errors'
 import { currentStateAsChanges } from './change-events'
 
-import { CollectionStateManager } from "./state"
-import { CollectionChangesManager } from "./changes"
-import { CollectionLifecycleManager } from "./lifecycle.js"
-import { CollectionSyncManager } from "./sync"
-import { CollectionIndexesManager } from "./indexes"
-import { CollectionMutationsManager } from "./mutations"
-import { CollectionEventsManager } from "./events.js"
-import type { CollectionSubscription } from "./subscription"
-import type { AllCollectionEvents, CollectionEventHandler } from "./events.js"
-import type { BaseIndex, IndexConstructor } from "../indexes/base-index.js"
-import type { IndexOptions } from "../indexes/index-options.js"
+import { CollectionStateManager } from './state'
+import { CollectionChangesManager } from './changes'
+import { CollectionLifecycleManager } from './lifecycle.js'
+import { CollectionSyncManager } from './sync'
+import { CollectionIndexesManager } from './indexes'
+import { CollectionMutationsManager } from './mutations'
+import { CollectionEventsManager } from './events.js'
+import type { CollectionSubscription } from './subscription'
+import type { AllCollectionEvents, CollectionEventHandler } from './events.js'
+import type { BaseIndex, IndexConstructor } from '../indexes/base-index.js'
+import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
   CollectionConfig,
@@ -32,9 +32,9 @@ import type {
   Transaction as TransactionType,
   UtilsRecord,
   WritableDeep,
-} from "../types"
-import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from '../types'
+import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -542,7 +542,7 @@ export class CollectionImpl<
    */
   public createIndex<TIndexType extends IndexConstructor<TKey>>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
-    config: IndexOptions<TIndexType> = {}
+    config: IndexOptions<TIndexType> = {},
   ): BaseIndex<TKey> {
     return this._indexes.createIndex(indexCallback, config)
   }

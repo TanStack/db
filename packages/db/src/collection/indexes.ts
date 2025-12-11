@@ -1,14 +1,14 @@
 import {
   createSingleRowRefProxy,
   toExpression,
-} from "../query/builder/ref-proxy"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { BaseIndex, IndexConstructor } from "../indexes/base-index"
-import type { ChangeMessage } from "../types"
-import type { IndexOptions } from "../indexes/index-options"
-import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
-import type { CollectionLifecycleManager } from "./lifecycle"
-import type { CollectionStateManager } from "./state"
+} from '../query/builder/ref-proxy'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { BaseIndex, IndexConstructor } from '../indexes/base-index'
+import type { ChangeMessage } from '../types'
+import type { IndexOptions } from '../indexes/index-options'
+import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
+import type { CollectionLifecycleManager } from './lifecycle'
+import type { CollectionStateManager } from './state'
 
 export class CollectionIndexesManager<
   TOutput extends object = Record<string, unknown>,
@@ -50,7 +50,7 @@ export class CollectionIndexesManager<
    */
   public createIndex<TIndexType extends IndexConstructor<TKey>>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
-    config: IndexOptions<TIndexType> = {}
+    config: IndexOptions<TIndexType> = {},
   ): BaseIndex<TKey> {
     this.lifecycle.validateCollectionUsable(`createIndex`)
 
@@ -66,7 +66,7 @@ export class CollectionIndexesManager<
         `No index type specified and no defaultIndexType set on collection. ` +
           `Either pass indexType in config, or set defaultIndexType on the collection:\n` +
           `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
-          `  createCollection({ defaultIndexType: BasicIndex, ... })`
+          `  createCollection({ defaultIndexType: BasicIndex, ... })`,
       )
     }
 
@@ -75,7 +75,7 @@ export class CollectionIndexesManager<
       indexId,
       expression,
       config.name,
-      config.options
+      config.options,
     )
 
     // Build with current data

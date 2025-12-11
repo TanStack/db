@@ -1,12 +1,12 @@
-import { expect } from "vitest"
-import { BTreeIndex } from "../src/indexes/btree-index"
+import { expect } from 'vitest'
+import { BTreeIndex } from '../src/indexes/btree-index'
 import type {
   CollectionConfig,
   MutationFnParams,
   StringCollationConfig,
   SyncConfig,
-} from "../src/index.js"
-import type { IndexConstructor } from "../src/indexes/base-index"
+} from '../src/index.js'
+import type { IndexConstructor } from '../src/indexes/base-index'
 
 // Index usage tracking utilities
 export interface IndexUsageStats {

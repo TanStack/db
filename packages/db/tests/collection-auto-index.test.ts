@@ -8,11 +8,11 @@ import {
   lte,
   not,
   or,
-} from "../src/query/builder/functions"
-import { createSingleRowRefProxy } from "../src/query/builder/ref-proxy"
-import { createLiveQueryCollection } from "../src"
-import { PropRef } from "../src/query/ir"
-import { BTreeIndex } from "../src/indexes/btree-index"
+} from '../src/query/builder/functions'
+import { createSingleRowRefProxy } from '../src/query/builder/ref-proxy'
+import { createLiveQueryCollection } from '../src'
+import { PropRef } from '../src/query/ir'
+import { BTreeIndex } from '../src/indexes/btree-index'
 import {
   createIndexUsageTracker,
   expectIndexUsage,

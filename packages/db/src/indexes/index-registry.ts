@@ -48,7 +48,7 @@ const queryPatterns = new Map<
  * Configure dev mode for index suggestions
  */
 export function configureIndexDevMode(
-  config: Partial<IndexDevModeConfig>
+  config: Partial<IndexDevModeConfig>,
 ): void {
   devModeConfig = { ...devModeConfig, ...config }
 }
@@ -81,7 +81,7 @@ export function emitIndexSuggestion(suggestion: IndexSuggestion): void {
       `[TanStack DB] Index suggestion for "${suggestion.collectionId}":\n` +
         `  ${suggestion.message}\n` +
         `  Field: ${suggestion.fieldPath.join(`.`)}\n` +
-        `  Add index: collection.createIndex((row) => row.${suggestion.fieldPath.join(`.`)})`
+        `  Add index: collection.createIndex((row) => row.${suggestion.fieldPath.join(`.`)})`,
     )
   }
 }
@@ -92,7 +92,7 @@ export function emitIndexSuggestion(suggestion: IndexSuggestion): void {
 export function trackQuery(
   collectionId: string,
   fieldPath: Array<string>,
-  executionTimeMs: number
+  executionTimeMs: number,
 ): void {
   if (!isDevModeEnabled()) return
 
@@ -132,7 +132,7 @@ export function trackQuery(
 export function checkCollectionSizeForIndex(
   collectionId: string,
   collectionSize: number,
-  fieldPath: Array<string>
+  fieldPath: Array<string>,
 ): void {
   if (!isDevModeEnabled()) return
 

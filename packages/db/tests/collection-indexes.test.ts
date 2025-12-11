@@ -12,12 +12,12 @@ import {
   lt,
   lte,
   or,
-} from "../src/query/builder/functions"
-import { PropRef } from "../src/query/ir"
-import { BTreeIndex } from "../src/indexes/btree-index"
-import { expectIndexUsage, withIndexTracking } from "./utils"
-import type { Collection } from "../src/collection/index.js"
-import type { MutationFn, PendingMutation } from "../src/types"
+} from '../src/query/builder/functions'
+import { PropRef } from '../src/query/ir'
+import { BTreeIndex } from '../src/indexes/btree-index'
+import { expectIndexUsage, withIndexTracking } from './utils'
+import type { Collection } from '../src/collection/index.js'
+import type { MutationFn, PendingMutation } from '../src/types'
 
 interface TestItem {
   id: string

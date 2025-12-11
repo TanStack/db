@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection/index.js"
-import { BTreeIndex } from "../../src/indexes/btree-index"
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { BTreeIndex } from '../../src/indexes/btree-index'
 
 import { createLiveQueryCollection } from '../../src/query/live-query-collection'
 import {
@@ -236,7 +236,7 @@ function createTestItemCollection(autoIndex: `off` | `eager` = `off`) {
       initialData: testData,
       autoIndex,
       defaultIndexType: BTreeIndex,
-    })
+    }),
   )
 }
 

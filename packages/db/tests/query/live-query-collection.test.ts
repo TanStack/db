@@ -13,10 +13,10 @@ import {
   flushPromises,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
-} from "../utils.js"
-import { createDeferred } from "../../src/deferred"
-import { BTreeIndex } from "../../src/indexes/btree-index"
-import type { ChangeMessage, LoadSubsetOptions } from "../../src/types.js"
+} from '../utils.js'
+import { createDeferred } from '../../src/deferred'
+import { BTreeIndex } from '../../src/indexes/btree-index'
+import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
 
 // Sample user type for tests
 type User = {

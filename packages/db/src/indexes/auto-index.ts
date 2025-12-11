@@ -1,8 +1,8 @@
-import { DEFAULT_COMPARE_OPTIONS } from "../utils"
-import { checkCollectionSizeForIndex, isDevModeEnabled } from "./index-registry"
-import type { CompareOptions } from "../query/builder/types"
-import type { BasicExpression } from "../query/ir"
-import type { CollectionImpl } from "../collection/index.js"
+import { DEFAULT_COMPARE_OPTIONS } from '../utils'
+import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
+import type { CompareOptions } from '../query/builder/types'
+import type { BasicExpression } from '../query/ir'
+import type { CollectionImpl } from '../collection/index.js'
 
 export interface AutoIndexConfig {
   autoIndex?: `off` | `eager`
@@ -21,7 +21,7 @@ function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
         `[TanStack DB] Auto-indexing is enabled but no defaultIndexType is set. ` +
           `Set defaultIndexType on the collection:\n` +
           `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
-          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`
+          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
       )
     }
     return false
@@ -64,7 +64,7 @@ export function ensureIndexForField<
     checkCollectionSizeForIndex(
       collection.id || `unknown`,
       collection.size,
-      fieldPath
+      fieldPath,
     )
   }
 

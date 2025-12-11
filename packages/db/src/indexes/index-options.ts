@@ -1,4 +1,4 @@
-import type { IndexConstructor } from "./base-index.js"
+import type { IndexConstructor } from './base-index.js'
 
 /**
  * Options for creating an index
@@ -15,7 +15,7 @@ export interface IndexOptions<
     id: number,
     expr: any,
     name?: string,
-    options?: infer O
+    options?: infer O,
   ) => any
     ? O
     : never

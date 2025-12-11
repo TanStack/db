@@ -1,8 +1,8 @@
-import { defaultComparator, normalizeValue } from "../utils/comparison.js"
-import { BaseIndex } from "./base-index.js"
-import type { CompareOptions } from "../query/builder/types.js"
-import type { BasicExpression } from "../query/ir.js"
-import type { IndexOperation } from "./base-index.js"
+import { defaultComparator, normalizeValue } from '../utils/comparison.js'
+import { BaseIndex } from './base-index.js'
+import type { CompareOptions } from '../query/builder/types.js'
+import type { BasicExpression } from '../query/ir.js'
+import type { IndexOperation } from './base-index.js'
 
 /**
  * Options for range queries
@@ -57,7 +57,7 @@ export class BasicIndex<
     id: number,
     expression: BasicExpression,
     name?: string,
-    options?: any
+    options?: any,
   ) {
     super(id, expression, name, options)
     this.compareFn = options?.compareFn ?? defaultComparator
@@ -95,7 +95,7 @@ export class BasicIndex<
       indexedValue = this.evaluateIndexExpression(item)
     } catch (error) {
       throw new Error(
-        `Failed to evaluate index expression for key ${key}: ${error}`
+        `Failed to evaluate index expression for key ${key}: ${error}`,
       )
     }
 
@@ -127,7 +127,7 @@ export class BasicIndex<
     } catch (error) {
       console.warn(
         `Failed to evaluate index expression for key ${key} during removal:`,
-        error
+        error,
       )
       return
     }
@@ -178,7 +178,7 @@ export class BasicIndex<
         indexedValue = this.evaluateIndexExpression(item)
       } catch (error) {
         throw new Error(
-          `Failed to evaluate index expression for key ${key}: ${error}`
+          `Failed to evaluate index expression for key ${key}: ${error}`,
         )
       }
       entriesArray.push({ key, value: normalizeValue(indexedValue) })
@@ -366,7 +366,7 @@ export class BasicIndex<
   takeReversed(
     n: number,
     from?: any,
-    filterFn?: (key: TKey) => boolean
+    filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
     const result: Array<TKey> = []
 

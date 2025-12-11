@@ -25,30 +25,30 @@
  */
 
 // BasicIndex - Map + sorted Array, good balance of features and size
-export { BasicIndex } from "./indexes/basic-index.js"
+export { BasicIndex } from './indexes/basic-index.js'
 export type {
   BasicIndexOptions,
   RangeQueryOptions,
-} from "./indexes/basic-index.js"
+} from './indexes/basic-index.js'
 
 // BTreeIndex - full-featured with efficient sorted iteration (for ORDER BY optimization)
-export { BTreeIndex } from "./indexes/btree-index.js"
-export type { RangeQueryOptions as BTreeRangeQueryOptions } from "./indexes/btree-index.js"
+export { BTreeIndex } from './indexes/btree-index.js'
+export type { RangeQueryOptions as BTreeRangeQueryOptions } from './indexes/btree-index.js'
 
 // Re-export base index types
-export { BaseIndex } from "./indexes/base-index.js"
+export { BaseIndex } from './indexes/base-index.js'
 export type {
   IndexInterface,
   IndexConstructor,
   IndexStats,
   IndexOperation,
-} from "./indexes/base-index.js"
+} from './indexes/base-index.js'
 
 // Re-export reverse index
-export { ReverseIndex } from "./indexes/reverse-index.js"
+export { ReverseIndex } from './indexes/reverse-index.js'
 
 // Re-export index options
-export type { IndexOptions } from "./indexes/index-options.js"
+export type { IndexOptions } from './indexes/index-options.js'
 
 // Re-export dev mode utilities
 export {
@@ -58,14 +58,14 @@ export {
   trackQuery,
   clearQueryPatterns,
   getQueryPatterns,
-} from "./indexes/index-registry.js"
+} from './indexes/index-registry.js'
 export type {
   IndexDevModeConfig,
   IndexSuggestion,
-} from "./indexes/index-registry.js"
+} from './indexes/index-registry.js'
 
 // Re-export index optimization utilities
 export {
   optimizeExpressionWithIndexes,
   findIndexForField,
-} from "./utils/index-optimization.js"
+} from './utils/index-optimization.js'
