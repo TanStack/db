@@ -328,7 +328,9 @@ export interface SyncConfig<
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
     begin: () => void
-    write: (message: Omit<ChangeMessage<T>, `key`>) => void
+    write: (
+      message: ChangeMessageOrDeleteKeyMessage<T, TKey>,
+    ) => void
     commit: () => void
     markReady: () => void
     truncate: () => void
