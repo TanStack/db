@@ -9,4 +9,4 @@ title: TransactionState
 type TransactionState = "pending" | "persisting" | "completed" | "failed";
 ```
 
-Defined in: [packages/db/src/types.ts:61](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L61)
+Defined in: [packages/db/src/types.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L62)

@@ -5,7 +5,7 @@ title: CreateOptimisticActionsOptions
 
 # Interface: CreateOptimisticActionsOptions\<TVars, T\>
 
-Defined in: [packages/db/src/types.ts:178](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L178)
+Defined in: [packages/db/src/types.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L179)
 
 Options for the createOptimisticAction helper
 
@@ -31,7 +31,7 @@ Options for the createOptimisticAction helper
 optional autoCommit: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L169)
+Defined in: [packages/db/src/types.ts:170](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L170)
 
 #### Inherited from
 
@@ -45,7 +45,7 @@ Defined in: [packages/db/src/types.ts:169](https://github.com/TanStack/db/blob/m
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L167)
+Defined in: [packages/db/src/types.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L168)
 
 Unique identifier for the transaction
 
@@ -63,7 +63,7 @@ Omit.id
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:172](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L172)
+Defined in: [packages/db/src/types.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L173)
 
 Custom metadata to associate with the transaction
 
@@ -81,7 +81,7 @@ Omit.metadata
 mutationFn: (vars, params) => Promise<any>;
 ```
 
-Defined in: [packages/db/src/types.ts:185](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L185)
+Defined in: [packages/db/src/types.ts:186](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L186)
 
 Function to execute the mutation on the server
 
@@ -107,7 +107,7 @@ Function to execute the mutation on the server
 onMutate: (vars) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L183)
+Defined in: [packages/db/src/types.ts:184](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L184)
 
 Function to apply optimistic updates locally before the mutation completes
 
