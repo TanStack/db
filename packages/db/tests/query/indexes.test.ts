@@ -235,12 +235,8 @@ function createTestItemCollection(autoIndex: `off` | `eager` = `off`) {
       getKey: (item) => item.id,
       initialData: testData,
       autoIndex,
-<<<<<<< HEAD
-    }),
-=======
       defaultIndexType: BTreeIndex,
     })
->>>>>>> 6df29a21 (refactor(db): simplify indexing with BasicIndex and explicit defaultIndexType)
   )
 }
 
