@@ -361,6 +361,16 @@ export interface ChangeMessage<
   metadata?: Record<string, unknown>
 }
 
+export type DeleteKeyMessage<TKey extends string | number = string | number> =
+  Omit<ChangeMessage<any, TKey>, `value` | `previousValue` | `type`> & {
+    type: `delete`
+  }
+
+export type ChangeMessageOrDeleteKeyMessage<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = Omit<ChangeMessage<T>, `key`> | DeleteKeyMessage<TKey>
+
 export interface OptimisticChangeMessage<
   T extends object = Record<string, unknown>,
 > extends ChangeMessage<T> {
@@ -894,3 +904,5 @@ export type WritableDeep<T> = T extends BuiltIns
           : T extends object
             ? WritableObjectDeep<T>
             : unknown
+
+export type MakeOptional<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>

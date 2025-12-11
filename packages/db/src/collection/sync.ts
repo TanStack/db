@@ -13,6 +13,7 @@ import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessage,
+  ChangeMessageOrDeleteKeyMessage,
   CleanupFn,
   CollectionConfig,
   LoadSubsetOptions,
@@ -94,7 +95,12 @@ export class CollectionSyncManager<
               deletedKeys: new Set(),
             })
           },
-          write: (messageWithoutKey: Omit<ChangeMessage<TOutput>, `key`>) => {
+          write: (
+            messageWithOptionalKey: ChangeMessageOrDeleteKeyMessage<
+              TOutput,
+              TKey
+            >,
+          ) => {
             const pendingTransaction =
               this.state.pendingSyncedTransactions[
                 this.state.pendingSyncedTransactions.length - 1
@@ -105,12 +111,18 @@ export class CollectionSyncManager<
             if (pendingTransaction.committed) {
               throw new SyncTransactionAlreadyCommittedWriteError()
             }
-            const key = this.config.getKey(messageWithoutKey.value)
 
-            let messageType = messageWithoutKey.type
+            let key: TKey | undefined = undefined
+            if (`key` in messageWithOptionalKey) {
+              key = messageWithOptionalKey.key
+            } else {
+              key = this.config.getKey(messageWithOptionalKey.value)
+            }
+
+            let messageType = messageWithOptionalKey.type
 
             // Check if an item with this key already exists when inserting
-            if (messageWithoutKey.type === `insert`) {
+            if (messageWithOptionalKey.type === `insert`) {
               const insertingIntoExistingSynced = this.state.syncedData.has(key)
               const hasPendingDeleteForKey =
                 pendingTransaction.deletedKeys.has(key)
@@ -124,7 +136,7 @@ export class CollectionSyncManager<
                 const existingValue = this.state.syncedData.get(key)
                 if (
                   existingValue !== undefined &&
-                  deepEquals(existingValue, messageWithoutKey.value)
+                  deepEquals(existingValue, messageWithOptionalKey.value)
                 ) {
                   // The "insert" is an echo of a value we already have locally.
                   // Treat it as an update so we preserve optimistic intent without
@@ -143,7 +155,9 @@ export class CollectionSyncManager<
             }
 
             const message: ChangeMessage<TOutput> = {
-              ...messageWithoutKey,
+              // TODO: this type cast is false because now the message may not contain a value field
+              //       will need to fix the types but that's going to spread...
+              ...(messageWithOptionalKey as ChangeMessage<TOutput>),
               type: messageType,
               key,
             }
