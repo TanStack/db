@@ -288,6 +288,15 @@ function isSnapshotEndMessage<T extends Row<unknown>>(
   return isControlMessage(message) && message.headers.control === `snapshot-end`
 }
 
+function isSubsetEndMessage<T extends Row<unknown>>(
+  message: Message<T>,
+): message is ControlMessage & { headers: { control: `subset-end` } } {
+  return (
+    isControlMessage(message) &&
+    (message.headers.control as string) === `subset-end`
+  )
+}
+
 function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
   return {
     xmin: message.headers.xmin,
@@ -998,7 +1007,7 @@ function createElectricSync<T extends Row<unknown>>(
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
-        let hasSnapshotEnd = false
+        let hasSubsetEnd = false
 
         // Clear the current batch buffer at the START of processing a new batch
         // This preserves messages from the previous batch until new ones arrive,
@@ -1075,11 +1084,14 @@ function createElectricSync<T extends Row<unknown>>(
               })
             }
           } else if (isSnapshotEndMessage(message)) {
-            // Skip snapshot-end tracking during buffered initial sync (will be extracted during atomic swap)
+            // Track postgres snapshot metadata for resolving awaiting mutations
+            // Skip during buffered initial sync (will be extracted during atomic swap)
             if (!isBufferingInitialSync()) {
               newSnapshots.push(parseSnapshotMessage(message))
             }
-            hasSnapshotEnd = true
+          } else if (isSubsetEndMessage(message)) {
+            // subset-end marks the end of an injected subset snapshot - treat like up-to-date for commit
+            hasSubsetEnd = true
           } else if (isUpToDateMessage(message)) {
             hasUpToDate = true
           } else if (isMustRefetchMessage(message)) {
@@ -1101,13 +1113,13 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Reset flags so we continue accumulating changes until next up-to-date
             hasUpToDate = false
-            hasSnapshotEnd = false
+            hasSubsetEnd = false
             hasReceivedUpToDate = false // Reset for progressive mode (isBufferingInitialSync will reflect this)
             bufferedMessages.length = 0 // Clear buffered messages
           }
         }
 
-        if (hasUpToDate || hasSnapshotEnd) {
+        if (hasUpToDate || hasSubsetEnd) {
           // PROGRESSIVE MODE: Atomic swap on first up-to-date
           if (isBufferingInitialSync() && hasUpToDate) {
             debug(
@@ -1155,19 +1167,14 @@ function createElectricSync<T extends Row<unknown>>(
             )
           } else {
             // Normal mode or on-demand: commit transaction if one was started
-            // In eager mode, only commit on snapshot-end if we've already received
-            // the first up-to-date, because the snapshot-end in the log could be from
-            // a significant period before the stream is actually up to date
-            const shouldCommit =
-              hasUpToDate || syncMode === `on-demand` || hasReceivedUpToDate
-
-            if (transactionStarted && shouldCommit) {
+            // Both up-to-date and subset-end trigger a commit
+            if (transactionStarted) {
               commit()
               transactionStarted = false
             }
           }
 
-          if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
+          if (hasUpToDate || (hasSubsetEnd && syncMode === `on-demand`)) {
             // Mark the collection as ready now that sync is up to date
             wrappedMarkReady(isBufferingInitialSync())
           }
