@@ -144,7 +144,7 @@ function compileFunction(
   // In SQL, all comparisons with NULL return UNKNOWN, so these are almost always mistakes
   if (isComparisonOp(name)) {
     const nullArgIndex = args.findIndex((arg: IR.BasicExpression) =>
-      isNullValue(arg)
+      isNullValue(arg),
     )
 
     if (nullArgIndex !== -1) {
@@ -154,7 +154,7 @@ function compileFunction(
         `Cannot use null/undefined value with '${name}' operator. ` +
           `Comparisons with null always evaluate to UNKNOWN in SQL. ` +
           `Use isNull() or isUndefined() to check for null values, ` +
-          `or filter out null values before building the query.`
+          `or filter out null values before building the query.`,
       )
     }
   }

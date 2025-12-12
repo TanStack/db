@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { compileSQL } from "../src/sql-compiler"
-import type { IR } from "@tanstack/db"
+import { describe, expect, it } from 'vitest'
+import { compileSQL } from '../src/sql-compiler'
+import type { IR } from '@tanstack/db'
 
 // Helper to create a value expression
 function val<T>(value: T): IR.BasicExpression<T> {
@@ -26,7 +26,7 @@ describe(`sql-compiler`, () => {
           where: func(`eq`, [ref(`name`), val(`John`)]),
         })
         expect(result.where).toBe(`"name" = $1`)
-        expect(result.params).toEqual({ "1": `John` })
+        expect(result.params).toEqual({ '1': `John` })
       })
 
       it(`should compile eq with number value`, () => {
@@ -34,7 +34,7 @@ describe(`sql-compiler`, () => {
           where: func(`eq`, [ref(`age`), val(25)]),
         })
         expect(result.where).toBe(`"age" = $1`)
-        expect(result.params).toEqual({ "1": `25` })
+        expect(result.params).toEqual({ '1': `25` })
       })
 
       it(`should compile gt operator`, () => {
@@ -42,7 +42,7 @@ describe(`sql-compiler`, () => {
           where: func(`gt`, [ref(`age`), val(18)]),
         })
         expect(result.where).toBe(`"age" > $1`)
-        expect(result.params).toEqual({ "1": `18` })
+        expect(result.params).toEqual({ '1': `18` })
       })
 
       it(`should compile lt operator`, () => {
@@ -50,7 +50,7 @@ describe(`sql-compiler`, () => {
           where: func(`lt`, [ref(`price`), val(100)]),
         })
         expect(result.where).toBe(`"price" < $1`)
-        expect(result.params).toEqual({ "1": `100` })
+        expect(result.params).toEqual({ '1': `100` })
       })
 
       it(`should compile gte operator`, () => {
@@ -58,7 +58,7 @@ describe(`sql-compiler`, () => {
           where: func(`gte`, [ref(`quantity`), val(10)]),
         })
         expect(result.where).toBe(`"quantity" >= $1`)
-        expect(result.params).toEqual({ "1": `10` })
+        expect(result.params).toEqual({ '1': `10` })
       })
 
       it(`should compile lte operator`, () => {
@@ -66,7 +66,7 @@ describe(`sql-compiler`, () => {
           where: func(`lte`, [ref(`rating`), val(5)]),
         })
         expect(result.where).toBe(`"rating" <= $1`)
-        expect(result.params).toEqual({ "1": `5` })
+        expect(result.params).toEqual({ '1': `5` })
       })
     })
 
@@ -80,7 +80,7 @@ describe(`sql-compiler`, () => {
         })
         // Note: 2-arg AND doesn't add parentheses around the operands
         expect(result.where).toBe(`"projectId" = $1 AND "name" > $2`)
-        expect(result.params).toEqual({ "1": `uuid-123`, "2": `cursor-value` })
+        expect(result.params).toEqual({ '1': `uuid-123`, '2': `cursor-value` })
       })
 
       it(`should compile AND with more than two conditions`, () => {
@@ -93,7 +93,7 @@ describe(`sql-compiler`, () => {
         })
         // >2 args adds parentheses
         expect(result.where).toBe(`("a" = $1) AND ("b" = $2) AND ("c" = $3)`)
-        expect(result.params).toEqual({ "1": `1`, "2": `2`, "3": `3` })
+        expect(result.params).toEqual({ '1': `1`, '2': `2`, '3': `3` })
       })
 
       it(`should compile OR with two conditions`, () => {
@@ -104,7 +104,7 @@ describe(`sql-compiler`, () => {
           ]),
         })
         expect(result.where).toBe(`"status" = $1 OR "status" = $2`)
-        expect(result.params).toEqual({ "1": `active`, "2": `pending` })
+        expect(result.params).toEqual({ '1': `active`, '2': `pending` })
       })
     })
 
@@ -114,7 +114,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`eq`, [ref(`deletedAt`), val(null)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
       })
 
@@ -122,7 +122,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`eq`, [ref(`deletedAt`), val(undefined)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
       })
 
@@ -130,7 +130,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`eq`, [val(null), ref(`name`)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
       })
 
@@ -138,7 +138,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`gt`, [ref(`age`), val(null)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'gt' operator`)
       })
 
@@ -146,7 +146,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`lt`, [ref(`age`), val(undefined)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'lt' operator`)
       })
 
@@ -154,7 +154,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`gte`, [ref(`price`), val(null)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'gte' operator`)
       })
 
@@ -162,7 +162,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`lte`, [ref(`rating`), val(null)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'lte' operator`)
       })
 
@@ -170,7 +170,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`like`, [ref(`name`), val(null)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'like' operator`)
       })
 
@@ -178,7 +178,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`ilike`, [ref(`name`), val(null)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'ilike' operator`)
       })
 
@@ -189,7 +189,7 @@ describe(`sql-compiler`, () => {
               func(`eq`, [ref(`projectId`), val(`uuid-123`)]),
               func(`eq`, [ref(`deletedAt`), val(null)]),
             ]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
       })
 
@@ -201,7 +201,7 @@ describe(`sql-compiler`, () => {
               func(`eq`, [ref(`archivedAt`), val(null)]),
               func(`gt`, [ref(`createdAt`), val(`2024-01-01`)]),
             ]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
       })
 
@@ -217,7 +217,7 @@ describe(`sql-compiler`, () => {
               func(`eq`, [ref(`projectId`), val(`uuid`)]),
               func(`gt`, [ref(`name`), val(null)]),
             ]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'gt' operator`)
       })
 
@@ -226,7 +226,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`eq`, [val(null), val(null)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
       })
 
@@ -235,7 +235,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`eq`, [val(null), val(42)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
       })
 
@@ -245,7 +245,7 @@ describe(`sql-compiler`, () => {
         expect(() =>
           compileSQL({
             where: func(`eq`, [ref(`email`), val(null)]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
 
         // isNull(col) should work correctly
@@ -263,7 +263,7 @@ describe(`sql-compiler`, () => {
               func(`eq`, [ref(`deletedAt`), val(null)]),
               func(`eq`, [ref(`status`), val(`active`)]),
             ]),
-          })
+          }),
         ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
       })
     })

@@ -1,5 +1,5 @@
 ---
-"@tanstack/electric-db-collection": patch
+'@tanstack/electric-db-collection': patch
 ---
 
 Fix invalid Electric proxy queries with missing params for null/undefined values
