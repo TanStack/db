@@ -43,10 +43,19 @@ export interface CollectionLoadingSubsetChangeEvent {
   loadingSubsetTransition: `start` | `end`
 }
 
+/**
+ * Event emitted when the collection is truncated (all data cleared)
+ */
+export interface CollectionTruncateEvent {
+  type: `truncate`
+  collection: Collection<any, any, any, any, any>
+}
+
 export type AllCollectionEvents = {
   'status:change': CollectionStatusChangeEvent
   'subscribers:change': CollectionSubscribersChangeEvent
   'loadingSubset:change': CollectionLoadingSubsetChangeEvent
+  truncate: CollectionTruncateEvent
 } & {
   [K in CollectionStatus as `status:${K}`]: CollectionStatusEvent<K>
 }
@@ -56,6 +65,7 @@ export type CollectionEvent =
   | CollectionStatusChangeEvent
   | CollectionSubscribersChangeEvent
   | CollectionLoadingSubsetChangeEvent
+  | CollectionTruncateEvent
 
 export type CollectionEventHandler<T extends keyof AllCollectionEvents> = (
   event: AllCollectionEvents[T],

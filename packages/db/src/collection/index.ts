@@ -365,6 +365,7 @@ export class CollectionImpl<
       lifecycle: this._lifecycle,
       changes: this._changes,
       indexes: this._indexes,
+      events: this._events,
     })
     this._sync.setDeps({
       collection: this, // Required for passing to config.sync callback

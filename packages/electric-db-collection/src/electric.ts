@@ -6,7 +6,7 @@ import {
 } from '@electric-sql/client'
 import { Store } from '@tanstack/store'
 import DebugModule from 'debug'
-import { DeduplicatedLoadSubset } from '@tanstack/db'
+import { DeduplicatedLoadSubset, and } from '@tanstack/db'
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
@@ -307,7 +307,12 @@ function hasTxids<T extends Row<unknown>>(
  * Creates a deduplicated loadSubset handler for progressive/on-demand modes
  * Returns null for eager mode, or a DeduplicatedLoadSubset instance for other modes.
  * Handles fetching snapshots in progressive mode during buffering phase,
- * and requesting snapshots in on-demand mode
+ * and requesting snapshots in on-demand mode.
+ *
+ * When cursor expressions are provided (whereFrom/whereCurrent), makes two
+ * requestSnapshot calls:
+ * - One for whereFrom (rows > cursor) with limit
+ * - One for whereCurrent (rows = cursor, for tie-breaking) without limit
  */
 function createLoadSubsetDedupe<T extends Row<unknown>>({
   stream,
@@ -382,8 +387,50 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       return
     } else {
       // On-demand mode: use requestSnapshot
-      const snapshotParams = compileSQL<T>(opts)
-      await stream.requestSnapshot(snapshotParams)
+      // When cursor is provided, make two calls:
+      // 1. whereCurrent (all ties, no limit)
+      // 2. whereFrom (rows > cursor, with limit)
+      const { cursor, where, orderBy, limit } = opts
+
+      if (cursor) {
+        // Make parallel requests for cursor-based pagination
+        const promises: Array<Promise<unknown>> = []
+
+        // Request 1: All rows matching whereCurrent (ties at boundary, no limit)
+        // Combine main where with cursor.whereCurrent
+        const whereCurrentOpts: LoadSubsetOptions = {
+          where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
+          orderBy,
+          // No limit - get all ties
+        }
+        const whereCurrentParams = compileSQL<T>(whereCurrentOpts)
+        promises.push(stream.requestSnapshot(whereCurrentParams))
+
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereCurrent snapshot (all ties)`,
+        )
+
+        // Request 2: Rows matching whereFrom (rows > cursor, with limit)
+        // Combine main where with cursor.whereFrom
+        const whereFromOpts: LoadSubsetOptions = {
+          where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
+          orderBy,
+          limit,
+        }
+        const whereFromParams = compileSQL<T>(whereFromOpts)
+        promises.push(stream.requestSnapshot(whereFromParams))
+
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
+        )
+
+        // Wait for both requests to complete
+        await Promise.all(promises)
+      } else {
+        // No cursor - standard single request
+        const snapshotParams = compileSQL<T>(opts)
+        await stream.requestSnapshot(snapshotParams)
+      }
     }
   }
 
