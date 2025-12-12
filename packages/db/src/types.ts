@@ -328,7 +328,7 @@ export interface SyncConfig<
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
     begin: () => void
-    write: (message: Omit<ChangeMessage<T>, `key`>) => void
+    write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     commit: () => void
     markReady: () => void
     truncate: () => void
@@ -361,12 +361,28 @@ export interface ChangeMessage<
   metadata?: Record<string, unknown>
 }
 
-export interface OptimisticChangeMessage<
+export type DeleteKeyMessage<TKey extends string | number = string | number> =
+  Omit<ChangeMessage<any, TKey>, `value` | `previousValue` | `type`> & {
+    type: `delete`
+  }
+
+export type ChangeMessageOrDeleteKeyMessage<
   T extends object = Record<string, unknown>,
-> extends ChangeMessage<T> {
-  // Is this change message part of an active transaction. Only applies to optimistic changes.
-  isActive?: boolean
-}
+  TKey extends string | number = string | number,
+> = Omit<ChangeMessage<T>, `key`> | DeleteKeyMessage<TKey>
+
+export type OptimisticChangeMessage<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> =
+  | (ChangeMessage<T> & {
+      // Is this change message part of an active transaction. Only applies to optimistic changes.
+      isActive?: boolean
+    })
+  | (DeleteKeyMessage<TKey> & {
+      // Is this change message part of an active transaction. Only applies to optimistic changes.
+      isActive?: boolean
+    })
 
 /**
  * The Standard Schema interface.
@@ -894,3 +910,6 @@ export type WritableDeep<T> = T extends BuiltIns
           : T extends object
             ? WritableObjectDeep<T>
             : unknown
+
+export type MakeOptional<T, K extends keyof T> = Omit<T, K> &
+  Partial<Pick<T, K>>

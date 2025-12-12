@@ -1546,6 +1546,116 @@ describe(`Collection`, () => {
     const state = await collection.stateWhenReady()
     expect(state.size).toBe(3)
   })
+
+  it(`should allow deleting a row by passing only the key to write function`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `delete-by-key`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, markReady }
+        },
+      },
+    })
+
+    // Collection should start in loading state
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(0)
+
+    const { begin, write, commit, markReady } = testSyncFunctions
+
+    // Insert some initial data
+    begin()
+    write({ type: `insert`, value: { id: 1, value: `item 1` } })
+    write({ type: `insert`, value: { id: 2, value: `item 2` } })
+    write({ type: `insert`, value: { id: 3, value: `item 3` } })
+    commit()
+
+    // Verify data was inserted
+    expect(collection.size).toBe(3)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `item 1` })
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `item 2` })
+    expect(collection.state.get(3)).toEqual({ id: 3, value: `item 3` })
+
+    // Delete a row by passing only the key (no value)
+    begin()
+    write({ type: `delete`, key: 2 })
+    commit()
+
+    // Verify the row is gone
+    expect(collection.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `item 1` })
+    expect(collection.state.get(2)).toBeUndefined()
+    expect(collection.state.get(3)).toEqual({ id: 3, value: `item 3` })
+
+    // Delete another row by key only
+    begin()
+    write({ type: `delete`, key: 1 })
+    commit()
+
+    // Verify both rows are gone
+    expect(collection.size).toBe(1)
+    expect(collection.state.get(1)).toBeUndefined()
+    expect(collection.state.get(2)).toBeUndefined()
+    expect(collection.state.get(3)).toEqual({ id: 3, value: `item 3` })
+
+    // Mark as ready
+    markReady()
+
+    // Verify final state
+    expect(collection.status).toBe(`ready`)
+    expect(collection.size).toBe(1)
+    expect(Array.from(collection.state.keys())).toEqual([3])
+  })
+
+  it(`should allow deleting a row by key with string keys`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: string; name: string }>({
+      id: `delete-by-string-key`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, markReady }
+        },
+      },
+    })
+
+    const { begin, write, commit, markReady } = testSyncFunctions
+
+    // Insert initial data
+    begin()
+    write({ type: `insert`, value: { id: `a`, name: `Alice` } })
+    write({ type: `insert`, value: { id: `b`, name: `Bob` } })
+    write({ type: `insert`, value: { id: `c`, name: `Charlie` } })
+    commit()
+
+    // Verify data was inserted
+    expect(collection.size).toBe(3)
+    expect(collection.state.get(`a`)).toEqual({ id: `a`, name: `Alice` })
+    expect(collection.state.get(`b`)).toEqual({ id: `b`, name: `Bob` })
+    expect(collection.state.get(`c`)).toEqual({ id: `c`, name: `Charlie` })
+
+    // Delete by key only
+    begin()
+    write({ type: `delete`, key: `b` })
+    commit()
+
+    // Verify the row is gone
+    expect(collection.size).toBe(2)
+    expect(collection.state.get(`a`)).toEqual({ id: `a`, name: `Alice` })
+    expect(collection.state.get(`b`)).toBeUndefined()
+    expect(collection.state.get(`c`)).toEqual({ id: `c`, name: `Charlie` })
+
+    markReady()
+    expect(collection.status).toBe(`ready`)
+  })
 })
 
 describe(`Collection isLoadingSubset property`, () => {
