@@ -898,8 +898,44 @@ describe(`useLiveInfiniteQuery`, () => {
                 })
               }
 
-              // Apply limit if provided
-              if (opts.limit !== undefined) {
+              // Apply cursor expressions if present (new cursor-based pagination)
+              if (opts.cursor) {
+                const { whereFrom, whereCurrent } = opts.cursor
+                try {
+                  const whereFromFn =
+                    createFilterFunctionFromExpression(whereFrom)
+                  const fromData = filtered.filter(whereFromFn)
+
+                  const whereCurrentFn =
+                    createFilterFunctionFromExpression(whereCurrent)
+                  const currentData = filtered.filter(whereCurrentFn)
+
+                  // Combine current (ties) with from (next page), deduplicate
+                  const seenIds = new Set<string>()
+                  filtered = []
+                  for (const item of currentData) {
+                    if (!seenIds.has(item.id)) {
+                      seenIds.add(item.id)
+                      filtered.push(item)
+                    }
+                  }
+                  // Apply limit only to fromData
+                  const limitedFromData = opts.limit
+                    ? fromData.slice(0, opts.limit)
+                    : fromData
+                  for (const item of limitedFromData) {
+                    if (!seenIds.has(item.id)) {
+                      seenIds.add(item.id)
+                      filtered.push(item)
+                    }
+                  }
+                  // Re-sort after combining
+                  filtered.sort((a, b) => b.createdAt - a.createdAt)
+                } catch {
+                  // Fallback to original filtered if cursor parsing fails
+                }
+              } else if (opts.limit !== undefined) {
+                // Apply limit only if no cursor (cursor handles limit internally)
                 filtered = filtered.slice(0, opts.limit)
               }
 

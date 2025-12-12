@@ -5,7 +5,7 @@ title: JoinError
 
 # Class: JoinError
 
-Defined in: [packages/db/src/errors.ts:479](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L479)
+Defined in: [packages/db/src/errors.ts:488](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L488)
 
 ## Extends
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/errors.ts:479](https://github.com/TanStack/db/blob/
 new JoinError(message): JoinError;
 ```
 
-Defined in: [packages/db/src/errors.ts:480](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L480)
+Defined in: [packages/db/src/errors.ts:489](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L489)
 
 #### Parameters
 

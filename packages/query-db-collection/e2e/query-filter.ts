@@ -69,6 +69,11 @@ export function serializeLoadSubsetOptions(
     result.limit = options.limit
   }
 
+  // Include offset for pagination support - different offsets need different query keys
+  if (options.offset !== undefined) {
+    result.offset = options.offset
+  }
+
   return JSON.stringify(Object.keys(result).length === 0 ? null : result)
 }
 
@@ -158,7 +163,7 @@ function isBasicExpression(
 }
 
 /**
- * Apply LoadSubsetOptions to data (filter, sort, limit)
+ * Apply LoadSubsetOptions to data (filter, sort, limit, offset)
  */
 export function applyPredicates<T>(
   data: Array<T>,
@@ -172,6 +177,7 @@ export function applyPredicates<T>(
   let filters: Array<SimpleComparison> = []
   let sorts: Array<ParsedOrderBy> = []
   let limit: number | undefined = undefined
+  const offset = options.offset ?? 0
 
   // Check if where clause is simple before trying to parse
   const hasComplexWhere = options.where && !isSimpleExpression(options.where)
@@ -232,6 +238,7 @@ export function applyPredicates<T>(
       expressionSummary: analysis,
       hasOrderBy: Boolean(orderBy),
       limit: rawLimit,
+      offset,
       filtersCount: filters.length,
       sortsCount: sorts.length,
       initialSize: data.length,
@@ -261,14 +268,16 @@ export function applyPredicates<T>(
     }
   }
 
-  // Apply LIMIT
-  // Note: offset is NOT applied here - it's handled by the live query windowing layer
-  // The limit passed here already accounts for offset (e.g., offset(20).limit(10) -> limit: 30)
-  if (limit !== undefined) {
-    result = result.slice(0, limit)
+  // Apply OFFSET and LIMIT
+  // For pagination: offset skips rows, limit caps the result
+  if (offset > 0 || limit !== undefined) {
+    const start = offset
+    const end = limit !== undefined ? offset + limit : undefined
+    result = result.slice(start, end)
     if (DEBUG_SUMMARY) {
-      console.log(`[query-filter] after limit`, {
+      console.log(`[query-filter] after offset/limit`, {
         size: result.length,
+        offset,
         limit,
       })
     }

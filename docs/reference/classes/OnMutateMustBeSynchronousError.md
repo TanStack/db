@@ -5,7 +5,7 @@ title: OnMutateMustBeSynchronousError
 
 # Class: OnMutateMustBeSynchronousError
 
-Defined in: [packages/db/src/errors.ts:274](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L274)
+Defined in: [packages/db/src/errors.ts:283](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L283)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:274](https://github.com/TanStack/db/blob/
 new OnMutateMustBeSynchronousError(): OnMutateMustBeSynchronousError;
 ```
 
-Defined in: [packages/db/src/errors.ts:275](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L275)
+Defined in: [packages/db/src/errors.ts:284](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L284)
 
 #### Returns
 

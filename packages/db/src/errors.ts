@@ -151,6 +151,15 @@ export class UndefinedKeyError extends CollectionOperationError {
   }
 }
 
+export class InvalidKeyError extends CollectionOperationError {
+  constructor(key: unknown, item: unknown) {
+    const keyType = key === null ? `null` : typeof key
+    super(
+      `getKey returned an invalid key type. Expected string or number, but got ${keyType}: ${JSON.stringify(key)}. Item: ${JSON.stringify(item)}`,
+    )
+  }
+}
+
 export class DuplicateKeyError extends CollectionOperationError {
   constructor(key: string | number) {
     super(

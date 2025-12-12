@@ -43,6 +43,7 @@ title: "@tanstack/db"
 - [InvalidJoinConditionRightSourceError](classes/InvalidJoinConditionRightSourceError.md)
 - [InvalidJoinConditionSameSourceError](classes/InvalidJoinConditionSameSourceError.md)
 - [InvalidJoinConditionSourceMismatchError](classes/InvalidJoinConditionSourceMismatchError.md)
+- [InvalidKeyError](classes/InvalidKeyError.md)
 - [InvalidSchemaError](classes/InvalidSchemaError.md)
 - [InvalidSourceError](classes/InvalidSourceError.md)
 - [InvalidSourceTypeError](classes/InvalidSourceTypeError.md)

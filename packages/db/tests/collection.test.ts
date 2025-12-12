@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
+  InvalidKeyError,
   KeyUpdateNotAllowedError,
   MissingDeleteHandlerError,
   MissingInsertHandlerError,
@@ -610,6 +611,151 @@ describe(`Collection`, () => {
     // Verify both items were inserted
     expect(collection.state.get(2)).toEqual({ id: 2, value: `first` })
     expect(collection.state.get(3)).toEqual({ id: 3, value: `second` })
+  })
+
+  it(`should throw InvalidKeyError when getKey returns null`, async () => {
+    const collection = createCollection<{ id: null; value: string }>({
+      id: `null-key-test`,
+      // @ts-expect-error - testing runtime behavior when getKey returns null
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+
+    expect(() => {
+      tx.mutate(() => collection.insert({ id: null, value: `test` }))
+    }).toThrow(InvalidKeyError)
+  })
+
+  it(`should throw InvalidKeyError when getKey returns an object`, async () => {
+    const collection = createCollection<{
+      id: { nested: string }
+      value: string
+    }>({
+      id: `object-key-test`,
+      // @ts-expect-error - testing runtime behavior when getKey returns an object
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+
+    expect(() => {
+      tx.mutate(() =>
+        collection.insert({ id: { nested: `value` }, value: `test` }),
+      )
+    }).toThrow(InvalidKeyError)
+  })
+
+  it(`should throw InvalidKeyError when getKey returns a boolean`, async () => {
+    const collection = createCollection<{ id: boolean; value: string }>({
+      id: `boolean-key-test`,
+      // @ts-expect-error - testing runtime behavior when getKey returns a boolean
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+
+    expect(() => {
+      tx.mutate(() => collection.insert({ id: true, value: `test` }))
+    }).toThrow(InvalidKeyError)
+  })
+
+  it(`should accept valid string and number keys`, async () => {
+    const stringKeyCollection = createCollection<{ id: string; value: string }>(
+      {
+        id: `string-key-test`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            begin()
+            commit()
+            markReady()
+          },
+        },
+      },
+    )
+
+    const numberKeyCollection = createCollection<{ id: number; value: string }>(
+      {
+        id: `number-key-test`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            begin()
+            commit()
+            markReady()
+          },
+        },
+      },
+    )
+
+    await Promise.all([
+      stringKeyCollection.stateWhenReady(),
+      numberKeyCollection.stateWhenReady(),
+    ])
+
+    const mutationFn = async () => {}
+
+    // String key should work
+    const tx1 = createTransaction({ mutationFn })
+    expect(() => {
+      tx1.mutate(() =>
+        stringKeyCollection.insert({ id: `string-id`, value: `test` }),
+      )
+    }).not.toThrow()
+
+    // Number key should work
+    const tx2 = createTransaction({ mutationFn })
+    expect(() => {
+      tx2.mutate(() => numberKeyCollection.insert({ id: 123, value: `test` }))
+    }).not.toThrow()
+
+    // Empty string key should work
+    const tx3 = createTransaction({ mutationFn })
+    expect(() => {
+      tx3.mutate(() => stringKeyCollection.insert({ id: ``, value: `empty` }))
+    }).not.toThrow()
+
+    // Zero key should work
+    const tx4 = createTransaction({ mutationFn })
+    expect(() => {
+      tx4.mutate(() => numberKeyCollection.insert({ id: 0, value: `zero` }))
+    }).not.toThrow()
   })
 
   it(`should support operation handler functions`, async () => {

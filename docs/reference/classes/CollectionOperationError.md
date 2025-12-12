@@ -14,6 +14,7 @@ Defined in: [packages/db/src/errors.ts:139](https://github.com/TanStack/db/blob/
 ## Extended by
 
 - [`UndefinedKeyError`](UndefinedKeyError.md)
+- [`InvalidKeyError`](InvalidKeyError.md)
 - [`DuplicateKeyError`](DuplicateKeyError.md)
 - [`DuplicateKeySyncError`](DuplicateKeySyncError.md)
 - [`MissingUpdateArgumentError`](MissingUpdateArgumentError.md)

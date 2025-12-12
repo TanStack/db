@@ -5,7 +5,7 @@ title: SubQueryMustHaveFromClauseError
 
 # Class: SubQueryMustHaveFromClauseError
 
-Defined in: [packages/db/src/errors.ts:349](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L349)
+Defined in: [packages/db/src/errors.ts:358](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L358)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:349](https://github.com/TanStack/db/blob/
 new SubQueryMustHaveFromClauseError(context): SubQueryMustHaveFromClauseError;
 ```
 
-Defined in: [packages/db/src/errors.ts:350](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L350)
+Defined in: [packages/db/src/errors.ts:359](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L359)
 
 #### Parameters
 

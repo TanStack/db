@@ -3,6 +3,7 @@ import { createTransaction, getActiveTransaction } from '../transactions'
 import {
   DeleteKeyNotFoundError,
   DuplicateKeyError,
+  InvalidKeyError,
   InvalidSchemaError,
   KeyUpdateNotAllowedError,
   MissingDeleteHandlerError,
@@ -141,8 +142,12 @@ export class CollectionMutationsManager<
   }
 
   public generateGlobalKey(key: any, item: any): string {
-    if (typeof key === `undefined`) {
-      throw new UndefinedKeyError(item)
+    if (typeof key !== `string` && typeof key !== `number`) {
+      // Preserve specific error for undefined keys
+      if (typeof key === `undefined`) {
+        throw new UndefinedKeyError(item)
+      }
+      throw new InvalidKeyError(key, item)
     }
 
     return `KEY::${this.id}/${key}`

@@ -25,8 +25,6 @@ jobs:
         uses: tanstack/config/.github/setup@main
       - name: Fix formatting
         run: pnpm format
-      - name: Regenerate docs
-        run: pnpm build && pnpm generate-docs
       - name: Apply fixes
         uses: autofix-ci/action@635ffb0c9798bd160680f18fd73371e355b85f27
         with:
