@@ -1,5 +1,72 @@
 # @tanstack/db
 
+## 0.5.12
+
+### Patch Changes
+
+- Enhanced LoadSubsetOptions with separate cursor expressions and offset for flexible pagination. ([#960](https://github.com/TanStack/db/pull/960))
+
+  **⚠️ Breaking Change for Custom Sync Layers / Query Collections:**
+
+  `LoadSubsetOptions.where` no longer includes cursor expressions for pagination. If you have a custom sync layer or query collection that implements `loadSubset`, you must now handle pagination separately:
+  - **Cursor-based pagination:** Use the new `cursor` property (`cursor.whereFrom` and `cursor.whereCurrent`) and combine them with `where` yourself
+  - **Offset-based pagination:** Use the new `offset` property
+
+  Previously, cursor expressions were baked into the `where` clause. Now they are passed separately so sync layers can choose their preferred pagination strategy.
+
+  **Changes:**
+  - Added `CursorExpressions` type with `whereFrom`, `whereCurrent`, and optional `lastKey` properties
+  - Added `cursor` to `LoadSubsetOptions` for cursor-based pagination (separate from `where`)
+  - Added `offset` to `LoadSubsetOptions` for offset-based pagination support
+  - Electric sync layer now makes two parallel `requestSnapshot` calls when cursor is present:
+    - One for `whereCurrent` (all ties at boundary, no limit)
+    - One for `whereFrom` (rows after cursor, with limit)
+  - Query collection serialization now includes `offset` for query key generation
+  - Added `truncate` event to collections, emitted when synced data is truncated (e.g., after `must-refetch`)
+  - Fixed `setWindow` pagination: cursor expressions are now correctly built when paging through results
+  - Fixed offset tracking: `loadNextItems` now passes the correct window offset to prevent incorrect deduplication
+  - `CollectionSubscriber` now listens for `truncate` events to reset cursor tracking state
+
+  **Benefits:**
+  - Sync layers can choose between cursor-based or offset-based pagination strategies
+  - Electric can efficiently handle tie-breaking with two targeted requests
+  - Better separation of concerns between filtering (`where`) and pagination (`cursor`/`offset`)
+  - `setWindow` correctly triggers backend loading for subsequent pages in multi-column orderBy queries
+  - Cursor state is properly reset after truncation, preventing stale cursor data from being used
+
+- Ensure deterministic iteration order for collections and indexes. ([#958](https://github.com/TanStack/db/pull/958))
+
+  **SortedMap improvements:**
+  - Added key-based tie-breaking when values compare as equal, ensuring deterministic ordering
+  - Optimized to skip value comparison entirely when no comparator is provided (key-only sorting)
+  - Extracted `compareKeys` utility to `utils/comparison.ts` for reuse
+
+  **BTreeIndex improvements:**
+  - Keys within the same indexed value are now returned in deterministic sorted order
+  - Optimized with fast paths for empty sets and single-key sets to avoid unnecessary allocations
+
+  **CollectionStateManager changes:**
+  - Collections now always use `SortedMap` for `syncedData`, ensuring deterministic iteration order
+  - When no `compare` function is provided, entries are sorted by key only
+
+  This ensures that live queries with `orderBy` and `limit` produce stable, deterministic results even when multiple rows have equal sort values.
+
+- Enhanced multi-column orderBy support with lazy loading and composite cursor optimization. ([#926](https://github.com/TanStack/db/pull/926))
+
+  **Changes:**
+  - Create index on first orderBy column even for multi-column orderBy queries, enabling lazy loading with first-column ordering
+  - Pass multi-column orderBy to loadSubset with precise composite cursors (e.g., `or(gt(col1, v1), and(eq(col1, v1), gt(col2, v2)))`) for backend optimization
+  - Use wide bounds (first column only) for local index operations to ensure no rows are missed
+  - Use precise composite cursor for sync layer loadSubset to minimize data transfer
+
+  **Benefits:**
+  - Multi-column orderBy queries with limit now support lazy loading (previously disabled)
+  - Sync implementations (like Electric) can optimize queries using composite indexes on the backend
+  - Local collection uses first-column index efficiently while backend gets precise cursor
+
+- Updated dependencies [[`52c29fa`](https://github.com/TanStack/db/commit/52c29fa83b390ac26341dbf93e79ce0d59543686)]:
+  - @tanstack/db-ivm@0.1.14
+
 ## 0.5.11
 
 ### Patch Changes
