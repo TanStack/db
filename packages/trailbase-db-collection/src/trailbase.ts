@@ -125,6 +125,9 @@ export function trailBaseCollectionOptions<
 
   const seenIds = new Store(new Map<string, number>())
 
+  const internalSyncMode = (config as any).syncMode ?? `eager`
+  let fullSyncCompleted = false
+
   const awaitIds = (
     ids: Array<string>,
     timeout: number = 120 * 1000,
@@ -154,8 +157,16 @@ export function trailBaseCollectionOptions<
   let eventReader: ReadableStreamDefaultReader<Event> | undefined
   const cancelEventReader = () => {
     if (eventReader) {
-      eventReader.cancel()
-      eventReader.releaseLock()
+      try {
+        eventReader.cancel()
+      } catch {
+        // ignore
+      }
+      try {
+        eventReader.releaseLock()
+      } catch {
+        // ignore if already released
+      }
       eventReader = undefined
     }
   }
@@ -211,7 +222,13 @@ export function trailBaseCollectionOptions<
           const { done, value: event } = await reader.read()
 
           if (done || !event) {
-            reader.releaseLock()
+            try {
+              if ((reader as any).locked) {
+                reader.releaseLock()
+              }
+            } catch {
+              // ignore if already released
+            }
             eventReader = undefined
             return
           }
@@ -251,14 +268,34 @@ export function trailBaseCollectionOptions<
         listen(reader)
 
         try {
-          await initialFetch()
+          // Eager mode: perform initial fetch to populate everything
+          if (internalSyncMode === `eager`) {
+            await initialFetch()
+            fullSyncCompleted = true
+          }
         } catch (e) {
           cancelEventReader()
           throw e
         } finally {
           // Mark ready both if everything went well or if there's an error to
           // avoid blocking apps waiting for `.preload()` to finish.
+          // In on-demand/progressive mode we mark ready immediately after listener starts
+          // to allow queries to drive snapshots via `loadSubset`.
           markReady()
+          // If progressive, start the background full sync after we've marked ready
+          if (internalSyncMode === `progressive`) {
+            // Defer background sync to avoid racing with preload assertions
+            setTimeout(() => {
+              void (async () => {
+                try {
+                  await initialFetch()
+                  fullSyncCompleted = true
+                } catch (e) {
+                  console.error(`TrailBase progressive full sync failed`, e)
+                }
+              })()
+            }, 0)
+          }
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the
@@ -285,9 +322,44 @@ export function trailBaseCollectionOptions<
       }
 
       start()
+
+      // If we're in on-demand mode, expose loadSubset/unloadSubset handlers
+      if (internalSyncMode === `eager`) {
+        return
+      }
+
+      const loadSubset = async (opts: { limit?: number } = {}) => {
+        const limit = opts.limit ?? 256
+        const response = await config.recordApi.list({ pagination: { limit } })
+        const records = (response?.records ?? [])
+
+        if (records.length > 0) {
+          begin()
+          for (const item of records) {
+            write({ type: `insert`, value: parse(item) })
+          }
+          commit()
+        }
+      }
+
+      const unloadSubset = (_opts: any = {}) => {
+        // No-op for now
+      }
+
+      return {
+        loadSubset,
+        unloadSubset,
+        getSyncMetadata: () => ({
+          syncMode: internalSyncMode,
+          fullSyncComplete: fullSyncCompleted,
+        } as const),
+      }
     },
     // Expose the getSyncMetadata function
-    getSyncMetadata: undefined,
+    getSyncMetadata: () => ({
+      syncMode: internalSyncMode,
+      fullSyncComplete: fullSyncCompleted,
+    } as const),
   }
 
   return {
