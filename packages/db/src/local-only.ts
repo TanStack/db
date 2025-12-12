@@ -250,7 +250,7 @@ export function localOnlyCollectionOptions<
   }) => {
     // Filter mutations that belong to this collection
     const collectionMutations = transaction.mutations.filter(
-      (m) => m.collection.id === collectionId
+      (m) => m.collection.id === collectionId,
     )
 
     if (collectionMutations.length === 0) {
