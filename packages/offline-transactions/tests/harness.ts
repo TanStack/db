@@ -1,12 +1,12 @@
-import { createCollection } from "@tanstack/db"
-import { startOfflineExecutor } from "../src/index"
-import type { ChangeMessage, Collection, PendingMutation } from "@tanstack/db"
+import { createCollection } from '@tanstack/db'
+import { startOfflineExecutor } from '../src/index'
+import type { ChangeMessage, Collection, PendingMutation } from '@tanstack/db'
 import type {
   LeaderElection,
   OfflineConfig,
   OfflineMutationFnParams,
   StorageAdapter,
-} from "../src/types"
+} from '../src/types'
 
 export class FakeStorageAdapter implements StorageAdapter {
   private store = new Map<string, string>()
@@ -93,7 +93,7 @@ class FakeLeaderElection implements LeaderElection {
 }
 
 type TestMutationFn = (
-  params: OfflineMutationFnParams & { attempt: number }
+  params: OfflineMutationFnParams & { attempt: number },
 ) => Promise<any>
 
 interface TestOfflineEnvironmentOptions {
@@ -130,7 +130,7 @@ function createDefaultCollection(): {
 }
 
 export function createTestOfflineEnvironment(
-  options: TestOfflineEnvironmentOptions = {}
+  options: TestOfflineEnvironmentOptions = {},
 ): {
   executor: ReturnType<typeof startOfflineExecutor>
   storage: FakeStorageAdapter
@@ -176,7 +176,7 @@ export function createTestOfflineEnvironment(
 
           if (!id) {
             throw new Error(
-              `Unable to determine id for delete mutation ${mutation.globalKey}`
+              `Unable to determine id for delete mutation ${mutation.globalKey}`,
             )
           }
 
@@ -218,7 +218,7 @@ export function createTestOfflineEnvironment(
   const leader = new FakeLeaderElection()
 
   const wrappedMutation = async (
-    params: OfflineMutationFnParams
+    params: OfflineMutationFnParams,
   ): Promise<any> => {
     const currentAttempt = (attemptCounter.get(params.idempotencyKey) ?? 0) + 1
     attemptCounter.set(params.idempotencyKey, currentAttempt)

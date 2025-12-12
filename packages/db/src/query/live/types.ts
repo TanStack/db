@@ -1,11 +1,11 @@
-import type { D2, RootStreamBuilder } from "@tanstack/db-ivm"
+import type { D2, RootStreamBuilder } from '@tanstack/db-ivm'
 import type {
   CollectionConfig,
   ResultStream,
   StringCollationConfig,
-} from "../../types.js"
-import type { InitialQueryBuilder, QueryBuilder } from "../builder/index.js"
-import type { Context, GetResult } from "../builder/types.js"
+} from '../../types.js'
+import type { InitialQueryBuilder, QueryBuilder } from '../builder/index.js'
+import type { Context, GetResult } from '../builder/types.js'
 
 export type Changes<T> = {
   deletes: number

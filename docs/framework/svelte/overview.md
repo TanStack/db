@@ -11,7 +11,7 @@ npm install @tanstack/svelte-db
 
 ## Svelte Utilities
 
-See the [Svelte Functions Reference](../reference/index.md) to see the full list of utilities available in the Svelte Adapter.
+See the [Svelte Functions Reference](./reference/index.md) to see the full list of utilities available in the Svelte Adapter.
 
 For comprehensive documentation on writing queries (filtering, joins, aggregations, etc.), see the [Live Queries Guide](../../guides/live-queries).
 

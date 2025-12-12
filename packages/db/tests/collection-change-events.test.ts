@@ -1,8 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection/index.js"
-import { currentStateAsChanges } from "../src/collection/change-events.js"
-import { Func, PropRef, Value } from "../src/query/ir.js"
-import { DEFAULT_COMPARE_OPTIONS } from "../src/utils.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
+import { currentStateAsChanges } from '../src/collection/change-events.js'
+import { Func, PropRef, Value } from '../src/query/ir.js'
+import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
 
 interface TestUser {
   id: string
@@ -33,7 +33,7 @@ describe(`currentStateAsChanges`, () => {
 
   // Helper function to create and populate collection with test data
   async function createAndPopulateCollection(
-    autoIndex: `eager` | `off` = `eager`
+    autoIndex: `eager` | `off` = `eager`,
   ) {
     const collection = createCollection<TestUser>({
       id: `test-collection-${autoIndex}`,
@@ -69,7 +69,7 @@ describe(`currentStateAsChanges`, () => {
     describe(`where clause without orderBy or limit`, () => {
       it(`should return all items when no where clause is provided`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection)
@@ -86,7 +86,7 @@ describe(`currentStateAsChanges`, () => {
 
       it(`should filter items based on where clause`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -103,7 +103,7 @@ describe(`currentStateAsChanges`, () => {
 
       it(`should filter items based on numeric where clause`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -122,7 +122,7 @@ describe(`currentStateAsChanges`, () => {
     describe(`orderBy without limit and no where clause`, () => {
       it(`should return all items ordered by name ascending`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -146,7 +146,7 @@ describe(`currentStateAsChanges`, () => {
 
       it(`should return all items ordered by score descending`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -170,7 +170,7 @@ describe(`currentStateAsChanges`, () => {
 
       it(`should return all items ordered by age ascending`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -196,7 +196,7 @@ describe(`currentStateAsChanges`, () => {
     describe(`orderBy with limit and no where clause`, () => {
       it(`should return top 3 items ordered by score descending`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -221,7 +221,7 @@ describe(`currentStateAsChanges`, () => {
     describe(`orderBy with limit and where clause`, () => {
       it(`should return top active users ordered by score descending`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -244,7 +244,7 @@ describe(`currentStateAsChanges`, () => {
 
       it(`should return top users over 25 ordered by age ascending`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -267,7 +267,7 @@ describe(`currentStateAsChanges`, () => {
 
       it(`should handle multi-column orderBy with where clause`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -297,7 +297,7 @@ describe(`currentStateAsChanges`, () => {
     describe(`error cases`, () => {
       it(`should throw error when limit is provided without orderBy`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         expect(() => {
@@ -309,7 +309,7 @@ describe(`currentStateAsChanges`, () => {
 
       it(`should throw error when limit is provided without orderBy even with where clause`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         expect(() => {
@@ -394,7 +394,7 @@ describe(`currentStateAsChanges`, () => {
 
       it(`should handle limit larger than collection size`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {
@@ -419,7 +419,7 @@ describe(`currentStateAsChanges`, () => {
 
       it(`should handle limit of 0`, async () => {
         const collection = await createAndPopulateCollection(
-          autoIndex as `eager` | `off`
+          autoIndex as `eager` | `off`,
         )
 
         const result = currentStateAsChanges(collection, {

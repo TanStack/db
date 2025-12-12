@@ -11,7 +11,7 @@ Defined in: [packages/db/src/query/builder/index.ts:47](https://github.com/TanSt
 
 ### TContext
 
-`TContext` *extends* [`Context`](../../interfaces/Context.md) = [`Context`](../../interfaces/Context.md)
+`TContext` *extends* [`Context`](../interfaces/Context.md) = [`Context`](../interfaces/Context.md)
 
 ## Constructors
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/query/builder/index.ts:50](https://github.com/TanSt
 
 ##### query
 
-`Partial`\<[`QueryIR`](../../@tanstack/namespaces/IR/interfaces/QueryIR.md)\> = `{}`
+`Partial`\<[`QueryIR`](../@tanstack/namespaces/IR/interfaces/QueryIR.md)\> = `{}`
 
 #### Returns
 
@@ -80,7 +80,7 @@ A function that receives an aggregated row and returns a boolean
 
 ###### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 A QueryBuilder with functional having filter applied
 
@@ -119,7 +119,7 @@ A function that receives a row and returns the selected value
 
 ###### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`WithResult`\<`TContext`, `TFuncSelectResult`\>\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`WithResult`\<`TContext`, `TFuncSelectResult`\>\>
 
 A QueryBuilder with functional selection applied
 
@@ -154,7 +154,7 @@ A function that receives a row and returns a boolean
 
 ###### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 A QueryBuilder with functional filtering applied
 
@@ -179,7 +179,7 @@ Defined in: [packages/db/src/query/builder/index.ts:784](https://github.com/TanS
 
 #### Returns
 
-[`QueryIR`](../../@tanstack/namespaces/IR/interfaces/QueryIR.md)
+[`QueryIR`](../@tanstack/namespaces/IR/interfaces/QueryIR.md)
 
 ***
 
@@ -196,7 +196,7 @@ Deduplicates rows based on the selected columns.
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 A QueryBuilder with distinct enabled
 
@@ -224,7 +224,7 @@ Specify that the query should return a single result
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext` & [`SingleResult`](../../type-aliases/SingleResult.md)\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext` & [`SingleResult`](../type-aliases/SingleResult.md)\>
 
 A QueryBuilder that returns the first result
 
@@ -259,7 +259,7 @@ Specify the source table or subquery for the query
 
 ##### TSource
 
-`TSource` *extends* [`Source`](../../type-aliases/Source.md)
+`TSource` *extends* [`Source`](../type-aliases/Source.md)
 
 #### Parameters
 
@@ -271,7 +271,7 @@ An object with a single key-value pair where the key is the table alias and the 
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<\{
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<\{
   `baseSchema`: `SchemaFromSource`\<`TSource`\>;
   `fromSourceName`: keyof `TSource` & `string`;
   `hasJoins`: `false`;
@@ -307,7 +307,7 @@ Perform a FULL JOIN with another table or subquery
 
 ##### TSource
 
-`TSource` *extends* [`Source`](../../type-aliases/Source.md)
+`TSource` *extends* [`Source`](../type-aliases/Source.md)
 
 #### Parameters
 
@@ -325,7 +325,7 @@ A function that receives table references and returns the join condition
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `"full"`\>\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `"full"`\>\>
 
 A QueryBuilder with the full joined table available
 
@@ -360,7 +360,7 @@ A function that receives table references and returns the field(s) to group by
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 A QueryBuilder with grouping applied (enables aggregate functions in SELECT and HAVING)
 
@@ -409,7 +409,7 @@ A function that receives table references and returns an expression
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 A QueryBuilder with the having condition applied
 
@@ -452,7 +452,7 @@ Perform an INNER JOIN with another table or subquery
 
 ##### TSource
 
-`TSource` *extends* [`Source`](../../type-aliases/Source.md)
+`TSource` *extends* [`Source`](../type-aliases/Source.md)
 
 #### Parameters
 
@@ -470,7 +470,7 @@ A function that receives table references and returns the join condition
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `"inner"`\>\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `"inner"`\>\>
 
 A QueryBuilder with the inner joined table available
 
@@ -502,7 +502,7 @@ Join another table or subquery to the current query
 
 ##### TSource
 
-`TSource` *extends* [`Source`](../../type-aliases/Source.md)
+`TSource` *extends* [`Source`](../type-aliases/Source.md)
 
 ##### TJoinType
 
@@ -530,7 +530,7 @@ The type of join: 'inner', 'left', 'right', or 'full' (defaults to 'left')
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `TJoinType`\>\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `TJoinType`\>\>
 
 A QueryBuilder with the joined table available
 
@@ -570,7 +570,7 @@ Perform a LEFT JOIN with another table or subquery
 
 ##### TSource
 
-`TSource` *extends* [`Source`](../../type-aliases/Source.md)
+`TSource` *extends* [`Source`](../type-aliases/Source.md)
 
 #### Parameters
 
@@ -588,7 +588,7 @@ A function that receives table references and returns the join condition
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `"left"`\>\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `"left"`\>\>
 
 A QueryBuilder with the left joined table available
 
@@ -624,7 +624,7 @@ Maximum number of rows to return
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 A QueryBuilder with the limit applied
 
@@ -661,7 +661,7 @@ Number of rows to skip
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 A QueryBuilder with the offset applied
 
@@ -698,11 +698,11 @@ A function that receives table references and returns the field to sort by
 
 ##### options
 
-[`OrderByDirection`](../../@tanstack/namespaces/IR/type-aliases/OrderByDirection.md) | `OrderByOptions`
+[`OrderByDirection`](../@tanstack/namespaces/IR/type-aliases/OrderByDirection.md) | `OrderByOptions`
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 A QueryBuilder with the ordering applied
 
@@ -742,7 +742,7 @@ Perform a RIGHT JOIN with another table or subquery
 
 ##### TSource
 
-`TSource` *extends* [`Source`](../../type-aliases/Source.md)
+`TSource` *extends* [`Source`](../type-aliases/Source.md)
 
 #### Parameters
 
@@ -760,7 +760,7 @@ A function that receives table references and returns the join condition
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `"right"`\>\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`MergeContextWithJoinType`\<`TContext`, `SchemaFromSource`\<`TSource`\>, `"right"`\>\>
 
 A QueryBuilder with the right joined table available
 
@@ -801,7 +801,7 @@ A function that receives table references and returns an object with selected fi
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`WithResult`\<`TContext`, `ResultTypeFromSelect`\<`TSelectObject`\>\>\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`WithResult`\<`TContext`, `ResultTypeFromSelect`\<`TSelectObject`\>\>\>
 
 A QueryBuilder that returns only the selected fields
 
@@ -856,7 +856,7 @@ A function that receives table references and returns an expression
 
 #### Returns
 
-[`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+[`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 A QueryBuilder with the where condition applied
 

@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection/index.js"
-import { createLiveQueryCollection } from "../../src/query/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
-import { add, eq, upper } from "../../src/query/builder/functions.js"
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import { add, eq, upper } from '../../src/query/builder/functions.js'
 
 // Base type used in bug report
 interface Message {
@@ -22,7 +22,7 @@ function createMessagesCollection() {
       id: `messages-select-spread`,
       getKey: (m) => m.id,
       initialData: initialMessages,
-    })
+    }),
   )
 }
 
@@ -58,7 +58,7 @@ function createMessagesWithMetaCollection() {
       id: `messages-select-spread-nested`,
       getKey: (m) => m.id,
       initialData: nestedMessages,
-    })
+    }),
   )
 }
 
@@ -79,7 +79,7 @@ function createUsersCollection() {
       id: `users-select-spread`,
       getKey: (u) => u.id,
       initialData: usersData,
-    })
+    }),
   )
 }
 
@@ -94,7 +94,7 @@ describe(`select spreads (runtime)`, () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ message: messagesCollection }).select(({ message }) => ({
         ...message,
-      }))
+      })),
     )
     await collection.preload()
 
@@ -112,7 +112,7 @@ describe(`select spreads (runtime)`, () => {
         ...message,
         idPlusOne: add(message.id, 1),
         upperText: upper(message.text),
-      }))
+      })),
     )
     await collection.preload()
 
@@ -134,7 +134,7 @@ describe(`select spreads (runtime)`, () => {
       q.from({ message: messagesCollection }).select(({ message }) => ({
         ...message,
         user: upper(message.user),
-      }))
+      })),
     )
     await collection.preload()
 
@@ -149,7 +149,7 @@ describe(`select spreads (runtime)`, () => {
         // @ts-expect-error - user is overridden by spread
         user: upper(message.user),
         ...message,
-      }))
+      })),
     )
     await collection.preload()
 
@@ -163,7 +163,7 @@ describe(`select spreads (runtime)`, () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ message: messagesCollection }).select(({ message }) => ({
         ...message,
-      }))
+      })),
     )
     await collection.preload()
 
@@ -185,7 +185,7 @@ describe(`select spreads (runtime)`, () => {
     const collection = createLiveQueryCollection((q) =>
       q.from({ m: messagesNested }).select(({ m }) => ({
         ...m,
-      }))
+      })),
     )
     await collection.preload()
 
@@ -207,7 +207,7 @@ describe(`select spreads (runtime)`, () => {
         ...message,
         // and a final override wins over the last spread
         text: upper(message.text),
-      }))
+      })),
     )
     await collection.preload()
 
@@ -227,7 +227,7 @@ describe(`select spreads (runtime)`, () => {
         .select(({ m, u }) => ({
           ...m,
           ...u,
-        }))
+        })),
     )
     await collection.preload()
 
@@ -248,7 +248,7 @@ describe(`select spreads (runtime)`, () => {
           // desired: spread meta fields under meta key
           ...m.meta,
         },
-      }))
+      })),
     )
     await collection.preload()
 
@@ -270,7 +270,7 @@ describe(`select spreads (runtime)`, () => {
           // last spread restores original author
           ...m.meta,
         },
-      }))
+      })),
     )
     await collection.preload()
 

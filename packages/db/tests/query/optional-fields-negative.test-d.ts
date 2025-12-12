@@ -1,7 +1,7 @@
-import { describe, expectTypeOf, test } from "vitest"
-import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { describe, expectTypeOf, test } from 'vitest'
+import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Test types with optional fields
 type UserWithOptional = {
@@ -24,7 +24,7 @@ function createUsersCollection() {
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: [],
-    })
+    }),
   )
 }
 
@@ -34,7 +34,7 @@ function createDepartmentsCollection() {
       id: `test-departments`,
       getKey: (dept) => dept.id,
       initialData: [],
-    })
+    }),
   )
 }
 
@@ -80,7 +80,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
             // This should work correctly - department_id is optional but can be used in join
             return eq(user.department_id, dept.id)
           },
-          `inner`
+          `inner`,
         ),
     })
 
@@ -149,7 +149,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
           .join(
             { dept: departmentsCollection },
             ({ user, dept }) => eq(user.department_id, dept.id),
-            `left`
+            `left`,
           )
           .select(({ user, dept }) => ({
             user_name: user.name,

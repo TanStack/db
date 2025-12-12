@@ -1,12 +1,12 @@
 {
   "name": "@tanstack/vue-db",
+  "version": "0.0.88",
   "description": "Vue integration for @tanstack/db",
-  "version": "0.0.86",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/db.git",
+    "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/vue-db"
   },
   "homepage": "https://tanstack.com/db",
@@ -15,16 +15,16 @@
     "vue",
     "typescript"
   ],
-  "packageManager": "pnpm@10.24.0",
-  "dependencies": {
-    "@tanstack/db": "workspace:*"
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "vitest --run",
+    "lint": "eslint . --fix"
   },
-  "devDependencies": {
-    "@electric-sql/client": "1.2.0",
-    "@vitejs/plugin-vue": "^6.0.2",
-    "@vitest/coverage-istanbul": "^3.2.4",
-    "vue": "^3.5.25"
-  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -38,22 +38,21 @@
     },
     "./package.json": "./package.json"
   },
+  "sideEffects": false,
   "files": [
     "dist",
     "src"
   ],
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  },
   "peerDependencies": {
     "vue": ">=3.3.0"
   },
-  "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch",
-    "test": "npx vitest --run",
-    "lint": "eslint . --fix"
-  },
-  "sideEffects": false,
-  "type": "module",
-  "types": "dist/esm/index.d.ts"
+  "devDependencies": {
+    "@electric-sql/client": "1.2.0",
+    "@vitejs/plugin-vue": "^6.0.2",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "vue": "^3.5.25"
+  }
 }

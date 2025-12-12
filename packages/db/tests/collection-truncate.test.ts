@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection/index.js"
-import type { SyncConfig } from "../src/types"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
+import type { SyncConfig } from '../src/types'
 
 describe(`Collection truncate operations`, () => {
   beforeEach(() => {
@@ -81,7 +81,7 @@ describe(`Collection truncate operations`, () => {
 
     // Verify only one insert event for the optimistic item
     const key3Inserts = changeEvents.filter(
-      (e) => e.type === `insert` && e.key === 3
+      (e) => e.type === `insert` && e.key === 3,
     )
     expect(key3Inserts.length).toBe(1)
   })
@@ -198,7 +198,7 @@ describe(`Collection truncate operations`, () => {
 
     // Should not have duplicate insert events
     const insertCount = changeEvents.filter(
-      (e) => e.type === `insert` && e.key === 1
+      (e) => e.type === `insert` && e.key === 1,
     ).length
     expect(insertCount).toBeLessThanOrEqual(1)
   })

@@ -29,7 +29,7 @@ The WHERE expression to parse
 
 ## Returns
 
-[`SimpleComparison`](../../interfaces/SimpleComparison.md)[]
+[`SimpleComparison`](../interfaces/SimpleComparison.md)[]
 
 Array of simple comparisons
 

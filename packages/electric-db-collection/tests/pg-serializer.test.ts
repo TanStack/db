@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { serialize } from "../src/pg-serializer"
+import { describe, expect, it } from 'vitest'
+import { serialize } from '../src/pg-serializer'
 
 describe(`pg-serializer`, () => {
   describe(`serialize`, () => {
@@ -56,7 +56,7 @@ describe(`pg-serializer`, () => {
       it(`should serialize arrays of bigints`, () => {
         expect(serialize([BigInt(1), BigInt(2), BigInt(3)])).toBe(`{1,2,3}`)
         expect(serialize([BigInt(`9007199254740993`)])).toBe(
-          `{9007199254740993}`
+          `{9007199254740993}`,
         )
       })
 
@@ -94,7 +94,7 @@ describe(`pg-serializer`, () => {
           serialize([
             [1, 2],
             [3, 4],
-          ])
+          ]),
         ).toBe(`{{1,2},{3,4}}`)
       })
     })
@@ -102,10 +102,10 @@ describe(`pg-serializer`, () => {
     describe(`error handling`, () => {
       it(`should throw for unsupported types`, () => {
         expect(() => serialize({ key: `value` })).toThrow(
-          `Cannot serialize value:`
+          `Cannot serialize value:`,
         )
         expect(() => serialize(Symbol(`test`))).toThrow(
-          `Cannot serialize value:`
+          `Cannot serialize value:`,
         )
       })
 

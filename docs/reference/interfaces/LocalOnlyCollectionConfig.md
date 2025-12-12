@@ -11,7 +11,7 @@ Configuration interface for Local-only collection options
 
 ## Extends
 
-- `Omit`\<[`BaseCollectionConfig`](../BaseCollectionConfig.md)\<`T`, `TKey`, `TSchema`, [`LocalOnlyCollectionUtils`](../LocalOnlyCollectionUtils.md)\>, `"gcTime"` \| `"startSync"`\>
+- `Omit`\<[`BaseCollectionConfig`](BaseCollectionConfig.md)\<`T`, `TKey`, `TSchema`, [`LocalOnlyCollectionUtils`](LocalOnlyCollectionUtils.md)\>, `"gcTime"` \| `"startSync"`\>
 
 ## Type Parameters
 
@@ -59,7 +59,7 @@ When enabled, indexes will be automatically created for simple where expressions
 
 #### Inherited from
 
-[`BaseCollectionConfig`](../BaseCollectionConfig.md).[`autoIndex`](../BaseCollectionConfig.md#autoindex)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`autoIndex`](BaseCollectionConfig.md#autoindex)
 
 ***
 
@@ -180,7 +180,7 @@ Defined in: [packages/db/src/types.ts:451](https://github.com/TanStack/db/blob/m
 
 #### Inherited from
 
-[`BaseCollectionConfig`](../BaseCollectionConfig.md).[`id`](../BaseCollectionConfig.md#id)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`id`](BaseCollectionConfig.md#id)
 
 ***
 
@@ -444,7 +444,7 @@ The exact implementation of the sync mode is up to the sync implementation.
 
 #### Inherited from
 
-[`BaseCollectionConfig`](../BaseCollectionConfig.md).[`syncMode`](../BaseCollectionConfig.md#syncmode)
+[`BaseCollectionConfig`](BaseCollectionConfig.md).[`syncMode`](BaseCollectionConfig.md#syncmode)
 
 ***
 

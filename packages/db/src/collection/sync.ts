@@ -7,22 +7,22 @@ import {
   SyncCleanupError,
   SyncTransactionAlreadyCommittedError,
   SyncTransactionAlreadyCommittedWriteError,
-} from "../errors"
-import { deepEquals } from "../utils"
-import { LIVE_QUERY_INTERNAL } from "../query/live/internal.js"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from '../errors'
+import { deepEquals } from '../utils'
+import { LIVE_QUERY_INTERNAL } from '../query/live/internal.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   ChangeMessage,
   CleanupFn,
   CollectionConfig,
   LoadSubsetOptions,
   SyncConfigRes,
-} from "../types"
-import type { CollectionImpl } from "./index.js"
-import type { CollectionStateManager } from "./state"
-import type { CollectionLifecycleManager } from "./lifecycle"
-import type { CollectionEventsManager } from "./events.js"
-import type { LiveQueryCollectionUtils } from "../query/live/collection-config-builder.js"
+} from '../types'
+import type { CollectionImpl } from './index.js'
+import type { CollectionStateManager } from './state'
+import type { CollectionLifecycleManager } from './lifecycle'
+import type { CollectionEventsManager } from './events.js'
+import type { LiveQueryCollectionUtils } from '../query/live/collection-config-builder.js'
 
 export class CollectionSyncManager<
   TOutput extends object = Record<string, unknown>,
@@ -202,7 +202,7 @@ export class CollectionSyncManager<
               deletes: new Set(this.state.optimisticDeletes),
             }
           },
-        })
+        }),
       )
 
       // Store cleanup function if provided
@@ -218,7 +218,7 @@ export class CollectionSyncManager<
       if (this.syncMode === `on-demand` && !this.syncLoadSubsetFn) {
         throw new CollectionConfigurationError(
           `Collection "${this.id}" is configured with syncMode "on-demand" but the sync function did not return a loadSubset handler. ` +
-            `Either provide a loadSubset handler or use syncMode "eager".`
+            `Either provide a loadSubset handler or use syncMode "eager".`,
         )
       }
     } catch (error) {
@@ -242,7 +242,7 @@ export class CollectionSyncManager<
         `${this.id ? `[${this.id}] ` : ``}Calling .preload() on a collection with syncMode "on-demand" is a no-op. ` +
           `In on-demand mode, data is only loaded when queries request it. ` +
           `Instead, create a live query and call .preload() on that to load the specific data you need. ` +
-          `See https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync for more details.`
+          `See https://tanstack.com/blog/tanstack-db-0.5-query-driven-sync for more details.`,
       )
     }
 

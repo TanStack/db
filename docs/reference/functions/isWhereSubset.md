@@ -20,13 +20,13 @@ Returns true if the subset predicate is more restrictive than (or equal to) the 
 
 The potentially more restrictive predicate
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\> | `undefined`
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\> | `undefined`
 
 ### superset
 
 The potentially less restrictive predicate
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\> | `undefined`
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\> | `undefined`
 
 ## Returns
 

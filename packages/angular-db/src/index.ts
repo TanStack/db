@@ -5,8 +5,8 @@ import {
   effect,
   inject,
   signal,
-} from "@angular/core"
-import { createLiveQueryCollection } from "@tanstack/db"
+} from '@angular/core'
+import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
@@ -16,8 +16,8 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   QueryBuilder,
-} from "@tanstack/db"
-import type { Signal } from "@angular/core"
+} from '@tanstack/db'
+import type { Signal } from '@angular/core'
 
 /**
  * The result of calling `injectLiveQuery`.
@@ -32,10 +32,10 @@ export interface InjectLiveQueryResult<
   state: Signal<Map<TKey, TResult>>
   /** A signal containing the results as an array */
   data: Signal<Array<TResult>>
-  /** A signal containing the underlying collection instance */
-  collection: Signal<Collection<TResult, TKey, TUtils>>
+  /** A signal containing the underlying collection instance (null for disabled queries) */
+  collection: Signal<Collection<TResult, TKey, TUtils> | null>
   /** A signal containing the current status of the collection */
-  status: Signal<CollectionStatus>
+  status: Signal<CollectionStatus | `disabled`>
   /** A signal indicating whether the collection is currently loading */
   isLoading: Signal<boolean>
   /** A signal indicating whether the collection is ready */
@@ -58,18 +58,33 @@ export function injectLiveQuery<
     q: InitialQueryBuilder
   }) => QueryBuilder<TContext>
 }): InjectLiveQueryResult<GetResult<TContext>>
+export function injectLiveQuery<
+  TContext extends Context,
+  TParams extends any,
+>(options: {
+  params: () => TParams
+  query: (args: {
+    params: TParams
+    q: InitialQueryBuilder
+  }) => QueryBuilder<TContext> | undefined | null
+}): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
-  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>
+  queryFn: (
+    q: InitialQueryBuilder,
+  ) => QueryBuilder<TContext> | undefined | null,
+): InjectLiveQueryResult<GetResult<TContext>>
+export function injectLiveQuery<TContext extends Context>(
+  config: LiveQueryCollectionConfig<TContext>,
 ): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils>
+  liveQueryCollection: Collection<TResult, TKey, TUtils>,
 ): InjectLiveQueryResult<TResult, TKey, TUtils>
 export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
@@ -89,6 +104,15 @@ export function injectLiveQuery(opts: any) {
     }
 
     if (typeof opts === `function`) {
+      // Check if query function returns null/undefined (disabled query)
+      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+      const result = opts(queryBuilder)
+
+      if (result === undefined || result === null) {
+        // Disabled query - return null
+        return null
+      }
+
       return createLiveQueryCollection({
         query: opts,
         startSync: true,
@@ -106,6 +130,16 @@ export function injectLiveQuery(opts: any) {
     if (isReactiveQueryOptions) {
       const { params, query } = opts
       const currentParams = params()
+
+      // Check if query function returns null/undefined (disabled query)
+      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+      const result = query({ params: currentParams, q: queryBuilder })
+
+      if (result === undefined || result === null) {
+        // Disabled query - return null
+        return null
+      }
+
       return createLiveQueryCollection({
         query: (q) => query({ params: currentParams, q }),
         startSync: true,
@@ -123,10 +157,12 @@ export function injectLiveQuery(opts: any) {
 
   const state = signal(new Map<string | number, any>())
   const data = signal<Array<any>>([])
-  const status = signal<CollectionStatus>(`idle`)
+  const status = signal<CollectionStatus | `disabled`>(
+    collection() ? `idle` : `disabled`,
+  )
 
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     const newState = new Map(currentCollection.entries())
     const newData = Array.from(currentCollection.values())
@@ -145,7 +181,12 @@ export function injectLiveQuery(opts: any) {
   effect((onCleanup) => {
     const currentCollection = collection()
 
+    // Handle null collection (disabled query)
     if (!currentCollection) {
+      status.set(`disabled` as const)
+      state.set(new Map())
+      data.set([])
+      cleanup()
       return
     }
 
@@ -165,7 +206,7 @@ export function injectLiveQuery(opts: any) {
     const subscription = currentCollection.subscribeChanges(
       (_: Array<ChangeMessage<any>>) => {
         syncDataFromCollection(currentCollection)
-      }
+      },
     )
     unsub = subscription.unsubscribe.bind(subscription)
 
@@ -185,7 +226,7 @@ export function injectLiveQuery(opts: any) {
     collection,
     status,
     isLoading: computed(() => status() === `loading`),
-    isReady: computed(() => status() === `ready`),
+    isReady: computed(() => status() === `ready` || status() === `disabled`),
     isIdle: computed(() => status() === `idle`),
     isError: computed(() => status() === `error`),
     isCleanedUp: computed(() => status() === `cleaned-up`),

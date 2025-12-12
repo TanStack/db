@@ -1,7 +1,7 @@
-import { drizzle } from "drizzle-orm/node-postgres"
-import { migrate } from "drizzle-orm/node-postgres/migrator"
-import pkg from "pg"
-import * as dotenv from "dotenv"
+import { drizzle } from 'drizzle-orm/node-postgres'
+import { migrate } from 'drizzle-orm/node-postgres/migrator'
+import pkg from 'pg'
+import * as dotenv from 'dotenv'
 
 dotenv.config()
 

@@ -1,7 +1,7 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { concat, output } from "../../src/operators/index.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { concat, output } from '../../src/operators/index.js'
 
 describe(`Operators`, () => {
   describe(`Concat operation`, () => {
@@ -15,7 +15,7 @@ describe(`Operators`, () => {
         concat(input2),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -24,14 +24,14 @@ describe(`Operators`, () => {
         new MultiSet([
           [1, 1],
           [2, 1],
-        ])
+        ]),
       )
 
       input2.sendData(
         new MultiSet([
           [3, 1],
           [4, 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -58,7 +58,7 @@ describe(`Operators`, () => {
         concat(input2),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -67,14 +67,14 @@ describe(`Operators`, () => {
         new MultiSet([
           [1, -1],
           [2, 2],
-        ])
+        ]),
       )
 
       input2.sendData(
         new MultiSet([
           [3, -2],
           [4, 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -101,7 +101,7 @@ describe(`Operators`, () => {
         concat(input2),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -110,14 +110,14 @@ describe(`Operators`, () => {
         new MultiSet([
           [1, 1],
           [2, 1],
-        ])
+        ]),
       )
 
       input2.sendData(
         new MultiSet([
           [`a`, 1],
           [`b`, 1],
-        ])
+        ]),
       )
 
       graph.run()
@@ -144,7 +144,7 @@ describe(`Operators`, () => {
         concat(input2),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -154,7 +154,7 @@ describe(`Operators`, () => {
           [1, 1],
           [2, 1],
           [3, 1],
-        ])
+        ]),
       )
 
       input2.sendData(
@@ -162,7 +162,7 @@ describe(`Operators`, () => {
           [2, 2],
           [3, -1],
           [4, 1],
-        ])
+        ]),
       )
 
       graph.run()

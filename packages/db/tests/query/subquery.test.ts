@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, test } from "vitest"
-import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { beforeEach, describe, expect, test } from 'vitest'
+import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Sample types for subquery testing
 type Issue = {
@@ -70,7 +70,7 @@ function createIssuesCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (issue) => issue.id,
       initialData: sampleIssues,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -106,7 +106,7 @@ function createSubqueryTests(autoIndex: `off` | `eager`): void {
 
         expect(results.map((r) => r.id).sort()).toEqual([1, 2, 3, 5])
         expect(results.map((r) => r.title)).toEqual(
-          expect.arrayContaining([`Bug 1`, `Bug 2`, `Feature 1`, `Feature 2`])
+          expect.arrayContaining([`Bug 1`, `Bug 2`, `Feature 1`, `Feature 2`]),
         )
       })
 
@@ -130,8 +130,8 @@ function createSubqueryTests(autoIndex: `off` | `eager`): void {
         expect(results.map((r) => r.id).sort()).toEqual([1, 4])
         expect(
           results.every(
-            (r) => sampleIssues.find((i) => i.id === r.id)?.status === `open`
-          )
+            (r) => sampleIssues.find((i) => i.id === r.id)?.status === `open`,
+          ),
         ).toBe(true)
       })
 

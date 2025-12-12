@@ -1,5 +1,49 @@
 # @tanstack/electric-db-collection
 
+## 0.2.13
+
+### Patch Changes
+
+- Enhanced LoadSubsetOptions with separate cursor expressions and offset for flexible pagination. ([#960](https://github.com/TanStack/db/pull/960))
+
+  **⚠️ Breaking Change for Custom Sync Layers / Query Collections:**
+
+  `LoadSubsetOptions.where` no longer includes cursor expressions for pagination. If you have a custom sync layer or query collection that implements `loadSubset`, you must now handle pagination separately:
+  - **Cursor-based pagination:** Use the new `cursor` property (`cursor.whereFrom` and `cursor.whereCurrent`) and combine them with `where` yourself
+  - **Offset-based pagination:** Use the new `offset` property
+
+  Previously, cursor expressions were baked into the `where` clause. Now they are passed separately so sync layers can choose their preferred pagination strategy.
+
+  **Changes:**
+  - Added `CursorExpressions` type with `whereFrom`, `whereCurrent`, and optional `lastKey` properties
+  - Added `cursor` to `LoadSubsetOptions` for cursor-based pagination (separate from `where`)
+  - Added `offset` to `LoadSubsetOptions` for offset-based pagination support
+  - Electric sync layer now makes two parallel `requestSnapshot` calls when cursor is present:
+    - One for `whereCurrent` (all ties at boundary, no limit)
+    - One for `whereFrom` (rows after cursor, with limit)
+  - Query collection serialization now includes `offset` for query key generation
+  - Added `truncate` event to collections, emitted when synced data is truncated (e.g., after `must-refetch`)
+  - Fixed `setWindow` pagination: cursor expressions are now correctly built when paging through results
+  - Fixed offset tracking: `loadNextItems` now passes the correct window offset to prevent incorrect deduplication
+  - `CollectionSubscriber` now listens for `truncate` events to reset cursor tracking state
+
+  **Benefits:**
+  - Sync layers can choose between cursor-based or offset-based pagination strategies
+  - Electric can efficiently handle tie-breaking with two targeted requests
+  - Better separation of concerns between filtering (`where`) and pagination (`cursor`/`offset`)
+  - `setWindow` correctly triggers backend loading for subsequent pages in multi-column orderBy queries
+  - Cursor state is properly reset after truncation, preventing stale cursor data from being used
+
+- Updated dependencies [[`b3b1940`](https://github.com/TanStack/db/commit/b3b194000d8efcc2c6cc45a663029dadc26f13f0), [`09da081`](https://github.com/TanStack/db/commit/09da081b420fc915d7f0dc566c6cdbbc78582435), [`86ad40c`](https://github.com/TanStack/db/commit/86ad40c6bc37b2f5d4ad24d06f72168ca4b96161)]:
+  - @tanstack/db@0.5.12
+
+## 0.2.12
+
+### Patch Changes
+
+- Updated dependencies [[`c4b9399`](https://github.com/TanStack/db/commit/c4b93997432743d974749683059bf68a082d3e5b), [`a1a484e`](https://github.com/TanStack/db/commit/a1a484ec4d2331d702ab9c4b7e5b02622c76b3dd)]:
+  - @tanstack/db@0.5.11
+
 ## 0.2.11
 
 ### Patch Changes
@@ -130,7 +174,7 @@
         // Specify custom timeout (in milliseconds)
         return { txid: result.txid, timeout: 10000 }
       },
-    })
+    }),
   )
   ```
 
@@ -255,7 +299,7 @@
   **Example Usage:**
 
   ```typescript
-  import { isChangeMessage } from "@tanstack/electric-db-collection"
+  import { isChangeMessage } from '@tanstack/electric-db-collection'
 
   const todosCollection = createCollection(
     electricCollectionOptions({
@@ -267,12 +311,12 @@
         await collection.utils.awaitMatch(
           (message) =>
             isChangeMessage(message) &&
-            message.headers.operation === "insert" &&
+            message.headers.operation === 'insert' &&
             message.value.text === newItem.text,
-          5000 // timeout in ms (optional, defaults to 5000)
+          5000, // timeout in ms (optional, defaults to 5000)
         )
       },
-    })
+    }),
   )
   ```
 
@@ -604,7 +648,7 @@
   try {
     collection.insert(data)
   } catch (error) {
-    if (error.message.includes("already exists")) {
+    if (error.message.includes('already exists')) {
       // Handle duplicate key error
     }
   }
@@ -613,7 +657,7 @@
   **After:**
 
   ```ts
-  import { DuplicateKeyError } from "@tanstack/db"
+  import { DuplicateKeyError } from '@tanstack/db'
 
   try {
     collection.insert(data)
@@ -630,14 +674,14 @@
 
   ```ts
   // Electric collection errors were imported from @tanstack/db
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/db"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/db'
   ```
 
   **After:**
 
   ```ts
   // Now import from the specific adapter package
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/electric-db-collection"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/electric-db-collection'
   ```
 
   ### Unified Error Handling
@@ -645,14 +689,14 @@
   **New:**
 
   ```ts
-  import { TanStackDBError } from "@tanstack/db"
+  import { TanStackDBError } from '@tanstack/db'
 
   try {
     // Any TanStack DB operation
   } catch (error) {
     if (error instanceof TanStackDBError) {
       // Handle all TanStack DB errors uniformly
-      console.log("TanStack DB error:", error.message)
+      console.log('TanStack DB error:', error.message)
     }
   }
   ```

@@ -13,7 +13,7 @@ Enhanced index options that support both sync and async resolvers
 
 ### TResolver
 
-`TResolver` *extends* [`IndexResolver`](../../type-aliases/IndexResolver.md) = [`IndexResolver`](../../type-aliases/IndexResolver.md)
+`TResolver` *extends* [`IndexResolver`](../type-aliases/IndexResolver.md) = [`IndexResolver`](../type-aliases/IndexResolver.md)
 
 ## Properties
 

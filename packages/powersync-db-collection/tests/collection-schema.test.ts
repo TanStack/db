@@ -1,11 +1,11 @@
-import { randomUUID } from "node:crypto"
-import { tmpdir } from "node:os"
-import { PowerSyncDatabase, Schema, Table, column } from "@powersync/node"
-import { SchemaValidationError, createCollection } from "@tanstack/db"
-import { describe, expect, it, onTestFinished, vi } from "vitest"
-import { z } from "zod"
-import { powerSyncCollectionOptions } from "../src"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+import { randomUUID } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { PowerSyncDatabase, Schema, Table, column } from '@powersync/node'
+import { SchemaValidationError, createCollection } from '@tanstack/db'
+import { describe, expect, it, onTestFinished, vi } from 'vitest'
+import { z } from 'zod'
+import { powerSyncCollectionOptions } from '../src'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 const APP_SCHEMA = new Schema({
   documents: new Table({
@@ -41,7 +41,7 @@ describe(`PowerSync Schema Integration`, () => {
         database: db,
         // We get typing and a default validator from this
         table: APP_SCHEMA.props.documents,
-      })
+      }),
     )
     onTestFinished(() => collection.cleanup())
     return collection
@@ -110,7 +110,7 @@ describe(`PowerSync Schema Integration`, () => {
           table: APP_SCHEMA.props.documents,
           schema,
           onDeserializationError: () => {},
-        })
+        }),
       )
       onTestFinished(() => collection.cleanup())
 
@@ -170,7 +170,7 @@ describe(`PowerSync Schema Integration`, () => {
           table: APP_SCHEMA.props.documents,
           schema,
           onDeserializationError: () => {},
-        })
+        }),
       )
       onTestFinished(() => collection.cleanup())
 
@@ -234,7 +234,7 @@ describe(`PowerSync Schema Integration`, () => {
               .transform((val) => (val ? new Date(val) : null)),
           }),
           onDeserializationError: () => {},
-        })
+        }),
       )
       onTestFinished(() => collection.cleanup())
 
@@ -290,7 +290,7 @@ describe(`PowerSync Schema Integration`, () => {
           },
           deserializationSchema: schema,
           onDeserializationError: () => {},
-        })
+        }),
       )
       onTestFinished(() => collection.cleanup())
 
@@ -329,7 +329,7 @@ describe(`PowerSync Schema Integration`, () => {
       })
 
       const onError = vi.fn((() => {}) as (
-        error: StandardSchemaV1.FailureResult
+        error: StandardSchemaV1.FailureResult,
       ) => void)
 
       const collection = createCollection(
@@ -338,7 +338,7 @@ describe(`PowerSync Schema Integration`, () => {
           table: APP_SCHEMA.props.documents,
           schema,
           onDeserializationError: onError,
-        })
+        }),
       )
       onTestFinished(() => collection.cleanup())
 
@@ -355,7 +355,7 @@ describe(`PowerSync Schema Integration`, () => {
           // Each column which should have been defined
           expect(issues?.length).eq(4)
         },
-        { timeout: 1000 }
+        { timeout: 1000 },
       )
     })
   })

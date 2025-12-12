@@ -27,7 +27,7 @@ The explicit type of items in the collection (highest priority)
 
 #### config
 
-[`ElectricCollectionConfig`](../../interfaces/ElectricCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `T`\> & `object`
+[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `T`\> & `object`
 
 Configuration options for the Electric collection
 
@@ -59,7 +59,7 @@ The explicit type of items in the collection (highest priority)
 
 #### config
 
-[`ElectricCollectionConfig`](../../interfaces/ElectricCollectionConfig.md)\<`T`, `never`\> & `object`
+[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`T`, `never`\> & `object`
 
 Configuration options for the Electric collection
 

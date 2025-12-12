@@ -9,7 +9,7 @@ Defined in: [packages/db/src/collection/index.ts:266](https://github.com/TanStac
 
 ## Extended by
 
-- [`Collection`](../../interfaces/Collection.md)
+- [`Collection`](../interfaces/Collection.md)
 
 ## Type Parameters
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/collection/index.ts:266](https://github.com/TanStac
 
 ### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md) = \{
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md) = \{
 \}
 
 ### TSchema
@@ -50,7 +50,7 @@ Creates a new Collection instance
 
 ##### config
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`TOutput`, `TKey`, `TSchema`\>
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`TOutput`, `TKey`, `TSchema`\>
 
 Configuration object for the collection
 
@@ -136,7 +136,7 @@ Defined in: [packages/db/src/collection/index.ts:579](https://github.com/TanStac
 
 ##### Returns
 
-[`StringCollationConfig`](../../type-aliases/StringCollationConfig.md)
+[`StringCollationConfig`](../type-aliases/StringCollationConfig.md)
 
 ***
 
@@ -154,7 +154,7 @@ Get resolved indexes for query optimization
 
 ##### Returns
 
-`Map`\<`number`, [`BaseIndex`](../BaseIndex.md)\<`TKey`\>\>
+`Map`\<`number`, [`BaseIndex`](BaseIndex.md)\<`TKey`\>\>
 
 ***
 
@@ -246,7 +246,7 @@ Gets the current status of the collection
 
 ##### Returns
 
-[`CollectionStatus`](../../type-aliases/CollectionStatus.md)
+[`CollectionStatus`](../type-aliases/CollectionStatus.md)
 
 ***
 
@@ -337,7 +337,7 @@ and logarithmic time range queries instead of full scans.
 
 ##### TResolver
 
-`TResolver` *extends* [`IndexResolver`](../../type-aliases/IndexResolver.md)\<`TKey`\> = *typeof* [`BTreeIndex`](../BTreeIndex.md)
+`TResolver` *extends* [`IndexResolver`](../type-aliases/IndexResolver.md)\<`TKey`\> = *typeof* [`BTreeIndex`](BTreeIndex.md)
 
 The type of the index resolver (constructor or async loader)
 
@@ -351,13 +351,13 @@ Function that extracts the indexed value from each item
 
 ##### config
 
-[`IndexOptions`](../../interfaces/IndexOptions.md)\<`TResolver`\> = `{}`
+[`IndexOptions`](../interfaces/IndexOptions.md)\<`TResolver`\> = `{}`
 
 Configuration including index type and type-specific options
 
 #### Returns
 
-[`IndexProxy`](../IndexProxy.md)\<`TKey`\>
+[`IndexProxy`](IndexProxy.md)\<`TKey`\>
 
 An index proxy that provides access to the index when ready
 
@@ -405,14 +405,14 @@ Returns the current state of the collection as an array of changes
 
 ##### options
 
-[`CurrentStateAsChangesOptions`](../../interfaces/CurrentStateAsChangesOptions.md) = `{}`
+[`CurrentStateAsChangesOptions`](../interfaces/CurrentStateAsChangesOptions.md) = `{}`
 
 Options including optional where filter
 
 #### Returns
 
   \| `void`
-  \| [`ChangeMessage`](../../interfaces/ChangeMessage.md)\<`TOutput`, `string` \| `number`\>[]
+  \| [`ChangeMessage`](../interfaces/ChangeMessage.md)\<`TOutput`, `string` \| `number`\>[]
 
 An array of changes
 
@@ -455,13 +455,13 @@ Single key or array of keys to delete
 
 ##### config?
 
-[`OperationConfig`](../../interfaces/OperationConfig.md)
+[`OperationConfig`](../interfaces/OperationConfig.md)
 
 Optional configuration including metadata
 
 #### Returns
 
-[`Transaction`](../../interfaces/Transaction.md)\<`any`\>
+[`Transaction`](../interfaces/Transaction.md)\<`any`\>
 
 A Transaction object representing the delete operation(s)
 
@@ -620,14 +620,14 @@ Inserts one or more items into the collection
 
 ##### config?
 
-[`InsertConfig`](../../interfaces/InsertConfig.md)
+[`InsertConfig`](../interfaces/InsertConfig.md)
 
 Optional configuration including metadata
 
 #### Returns
 
-  \| [`Transaction`](../../interfaces/Transaction.md)\<`Record`\<`string`, `unknown`\>\>
-  \| [`Transaction`](../../interfaces/Transaction.md)\<`TOutput`\>
+  \| [`Transaction`](../interfaces/Transaction.md)\<`Record`\<`string`, `unknown`\>\>
+  \| [`Transaction`](../interfaces/Transaction.md)\<`TOutput`\>
 
 A Transaction object representing the insert operation(s)
 
@@ -986,7 +986,7 @@ Function called when items change
 
 ##### options
 
-[`SubscribeChangesOptions`](../../interfaces/SubscribeChangesOptions.md) = `{}`
+[`SubscribeChangesOptions`](../interfaces/SubscribeChangesOptions.md) = `{}`
 
 Subscription options including includeInitialState and where filter
 
@@ -1081,7 +1081,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](../../interfaces/Transaction.md)
+[`Transaction`](../interfaces/Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1150,7 +1150,7 @@ Single key or array of keys to update
 
 ###### config
 
-[`OperationConfig`](../../interfaces/OperationConfig.md)
+[`OperationConfig`](../interfaces/OperationConfig.md)
 
 ###### callback
 
@@ -1158,7 +1158,7 @@ Single key or array of keys to update
 
 ##### Returns
 
-[`Transaction`](../../interfaces/Transaction.md)
+[`Transaction`](../interfaces/Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1226,7 +1226,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](../../interfaces/Transaction.md)
+[`Transaction`](../interfaces/Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1293,7 +1293,7 @@ Updates one or more items in the collection using a callback function
 
 ###### config
 
-[`OperationConfig`](../../interfaces/OperationConfig.md)
+[`OperationConfig`](../interfaces/OperationConfig.md)
 
 ###### callback
 
@@ -1301,7 +1301,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](../../interfaces/Transaction.md)
+[`Transaction`](../interfaces/Transaction.md)
 
 A Transaction object representing the update operation(s)
 

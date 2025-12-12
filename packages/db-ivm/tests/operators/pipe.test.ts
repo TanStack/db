@@ -1,7 +1,7 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { map, output, pipe } from "../../src/operators/index.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { map, output, pipe } from '../../src/operators/index.js'
 
 describe(`Operators`, () => {
   describe(`Pipe operation`, () => {
@@ -13,11 +13,11 @@ describe(`Operators`, () => {
       input.pipe(
         pipe(
           map((x) => x + 5),
-          map((x) => x * 2)
+          map((x) => x * 2),
         ),
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
@@ -27,7 +27,7 @@ describe(`Operators`, () => {
           [1, 1],
           [2, 1],
           [3, 1],
-        ])
+        ]),
       )
 
       graph.run()

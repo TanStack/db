@@ -4,6 +4,6 @@ export {
   type ElectricCollectionUtils,
   type Txid,
   type AwaitTxIdFn,
-} from "./electric"
+} from './electric'
 
-export * from "./errors"
+export * from './errors'

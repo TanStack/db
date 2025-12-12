@@ -5,11 +5,11 @@ title: JoinConditionMustBeEqualityError
 
 # Class: JoinConditionMustBeEqualityError
 
-Defined in: [packages/db/src/errors.ts:372](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L372)
+Defined in: [packages/db/src/errors.ts:381](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L381)
 
 ## Extends
 
-- [`QueryBuilderError`](../QueryBuilderError.md)
+- [`QueryBuilderError`](QueryBuilderError.md)
 
 ## Constructors
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:372](https://github.com/TanStack/db/blob/
 new JoinConditionMustBeEqualityError(): JoinConditionMustBeEqualityError;
 ```
 
-Defined in: [packages/db/src/errors.ts:373](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L373)
+Defined in: [packages/db/src/errors.ts:382](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L382)
 
 #### Returns
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/errors.ts:373](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`QueryBuilderError`](../QueryBuilderError.md).[`constructor`](../QueryBuilderError.md#constructor)
+[`QueryBuilderError`](QueryBuilderError.md).[`constructor`](QueryBuilderError.md#constructor)
 
 ## Properties
 
@@ -41,7 +41,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryBuilderError`](../QueryBuilderError.md).[`cause`](../QueryBuilderError.md#cause)
+[`QueryBuilderError`](QueryBuilderError.md).[`cause`](QueryBuilderError.md#cause)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryBuilderError`](../QueryBuilderError.md).[`message`](../QueryBuilderError.md#message)
+[`QueryBuilderError`](QueryBuilderError.md).[`message`](QueryBuilderError.md#message)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryBuilderError`](../QueryBuilderError.md).[`name`](../QueryBuilderError.md#name)
+[`QueryBuilderError`](QueryBuilderError.md).[`name`](QueryBuilderError.md#name)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`QueryBuilderError`](../QueryBuilderError.md).[`stack`](../QueryBuilderError.md#stack)
+[`QueryBuilderError`](QueryBuilderError.md).[`stack`](QueryBuilderError.md#stack)
 
 ***
 
@@ -107,7 +107,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`QueryBuilderError`](../QueryBuilderError.md).[`stackTraceLimit`](../QueryBuilderError.md#stacktracelimit)
+[`QueryBuilderError`](QueryBuilderError.md).[`stackTraceLimit`](QueryBuilderError.md#stacktracelimit)
 
 ## Methods
 
@@ -179,7 +179,7 @@ a();
 
 #### Inherited from
 
-[`QueryBuilderError`](../QueryBuilderError.md).[`captureStackTrace`](../QueryBuilderError.md#capturestacktrace)
+[`QueryBuilderError`](QueryBuilderError.md).[`captureStackTrace`](QueryBuilderError.md#capturestacktrace)
 
 ***
 
@@ -211,4 +211,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`QueryBuilderError`](../QueryBuilderError.md).[`prepareStackTrace`](../QueryBuilderError.md#preparestacktrace)
+[`QueryBuilderError`](QueryBuilderError.md).[`prepareStackTrace`](QueryBuilderError.md#preparestacktrace)

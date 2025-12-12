@@ -1,20 +1,20 @@
-import { createDeferred } from "./deferred"
-import "./duplicate-instance-check"
+import { createDeferred } from './deferred'
+import './duplicate-instance-check'
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
-} from "./errors"
-import { transactionScopedScheduler } from "./scheduler.js"
-import type { Deferred } from "./deferred"
+} from './errors'
+import { transactionScopedScheduler } from './scheduler.js'
+import type { Deferred } from './deferred'
 import type {
   MutationFn,
   PendingMutation,
   TransactionConfig,
   TransactionState,
   TransactionWithMutations,
-} from "./types"
+} from './types'
 
 const transactions: Array<Transaction<any>> = []
 let transactionStack: Array<Transaction<any>> = []
@@ -41,7 +41,7 @@ let sequenceNumber = 0
  */
 function mergePendingMutations<T extends object>(
   existing: PendingMutation<T>,
-  incoming: PendingMutation<T>
+  incoming: PendingMutation<T>,
 ): PendingMutation<T> | null {
   // Truth table implementation
   switch (`${existing.type}-${incoming.type}` as const) {
@@ -154,7 +154,7 @@ function mergePendingMutations<T extends object>(
  * await tx.commit()
  */
 export function createTransaction<T extends object = Record<string, unknown>>(
-  config: TransactionConfig<T>
+  config: TransactionConfig<T>,
 ): Transaction<T> {
   const newTransaction = new Transaction<T>(config)
   transactions.push(newTransaction)
@@ -327,7 +327,7 @@ class Transaction<T extends object = Record<string, unknown>> {
   applyMutations(mutations: Array<PendingMutation<any>>): void {
     for (const newMutation of mutations) {
       const existingIndex = this.mutations.findIndex(
-        (m) => m.globalKey === newMutation.globalKey
+        (m) => m.globalKey === newMutation.globalKey,
       )
 
       if (existingIndex >= 0) {

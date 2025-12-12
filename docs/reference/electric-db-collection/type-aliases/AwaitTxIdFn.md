@@ -17,7 +17,7 @@ Type for the awaitTxId utility function
 
 ### txId
 
-[`Txid`](../Txid.md)
+[`Txid`](Txid.md)
 
 ### timeout?
 

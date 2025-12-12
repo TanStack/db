@@ -2,7 +2,7 @@
  * Generic utility functions
  */
 
-import type { CompareOptions } from "./query/builder/types"
+import type { CompareOptions } from './query/builder/types'
 
 interface TypedArray {
   length: number
@@ -36,7 +36,7 @@ export function deepEquals(a: any, b: any): boolean {
 function deepEqualsInternal(
   a: any,
   b: any,
-  visited: Map<object, object>
+  visited: Map<object, object>,
 ): boolean {
   // Handle strict equality (primitives, same reference)
   if (a === b) return true
@@ -154,7 +154,7 @@ function deepEqualsInternal(
     visited.set(a, b)
 
     const result = a.every((item, index) =>
-      deepEqualsInternal(item, b[index], visited)
+      deepEqualsInternal(item, b[index], visited),
     )
     visited.delete(a)
     return result
@@ -180,7 +180,7 @@ function deepEqualsInternal(
 
     // Check if all keys exist in both objects and their values are equal
     const result = keysA.every(
-      (key) => key in b && deepEqualsInternal(a[key], b[key], visited)
+      (key) => key in b && deepEqualsInternal(a[key], b[key], visited),
     )
 
     visited.delete(a)
