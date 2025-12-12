@@ -242,7 +242,7 @@ export function powerSyncCollectionOptions<
   // The collection output type
   type OutputType = InferPowerSyncOutputType<TTable, TSchema>
 
-  const { viewName } = table
+  const { viewName, trackMetadata: metadataIsTracked } = table
 
   /**
    * Deserializes data from the incoming sync stream
@@ -459,6 +459,7 @@ export function powerSyncCollectionOptions<
       getMeta: () => ({
         tableName: viewName,
         trackedTableName,
+        metadataIsTracked,
         serializeValue: (value) =>
           serializeForSQLite(
             value,

@@ -401,6 +401,109 @@ task.due_date.getTime() // OK - TypeScript knows this is a Date
 
 Updates to the collection are applied optimistically to the local state first, then synchronized with PowerSync and the backend. If an error occurs during sync, the changes are automatically rolled back.
 
+### Metadata Tracking
+
+Metadata tracking allows attaching custom metadata to collection operations (insert, update, delete). This metadata is persisted alongside the operation and available in PowerSync `CrudEntry` records during upload processing. This is useful for passing additional context about mutations to the backend, such as audit information, operation sources, or custom processing hints.
+
+#### Enabling Metadata Tracking
+
+Metadata tracking must be enabled on the PowerSync table:
+
+```typescript
+const APP_SCHEMA = new Schema({
+  documents: new Table(
+    {
+      name: column.text,
+      author: column.text,
+    },
+    {
+      // Enable metadata tracking on this table
+      trackMetadata: true,
+    }
+  ),
+})
+```
+
+#### Using Metadata in Operations
+
+Once enabled, metadata can be passed to any collection operation:
+
+```typescript
+const documents = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: APP_SCHEMA.props.documents,
+  })
+)
+
+// Insert with metadata
+await documents.insert(
+  {
+    id: crypto.randomUUID(),
+    name: "Report Q4",
+    author: "Jane Smith",
+  },
+  {
+    metadata: {
+      source: "web-app",
+      userId: "user-123",
+      timestamp: Date.now(),
+    },
+  }
+).isPersisted.promise
+
+// Update with metadata
+await documents.update(
+  docId,
+  { metadata: { reason: "typo-fix", editor: "user-456" } },
+  (doc) => {
+    doc.name = "Report Q4 (Updated)"
+  }
+).isPersisted.promise
+
+// Delete with metadata
+await documents.delete(docId, {
+  metadata: { deletedBy: "user-789", reason: "duplicate" },
+}).isPersisted.promise
+```
+
+#### Accessing Metadata During Upload
+
+The metadata is available in PowerSync `CrudEntry` records when processing uploads in the connector:
+
+```typescript
+import { CrudEntry } from "@powersync/web"
+
+class Connector implements PowerSyncBackendConnector {
+  // ...
+
+  async uploadData(database: AbstractPowerSyncDatabase) {
+    const batch = await database.getCrudBatch()
+    if (!batch) return
+
+    for (const entry of batch.crud) {
+      console.log("Operation:", entry.op) // PUT, PATCH, DELETE
+      console.log("Table:", entry.table)
+      console.log("Data:", entry.opData)
+      console.log("Metadata:", entry.metadata) // Custom metadata (stringified)
+
+      // Parse metadata if needed
+      if (entry.metadata) {
+        const meta = JSON.parse(entry.metadata)
+        console.log("Source:", meta.source)
+        console.log("User ID:", meta.userId)
+      }
+
+      // Process the operation with the backend...
+    }
+
+    await batch.complete()
+  }
+}
+```
+
+**Note**: If metadata is provided to an operation but the table doesn't have `trackMetadata: true`, a warning will be logged and the metadata will be ignored.
+
 ## Configuration Options
 
 The `powerSyncCollectionOptions` function accepts the following options:
