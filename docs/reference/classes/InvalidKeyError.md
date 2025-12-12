@@ -1,11 +1,11 @@
 ---
-id: NoKeysPassedToDeleteError
-title: NoKeysPassedToDeleteError
+id: InvalidKeyError
+title: InvalidKeyError
 ---
 
-# Class: NoKeysPassedToDeleteError
+# Class: InvalidKeyError
 
-Defined in: [packages/db/src/errors.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L223)
+Defined in: [packages/db/src/errors.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L154)
 
 ## Extends
 
@@ -16,14 +16,24 @@ Defined in: [packages/db/src/errors.ts:223](https://github.com/TanStack/db/blob/
 ### Constructor
 
 ```ts
-new NoKeysPassedToDeleteError(): NoKeysPassedToDeleteError;
+new InvalidKeyError(key, item): InvalidKeyError;
 ```
 
-Defined in: [packages/db/src/errors.ts:224](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L224)
+Defined in: [packages/db/src/errors.ts:155](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L155)
+
+#### Parameters
+
+##### key
+
+`unknown`
+
+##### item
+
+`unknown`
 
 #### Returns
 
-`NoKeysPassedToDeleteError`
+`InvalidKeyError`
 
 #### Overrides
 
