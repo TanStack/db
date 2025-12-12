@@ -1,5 +1,7 @@
 export {
   electricCollectionOptions,
+  isChangeMessage,
+  isControlMessage,
   type ElectricCollectionConfig,
   type ElectricCollectionUtils,
   type Txid,

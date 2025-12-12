@@ -523,6 +523,10 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   // Buffer messages since last up-to-date to handle race conditions
   const currentBatchMessages = new Store<Array<Message<any>>>([])
 
+  // Track whether the current batch has been committed (up-to-date received)
+  // This allows awaitMatch to resolve immediately for messages from committed batches
+  const batchCommitted = new Store<boolean>(false)
+
   /**
    * Helper function to remove multiple matches from the pendingMatches store
    */
@@ -560,6 +564,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     syncMode: internalSyncMode,
     pendingMatches,
     currentBatchMessages,
+    batchCommitted,
     removePendingMatches,
     resolveMatchedPendingMatches,
     collectionId: config.id,
@@ -689,10 +694,21 @@ export function electricCollectionOptions<T extends Row<unknown>>(
       // Check against current batch messages first to handle race conditions
       for (const message of currentBatchMessages.state) {
         if (matchFn(message)) {
+          // If batch is committed (up-to-date already received), resolve immediately
+          // just like awaitTxId does when it finds a txid in seenTxids
+          if (batchCommitted.state) {
+            debug(
+              `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in committed batch, resolving immediately`,
+            )
+            clearTimeout(timeoutId)
+            resolve(true)
+            return
+          }
+
+          // If batch is not yet committed, register match and wait for up-to-date
           debug(
             `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in current batch, waiting for up-to-date`,
           )
-          // Register match as already matched
           pendingMatches.setState((current) => {
             const newMatches = new Map(current)
             newMatches.set(matchId, {
@@ -700,7 +716,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
               resolve,
               reject,
               timeoutId,
-              matched: true, // Already matched
+              matched: true, // Already matched, will resolve on up-to-date
             })
             return newMatches
           })
@@ -831,6 +847,7 @@ function createElectricSync<T extends Row<unknown>>(
       >
     >
     currentBatchMessages: Store<Array<Message<T>>>
+    batchCommitted: Store<boolean>
     removePendingMatches: (matchIds: Array<string>) => void
     resolveMatchedPendingMatches: () => void
     collectionId?: string
@@ -843,6 +860,7 @@ function createElectricSync<T extends Row<unknown>>(
     syncMode,
     pendingMatches,
     currentBatchMessages,
+    batchCommitted,
     removePendingMatches,
     resolveMatchedPendingMatches,
     collectionId,
@@ -981,6 +999,12 @@ function createElectricSync<T extends Row<unknown>>(
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
         let hasUpToDate = false
         let hasSnapshotEnd = false
+
+        // Clear the current batch buffer at the START of processing a new batch
+        // This preserves messages from the previous batch until new ones arrive,
+        // allowing awaitMatch to find messages even if called after up-to-date
+        currentBatchMessages.setState(() => [])
+        batchCommitted.setState(() => false)
 
         for (const message of messages) {
           // Add message to current batch buffer (for race condition handling)
@@ -1143,9 +1167,6 @@ function createElectricSync<T extends Row<unknown>>(
             }
           }
 
-          // Clear the current batch buffer since we're now up-to-date
-          currentBatchMessages.setState(() => [])
-
           if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
             // Mark the collection as ready now that sync is up to date
             wrappedMarkReady(isBufferingInitialSync())
@@ -1183,7 +1204,12 @@ function createElectricSync<T extends Row<unknown>>(
             return seen
           })
 
-          // Resolve all matched pending matches on up-to-date
+          // Resolve all matched pending matches on up-to-date or snapshot-end in on-demand mode
+          // Set batchCommitted BEFORE resolving to avoid timing window where late awaitMatch
+          // calls could register as "matched" after resolver pass already ran
+          if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
+            batchCommitted.setState(() => true)
+          }
           resolveMatchedPendingMatches()
         }
       })

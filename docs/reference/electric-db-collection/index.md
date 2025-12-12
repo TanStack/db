@@ -26,3 +26,5 @@ title: "@tanstack/electric-db-collection"
 ## Functions
 
 - [electricCollectionOptions](functions/electricCollectionOptions.md)
+- [isChangeMessage](functions/isChangeMessage.md)
+- [isControlMessage](functions/isControlMessage.md)
