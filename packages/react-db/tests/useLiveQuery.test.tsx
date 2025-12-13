@@ -2351,4 +2351,402 @@ describe(`Query Collections`, () => {
       expect(result.current.isEnabled).toBe(false)
     })
   })
+
+  describe(`isLoading and data consistency`, () => {
+    it(`should never have isLoading=false with data=null/undefined on initial load`, async () => {
+      // Track render states to detect the bug where isLoading=false but data is still null
+      const renderStates: Array<{
+        isLoading: boolean
+        isReady: boolean
+        status: string
+        dataLength: number
+        hasData: boolean
+        timestamp: number
+      }> = []
+
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `loading-data-consistency-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        const queryResult = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 20))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            })),
+        )
+
+        // Track each render state
+        useEffect(() => {
+          renderStates.push({
+            isLoading: queryResult.isLoading,
+            isReady: queryResult.isReady,
+            status: queryResult.status,
+            dataLength: queryResult.data.length,
+            hasData: queryResult.data.length > 0,
+            timestamp: Date.now(),
+          })
+        })
+
+        return queryResult
+      })
+
+      // Wait for the query to be ready with data
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+        expect(result.current.data.length).toBe(3) // All 3 persons are > 20
+      })
+
+      // Check for the bug: any render where isLoading=false but data is null/undefined
+      const buggyRenders = renderStates.filter(
+        (state) => !state.isLoading && !state.hasData,
+      )
+
+      // This test will fail if the bug exists - there should never be a render
+      // where isLoading is false but data is not yet available
+      expect(buggyRenders).toEqual([])
+    })
+
+    it(`should never have isLoading=false with data=null when using on-demand sync with REST-like loader`, async () => {
+      // This test simulates a real-world scenario where data is loaded from a REST API
+      // using on-demand sync mode. The bug might manifest when:
+      // 1. The collection becomes "ready" (isLoading=false)
+      // 2. But the live query hasn't processed the data yet (data=null)
+
+      const renderStates: Array<{
+        isLoading: boolean
+        isReady: boolean
+        status: string
+        dataLength: number
+        hasData: boolean
+        renderIndex: number
+      }> = []
+      let renderCount = 0
+
+      // Simulate REST API data
+      const restData: Array<Person> = [
+        {
+          id: `1`,
+          name: `John Doe`,
+          age: 30,
+          email: `john@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+        {
+          id: `2`,
+          name: `Jane Smith`,
+          age: 35,
+          email: `jane@example.com`,
+          isActive: true,
+          team: `team2`,
+        },
+      ]
+
+      const collection = createCollection<Person>({
+        id: `on-demand-rest-test`,
+        getKey: (person: Person) => person.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Mark ready immediately (collection is ready to receive data)
+            markReady()
+
+            return {
+              loadSubset: async () => {
+                // Simulate REST API delay
+                await new Promise((resolve) => setTimeout(resolve, 50))
+
+                // Load data from "REST API"
+                begin()
+                for (const person of restData) {
+                  write({ type: `insert`, value: person })
+                }
+                commit()
+              },
+            }
+          },
+        },
+      })
+
+      const { result } = renderHook(() => {
+        const queryResult = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 25))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+              age: persons.age,
+            })),
+        )
+
+        // Track every render
+        renderCount++
+        renderStates.push({
+          isLoading: queryResult.isLoading,
+          isReady: queryResult.isReady,
+          status: queryResult.status,
+          dataLength: queryResult.data.length,
+          hasData: queryResult.data.length > 0,
+          renderIndex: renderCount,
+        })
+
+        return queryResult
+      })
+
+      // Wait for data to load
+      await waitFor(
+        () => {
+          expect(result.current.data.length).toBe(2) // Both persons are > 25
+        },
+        { timeout: 2000 },
+      )
+
+      // Check for the bug: any render where isLoading=false AND isReady=true but data is null/undefined
+      // This is the specific bug scenario - when the collection reports ready but data hasn't synced
+      const buggyRenders = renderStates.filter(
+        (state) => !state.isLoading && state.isReady && !state.hasData,
+      )
+
+      // Log render states for debugging if test fails
+      if (buggyRenders.length > 0) {
+        console.log(`All render states:`, renderStates)
+        console.log(`Buggy renders:`, buggyRenders)
+      }
+
+      expect(buggyRenders).toEqual([])
+    })
+
+    it(`should never have isLoading=false with data=undefined for findOne with on-demand REST-like loader`, async () => {
+      // This test specifically targets the bug where findOne() returns undefined
+      // for a single render even though isLoading=false
+      // With findOne(), data is dataCache[0] which is undefined when entries is empty
+
+      const renderStates: Array<{
+        isLoading: boolean
+        isReady: boolean
+        status: string
+        data: Person | undefined
+        stateSize: number
+        renderIndex: number
+        isLoadingSubset: boolean
+      }> = []
+      let renderCount = 0
+
+      // Simulate REST API data - single item for findOne
+      const restPerson: Person = {
+        id: `1`,
+        name: `John Doe`,
+        age: 30,
+        email: `john@example.com`,
+        isActive: true,
+        team: `team1`,
+      }
+
+      const collection = createCollection<Person>({
+        id: `on-demand-findone-test`,
+        getKey: (person: Person) => person.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Mark ready immediately - this is where the bug could manifest
+            // The collection is "ready" but has no data yet
+            markReady()
+
+            return {
+              loadSubset: async () => {
+                // Simulate REST API delay
+                await new Promise((resolve) => setTimeout(resolve, 50))
+
+                // Load data from "REST API"
+                begin()
+                write({ type: `insert`, value: restPerson })
+                commit()
+              },
+            }
+          },
+        },
+      })
+
+      const { result } = renderHook(() => {
+        const queryResult = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => eq(persons.id, `1`))
+            .findOne(),
+        )
+
+        // Track every render
+        renderCount++
+        renderStates.push({
+          isLoading: queryResult.isLoading,
+          isReady: queryResult.isReady,
+          status: queryResult.status,
+          data: queryResult.data,
+          stateSize: queryResult.state.size,
+          renderIndex: renderCount,
+          isLoadingSubset: queryResult.collection.isLoadingSubset,
+        })
+
+        return queryResult
+      })
+
+      // Wait for data to load
+      await waitFor(
+        () => {
+          expect(result.current.data).toBeDefined()
+          expect(result.current.data?.id).toBe(`1`)
+        },
+        { timeout: 2000 },
+      )
+
+      // Check for the specific bug: isLoading=false AND isReady=true but data is undefined
+      // For findOne queries, this happens when the collection is ready but entries are empty
+      const buggyRenders = renderStates.filter(
+        (state) => !state.isLoading && state.isReady && state.data === undefined,
+      )
+
+      // Log render states for debugging if test fails
+      if (buggyRenders.length > 0) {
+        console.log(`All render states:`, renderStates)
+        console.log(`Buggy renders (isLoading=false, isReady=true, data=undefined):`, buggyRenders)
+      }
+
+      expect(buggyRenders).toEqual([])
+    })
+
+    it(`should never have isLoading=false with empty data when data exists in collection`, async () => {
+      // Track render states to detect inconsistency
+      const renderStates: Array<{
+        isLoading: boolean
+        isReady: boolean
+        status: string
+        dataLength: number
+        stateSize: number
+        timestamp: number
+      }> = []
+
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `loading-empty-data-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        const queryResult = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        )
+
+        // Track each render state
+        useEffect(() => {
+          renderStates.push({
+            isLoading: queryResult.isLoading,
+            isReady: queryResult.isReady,
+            status: queryResult.status,
+            dataLength: queryResult.data.length,
+            stateSize: queryResult.state.size,
+            timestamp: Date.now(),
+          })
+        })
+
+        return queryResult
+      })
+
+      // Wait for the query to be ready
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+        expect(result.current.data.length).toBe(3)
+      })
+
+      // Check for renders where isLoading=false but data is empty when it shouldn't be
+      // (state.size > 0 means collection has data, but data.length could be 0 if not synced)
+      const inconsistentRenders = renderStates.filter(
+        (state) =>
+          !state.isLoading &&
+          state.isReady &&
+          state.stateSize > 0 &&
+          state.dataLength === 0,
+      )
+
+      expect(inconsistentRenders).toEqual([])
+    })
+
+    it(`should have consistent isLoading and data state for findOne queries`, async () => {
+      // Track render states for single result queries
+      const renderStates: Array<{
+        isLoading: boolean
+        isReady: boolean
+        status: string
+        data: any
+        stateSize: number
+        timestamp: number
+      }> = []
+
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `findone-consistency-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        const queryResult = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => eq(persons.id, `1`))
+            .findOne(),
+        )
+
+        // Track each render state
+        useEffect(() => {
+          renderStates.push({
+            isLoading: queryResult.isLoading,
+            isReady: queryResult.isReady,
+            status: queryResult.status,
+            data: queryResult.data,
+            stateSize: queryResult.state.size,
+            timestamp: Date.now(),
+          })
+        })
+
+        return queryResult
+      })
+
+      // Wait for the query to be ready with data
+      await waitFor(() => {
+        expect(result.current.isReady).toBe(true)
+        expect(result.current.data).toBeDefined()
+      })
+
+      // For findOne, check if there's ever a render where:
+      // - isLoading is false
+      // - state has the item (stateSize > 0)
+      // - but data is still undefined
+      const buggyRenders = renderStates.filter(
+        (state) =>
+          !state.isLoading && state.stateSize > 0 && state.data === undefined,
+      )
+
+      expect(buggyRenders).toEqual([])
+    })
+  })
 })

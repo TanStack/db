@@ -5,6 +5,7 @@ import {
   and,
   createLiveQueryCollection,
   eq,
+  gt,
   ilike,
   liveQueryCollectionOptions,
 } from '../../src/query/index.js'
@@ -103,7 +104,7 @@ describe(`createLiveQueryCollection`, () => {
   })
 
   describe(`compareOptions inheritance`, () => {
-    it(`should inherit compareOptions from FROM collection`, async () => {
+    it(`should inherit compareOptions from FROM collection`, () => {
       // Create a collection with non-default compareOptions
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -130,7 +131,7 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
 
-    it(`should inherit compareOptions from FROM collection via subquery`, async () => {
+    it(`should inherit compareOptions from FROM collection via subquery`, () => {
       // Create a collection with non-default compareOptions
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -167,7 +168,7 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
 
-    it(`should use default compareOptions when FROM collection has no compareOptions`, async () => {
+    it(`should use default compareOptions when FROM collection has no compareOptions`, () => {
       // Create a collection without compareOptions (uses defaults)
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -199,7 +200,7 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
 
-    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, async () => {
+    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, () => {
       // Create a collection with non-default compareOptions
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -1117,7 +1118,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
 
-    it(`source collection isLoadingSubset is independent`, async () => {
+    it(`source collection isLoadingSubset propagates to live query via subscriptions`, async () => {
       let resolveLoadSubset: () => void
       const loadSubsetPromise = new Promise<void>((resolve) => {
         resolveLoadSubset = resolve
@@ -1147,19 +1148,175 @@ describe(`createLiveQueryCollection`, () => {
 
       await liveQuery.preload()
 
-      // Calling loadSubset directly on source collection sets its own isLoadingSubset
+      // Since the subscription tracks loadSubset promises (for on-demand sync),
+      // the live query's isLoadingSubset reflects the source's pending load
+      // This is the correct behavior - it shows loading state until data is ready
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // Calling loadSubset directly on source collection also tracks loading
       sourceCollection._sync.loadSubset({})
       expect(sourceCollection.isLoadingSubset).toBe(true)
-
-      // But live query isLoadingSubset tracks subscription-driven loads, not direct loadSubset calls
-      // so it remains false unless subscriptions trigger loads via predicate pushdown
-      expect(liveQuery.isLoadingSubset).toBe(false)
 
       resolveLoadSubset!()
       await new Promise((resolve) => setTimeout(resolve, 10))
 
+      // After loading completes, both should be false
       expect(sourceCollection.isLoadingSubset).toBe(false)
       expect(liveQuery.isLoadingSubset).toBe(false)
+    })
+
+    it(`should have isLoadingSubset=true until data is loaded for on-demand sync with REST-like loader`, async () => {
+      // This test reproduces the bug where:
+      // 1. Source collection uses on-demand sync and calls markReady() immediately
+      // 2. Live query subscribes and gets status=ready before data is loaded
+      // 3. Without the fix, isLoadingSubset would be false even though data is loading
+      //
+      // The fix ensures isLoadingSubset=true while loadSubset is pending,
+      // so consumers know to show a loading state
+
+      type Person = {
+        id: string
+        name: string
+        age: number
+      }
+
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      // Simulate REST API data
+      const restPerson: Person = {
+        id: `1`,
+        name: `John Doe`,
+        age: 30,
+      }
+
+      const sourceCollection = createCollection<Person>({
+        id: `on-demand-rest-source`,
+        getKey: (person) => person.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Mark ready immediately - this is the pattern that caused the bug
+            // The collection is "ready" but has no data yet
+            markReady()
+
+            return {
+              loadSubset: async () => {
+                // Simulate REST API delay
+                await loadSubsetPromise
+
+                // Load data from "REST API"
+                begin()
+                write({ type: `insert`, value: restPerson })
+                commit()
+              },
+            }
+          },
+        },
+      })
+
+      // Create live query with findOne
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ person: sourceCollection })
+            .where(({ person }) => eq(person.id, `1`))
+            .findOne(),
+        startSync: true,
+      })
+
+      await liveQuery.preload()
+
+      // Before the fix: status would be 'ready' and isLoadingSubset would be false
+      // even though loadSubset is still pending and no data is available
+      //
+      // After the fix: isLoadingSubset should be true because loadSubset is pending
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.isLoadingSubset).toBe(true) // This is the key assertion
+
+      // Data should not be available yet
+      expect(liveQuery.size).toBe(0)
+
+      // Resolve the loadSubset promise (simulate REST response)
+      resolveLoadSubset!()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now loading should be complete
+      expect(liveQuery.isLoadingSubset).toBe(false)
+      expect(liveQuery.size).toBe(1)
+      expect(liveQuery.get(`1`)).toEqual(restPerson)
+    })
+
+    it(`should have consistent status and isLoadingSubset for array queries with on-demand sync`, async () => {
+      // Similar test but for array queries (not findOne)
+
+      type Person = {
+        id: string
+        name: string
+        age: number
+      }
+
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const restData: Array<Person> = [
+        { id: `1`, name: `John Doe`, age: 30 },
+        { id: `2`, name: `Jane Smith`, age: 35 },
+      ]
+
+      const sourceCollection = createCollection<Person>({
+        id: `on-demand-rest-array-source`,
+        getKey: (person) => person.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            markReady()
+
+            return {
+              loadSubset: async () => {
+                await loadSubsetPromise
+
+                begin()
+                for (const person of restData) {
+                  write({ type: `insert`, value: person })
+                }
+                commit()
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ person: sourceCollection })
+            .where(({ person }) => gt(person.age, 25)),
+        startSync: true,
+      })
+
+      await liveQuery.preload()
+
+      // Status is ready but loading is in progress
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.isLoadingSubset).toBe(true)
+      expect(liveQuery.size).toBe(0)
+
+      // Resolve loading
+      resolveLoadSubset!()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now data should be available
+      expect(liveQuery.isLoadingSubset).toBe(false)
+      expect(liveQuery.size).toBe(2)
     })
   })
 

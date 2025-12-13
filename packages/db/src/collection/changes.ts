@@ -108,7 +108,9 @@ export class CollectionChangesManager<
     })
 
     if (options.includeInitialState) {
-      subscription.requestSnapshot({ trackLoadSubsetPromise: false })
+      // Track the loadSubset promise so isLoadingSubset reflects async data loading
+      // This ensures on-demand sync shows loading state until data is available
+      subscription.requestSnapshot()
     }
 
     // Add to batched listeners
