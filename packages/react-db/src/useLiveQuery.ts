@@ -424,6 +424,17 @@ export function useLiveQuery(
         versionRef.current += 1
         onStoreChange()
       })
+
+      // Subscribe to loadingSubset changes for on-demand sync mode
+      // This ensures isLoading reflects async data loading via loadSubset()
+      const loadingSubsetUnsubscribe = collectionRef.current.on(
+        `loadingSubset:change`,
+        () => {
+          versionRef.current += 1
+          onStoreChange()
+        },
+      )
+
       // Collection may be ready and will not receive initial `subscribeChanges()`
       if (collectionRef.current.status === `ready`) {
         versionRef.current += 1
@@ -431,6 +442,7 @@ export function useLiveQuery(
       }
       return () => {
         subscription.unsubscribe()
+        loadingSubsetUnsubscribe()
       }
     }
   }
@@ -522,7 +534,9 @@ export function useLiveQuery(
         },
         collection: snapshot.collection,
         status: snapshot.collection.status,
-        isLoading: snapshot.collection.status === `loading`,
+        isLoading:
+          snapshot.collection.status === `loading` ||
+          snapshot.collection.isLoadingSubset,
         isReady: snapshot.collection.status === `ready`,
         isIdle: snapshot.collection.status === `idle`,
         isError: snapshot.collection.status === `error`,
