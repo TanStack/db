@@ -62,8 +62,8 @@
     "@powersync/common": "^1.41.0"
   },
   "devDependencies": {
-    "@powersync/common": "^1.43.1",
-    "@powersync/node": "^0.14.3",
+    "@powersync/common": "^1.44.0",
+    "@powersync/node": "^0.15.0",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4"
   }
