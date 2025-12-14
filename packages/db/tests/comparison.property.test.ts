@@ -52,7 +52,9 @@ const arbitraryComparablePrimitive = fc.oneof(
 
 const arbitraryDate = fc.date({ noInvalidDate: true })
 
-const arbitraryComparableArray = fc.array(arbitraryComparablePrimitive, { maxLength: 5 })
+const arbitraryComparableArray = fc.array(arbitraryComparablePrimitive, {
+  maxLength: 5,
+})
 
 // Helper to get sign of a number
 const sign = (n: number): -1 | 0 | 1 => {
@@ -182,13 +184,13 @@ describe(`ascComparator property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.constantFrom(null, undefined), fc.constantFrom(null, undefined)])(
-      `null and undefined are treated the same for comparison`,
-      (a, b) => {
-        // Both null and undefined are treated as "null-ish" values
-        expect(ascComparator(a, b, defaultOpts)).toBe(0)
-      },
-    )
+    fcTest.prop([
+      fc.constantFrom(null, undefined),
+      fc.constantFrom(null, undefined),
+    ])(`null and undefined are treated the same for comparison`, (a, b) => {
+      // Both null and undefined are treated as "null-ish" values
+      expect(ascComparator(a, b, defaultOpts)).toBe(0)
+    })
   })
 
   describe(`string comparison`, () => {
@@ -275,26 +277,20 @@ describe(`ascComparator property-based tests`, () => {
       // Use bounded dates to avoid overflow when adding offset
       fc.date({ min: new Date(0), max: new Date(`2100-01-01`) }),
       fc.integer({ min: 1, max: 1000000 }),
-    ])(
-      `earlier date comes before later date`,
-      (date, offset) => {
-        const later = new Date(date.getTime() + offset)
-        // Only test if the later date is valid
-        if (!isNaN(later.getTime())) {
-          expect(ascComparator(date, later, defaultOpts)).toBeLessThan(0)
-          expect(ascComparator(later, date, defaultOpts)).toBeGreaterThan(0)
-        }
-      },
-    )
+    ])(`earlier date comes before later date`, (date, offset) => {
+      const later = new Date(date.getTime() + offset)
+      // Only test if the later date is valid
+      if (!isNaN(later.getTime())) {
+        expect(ascComparator(date, later, defaultOpts)).toBeLessThan(0)
+        expect(ascComparator(later, date, defaultOpts)).toBeGreaterThan(0)
+      }
+    })
   })
 
   describe(`number comparison`, () => {
-    fcTest.prop([fc.integer()])(
-      `reflexivity for integers`,
-      (n) => {
-        expect(ascComparator(n, n, defaultOpts)).toBe(0)
-      },
-    )
+    fcTest.prop([fc.integer()])(`reflexivity for integers`, (n) => {
+      expect(ascComparator(n, n, defaultOpts)).toBe(0)
+    })
 
     fcTest.prop([fc.double({ noNaN: true, noDefaultInfinity: true })])(
       `reflexivity for doubles`,
@@ -374,12 +370,9 @@ describe(`makeComparator property-based tests`, () => {
 })
 
 describe(`normalizeValue property-based tests`, () => {
-  fcTest.prop([arbitraryDate])(
-    `dates normalize to their timestamp`,
-    (date) => {
-      expect(normalizeValue(date)).toBe(date.getTime())
-    },
-  )
+  fcTest.prop([arbitraryDate])(`dates normalize to their timestamp`, (date) => {
+    expect(normalizeValue(date)).toBe(date.getTime())
+  })
 
   fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 128 })])(
     `small Uint8Arrays normalize to string representation`,
@@ -398,19 +391,13 @@ describe(`normalizeValue property-based tests`, () => {
     },
   )
 
-  fcTest.prop([fc.string()])(
-    `strings pass through unchanged`,
-    (str) => {
-      expect(normalizeValue(str)).toBe(str)
-    },
-  )
+  fcTest.prop([fc.string()])(`strings pass through unchanged`, (str) => {
+    expect(normalizeValue(str)).toBe(str)
+  })
 
-  fcTest.prop([fc.integer()])(
-    `integers pass through unchanged`,
-    (n) => {
-      expect(normalizeValue(n)).toBe(n)
-    },
-  )
+  fcTest.prop([fc.integer()])(`integers pass through unchanged`, (n) => {
+    expect(normalizeValue(n)).toBe(n)
+  })
 
   fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 128 })])(
     `normalization is idempotent for Uint8Arrays`,
@@ -446,12 +433,9 @@ describe(`areValuesEqual property-based tests`, () => {
     },
   )
 
-  fcTest.prop([fc.integer()])(
-    `reference equality for primitives`,
-    (n) => {
-      expect(areValuesEqual(n, n)).toBe(true)
-    },
-  )
+  fcTest.prop([fc.integer()])(`reference equality for primitives`, (n) => {
+    expect(areValuesEqual(n, n)).toBe(true)
+  })
 
   fcTest.prop([fc.integer(), fc.integer()])(
     `different integers are not equal`,

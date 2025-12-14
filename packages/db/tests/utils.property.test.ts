@@ -22,8 +22,9 @@ const arbitraryPrimitive = fc.oneof(
 
 const arbitraryDate = fc.date().map((d) => new Date(d.getTime()))
 
-const arbitraryRegExp = fc.tuple(fc.string(), fc.constantFrom(``, `g`, `i`, `gi`, `m`, `gim`)).map(
-  ([source, flags]) => {
+const arbitraryRegExp = fc
+  .tuple(fc.string(), fc.constantFrom(``, `g`, `i`, `gi`, `m`, `gim`))
+  .map(([source, flags]) => {
     try {
       // Escape special regex characters to avoid invalid patterns
       const escapedSource = source.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)
@@ -31,8 +32,7 @@ const arbitraryRegExp = fc.tuple(fc.string(), fc.constantFrom(``, `g`, `i`, `gi`
     } catch {
       return /test/
     }
-  },
-)
+  })
 
 const arbitraryUint8Array = fc.uint8Array({ minLength: 0, maxLength: 20 })
 
@@ -54,7 +54,9 @@ const arbitraryTemporalDuration = fc
     fc.integer({ min: 0, max: 59 }),
     fc.integer({ min: 0, max: 59 }),
   )
-  .map(([hours, minutes, seconds]) => Temporal.Duration.from({ hours, minutes, seconds }))
+  .map(([hours, minutes, seconds]) =>
+    Temporal.Duration.from({ hours, minutes, seconds }),
+  )
 
 // Same-type value arbitraries for testing equivalence properties
 // These avoid cross-type comparisons that have known asymmetric behavior
@@ -67,9 +69,18 @@ const arbitrarySameTypePrimitive = fc.oneof(
 
 const arbitrarySameTypeDate = fc.tuple(arbitraryDate, arbitraryDate)
 const arbitrarySameTypeRegExp = fc.tuple(arbitraryRegExp, arbitraryRegExp)
-const arbitrarySameTypeUint8Array = fc.tuple(arbitraryUint8Array, arbitraryUint8Array)
-const arbitrarySameTypeTemporalDate = fc.tuple(arbitraryTemporalPlainDate, arbitraryTemporalPlainDate)
-const arbitrarySameTypeTemporalDuration = fc.tuple(arbitraryTemporalDuration, arbitraryTemporalDuration)
+const arbitrarySameTypeUint8Array = fc.tuple(
+  arbitraryUint8Array,
+  arbitraryUint8Array,
+)
+const arbitrarySameTypeTemporalDate = fc.tuple(
+  arbitraryTemporalPlainDate,
+  arbitraryTemporalPlainDate,
+)
+const arbitrarySameTypeTemporalDuration = fc.tuple(
+  arbitraryTemporalDuration,
+  arbitraryTemporalDuration,
+)
 
 // Pair of values of the same type
 const arbitrarySameTypePair = fc.oneof(
@@ -79,7 +90,10 @@ const arbitrarySameTypePair = fc.oneof(
   arbitrarySameTypeUint8Array,
   arbitrarySameTypeTemporalDate,
   arbitrarySameTypeTemporalDuration,
-  fc.tuple(fc.array(fc.integer(), { maxLength: 5 }), fc.array(fc.integer(), { maxLength: 5 })),
+  fc.tuple(
+    fc.array(fc.integer(), { maxLength: 5 }),
+    fc.array(fc.integer(), { maxLength: 5 }),
+  ),
   fc.tuple(
     fc.dictionary(fc.string(), fc.integer(), { maxKeys: 5 }),
     fc.dictionary(fc.string(), fc.integer(), { maxKeys: 5 }),
@@ -132,7 +146,11 @@ describe(`deepEquals property-based tests`, () => {
   describe(`cross-type comparisons`, () => {
     it(`Date and Temporal.Duration are not equal in either direction`, () => {
       const date = new Date(`1970-01-01T00:00:00.000Z`)
-      const duration = Temporal.Duration.from({ hours: 0, minutes: 0, seconds: 0 })
+      const duration = Temporal.Duration.from({
+        hours: 0,
+        minutes: 0,
+        seconds: 0,
+      })
 
       // Both directions should return false for different types (symmetric)
       expect(deepEquals(date, duration)).toBe(false)
@@ -189,22 +207,23 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.dictionary(fc.string(), fc.integer(), { minKeys: 0, maxKeys: 10 })])(
-      `objects with same properties are equal`,
-      (obj) => {
-        const copy = { ...obj }
-        expect(deepEquals(obj, copy)).toBe(true)
-      },
-    )
+    fcTest.prop([
+      fc.dictionary(fc.string(), fc.integer(), { minKeys: 0, maxKeys: 10 }),
+    ])(`objects with same properties are equal`, (obj) => {
+      const copy = { ...obj }
+      expect(deepEquals(obj, copy)).toBe(true)
+    })
 
-    fcTest.prop([fc.array(fc.tuple(fc.string(), fc.integer()), { minLength: 0, maxLength: 5 })])(
-      `Maps with same entries are equal`,
-      (entries) => {
-        const map1 = new Map(entries)
-        const map2 = new Map(entries)
-        expect(deepEquals(map1, map2)).toBe(true)
-      },
-    )
+    fcTest.prop([
+      fc.array(fc.tuple(fc.string(), fc.integer()), {
+        minLength: 0,
+        maxLength: 5,
+      }),
+    ])(`Maps with same entries are equal`, (entries) => {
+      const map1 = new Map(entries)
+      const map2 = new Map(entries)
+      expect(deepEquals(map1, map2)).toBe(true)
+    })
 
     fcTest.prop([fc.array(fc.integer(), { minLength: 0, maxLength: 10 })])(
       `Sets with same primitive values are equal`,
@@ -223,13 +242,10 @@ describe(`deepEquals property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitraryDate])(
-      `Dates with same time are equal`,
-      (date) => {
-        const copy = new Date(date.getTime())
-        expect(deepEquals(date, copy)).toBe(true)
-      },
-    )
+    fcTest.prop([arbitraryDate])(`Dates with same time are equal`, (date) => {
+      const copy = new Date(date.getTime())
+      expect(deepEquals(date, copy)).toBe(true)
+    })
 
     fcTest.prop([arbitraryTemporalPlainDate])(
       `Temporal.PlainDate with same values are equal`,
@@ -241,28 +257,25 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   describe(`inequality properties`, () => {
-    fcTest.prop([fc.array(fc.integer(), { minLength: 1, maxLength: 10 }), fc.integer()])(
-      `arrays with different elements are not equal`,
-      (arr, extraElement) => {
-        const modified = [...arr, extraElement]
-        expect(deepEquals(arr, modified)).toBe(false)
-      },
-    )
+    fcTest.prop([
+      fc.array(fc.integer(), { minLength: 1, maxLength: 10 }),
+      fc.integer(),
+    ])(`arrays with different elements are not equal`, (arr, extraElement) => {
+      const modified = [...arr, extraElement]
+      expect(deepEquals(arr, modified)).toBe(false)
+    })
 
     fcTest.prop([
       fc.dictionary(fc.string(), fc.integer(), { minKeys: 1, maxKeys: 5 }),
       fc.string(),
       fc.integer(),
-    ])(
-      `objects with extra property are not equal`,
-      (obj, newKey, newValue) => {
-        // Only test if the key doesn't already exist
-        if (!(newKey in obj)) {
-          const modified = { ...obj, [newKey]: newValue }
-          expect(deepEquals(obj, modified)).toBe(false)
-        }
-      },
-    )
+    ])(`objects with extra property are not equal`, (obj, newKey, newValue) => {
+      // Only test if the key doesn't already exist
+      if (!(newKey in obj)) {
+        const modified = { ...obj, [newKey]: newValue }
+        expect(deepEquals(obj, modified)).toBe(false)
+      }
+    })
 
     fcTest.prop([fc.integer(), fc.string()])(
       `different types are not equal`,
@@ -312,22 +325,24 @@ describe(`deepEquals property-based tests`, () => {
   })
 
   describe(`nested structure consistency`, () => {
-    fcTest.prop([fc.array(fc.array(fc.integer(), { maxLength: 3 }), { maxLength: 3 })])(
-      `nested arrays maintain equality through cloning`,
-      (nestedArr) => {
-        const clone = nestedArr.map((inner) => [...inner])
-        expect(deepEquals(nestedArr, clone)).toBe(true)
-      },
-    )
+    fcTest.prop([
+      fc.array(fc.array(fc.integer(), { maxLength: 3 }), { maxLength: 3 }),
+    ])(`nested arrays maintain equality through cloning`, (nestedArr) => {
+      const clone = nestedArr.map((inner) => [...inner])
+      expect(deepEquals(nestedArr, clone)).toBe(true)
+    })
 
-    fcTest.prop([fc.dictionary(fc.string(), fc.dictionary(fc.string(), fc.integer(), { maxKeys: 3 }), { maxKeys: 3 })])(
-      `nested objects maintain equality through cloning`,
-      (nestedObj) => {
-        const clone = Object.fromEntries(
-          Object.entries(nestedObj).map(([k, v]) => [k, { ...v }]),
-        )
-        expect(deepEquals(nestedObj, clone)).toBe(true)
-      },
-    )
+    fcTest.prop([
+      fc.dictionary(
+        fc.string(),
+        fc.dictionary(fc.string(), fc.integer(), { maxKeys: 3 }),
+        { maxKeys: 3 },
+      ),
+    ])(`nested objects maintain equality through cloning`, (nestedObj) => {
+      const clone = Object.fromEntries(
+        Object.entries(nestedObj).map(([k, v]) => [k, { ...v }]),
+      )
+      expect(deepEquals(nestedObj, clone)).toBe(true)
+    })
   })
 })
