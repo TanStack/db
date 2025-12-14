@@ -21,10 +21,7 @@ const arbitraryDirection = fc.constantFrom(`asc`, `desc`)
 
 const arbitraryNulls = fc.constantFrom(`first`, `last`)
 
-const arbitraryStringSort = fc.constantFrom(
-  `locale`,
-  `lexical`,
-)
+const arbitraryStringSort = fc.constantFrom(`locale`, `lexical`)
 
 const arbitraryCompareOptions = fc.record({
   direction: arbitraryDirection,
@@ -126,7 +123,12 @@ describe(`buildCursor property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitraryPropRef, arbitraryNulls, arbitraryStringSort, arbitraryValue])(
+    fcTest.prop([
+      arbitraryPropRef,
+      arbitraryNulls,
+      arbitraryStringSort,
+      arbitraryValue,
+    ])(
       `ascending direction produces gt operator`,
       (expr, nulls, stringSort, value) => {
         const clause: OrderByClause = {
@@ -140,7 +142,12 @@ describe(`buildCursor property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitraryPropRef, arbitraryNulls, arbitraryStringSort, arbitraryValue])(
+    fcTest.prop([
+      arbitraryPropRef,
+      arbitraryNulls,
+      arbitraryStringSort,
+      arbitraryValue,
+    ])(
       `descending direction produces lt operator`,
       (expr, nulls, stringSort, value) => {
         const clause: OrderByClause = {
@@ -294,30 +301,27 @@ describe(`buildCursor property-based tests`, () => {
         { minLength: 2, maxLength: 4 },
       ),
       arbitraryValues(2, 4),
-    ])(
-      `all ascending columns use gt operators`,
-      (clauseParts, values) => {
-        const orderBy: OrderBy = clauseParts.map(([expr, nulls, stringSort]) => ({
-          expression: expr,
-          compareOptions: { direction: `asc` as const, nulls, stringSort },
-        }))
+    ])(`all ascending columns use gt operators`, (clauseParts, values) => {
+      const orderBy: OrderBy = clauseParts.map(([expr, nulls, stringSort]) => ({
+        expression: expr,
+        compareOptions: { direction: `asc` as const, nulls, stringSort },
+      }))
 
-        const minLen = Math.min(orderBy.length, values.length)
-        const result = buildCursor(
-          orderBy.slice(0, minLen),
-          values.slice(0, minLen),
-        )
+      const minLen = Math.min(orderBy.length, values.length)
+      const result = buildCursor(
+        orderBy.slice(0, minLen),
+        values.slice(0, minLen),
+      )
 
-        if (result) {
-          // Count gt operators - should equal number of columns
-          const gtCount = countOperators(result, `gt`)
-          expect(gtCount).toBe(minLen)
-          // Should have no lt operators
-          const ltCount = countOperators(result, `lt`)
-          expect(ltCount).toBe(0)
-        }
-      },
-    )
+      if (result) {
+        // Count gt operators - should equal number of columns
+        const gtCount = countOperators(result, `gt`)
+        expect(gtCount).toBe(minLen)
+        // Should have no lt operators
+        const ltCount = countOperators(result, `lt`)
+        expect(ltCount).toBe(0)
+      }
+    })
 
     fcTest.prop([
       fc.array(
@@ -325,29 +329,26 @@ describe(`buildCursor property-based tests`, () => {
         { minLength: 2, maxLength: 4 },
       ),
       arbitraryValues(2, 4),
-    ])(
-      `all descending columns use lt operators`,
-      (clauseParts, values) => {
-        const orderBy: OrderBy = clauseParts.map(([expr, nulls, stringSort]) => ({
-          expression: expr,
-          compareOptions: { direction: `desc` as const, nulls, stringSort },
-        }))
+    ])(`all descending columns use lt operators`, (clauseParts, values) => {
+      const orderBy: OrderBy = clauseParts.map(([expr, nulls, stringSort]) => ({
+        expression: expr,
+        compareOptions: { direction: `desc` as const, nulls, stringSort },
+      }))
 
-        const minLen = Math.min(orderBy.length, values.length)
-        const result = buildCursor(
-          orderBy.slice(0, minLen),
-          values.slice(0, minLen),
-        )
+      const minLen = Math.min(orderBy.length, values.length)
+      const result = buildCursor(
+        orderBy.slice(0, minLen),
+        values.slice(0, minLen),
+      )
 
-        if (result) {
-          // Count lt operators - should equal number of columns
-          const ltCount = countOperators(result, `lt`)
-          expect(ltCount).toBe(minLen)
-          // Should have no gt operators
-          const gtCount = countOperators(result, `gt`)
-          expect(gtCount).toBe(0)
-        }
-      },
-    )
+      if (result) {
+        // Count lt operators - should equal number of columns
+        const ltCount = countOperators(result, `lt`)
+        expect(ltCount).toBe(minLen)
+        // Should have no gt operators
+        const gtCount = countOperators(result, `gt`)
+        expect(gtCount).toBe(0)
+      }
+    })
   })
 })

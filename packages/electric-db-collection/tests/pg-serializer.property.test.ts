@@ -16,12 +16,9 @@ import { serialize } from '../src/pg-serializer'
 
 describe(`pg-serializer property-based tests`, () => {
   describe(`string serialization`, () => {
-    fcTest.prop([fc.string()])(
-      `strings pass through unchanged`,
-      (str) => {
-        expect(serialize(str)).toBe(str)
-      },
-    )
+    fcTest.prop([fc.string()])(`strings pass through unchanged`, (str) => {
+      expect(serialize(str)).toBe(str)
+    })
 
     fcTest.prop([fc.string()])(`strings are idempotent`, (str) => {
       // serialize(serialize(str)) should equal serialize(str) for strings
@@ -70,10 +67,13 @@ describe(`pg-serializer property-based tests`, () => {
   })
 
   describe(`boolean serialization`, () => {
-    fcTest.prop([fc.boolean()])(`booleans serialize to 'true' or 'false'`, (b) => {
-      const serialized = serialize(b)
-      expect(serialized).toBe(b ? `true` : `false`)
-    })
+    fcTest.prop([fc.boolean()])(
+      `booleans serialize to 'true' or 'false'`,
+      (b) => {
+        const serialized = serialize(b)
+        expect(serialized).toBe(b ? `true` : `false`)
+      },
+    )
 
     fcTest.prop([fc.boolean()])(
       `booleans round-trip through string comparison`,
@@ -161,18 +161,19 @@ describe(`pg-serializer property-based tests`, () => {
       },
     )
 
-    fcTest.prop([
-      fc.array(fc.constantFrom(null, undefined), { maxLength: 5 }),
-    ])(`arrays with null/undefined serialize to NULL`, (arr) => {
-      const serialized = serialize(arr)
-      const inner = serialized.slice(1, -1)
-      if (inner !== ``) {
-        const elements = inner.split(`,`)
-        elements.forEach((el) => {
-          expect(el).toBe(`NULL`)
-        })
-      }
-    })
+    fcTest.prop([fc.array(fc.constantFrom(null, undefined), { maxLength: 5 })])(
+      `arrays with null/undefined serialize to NULL`,
+      (arr) => {
+        const serialized = serialize(arr)
+        const inner = serialized.slice(1, -1)
+        if (inner !== ``) {
+          const elements = inner.split(`,`)
+          elements.forEach((el) => {
+            expect(el).toBe(`NULL`)
+          })
+        }
+      },
+    )
   })
 
   describe(`string array escaping`, () => {

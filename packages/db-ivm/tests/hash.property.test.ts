@@ -87,15 +87,21 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([arbitrarySimpleArray])(`cloned arrays have same hash`, (arr) => {
-      const clone = [...arr]
-      expect(hash(clone)).toBe(hash(arr))
-    })
+    fcTest.prop([arbitrarySimpleArray])(
+      `cloned arrays have same hash`,
+      (arr) => {
+        const clone = [...arr]
+        expect(hash(clone)).toBe(hash(arr))
+      },
+    )
 
-    fcTest.prop([arbitraryDate])(`dates with same time have same hash`, (date) => {
-      const clone = new Date(date.getTime())
-      expect(hash(clone)).toBe(hash(date))
-    })
+    fcTest.prop([arbitraryDate])(
+      `dates with same time have same hash`,
+      (date) => {
+        const clone = new Date(date.getTime())
+        expect(hash(clone)).toBe(hash(date))
+      },
+    )
 
     fcTest.prop([arbitraryUint8Array])(
       `Uint8Arrays with same content have same hash`,
@@ -143,21 +149,20 @@ describe(`hash property-based tests`, () => {
       },
     )
 
-    fcTest.prop([fc.dictionary(fc.string(), fc.integer(), { minKeys: 2, maxKeys: 5 })])(
-      `object hash is independent of property insertion order`,
-      (obj) => {
-        const keys = Object.keys(obj)
-        const reversedKeys = [...keys].reverse()
+    fcTest.prop([
+      fc.dictionary(fc.string(), fc.integer(), { minKeys: 2, maxKeys: 5 }),
+    ])(`object hash is independent of property insertion order`, (obj) => {
+      const keys = Object.keys(obj)
+      const reversedKeys = [...keys].reverse()
 
-        // Create new object with reversed key order
-        const reversed: Record<string, number> = {}
-        for (const key of reversedKeys) {
-          reversed[key] = obj[key]!
-        }
+      // Create new object with reversed key order
+      const reversed: Record<string, number> = {}
+      for (const key of reversedKeys) {
+        reversed[key] = obj[key]!
+      }
 
-        expect(hash(reversed)).toBe(hash(obj))
-      },
-    )
+      expect(hash(reversed)).toBe(hash(obj))
+    })
   })
 
   describe(`number normalization`, () => {
@@ -254,20 +259,29 @@ describe(`hash property-based tests`, () => {
   })
 
   describe(`hash produces numbers`, () => {
-    fcTest.prop([arbitraryPrimitive])(`hash returns a number for primitives`, (value) => {
-      expect(typeof hash(value)).toBe(`number`)
-      expect(Number.isFinite(hash(value))).toBe(true)
-    })
+    fcTest.prop([arbitraryPrimitive])(
+      `hash returns a number for primitives`,
+      (value) => {
+        expect(typeof hash(value)).toBe(`number`)
+        expect(Number.isFinite(hash(value))).toBe(true)
+      },
+    )
 
-    fcTest.prop([arbitrarySimpleObject])(`hash returns a number for objects`, (obj) => {
-      expect(typeof hash(obj)).toBe(`number`)
-      expect(Number.isFinite(hash(obj))).toBe(true)
-    })
+    fcTest.prop([arbitrarySimpleObject])(
+      `hash returns a number for objects`,
+      (obj) => {
+        expect(typeof hash(obj)).toBe(`number`)
+        expect(Number.isFinite(hash(obj))).toBe(true)
+      },
+    )
 
-    fcTest.prop([arbitrarySimpleArray])(`hash returns a number for arrays`, (arr) => {
-      expect(typeof hash(arr)).toBe(`number`)
-      expect(Number.isFinite(hash(arr))).toBe(true)
-    })
+    fcTest.prop([arbitrarySimpleArray])(
+      `hash returns a number for arrays`,
+      (arr) => {
+        expect(typeof hash(arr)).toBe(`number`)
+        expect(Number.isFinite(hash(arr))).toBe(true)
+      },
+    )
   })
 
   describe(`inequality detection`, () => {
@@ -303,11 +317,14 @@ describe(`hash property-based tests`, () => {
       fc.dictionary(fc.string(), fc.integer(), { minKeys: 1, maxKeys: 5 }),
       fc.string(),
       fc.integer(),
-    ])(`objects with extra property have different hashes`, (obj, newKey, newValue) => {
-      if (!(newKey in obj)) {
-        const extended = { ...obj, [newKey]: newValue }
-        expect(hash(obj)).not.toBe(hash(extended))
-      }
-    })
+    ])(
+      `objects with extra property have different hashes`,
+      (obj, newKey, newValue) => {
+        if (!(newKey in obj)) {
+          const extended = { ...obj, [newKey]: newValue }
+          expect(hash(obj)).not.toBe(hash(extended))
+        }
+      },
+    )
   })
 })
