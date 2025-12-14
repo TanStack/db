@@ -379,6 +379,10 @@ function getAggregateFunction(aggExpr: Aggregate) {
       return min(valueExtractorWithDate)
     case `max`:
       return max(valueExtractorWithDate)
+    case `minstr`:
+      return min(rawValueExtractor)
+    case `maxstr`:
+      return max(rawValueExtractor)
     case `collect`:
       return collect(rawValueExtractor)
     default:
