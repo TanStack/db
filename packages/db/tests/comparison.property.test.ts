@@ -355,7 +355,11 @@ describe(`makeComparator property-based tests`, () => {
   ])(
     `makeComparator produces valid comparator for any options (same types)`,
     ([a, b], direction, nulls) => {
-      const opts: CompareOptions = { direction, nulls, stringSort: `locale` }
+      const opts: CompareOptions = {
+        direction: direction as `asc` | `desc`,
+        nulls: nulls as `first` | `last`,
+        stringSort: `locale`,
+      }
       const comparator = makeComparator(opts)
 
       // Reflexivity

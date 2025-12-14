@@ -129,33 +129,54 @@ describe(`deepEquals property-based tests`, () => {
     )
   })
 
-  describe(`known edge cases - cross-type comparisons`, () => {
-    /**
-     * This test documents a known asymmetry in deepEquals when comparing
-     * Date objects with Temporal objects. The Date check comes first and
-     * returns false, but when reversed, the Temporal check requires both
-     * to be Temporal types, so it falls through to generic object comparison.
-     *
-     * This is arguably a bug that could be fixed by ensuring symmetric
-     * type checking for all special types.
-     */
-    it(`documents asymmetric behavior between Date and Temporal.Duration`, () => {
+  describe(`cross-type comparisons`, () => {
+    it(`Date and Temporal.Duration are not equal in either direction`, () => {
       const date = new Date(`1970-01-01T00:00:00.000Z`)
       const duration = Temporal.Duration.from({ hours: 0, minutes: 0, seconds: 0 })
 
-      // Both directions should return false for different types
-      const dateFirst = deepEquals(date, duration)
-      const durationFirst = deepEquals(duration, date)
+      // Both directions should return false for different types (symmetric)
+      expect(deepEquals(date, duration)).toBe(false)
+      expect(deepEquals(duration, date)).toBe(false)
+    })
 
-      // Document the current behavior (this may be asymmetric)
-      // If this test fails after a fix, that's good - the fix should make them both false
-      expect(dateFirst).toBe(false)
-      // Note: durationFirst may be true due to object key comparison falling through
-      // This documents the asymmetry - ideally both should be false
-      if (durationFirst !== dateFirst) {
-        // Asymmetry detected - this is the known edge case
-        expect(durationFirst).toBe(true) // Documents current behavior
-      }
+    it(`Date and Temporal.PlainDate are not equal in either direction`, () => {
+      const date = new Date(`2023-01-01T00:00:00.000Z`)
+      const plainDate = new Temporal.PlainDate(2023, 1, 1)
+
+      expect(deepEquals(date, plainDate)).toBe(false)
+      expect(deepEquals(plainDate, date)).toBe(false)
+    })
+
+    it(`RegExp and object are not equal in either direction`, () => {
+      const regex = /test/g
+      const obj = { source: `test`, flags: `g` }
+
+      expect(deepEquals(regex, obj)).toBe(false)
+      expect(deepEquals(obj, regex)).toBe(false)
+    })
+
+    it(`Map and object are not equal in either direction`, () => {
+      const map = new Map([[`a`, 1]])
+      const obj = { a: 1 }
+
+      expect(deepEquals(map, obj)).toBe(false)
+      expect(deepEquals(obj, map)).toBe(false)
+    })
+
+    it(`Set and array are not equal in either direction`, () => {
+      const set = new Set([1, 2, 3])
+      const arr = [1, 2, 3]
+
+      expect(deepEquals(set, arr)).toBe(false)
+      expect(deepEquals(arr, set)).toBe(false)
+    })
+
+    it(`Uint8Array and array are not equal in either direction`, () => {
+      const typedArr = new Uint8Array([1, 2, 3])
+      const arr = [1, 2, 3]
+
+      expect(deepEquals(typedArr, arr)).toBe(false)
+      expect(deepEquals(arr, typedArr)).toBe(false)
     })
   })
 
