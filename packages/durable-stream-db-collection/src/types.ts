@@ -105,6 +105,12 @@ export interface DurableStreamCollectionConfig<TRow extends object> {
    * Defaults to localStorage in browsers.
    */
   storage?: OffsetStorage
+
+  /**
+   * AbortSignal to cancel the stream sync.
+   * When aborted, the sync will stop and cleanup will be called.
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -154,7 +160,7 @@ export interface DurableStreamClient<TRow = unknown> {
   /**
    * Follow the stream from a given offset, yielding results as they arrive.
    */
-  follow(options: FollowOptions): AsyncIterable<DurableStreamResult<TRow>>
+  follow: (options: FollowOptions) => AsyncIterable<DurableStreamResult<TRow>>
 }
 
 /**

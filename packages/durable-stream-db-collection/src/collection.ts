@@ -96,6 +96,7 @@ export function durableStreamCollectionOptions<TRow extends object>(
       const stream = new DurableStream({
         url: config.url,
         headers: config.headers,
+        signal: config.signal,
       })
 
       try {
@@ -104,13 +105,30 @@ export function durableStreamCollectionOptions<TRow extends object>(
           live: config.liveMode ?? `long-poll`,
         }
 
-        for await (const result of stream.follow(
-          followOptions,
-        ) as AsyncIterable<DurableStreamResult<TRow>>) {
+        for await (const chunk of stream.read(followOptions)) {
           if (aborted) break
 
-          // In JSON mode, result.data is the parsed array
-          const rows = result.data
+          // Parse JSON from raw bytes
+          // The stream returns Uint8Array, we need to decode and parse
+          let rows: Array<TRow>
+          try {
+            const text = new TextDecoder().decode(chunk.data)
+            if (!text.trim()) {
+              // Empty response, skip
+              continue
+            }
+            const parsed = JSON.parse(text)
+            // Server may return array directly or wrapped in an object
+            rows = Array.isArray(parsed) ? parsed : [parsed]
+          } catch {
+            // Skip malformed JSON
+            continue
+          }
+
+          const result: DurableStreamResult<TRow> = {
+            data: rows,
+            offset: chunk.offset,
+          }
 
           // Only start a transaction if we have rows to process
           if (rows.length > 0) {
@@ -146,6 +164,7 @@ export function durableStreamCollectionOptions<TRow extends object>(
           // Mark ready after first successful batch
           if (isFirstBatch) {
             markReady()
+
             isFirstBatch = false
           }
         }
@@ -160,6 +179,7 @@ export function durableStreamCollectionOptions<TRow extends object>(
         // Reconnect after delay if not aborted
         if (!aborted) {
           const delay = config.reconnectDelay ?? 5000
+
           setTimeout(syncLoop, delay)
         }
       }
@@ -179,7 +199,7 @@ export function durableStreamCollectionOptions<TRow extends object>(
   // Create the getKey function that extracts from RowWithOffset
   const getKey = (row: RowWithOffset<TRow>): string | number => {
     // Extract the original row (without offset) for the user's getKey function
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     const { offset: _offset, ...originalRow } = row
     return config.getKey(originalRow as TRow)
   }
