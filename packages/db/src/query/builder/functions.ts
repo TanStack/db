@@ -330,7 +330,7 @@ export function max<T extends ExpressionLike>(arg: T): AggregateReturnType<T> {
  * for proper lexicographic comparison (e.g., ISO 8601 date strings).
  */
 export function minStr<T extends ExpressionLike>(
-  arg: T
+  arg: T,
 ): Aggregate<string | null | undefined> {
   return new Aggregate(`minstr`, [toExpression(arg)])
 }
@@ -341,7 +341,7 @@ export function minStr<T extends ExpressionLike>(
  * for proper lexicographic comparison (e.g., ISO 8601 date strings).
  */
 export function maxStr<T extends ExpressionLike>(
-  arg: T
+  arg: T,
 ): Aggregate<string | null | undefined> {
   return new Aggregate(`maxstr`, [toExpression(arg)])
 }

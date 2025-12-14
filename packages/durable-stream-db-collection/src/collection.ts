@@ -199,7 +199,7 @@ export function durableStreamCollectionOptions<TRow extends object>(
   // Create the getKey function that extracts from RowWithOffset
   const getKey = (row: RowWithOffset<TRow>): string | number => {
     // Extract the original row (without offset) for the user's getKey function
-     
+
     const { offset: _offset, ...originalRow } = row
     return config.getKey(originalRow as TRow)
   }

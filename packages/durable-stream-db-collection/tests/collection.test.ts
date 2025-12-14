@@ -30,9 +30,13 @@ vi.mock(`@durable-streams/client`, () => {
 })
 
 // Helper to create an async iterator from a controller
-function createMockFollowIterator(): AsyncIterable<DurableStreamResult<TestRow>> {
+function createMockFollowIterator(): AsyncIterable<
+  DurableStreamResult<TestRow>
+> {
   const queue: Array<DurableStreamResult<TestRow>> = []
-  let resolveNext: ((value: IteratorResult<DurableStreamResult<TestRow>>) => void) | null = null
+  let resolveNext:
+    | ((value: IteratorResult<DurableStreamResult<TestRow>>) => void)
+    | null = null
   let isDone = false
   let error: Error | null = null
 

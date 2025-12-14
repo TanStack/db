@@ -13,7 +13,9 @@
     "paths": {
       "@tanstack/db-ivm": ["../db-ivm/src"],
       "@tanstack/db": ["../db/src"],
-      "@durable-streams/client": ["../../../../durable-streams/durable-streams/packages/client/src"]
+      "@durable-streams/client": [
+        "../../../../durable-streams/durable-streams/packages/client/src"
+      ]
     }
   },
   "include": ["src", "tests", "vite.config.ts"],

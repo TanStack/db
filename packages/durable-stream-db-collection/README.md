@@ -21,7 +21,7 @@ const eventsCollection = createCollection(
     url: 'https://api.example.com/v1/stream/events',
     getKey: (row) => row.id,
     getDeduplicationKey: (row) => `${row.id}:${row.seq}`,
-  })
+  }),
 )
 ```
 
@@ -56,19 +56,19 @@ Creates TanStack DB collection configuration for a Durable Stream.
 ```typescript
 interface DurableStreamCollectionConfig<TRow> {
   // Required
-  url: string                              // URL of the Durable Stream endpoint
-  getKey: (row: TRow) => string | number   // Extract primary key from row
+  url: string // URL of the Durable Stream endpoint
+  getKey: (row: TRow) => string | number // Extract primary key from row
   getDeduplicationKey: (row: TRow) => string // Extract deduplication key from row
 
   // Optional
-  id?: string                              // Collection ID (auto-generated from URL if not provided)
-  schema?: StandardSchemaV1<TRow>          // Standard Schema for validation
-  initialOffset?: string                   // Initial offset (default: '-1' for beginning)
-  headers?: Record<string, string>         // HTTP headers for requests
-  reconnectDelay?: number                  // Delay before reconnecting after error (default: 5000ms)
-  liveMode?: 'long-poll' | 'sse'           // Live mode (default: 'long-poll')
-  storageKey?: string | false              // Storage key prefix (default: 'durable-stream')
-  storage?: OffsetStorage                  // Custom storage adapter
+  id?: string // Collection ID (auto-generated from URL if not provided)
+  schema?: StandardSchemaV1<TRow> // Standard Schema for validation
+  initialOffset?: string // Initial offset (default: '-1' for beginning)
+  headers?: Record<string, string> // HTTP headers for requests
+  reconnectDelay?: number // Delay before reconnecting after error (default: 5000ms)
+  liveMode?: 'long-poll' | 'sse' // Live mode (default: 'long-poll')
+  storageKey?: string | false // Storage key prefix (default: 'durable-stream')
+  storage?: OffsetStorage // Custom storage adapter
 }
 ```
 
@@ -100,7 +100,7 @@ const eventsCollection = createCollection(
     url: 'https://api.example.com/v1/stream/events',
     getKey: (row) => row.id,
     getDeduplicationKey: (row) => row.id,
-  })
+  }),
 )
 
 // Preload the collection
@@ -134,7 +134,7 @@ const eventsCollection = createCollection(
     getKey: (row) => row.id,
     getDeduplicationKey: (row) => `${row.id}:${row.seq}`,
     schema: eventSchema,
-  })
+  }),
 )
 ```
 
@@ -147,9 +147,9 @@ const eventsCollection = createCollection(
     getKey: (row) => row.id,
     getDeduplicationKey: (row) => row.id,
     headers: {
-      'Authorization': `Bearer ${token}`,
+      Authorization: `Bearer ${token}`,
     },
-  })
+  }),
 )
 ```
 
@@ -165,7 +165,7 @@ const eventsCollection = createCollection(
     getKey: (row) => row.id,
     getDeduplicationKey: (row) => row.id,
     storage: AsyncStorage,
-  })
+  }),
 )
 ```
 
@@ -178,7 +178,7 @@ const eventsCollection = createCollection(
     getKey: (row) => row.id,
     getDeduplicationKey: (row) => row.id,
     storageKey: false, // No persistence
-  })
+  }),
 )
 ```
 
@@ -225,12 +225,14 @@ getDeduplicationKey: (row) => `${row.timestamp}:${row.id}`
 ```
 
 The deduplication key must be:
+
 - **Unique** within the stream
 - **Deterministic** - the same row always produces the same key
 
 ## Reconnection Behavior
 
 On error, the collection will:
+
 1. Mark as ready (if not already) to avoid blocking UI
 2. Wait for `reconnectDelay` milliseconds (default: 5000)
 3. Reconnect and resume from the last successful offset
