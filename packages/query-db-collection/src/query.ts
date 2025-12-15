@@ -1187,10 +1187,7 @@ export function queryCollectionOptions(
           )
         } else {
           // No select - cache contains raw array, just set it directly
-          queryClient.setQueryData(
-            queryKey as unknown as Array<unknown>,
-            items,
-          )
+          queryClient.setQueryData(queryKey as unknown as Array<unknown>, items)
         }
       },
     }
