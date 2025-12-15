@@ -39,10 +39,11 @@ export interface SyncContext<
   write: (message: Omit<ChangeMessage<TRow>, `key`>) => void
   commit: () => void
   /**
-   * Function to update the query cache with the latest synced data.
+   * Optional function to update the query cache with the latest synced data.
    * Handles both direct array caches and wrapped response formats (when `select` is used).
+   * If not provided, falls back to directly setting the cache with the raw array.
    */
-  updateCacheData: (items: Array<TRow>) => void
+  updateCacheData?: (items: Array<TRow>) => void
 }
 
 interface NormalizedOperation<
@@ -210,7 +211,12 @@ export function performWriteOperations<
 
   // Update query cache after successful commit
   const updatedData = Array.from(ctx.collection._state.syncedData.values())
-  ctx.updateCacheData(updatedData)
+  if (ctx.updateCacheData) {
+    ctx.updateCacheData(updatedData)
+  } else {
+    // Fallback: directly set the cache with raw array (for non-Query Collection consumers)
+    ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
+  }
 }
 
 // Factory function to create write utils
