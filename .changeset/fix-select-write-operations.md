@@ -1,5 +1,5 @@
 ---
-"@tanstack/query-db-collection": patch
+'@tanstack/query-db-collection': patch
 ---
 
 Fix writeInsert/writeUpsert throwing error when collection uses select option
