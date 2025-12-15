@@ -1139,7 +1139,7 @@ export function queryCollectionOptions(
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => void
-    hasSelect: boolean
+    updateCacheData: (items: Array<any>) => void
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
@@ -1155,7 +1155,44 @@ export function queryCollectionOptions(
       begin,
       write,
       commit,
-      hasSelect: !!select,
+      updateCacheData: (items: Array<any>) => {
+        if (select) {
+          // When `select` is used, the cache contains a wrapped response (e.g., { data: [...], meta: {...} })
+          // We need to update the cache while preserving the wrapper structure
+          queryClient.setQueryData(
+            queryKey as unknown as Array<unknown>,
+            (oldData: any) => {
+              if (!oldData || typeof oldData !== `object`) {
+                // No existing cache or not an object - just set the raw array
+                return items
+              }
+
+              if (Array.isArray(oldData)) {
+                // Cache is already a raw array (shouldn't happen with select, but handle it)
+                return items
+              }
+
+              // Find the property that contains the array by checking each property
+              // The select function extracts from this property, so we need to find and update it
+              for (const key of Object.keys(oldData)) {
+                if (Array.isArray(oldData[key])) {
+                  // Found the array property - create a shallow copy with updated items
+                  return { ...oldData, [key]: items }
+                }
+              }
+
+              // Couldn't find an array property - fallback to raw array
+              return items
+            },
+          )
+        } else {
+          // No select - cache contains raw array, just set it directly
+          queryClient.setQueryData(
+            queryKey as unknown as Array<unknown>,
+            items,
+          )
+        }
+      },
     }
 
     // Call the original internalSync logic

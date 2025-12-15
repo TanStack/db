@@ -795,6 +795,76 @@ describe(`QueryCollection`, () => {
 
       consoleErrorSpy.mockRestore()
     })
+
+    it(`should update query cache with wrapped format preserved when using writeInsert with select option`, async () => {
+      const queryKey = [`select-cache-update-test`]
+
+      const queryFn = vi.fn().mockResolvedValue(initialMetaData)
+      const select = vi.fn((data: MetaDataType<TestItem>) => data.data)
+
+      const options = queryCollectionOptions({
+        id: `select-cache-update-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        select,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      // Wait for collection to be ready
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.size).toBe(2)
+      })
+
+      // Verify initial cache has wrapped format
+      const initialCache = queryClient.getQueryData(
+        queryKey,
+      ) as MetaDataType<TestItem>
+      expect(initialCache.metaDataOne).toBe(`example metadata`)
+      expect(initialCache.metaDataTwo).toBe(`example metadata`)
+      expect(initialCache.data).toHaveLength(2)
+
+      // Insert a new item
+      const newItem: TestItem = { id: `3`, name: `New Item` }
+      collection.utils.writeInsert(newItem)
+
+      // Verify the cache still has wrapped format with metadata preserved
+      const cacheAfterInsert = queryClient.getQueryData(
+        queryKey,
+      ) as MetaDataType<TestItem>
+      expect(cacheAfterInsert.metaDataOne).toBe(`example metadata`)
+      expect(cacheAfterInsert.metaDataTwo).toBe(`example metadata`)
+      expect(cacheAfterInsert.data).toHaveLength(3)
+      expect(cacheAfterInsert.data).toContainEqual(newItem)
+
+      // Update an existing item
+      collection.utils.writeUpdate({ id: `1`, name: `Updated First Item` })
+
+      // Verify the cache still has wrapped format
+      const cacheAfterUpdate = queryClient.getQueryData(
+        queryKey,
+      ) as MetaDataType<TestItem>
+      expect(cacheAfterUpdate.metaDataOne).toBe(`example metadata`)
+      expect(cacheAfterUpdate.data).toHaveLength(3)
+      const updatedItem = cacheAfterUpdate.data.find((item) => item.id === `1`)
+      expect(updatedItem?.name).toBe(`Updated First Item`)
+
+      // Delete an item
+      collection.utils.writeDelete(`2`)
+
+      // Verify the cache still has wrapped format
+      const cacheAfterDelete = queryClient.getQueryData(
+        queryKey,
+      ) as MetaDataType<TestItem>
+      expect(cacheAfterDelete.metaDataOne).toBe(`example metadata`)
+      expect(cacheAfterDelete.data).toHaveLength(2)
+      expect(cacheAfterDelete.data).not.toContainEqual(
+        expect.objectContaining({ id: `2` }),
+      )
+    })
   })
   describe(`Direct persistence handlers`, () => {
     it(`should pass through direct persistence handlers to collection options`, () => {
