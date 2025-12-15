@@ -312,9 +312,9 @@ function stripStringsAndComments(source: string): string {
  * // This is fine:
  * checkCallbackForJsOperators(({users}) => users.data)
  */
-export function checkCallbackForJsOperators<T extends (...args: Array<any>) => any>(
-  callback: T,
-): void {
+export function checkCallbackForJsOperators<
+  T extends (...args: Array<any>) => any,
+>(callback: T): void {
   const source = callback.toString()
 
   // Strip strings and comments to avoid false positives
