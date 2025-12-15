@@ -9,7 +9,7 @@ title: LoadSubsetOptions
 type LoadSubsetOptions = object;
 ```
 
-Defined in: [packages/db/src/types.ts:256](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L256)
+Defined in: [packages/db/src/types.ts:257](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L257)
 
 ## Properties
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/types.ts:256](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:262](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L262)
+Defined in: [packages/db/src/types.ts:263](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L263)
 
 The limit of the data to load
 
@@ -31,7 +31,7 @@ The limit of the data to load
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:260](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L260)
+Defined in: [packages/db/src/types.ts:261](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L261)
 
 The order by clause to sort the data
 
@@ -43,7 +43,7 @@ The order by clause to sort the data
 optional subscription: Subscription;
 ```
 
-Defined in: [packages/db/src/types.ts:271](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L271)
+Defined in: [packages/db/src/types.ts:272](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L272)
 
 The subscription that triggered the load.
 Advanced sync implementations can use this for:
@@ -63,6 +63,6 @@ Available when called from CollectionSubscription, may be undefined for direct c
 optional where: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:258](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L258)
+Defined in: [packages/db/src/types.ts:259](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L259)
 
 The where expression to filter the data

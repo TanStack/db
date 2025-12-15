@@ -205,10 +205,3 @@ export type IndexConstructor<TKey extends string | number = string | number> =
     name?: string,
     options?: any,
   ) => BaseIndex<TKey>
-
-/**
- * Index resolver can be either a class constructor or async loader
- */
-export type IndexResolver<TKey extends string | number = string | number> =
-  | IndexConstructor<TKey>
-  | (() => Promise<IndexConstructor<TKey>>)

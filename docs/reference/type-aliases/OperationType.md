@@ -9,4 +9,4 @@ title: OperationType
 type OperationType = "insert" | "update" | "delete";
 ```
 
-Defined in: [packages/db/src/types.ts:202](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L202)
+Defined in: [packages/db/src/types.ts:203](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L203)

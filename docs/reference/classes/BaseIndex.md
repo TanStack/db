@@ -9,10 +9,6 @@ Defined in: [packages/db/src/indexes/base-index.ts:76](https://github.com/TanSta
 
 Base abstract class that all index types extend
 
-## Extended by
-
-- [`BTreeIndex`](BTreeIndex.md)
-
 ## Type Parameters
 
 ### TKey
@@ -534,7 +530,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:122](https://github.com/TanSt
 
 ##### options
 
-[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md)
+`RangeQueryOptions`
 
 #### Returns
 
@@ -558,7 +554,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:123](https://github.com/TanSt
 
 ##### options
 
-[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md)
+`RangeQueryOptions`
 
 #### Returns
 

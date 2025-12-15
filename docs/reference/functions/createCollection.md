@@ -11,7 +11,7 @@ title: createCollection
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:134](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L134)
+Defined in: [packages/db/src/collection/index.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L132)
 
 Creates a new Collection instance with the given configuration
 
@@ -120,7 +120,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, Exclude<TUtils, undefined>, T, InferSchemaInput<T>> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:151](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L151)
+Defined in: [packages/db/src/collection/index.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L149)
 
 Creates a new Collection instance with the given configuration
 
@@ -229,7 +229,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:169](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L169)
+Defined in: [packages/db/src/collection/index.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L167)
 
 Creates a new Collection instance with the given configuration
 
@@ -338,7 +338,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:185](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L185)
+Defined in: [packages/db/src/collection/index.ts:183](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L183)
 
 Creates a new Collection instance with the given configuration
 
@@ -447,7 +447,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:198](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L198)
+Defined in: [packages/db/src/collection/index.ts:196](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L196)
 
 Creates a new Collection instance with the given configuration
 
@@ -556,7 +556,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & NonSingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:211](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L211)
+Defined in: [packages/db/src/collection/index.ts:209](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L209)
 
 Creates a new Collection instance with the given configuration
 
@@ -665,7 +665,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L223)
+Defined in: [packages/db/src/collection/index.ts:221](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L221)
 
 Creates a new Collection instance with the given configuration
 
@@ -774,7 +774,7 @@ const todos = createCollection({
 function createCollection<T, TKey, TUtils>(options): Collection<T, TKey, TUtils, never, T> & SingleResult;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:236](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L236)
+Defined in: [packages/db/src/collection/index.ts:234](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L234)
 
 Creates a new Collection instance with the given configuration
 

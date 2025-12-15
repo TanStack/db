@@ -5,7 +5,7 @@ title: CollectionLike
 
 # Interface: CollectionLike\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:12](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L12)
+Defined in: [packages/db/src/types.ts:13](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L13)
 
 Interface for a collection-like object that provides the necessary methods
 for the change events system to work
@@ -32,7 +32,7 @@ for the change events system to work
 compareOptions: StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:579](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L579)
+Defined in: [packages/db/src/collection/index.ts:567](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L567)
 
 #### Inherited from
 
@@ -46,7 +46,7 @@ Defined in: [packages/db/src/collection/index.ts:579](https://github.com/TanStac
 id: string;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:273](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L273)
+Defined in: [packages/db/src/collection/index.ts:271](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L271)
 
 #### Inherited from
 
@@ -60,7 +60,7 @@ Defined in: [packages/db/src/collection/index.ts:273](https://github.com/TanStac
 indexes: Map<number, BaseIndex<TKey>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:564](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L564)
+Defined in: [packages/db/src/collection/index.ts:552](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L552)
 
 #### Inherited from
 
@@ -76,7 +76,7 @@ Pick.indexes
 entries(): IterableIterator<[TKey, T]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:488](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L488)
+Defined in: [packages/db/src/collection/index.ts:487](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L487)
 
 Get all entries (virtual derived state)
 
@@ -98,7 +98,7 @@ Pick.entries
 get(key): T | undefined;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:453](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L453)
+Defined in: [packages/db/src/collection/index.ts:452](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L452)
 
 Get the current value for a key (virtual derived state)
 
@@ -126,7 +126,7 @@ Pick.get
 has(key): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:460](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L460)
+Defined in: [packages/db/src/collection/index.ts:459](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L459)
 
 Check if a key exists in the collection (virtual derived state)
 
