@@ -1135,10 +1135,16 @@ export function queryCollectionOptions(
    * and wrapped response formats (when `select` is used).
    */
   const updateCacheData = (items: Array<any>): void => {
+    // Get the base query key (handle both static and function-based keys)
+    const key =
+      typeof queryKey === `function`
+        ? queryKey({})
+        : (queryKey as unknown as QueryKey)
+
     if (select) {
       // When `select` is used, the cache contains a wrapped response (e.g., { data: [...], meta: {...} })
       // We need to update the cache while preserving the wrapper structure
-      queryClient.setQueryData(queryKey, (oldData: any) => {
+      queryClient.setQueryData(key, (oldData: any) => {
         if (!oldData || typeof oldData !== `object`) {
           // No existing cache or not an object - don't corrupt the cache
           return oldData
@@ -1187,7 +1193,7 @@ export function queryCollectionOptions(
       })
     } else {
       // No select - cache contains raw array, just set it directly
-      queryClient.setQueryData(queryKey, items)
+      queryClient.setQueryData(key, items)
     }
   }
 
@@ -1195,7 +1201,7 @@ export function queryCollectionOptions(
   let writeContext: {
     collection: any
     queryClient: QueryClient
-    queryKey: QueryKey
+    queryKey: Array<unknown>
     getKey: (item: any) => string | number
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
@@ -1207,11 +1213,17 @@ export function queryCollectionOptions(
   const enhancedInternalSync: SyncConfig<any>[`sync`] = (params) => {
     const { begin, write, commit, collection } = params
 
+    // Get the base query key for the context (handle both static and function-based keys)
+    const contextQueryKey =
+      typeof queryKey === `function`
+        ? (queryKey({}) as unknown as Array<unknown>)
+        : (queryKey as unknown as Array<unknown>)
+
     // Store references for manual write operations
     writeContext = {
       collection,
       queryClient,
-      queryKey: queryKey as QueryKey,
+      queryKey: contextQueryKey,
       getKey: getKey as (item: any) => string | number,
       begin,
       write,
