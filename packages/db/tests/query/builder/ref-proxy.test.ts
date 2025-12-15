@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
+  checkCallbackForJsOperators,
   createRefProxy,
   isRefProxy,
   toExpression,
   val,
 } from '../../../src/query/builder/ref-proxy.js'
 import { PropRef, Value } from '../../../src/query/ir.js'
+import { JavaScriptOperatorInQueryError } from '../../../src/errors.js'
 
 describe(`ref-proxy`, () => {
   describe(`createRefProxy`, () => {
@@ -212,6 +214,83 @@ describe(`ref-proxy`, () => {
       expect((val(null) as Value).value).toBe(null)
       expect((val([1, 2, 3]) as Value).value).toEqual([1, 2, 3])
       expect((val({ a: 1 }) as Value).value).toEqual({ a: 1 })
+    })
+  })
+
+  describe(`checkCallbackForJsOperators`, () => {
+    it(`throws error for || operator`, () => {
+      const callback = ({ users }: any) => ({ data: users.data || [] })
+      expect(() => checkCallbackForJsOperators(callback)).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
+      expect(() => checkCallbackForJsOperators(callback)).toThrow(`||`)
+    })
+
+    it(`throws error for && operator`, () => {
+      const callback = ({ users }: any) => users.active && users.name
+      expect(() => checkCallbackForJsOperators(callback)).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
+      expect(() => checkCallbackForJsOperators(callback)).toThrow(`&&`)
+    })
+
+    it(`throws error for ?? operator`, () => {
+      const callback = ({ users }: any) => ({ name: users.name ?? `default` })
+      expect(() => checkCallbackForJsOperators(callback)).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
+      expect(() => checkCallbackForJsOperators(callback)).toThrow(`??`)
+    })
+
+    it(`does not throw for valid query callbacks`, () => {
+      // Simple property access
+      expect(() =>
+        checkCallbackForJsOperators(({ users }: any) => users.name),
+      ).not.toThrow()
+
+      // Object with property access
+      expect(() =>
+        checkCallbackForJsOperators(({ users }: any) => ({
+          id: users.id,
+          name: users.name,
+        })),
+      ).not.toThrow()
+
+      // Optional chaining is allowed
+      expect(() =>
+        checkCallbackForJsOperators(({ users }: any) => users.profile?.bio),
+      ).not.toThrow()
+    })
+
+    it(`does not throw for operators in string literals`, () => {
+      // || in a string literal should not trigger error
+      expect(() =>
+        checkCallbackForJsOperators(() => ({ message: `a || b is valid` })),
+      ).not.toThrow()
+
+      // && in a string literal should not trigger error
+      expect(() =>
+        checkCallbackForJsOperators(() => ({ message: `a && b is valid` })),
+      ).not.toThrow()
+    })
+  })
+
+  describe(`Symbol.toPrimitive trap`, () => {
+    it(`throws error when proxy is coerced to string`, () => {
+      const proxy = createRefProxy<{ users: { id: number } }>([`users`])
+      expect(() => String(proxy.users.id)).toThrow(JavaScriptOperatorInQueryError)
+    })
+
+    it(`throws error when proxy is used in arithmetic`, () => {
+      const proxy = createRefProxy<{ users: { id: number } }>([`users`])
+      expect(() => Number(proxy.users.id)).toThrow(JavaScriptOperatorInQueryError)
+    })
+
+    it(`throws error when proxy is concatenated with string`, () => {
+      const proxy = createRefProxy<{ users: { name: string } }>([`users`])
+      expect(() => `Hello ${proxy.users.name}`).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
     })
   })
 })

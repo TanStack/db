@@ -16,7 +16,7 @@ import {
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
-import { createRefProxy, toExpression } from './ref-proxy.js'
+import { checkCallbackForJsOperators, createRefProxy, toExpression } from './ref-proxy.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
@@ -357,6 +357,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   where(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
+    // Check for JavaScript operators that cannot be translated to query operations
+    checkCallbackForJsOperators(callback)
+
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
@@ -398,6 +401,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    */
   having(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
+    // Check for JavaScript operators that cannot be translated to query operations
+    checkCallbackForJsOperators(callback)
+
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
@@ -447,6 +453,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   select<TSelectObject extends SelectObject>(
     callback: (refs: RefsForContext<TContext>) => TSelectObject,
   ): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>> {
+    // Check for JavaScript operators that cannot be translated to query operations
+    checkCallbackForJsOperators(callback)
+
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const selectObject = callback(refProxy)

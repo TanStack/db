@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
-import { createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
+import { coalesce, createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
 import { createTransaction } from '../../src/transactions.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import { transactionScopedScheduler } from '../../src/scheduler.js'
@@ -721,7 +721,7 @@ describe(`live query scheduler`, () => {
           .select(({ a, b }) => ({
             id: a.id,
             aValue: a.value,
-            bValue: b?.value ?? null,
+            bValue: coalesce(b!.value, null),
           })),
     })
 

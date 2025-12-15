@@ -1,6 +1,23 @@
 import { PropRef, Value } from '../ir.js'
+import { JavaScriptOperatorInQueryError } from '../../errors.js'
 import type { BasicExpression } from '../ir.js'
 import type { RefLeaf } from './types.js'
+
+/**
+ * Creates a handler for Symbol.toPrimitive that throws an error when
+ * JavaScript tries to coerce a RefProxy to a primitive value.
+ * This catches misuse like string concatenation, arithmetic, etc.
+ */
+function createToPrimitiveHandler(path: Array<string>): (hint: string) => never {
+  return (hint: string) => {
+    const pathStr = path.length > 0 ? path.join(`.`) : `<root>`
+    throw new JavaScriptOperatorInQueryError(
+      hint === `number` ? `arithmetic` : hint === `string` ? `string concatenation` : `comparison`,
+      `Attempted to use "${pathStr}" in a JavaScript ${hint} context.\n` +
+        `Query references can only be used with query functions, not JavaScript operators.`,
+    )
+  }
+}
 
 export interface RefProxy<T = any> {
   /** @internal */
@@ -44,6 +61,10 @@ export function createSingleRowRefProxy<
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
+        // Intercept Symbol.toPrimitive to catch JS coercion attempts
+        if (prop === Symbol.toPrimitive) {
+          return createToPrimitiveHandler(path)
+        }
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
@@ -97,6 +118,10 @@ export function createRefProxy<T extends Record<string, any>>(
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
+        // Intercept Symbol.toPrimitive to catch JS coercion attempts
+        if (prop === Symbol.toPrimitive) {
+          return createToPrimitiveHandler(path)
+        }
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
@@ -140,6 +165,10 @@ export function createRefProxy<T extends Record<string, any>>(
       if (prop === `__refProxy`) return true
       if (prop === `__path`) return []
       if (prop === `__type`) return undefined // Type is only for TypeScript inference
+      // Intercept Symbol.toPrimitive to catch JS coercion attempts
+      if (prop === Symbol.toPrimitive) {
+        return createToPrimitiveHandler([])
+      }
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
       const propStr = String(prop)
@@ -212,4 +241,85 @@ export function isRefProxy(value: any): value is RefProxy {
  */
 export function val<T>(value: T): BasicExpression<T> {
   return new Value(value)
+}
+
+/**
+ * Patterns that indicate JavaScript operators being used in query callbacks.
+ * These operators cannot be translated to query operations and will silently
+ * produce incorrect results.
+ */
+const JS_OPERATOR_PATTERNS: Array<{
+  pattern: RegExp
+  operator: string
+  description: string
+}> = [
+  {
+    // Match || that's not inside a string or comment
+    // This regex looks for || not preceded by quotes that would indicate a string
+    pattern: /\|\|/,
+    operator: `||`,
+    description: `logical OR`,
+  },
+  {
+    // Match && that's not inside a string or comment
+    pattern: /&&/,
+    operator: `&&`,
+    description: `logical AND`,
+  },
+  {
+    // Match ?? nullish coalescing
+    pattern: /\?\?/,
+    operator: `??`,
+    description: `nullish coalescing`,
+  },
+]
+
+/**
+ * Removes string literals and comments from source code to avoid false positives
+ * when checking for JavaScript operators.
+ */
+function stripStringsAndComments(source: string): string {
+  // Remove template literals (backtick strings)
+  let result = source.replace(/`(?:[^`\\]|\\.)*`/g, `""`)
+  // Remove double-quoted strings
+  result = result.replace(/"(?:[^"\\]|\\.)*"/g, `""`)
+  // Remove single-quoted strings
+  result = result.replace(/'(?:[^'\\]|\\.)*'/g, `""`)
+  // Remove single-line comments
+  result = result.replace(/\/\/[^\n]*/g, ``)
+  // Remove multi-line comments
+  result = result.replace(/\/\*[\s\S]*?\*\//g, ``)
+  return result
+}
+
+/**
+ * Checks a callback function's source code for JavaScript operators that
+ * cannot be translated to query operations.
+ *
+ * @param callback - The callback function to check
+ * @throws JavaScriptOperatorInQueryError if a problematic operator is found
+ *
+ * @example
+ * // This will throw an error:
+ * checkCallbackForJsOperators(({users}) => users.data || [])
+ *
+ * // This is fine:
+ * checkCallbackForJsOperators(({users}) => users.data)
+ */
+export function checkCallbackForJsOperators(callback: (...args: Array<unknown>) => unknown): void {
+  const source = callback.toString()
+
+  // Strip strings and comments to avoid false positives
+  const cleanedSource = stripStringsAndComments(source)
+
+  for (const { pattern, operator, description } of JS_OPERATOR_PATTERNS) {
+    if (pattern.test(cleanedSource)) {
+      throw new JavaScriptOperatorInQueryError(
+        operator,
+        `Found JavaScript ${description} operator (${operator}) in query callback.\n` +
+          `This operator is evaluated at query construction time, not at query execution time,\n` +
+          `which means it will not behave as expected.`,
+      )
+    }
+  }
 }
