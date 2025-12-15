@@ -1911,9 +1911,9 @@ describe(`createLiveQueryCollection`, () => {
             .join({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id))
             .select(({ comments: c, users: u }) => ({
               id: c.id,
-              userId: u.id,
+              userId: u!.id,
               text: c.text,
-              userName: u.name,
+              userName: u!.name,
             })),
         getKey: (item) => item.userId,
         startSync: true,

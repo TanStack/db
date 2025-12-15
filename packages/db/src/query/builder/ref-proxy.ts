@@ -312,8 +312,8 @@ function stripStringsAndComments(source: string): string {
  * // This is fine:
  * checkCallbackForJsOperators(({users}) => users.data)
  */
-export function checkCallbackForJsOperators(
-  callback: (...args: Array<unknown>) => unknown,
+export function checkCallbackForJsOperators<T extends (...args: Array<any>) => any>(
+  callback: T,
 ): void {
   const source = callback.toString()
 
