@@ -8,11 +8,17 @@ import type { RefLeaf } from './types.js'
  * JavaScript tries to coerce a RefProxy to a primitive value.
  * This catches misuse like string concatenation, arithmetic, etc.
  */
-function createToPrimitiveHandler(path: Array<string>): (hint: string) => never {
+function createToPrimitiveHandler(
+  path: Array<string>,
+): (hint: string) => never {
   return (hint: string) => {
     const pathStr = path.length > 0 ? path.join(`.`) : `<root>`
     throw new JavaScriptOperatorInQueryError(
-      hint === `number` ? `arithmetic` : hint === `string` ? `string concatenation` : `comparison`,
+      hint === `number`
+        ? `arithmetic`
+        : hint === `string`
+          ? `string concatenation`
+          : `comparison`,
       `Attempted to use "${pathStr}" in a JavaScript ${hint} context.\n` +
         `Query references can only be used with query functions, not JavaScript operators.`,
     )
@@ -306,7 +312,9 @@ function stripStringsAndComments(source: string): string {
  * // This is fine:
  * checkCallbackForJsOperators(({users}) => users.data)
  */
-export function checkCallbackForJsOperators(callback: (...args: Array<unknown>) => unknown): void {
+export function checkCallbackForJsOperators(
+  callback: (...args: Array<unknown>) => unknown,
+): void {
   const source = callback.toString()
 
   // Strip strings and comments to avoid false positives

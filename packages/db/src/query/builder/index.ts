@@ -16,7 +16,11 @@ import {
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
-import { checkCallbackForJsOperators, createRefProxy, toExpression } from './ref-proxy.js'
+import {
+  checkCallbackForJsOperators,
+  createRefProxy,
+  toExpression,
+} from './ref-proxy.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,

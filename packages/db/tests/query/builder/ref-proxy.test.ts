@@ -278,12 +278,16 @@ describe(`ref-proxy`, () => {
   describe(`Symbol.toPrimitive trap`, () => {
     it(`throws error when proxy is coerced to string`, () => {
       const proxy = createRefProxy<{ users: { id: number } }>([`users`])
-      expect(() => String(proxy.users.id)).toThrow(JavaScriptOperatorInQueryError)
+      expect(() => String(proxy.users.id)).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
     })
 
     it(`throws error when proxy is used in arithmetic`, () => {
       const proxy = createRefProxy<{ users: { id: number } }>([`users`])
-      expect(() => Number(proxy.users.id)).toThrow(JavaScriptOperatorInQueryError)
+      expect(() => Number(proxy.users.id)).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
     })
 
     it(`throws error when proxy is concatenated with string`, () => {
