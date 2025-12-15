@@ -1130,6 +1130,45 @@ export function queryCollectionOptions(
     await Promise.all(refetchPromises)
   }
 
+  /**
+   * Updates the query cache with new items, handling both direct arrays
+   * and wrapped response formats (when `select` is used).
+   */
+  const updateCacheData = (items: Array<any>): void => {
+    const key = queryKey as unknown as Array<unknown>
+
+    if (select) {
+      // When `select` is used, the cache contains a wrapped response (e.g., { data: [...], meta: {...} })
+      // We need to update the cache while preserving the wrapper structure
+      queryClient.setQueryData(key, (oldData: any) => {
+        if (!oldData || typeof oldData !== `object`) {
+          // No existing cache or not an object - just set the raw array
+          return items
+        }
+
+        if (Array.isArray(oldData)) {
+          // Cache is already a raw array (shouldn't happen with select, but handle it)
+          return items
+        }
+
+        // Find the property that contains the array by checking each property
+        // The select function extracts from this property, so we need to find and update it
+        for (const propKey of Object.keys(oldData)) {
+          if (Array.isArray(oldData[propKey])) {
+            // Found the array property - create a shallow copy with updated items
+            return { ...oldData, [propKey]: items }
+          }
+        }
+
+        // Couldn't find an array property - fallback to raw array
+        return items
+      })
+    } else {
+      // No select - cache contains raw array, just set it directly
+      queryClient.setQueryData(key, items)
+    }
+  }
+
   // Create write context for manual write operations
   let writeContext: {
     collection: any
@@ -1155,41 +1194,7 @@ export function queryCollectionOptions(
       begin,
       write,
       commit,
-      updateCacheData: (items: Array<any>) => {
-        if (select) {
-          // When `select` is used, the cache contains a wrapped response (e.g., { data: [...], meta: {...} })
-          // We need to update the cache while preserving the wrapper structure
-          queryClient.setQueryData(
-            queryKey as unknown as Array<unknown>,
-            (oldData: any) => {
-              if (!oldData || typeof oldData !== `object`) {
-                // No existing cache or not an object - just set the raw array
-                return items
-              }
-
-              if (Array.isArray(oldData)) {
-                // Cache is already a raw array (shouldn't happen with select, but handle it)
-                return items
-              }
-
-              // Find the property that contains the array by checking each property
-              // The select function extracts from this property, so we need to find and update it
-              for (const key of Object.keys(oldData)) {
-                if (Array.isArray(oldData[key])) {
-                  // Found the array property - create a shallow copy with updated items
-                  return { ...oldData, [key]: items }
-                }
-              }
-
-              // Couldn't find an array property - fallback to raw array
-              return items
-            },
-          )
-        } else {
-          // No select - cache contains raw array, just set it directly
-          queryClient.setQueryData(queryKey as unknown as Array<unknown>, items)
-        }
-      },
+      updateCacheData,
     }
 
     // Call the original internalSync logic
