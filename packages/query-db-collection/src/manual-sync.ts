@@ -38,6 +38,12 @@ export interface SyncContext<
   begin: () => void
   write: (message: Omit<ChangeMessage<TRow>, `key`>) => void
   commit: () => void
+  /**
+   * Whether the collection uses a `select` option to transform query data.
+   * When true, we skip updating the query cache directly since the cache format
+   * (wrapped response) differs from the collection format (extracted items).
+   */
+  hasSelect?: boolean
 }
 
 interface NormalizedOperation<
@@ -204,8 +210,13 @@ export function performWriteOperations<
   ctx.commit()
 
   // Update query cache after successful commit
-  const updatedData = Array.from(ctx.collection._state.syncedData.values())
-  ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
+  // Skip when `select` is used because the cache format (wrapped response)
+  // differs from the collection format (extracted items array).
+  // Setting the cache with a raw array would break the select function.
+  if (!ctx.hasSelect) {
+    const updatedData = Array.from(ctx.collection._state.syncedData.values())
+    ctx.queryClient.setQueryData(ctx.queryKey, updatedData)
+  }
 }
 
 // Factory function to create write utils

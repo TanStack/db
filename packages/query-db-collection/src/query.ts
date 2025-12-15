@@ -1139,6 +1139,7 @@ export function queryCollectionOptions(
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => void
+    hasSelect: boolean
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
@@ -1154,6 +1155,7 @@ export function queryCollectionOptions(
       begin,
       write,
       commit,
+      hasSelect: !!select,
     }
 
     // Call the original internalSync logic
