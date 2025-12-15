@@ -692,6 +692,109 @@ describe(`QueryCollection`, () => {
       ) as MetaDataType<TestItem>
       expect(initialCache).toEqual(initialMetaData)
     })
+
+    it(`should not throw error when using writeInsert with select option`, async () => {
+      const queryKey = [`select-writeInsert-test`]
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+
+      const queryFn = vi.fn().mockResolvedValue(initialMetaData)
+      const select = vi.fn((data: MetaDataType<TestItem>) => data.data)
+
+      const options = queryCollectionOptions({
+        id: `select-writeInsert-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        select,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      // Wait for collection to be ready
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.size).toBe(2)
+      })
+
+      // This should NOT cause an error - but with the bug it does
+      const newItem: TestItem = { id: `3`, name: `New Item` }
+      collection.utils.writeInsert(newItem)
+
+      // Verify the item was inserted
+      expect(collection.size).toBe(3)
+      expect(collection.get(`3`)).toEqual(newItem)
+
+      // Wait a tick to allow any async error handlers to run
+      await flushPromises()
+
+      // Verify no error was logged about select returning non-array
+      const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
+        call[0]?.includes?.(
+          `@tanstack/query-db-collection: select() must return an array of objects`,
+        ),
+      )
+      expect(errorCallArgs).toBeUndefined()
+
+      consoleErrorSpy.mockRestore()
+    })
+
+    it(`should not throw error when using writeUpsert with select option`, async () => {
+      const queryKey = [`select-writeUpsert-test`]
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+
+      const queryFn = vi.fn().mockResolvedValue(initialMetaData)
+      const select = vi.fn((data: MetaDataType<TestItem>) => data.data)
+
+      const options = queryCollectionOptions({
+        id: `select-writeUpsert-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        select,
+        getKey,
+        startSync: true,
+      })
+      const collection = createCollection(options)
+
+      // Wait for collection to be ready
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+        expect(collection.size).toBe(2)
+      })
+
+      // This should NOT cause an error - but with the bug it does
+      // Test upsert for new item
+      const newItem: TestItem = { id: `3`, name: `Upserted New Item` }
+      collection.utils.writeUpsert(newItem)
+
+      // Verify the item was inserted
+      expect(collection.size).toBe(3)
+      expect(collection.get(`3`)).toEqual(newItem)
+
+      // Test upsert for existing item
+      collection.utils.writeUpsert({ id: `1`, name: `Updated First Item` })
+
+      // Verify the item was updated
+      expect(collection.get(`1`)?.name).toBe(`Updated First Item`)
+
+      // Wait a tick to allow any async error handlers to run
+      await flushPromises()
+
+      // Verify no error was logged about select returning non-array
+      const errorCallArgs = consoleErrorSpy.mock.calls.find((call) =>
+        call[0]?.includes?.(
+          `@tanstack/query-db-collection: select() must return an array of objects`,
+        ),
+      )
+      expect(errorCallArgs).toBeUndefined()
+
+      consoleErrorSpy.mockRestore()
+    })
   })
   describe(`Direct persistence handlers`, () => {
     it(`should pass through direct persistence handlers to collection options`, () => {
