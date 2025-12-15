@@ -1,9 +1,36 @@
-import { orderByWithFractionalIndex } from "@electric-sql/d2mini"
-import { ascComparator, descComparator } from "../../utils/comparison.js"
+import { orderByWithFractionalIndex } from "@tanstack/db-ivm"
+import { defaultComparator, makeComparator } from "../../utils/comparison.js"
+import { PropRef, followRef } from "../ir.js"
+import { ensureIndexForField } from "../../indexes/auto-index.js"
+import { findIndexForField } from "../../utils/index-optimization.js"
 import { compileExpression } from "./evaluators.js"
-import type { OrderByClause } from "../ir.js"
-import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
-import type { IStreamBuilder, KeyValue } from "@electric-sql/d2mini"
+import { replaceAggregatesByRefs } from "./group-by.js"
+import type { CompareOptions } from "../builder/types.js"
+import type { WindowOptions } from "./types.js"
+import type { CompiledSingleRowExpression } from "./evaluators.js"
+import type { OrderBy, OrderByClause, QueryIR, Select } from "../ir.js"
+import type {
+  CollectionLike,
+  NamespacedAndKeyedStream,
+  NamespacedRow,
+} from "../../types.js"
+import type { IStreamBuilder, KeyValue } from "@tanstack/db-ivm"
+import type { IndexInterface } from "../../indexes/base-index.js"
+import type { Collection } from "../../collection/index.js"
+
+export type OrderByOptimizationInfo = {
+  alias: string
+  orderBy: OrderBy
+  offset: number
+  limit: number
+  comparator: (
+    a: Record<string, unknown> | null | undefined,
+    b: Record<string, unknown> | null | undefined
+  ) => number
+  valueExtractorForRawRow: (row: Record<string, unknown>) => any
+  index: IndexInterface<string | number>
+  dataNeeded?: () => number
+}
 
 /**
  * Processes the ORDER BY clause
@@ -11,31 +38,38 @@ import type { IStreamBuilder, KeyValue } from "@electric-sql/d2mini"
  * Always uses fractional indexing and adds the index as __ordering_index to the result
  */
 export function processOrderBy(
+  rawQuery: QueryIR,
   pipeline: NamespacedAndKeyedStream,
   orderByClause: Array<OrderByClause>,
+  selectClause: Select,
+  collection: Collection,
+  optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
+  setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   limit?: number,
   offset?: number
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
   // Pre-compile all order by expressions
-  const compiledOrderBy = orderByClause.map((clause) => ({
-    compiledExpression: compileExpression(clause.expression),
-    direction: clause.direction,
-  }))
+  const compiledOrderBy = orderByClause.map((clause) => {
+    const clauseWithoutAggregates = replaceAggregatesByRefs(
+      clause.expression,
+      selectClause,
+      `__select_results`
+    )
+
+    return {
+      compiledExpression: compileExpression(clauseWithoutAggregates),
+      compareOptions: buildCompareOptions(clause, collection),
+    }
+  })
 
   // Create a value extractor function for the orderBy operator
   const valueExtractor = (row: NamespacedRow & { __select_results?: any }) => {
-    // For ORDER BY expressions, we need to provide access to both:
-    // 1. The original namespaced row data (for direct table column references)
-    // 2. The __select_results (for SELECT alias references)
-
-    // Create a merged context for expression evaluation
-    const orderByContext = { ...row }
-
-    // If there are select results, merge them at the top level for alias access
-    if (row.__select_results) {
-      // Add select results as top-level properties for alias access
-      Object.assign(orderByContext, row.__select_results)
-    }
+    // The namespaced row contains:
+    // 1. Table aliases as top-level properties (e.g., row["tableName"])
+    // 2. SELECT results in __select_results (e.g., row.__select_results["aggregateAlias"])
+    // The replaceAggregatesByRefs function has already transformed any aggregate expressions
+    // that match SELECT aggregates to use the __select_results namespace.
+    const orderByContext = row
 
     if (orderByClause.length > 1) {
       // For multiple orderBy columns, create a composite key
@@ -53,43 +87,159 @@ export function processOrderBy(
   }
 
   // Create a multi-property comparator that respects the order and direction of each property
-  const makeComparator = () => {
-    return (a: unknown, b: unknown) => {
-      // If we're comparing arrays (multiple properties), compare each property in order
-      if (orderByClause.length > 1) {
-        const arrayA = a as Array<unknown>
-        const arrayB = b as Array<unknown>
-        for (let i = 0; i < orderByClause.length; i++) {
-          const direction = orderByClause[i]!.direction
-          const compareFn =
-            direction === `desc` ? descComparator : ascComparator
-          const result = compareFn(arrayA[i], arrayB[i])
-          if (result !== 0) {
-            return result
-          }
+  const compare = (a: unknown, b: unknown) => {
+    // If we're comparing arrays (multiple properties), compare each property in order
+    if (orderByClause.length > 1) {
+      const arrayA = a as Array<unknown>
+      const arrayB = b as Array<unknown>
+      for (let i = 0; i < orderByClause.length; i++) {
+        const clause = compiledOrderBy[i]!
+        const compareFn = makeComparator(clause.compareOptions)
+        const result = compareFn(arrayA[i], arrayB[i])
+        if (result !== 0) {
+          return result
         }
-        return arrayA.length - arrayB.length
       }
-
-      // Single property comparison
-      if (orderByClause.length === 1) {
-        const direction = orderByClause[0]!.direction
-        return direction === `desc` ? descComparator(a, b) : ascComparator(a, b)
-      }
-
-      return ascComparator(a, b)
+      return arrayA.length - arrayB.length
     }
+
+    // Single property comparison
+    if (orderByClause.length === 1) {
+      const clause = compiledOrderBy[0]!
+      const compareFn = makeComparator(clause.compareOptions)
+      return compareFn(a, b)
+    }
+
+    return defaultComparator(a, b)
   }
 
-  const comparator = makeComparator()
+  let setSizeCallback: ((getSize: () => number) => void) | undefined
+
+  let orderByOptimizationInfo: OrderByOptimizationInfo | undefined
+
+  // Optimize the orderBy operator to lazily load elements
+  // by using the range index of the collection.
+  // Only for orderBy clause on a single column for now (no composite ordering)
+  if (limit && orderByClause.length === 1) {
+    const clause = orderByClause[0]!
+    const orderByExpression = clause.expression
+
+    if (orderByExpression.type === `ref`) {
+      const followRefResult = followRef(
+        rawQuery,
+        orderByExpression,
+        collection
+      )!
+
+      const followRefCollection = followRefResult.collection
+      const fieldName = followRefResult.path[0]
+      const compareOpts = buildCompareOptions(clause, followRefCollection)
+      if (fieldName) {
+        ensureIndexForField(
+          fieldName,
+          followRefResult.path,
+          followRefCollection,
+          compareOpts,
+          compare
+        )
+      }
+
+      const valueExtractorForRawRow = compileExpression(
+        new PropRef(followRefResult.path),
+        true
+      ) as CompiledSingleRowExpression
+
+      const comparator = (
+        a: Record<string, unknown> | null | undefined,
+        b: Record<string, unknown> | null | undefined
+      ) => {
+        const extractedA = a ? valueExtractorForRawRow(a) : a
+        const extractedB = b ? valueExtractorForRawRow(b) : b
+        return compare(extractedA, extractedB)
+      }
+
+      const index: IndexInterface<string | number> | undefined =
+        findIndexForField(
+          followRefCollection,
+          followRefResult.path,
+          compareOpts
+        )
+
+      if (index && index.supports(`gt`)) {
+        // We found an index that we can use to lazily load ordered data
+        const orderByAlias =
+          orderByExpression.path.length > 1
+            ? String(orderByExpression.path[0])
+            : rawQuery.from.alias
+
+        orderByOptimizationInfo = {
+          alias: orderByAlias,
+          offset: offset ?? 0,
+          limit,
+          comparator,
+          valueExtractorForRawRow,
+          index,
+          orderBy: orderByClause,
+        }
+
+        optimizableOrderByCollections[followRefCollection.id] =
+          orderByOptimizationInfo
+
+        setSizeCallback = (getSize: () => number) => {
+          optimizableOrderByCollections[followRefCollection.id]![`dataNeeded`] =
+            () => {
+              const size = getSize()
+              return Math.max(0, orderByOptimizationInfo!.limit - size)
+            }
+        }
+      }
+    }
+  }
 
   // Use fractional indexing and return the tuple [value, index]
   return pipeline.pipe(
     orderByWithFractionalIndex(valueExtractor, {
       limit,
       offset,
-      comparator,
+      comparator: compare,
+      setSizeCallback,
+      setWindowFn: (
+        windowFn: (options: { offset?: number; limit?: number }) => void
+      ) => {
+        setWindowFn(
+          // We wrap the move function such that we update the orderByOptimizationInfo
+          // because that is used by the `dataNeeded` callback to determine if we need to load more data
+          (options) => {
+            windowFn(options)
+            if (orderByOptimizationInfo) {
+              orderByOptimizationInfo.offset =
+                options.offset ?? orderByOptimizationInfo.offset
+              orderByOptimizationInfo.limit =
+                options.limit ?? orderByOptimizationInfo.limit
+            }
+          }
+        )
+      },
     })
     // orderByWithFractionalIndex returns [key, [value, index]] - we keep this format
   )
+}
+
+/**
+ * Builds a comparison configuration object that uses the values provided in the orderBy clause.
+ * If no string sort configuration is provided it defaults to the collection's string sort configuration.
+ */
+export function buildCompareOptions(
+  clause: OrderByClause,
+  collection: CollectionLike<any, any>
+): CompareOptions {
+  if (clause.compareOptions.stringSort !== undefined) {
+    return clause.compareOptions
+  }
+
+  return {
+    ...collection.compareOptions,
+    direction: clause.compareOptions.direction,
+    nulls: clause.compareOptions.nulls,
+  }
 }

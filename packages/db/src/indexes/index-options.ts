@@ -8,7 +8,7 @@ export interface IndexOptions<TResolver extends IndexResolver = IndexResolver> {
   indexType?: TResolver
   options?: TResolver extends IndexConstructor<any>
     ? TResolver extends new (
-        id: string,
+        id: number,
         expr: any,
         name?: string,
         options?: infer O
@@ -17,7 +17,7 @@ export interface IndexOptions<TResolver extends IndexResolver = IndexResolver> {
       : never
     : TResolver extends () => Promise<infer TCtor>
       ? TCtor extends new (
-          id: string,
+          id: number,
           expr: any,
           name?: string,
           options?: infer O

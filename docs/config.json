@@ -20,30 +20,6 @@
         {
           "label": "Installation",
           "to": "installation"
-        },
-        {
-          "label": "Live Queries",
-          "to": "live-queries"
-        }
-      ],
-      "frameworks": [
-        {
-          "label": "react",
-          "children": [
-            {
-              "label": "React Adapter",
-              "to": "framework/react/adapter"
-            }
-          ]
-        },
-        {
-          "label": "vue",
-          "children": [
-            {
-              "label": "Vue Adapter",
-              "to": "framework/vue/adapter"
-            }
-          ]
         }
       ]
     },
@@ -51,12 +27,91 @@
       "label": "Guides",
       "children": [
         {
+          "label": "Live Queries",
+          "to": "guides/live-queries"
+        },
+        {
+          "label": "Mutations",
+          "to": "guides/mutations"
+        },
+        {
+          "label": "Schemas",
+          "to": "guides/schemas"
+        },
+        {
           "label": "Error Handling",
-          "to": "error-handling"
+          "to": "guides/error-handling"
         },
         {
           "label": "Creating Collection Options Creators",
-          "to": "collection-options-creator"
+          "to": "guides/collection-options-creator"
+        }
+      ]
+    },
+    {
+      "label": "Collections",
+      "children": [
+        {
+          "label": "Query Collection",
+          "to": "collections/query-collection"
+        },
+        {
+          "label": "Electric Collection",
+          "to": "collections/electric-collection"
+        },
+        {
+          "label": "TrailBase Collection",
+          "to": "collections/trailbase-collection"
+        },
+        {
+          "label": "RxDB Collection",
+          "to": "collections/rxdb-collection"
+        },
+        {
+          "label": "PowerSync Collection",
+          "to": "collections/powersync-collection"
+        },
+        {
+          "label": "LocalStorage Collection",
+          "to": "collections/local-storage-collection"
+        },
+        {
+          "label": "LocalOnly Collection",
+          "to": "collections/local-only-collection"
+        }
+      ]
+    },
+    {
+      "label": "Frameworks",
+      "children": [
+        {
+          "label": "React",
+          "to": "framework/react/overview"
+        },
+        {
+          "label": "Vue",
+          "to": "framework/vue/overview"
+        },
+        {
+          "label": "Angular",
+          "to": "framework/angular/overview"
+        },
+        {
+          "label": "Solid",
+          "to": "framework/solid/overview"
+        },
+        {
+          "label": "Svelte",
+          "to": "framework/svelte/overview"
+        }
+      ]
+    },
+    {
+      "label": "Community",
+      "children": [
+        {
+          "label": "Resources & Packages",
+          "to": "community/resources"
         }
       ]
     },
@@ -66,6 +121,62 @@
         {
           "label": "Core API Reference",
           "to": "reference/index"
+        },
+        {
+          "label": "Collection",
+          "to": "reference/interfaces/Collection"
+        },
+        {
+          "label": "createCollection",
+          "to": "reference/functions/createCollection"
+        },
+        {
+          "label": "liveQueryCollectionOptions",
+          "to": "reference/functions/liveQueryCollectionOptions"
+        },
+        {
+          "label": "createLiveQueryCollection",
+          "to": "reference/functions/createLiveQueryCollection"
+        },
+        {
+          "label": "createOptimisticAction",
+          "to": "reference/functions/createOptimisticAction"
+        },
+        {
+          "label": "createTransaction",
+          "to": "reference/functions/createTransaction"
+        },
+        {
+          "label": "Electric DB Collection",
+          "to": "reference/electric-db-collection/index"
+        },
+        {
+          "label": "electricCollectionOptions",
+          "to": "reference/electric-db-collection/functions/electricCollectionOptions"
+        },
+        {
+          "label": "Query DB Collection",
+          "to": "reference/query-db-collection/index"
+        },
+        {
+          "label": "queryCollectionOptions",
+          "to": "reference/query-db-collection/functions/queryCollectionOptions"
+        },
+        {
+          "label": "RxDB DB Collection",
+          "to": "reference/rxdb-db-collection/index"
+        },
+        {
+          "label": "rxdbCollectionOptions",
+          "to": "reference/rxdb-db-collection/functions/rxdbCollectionOptions"
+        },
+        {
+          "label": "PowerSync Collection",
+          "to": "reference/powersync-db-collection/index"
+        },
+        {
+          "label": "powerSyncCollectionOptions",
+          "to": "reference/powersync-db-collection/functions/powerSyncCollectionOptions"
         }
       ],
       "frameworks": [
@@ -75,6 +186,23 @@
             {
               "label": "React Hooks",
               "to": "framework/react/reference/index"
+            },
+            {
+              "label": "useLiveQuery",
+              "to": "framework/react/reference/functions/useLiveQuery"
+            }
+          ]
+        },
+        {
+          "label": "solid",
+          "children": [
+            {
+              "label": "Solid Hooks",
+              "to": "framework/solid/reference/index"
+            },
+            {
+              "label": "useLiveQuery",
+              "to": "framework/solid/reference/functions/useLiveQuery"
             }
           ]
         },
@@ -82,23 +210,33 @@
           "label": "vue",
           "children": [
             {
-              "label": "Vue Hooks",
+              "label": "Vue Composables",
               "to": "framework/vue/reference/index"
+            },
+            {
+              "label": "useLiveQuery",
+              "to": "framework/vue/reference/functions/useLiveQuery"
+            },
+            {
+              "label": "UseLiveQueryReturn",
+              "to": "framework/vue/reference/interfaces/UseLiveQueryReturn"
+            },
+            {
+              "label": "UseLiveQueryReturnWithCollection",
+              "to": "framework/vue/reference/interfaces/UseLiveQueryReturnWithCollection"
             }
           ]
-        }
-      ]
-    },
-    {
-      "label": "Examples",
-      "children": [],
-      "frameworks": [
+        },
         {
-          "label": "react",
+          "label": "angular",
           "children": [
             {
-              "label": "Todo List",
-              "to": "framework/react/examples/todo"
+              "label": "Angular Functions",
+              "to": "framework/angular/reference/index"
+            },
+            {
+              "label": "injectLiveQuery",
+              "to": "framework/angular/reference/functions/injectLiveQuery"
             }
           ]
         }

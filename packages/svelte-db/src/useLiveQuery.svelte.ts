@@ -1,6 +1,8 @@
+// eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { untrack } from "svelte"
-import { createLiveQueryCollection } from "@tanstack/db"
+// eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from "svelte/reactivity"
+import { createLiveQueryCollection } from "@tanstack/db"
 import type {
   ChangeMessage,
   Collection,
@@ -66,13 +68,38 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * @param queryFn - Query function that defines what data to fetch
  * @param deps - Array of reactive dependencies that trigger query re-execution when changed
  * @returns Reactive object with query data, state, and status information
+ *
+ * @remarks
+ * **IMPORTANT - Destructuring in Svelte 5:**
+ * Direct destructuring breaks reactivity. To destructure, wrap with `$derived`:
+ *
+ * ❌ **Incorrect** - Loses reactivity:
+ * ```ts
+ * const { data, isLoading } = useLiveQuery(...)
+ * ```
+ *
+ * ✅ **Correct** - Maintains reactivity:
+ * ```ts
+ * // Option 1: Use dot notation (recommended)
+ * const query = useLiveQuery(...)
+ * // Access: query.data, query.isLoading
+ *
+ * // Option 2: Wrap with $derived for destructuring
+ * const query = useLiveQuery(...)
+ * const { data, isLoading } = $derived(query)
+ * ```
+ *
+ * This is a fundamental Svelte 5 limitation, not a library bug. See:
+ * https://github.com/sveltejs/svelte/issues/11002
+ *
  * @example
- * // Basic query with object syntax
+ * // Basic query with object syntax (recommended pattern)
  * const todosQuery = useLiveQuery((q) =>
  *   q.from({ todos: todosCollection })
  *    .where(({ todos }) => eq(todos.completed, false))
  *    .select(({ todos }) => ({ id: todos.id, text: todos.text }))
  * )
+ * // Access via: todosQuery.data, todosQuery.isLoading, etc.
  *
  * @example
  * // With reactive dependencies
@@ -82,6 +109,14 @@ function toValue<T>(value: MaybeGetter<T>): T {
  *          .where(({ todos }) => gt(todos.priority, minPriority)),
  *   [() => minPriority] // Re-run when minPriority changes
  * )
+ *
+ * @example
+ * // Destructuring with $derived (if needed)
+ * const query = useLiveQuery((q) =>
+ *   q.from({ todos: todosCollection })
+ * )
+ * const { data, isLoading, isError } = $derived(query)
+ * // Now data, isLoading, and isError maintain reactivity
  *
  * @example
  * // Join pattern
@@ -246,7 +281,10 @@ export function useLiveQuery(
 
     if (isCollection) {
       // It's already a collection, ensure sync is started for Svelte helpers
-      unwrappedParam.startSyncImmediate()
+      // Only start sync if the collection is in idle state
+      if (unwrappedParam.status === `idle`) {
+        unwrappedParam.startSyncImmediate()
+      }
       return unwrappedParam
     }
 
@@ -312,8 +350,16 @@ export function useLiveQuery(
     // Initialize data array in correct order
     syncDataFromCollection(currentCollection)
 
+    // Listen for the first ready event to catch status transitions
+    // that might not trigger change events (fixes async status transition bug)
+    currentCollection.onFirstReady(() => {
+      // Update status directly - Svelte's reactivity system handles the update automatically
+      // Note: We cannot use flushSync here as it's disallowed inside effects in async mode
+      status = currentCollection.status
+    })
+
     // Subscribe to collection changes with granular updates
-    currentUnsubscribe = currentCollection.subscribeChanges(
+    const subscription = currentCollection.subscribeChanges(
       (changes: Array<ChangeMessage<any>>) => {
         // Apply each change individually to the reactive state
         untrack(() => {
@@ -334,8 +380,13 @@ export function useLiveQuery(
         syncDataFromCollection(currentCollection)
         // Update status state on every change
         status = currentCollection.status
+      },
+      {
+        includeInitialState: true,
       }
     )
+
+    currentUnsubscribe = subscription.unsubscribe.bind(subscription)
 
     // Preload collection data if not already started
     if (currentCollection.status === `idle`) {
@@ -365,7 +416,7 @@ export function useLiveQuery(
       return status
     },
     get isLoading() {
-      return status === `loading` || status === `initialCommit`
+      return status === `loading`
     },
     get isReady() {
       return status === `ready`

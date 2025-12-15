@@ -1,8 +1,6 @@
-import { type } from "arktype"
 import mitt from "mitt"
-import { describe, expect, expectTypeOf, it, vi } from "vitest"
-import { z } from "zod"
-import { createCollection } from "../src/collection"
+import { describe, expect, it, vi } from "vitest"
+import { createCollection } from "../src/collection/index.js"
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
@@ -10,16 +8,14 @@ import {
   MissingDeleteHandlerError,
   MissingInsertHandlerError,
   MissingUpdateHandlerError,
-  SchemaValidationError,
 } from "../src/errors"
 import { createTransaction } from "../src/transactions"
-import type {
-  ChangeMessage,
-  MutationFn,
-  OperationType,
-  PendingMutation,
-  ResolveTransactionChanges,
-} from "../src/types"
+import {
+  flushPromises,
+  mockSyncCollectionOptionsNoInitialState,
+  withExpectedRejection,
+} from "./utils"
+import type { ChangeMessage, MutationFn, PendingMutation } from "../src/types"
 
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
@@ -231,8 +227,8 @@ describe(`Collection`, () => {
 
     // Check the optimistic operation is there
     const insertKey = 1
-    expect(collection.optimisticUpserts.has(insertKey)).toBe(true)
-    expect(collection.optimisticUpserts.get(insertKey)).toEqual({
+    expect(collection._state.optimisticUpserts.has(insertKey)).toBe(true)
+    expect(collection._state.optimisticUpserts.get(insertKey)).toEqual({
       id: 1,
       value: `bar`,
     })
@@ -264,19 +260,13 @@ describe(`Collection`, () => {
       value: `bar`,
     })
 
-    // after mutationFn returns, check that the transaction is updated &
-    // optimistic update is gone & synced data & comibned state are all updated.
-    expect(
-      // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection.transactions.values())[0].mutations[0].changes
-    ).toEqual({
-      id: 1,
-      value: `bar`,
-    })
+    // after mutationFn returns, check that the transaction is cleaned up,
+    // optimistic update is gone & synced data & combined state are all updated.
+    expect(collection._state.transactions.size).toEqual(0) // Transaction should be cleaned up
     expect(collection.state).toEqual(
       new Map([[insertedKey, { id: 1, value: `bar` }]])
     )
-    expect(collection.optimisticUpserts.size).toEqual(0)
+    expect(collection._state.optimisticUpserts.size).toEqual(0)
 
     // Test insert with provided key
     const tx2 = createTransaction({ mutationFn })
@@ -490,7 +480,8 @@ describe(`Collection`, () => {
     // check there's a transaction in peristing state
     expect(
       // @ts-expect-error possibly undefined is ok in test
-      Array.from(collection.transactions.values())[0].mutations[0].changes
+      Array.from(collection._state.transactions.values())[0].mutations[0]
+        .changes
     ).toEqual({
       id: 1,
       value: `bar`,
@@ -498,8 +489,8 @@ describe(`Collection`, () => {
 
     // Check the optimistic operation is there
     const insertKey = 1
-    expect(collection.optimisticUpserts.has(insertKey)).toBe(true)
-    expect(collection.optimisticUpserts.get(insertKey)).toEqual({
+    expect(collection._state.optimisticUpserts.has(insertKey)).toBe(true)
+    expect(collection._state.optimisticUpserts.get(insertKey)).toEqual({
       id: 1,
       value: `bar`,
     })
@@ -799,7 +790,7 @@ describe(`Collection`, () => {
 
     // The item should NOT appear in the collection state immediately
     expect(collection.state.has(2)).toBe(false)
-    expect(collection.optimisticUpserts.has(2)).toBe(false)
+    expect(collection._state.optimisticUpserts.has(2)).toBe(false)
     expect(collection.state.size).toBe(1) // Only the initial item
 
     // Now resolve the mutation and wait for completion
@@ -824,7 +815,7 @@ describe(`Collection`, () => {
 
     // The original value should still be there immediately
     expect(collection.state.get(1)?.value).toBe(`initial value`)
-    expect(collection.optimisticUpserts.has(1)).toBe(false)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(false)
 
     // Now resolve the update mutation and wait for completion
     pendingMutations[1]?.()
@@ -838,7 +829,7 @@ describe(`Collection`, () => {
 
     // The item should still be there immediately
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.optimisticDeletes.has(2)).toBe(false)
+    expect(collection._state.optimisticDeletes.has(2)).toBe(false)
 
     // Now resolve the delete mutation and wait for completion
     pendingMutations[2]?.()
@@ -899,7 +890,7 @@ describe(`Collection`, () => {
 
     // The item should appear immediately
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.optimisticUpserts.has(2)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(2)).toBe(true)
     expect(collection.state.get(2)).toEqual({
       id: 2,
       value: `default optimistic`,
@@ -915,7 +906,7 @@ describe(`Collection`, () => {
 
     // The item should appear immediately
     expect(collection.state.has(3)).toBe(true)
-    expect(collection.optimisticUpserts.has(3)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(3)).toBe(true)
     expect(collection.state.get(3)).toEqual({
       id: 3,
       value: `explicit optimistic`,
@@ -934,7 +925,7 @@ describe(`Collection`, () => {
 
     // The update should be reflected immediately
     expect(collection.state.get(1)?.value).toBe(`optimistic update`)
-    expect(collection.optimisticUpserts.has(1)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(1)).toBe(true)
 
     await optimisticUpdateTx.isPersisted.promise
 
@@ -943,310 +934,9 @@ describe(`Collection`, () => {
 
     // The item should be gone immediately
     expect(collection.state.has(3)).toBe(false)
-    expect(collection.optimisticDeletes.has(3)).toBe(true)
+    expect(collection._state.optimisticDeletes.has(3)).toBe(true)
 
     await optimisticDeleteTx.isPersisted.promise
-  })
-})
-
-describe(`Collection with schema validation`, () => {
-  it(`should validate data against arktype schema on insert`, () => {
-    // Create a Zod schema for a user
-    const userSchema = type({
-      name: `string > 0`,
-      age: `number.integer > 0`,
-      "email?": `string.email`,
-    })
-
-    // Create a collection with the schema
-    const collection = createCollection<typeof userSchema.infer>({
-      id: `test`,
-      getKey: (item) => item.name,
-      startSync: true,
-      sync: {
-        sync: ({ begin, commit }) => {
-          begin()
-          commit()
-        },
-      },
-      schema: userSchema,
-    })
-    const mutationFn = async () => {}
-
-    // Valid data should work
-    const validUser = {
-      name: `Alice`,
-      age: 30,
-      email: `alice@example.com`,
-    }
-
-    const tx1 = createTransaction({ mutationFn })
-    tx1.mutate(() => collection.insert(validUser))
-
-    // Invalid data should throw SchemaValidationError
-    const invalidUser = {
-      name: ``, // Empty name (fails min length)
-      age: -5, // Negative age (fails positive)
-      email: `not-an-email`, // Invalid email
-    }
-
-    try {
-      const tx2 = createTransaction({ mutationFn })
-      tx2.mutate(() => collection.insert(invalidUser))
-      // Should not reach here
-      expect(true).toBe(false)
-    } catch (error) {
-      expect(error).toBeInstanceOf(SchemaValidationError)
-      if (error instanceof SchemaValidationError) {
-        expect(error.type).toBe(`insert`)
-        expect(error.issues.length).toBeGreaterThan(0)
-        // Check that we have validation errors for each invalid field
-        expect(error.issues.some((issue) => issue.path?.includes(`name`))).toBe(
-          true
-        )
-        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
-        )
-        expect(
-          error.issues.some((issue) => issue.path?.includes(`email`))
-        ).toBe(true)
-      }
-    }
-
-    // Partial updates should work with valid data
-    const tx3 = createTransaction({ mutationFn })
-    tx3.mutate(() =>
-      collection.update(`Alice`, (draft) => {
-        draft.age = 31
-      })
-    )
-
-    // Partial updates should fail with invalid data
-    try {
-      const tx4 = createTransaction({ mutationFn })
-      tx4.mutate(() =>
-        collection.update(`Alice`, (draft) => {
-          draft.age = -1
-        })
-      )
-      // Should not reach here
-      expect(true).toBe(false)
-    } catch (error) {
-      expect(error).toBeInstanceOf(SchemaValidationError)
-      if (error instanceof SchemaValidationError) {
-        expect(error.type).toBe(`update`)
-        expect(error.issues.length).toBeGreaterThan(0)
-        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
-        )
-      }
-    }
-  })
-
-  it(`should validate data against schema on insert`, () => {
-    // Create a Zod schema for a user
-    const userSchema = z.object({
-      name: z.string().min(1),
-      age: z.number().int().positive(),
-      email: z.string().email().optional(),
-    })
-
-    // Create a collection with the schema
-    const collection = createCollection<z.infer<typeof userSchema>>({
-      id: `test`,
-      getKey: (item) => item.name,
-      startSync: true,
-      sync: {
-        sync: ({ begin, commit }) => {
-          begin()
-          commit()
-        },
-      },
-      schema: userSchema,
-    })
-    const mutationFn = async () => {}
-
-    // Valid data should work
-    const validUser = {
-      name: `Alice`,
-      age: 30,
-      email: `alice@example.com`,
-    }
-
-    const tx1 = createTransaction({ mutationFn })
-    tx1.mutate(() => collection.insert(validUser))
-
-    // Invalid data should throw SchemaValidationError
-    const invalidUser = {
-      name: ``, // Empty name (fails min length)
-      age: -5, // Negative age (fails positive)
-      email: `not-an-email`, // Invalid email
-    }
-
-    try {
-      const tx2 = createTransaction({ mutationFn })
-      tx2.mutate(() => collection.insert(invalidUser))
-      // Should not reach here
-      expect(true).toBe(false)
-    } catch (error) {
-      expect(error).toBeInstanceOf(SchemaValidationError)
-      if (error instanceof SchemaValidationError) {
-        expect(error.type).toBe(`insert`)
-        expect(error.issues.length).toBeGreaterThan(0)
-        // Check that we have validation errors for each invalid field
-        expect(error.issues.some((issue) => issue.path?.includes(`name`))).toBe(
-          true
-        )
-        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
-        )
-        expect(
-          error.issues.some((issue) => issue.path?.includes(`email`))
-        ).toBe(true)
-      }
-    }
-
-    // Partial updates should work with valid data
-    const tx3 = createTransaction({ mutationFn })
-    tx3.mutate(() =>
-      collection.update(`Alice`, (draft) => {
-        draft.age = 31
-      })
-    )
-
-    // Partial updates should fail with invalid data
-    try {
-      const tx4 = createTransaction({ mutationFn })
-      tx4.mutate(() =>
-        collection.update(`Alice`, (draft) => {
-          draft.age = -1
-        })
-      )
-      // Should not reach here
-      expect(true).toBe(false)
-    } catch (error) {
-      expect(error).toBeInstanceOf(SchemaValidationError)
-      if (error instanceof SchemaValidationError) {
-        expect(error.type).toBe(`update`)
-        expect(error.issues.length).toBeGreaterThan(0)
-        expect(error.issues.some((issue) => issue.path?.includes(`age`))).toBe(
-          true
-        )
-      }
-    }
-  })
-
-  it(`should apply schema defaults on insert`, () => {
-    const todoSchema = z.object({
-      id: z
-        .string()
-        .default(() => `todo-${Math.random().toString(36).substr(2, 9)}`),
-      text: z.string(),
-      completed: z.boolean().default(false),
-      createdAt: z.coerce.date().default(() => new Date()),
-      updatedAt: z.coerce.date().default(() => new Date()),
-    })
-
-    // Define inferred types for clarity and use in assertions
-    type Todo = z.infer<typeof todoSchema>
-    type TodoInput = z.input<typeof todoSchema>
-
-    // NOTE: `createCollection<Todo>` breaks the schema type inference.
-    // We have to use only the schema, and not the type generic, like so:
-    const collection = createCollection({
-      id: `defaults-test`,
-      getKey: (item) => item.id,
-      sync: {
-        sync: ({ begin, commit }) => {
-          begin()
-          commit()
-        },
-      },
-      schema: todoSchema,
-    })
-
-    // Type test: should allow inserting input type (with missing fields that have defaults)
-    // Important: Input type is different from the output type (which is inferred using z.infer)
-    // For more details, @see https://github.com/colinhacks/zod/issues/4179#issuecomment-2811669261
-    type InsertParam = Parameters<typeof collection.insert>[0]
-    expectTypeOf<InsertParam>().toEqualTypeOf<TodoInput | Array<TodoInput>>()
-
-    const mutationFn = async () => {}
-
-    // Minimal data
-    const tx1 = createTransaction<Todo>({ mutationFn })
-    tx1.mutate(() => collection.insert({ text: `task-1` }))
-
-    // Type assertions on the mutation structure
-    expect(tx1.mutations).toHaveLength(1)
-    const mutation = tx1.mutations[0]!
-
-    // Test the mutation type structure
-    expectTypeOf(mutation).toExtend<PendingMutation<Todo>>()
-    expectTypeOf(mutation.type).toEqualTypeOf<OperationType>()
-    expectTypeOf(mutation.changes).toEqualTypeOf<
-      ResolveTransactionChanges<Todo>
-    >()
-    expectTypeOf(mutation.modified).toEqualTypeOf<Todo>()
-
-    // Runtime assertions for actual values
-    expect(mutation.type).toBe(`insert`)
-    expect(mutation.changes).toEqual({ text: `task-1` })
-    expect(mutation.modified.text).toBe(`task-1`)
-    expect(mutation.modified.completed).toBe(false)
-    expect(mutation.modified.id).toBeDefined()
-    expect(mutation.modified.createdAt).toBeInstanceOf(Date)
-    expect(mutation.modified.updatedAt).toBeInstanceOf(Date)
-
-    let insertedItems = Array.from(collection.state.values())
-    expect(insertedItems).toHaveLength(1)
-    const insertedItem = insertedItems[0]!
-    expect(insertedItem.text).toBe(`task-1`)
-    expect(insertedItem.completed).toBe(false)
-    expect(insertedItem.id).toBeDefined()
-    expect(typeof insertedItem.id).toBe(`string`)
-    expect(insertedItem.createdAt).toBeInstanceOf(Date)
-    expect(insertedItem.updatedAt).toBeInstanceOf(Date)
-
-    // Partial data
-    const tx2 = createTransaction<Todo>({ mutationFn })
-    tx2.mutate(() => collection.insert({ text: `task-2`, completed: true }))
-
-    insertedItems = Array.from(collection.state.values())
-    expect(insertedItems).toHaveLength(2)
-
-    const secondItem = insertedItems.find((item) => item.text === `task-2`)!
-    expect(secondItem).toBeDefined()
-    expect(secondItem.text).toBe(`task-2`)
-    expect(secondItem.completed).toBe(true)
-    expect(secondItem.id).toBeDefined()
-    expect(typeof secondItem.id).toBe(`string`)
-    expect(secondItem.createdAt).toBeInstanceOf(Date)
-    expect(secondItem.updatedAt).toBeInstanceOf(Date)
-
-    // All fields provided
-    const tx3 = createTransaction<Todo>({ mutationFn })
-
-    tx3.mutate(() =>
-      collection.insert({
-        id: `task-id-3`,
-        text: `task-3`,
-        completed: true,
-        createdAt: new Date(`2023-01-01T00:00:00Z`),
-        updatedAt: new Date(`2023-01-01T00:00:00Z`),
-      })
-    )
-    insertedItems = Array.from(collection.state.values())
-    expect(insertedItems).toHaveLength(3)
-
-    // using insertedItems[2] was finding wrong item for some reason.
-    const thirdItem = insertedItems.find((item) => item.text === `task-3`)
-    expect(thirdItem).toBeDefined()
-    expect(thirdItem!.text).toBe(`task-3`)
-    expect(thirdItem!.completed).toBe(true)
-    expect(thirdItem!.createdAt).toEqual(new Date(`2023-01-01T00:00:00Z`))
-    expect(thirdItem!.updatedAt).toEqual(new Date(`2023-01-01T00:00:00Z`))
-    expect(thirdItem!.id).toBe(`task-id-3`)
   })
 
   it(`should not block user actions when keys are recently synced`, async () => {
@@ -1363,5 +1053,542 @@ describe(`Collection with schema validation`, () => {
       tx4.isPersisted.promise,
       tx5.isPersisted.promise,
     ])
+  })
+
+  it(`should handle basic truncate operations`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-basic-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          // Initialize with some data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value 1` },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `initial value 2` },
+          })
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, truncate }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Verify initial state
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `initial value 1` })
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `initial value 2` })
+
+    // Test truncate operation
+    const { begin, truncate, commit } = testSyncFunctions
+    begin()
+    truncate()
+    commit()
+
+    // Verify collection is cleared
+    expect(collection.state.size).toBe(0)
+    expect(collection._state.syncedData.size).toBe(0)
+    expect(collection._state.syncedMetadata.size).toBe(0)
+  })
+
+  it(`should keep operations written after truncate in the same transaction`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-operations-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          // Initialize with some data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value` },
+          })
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, truncate }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Verify initial state
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `initial value` })
+
+    // Test truncate operation with additional operations in the same transaction
+    const { begin, write, truncate, commit } = testSyncFunctions
+
+    begin()
+
+    // Add some operations to the transaction
+    write({
+      type: `insert`,
+      value: { id: 2, value: `should be cleared` },
+    })
+    write({
+      type: `update`,
+      value: { id: 1, value: `should be cleared` },
+    })
+
+    // Call truncate - this should clear the operations and mark as truncate
+    truncate()
+
+    // Add more operations after truncate (these should not be cleared)
+    write({
+      type: `insert`,
+      value: { id: 3, value: `should not be cleared` },
+    })
+
+    commit()
+
+    // Verify only post-truncate operations are kept
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(3)).toEqual({
+      id: 3,
+      value: `should not be cleared`,
+    })
+    expect(collection._state.syncedData.size).toBe(1)
+    expect(collection._state.syncedMetadata.size).toBe(1)
+  })
+
+  it(`should handle truncate with empty collection`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-empty-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, truncate, markReady }) => {
+          // Initialize with empty collection
+          begin()
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, commit, truncate }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Verify initial state is empty
+    expect(collection.state.size).toBe(0)
+
+    // Test truncate operation on empty collection
+    const { begin, truncate, commit } = testSyncFunctions
+    begin()
+    truncate()
+    commit()
+
+    // Verify collection remains empty
+    expect(collection.state.size).toBe(0)
+    expect(collection._state.syncedData.size).toBe(0)
+    expect(collection._state.syncedMetadata.size).toBe(0)
+  })
+
+  it(`open sync transaction isn't applied when optimistic mutation is resolved/rejected`, async () => {
+    type Row = { id: number; name: string }
+
+    const collection = createCollection(
+      mockSyncCollectionOptionsNoInitialState<Row>({
+        id: `repro-truncate-open-transaction`,
+        getKey: (r) => r.id,
+      })
+    )
+    const preloadPromise = collection.preload()
+
+    collection.utils.begin()
+    collection.utils.write({ type: `insert`, value: { id: 1, name: `one` } })
+    collection.utils.write({ type: `insert`, value: { id: 2, name: `two` } })
+    collection.utils.commit()
+    collection.utils.markReady()
+
+    await preloadPromise
+
+    expect(collection.state.size).toBe(2)
+
+    // start a transaction with a truncate, but don't commit it
+    collection.utils.begin()
+    collection.utils.truncate()
+
+    // expect the state to still be the same
+    expect(collection.state.size).toBe(2)
+
+    // we now do a local optimistic insert
+    collection.insert({ id: 3, name: `three` })
+
+    // we should immediately see the optimistic state
+    expect(collection.state.size).toBe(3)
+    expect(collection.state.get(3)?.name).toBe(`three`)
+
+    // we now reject the sync, this should trigger a rollback of the open transaction
+    // and the optimistic state should be removed
+    // it should *not* trigger the open sync transaction to be applied to the synced state
+    await withExpectedRejection(`trigger rollback`, () => {
+      collection.utils.rejectSync(new Error(`trigger rollback`))
+      return flushPromises()
+    })
+
+    // we should now be back to the original state, the optimistic state has
+    // been removed
+    expect(collection.state.size).toBe(2)
+
+    // write the new row back via sync
+    collection.utils.write({
+      type: `insert`,
+      value: { id: 3, name: `tree (from sync)` },
+    })
+
+    // expect the state to still be the same
+    expect(collection.state.size).toBe(2)
+
+    // now commit the sync transaction
+    collection.utils.commit()
+
+    // we truncated everything, so we should only have one item left that synced
+    expect(collection.state.size).toBe(1)
+  })
+
+  it(`should allow multiple sync transactions before marking collection ready and data should be visible`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `multiple-sync-before-ready`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, markReady }
+        },
+      },
+    })
+
+    // Collection should start in loading state
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(0)
+
+    const { begin, write, commit, markReady } = testSyncFunctions
+
+    // First sync transaction
+    begin()
+    write({ type: `insert`, value: { id: 1, value: `first batch item 1` } })
+    write({ type: `insert`, value: { id: 2, value: `first batch item 2` } })
+    commit()
+
+    // Data should be visible even though not ready
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      value: `first batch item 1`,
+    })
+    expect(collection.state.get(2)).toEqual({
+      id: 2,
+      value: `first batch item 2`,
+    })
+
+    // Second sync transaction
+    begin()
+    write({ type: `insert`, value: { id: 3, value: `second batch item 1` } })
+    write({
+      type: `update`,
+      value: { id: 1, value: `first batch item 1 updated` },
+    })
+    commit()
+
+    // More data should be visible
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(3)
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      value: `first batch item 1 updated`,
+    })
+    expect(collection.state.get(3)).toEqual({
+      id: 3,
+      value: `second batch item 1`,
+    })
+
+    // Third sync transaction
+    begin()
+    write({ type: `delete`, value: { id: 2, value: `first batch item 2` } })
+    write({ type: `insert`, value: { id: 4, value: `third batch item 1` } })
+    commit()
+
+    // Updates should be reflected
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(3) // Deleted 2, added 4
+    expect(collection.state.get(2)).toBeUndefined()
+    expect(collection.state.get(4)).toEqual({
+      id: 4,
+      value: `third batch item 1`,
+    })
+
+    // Now mark as ready
+    markReady()
+
+    // Should transition to ready with all data intact
+    expect(collection.status).toBe(`ready`)
+    expect(collection.size).toBe(3)
+    expect(Array.from(collection.state.keys()).sort()).toEqual([1, 3, 4])
+
+    // Verify we can use stateWhenReady
+    const state = await collection.stateWhenReady()
+    expect(state.size).toBe(3)
+  })
+})
+
+describe(`Collection isLoadingSubset property`, () => {
+  it(`isLoadingSubset is false initially`, () => {
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+    })
+
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`isLoadingSubset becomes true when loadSubset returns a promise`, async () => {
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
+    })
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => loadSubsetPromise,
+          }
+        },
+      },
+    })
+
+    expect(collection.isLoadingSubset).toBe(false)
+
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoadSubset!()
+    await flushPromises()
+
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`isLoadingSubset becomes false when promise resolves`, async () => {
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
+    })
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => loadSubsetPromise,
+          }
+        },
+      },
+    })
+
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoadSubset!()
+    await flushPromises()
+
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`concurrent loadSubset calls keep isLoadingSubset true until all resolve`, async () => {
+    let resolveLoadSubset1: () => void
+    let resolveLoadSubset2: () => void
+    let callCount = 0
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => {
+              callCount++
+              if (callCount === 1) {
+                return new Promise<void>((resolve) => {
+                  resolveLoadSubset1 = resolve
+                })
+              } else {
+                return new Promise<void>((resolve) => {
+                  resolveLoadSubset2 = resolve
+                })
+              }
+            },
+          }
+        },
+      },
+    })
+
+    collection._sync.loadSubset({})
+    collection._sync.loadSubset({})
+
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoadSubset1!()
+    await flushPromises()
+
+    // Should still be loading because second promise is pending
+    expect(collection.isLoadingSubset).toBe(true)
+
+    resolveLoadSubset2!()
+    await flushPromises()
+
+    // Now should be false
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`emits loadingSubset:change event`, async () => {
+    let resolveLoadSubset: () => void
+    const loadSubsetPromise = new Promise<void>((resolve) => {
+      resolveLoadSubset = resolve
+    })
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => loadSubsetPromise,
+          }
+        },
+      },
+    })
+
+    const loadingChanges: Array<{
+      isLoadingSubset: boolean
+      previousIsLoadingSubset: boolean
+    }> = []
+
+    collection.on(`loadingSubset:change`, (event) => {
+      loadingChanges.push({
+        isLoadingSubset: event.isLoadingSubset,
+        previousIsLoadingSubset: event.previousIsLoadingSubset,
+      })
+    })
+
+    collection._sync.loadSubset({})
+    await flushPromises()
+
+    expect(loadingChanges).toHaveLength(1)
+    expect(loadingChanges[0]).toEqual({
+      isLoadingSubset: true,
+      previousIsLoadingSubset: false,
+    })
+
+    resolveLoadSubset!()
+    await flushPromises()
+
+    expect(loadingChanges).toHaveLength(2)
+    expect(loadingChanges[1]).toEqual({
+      isLoadingSubset: false,
+      previousIsLoadingSubset: true,
+    })
+  })
+
+  it(`rejected promises still clean up`, async () => {
+    let rejectLoadSubset: (error: Error) => void
+    const loadSubsetPromise = new Promise<void>((_, reject) => {
+      rejectLoadSubset = reject
+    })
+    // Attach catch handler before rejecting to avoid unhandled rejection
+    const handledPromise = loadSubsetPromise.catch(() => {})
+
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => handledPromise,
+          }
+        },
+      },
+    })
+
+    collection._sync.loadSubset({})
+    expect(collection.isLoadingSubset).toBe(true)
+
+    // Reject the promise
+    rejectLoadSubset!(new Error(`Load failed`))
+    await flushPromises()
+
+    expect(collection.isLoadingSubset).toBe(false)
+  })
+
+  it(`isLoadingSubset stays false when loadSubset returns true (no work to do)`, () => {
+    const collection = createCollection<{ id: string; value: string }>({
+      id: `test`,
+      getKey: (item) => item.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+          return {
+            loadSubset: () => true, // No work to do
+          }
+        },
+      },
+    })
+
+    expect(collection.isLoadingSubset).toBe(false)
+
+    // Call loadSubset - it should return true and not track any promise
+    const result = collection._sync.loadSubset({})
+    expect(result).toBe(true)
+    expect(collection.isLoadingSubset).toBe(false)
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Collection } from "../src/collection"
+import type { Collection } from "../src/collection/index.js"
 import type {
   MutationFn,
   PendingMutation,

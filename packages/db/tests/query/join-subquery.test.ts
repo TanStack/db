@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from "vitest"
 import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection.js"
-import { mockSyncCollectionOptions } from "../utls.js"
+import { createCollection } from "../../src/collection/index.js"
+import { mockSyncCollectionOptions } from "../utils.js"
 
 // Sample data types for join-subquery testing
 type Issue = {
@@ -20,6 +20,13 @@ type User = {
   status: `active` | `inactive`
   email: string
   departmentId: number | undefined
+}
+
+type Profile = {
+  id: number
+  userId: number
+  bio: string
+  avatar: string
 }
 
 // Sample data
@@ -102,6 +109,41 @@ const sampleUsers: Array<User> = [
   },
 ]
 
+const sampleProfiles: Array<Profile> = [
+  {
+    id: 1,
+    userId: 1,
+    bio: `Senior developer with 10 years experience`,
+    avatar: `alice.jpg`,
+  },
+  {
+    id: 2,
+    userId: 2,
+    bio: `Full-stack engineer`,
+    avatar: `bob.jpg`,
+  },
+  {
+    id: 3,
+    userId: 3,
+    bio: `Frontend specialist`,
+    avatar: `charlie.jpg`,
+  },
+]
+
+const sampleProducts = [
+  { id: 1, a: `8` },
+  { id: 2, a: `6` },
+  { id: 3, a: `0` },
+  { id: 4, a: `5` },
+]
+
+const sampleTrials = [
+  { id: 1, productId: 1, userId: 1, createdAt: new Date() },
+  { id: 2, productId: 2, userId: 1, createdAt: new Date() },
+  { id: 2, productId: 4, userId: 1, createdAt: null },
+  { id: 3, productId: 3, userId: 2, createdAt: new Date() },
+]
+
 function createIssuesCollection(autoIndex: `off` | `eager` = `eager`) {
   return createCollection(
     mockSyncCollectionOptions<Issue>({
@@ -119,6 +161,39 @@ function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
       id: `join-subquery-test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
+      autoIndex,
+    })
+  )
+}
+
+function createProfilesCollection(autoIndex: `off` | `eager` = `eager`) {
+  return createCollection(
+    mockSyncCollectionOptions<Profile>({
+      id: `join-subquery-test-profiles`,
+      getKey: (profile) => profile.id,
+      initialData: sampleProfiles,
+      autoIndex,
+    })
+  )
+}
+
+function createProductsCollection(autoIndex: `off` | `eager` = `eager`) {
+  return createCollection(
+    mockSyncCollectionOptions({
+      id: `join-subquery-test-products`,
+      getKey: (product) => product.id,
+      initialData: sampleProducts,
+      autoIndex,
+    })
+  )
+}
+
+function createTrialsCollection(autoIndex: `off` | `eager` = `eager`) {
+  return createCollection(
+    mockSyncCollectionOptions({
+      id: `join-subquery-test-trials`,
+      getKey: (item) => `${item.productId}-${item.userId}`,
+      initialData: sampleTrials,
       autoIndex,
     })
   )
@@ -193,7 +268,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
-                user_name: activeUser.name,
+                user_name: activeUser?.name,
                 issue_status: issue.status,
               }))
           },
@@ -272,10 +347,14 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
     describe(`subqueries in JOIN clause`, () => {
       let issuesCollection: ReturnType<typeof createIssuesCollection>
       let usersCollection: ReturnType<typeof createUsersCollection>
+      let productsCollection: ReturnType<typeof createProductsCollection>
+      let trialsCollection: ReturnType<typeof createTrialsCollection>
 
       beforeEach(() => {
         issuesCollection = createIssuesCollection(autoIndex)
         usersCollection = createUsersCollection(autoIndex)
+        productsCollection = createProductsCollection(autoIndex)
+        trialsCollection = createTrialsCollection(autoIndex)
       })
 
       test(`should use subquery in JOIN clause - inner join`, () => {
@@ -333,8 +412,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
                 issue_status: issue.status,
-                user_name: activeUser.name,
-                user_status: activeUser.status,
+                user_name: activeUser?.name,
+                user_status: activeUser?.status,
               }))
           },
         })
@@ -356,6 +435,116 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           user_name: undefined,
           user_status: undefined,
         })
+      })
+
+      test(`should use subquery in JOIN clause - left join for trials`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return q
+              .from({ product: productsCollection })
+              .join(
+                {
+                  tried: q
+                    .from({ tried: trialsCollection })
+                    .where(({ tried }) => eq(tried.userId, 1)),
+                },
+                ({ tried, product }) => eq(tried.productId, product.id),
+                `left`
+              )
+              .where(({ product }) => eq(product.id, 1))
+              .select(({ product, tried }) => ({
+                product,
+                tried,
+              }))
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        expect(results).toHaveLength(1)
+        expect(results[0]!.product.id).toBe(1)
+        expect(results[0]!.tried).toBeDefined()
+        expect(results[0]!.tried!.userId).toBe(1)
+        expect(results[0]).toEqual({
+          product: { id: 1, a: `8` },
+          tried: sampleTrials[0],
+        })
+      })
+
+      test(`should use subquery in LEFT JOIN clause - left join with ordered subquery with limit`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return q
+              .from({ issue: issuesCollection })
+              .join(
+                {
+                  users: q
+                    .from({ user: usersCollection })
+                    .where(({ user }) => eq(user.status, `active`))
+                    .orderBy(({ user }) => user.name, `asc`)
+                    .limit(1),
+                },
+                ({ issue, users }) => eq(issue.userId, users.id),
+                `left`
+              )
+              .orderBy(({ issue }) => issue.id, `desc`)
+              .limit(1)
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        expect(results).toEqual([
+          {
+            issue: {
+              id: 5,
+              title: `Feature 2`,
+              status: `in_progress`,
+              projectId: 2,
+              userId: 2,
+              duration: 15,
+              createdAt: `2024-01-05`,
+            },
+          },
+        ])
+      })
+
+      test(`should use subquery in RIGHT JOIN clause - left join with ordered subquery with limit`, () => {
+        const joinSubquery = createLiveQueryCollection({
+          query: (q) => {
+            return q
+              .from({
+                users: q
+                  .from({ user: usersCollection })
+                  .where(({ user }) => eq(user.status, `active`))
+                  .orderBy(({ user }) => user.name, `asc`)
+                  .limit(1),
+              })
+              .join(
+                { issue: issuesCollection },
+                ({ issue, users }) => eq(issue.userId, users.id),
+                `right`
+              )
+              .orderBy(({ issue }) => issue.id, `desc`)
+              .limit(1)
+          },
+          startSync: true,
+        })
+
+        const results = joinSubquery.toArray
+        expect(results).toEqual([
+          {
+            issue: {
+              id: 5,
+              title: `Feature 2`,
+              status: `in_progress`,
+              projectId: 2,
+              userId: 2,
+              duration: 15,
+              createdAt: `2024-01-05`,
+            },
+          },
+        ])
       })
 
       test(`should handle subqueries with SELECT clauses in both FROM and JOIN`, () => {
@@ -450,6 +639,219 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
             department: 1,
           },
         ])
+      })
+    })
+
+    describe(`nested subqueries with joins (alias remapping)`, () => {
+      let issuesCollection: ReturnType<typeof createIssuesCollection>
+      let usersCollection: ReturnType<typeof createUsersCollection>
+      let profilesCollection: ReturnType<typeof createProfilesCollection>
+
+      beforeEach(() => {
+        issuesCollection = createIssuesCollection(autoIndex)
+        usersCollection = createUsersCollection(autoIndex)
+        profilesCollection = createProfilesCollection(autoIndex)
+      })
+
+      test(`should handle subquery with join used in FROM clause (tests alias remapping)`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            // Level 1: Subquery WITH a join (user + profile)
+            // This creates two inner aliases: 'user' and 'profile'
+            // Filter for active users at the subquery level to avoid WHERE on SELECT fields bug
+            const activeUsersWithProfiles = q
+              .from({ user: usersCollection })
+              .join(
+                { profile: profilesCollection },
+                ({ user, profile }) => eq(user.id, profile.userId),
+                `inner`
+              )
+              .where(({ user }) => eq(user.status, `active`))
+              .select(({ user, profile }) => ({
+                userId: user.id,
+                userName: user.name,
+                userEmail: user.email,
+                profileBio: profile.bio,
+                profileAvatar: profile.avatar,
+              }))
+
+            // Level 2: Use the joined subquery in FROM clause
+            // Outer alias: 'activeUser', inner aliases: 'user', 'profile'
+            // This tests that aliasRemapping['activeUser'] = 'user' (flattened to innermost)
+            return q
+              .from({ activeUser: activeUsersWithProfiles })
+              .join(
+                { issue: issuesCollection },
+                ({ activeUser, issue }) => eq(issue.userId, activeUser.userId),
+                `inner`
+              )
+              .select(({ activeUser, issue }) => ({
+                issue_title: issue.title,
+                issue_status: issue.status,
+                user_name: activeUser.userName,
+                user_email: activeUser.userEmail,
+                profile_bio: activeUser.profileBio,
+                profile_avatar: activeUser.profileAvatar,
+              }))
+          },
+        })
+
+        const results = joinQuery.toArray
+        // Alice (id:1) and Bob (id:2) are active with profiles
+        // Their issues: 1, 3 (Alice), 2, 5 (Bob) = 4 issues total
+        expect(results).toHaveLength(4)
+
+        const sortedResults = results.sort((a, b) =>
+          a.issue_title.localeCompare(b.issue_title)
+        )
+
+        // Verify structure - should have both user data AND profile data
+        sortedResults.forEach((result) => {
+          expect(result).toHaveProperty(`issue_title`)
+          expect(result).toHaveProperty(`user_name`)
+          expect(result).toHaveProperty(`user_email`)
+          expect(result).toHaveProperty(`profile_bio`)
+          expect(result).toHaveProperty(`profile_avatar`)
+        })
+
+        // Verify Alice's issue with profile data (validates alias remapping worked)
+        const aliceIssue = results.find((r) => r.issue_title === `Bug 1`)
+        expect(aliceIssue).toMatchObject({
+          user_name: `Alice`,
+          user_email: `alice@example.com`,
+          profile_bio: `Senior developer with 10 years experience`,
+          profile_avatar: `alice.jpg`,
+        })
+
+        // Verify Bob's issue with profile data (validates alias remapping worked)
+        const bobIssue = results.find((r) => r.issue_title === `Bug 2`)
+        expect(bobIssue).toMatchObject({
+          user_name: `Bob`,
+          user_email: `bob@example.com`,
+          profile_bio: `Full-stack engineer`,
+          profile_avatar: `bob.jpg`,
+        })
+
+        // Charlie's issue should NOT appear (inactive user was filtered in subquery)
+        const charlieIssue = results.find((r) => r.issue_title === `Bug 3`)
+        expect(charlieIssue).toBeUndefined()
+      })
+
+      test(`should handle subquery with join used in JOIN clause (tests alias remapping)`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            // Level 1: Subquery WITH a join (user + profile)
+            const usersWithProfiles = q
+              .from({ user: usersCollection })
+              .join(
+                { profile: profilesCollection },
+                ({ user, profile }) => eq(user.id, profile.userId),
+                `inner`
+              )
+              .where(({ user }) => eq(user.status, `active`))
+              .select(({ user, profile }) => ({
+                userId: user.id,
+                userName: user.name,
+                profileBio: profile.bio,
+              }))
+
+            // Level 2: Use the joined subquery in JOIN clause
+            // Outer alias: 'author', inner aliases: 'user', 'profile'
+            // This tests that aliasRemapping['author'] = 'user' for lazy loading
+            return q
+              .from({ issue: issuesCollection })
+              .join(
+                { author: usersWithProfiles },
+                ({ issue, author }) => eq(issue.userId, author.userId),
+                `left`
+              )
+              .select(({ issue, author }) => ({
+                issue_id: issue.id,
+                issue_title: issue.title,
+                author_name: author?.userName,
+                author_bio: author?.profileBio,
+              }))
+          },
+        })
+
+        const results = joinQuery.toArray
+        expect(results).toHaveLength(5) // All issues
+
+        // Active users with profiles should have author data
+        const withAuthors = results.filter((r) => r.author_name !== undefined)
+        expect(withAuthors).toHaveLength(4) // Issues 1, 2, 3, 5 (Alice and Bob)
+
+        // Charlie (inactive) issue should have no author data
+        const charlieIssue = results.find((r) => r.issue_id === 4)
+        expect(charlieIssue).toMatchObject({
+          issue_title: `Bug 3`,
+          author_name: undefined,
+          author_bio: undefined,
+        })
+      })
+
+      test(`should handle deeply nested subqueries with joins (3 levels)`, () => {
+        const joinQuery = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            // Level 1: Base joined subquery (user + profile)
+            const usersWithProfiles = q
+              .from({ user: usersCollection })
+              .join(
+                { profile: profilesCollection },
+                ({ user, profile }) => eq(user.id, profile.userId),
+                `inner`
+              )
+              .select(({ user, profile }) => ({
+                userId: user.id,
+                userName: user.name,
+                userStatus: user.status,
+                profileBio: profile.bio,
+              }))
+
+            // Level 2: Filter the joined subquery
+            const activeUsersWithProfiles = q
+              .from({ userProfile: usersWithProfiles })
+              .where(({ userProfile }) => eq(userProfile.userStatus, `active`))
+              .select(({ userProfile }) => ({
+                id: userProfile.userId,
+                name: userProfile.userName,
+                bio: userProfile.profileBio,
+              }))
+
+            // Level 3: Use the nested filtered joined subquery
+            // Outer alias: 'author', middle alias: 'userProfile', inner aliases: 'user', 'profile'
+            // Tests that aliasRemapping['author'] = 'user' (flattened to innermost, not 'userProfile')
+            return q
+              .from({ issue: issuesCollection })
+              .join(
+                { author: activeUsersWithProfiles },
+                ({ issue, author }) => eq(issue.userId, author.id),
+                `inner`
+              )
+              .select(({ issue, author }) => ({
+                issue_title: issue.title,
+                author_name: author.name,
+                author_bio: author.bio,
+              }))
+          },
+        })
+
+        const results = joinQuery.toArray
+        // Only issues with active users (Alice: 1, 3 and Bob: 2, 5)
+        expect(results).toHaveLength(4)
+
+        // All results should have complete author data from the joined profiles
+        results.forEach((result) => {
+          expect(result.author_name).toBeDefined()
+          expect(result.author_bio).toBeDefined()
+          expect([
+            `Senior developer with 10 years experience`,
+            `Full-stack engineer`,
+          ]).toContain(result.author_bio)
+        })
       })
     })
   })

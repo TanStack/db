@@ -1,13 +1,15 @@
 import { describe, expect, it, vi } from "vitest"
 import mitt from "mitt"
-import { createCollection } from "../src/collection"
+import { createCollection } from "../src/collection/index.js"
 import { createTransaction } from "../src/transactions"
 import { eq } from "../src/query/builder/functions"
+import { PropRef } from "../src/query/ir"
 import type {
   ChangeMessage,
   ChangesPayload,
   MutationFn,
   PendingMutation,
+  SyncConfig,
 } from "../src/types"
 
 // Helper function to wait for changes to be processed
@@ -42,7 +44,7 @@ describe(`Collection.subscribeChanges`, () => {
     // await waitForChanges()
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback, {
+    const subscription = collection.subscribeChanges(callback, {
       includeInitialState: true,
     })
 
@@ -61,7 +63,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(changes.every((change) => change.type === `insert`)).toBe(true)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should not emit initial collection state as insert changes by default`, () => {
@@ -92,13 +94,13 @@ describe(`Collection.subscribeChanges`, () => {
     // await waitForChanges()
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const subscription = collection.subscribeChanges(callback)
 
     // Verify that callback was called with initial state
     expect(callback).toHaveBeenCalledTimes(0)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should emit changes from synced operations`, () => {
@@ -133,7 +135,7 @@ describe(`Collection.subscribeChanges`, () => {
     })
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const subscription = collection.subscribeChanges(callback)
 
     // Reset mock to ignore initial state emission
     callback.mockReset()
@@ -210,7 +212,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(deleteChange.type).toBe(`delete`)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should emit changes from optimistic operations`, () => {
@@ -253,7 +255,7 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const subscription = collection.subscribeChanges(callback)
 
     // Reset mock to ignore initial state emission
     callback.mockReset()
@@ -339,7 +341,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(deleteChange.key).toBe(1)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should handle both synced and optimistic changes together`, async () => {
@@ -379,7 +381,7 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback)
+    const subscription = collection.subscribeChanges(callback)
 
     // Reset mock to ignore initial state emission
     callback.mockReset()
@@ -487,7 +489,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(updateChange.value).toEqual({ id: 1, value: `updated synced value` })
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should only emit differences between states, not whole state`, async () => {
@@ -534,7 +536,7 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback, {
+    const subscription = collection.subscribeChanges(callback, {
       includeInitialState: true,
     })
 
@@ -603,7 +605,7 @@ describe(`Collection.subscribeChanges`, () => {
     expect(updateChange.key).toBe(1)
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should correctly unsubscribe when returned function is called`, () => {
@@ -623,7 +625,7 @@ describe(`Collection.subscribeChanges`, () => {
     const mutationFn = async () => {}
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(callback, {
+    const subscription = collection.subscribeChanges(callback, {
       includeInitialState: true,
     })
 
@@ -634,7 +636,7 @@ describe(`Collection.subscribeChanges`, () => {
     callback.mockReset()
 
     // Unsubscribe
-    unsubscribe()
+    subscription.unsubscribe()
 
     // Insert an item
     const tx = createTransaction({ mutationFn })
@@ -678,15 +680,15 @@ describe(`Collection.subscribeChanges`, () => {
       syncCollection.config.sync.sync({
         collection: syncCollection,
         begin: () => {
-          syncCollection.pendingSyncedTransactions.push({
+          syncCollection._state.pendingSyncedTransactions.push({
             committed: false,
             operations: [],
           })
         },
         write: (messageWithoutKey: any) => {
           const pendingTransaction =
-            syncCollection.pendingSyncedTransactions[
-              syncCollection.pendingSyncedTransactions.length - 1
+            syncCollection._state.pendingSyncedTransactions[
+              syncCollection._state.pendingSyncedTransactions.length - 1
             ]
           const key = syncCollection.getKeyFromItem(messageWithoutKey.value)
           const message = { ...messageWithoutKey, key }
@@ -694,8 +696,8 @@ describe(`Collection.subscribeChanges`, () => {
         },
         commit: () => {
           const pendingTransaction =
-            syncCollection.pendingSyncedTransactions[
-              syncCollection.pendingSyncedTransactions.length - 1
+            syncCollection._state.pendingSyncedTransactions[
+              syncCollection._state.pendingSyncedTransactions.length - 1
             ]
           pendingTransaction.committed = true
           syncCollection.commitPendingTransactions()
@@ -708,9 +710,9 @@ describe(`Collection.subscribeChanges`, () => {
     }
 
     // Subscribe to changes with a filter for active items only
-    const unsubscribe = collection.subscribeChanges(callback, {
+    const subscription = collection.subscribeChanges(callback, {
       includeInitialState: true,
-      where: (row) => eq(row.status, `active`),
+      whereExpression: eq(new PropRef([`status`]), `active`),
     })
 
     // Should only receive the active item in initial state
@@ -808,6 +810,1108 @@ describe(`Collection.subscribeChanges`, () => {
     expect(callback).not.toHaveBeenCalled()
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
+  })
+
+  it(`should emit delete events for all items when truncate is called`, async () => {
+    const changeEvents: Array<any> = []
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-changes-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          // Initialize with some data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value 1` },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `initial value 2` },
+          })
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, truncate }
+        },
+      },
+    })
+
+    // Listen to change events
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      }
+    )
+
+    await collection.stateWhenReady()
+
+    // Verify initial state
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `initial value 1` })
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `initial value 2` })
+
+    expect(changeEvents).toHaveLength(2)
+
+    // Clear change events from initial state
+    changeEvents.length = 0
+
+    // Test truncate operation
+    const { begin, truncate, commit } = testSyncFunctions
+    begin()
+    truncate()
+    commit()
+
+    // Verify collection is cleared
+    expect(collection.state.size).toBe(0)
+
+    // Verify delete events were emitted for all existing items
+    expect(changeEvents).toHaveLength(2)
+    expect(changeEvents[0]).toEqual({
+      type: `delete`,
+      key: 1,
+      value: { id: 1, value: `initial value 1` },
+    })
+    expect(changeEvents[1]).toEqual({
+      type: `delete`,
+      key: 2,
+      value: { id: 2, value: `initial value 2` },
+    })
+  })
+
+  it(`should emit delete events for optimistic state when truncate is called`, async () => {
+    const changeEvents: Array<any> = []
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-optimistic-changes-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          // Initialize with some data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value 1` },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `initial value 2` },
+          })
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, truncate }
+        },
+      },
+      onInsert: async () => {},
+      onUpdate: async () => {},
+      onDelete: async () => {},
+    })
+
+    // Listen to change events
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      }
+    )
+
+    await collection.stateWhenReady()
+
+    // Add some optimistic updates
+    const tx1 = collection.update(1, (draft) => {
+      draft.value = `optimistic update 1`
+    })
+    const tx2 = collection.insert({ id: 3, value: `optimistic insert` })
+
+    // Verify optimistic state exists
+    expect(collection._state.optimisticUpserts.has(1)).toBe(true)
+    expect(collection._state.optimisticUpserts.has(3)).toBe(true)
+    expect(collection.state.get(1)?.value).toBe(`optimistic update 1`)
+    expect(collection.state.get(3)?.value).toBe(`optimistic insert`)
+
+    // Clear previous change events
+    changeEvents.length = 0
+
+    // Test truncate operation
+    const { begin, truncate, commit } = testSyncFunctions
+    begin()
+    truncate()
+    commit()
+
+    // Verify collection is cleared
+    // After truncate, preserved optimistic inserts should be re-applied
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      value: `optimistic update 1`,
+    })
+    expect(collection.state.get(3)).toEqual({
+      id: 3,
+      value: `optimistic insert`,
+    })
+
+    // Verify events are a single batch: deletes for ALL visible keys (1,2,3), then inserts for preserved optimistic (1,3)
+    expect(changeEvents.length).toBe(5)
+    const deletes = changeEvents.filter((e) => e.type === `delete`)
+    const inserts = changeEvents.filter((e) => e.type === `insert`)
+    expect(deletes.length).toBe(3)
+    expect(inserts.length).toBe(2)
+
+    const deleteByKey = new Map(deletes.map((e) => [e.key, e]))
+    const insertByKey = new Map(inserts.map((e) => [e.key, e]))
+
+    expect(deleteByKey.get(1)).toEqual({
+      type: `delete`,
+      key: 1,
+      value: { id: 1, value: `optimistic update 1` },
+    })
+    expect(deleteByKey.get(2)).toEqual({
+      type: `delete`,
+      key: 2,
+      value: { id: 2, value: `initial value 2` },
+    })
+    expect(deleteByKey.get(3)).toEqual({
+      type: `delete`,
+      key: 3,
+      value: { id: 3, value: `optimistic insert` },
+    })
+
+    // Insert events for preserved optimistic entries (1 and 3)
+    expect(insertByKey.get(1)).toEqual({
+      type: `insert`,
+      key: 1,
+      value: { id: 1, value: `optimistic update 1` },
+    })
+    expect(insertByKey.get(3)).toEqual({
+      type: `insert`,
+      key: 3,
+      value: { id: 3, value: `optimistic insert` },
+    })
+
+    // Wait for transactions to complete
+    await Promise.all([tx1.isPersisted.promise, tx2.isPersisted.promise])
+  })
+
+  it(`should emit insert events for new data after truncate`, async () => {
+    const changeEvents: Array<any> = []
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-new-data-changes-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          // Initialize with some data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial value 1` },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `initial value 2` },
+          })
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, truncate }
+        },
+      },
+    })
+
+    // Listen to change events
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      }
+    )
+
+    await collection.stateWhenReady()
+
+    // Verify initial state
+    expect(collection.state.size).toBe(2)
+
+    // Clear change events from initial state
+    changeEvents.length = 0
+
+    // Test truncate operation
+    const { begin, truncate, commit, write } = testSyncFunctions
+    begin()
+    truncate()
+    commit()
+
+    // Verify collection is cleared
+    expect(collection.state.size).toBe(0)
+
+    // Verify delete events were emitted
+    expect(changeEvents).toHaveLength(2)
+    expect(changeEvents.every((event) => event.type === `delete`)).toBe(true)
+
+    // Clear change events again
+    changeEvents.length = 0
+
+    // Add new data after truncate
+    begin()
+    write({
+      type: `insert`,
+      value: { id: 3, value: `new value after truncate` },
+    })
+    write({
+      type: `insert`,
+      value: { id: 4, value: `another new value` },
+    })
+    commit()
+
+    // Verify new data is added correctly
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.get(3)).toEqual({
+      id: 3,
+      value: `new value after truncate`,
+    })
+    expect(collection.state.get(4)).toEqual({
+      id: 4,
+      value: `another new value`,
+    })
+
+    // Verify insert events were emitted for new data
+    expect(changeEvents).toHaveLength(2)
+    expect(changeEvents[0]).toEqual({
+      type: `insert`,
+      key: 3,
+      value: { id: 3, value: `new value after truncate` },
+    })
+    expect(changeEvents[1]).toEqual({
+      type: `insert`,
+      key: 4,
+      value: { id: 4, value: `another new value` },
+    })
+  })
+
+  it(`should not emit any events when truncate is called on empty collection`, async () => {
+    const changeEvents: Array<any> = []
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-empty-changes-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, truncate, markReady }) => {
+          // Initialize with empty collection
+          begin()
+          commit()
+          markReady()
+
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, commit, truncate }
+        },
+      },
+    })
+
+    // Listen to change events
+    collection.subscribeChanges((changes) => {
+      changeEvents.push(...changes)
+    })
+
+    await collection.stateWhenReady()
+
+    // Verify initial state is empty
+    expect(collection.state.size).toBe(0)
+
+    // Clear any initial change events
+    changeEvents.length = 0
+
+    // Test truncate operation on empty collection
+    const { begin, truncate, commit } = testSyncFunctions
+    begin()
+    truncate()
+    commit()
+
+    // Verify collection remains empty
+    expect(collection.state.size).toBe(0)
+
+    // Verify no change events were emitted (since there was nothing to delete)
+    expect(changeEvents).toHaveLength(0)
+  })
+
+  it(`truncate + optimistic update: server reinserted key -> optimistic value wins in single batch`, async () => {
+    const changeEvents: Array<any> = []
+    let f: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-opt-update-exists-after`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          // Initial state with key 1
+          begin()
+          write({ type: `insert`, value: { id: 1, value: `server-initial` } })
+          commit()
+          markReady()
+          f = { begin, write, commit, truncate }
+        },
+      },
+    })
+
+    collection.subscribeChanges((changes) => changeEvents.push(...changes))
+    await collection.stateWhenReady()
+
+    // Optimistic update on id 1
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = `client-update`
+      })
+    )
+
+    changeEvents.length = 0
+
+    // Truncate, then server reinserts id 1 with different value
+    f.begin()
+    f.truncate()
+    f.write({ type: `insert`, value: { id: 1, value: `server-after` } })
+    f.commit()
+
+    // Expect delete, insert with optimistic value, and an empty event from markReady
+    expect(changeEvents.length).toBe(3)
+    expect(changeEvents[0]).toEqual({
+      type: `delete`,
+      key: 1,
+      value: { id: 1, value: `client-update` },
+    })
+    expect(changeEvents[1]).toEqual({
+      type: `insert`,
+      key: 1,
+      value: { id: 1, value: `client-update` },
+    })
+
+    // Final state reflects optimistic value
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `client-update` })
+  })
+
+  it(`truncate + optimistic delete: server reinserted key -> remains deleted (no duplicate delete event)`, async () => {
+    const changeEvents: Array<any> = []
+    let f: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-opt-delete-exists-after`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, value: `server-initial` } })
+          commit()
+          markReady()
+          f = { begin, write, commit, truncate }
+        },
+      },
+    })
+    collection.subscribeChanges((c) => changeEvents.push(...c))
+    await collection.stateWhenReady()
+
+    // Optimistic delete on id 1
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() => collection.delete(1))
+
+    changeEvents.length = 0
+
+    // Truncate, then server tries to reinsert id 1
+    f.begin()
+    f.truncate()
+    f.write({ type: `insert`, value: { id: 1, value: `server-after` } })
+    f.commit()
+
+    // We already emitted the optimistic delete earlier; do not emit it again.
+    // Also, do not emit an insert for the re-introduced key.
+    expect(changeEvents.length).toBe(0)
+    expect(collection.state.has(1)).toBe(false)
+  })
+
+  it(`should emit synced delete after a non-optimistic delete`, async () => {
+    const emitter = mitt()
+    const callback = vi.fn()
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `non-optimistic-delete-sync`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // replay any pending mutations emitted via mitt
+          // @ts-expect-error Mitt typings are loose for our test helpers
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error test helper
+                value: change.modified,
+              })
+            })
+            commit()
+          })
+
+          // seed initial row
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial` },
+          })
+          commit()
+        },
+      },
+      onDelete: async ({ transaction }) => {
+        emitter.emit(`sync`, transaction.mutations)
+      },
+    })
+
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
+
+    // initial insert emitted
+    expect(callback).toHaveBeenCalledTimes(1)
+    callback.mockClear()
+
+    const tx = collection.delete(1, { optimistic: false })
+    await tx.isPersisted.promise
+
+    expect(callback).toHaveBeenCalledTimes(1)
+    const deleteChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      value: string
+    }>
+    expect(deleteChanges).toEqual([
+      {
+        type: `delete`,
+        key: 1,
+        value: { id: 1, value: `initial` },
+      },
+    ])
+    expect(collection.state.has(1)).toBe(false)
+
+    subscription.unsubscribe()
+  })
+
+  it(`truncate + optimistic insert: server did NOT reinsert key -> inserted optimistically`, async () => {
+    const changeEvents: Array<any> = []
+    let f: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-opt-insert-not-after`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, value: `server-initial` } })
+          commit()
+          markReady()
+          f = { begin, write, commit, truncate }
+        },
+      },
+    })
+    collection.subscribeChanges((c) => changeEvents.push(...c), {
+      includeInitialState: true,
+    })
+    await collection.stateWhenReady()
+
+    // Optimistic insert for id 2 (did not exist before)
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() => collection.insert({ id: 2, value: `client-insert` }))
+
+    changeEvents.length = 0
+
+    // Truncate without server reinsert for id 2
+    f.begin()
+    f.truncate()
+    // server does not write id 2
+    f.commit()
+
+    // Expect delete for id 1, and insert for id 2
+    expect(changeEvents.some((e) => e.type === `delete` && e.key === 1)).toBe(
+      true
+    )
+    expect(
+      changeEvents.some(
+        (e) =>
+          e.type === `insert` &&
+          e.key === 2 &&
+          e.value.value === `client-insert`
+      )
+    ).toBe(true)
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `client-insert` })
+  })
+
+  it(`truncate + optimistic update: server did NOT reinsert key -> optimistic insert then update minimal`, async () => {
+    const changeEvents: Array<any> = []
+    let f: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-opt-update-not-after`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, value: `server-initial` } })
+          commit()
+          markReady()
+          f = { begin, write, commit, truncate }
+        },
+      },
+    })
+    collection.subscribeChanges((c) => changeEvents.push(...c))
+    await collection.stateWhenReady()
+
+    // Optimistic update on id 1
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.value = `client-update`
+      })
+    )
+
+    changeEvents.length = 0
+
+    // Truncate; server does not reinsert id 1
+    f.begin()
+    f.truncate()
+    f.commit()
+
+    // We expect delete for id 1 and then insert (minimal) with optimistic value
+    const deletes = changeEvents.filter((e) => e.type === `delete`)
+    const inserts = changeEvents.filter((e) => e.type === `insert`)
+    expect(deletes.some((e) => e.key === 1)).toBe(true)
+    expect(
+      inserts.some((e) => e.key === 1 && e.value.value === `client-update`)
+    ).toBe(true)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `client-update` })
+  })
+
+  it(`truncate + optimistic delete: server did NOT reinsert key -> remains deleted (no extra event)`, async () => {
+    const changeEvents: Array<any> = []
+    let f: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `truncate-opt-delete-not-after`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          begin()
+          write({ type: `insert`, value: { id: 1, value: `server-initial` } })
+          commit()
+          markReady()
+          f = { begin, write, commit, truncate }
+        },
+      },
+    })
+    collection.subscribeChanges((c) => changeEvents.push(...c))
+    await collection.stateWhenReady()
+
+    // Optimistic delete on id 1
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+    tx.mutate(() => collection.delete(1))
+
+    changeEvents.length = 0
+
+    // Truncate with no server reinserts
+    f.begin()
+    f.truncate()
+    f.commit()
+
+    // No new events since the optimistic delete event already fired earlier
+    expect(changeEvents.length).toBe(0)
+    expect(collection.state.has(1)).toBe(false)
+  })
+
+  it(`only emit a single event when a sync mutation is triggered from inside a mutation handler callback`, async () => {
+    const callback = vi.fn()
+
+    interface TestItem extends Record<string, unknown> {
+      id: number
+      number: number
+    }
+
+    let callBegin!: () => void
+    let callWrite!: (message: Omit<ChangeMessage<TestItem>, `key`>) => void
+    let callCommit!: () => void
+
+    // Create collection with pre-populated data
+    const collection = createCollection<TestItem>({
+      id: `test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          callBegin = begin
+          callWrite = write
+          callCommit = commit
+          // Immediately populate with initial data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 0, number: 15 },
+          })
+          commit()
+          markReady()
+        },
+      },
+      onDelete: ({ transaction }) => {
+        const { original } = transaction.mutations[0]
+
+        // IMMEDIATELY synchronously trigger the sync inside the onDelete callback promise
+        callBegin()
+        callWrite({ type: `delete`, value: original })
+        callCommit()
+
+        return Promise.resolve()
+      },
+    })
+
+    // Subscribe to changes
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
+
+    callback.mockReset()
+
+    // Delete item 0
+    collection.delete(0)
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(callback.mock.calls.length).toBe(1)
+    expect(callback.mock.calls[0]![0]).toEqual([
+      {
+        type: `delete`,
+        key: 0,
+        value: { id: 0, number: 15 },
+      },
+    ])
+
+    subscription.unsubscribe()
+  })
+
+  it(`only emit a single event when a sync mutation is triggered from inside a mutation handler callback after a short delay`, async () => {
+    const callback = vi.fn()
+
+    interface TestItem extends Record<string, unknown> {
+      id: number
+      number: number
+    }
+
+    let callBegin!: () => void
+    let callWrite!: (message: Omit<ChangeMessage<TestItem>, `key`>) => void
+    let callCommit!: () => void
+
+    // Create collection with pre-populated data
+    const collection = createCollection<TestItem>({
+      id: `test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          callBegin = begin
+          callWrite = write
+          callCommit = commit
+          // Immediately populate with initial data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 0, number: 15 },
+          })
+          commit()
+          markReady()
+        },
+      },
+      onDelete: async ({ transaction }) => {
+        const { original } = transaction.mutations[0]
+
+        // Simulate waiting for some async operation
+        await new Promise((resolve) => setTimeout(resolve, 0))
+
+        // Synchronously trigger the sync inside the onDelete callback promise,
+        // but after a short delay.
+        // Ordering here is important to test for a race condition!
+        callBegin()
+        callWrite({ type: `delete`, value: original })
+        callCommit()
+      },
+    })
+
+    // Subscribe to changes
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
+
+    callback.mockReset()
+
+    // Delete item 0
+    collection.delete(0)
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(callback.mock.calls.length).toBe(1)
+    expect(callback.mock.calls[0]![0]).toEqual([
+      {
+        type: `delete`,
+        key: 0,
+        value: { id: 0, number: 15 },
+      },
+    ])
+
+    subscription.unsubscribe()
+  })
+
+  it(`should not emit duplicate insert events when onInsert delays sync write`, async () => {
+    vi.useFakeTimers()
+
+    try {
+      const changeEvents: Array<any> = []
+      let syncOps:
+        | Parameters<
+            SyncConfig<{ id: string; n: number; foo?: string }, string>[`sync`]
+          >[0]
+        | undefined
+
+      const collection = createCollection<
+        { id: string; n: number; foo?: string },
+        string
+      >({
+        id: `async-oninsert-race-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: (cfg) => {
+            syncOps = cfg
+            cfg.markReady()
+          },
+        },
+        onInsert: async ({ transaction }) => {
+          // Simulate async operation (e.g., server round-trip)
+          await vi.advanceTimersByTimeAsync(100)
+
+          // Write modified data back via sync
+          const modifiedValues = transaction.mutations.map((m) => m.modified)
+          syncOps!.begin()
+          for (const value of modifiedValues) {
+            const existing = collection._state.syncedData.get(value.id)
+            syncOps!.write({
+              type: existing ? `update` : `insert`,
+              value: { ...value, foo: `abc` },
+            })
+          }
+          syncOps!.commit()
+        },
+        startSync: true,
+      })
+
+      collection.subscribeChanges((changes) => changeEvents.push(...changes))
+
+      // Insert two items rapidly - this triggers the race condition
+      collection.insert({ id: `0`, n: 1 })
+      collection.insert({ id: `1`, n: 1 })
+
+      await vi.runAllTimersAsync()
+
+      // Filter events by type
+      const insertEvents = changeEvents.filter((e) => e.type === `insert`)
+      const updateEvents = changeEvents.filter((e) => e.type === `update`)
+
+      // Expected: 2 optimistic inserts + 2 sync updates = 4 events
+      expect(insertEvents.length).toBe(2)
+      expect(updateEvents.length).toBe(2)
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it(`should handle single insert with delayed sync correctly`, async () => {
+    vi.useFakeTimers()
+
+    try {
+      const changeEvents: Array<any> = []
+      let syncOps:
+        | Parameters<
+            SyncConfig<{ id: string; n: number; foo?: string }, string>[`sync`]
+          >[0]
+        | undefined
+
+      const collection = createCollection<
+        { id: string; n: number; foo?: string },
+        string
+      >({
+        id: `single-insert-delayed-sync-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: (cfg) => {
+            syncOps = cfg
+            cfg.markReady()
+          },
+        },
+        onInsert: async ({ transaction }) => {
+          await vi.advanceTimersByTimeAsync(50)
+
+          const modifiedValues = transaction.mutations.map((m) => m.modified)
+          syncOps!.begin()
+          for (const value of modifiedValues) {
+            const existing = collection._state.syncedData.get(value.id)
+            syncOps!.write({
+              type: existing ? `update` : `insert`,
+              value: { ...value, foo: `abc` },
+            })
+          }
+          syncOps!.commit()
+        },
+        startSync: true,
+      })
+
+      collection.subscribeChanges((changes) => changeEvents.push(...changes))
+
+      collection.insert({ id: `x`, n: 1 })
+      await vi.runAllTimersAsync()
+
+      // Should have optimistic insert + sync update
+      expect(changeEvents).toHaveLength(2)
+      expect(changeEvents[0]).toMatchObject({
+        type: `insert`,
+        key: `x`,
+        value: { id: `x`, n: 1 },
+      })
+      expect(changeEvents[1]).toMatchObject({
+        type: `update`,
+        key: `x`,
+        value: { id: `x`, n: 1, foo: `abc` },
+      })
+    } finally {
+      vi.restoreAllMocks()
+    }
+  })
+
+  it(`should emit change events for multiple sync transactions before marking ready`, () => {
+    const changeEvents: Array<any> = []
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `sync-changes-before-ready`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, markReady }
+        },
+      },
+    })
+
+    // Subscribe to changes
+    collection.subscribeChanges((changes) => {
+      changeEvents.push(...changes)
+    })
+
+    const { begin, write, commit, markReady } = testSyncFunctions
+
+    // First sync transaction - should emit insert events
+    begin()
+    write({ type: `insert`, value: { id: 1, value: `first item` } })
+    write({ type: `insert`, value: { id: 2, value: `second item` } })
+    commit()
+
+    expect(changeEvents).toHaveLength(2)
+    expect(changeEvents[0]).toEqual({
+      type: `insert`,
+      key: 1,
+      value: { id: 1, value: `first item` },
+    })
+    expect(changeEvents[1]).toEqual({
+      type: `insert`,
+      key: 2,
+      value: { id: 2, value: `second item` },
+    })
+
+    // Collection should still be loading
+    expect(collection.status).toBe(`loading`)
+
+    // Clear events
+    changeEvents.length = 0
+
+    // Second sync transaction - should emit update and insert events
+    begin()
+    write({ type: `update`, value: { id: 1, value: `first item updated` } })
+    write({ type: `insert`, value: { id: 3, value: `third item` } })
+    commit()
+
+    expect(changeEvents).toHaveLength(2)
+    expect(changeEvents[0]).toEqual({
+      type: `update`,
+      key: 1,
+      value: { id: 1, value: `first item updated` },
+      previousValue: { id: 1, value: `first item` },
+    })
+    expect(changeEvents[1]).toEqual({
+      type: `insert`,
+      key: 3,
+      value: { id: 3, value: `third item` },
+    })
+
+    expect(collection.status).toBe(`loading`)
+
+    // Clear events
+    changeEvents.length = 0
+
+    // Third sync transaction - should emit delete event
+    begin()
+    write({ type: `delete`, value: { id: 2, value: `second item` } })
+    commit()
+
+    expect(changeEvents).toHaveLength(1)
+    expect(changeEvents[0]).toEqual({
+      type: `delete`,
+      key: 2,
+      value: { id: 2, value: `second item` },
+    })
+
+    expect(collection.status).toBe(`loading`)
+
+    // Clear events
+    changeEvents.length = 0
+
+    // Mark as ready - should not emit any change events
+    markReady()
+
+    expect(changeEvents).toHaveLength(0)
+    expect(collection.status).toBe(`ready`)
+
+    // Verify final state
+    expect(collection.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({
+      id: 1,
+      value: `first item updated`,
+    })
+    expect(collection.state.get(3)).toEqual({ id: 3, value: `third item` })
+  })
+
+  it(`should emit change events while collection is loading for filtered subscriptions`, () => {
+    const changeEvents: Array<any> = []
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{
+      id: number
+      value: string
+      active: boolean
+    }>({
+      id: `filtered-sync-changes-before-ready`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          testSyncFunctions = { begin, write, commit, markReady }
+        },
+      },
+    })
+
+    // Subscribe to changes with a filter for active items only
+    collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        whereExpression: eq(new PropRef([`active`]), true),
+      }
+    )
+
+    const { begin, write, commit, markReady } = testSyncFunctions
+
+    // First sync transaction - insert active and inactive items
+    begin()
+    write({
+      type: `insert`,
+      value: { id: 1, value: `active item`, active: true },
+    })
+    write({
+      type: `insert`,
+      value: { id: 2, value: `inactive item`, active: false },
+    })
+    commit()
+
+    // Should only receive the active item
+    expect(changeEvents).toHaveLength(1)
+    expect(changeEvents[0]).toEqual({
+      type: `insert`,
+      key: 1,
+      value: { id: 1, value: `active item`, active: true },
+    })
+
+    expect(collection.status).toBe(`loading`)
+
+    // Clear events
+    changeEvents.length = 0
+
+    // Second sync transaction - update inactive to active
+    begin()
+    write({
+      type: `update`,
+      value: { id: 2, value: `inactive item`, active: true },
+    })
+    commit()
+
+    // Should receive insert for the newly active item
+    expect(changeEvents).toHaveLength(1)
+    expect(changeEvents[0]).toMatchObject({
+      type: `insert`,
+      key: 2,
+      value: { id: 2, value: `inactive item`, active: true },
+      // Note: previousValue is included because the item existed in the collection before
+    })
+
+    expect(collection.status).toBe(`loading`)
+
+    // Clear events
+    changeEvents.length = 0
+
+    // Third sync transaction - update active to inactive
+    begin()
+    write({
+      type: `update`,
+      value: { id: 1, value: `active item`, active: false },
+    })
+    commit()
+
+    // Should receive delete for the newly inactive item
+    expect(changeEvents).toHaveLength(1)
+    expect(changeEvents[0]).toMatchObject({
+      type: `delete`,
+      key: 1,
+      value: { id: 1, value: `active item`, active: true },
+    })
+
+    // Mark as ready
+    markReady()
+
+    expect(collection.status).toBe(`ready`)
+    expect(collection.size).toBe(2)
   })
 })

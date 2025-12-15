@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/index"
+import { createCollection, liveQueryCollectionOptions } from "../src/index"
+import { sum } from "../src/query/builder/functions"
 import { localOnlyCollectionOptions } from "../src/local-only"
+import { createTransaction } from "../src/transactions"
 import type { LocalOnlyCollectionUtils } from "../src/local-only"
 import type { Collection } from "../src/index"
 
@@ -8,6 +10,7 @@ interface TestItem extends Record<string, unknown> {
   id: number
   name: string
   completed?: boolean
+  number?: number
 }
 
 describe(`LocalOnly Collection`, () => {
@@ -15,7 +18,7 @@ describe(`LocalOnly Collection`, () => {
 
   beforeEach(() => {
     // Create collection with LocalOnly configuration
-    collection = createCollection<TestItem, number>(
+    collection = createCollection<TestItem, number, LocalOnlyCollectionUtils>(
       localOnlyCollectionOptions({
         id: `test-local-only`,
         getKey: (item: TestItem) => item.id,
@@ -122,7 +125,7 @@ describe(`LocalOnly Collection`, () => {
     const changeHandler = vi.fn()
 
     // Subscribe to changes
-    const unsubscribe = collection.subscribeChanges(changeHandler)
+    const subscription = collection.subscribeChanges(changeHandler)
 
     // Insert an item
     collection.insert({ id: 1, name: `Test Item` })
@@ -138,7 +141,7 @@ describe(`LocalOnly Collection`, () => {
     ])
 
     // Clean up
-    unsubscribe()
+    subscription.unsubscribe()
   })
 
   it(`should support toArray method`, () => {
@@ -433,6 +436,209 @@ describe(`LocalOnly Collection`, () => {
       expect(testCollection.size).toBe(2)
       expect(testCollection.get(100)).toEqual({ id: 100, name: `Initial Item` })
       expect(testCollection.get(200)).toEqual({ id: 200, name: `Added Item` })
+    })
+  })
+
+  describe(`Live Query integration`, () => {
+    it(`aggregation should work when there is a onDelete callback`, async () => {
+      // This is a reproduction of this issue: https://github.com/TanStack/db/issues/609
+      // The underlying bug is covered by the "only emit a single event when a sync
+      // mutation is triggered from inside an mutation handler callback after a short
+      // delay" test in collection-subscribe-changes.test.ts
+
+      const testCollection = createCollection<TestItem, number>(
+        localOnlyCollectionOptions({
+          id: `numbers`,
+          getKey: (item) => item.id,
+          initialData: [
+            { id: 0, number: 15 },
+            { id: 1, number: 15 },
+            { id: 2, number: 15 },
+          ] as Array<TestItem>,
+          onDelete: () => {
+            return Promise.resolve()
+          },
+          autoIndex: `off`,
+        })
+      )
+
+      const query = createCollection(
+        liveQueryCollectionOptions({
+          startSync: true,
+          query: (q) =>
+            q.from({ numbers: testCollection }).select(({ numbers }) => ({
+              totalNumber: sum(numbers.number),
+            })),
+        })
+      )
+
+      testCollection.delete(0)
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(query.toArray).toEqual([{ totalNumber: 30 }])
+    })
+  })
+
+  describe(`Manual transactions with acceptMutations`, () => {
+    it(`should accept and persist mutations from manual transactions`, () => {
+      const tx = createTransaction({
+        mutationFn: async ({ transaction }: any) => {
+          // Simulate API call success
+          await Promise.resolve()
+          // Accept mutations for local-only collection
+          collection.utils.acceptMutations(transaction)
+        },
+        autoCommit: false,
+      })
+
+      // Create mutations in the transaction
+      tx.mutate(() => {
+        collection.insert({ id: 100, name: `Manual Tx Insert` })
+        collection.insert({ id: 101, name: `Manual Tx Insert 2` })
+      })
+
+      // Items should be in collection optimistically
+      expect(collection.has(100)).toBe(true)
+      expect(collection.has(101)).toBe(true)
+
+      tx.commit()
+
+      // Items should still be in collection after commit
+      expect(collection.get(100)).toEqual({ id: 100, name: `Manual Tx Insert` })
+      expect(collection.get(101)).toEqual({
+        id: 101,
+        name: `Manual Tx Insert 2`,
+      })
+    })
+
+    it(`should only accept mutations for the specific collection`, () => {
+      const otherCollection = createCollection<TestItem, number>(
+        localOnlyCollectionOptions({
+          id: `other-collection`,
+          getKey: (item) => item.id,
+        })
+      )
+
+      const tx = createTransaction({
+        mutationFn: async ({ transaction }: any) => {
+          await Promise.resolve()
+          // Only accept mutations for the original collection
+          collection.utils.acceptMutations(transaction)
+        },
+        autoCommit: false,
+      })
+
+      tx.mutate(() => {
+        collection.insert({ id: 200, name: `Collection 1` })
+        otherCollection.insert({ id: 300, name: `Collection 2` })
+      })
+
+      tx.commit()
+
+      // First collection mutations should be accepted
+      expect(collection.has(200)).toBe(true)
+      // Second collection mutations should not be accepted (remains optimistic)
+      expect(otherCollection.has(300)).toBe(true)
+    })
+
+    it(`should handle insert, update, and delete mutations`, () => {
+      // Pre-populate collection
+      collection.insert({ id: 400, name: `Existing Item` })
+
+      const tx = createTransaction({
+        mutationFn: async ({ transaction }: any) => {
+          await Promise.resolve()
+          collection.utils.acceptMutations(transaction)
+        },
+        autoCommit: false,
+      })
+
+      tx.mutate(() => {
+        collection.insert({ id: 401, name: `New Item` })
+        collection.update(400, (draft) => {
+          draft.name = `Updated Item`
+        })
+        collection.delete(401)
+      })
+
+      expect(collection.get(400)?.name).toBe(`Updated Item`)
+      expect(collection.has(401)).toBe(false)
+
+      tx.commit()
+
+      // Changes should persist after commit
+      expect(collection.get(400)?.name).toBe(`Updated Item`)
+      expect(collection.has(401)).toBe(false)
+    })
+
+    it(`should work when called before API operations`, () => {
+      const tx = createTransaction({
+        mutationFn: async ({ transaction }: any) => {
+          // Accept mutations BEFORE API call
+          collection.utils.acceptMutations(transaction)
+          await Promise.resolve()
+          // Simulate API call
+        },
+        autoCommit: false,
+      })
+
+      tx.mutate(() => {
+        collection.insert({ id: 500, name: `Before API` })
+      })
+
+      tx.commit()
+
+      expect(collection.get(500)).toEqual({ id: 500, name: `Before API` })
+    })
+
+    it(`should work when called after API operations`, () => {
+      const tx = createTransaction({
+        mutationFn: async ({ transaction }: any) => {
+          // Simulate API call
+          await Promise.resolve()
+          // Accept mutations AFTER API call
+          collection.utils.acceptMutations(transaction)
+        },
+        autoCommit: false,
+      })
+
+      tx.mutate(() => {
+        collection.insert({ id: 600, name: `After API` })
+      })
+
+      tx.commit()
+
+      expect(collection.get(600)).toEqual({ id: 600, name: `After API` })
+    })
+
+    it(`should rollback mutations when transaction fails`, async () => {
+      const tx = createTransaction({
+        mutationFn: async () => {
+          await Promise.resolve()
+          throw new Error(`API failed`)
+        },
+        autoCommit: false,
+      })
+
+      tx.mutate(() => {
+        collection.insert({ id: 700, name: `Should Rollback` })
+      })
+
+      // Item should be present optimistically
+      expect(collection.has(700)).toBe(true)
+
+      try {
+        await tx.commit()
+      } catch {
+        // Expected to fail
+      }
+
+      // Catch the rejected promise to avoid unhandled rejection
+      tx.isPersisted.promise.catch(() => {})
+
+      // Item should be rolled back
+      expect(collection.has(700)).toBe(false)
     })
   })
 })

@@ -1,65 +1,61 @@
 {
-  "name": "@tanstack/db-monorepo",
+  "name": "root",
   "private": true,
-  "description": "Reactive client queryable store for sync-first applications",
-  "version": "0.0.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/tanstack/db.git"
   },
-  "author": "Kyle Mathews <mathews.kyle@gmail.com>",
-  "packageManager": "pnpm@10.6.3",
+  "packageManager": "pnpm@10.22.0",
   "type": "module",
-  "keywords": [],
-  "license": "MIT",
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
+    "build:minified": "pnpm --filter \"./packages/**\" build:minified",
     "changeset": "changeset",
     "changeset:publish": "changeset publish",
     "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
+    "docs:generate": "tsx scripts/generateDocs.ts",
+    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
     "lint": "pnpm --filter \"./packages/**\" lint",
     "lint-all": "eslint . --fix",
     "prepare": "husky",
-    "test": "pnpm --filter \"./packages/**\" test"
+    "test": "pnpm --filter \"./packages/**\" test",
+    "test:verify-links": "node scripts/verify-links.ts"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.28.1",
-    "@eslint/js": "^9.22.0",
-    "@stylistic/eslint-plugin": "^4.2.0",
+    "@changesets/cli": "^2.29.7",
+    "@eslint/js": "^9.39.1",
+    "@stylistic/eslint-plugin": "^4.4.1",
     "@svitejs/changesets-changelog-github-compact": "^1.2.0",
-    "@tanstack/config": "^0.17.1",
-    "@testing-library/jest-dom": "^6.6.3",
-    "@types/node": "^22.13.10",
-    "@types/react": "^19.0.12",
-    "@types/react-dom": "^19.0.4",
-    "@types/use-sync-external-store": "^0.0.6",
-    "@typescript-eslint/eslint-plugin": "^8.26.1",
-    "@typescript-eslint/parser": "^8.26.1",
-    "@vitejs/plugin-react": "^4.3.4",
-    "eslint": "^9.22.0",
-    "eslint-config-prettier": "^10.1.1",
-    "eslint-plugin-prettier": "^5.2.3",
-    "eslint-plugin-react": "^7.37.4",
+    "@tanstack/config": "^0.22.0",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@types/node": "^24.6.2",
+    "@types/react": "^19.2.5",
+    "@types/react-dom": "^19.2.3",
+    "@types/use-sync-external-store": "^1.5.0",
+    "@typescript-eslint/eslint-plugin": "^8.46.4",
+    "@typescript-eslint/parser": "^8.46.4",
+    "@vitejs/plugin-react": "^5.1.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-react": "^7.37.5",
     "husky": "^9.1.7",
-    "jsdom": "^26.0.0",
-    "lint-staged": "^15.5.0",
+    "jsdom": "^27.2.0",
+    "knip": "^5.69.1",
+    "lint-staged": "^15.5.2",
+    "markdown-link-extractor": "^4.0.2",
     "mitt": "^3.0.1",
-    "prettier": "^3.5.3",
-    "publint": "^0.3.9",
+    "prettier": "^3.6.2",
+    "publint": "^0.3.15",
+    "sherif": "^1.9.0",
     "shx": "^0.4.0",
-    "tsup": "^8.0.2",
-    "typescript": "^5.8.2",
-    "vite": "^6.2.2",
-    "vitest": "^3.0.9",
-    "zod": "^3.24.2"
+    "tinyglobby": "^0.2.15",
+    "typescript": "^5.9.2",
+    "vite": "^7.2.2",
+    "vitest": "^3.2.4",
+    "zod": "^3.25.76"
   },
-  "exports": {
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "dist",
-    "src"
-  ],
   "lint-staged": {
     "*.{ts,tsx}": [
       "eslint --fix"
@@ -71,8 +67,38 @@
     "examples/react/*"
   ],
   "overrides": {
+    "@tanstack/angular-db": "workspace:*",
     "@tanstack/db": "workspace:*",
+    "@tanstack/db-ivm": "workspace:*",
+    "@tanstack/electric-db-collection": "workspace:*",
+    "@tanstack/offline-transactions": "workspace:*",
+    "@tanstack/powersync-db-collection": "workspace:*",
+    "@tanstack/query-db-collection": "workspace:*",
     "@tanstack/react-db": "workspace:*",
+    "@tanstack/rxdb-db-collection": "workspace:*",
+    "@tanstack/solid-db": "workspace:*",
+    "@tanstack/svelte-db": "workspace:*",
+    "@tanstack/trailbase-db-collection": "workspace:*",
     "@tanstack/vue-db": "workspace:*"
+  },
+  "pnpm": {
+    "overrides": {
+      "@tanstack/angular-db": "workspace:*",
+      "@tanstack/db": "workspace:*",
+      "@tanstack/db-ivm": "workspace:*",
+      "@tanstack/electric-db-collection": "workspace:*",
+      "@tanstack/offline-transactions": "workspace:*",
+      "@tanstack/powersync-db-collection": "workspace:*",
+      "@tanstack/query-db-collection": "workspace:*",
+      "@tanstack/react-db": "workspace:*",
+      "@tanstack/rxdb-db-collection": "workspace:*",
+      "@tanstack/solid-db": "workspace:*",
+      "@tanstack/svelte-db": "workspace:*",
+      "@tanstack/trailbase-db-collection": "workspace:*",
+      "@tanstack/vue-db": "workspace:*"
+    }
+  },
+  "dependencies": {
+    "tsx": "^4.20.6"
   }
 }

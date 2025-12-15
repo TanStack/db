@@ -1,5 +1,27 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
+import {
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  limit,
+  onSnapshot,
+  onSnapshotsInSync,
+  query,
+  runTransaction,
+  serverTimestamp,
+  startAfter,
+  waitForPendingWrites,
+  writeBatch,
+} from "firebase/firestore"
+import {
+  ExpectedDeleteTypeError,
+  ExpectedInsertTypeError,
+  ExpectedUpdateTypeError,
+  FirestoreIntegrationError,
+} from "./errors"
 import type {
+  BaseCollectionConfig,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -7,42 +29,28 @@ import type {
   UpdateMutationFnParams,
   UtilsRecord,
 } from "@tanstack/db"
+import type { StandardSchemaV1 } from "@standard-schema/spec"
 import type {
-  Firestore,
   CollectionReference,
-  DocumentReference,
   DocumentData,
-  QuerySnapshot,
-  Unsubscribe,
+  DocumentReference,
+  Firestore,
   FirestoreError,
-  QueryDocumentSnapshot,
-  SnapshotOptions,
-  WithFieldValue,
-  QueryConstraint,
   Query,
+  QueryConstraint,
+  QueryDocumentSnapshot,
+  QuerySnapshot,
+  SnapshotOptions,
+  Unsubscribe,
+  WithFieldValue,
 } from "firebase/firestore"
-import {
-  collection,
-  doc,
-  onSnapshot,
-  writeBatch,
-  query,
-  limit,
-  getDocs,
-  startAfter,
-  serverTimestamp,
-  addDoc,
-  waitForPendingWrites,
-  onSnapshotsInSync,
-  runTransaction,
-} from "firebase/firestore"
-import {
-  ExpectedInsertTypeError,
-  ExpectedUpdateTypeError,
-  ExpectedDeleteTypeError,
-  FirestoreIntegrationError,
-} from "./errors"
-import type { ShapeOf, FirebaseConversion, FirebaseConversions } from "./types"
+import type { FirebaseConversion, FirebaseConversions, ShapeOf } from "./types"
+
+type InferSchemaOutput<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T> extends object
+    ? StandardSchemaV1.InferOutput<T>
+    : Record<string, unknown>
+  : Record<string, unknown>
 
 const FIRESTORE_BATCH_LIMIT = 500
 
@@ -93,19 +101,20 @@ export interface FirebaseCollectionConfig<
   TItem extends ShapeOf<TRecord>,
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string = string,
+  TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-    CollectionConfig<TItem, TKey>,
-    "sync" | "onInsert" | "onUpdate" | "onDelete"
-  > {
+  BaseCollectionConfig<TItem, TKey, TSchema, UtilsRecord, any>,
+  `sync` | `onInsert` | `onUpdate` | `onDelete`
+> {
   /**
    * Firestore instance
    */
   firestore: Firestore
 
   /**
-   * Collection name in Firestore
+   * Collection path in Firestore
    */
-  collectionName: string
+  collectionPath: string
 
   /**
    * Page size for initial fetch
@@ -144,7 +153,7 @@ export interface FirebaseCollectionConfig<
    * Initial query constraints (e.g., orderBy, where)
    * These constraints will be applied to both initial fetch and listener
    */
-  queryConstraints?: QueryConstraint[]
+  queryConstraints?: Array<QueryConstraint>
 
   /**
    * How updates are applied to rows
@@ -152,7 +161,7 @@ export interface FirebaseCollectionConfig<
    * - 'full': Entire row is replaced
    * @default 'partial'
    */
-  rowUpdateMode?: "partial" | "full"
+  rowUpdateMode?: `partial` | `full`
 
   /**
    * Whether to include metadata changes in the listener
@@ -172,6 +181,24 @@ export interface FirebaseCollectionConfig<
    * @default false
    */
   useTransactions?: boolean
+
+  /**
+   * Optional handler called when items are inserted.
+   * Firebase handles the persistence automatically.
+   */
+  onInsert?: (params: InsertMutationFnParams<TItem, TKey>) => Promise<void>
+
+  /**
+   * Optional handler called when items are updated.
+   * Firebase handles the persistence automatically.
+   */
+  onUpdate?: (params: UpdateMutationFnParams<TItem, TKey>) => Promise<void>
+
+  /**
+   * Optional handler called when items are deleted.
+   * Firebase handles the persistence automatically.
+   */
+  onDelete?: (params: DeleteMutationFnParams<TItem, TKey>) => Promise<void>
 }
 
 export interface FirebaseCollectionUtils extends UtilsRecord {
@@ -192,7 +219,7 @@ export interface FirebaseCollectionUtils extends UtilsRecord {
 }
 
 interface BufferedEvent {
-  type: "added" | "modified" | "removed"
+  type: `added` | `modified` | `removed`
   data: any
   doc: QueryDocumentSnapshot
 }
@@ -200,7 +227,7 @@ interface BufferedEvent {
 async function executeBatchedWrites(
   firestore: Firestore,
   operations: Array<{
-    type: "set" | "update" | "delete"
+    type: `set` | `update` | `delete`
     ref: DocumentReference
     data?: any
   }>
@@ -212,13 +239,13 @@ async function executeBatchedWrites(
 
     for (const op of chunk) {
       switch (op.type) {
-        case "set":
+        case `set`:
           batch.set(op.ref, op.data)
           break
-        case "update":
+        case `update`:
           batch.update(op.ref, op.data)
           break
-        case "delete":
+        case `delete`:
           batch.delete(op.ref)
           break
       }
@@ -232,25 +259,25 @@ function handleFirestoreError(error: unknown, context: string): never {
   if ((error as FirestoreError).code) {
     const firestoreError = error as FirestoreError
     switch (firestoreError.code) {
-      case "permission-denied":
+      case `permission-denied`:
         throw new FirestoreIntegrationError(`Permission denied: ${context}`)
-      case "not-found":
+      case `not-found`:
         throw new FirestoreIntegrationError(`Document not found: ${context}`)
-      case "already-exists":
+      case `already-exists`:
         throw new FirestoreIntegrationError(
           `Document already exists: ${context}`
         )
-      case "resource-exhausted":
+      case `resource-exhausted`:
         throw new FirestoreIntegrationError(`Quota exceeded: ${context}`)
-      case "unavailable":
+      case `unavailable`:
         throw new FirestoreIntegrationError(
           `Service temporarily unavailable: ${context}`
         )
-      case "failed-precondition":
+      case `failed-precondition`:
         throw new FirestoreIntegrationError(
           `Operation failed precondition: ${context}`
         )
-      case "unimplemented":
+      case `unimplemented`:
         throw new FirestoreIntegrationError(
           `Operation not supported: ${context}`
         )
@@ -288,7 +315,7 @@ class ExponentialBackoff {
       }
     }
 
-    throw new FirestoreIntegrationError("Unreachable")
+    throw new FirestoreIntegrationError(`Unreachable`)
   }
 
   reset() {
@@ -296,26 +323,55 @@ class ExponentialBackoff {
   }
 }
 
+// Overload: with schema
+export function firebaseCollectionOptions<TSchema extends StandardSchemaV1>(
+  config: FirebaseCollectionConfig<
+    InferSchemaOutput<TSchema>,
+    InferSchemaOutput<TSchema>,
+    string,
+    TSchema
+  > & { schema: TSchema }
+): CollectionConfig<InferSchemaOutput<TSchema>, string, TSchema> & {
+  utils: FirebaseCollectionUtils
+  schema: TSchema
+}
+
+// Without schema
 export function firebaseCollectionOptions<
   TItem extends ShapeOf<TRecord>,
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string = string,
 >(
-  config: FirebaseCollectionConfig<TItem, TRecord, TKey>
-): CollectionConfig<TItem, TKey> & { utils: FirebaseCollectionUtils } {
+  config: FirebaseCollectionConfig<TItem, TRecord, TKey, never>
+): CollectionConfig<TItem, TKey> & {
+  utils: FirebaseCollectionUtils
+  schema: never
+}
+
+// With schema
+export function firebaseCollectionOptions<
+  TItem extends ShapeOf<TRecord>,
+  TRecord extends ShapeOf<TItem> = TItem,
+  TKey extends string = string,
+>(
+  config: FirebaseCollectionConfig<TItem, TRecord, TKey, any>
+): CollectionConfig<TItem, TKey, any> & { utils: FirebaseCollectionUtils } {
   const {
     firestore,
-    collectionName,
+    collectionPath,
     pageSize = 1000,
     parse: parseConversions = {} as FirebaseConversions<TRecord, TItem>,
     serialize: serializeConversions = {} as FirebaseConversions<TItem, TRecord>,
     converter,
     autoId = false,
     queryConstraints = [],
-    rowUpdateMode = "partial",
+    rowUpdateMode = `partial`,
     includeMetadataChanges = false,
     queryBuilder,
     useTransactions = false,
+    onInsert: userOnInsert,
+    onUpdate: userOnUpdate,
+    onDelete: userOnDelete,
     ...restConfig
   } = config
 
@@ -328,7 +384,7 @@ export function firebaseCollectionOptions<
   const serialIns = (item: TItem) =>
     convert<TItem, TRecord>(serializeConversions, item)
 
-  const collectionRef = collection(firestore, collectionName)
+  const collectionRef = collection(firestore, collectionPath)
   const backoff = new ExponentialBackoff()
 
   let unsubscribeSnapshot: Unsubscribe | undefined
@@ -348,12 +404,18 @@ export function firebaseCollectionOptions<
     })
   }
 
-  type SyncParams = Parameters<SyncConfig<TItem, TKey>["sync"]>[0]
+  type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
   const sync: SyncConfig<TItem, TKey> = {
     sync: (params: SyncParams) => {
-      const { begin, write, commit, markReady } = params
+      const {
+        begin,
+        write,
+        commit,
+        markReady,
+        collection: dbCollection,
+      } = params
 
-      const eventBuffer: BufferedEvent[] = []
+      const eventBuffer: Array<BufferedEvent> = []
       let isInitialFetchComplete = false
       const fetchedIds = new Set<string>()
       let initialFetchEndTime: Date
@@ -373,20 +435,17 @@ export function firebaseCollectionOptions<
           finalQuery,
           { includeMetadataChanges },
           (snapshot: QuerySnapshot) => {
-            const events: BufferedEvent[] = snapshot
+            const events: Array<BufferedEvent> = snapshot
               .docChanges()
               .map((change) => ({
                 type: change.type,
                 data: converter
-                  ? converter.fromFirestore(
-                      change.doc as QueryDocumentSnapshot,
-                      {}
-                    )
+                  ? converter.fromFirestore(change.doc, {})
                   : ({
                       id: change.doc.id,
                       ...change.doc.data(),
                     } as unknown as TRecord),
-                doc: change.doc as QueryDocumentSnapshot,
+                doc: change.doc,
               }))
 
             if (!isInitialFetchComplete) {
@@ -398,8 +457,18 @@ export function firebaseCollectionOptions<
             }
           },
           (error) => {
-            console.error("Firestore listener error:", error)
-            handleFirestoreError(error, "real-time sync")
+            if (error.code === `aborted`) {
+              console.warn(
+                `[${dbCollection.id}] Firestore listener aborted`,
+                error
+              )
+              return
+            }
+            console.error(
+              `[${dbCollection.id}] Firestore listener error:`,
+              error
+            )
+            handleFirestoreError(error, `real-time sync`)
           }
         )
       }
@@ -409,16 +478,16 @@ export function firebaseCollectionOptions<
 
         write({
           type:
-            event.type === "added"
-              ? "insert"
-              : event.type === "modified"
-                ? "update"
-                : "delete",
+            event.type === `added`
+              ? `insert`
+              : event.type === `modified`
+                ? `update`
+                : `delete`,
           value,
         })
       }
 
-      function processEvents(events: BufferedEvent[]) {
+      function processEvents(events: Array<BufferedEvent>) {
         if (events.length === 0) return
 
         begin()
@@ -435,7 +504,7 @@ export function firebaseCollectionOptions<
 
         while (hasMore) {
           try {
-            const constraints: QueryConstraint[] = [
+            const constraints: Array<QueryConstraint> = [
               ...queryConstraints,
               limit(pageSize),
               ...(lastDoc ? [startAfter(lastDoc)] : []),
@@ -454,11 +523,11 @@ export function firebaseCollectionOptions<
               fetchedIds.add(id)
 
               const data = converter
-                ? converter.fromFirestore(docSnap as QueryDocumentSnapshot, {})
+                ? converter.fromFirestore(docSnap, {})
                 : ({ id, ...docSnap.data() } as unknown as TRecord)
 
               write({
-                type: "insert",
+                type: `insert`,
                 value: parse(data),
               })
             })
@@ -466,7 +535,7 @@ export function firebaseCollectionOptions<
             lastDoc = snapshot.docs[snapshot.docs.length - 1] || null
             hasMore = snapshot.docs.length === pageSize
           } catch (error) {
-            handleFirestoreError(error, "initial fetch")
+            handleFirestoreError(error, `initial fetch`)
           }
         }
 
@@ -482,7 +551,7 @@ export function firebaseCollectionOptions<
 
         for (const event of eventBuffer) {
           // Skip if we already fetched this document
-          if (event.type === "added" && fetchedIds.has(event.data.id)) {
+          if (event.type === `added` && fetchedIds.has(event.data.id)) {
             // Only process if it's newer than our fetch
             const docTime = event.doc.metadata.hasPendingWrites
               ? new Date()
@@ -506,11 +575,11 @@ export function firebaseCollectionOptions<
       async function start() {
         try {
           setupListener() // First! Prevents race condition
-          await backoff.execute(() => initialFetch(), "initial fetch")
+          await backoff.execute(() => initialFetch(), `initial fetch`)
           isInitialFetchComplete = true
           processBufferedEvents()
         } catch (error) {
-          console.error("Sync failed:", error)
+          console.error(`[${dbCollection.id}] Sync failed:`, error)
           cancelSnapshot()
           throw error
         } finally {
@@ -526,7 +595,9 @@ export function firebaseCollectionOptions<
       }
     },
     rowUpdateMode,
-    getSyncMetadata: undefined,
+    getSyncMetadata: () => ({
+      collectionPath,
+    }),
   }
 
   return {
@@ -536,12 +607,18 @@ export function firebaseCollectionOptions<
     onInsert: async (
       params: InsertMutationFnParams<TItem, TKey>
     ): Promise<Array<TKey>> => {
+      // Call user handler first if provided
+      if (userOnInsert) {
+        await userOnInsert(params)
+      }
+
+      // Always persist to Firestore
       if (autoId) {
         // Can't batch with auto-generated IDs
         const ids = await Promise.all(
           params.transaction.mutations.map(async (mutation) => {
             const { type, modified } = mutation
-            if (type !== "insert") {
+            if (type !== `insert`) {
               throw new ExpectedInsertTypeError(type)
             }
 
@@ -551,7 +628,7 @@ export function firebaseCollectionOptions<
                   ...serialIns(modified),
                   createdAt: serverTimestamp(),
                 }),
-              "insert document"
+              `insert document`
             )
 
             return docRef.id as TKey
@@ -559,18 +636,19 @@ export function firebaseCollectionOptions<
         )
 
         await waitForPendingWrites(firestore)
+        await waitForSync()
         return ids
       } else {
         // Use batched approach
         const operations = params.transaction.mutations.map((mutation) => {
           const { type, modified } = mutation
-          if (type !== "insert") {
+          if (type !== `insert`) {
             throw new ExpectedInsertTypeError(type)
           }
 
           const id = String(getKey(modified))
           return {
-            type: "set" as const,
+            type: `set` as const,
             ref: doc(collectionRef, id),
             data: {
               ...serialIns(modified),
@@ -581,20 +659,27 @@ export function firebaseCollectionOptions<
 
         await backoff.execute(
           () => executeBatchedWrites(firestore, operations),
-          "batch insert"
+          `batch insert`
         )
 
         await waitForPendingWrites(firestore)
+        await waitForSync()
         return params.transaction.mutations.map((m) => getKey(m.modified))
       }
     },
     onUpdate: async (params: UpdateMutationFnParams<TItem, TKey>) => {
+      // Call user handler first if provided
+      if (userOnUpdate) {
+        await userOnUpdate(params)
+      }
+
+      // Always persist to Firestore
       if (useTransactions) {
         // Use transactions for stronger consistency
         await Promise.all(
           params.transaction.mutations.map(async (mutation) => {
             const { type, changes, key } = mutation
-            if (type !== "update") {
+            if (type !== `update`) {
               throw new ExpectedUpdateTypeError(type)
             }
 
@@ -617,12 +702,12 @@ export function firebaseCollectionOptions<
         // Use batched writes
         const operations = params.transaction.mutations.map((mutation) => {
           const { type, changes, key } = mutation
-          if (type !== "update") {
+          if (type !== `update`) {
             throw new ExpectedUpdateTypeError(type)
           }
 
           return {
-            type: "update" as const,
+            type: `update` as const,
             ref: doc(collectionRef, String(key)),
             data: {
               ...serialUpd(changes),
@@ -633,31 +718,39 @@ export function firebaseCollectionOptions<
 
         await backoff.execute(
           () => executeBatchedWrites(firestore, operations),
-          "batch update"
+          `batch update`
         )
       }
 
       await waitForPendingWrites(firestore)
+      await waitForSync()
     },
     onDelete: async (params: DeleteMutationFnParams<TItem, TKey>) => {
+      // Call user handler first if provided
+      if (userOnDelete) {
+        await userOnDelete(params)
+      }
+
+      // Always persist to Firestore
       const operations = params.transaction.mutations.map((mutation) => {
         const { type, key } = mutation
-        if (type !== "delete") {
+        if (type !== `delete`) {
           throw new ExpectedDeleteTypeError(type)
         }
 
         return {
-          type: "delete" as const,
+          type: `delete` as const,
           ref: doc(collectionRef, String(key)),
         }
       })
 
       await backoff.execute(
         () => executeBatchedWrites(firestore, operations),
-        "batch delete"
+        `batch delete`
       )
 
       await waitForPendingWrites(firestore)
+      await waitForSync()
     },
     utils: {
       cancel: cancelSnapshot,

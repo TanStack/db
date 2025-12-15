@@ -1,4 +1,6 @@
 import { createTransaction } from "./transactions"
+import { OnMutateMustBeSynchronousError } from "./errors"
+import { isPromiseLike } from "./utils/type-guards"
 import type { CreateOptimisticActionsOptions, Transaction } from "./types"
 
 /**
@@ -8,6 +10,11 @@ import type { CreateOptimisticActionsOptions, Transaction } from "./types"
  * This pattern allows for responsive UI updates while the actual mutation is in progress.
  * The optimistic update is applied via the `onMutate` callback, and the server mutation
  * is executed via the `mutationFn`.
+ *
+ * **Important:** Inside your `mutationFn`, you must ensure that your server writes have synced back
+ * before you return, as the optimistic state is dropped when you return from the mutation function.
+ * You generally use collection-specific helpers to do this, such as Query's `utils.refetch()`,
+ * direct write APIs, or Electric's `utils.awaitTxId()`.
  *
  * @example
  * ```ts
@@ -26,7 +33,13 @@ import type { CreateOptimisticActionsOptions, Transaction } from "./types"
  *       method: 'POST',
  *       body: JSON.stringify({ text, completed: false }),
  *     })
- *     return response.json()
+ *     const result = await response.json()
+ *
+ *     // IMPORTANT: Ensure server writes have synced back before returning
+ *     // This ensures the optimistic state can be safely discarded
+ *     await todoCollection.utils.refetch()
+ *
+ *     return result
  *   }
  * })
  *
@@ -56,8 +69,11 @@ export function createOptimisticAction<TVariables = unknown>(
     // Execute the transaction. The mutationFn is called once mutate()
     // is finished.
     transaction.mutate(() => {
-      // Call onMutate with variables to apply optimistic updates
-      onMutate(variables)
+      const maybePromise = onMutate(variables) as unknown
+
+      if (isPromiseLike(maybePromise)) {
+        throw new OnMutateMustBeSynchronousError()
+      }
     })
 
     return transaction

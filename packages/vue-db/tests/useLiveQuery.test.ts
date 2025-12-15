@@ -9,7 +9,7 @@ import {
 } from "@tanstack/db"
 import { nextTick, ref, watchEffect } from "vue"
 import { useLiveQuery } from "../src/useLiveQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utls"
+import { mockSyncCollectionOptions } from "../../db/tests/utils"
 
 type Person = {
   id: string
@@ -840,6 +840,7 @@ describe(`Query Collections`, () => {
     it(`should be false initially and true after collection is ready`, async () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
 
       // Create a collection that doesn't start sync immediately
       const collection = createCollection<Person>({
@@ -847,9 +848,10 @@ describe(`Query Collections`, () => {
         getKey: (person: Person) => person.id,
         startSync: false, // Don't start sync immediately
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginFn = begin
             commitFn = commit
+            markReadyFn = markReady
             // Don't call begin/commit immediately
           },
         },
@@ -875,9 +877,10 @@ describe(`Query Collections`, () => {
       collection.preload()
 
       // Trigger the first commit to make collection ready
-      if (beginFn && commitFn) {
+      if (beginFn && commitFn && markReadyFn) {
         beginFn()
         commitFn()
+        markReadyFn()
       }
 
       // Insert data
@@ -955,15 +958,17 @@ describe(`Query Collections`, () => {
     it(`should update isReady when collection status changes`, async () => {
       let beginFn: (() => void) | undefined
       let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
 
       const collection = createCollection<Person>({
         id: `status-change-is-ready-test`,
         getKey: (person: Person) => person.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginFn = begin
             commitFn = commit
+            markReadyFn = markReady
             // Don't sync immediately
           },
         },
@@ -984,9 +989,10 @@ describe(`Query Collections`, () => {
 
       expect(isReady.value).toBe(false)
       collection.preload()
-      if (beginFn && commitFn) {
+      if (beginFn && commitFn && markReadyFn) {
         beginFn()
         commitFn()
+        markReadyFn()
       }
       collection.insert({
         id: `1`,
@@ -997,6 +1003,73 @@ describe(`Query Collections`, () => {
         team: `team1`,
       })
       await waitFor(() => expect(isReady.value).toBe(true))
+    })
+
+    it(`should update isLoading when collection status changes`, async () => {
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `status-change-is-loading-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isLoading, isReady, status } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
+      )
+
+      // Initially should be true
+      expect(isLoading.value).toBe(true)
+
+      // Start sync manually
+      collection.preload()
+
+      // Trigger the first commit to make collection ready
+      if (beginFn && commitFn && markReadyFn) {
+        beginFn()
+        commitFn()
+        markReadyFn()
+      }
+
+      // Insert data
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      await waitForVueUpdate()
+
+      expect(isLoading.value).toBe(false)
+      expect(isReady.value).toBe(true)
+
+      // Wait for collection to become ready
+      await waitFor(() => {
+        expect(isLoading.value).toBe(false)
+      })
+      expect(status.value).toBe(`ready`)
     })
 
     it(`should maintain isReady state during live updates`, async () => {
@@ -1041,17 +1114,20 @@ describe(`Query Collections`, () => {
     it(`should handle isReady with complex queries including joins`, async () => {
       let personBeginFn: (() => void) | undefined
       let personCommitFn: (() => void) | undefined
+      let personMarkReadyFn: (() => void) | undefined
       let issueBeginFn: (() => void) | undefined
       let issueCommitFn: (() => void) | undefined
+      let issueMarkReadyFn: (() => void) | undefined
 
       const personCollection = createCollection<Person>({
         id: `join-is-ready-persons`,
         getKey: (person: Person) => person.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             personBeginFn = begin
             personCommitFn = commit
+            personMarkReadyFn = markReady
             // Don't sync immediately
           },
         },
@@ -1065,9 +1141,10 @@ describe(`Query Collections`, () => {
         getKey: (issue: Issue) => issue.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             issueBeginFn = begin
             issueCommitFn = commit
+            issueMarkReadyFn = markReady
             // Don't sync immediately
           },
         },
@@ -1092,13 +1169,15 @@ describe(`Query Collections`, () => {
       expect(isReady.value).toBe(false)
       personCollection.preload()
       issueCollection.preload()
-      if (personBeginFn && personCommitFn) {
+      if (personBeginFn && personCommitFn && personMarkReadyFn) {
         personBeginFn()
         personCommitFn()
+        personMarkReadyFn()
       }
-      if (issueBeginFn && issueCommitFn) {
+      if (issueBeginFn && issueCommitFn && issueMarkReadyFn) {
         issueBeginFn()
         issueCommitFn()
+        issueMarkReadyFn()
       }
       personCollection.insert({
         id: `1`,
@@ -1126,9 +1205,12 @@ describe(`Query Collections`, () => {
         getKey: (person: Person) => person.id,
         startSync: false,
         sync: {
-          sync: ({ begin, commit }) => {
+          sync: ({ begin, commit, markReady }) => {
             beginFn = begin
-            commitFn = commit
+            commitFn = () => {
+              commit()
+              markReady()
+            }
             // Don't sync immediately
           },
         },
@@ -1176,6 +1258,142 @@ describe(`Query Collections`, () => {
       minAge.value = 25
       await waitFor(() => expect(isReady.value).toBe(true))
     })
+
+    it(`should handle async status transitions correctly`, async () => {
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `async-status-transition-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isLoading, isReady, status } = useLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => gt(c.age, 30))
+          .select(({ collection: c }) => ({
+            id: c.id,
+            name: c.name,
+          }))
+      )
+
+      // Initially should be loading
+      expect(isLoading.value).toBe(true)
+      expect(isReady.value).toBe(false)
+      expect(status.value).toBe(`loading`)
+
+      // Start sync manually
+      collection.preload()
+
+      // Trigger the first commit to make collection ready
+      if (beginFn && commitFn && markReadyFn) {
+        beginFn()
+        commitFn()
+        // Simulate async delay before marking ready
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        markReadyFn()
+      }
+
+      // Insert data
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      // Wait for the status to transition correctly
+      await waitFor(() => {
+        expect(isLoading.value).toBe(false)
+        expect(isReady.value).toBe(true)
+        expect(status.value).toBe(`ready`)
+      })
+    })
+
+    it(`should handle status transitions without change events`, async () => {
+      // This test reproduces the bug where status gets stuck in 'loading'
+      // when the collection status changes without triggering change events
+      let beginFn: (() => void) | undefined
+      let commitFn: (() => void) | undefined
+      let markReadyFn: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `status-stuck-test`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            beginFn = begin
+            commitFn = commit
+            markReadyFn = markReady
+            // Don't sync immediately
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isLoading, isReady, status } = useLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => gt(c.age, 30))
+          .select(({ collection: c }) => ({
+            id: c.id,
+            name: c.name,
+          }))
+      )
+
+      // Initially should be loading
+      expect(isLoading.value).toBe(true)
+      expect(isReady.value).toBe(false)
+
+      // Start sync manually
+      collection.preload()
+
+      // Trigger the first commit to make collection ready
+      if (beginFn && commitFn && markReadyFn) {
+        beginFn()
+        commitFn()
+        // Simulate async delay before marking ready
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        markReadyFn()
+      }
+
+      // Insert data
+      collection.insert({
+        id: `1`,
+        name: `John Doe`,
+        age: 35,
+        email: `john.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      // Wait for the status to transition correctly
+      // This should work even if no change events are fired
+      await waitFor(() => {
+        expect(isLoading.value).toBe(false)
+        expect(isReady.value).toBe(true)
+        expect(status.value).toBe(`ready`)
+      })
+    })
   })
 
   it(`should accept config object with pre-built QueryBuilder instance`, async () => {
@@ -1213,6 +1431,385 @@ describe(`Query Collections`, () => {
       id: `3`,
       name: `John Smith`,
       age: 35,
+    })
+  })
+
+  describe(`eager execution during sync`, () => {
+    it(`should show state while isLoading is true during sync`, async () => {
+      let syncBegin: (() => void) | undefined
+      let syncWrite: ((op: any) => void) | undefined
+      let syncCommit: (() => void) | undefined
+      let syncMarkReady: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `eager-execution-test-vue`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            syncBegin = begin
+            syncWrite = write
+            syncCommit = commit
+            syncMarkReady = markReady
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isLoading, state, data } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
+      )
+
+      // Initially isLoading should be true
+      expect(isLoading.value).toBe(true)
+      expect(state.value.size).toBe(0)
+      expect(data.value).toEqual([])
+
+      // Start sync manually
+      collection.preload()
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Still loading
+      expect(isLoading.value).toBe(true)
+
+      // Add first batch of data (but don't mark ready yet)
+      syncBegin!()
+      syncWrite!({
+        type: `insert`,
+        value: {
+          id: `1`,
+          name: `John Smith`,
+          age: 35,
+          email: `john.smith@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      syncCommit!()
+
+      // Data should be visible even though still loading
+      await waitFor(() => {
+        expect(state.value.size).toBe(1)
+      })
+      expect(isLoading.value).toBe(true) // Still loading
+      expect(data.value).toHaveLength(1)
+      expect(data.value[0]).toMatchObject({
+        id: `1`,
+        name: `John Smith`,
+      })
+
+      // Add second batch of data
+      syncBegin!()
+      syncWrite!({
+        type: `insert`,
+        value: {
+          id: `2`,
+          name: `Jane Doe`,
+          age: 32,
+          email: `jane.doe@example.com`,
+          isActive: true,
+          team: `team2`,
+        },
+      })
+      syncCommit!()
+
+      // More data should be visible
+      await waitFor(() => {
+        expect(state.value.size).toBe(2)
+      })
+      expect(isLoading.value).toBe(true) // Still loading
+      expect(data.value).toHaveLength(2)
+
+      // Now mark as ready
+      syncMarkReady!()
+
+      // Should now be ready
+      await waitFor(() => {
+        expect(isLoading.value).toBe(false)
+      })
+      expect(state.value.size).toBe(2)
+      expect(data.value).toHaveLength(2)
+    })
+
+    it(`should show filtered results during sync with isLoading true`, async () => {
+      let syncBegin: (() => void) | undefined
+      let syncWrite: ((op: any) => void) | undefined
+      let syncCommit: (() => void) | undefined
+      let syncMarkReady: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `eager-filter-test-vue`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            syncBegin = begin
+            syncWrite = write
+            syncCommit = commit
+            syncMarkReady = markReady
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isLoading, state, data } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => eq(persons.team, `team1`))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+            team: persons.team,
+          }))
+      )
+
+      // Start sync
+      collection.preload()
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(isLoading.value).toBe(true)
+
+      // Add items from different teams
+      syncBegin!()
+      syncWrite!({
+        type: `insert`,
+        value: {
+          id: `1`,
+          name: `Alice`,
+          age: 30,
+          email: `alice@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      syncWrite!({
+        type: `insert`,
+        value: {
+          id: `2`,
+          name: `Bob`,
+          age: 25,
+          email: `bob@example.com`,
+          isActive: true,
+          team: `team2`,
+        },
+      })
+      syncWrite!({
+        type: `insert`,
+        value: {
+          id: `3`,
+          name: `Charlie`,
+          age: 35,
+          email: `charlie@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      syncCommit!()
+
+      // Should only show team1 members, even while loading
+      await waitFor(() => {
+        expect(state.value.size).toBe(2)
+      })
+      expect(isLoading.value).toBe(true)
+      expect(data.value).toHaveLength(2)
+      expect(data.value.every((p) => p.team === `team1`)).toBe(true)
+
+      // Mark ready
+      syncMarkReady!()
+
+      await waitFor(() => {
+        expect(isLoading.value).toBe(false)
+      })
+      expect(state.value.size).toBe(2)
+    })
+
+    it(`should show join results during sync with isLoading true`, async () => {
+      let userSyncBegin: (() => void) | undefined
+      let userSyncWrite: ((op: any) => void) | undefined
+      let userSyncCommit: (() => void) | undefined
+      let userSyncMarkReady: (() => void) | undefined
+
+      let issueSyncBegin: (() => void) | undefined
+      let issueSyncWrite: ((op: any) => void) | undefined
+      let issueSyncCommit: (() => void) | undefined
+      let issueSyncMarkReady: (() => void) | undefined
+
+      const personCollection = createCollection<Person>({
+        id: `eager-join-persons-vue`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            userSyncBegin = begin
+            userSyncWrite = write
+            userSyncCommit = commit
+            userSyncMarkReady = markReady
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const issueCollection = createCollection<Issue>({
+        id: `eager-join-issues-vue`,
+        getKey: (issue: Issue) => issue.id,
+        startSync: false,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            issueSyncBegin = begin
+            issueSyncWrite = write
+            issueSyncCommit = commit
+            issueSyncMarkReady = markReady
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isLoading, state, data } = useLiveQuery((q) =>
+        q
+          .from({ issues: issueCollection })
+          .join({ persons: personCollection }, ({ issues, persons }) =>
+            eq(issues.userId, persons.id)
+          )
+          .select(({ issues, persons }) => ({
+            id: issues.id,
+            title: issues.title,
+            userName: persons.name,
+          }))
+      )
+
+      // Start sync for both
+      personCollection.preload()
+      issueCollection.preload()
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(isLoading.value).toBe(true)
+
+      // Add a person first
+      userSyncBegin!()
+      userSyncWrite!({
+        type: `insert`,
+        value: {
+          id: `1`,
+          name: `John Doe`,
+          age: 30,
+          email: `john@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      userSyncCommit!()
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      expect(isLoading.value).toBe(true)
+      expect(state.value.size).toBe(0) // No joins yet
+
+      // Add an issue for that person
+      issueSyncBegin!()
+      issueSyncWrite!({
+        type: `insert`,
+        value: {
+          id: `1`,
+          title: `First Issue`,
+          description: `Description`,
+          userId: `1`,
+        },
+      })
+      issueSyncCommit!()
+
+      // Should see join result even while loading
+      await waitFor(() => {
+        expect(state.value.size).toBe(1)
+      })
+      expect(isLoading.value).toBe(true)
+      expect(data.value).toHaveLength(1)
+      expect(data.value[0]).toMatchObject({
+        id: `1`,
+        title: `First Issue`,
+        userName: `John Doe`,
+      })
+
+      // Mark both as ready
+      userSyncMarkReady!()
+      issueSyncMarkReady!()
+
+      await waitFor(() => {
+        expect(isLoading.value).toBe(false)
+      })
+      expect(state.value.size).toBe(1)
+    })
+
+    it(`should update isReady when source collection is marked ready with no data`, async () => {
+      let syncMarkReady: (() => void) | undefined
+
+      const collection = createCollection<Person>({
+        id: `ready-no-data-test-vue`,
+        getKey: (person: Person) => person.id,
+        startSync: false,
+        sync: {
+          sync: ({ markReady }) => {
+            syncMarkReady = markReady
+            // Don't call begin/commit - just provide markReady
+          },
+        },
+        onInsert: () => Promise.resolve(),
+        onUpdate: () => Promise.resolve(),
+        onDelete: () => Promise.resolve(),
+      })
+
+      const { isLoading, isReady, state, data, status } = useLiveQuery((q) =>
+        q
+          .from({ persons: collection })
+          .where(({ persons }) => gt(persons.age, 30))
+          .select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          }))
+      )
+
+      // Initially isLoading should be true
+      expect(isLoading.value).toBe(true)
+      expect(isReady.value).toBe(false)
+      expect(state.value.size).toBe(0)
+      expect(data.value).toEqual([])
+
+      // Start sync manually
+      collection.preload()
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Still loading
+      expect(isLoading.value).toBe(true)
+      expect(isReady.value).toBe(false)
+
+      // Mark ready without any data commits
+      syncMarkReady!()
+
+      // Should now be ready, even with no data
+      await waitFor(() => {
+        expect(isReady.value).toBe(true)
+      })
+      expect(isLoading.value).toBe(false)
+      expect(state.value.size).toBe(0) // Still no data
+      expect(data.value).toEqual([]) // Empty array
+      expect(status.value).toBe(`ready`)
     })
   })
 })

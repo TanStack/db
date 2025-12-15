@@ -7,13 +7,8 @@ import type {
   StorageApi,
   StorageEventApi,
 } from "../src/local-storage"
-import type {
-  CollectionConfig,
-  DeleteMutationFnParams,
-  InsertMutationFnParams,
-  ResolveType,
-  UpdateMutationFnParams,
-} from "../src/types"
+
+type ItemOf<T> = T extends Array<infer U> ? U : T
 
 describe(`LocalStorage collection type resolution tests`, () => {
   // Define test types
@@ -59,6 +54,15 @@ describe(`LocalStorage collection type resolution tests`, () => {
     expectTypeOf(collection.size).toBeNumber()
     expectTypeOf(collection.utils.clearStorage).toBeFunction()
     expectTypeOf(collection.utils.getStorageSize).toBeFunction()
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExplicitType>()
+
+    // Test update draft type
+    collection.update(`test-id`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExplicitType>()
+    })
   })
 
   it(`should prioritize explicit type in LocalStorageCollectionConfig`, () => {
@@ -69,14 +73,20 @@ describe(`LocalStorage collection type resolution tests`, () => {
       getKey: (item) => item.id,
     })
 
-    type ExpectedType = ResolveType<
-      ExplicitType,
-      never,
-      Record<string, unknown>
-    >
     // The getKey function should have the resolved type
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExplicitType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
+
+    // Test that the collection works with the options
+    const collection = createCollection(options)
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExplicitType>()
+
+    // Test update draft type
+    collection.update(`test-id`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExplicitType>()
+    })
   })
 
   it(`should use schema type when explicit type is not provided`, () => {
@@ -88,55 +98,70 @@ describe(`LocalStorage collection type resolution tests`, () => {
       getKey: (item) => item.id,
     })
 
-    type ExpectedType = ResolveType<
-      unknown,
-      typeof testSchema,
-      Record<string, unknown>
-    >
     // The getKey function should have the resolved type
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[SchemaType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<SchemaType>()
+
+    // Test that the collection works with the options
+    const collection = createCollection(options)
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<SchemaType>()
+
+    // Test update draft type
+    collection.update(`test-id`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<SchemaType>()
+    })
   })
 
-  it(`should use fallback type when neither explicit nor schema type is provided`, () => {
-    const config: LocalStorageCollectionConfig<unknown, never, FallbackType> = {
+  it(`should use explicit type when provided`, () => {
+    const config: LocalStorageCollectionConfig<FallbackType> = {
       storageKey: `test`,
       storage: mockStorage,
       storageEventApi: mockStorageEventApi,
       getKey: (item) => item.id,
     }
 
-    const options = localStorageCollectionOptions<unknown, never, FallbackType>(
-      config
-    )
+    const options = localStorageCollectionOptions<FallbackType>(config)
 
-    type ExpectedType = ResolveType<unknown, never, FallbackType>
     // The getKey function should have the resolved type
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[FallbackType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<FallbackType>()
+
+    // Test that the collection works with the options
+    const collection = createCollection(options)
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<FallbackType>()
+
+    // Test update draft type
+    collection.update(`test-id`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<FallbackType>()
+    })
   })
 
-  it(`should correctly resolve type with all three types provided`, () => {
-    const options = localStorageCollectionOptions<
-      ExplicitType,
-      typeof testSchema,
-      FallbackType
-    >({
+  it(`should correctly resolve type with explicit type provided`, () => {
+    const options = localStorageCollectionOptions<ExplicitType>({
       storageKey: `test`,
       storage: mockStorage,
       storageEventApi: mockStorageEventApi,
-      schema: testSchema,
       getKey: (item) => item.id,
     })
 
-    type ExpectedType = ResolveType<
-      ExplicitType,
-      typeof testSchema,
-      FallbackType
-    >
     // The getKey function should have the resolved type (explicit type should win)
     expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExplicitType]>()
-    expectTypeOf<ExpectedType>().toEqualTypeOf<ExplicitType>()
+
+    // Test that the collection works with the options
+    const collection = createCollection(options)
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExplicitType>()
+
+    // Test update draft type
+    collection.update(`test-id`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExplicitType>()
+    })
   })
 
   it(`should properly type the onInsert, onUpdate, and onDelete handlers`, () => {
@@ -168,18 +193,17 @@ describe(`LocalStorage collection type resolution tests`, () => {
       },
     })
 
-    // Verify that the handlers are properly typed
-    expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [InsertMutationFnParams<ExplicitType>]
-    >()
+    // Test that the collection works with the options
+    const collection = createCollection(options)
 
-    expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [UpdateMutationFnParams<ExplicitType>]
-    >()
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExplicitType>()
 
-    expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [DeleteMutationFnParams<ExplicitType>]
-    >()
+    // Test update draft type
+    collection.update(`test-id`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExplicitType>()
+    })
   })
 
   it(`should properly type localStorage-specific configuration options`, () => {
@@ -227,9 +251,7 @@ describe(`LocalStorage collection type resolution tests`, () => {
     })
 
     // Verify sync has the correct type and optional getSyncMetadata
-    expectTypeOf(options.sync).toMatchTypeOf<
-      CollectionConfig<ExplicitType>[`sync`]
-    >()
+    expectTypeOf(options.sync).toBeObject()
 
     if (options.sync.getSyncMetadata) {
       expectTypeOf(options.sync.getSyncMetadata).toBeFunction()
@@ -276,7 +298,100 @@ describe(`LocalStorage collection type resolution tests`, () => {
     }
 
     // These should be assignable to our interfaces
-    expectTypeOf(localStorage).toMatchTypeOf<StorageApi>()
-    expectTypeOf(windowEventApi).toMatchTypeOf<StorageEventApi>()
+    expectTypeOf(localStorage).toExtend<StorageApi>()
+    expectTypeOf(windowEventApi).toExtend<StorageEventApi>()
+  })
+
+  it(`should work with schema and infer correct types`, () => {
+    const testSchemaWithSchema = z.object({
+      id: z.string(),
+      entityId: z.string(),
+      value: z.string(),
+      createdAt: z.date().optional().default(new Date()),
+    })
+
+    // We can trust that zod infers the correct types for the schema
+    type ExpectedType = z.infer<typeof testSchemaWithSchema>
+    type ExpectedInput = z.input<typeof testSchemaWithSchema>
+
+    const collection = createCollection(
+      localStorageCollectionOptions({
+        storageKey: `test-with-schema`,
+        storage: mockStorage,
+        storageEventApi: mockStorageEventApi,
+        getKey: (item: any) => item.id,
+        schema: testSchemaWithSchema,
+        onInsert: (params) => {
+          expectTypeOf(
+            params.transaction.mutations[0].modified
+          ).toEqualTypeOf<ExpectedType>()
+          return Promise.resolve()
+        },
+        onUpdate: (params) => {
+          expectTypeOf(
+            params.transaction.mutations[0].modified
+          ).toEqualTypeOf<ExpectedType>()
+          return Promise.resolve()
+        },
+        onDelete: (params) => {
+          expectTypeOf(
+            params.transaction.mutations[0].modified
+          ).toEqualTypeOf<ExpectedType>()
+          return Promise.resolve()
+        },
+      })
+    )
+
+    collection.insert({
+      id: `1`,
+      entityId: `1`,
+      value: `1`,
+    })
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<ExpectedInput>()
+
+    // Check that the update method accepts the expected input type
+    collection.update(`1`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<ExpectedInput>()
+    })
+
+    // Test that the collection has the correct inferred type from schema
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedType>>()
+  })
+
+  it(`should work with explicit type for URL scenario`, () => {
+    type SelectUrlType = {
+      id: string
+      url: string
+      title: string
+      createdAt: Date
+    }
+
+    const options = localStorageCollectionOptions<SelectUrlType>({
+      storageKey: `test-with-url-type`,
+      storage: mockStorage,
+      storageEventApi: mockStorageEventApi,
+      getKey: (url) => url.id,
+    })
+
+    const collection = createCollection(options)
+
+    // Test that the collection has the expected methods
+    expectTypeOf(collection.insert).toBeFunction()
+    expectTypeOf(collection.get).returns.toEqualTypeOf<
+      SelectUrlType | undefined
+    >()
+    expectTypeOf(collection.toArray).toEqualTypeOf<Array<SelectUrlType>>()
+
+    // Test insert parameter type
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<ItemOf<InsertParam>>().toEqualTypeOf<SelectUrlType>()
+
+    // Test update draft type
+    collection.update(`test-id`, (draft) => {
+      expectTypeOf(draft).toEqualTypeOf<SelectUrlType>()
+    })
   })
 })

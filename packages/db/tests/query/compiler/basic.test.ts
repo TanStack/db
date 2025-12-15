@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest"
-import { D2, MultiSet, output } from "@electric-sql/d2mini"
+import { D2, MultiSet, output } from "@tanstack/db-ivm"
 import { compileQuery } from "../../../src/query/compiler/index.js"
 import { CollectionRef, Func, PropRef, Value } from "../../../src/query/ir.js"
 import type { QueryIR } from "../../../src/query/ir.js"
-import type { CollectionImpl } from "../../../src/collection.js"
+import type { CollectionImpl } from "../../../src/collection/index.js"
 
 // Sample user type for tests
 type User = {
@@ -43,7 +43,16 @@ describe(`Query2 Compiler`, () => {
 
       const graph = new D2()
       const input = graph.newInput<[number, User]>()
-      const { pipeline } = compileQuery(query, { users: input })
+      const { pipeline } = compileQuery(
+        query,
+        { users: input },
+        { users: usersCollection },
+        {},
+        {},
+        new Set(),
+        {},
+        () => {}
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -90,7 +99,16 @@ describe(`Query2 Compiler`, () => {
 
       const graph = new D2()
       const input = graph.newInput<[number, User]>()
-      const { pipeline } = compileQuery(query, { users: input })
+      const { pipeline } = compileQuery(
+        query,
+        { users: input },
+        { users: usersCollection },
+        {},
+        {},
+        new Set(),
+        {},
+        () => {}
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -159,7 +177,16 @@ describe(`Query2 Compiler`, () => {
 
       const graph = new D2()
       const input = graph.newInput<[number, User]>()
-      const { pipeline } = compileQuery(query, { users: input })
+      const { pipeline } = compileQuery(
+        query,
+        { users: input },
+        { users: usersCollection },
+        {},
+        {},
+        new Set(),
+        {},
+        () => {}
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
@@ -216,7 +243,16 @@ describe(`Query2 Compiler`, () => {
 
       const graph = new D2()
       const input = graph.newInput<[number, User]>()
-      const { pipeline } = compileQuery(query, { users: input })
+      const { pipeline } = compileQuery(
+        query,
+        { users: input },
+        { users: usersCollection },
+        {},
+        {},
+        new Set(),
+        {},
+        () => {}
+      )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(

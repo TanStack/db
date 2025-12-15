@@ -3,8 +3,32 @@ import {
   UnknownExpressionTypeError,
   UnknownFunctionError,
 } from "../../errors.js"
+import { areValuesEqual, normalizeValue } from "../../utils/comparison.js"
 import type { BasicExpression, Func, PropRef } from "../ir.js"
 import type { NamespacedRow } from "../../types.js"
+
+/**
+ * Helper function to check if a value is null or undefined (represents UNKNOWN in 3-valued logic)
+ */
+function isUnknown(value: any): boolean {
+  return value === null || value === undefined
+}
+
+/**
+ * Converts a 3-valued logic result to a boolean for use in WHERE/HAVING filters.
+ * In SQL, UNKNOWN (null) values in WHERE clauses exclude rows, matching false behavior.
+ *
+ * @param result - The 3-valued logic result: true, false, or null (UNKNOWN)
+ * @returns true only if result is explicitly true, false otherwise
+ *
+ * Truth table:
+ * - true → true (include row)
+ * - false → false (exclude row)
+ * - null (UNKNOWN) → false (exclude row, matching SQL behavior)
+ */
+export function toBooleanPredicate(result: boolean | null): boolean {
+  return result === true
+}
 
 /**
  * Compiled expression evaluator function type
@@ -20,9 +44,12 @@ export type CompiledSingleRowExpression = (item: Record<string, unknown>) => any
  * Compiles an expression into an optimized evaluator function.
  * This eliminates branching during evaluation by pre-compiling the expression structure.
  */
-export function compileExpression(expr: BasicExpression): CompiledExpression {
-  const compiledFn = compileExpressionInternal(expr, false)
-  return compiledFn as CompiledExpression
+export function compileExpression(
+  expr: BasicExpression,
+  isSingleRow: boolean = false
+): CompiledExpression | CompiledSingleRowExpression {
+  const compiledFn = compileExpressionInternal(expr, isSingleRow)
+  return compiledFn
 }
 
 /**
@@ -139,9 +166,14 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
-        const a = argA(data)
-        const b = argB(data)
-        return a === b
+        const a = normalizeValue(argA(data))
+        const b = normalizeValue(argB(data))
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
+        // Use areValuesEqual for proper Uint8Array/Buffer comparison
+        return areValuesEqual(a, b)
       }
     }
     case `gt`: {
@@ -150,6 +182,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = argA(data)
         const b = argB(data)
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
         return a > b
       }
     }
@@ -159,6 +195,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = argA(data)
         const b = argB(data)
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
         return a >= b
       }
     }
@@ -168,6 +208,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = argA(data)
         const b = argB(data)
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
         return a < b
       }
     }
@@ -177,6 +221,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = argA(data)
         const b = argB(data)
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
         return a <= b
       }
     }
@@ -184,25 +232,67 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
     // Boolean operators
     case `and`:
       return (data) => {
+        // 3-valued logic for AND:
+        // - false AND anything = false (short-circuit)
+        // - null AND false = false
+        // - null AND anything (except false) = null
+        // - anything (except false) AND null = null
+        // - true AND true = true
+        let hasUnknown = false
         for (const compiledArg of compiledArgs) {
-          if (!compiledArg(data)) {
+          const result = compiledArg(data)
+          if (result === false) {
             return false
           }
+          if (isUnknown(result)) {
+            hasUnknown = true
+          }
         }
+        // If we got here, no operand was false
+        // If any operand was null, return null (UNKNOWN)
+        if (hasUnknown) {
+          return null
+        }
+
         return true
       }
     case `or`:
       return (data) => {
+        // 3-valued logic for OR:
+        // - true OR anything = true (short-circuit)
+        // - null OR anything (except true) = null
+        // - false OR false = false
+        let hasUnknown = false
         for (const compiledArg of compiledArgs) {
-          if (compiledArg(data)) {
+          const result = compiledArg(data)
+          if (result === true) {
             return true
           }
+          if (isUnknown(result)) {
+            hasUnknown = true
+          }
         }
+        // If we got here, no operand was true
+        // If any operand was null, return null (UNKNOWN)
+        if (hasUnknown) {
+          return null
+        }
+
         return false
       }
     case `not`: {
       const arg = compiledArgs[0]!
-      return (data) => !arg(data)
+      return (data) => {
+        // 3-valued logic for NOT:
+        // - NOT null = null
+        // - NOT true = false
+        // - NOT false = true
+        const result = arg(data)
+        if (isUnknown(result)) {
+          return null
+        }
+        return !result
+      }
     }
 
     // Array operators
@@ -212,6 +302,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const value = valueEvaluator(data)
         const array = arrayEvaluator(data)
+        // In 3-valued logic, if the value is null/undefined, return UNKNOWN
+        if (isUnknown(value)) {
+          return null
+        }
         if (!Array.isArray(array)) {
           return false
         }
@@ -226,6 +320,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const value = valueEvaluator(data)
         const pattern = patternEvaluator(data)
+        // In 3-valued logic, if value or pattern is null/undefined, return UNKNOWN
+        if (isUnknown(value) || isUnknown(pattern)) {
+          return null
+        }
         return evaluateLike(value, pattern, false)
       }
     }
@@ -235,6 +333,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const value = valueEvaluator(data)
         const pattern = patternEvaluator(data)
+        // In 3-valued logic, if value or pattern is null/undefined, return UNKNOWN
+        if (isUnknown(value) || isUnknown(pattern)) {
+          return null
+        }
         return evaluateLike(value, pattern, true)
       }
     }
@@ -331,6 +433,22 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         const b = argB(data)
         const divisor = b ?? 0
         return divisor !== 0 ? (a ?? 0) / divisor : null
+      }
+    }
+
+    // Null/undefined checking functions
+    case `isUndefined`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        return value === undefined
+      }
+    }
+    case `isNull`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        return value === null
       }
     }
 

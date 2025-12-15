@@ -1,20 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createTransaction } from "../src/transactions"
-import { createCollection } from "../src/collection"
-import type { CollectionImpl } from "../src/collection"
-import type { ChangeMessage, CollectionConfig } from "../src/types"
+import { createCollection } from "../src/collection/index.js"
+import type { CollectionImpl } from "../src/collection/index.js"
+import type { SyncConfig } from "../src/types"
+
+type Item = { id: string; name: string }
 
 describe(`Collection getters`, () => {
-  let collection: CollectionImpl
-  let mockSync: {
-    sync: (params: {
-      collection: CollectionImpl
-      begin: () => void
-      write: (message: ChangeMessage) => void
-      commit: () => void
-    }) => void
-  }
-  let config: CollectionConfig
+  let collection: CollectionImpl<Item>
+  let mockSync: SyncConfig<Item>
 
   beforeEach(() => {
     mockSync = {
@@ -33,9 +27,9 @@ describe(`Collection getters`, () => {
       }),
     }
 
-    config = {
+    const config = {
       id: `test-collection`,
-      getKey: (val) => val.id as string,
+      getKey: (val: Item) => val.id,
       sync: mockSync,
       startSync: true,
     }
@@ -68,7 +62,7 @@ describe(`Collection getters`, () => {
       // Create a createCollection with no initial data
       const emptyCollection = createCollection({
         id: `empty-collection`,
-        getKey: (val) => val.id as string,
+        getKey: (val: Item) => val.id,
         sync: {
           sync: ({ begin, commit }) => {
             begin()
@@ -424,23 +418,25 @@ describe(`Collection getters`, () => {
     it(`waits for data if not yet available`, async () => {
       // Create a createCollection with a sync that doesn't immediately commit
       let commitFn: () => void
+      let markReadyFn: () => void
 
       const delayedSyncMock = {
-        sync: vi.fn(({ begin, write, commit }) => {
+        sync: vi.fn(({ begin, write, commit, markReady }) => {
           // Start sync but don't commit yet
           begin()
           write({
             type: `insert`,
             value: { id: `delayed-item`, name: `Delayed Item` },
           })
-          // Save the commit function for later
+          // Save the commit and markReady functions for later
           commitFn = commit
+          markReadyFn = markReady
         }),
       }
 
       const delayedCollection = createCollection({
         id: `delayed-collection`,
-        getKey: (val) => val.id as string,
+        getKey: (val: Item) => val.id,
         startSync: true,
         sync: delayedSyncMock,
       })
@@ -448,9 +444,10 @@ describe(`Collection getters`, () => {
       // Start the stateWhenReady promise
       const statePromise = delayedCollection.stateWhenReady()
 
-      // Manually trigger the commit after a short delay
+      // Manually trigger the commit and markReady after a short delay
       setTimeout(() => {
         commitFn()
+        markReadyFn()
       }, 10)
 
       // Now the promise should resolve
@@ -484,9 +481,10 @@ describe(`Collection getters`, () => {
     it(`waits for data if not yet available`, async () => {
       // Create a createCollection with a sync that doesn't immediately commit
       let commitFn: () => void
+      let markReadyFn: () => void
 
       const delayedSyncMock = {
-        sync: vi.fn(({ begin, write, commit }) => {
+        sync: vi.fn(({ begin, write, commit, markReady }) => {
           // Start sync but don't commit yet
           begin()
           write({
@@ -494,14 +492,15 @@ describe(`Collection getters`, () => {
             id: `delayed-item`,
             value: { id: `delayed-item`, name: `Delayed Item` },
           })
-          // Save the commit function for later
+          // Save the commit and markReady functions for later
           commitFn = commit
+          markReadyFn = markReady
         }),
       }
 
       const delayedCollection = createCollection({
         id: `delayed-collection`,
-        getKey: (val) => val.id as string,
+        getKey: (val: Item) => val.id,
         startSync: true,
         sync: delayedSyncMock,
       })
@@ -509,9 +508,10 @@ describe(`Collection getters`, () => {
       // Start the toArrayWhenReady promise
       const arrayPromise = delayedCollection.toArrayWhenReady()
 
-      // Manually trigger the commit after a short delay
+      // Manually trigger the commit and markReady after a short delay
       setTimeout(() => {
         commitFn()
+        markReadyFn()
       }, 10)
 
       // Now the promise should resolve

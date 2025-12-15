@@ -1,6 +1,7 @@
-import { ascComparator } from "../utils/comparison.js"
 import { BTree } from "../utils/btree.js"
+import { defaultComparator, normalizeValue } from "../utils/comparison.js"
 import { BaseIndex } from "./base-index.js"
+import type { CompareOptions } from "../query/builder/types.js"
 import type { BasicExpression } from "../query/ir.js"
 import type { IndexOperation } from "./base-index.js"
 
@@ -9,6 +10,7 @@ import type { IndexOperation } from "./base-index.js"
  */
 export interface BTreeIndexOptions {
   compareFn?: (a: any, b: any) => number
+  compareOptions?: CompareOptions
 }
 
 /**
@@ -43,7 +45,7 @@ export class BTreeIndex<
   private orderedEntries: BTree<any, undefined> // we don't associate values with the keys of the B+ tree (the keys are indexed values)
   private valueMap = new Map<any, Set<TKey>>() // instead we store a mapping of indexed values to a set of PKs
   private indexedKeys = new Set<TKey>()
-  private compareFn: (a: any, b: any) => number = ascComparator
+  private compareFn: (a: any, b: any) => number = defaultComparator
 
   constructor(
     id: number,
@@ -52,7 +54,10 @@ export class BTreeIndex<
     options?: any
   ) {
     super(id, expression, name, options)
-    this.compareFn = options?.compareFn ?? ascComparator
+    this.compareFn = options?.compareFn ?? defaultComparator
+    if (options?.compareOptions) {
+      this.compareOptions = options!.compareOptions
+    }
     this.orderedEntries = new BTree(this.compareFn)
   }
 
@@ -71,15 +76,18 @@ export class BTreeIndex<
       )
     }
 
+    // Normalize the value for Map key usage
+    const normalizedValue = normalizeValue(indexedValue)
+
     // Check if this value already exists
-    if (this.valueMap.has(indexedValue)) {
+    if (this.valueMap.has(normalizedValue)) {
       // Add to existing set
-      this.valueMap.get(indexedValue)!.add(key)
+      this.valueMap.get(normalizedValue)!.add(key)
     } else {
       // Create new set for this value
       const keySet = new Set<TKey>([key])
-      this.valueMap.set(indexedValue, keySet)
-      this.orderedEntries.set(indexedValue, undefined)
+      this.valueMap.set(normalizedValue, keySet)
+      this.orderedEntries.set(normalizedValue, undefined)
     }
 
     this.indexedKeys.add(key)
@@ -101,16 +109,19 @@ export class BTreeIndex<
       return
     }
 
-    if (this.valueMap.has(indexedValue)) {
-      const keySet = this.valueMap.get(indexedValue)!
+    // Normalize the value for Map key usage
+    const normalizedValue = normalizeValue(indexedValue)
+
+    if (this.valueMap.has(normalizedValue)) {
+      const keySet = this.valueMap.get(normalizedValue)!
       keySet.delete(key)
 
       // If set is now empty, remove the entry entirely
       if (keySet.size === 0) {
-        this.valueMap.delete(indexedValue)
+        this.valueMap.delete(normalizedValue)
 
         // Remove from ordered entries
-        this.orderedEntries.delete(indexedValue)
+        this.orderedEntries.delete(normalizedValue)
       }
     }
 
@@ -195,7 +206,8 @@ export class BTreeIndex<
    * Performs an equality lookup
    */
   equalityLookup(value: any): Set<TKey> {
-    return new Set(this.valueMap.get(value) ?? [])
+    const normalizedValue = normalizeValue(value)
+    return new Set(this.valueMap.get(normalizedValue) ?? [])
   }
 
   /**
@@ -206,8 +218,10 @@ export class BTreeIndex<
     const { from, to, fromInclusive = true, toInclusive = true } = options
     const result = new Set<TKey>()
 
-    const fromKey = from ?? this.orderedEntries.minKey()
-    const toKey = to ?? this.orderedEntries.maxKey()
+    const normalizedFrom = normalizeValue(from)
+    const normalizedTo = normalizeValue(to)
+    const fromKey = normalizedFrom ?? this.orderedEntries.minKey()
+    const toKey = normalizedTo ?? this.orderedEntries.maxKey()
 
     this.orderedEntries.forRange(
       fromKey,
@@ -231,13 +245,82 @@ export class BTreeIndex<
   }
 
   /**
+   * Performs a reversed range query
+   */
+  rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
+    const { from, to, fromInclusive = true, toInclusive = true } = options
+    return this.rangeQuery({
+      from: to ?? this.orderedEntries.maxKey(),
+      to: from ?? this.orderedEntries.minKey(),
+      fromInclusive: toInclusive,
+      toInclusive: fromInclusive,
+    })
+  }
+
+  private takeInternal(
+    n: number,
+    nextPair: (k?: any) => [any, any] | undefined,
+    from?: any,
+    filterFn?: (key: TKey) => boolean
+  ): Array<TKey> {
+    const keysInResult: Set<TKey> = new Set()
+    const result: Array<TKey> = []
+    let pair: [any, any] | undefined
+    let key = normalizeValue(from)
+
+    while ((pair = nextPair(key)) !== undefined && result.length < n) {
+      key = pair[0]
+      const keys = this.valueMap.get(key)
+      if (keys) {
+        const it = keys.values()
+        let ks: TKey | undefined
+        while (result.length < n && (ks = it.next().value)) {
+          if (!keysInResult.has(ks) && (filterFn?.(ks) ?? true)) {
+            result.push(ks)
+            keysInResult.add(ks)
+          }
+        }
+      }
+    }
+
+    return result
+  }
+
+  /**
+   * Returns the next n items after the provided item or the first n items if no from item is provided.
+   * @param n - The number of items to return
+   * @param from - The item to start from (exclusive). Starts from the smallest item (inclusive) if not provided.
+   * @returns The next n items after the provided key. Returns the first n items if no from item is provided.
+   */
+  take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    const nextPair = (k?: any) => this.orderedEntries.nextHigherPair(k)
+    return this.takeInternal(n, nextPair, from, filterFn)
+  }
+
+  /**
+   * Returns the next n items **before** the provided item (in descending order) or the last n items if no from item is provided.
+   * @param n - The number of items to return
+   * @param from - The item to start from (exclusive). Starts from the largest item (inclusive) if not provided.
+   * @returns The next n items **before** the provided key. Returns the last n items if no from item is provided.
+   */
+  takeReversed(
+    n: number,
+    from?: any,
+    filterFn?: (key: TKey) => boolean
+  ): Array<TKey> {
+    const nextPair = (k?: any) => this.orderedEntries.nextLowerPair(k)
+    return this.takeInternal(n, nextPair, from, filterFn)
+  }
+
+  /**
    * Performs an IN array lookup
    */
   inArrayLookup(values: Array<any>): Set<TKey> {
     const result = new Set<TKey>()
 
     for (const value of values) {
-      const keys = this.valueMap.get(value)
+      const normalizedValue = normalizeValue(value)
+      const keys = this.valueMap.get(normalizedValue)
       if (keys) {
         keys.forEach((key) => result.add(key))
       }
@@ -255,6 +338,13 @@ export class BTreeIndex<
     return this.orderedEntries
       .keysArray()
       .map((key) => [key, this.valueMap.get(key) ?? new Set()])
+  }
+
+  get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
+    return this.takeReversed(this.orderedEntries.size).map((key) => [
+      key,
+      this.valueMap.get(key) ?? new Set(),
+    ])
   }
 
   get valueMapData(): Map<any, Set<TKey>> {

@@ -1,6 +1,7 @@
 import {
   computed,
   getCurrentInstance,
+  nextTick,
   onUnmounted,
   reactive,
   ref,
@@ -230,7 +231,10 @@ export function useLiveQuery(
 
     if (isCollection) {
       // It's already a collection, ensure sync is started for Vue hooks
-      unwrappedParam.startSyncImmediate()
+      // Only start sync if the collection is in idle state
+      if (unwrappedParam.status === `idle`) {
+        unwrappedParam.startSyncImmediate()
+      }
       return unwrappedParam
     }
 
@@ -295,8 +299,17 @@ export function useLiveQuery(
     // Initialize data array in correct order
     syncDataFromCollection(currentCollection)
 
+    // Listen for the first ready event to catch status transitions
+    // that might not trigger change events (fixes async status transition bug)
+    currentCollection.onFirstReady(() => {
+      // Use nextTick to ensure Vue reactivity updates properly
+      nextTick(() => {
+        status.value = currentCollection.status
+      })
+    })
+
     // Subscribe to collection changes with granular updates
-    currentUnsubscribe = currentCollection.subscribeChanges(
+    const subscription = currentCollection.subscribeChanges(
       (changes: Array<ChangeMessage<any>>) => {
         // Apply each change individually to the reactive state
         for (const change of changes) {
@@ -315,8 +328,13 @@ export function useLiveQuery(
         syncDataFromCollection(currentCollection)
         // Update status ref on every change
         status.value = currentCollection.status
+      },
+      {
+        includeInitialState: true,
       }
     )
+
+    currentUnsubscribe = subscription.unsubscribe.bind(subscription)
 
     // Preload collection data if not already started
     if (currentCollection.status === `idle`) {
@@ -347,9 +365,7 @@ export function useLiveQuery(
     data,
     collection: computed(() => collection.value),
     status: computed(() => status.value),
-    isLoading: computed(
-      () => status.value === `loading` || status.value === `initialCommit`
-    ),
+    isLoading: computed(() => status.value === `loading`),
     isReady: computed(() => status.value === `ready`),
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),
