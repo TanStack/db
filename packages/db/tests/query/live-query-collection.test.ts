@@ -1396,6 +1396,143 @@ describe(`createLiveQueryCollection`, () => {
       // Verify results
       expect(liveQuery.size).toBe(2)
     })
+
+    it(`live query should only become ready when both joined on-demand sources complete loading`, async () => {
+      // This test verifies that when a live query joins two on-demand collections,
+      // the live query should only become ready when BOTH sources have completed
+      // their loadSubset operations.
+
+      let resolveUsersLoad: () => void
+      let resolveOrdersLoad: () => void
+      let usersLoadCount = 0
+      let ordersLoadCount = 0
+
+      // First on-demand source: users
+      const usersCollection = createCollection<{
+        id: number
+        name: string
+      }>({
+        id: `on-demand-join-users`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                usersLoadCount++
+                const promise = new Promise<void>((resolve) => {
+                  resolveUsersLoad = resolve
+                })
+                return promise.then(() => {
+                  begin()
+                  write({ type: `insert`, value: { id: 1, name: `Alice` } })
+                  write({ type: `insert`, value: { id: 2, name: `Bob` } })
+                  commit()
+                })
+              },
+            }
+          },
+        },
+      })
+
+      // Second on-demand source: orders (joined by userId)
+      const ordersCollection = createCollection<{
+        id: number
+        userId: number
+        product: string
+      }>({
+        id: `on-demand-join-orders`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                ordersLoadCount++
+                const promise = new Promise<void>((resolve) => {
+                  resolveOrdersLoad = resolve
+                })
+                return promise.then(() => {
+                  begin()
+                  write({
+                    type: `insert`,
+                    value: { id: 101, userId: 1, product: `Laptop` },
+                  })
+                  write({
+                    type: `insert`,
+                    value: { id: 102, userId: 2, product: `Phone` },
+                  })
+                  commit()
+                })
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query that joins both on-demand collections
+      // Use leftJoin so users (left) is always the active source
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .leftJoin(
+              { order: ordersCollection },
+              ({ user, order }) => eq(user.id, order.userId),
+            )
+            .select(({ user, order }) => ({
+              userName: user.name,
+              // order can be undefined in left join, but we'll filter for this test
+              product: order?.product ?? ``,
+            })),
+        startSync: true,
+      })
+
+      await flushPromises()
+
+      // Users (active source) should have triggered loadSubset
+      expect(usersLoadCount).toBe(1)
+
+      // Live query should NOT be ready - still waiting for users to load
+      expect(liveQuery.status).toBe(`loading`)
+      expect(liveQuery.isReady()).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // Complete users loadSubset - this should trigger orders loadSubset via join
+      resolveUsersLoad!()
+      await flushPromises()
+
+      // Orders (lazy source) should now have triggered loadSubset due to join keys
+      expect(ordersLoadCount).toBe(1)
+
+      // Live query should STILL be loading - waiting for orders to complete
+      expect(liveQuery.status).toBe(`loading`)
+      expect(liveQuery.isReady()).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // Complete orders loadSubset
+      resolveOrdersLoad!()
+      await flushPromises()
+
+      // NOW the live query should be ready - both sources completed
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.isReady()).toBe(true)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
+      // Verify join results
+      expect(liveQuery.size).toBe(2)
+      const results = [...liveQuery.values()]
+      expect(results).toEqual(
+        expect.arrayContaining([
+          { userName: `Alice`, product: `Laptop` },
+          { userName: `Bob`, product: `Phone` },
+        ]),
+      )
+    })
   })
 
   describe(`move functionality`, () => {
