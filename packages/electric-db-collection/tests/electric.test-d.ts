@@ -163,6 +163,10 @@ describe(`Electric collection type resolution tests`, () => {
     // Verify the specific properties that define ElectricCollectionUtils exist and are functions
     expectTypeOf(todosCollection.utils.awaitTxId).toBeFunction
     expectTypeOf(todosCollection.utils.awaitMatch).toBeFunction
+    // shapeStream is a getter property, not a function
+    expectTypeOf(todosCollection.utils.shapeStream).toMatchTypeOf<
+      object | undefined
+    >()
   })
 
   it(`should properly type the onInsert, onUpdate, and onDelete handlers`, () => {

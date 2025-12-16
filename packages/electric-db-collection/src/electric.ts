@@ -458,6 +458,10 @@ export interface ElectricCollectionUtils<
 > extends UtilsRecord {
   awaitTxId: AwaitTxIdFn
   awaitMatch: AwaitMatchFn<T>
+  /**
+   * The underlying ShapeStream instance, or undefined if not yet connected
+   */
+  readonly shapeStream: ShapeStream<T> | undefined
 }
 
 /**
@@ -523,6 +527,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   // Buffer messages since last up-to-date to handle race conditions
   const currentBatchMessages = new Store<Array<Message<any>>>([])
 
+  // Store reference to the ShapeStream for accessing the shape handle
+  const streamRef = new Store<ShapeStream<T> | null>(null)
+
   /**
    * Helper function to remove multiple matches from the pendingMatches store
    */
@@ -564,6 +571,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     resolveMatchedPendingMatches,
     collectionId: config.id,
     testHooks: config[ELECTRIC_TEST_HOOKS],
+    streamRef,
   })
 
   /**
@@ -805,6 +813,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     utils: {
       awaitTxId,
       awaitMatch,
+      get shapeStream() {
+        return streamRef.state ?? undefined
+      },
     },
   }
 }
@@ -835,6 +846,7 @@ function createElectricSync<T extends Row<unknown>>(
     resolveMatchedPendingMatches: () => void
     collectionId?: string
     testHooks?: ElectricTestHooks
+    streamRef: Store<ShapeStream<T> | null>
   },
 ): SyncConfig<T> {
   const {
@@ -847,6 +859,7 @@ function createElectricSync<T extends Row<unknown>>(
     resolveMatchedPendingMatches,
     collectionId,
     testHooks,
+    streamRef,
   } = options
   const MAX_BATCH_MESSAGES = 1000 // Safety limit for message buffer
 
@@ -954,6 +967,10 @@ function createElectricSync<T extends Row<unknown>>(
           return
         },
       })
+
+      // Store the stream reference for external access via getShapeStream utility
+      streamRef.setState(() => stream)
+
       let transactionStarted = false
       const newTxids = new Set<Txid>()
       const newSnapshots: Array<PostgresSnapshot> = []
@@ -1199,6 +1216,8 @@ function createElectricSync<T extends Row<unknown>>(
           abortController.abort()
           // Reset deduplication tracking so collection can load fresh data if restarted
           loadSubsetDedupe?.reset()
+          // Clear the stream reference
+          streamRef.setState(() => null)
         },
       }
     },
