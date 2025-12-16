@@ -433,7 +433,7 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.7
+        specifier: ^1.0.8
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.1.56
@@ -554,7 +554,7 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.7
+        specifier: ^1.0.8
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
         specifier: ^0.1.54
@@ -876,7 +876,7 @@ importers:
         version: 1.6.0(react@19.2.1)
     devDependencies:
       '@electric-sql/client':
-        specifier: 1.2.0
+        specifier: ^1.2.0
         version: 1.2.0
       '@testing-library/react':
         specifier: ^16.3.0
@@ -941,7 +941,7 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: 1.2.0
+        specifier: ^1.2.0
         version: 1.2.0
       '@solidjs/testing-library':
         specifier: ^0.8.10
@@ -1022,7 +1022,7 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: 1.2.0
+        specifier: ^1.2.0
         version: 1.2.0
       '@vitejs/plugin-vue':
         specifier: ^6.0.2
