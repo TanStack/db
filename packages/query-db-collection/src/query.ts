@@ -1130,6 +1130,73 @@ export function queryCollectionOptions(
     await Promise.all(refetchPromises)
   }
 
+  /**
+   * Updates the query cache with new items, handling both direct arrays
+   * and wrapped response formats (when `select` is used).
+   */
+  const updateCacheData = (items: Array<any>): void => {
+    // Get the base query key (handle both static and function-based keys)
+    const key =
+      typeof queryKey === `function`
+        ? queryKey({})
+        : (queryKey as unknown as QueryKey)
+
+    if (select) {
+      // When `select` is used, the cache contains a wrapped response (e.g., { data: [...], meta: {...} })
+      // We need to update the cache while preserving the wrapper structure
+      queryClient.setQueryData(key, (oldData: any) => {
+        if (!oldData || typeof oldData !== `object`) {
+          // No existing cache or not an object - don't corrupt the cache
+          return oldData
+        }
+
+        if (Array.isArray(oldData)) {
+          // Cache is already a raw array (shouldn't happen with select, but handle it)
+          return items
+        }
+
+        // Use the select function to identify which property contains the items array.
+        // This is more robust than guessing based on property order.
+        const selectedArray = select(oldData)
+
+        if (Array.isArray(selectedArray)) {
+          // Find the property that matches the selected array by reference equality
+          for (const propKey of Object.keys(oldData)) {
+            if (oldData[propKey] === selectedArray) {
+              // Found the exact property - create a shallow copy with updated items
+              return { ...oldData, [propKey]: items }
+            }
+          }
+        }
+
+        // Fallback: check common property names used for data arrays
+        if (Array.isArray(oldData.data)) {
+          return { ...oldData, data: items }
+        }
+        if (Array.isArray(oldData.items)) {
+          return { ...oldData, items: items }
+        }
+        if (Array.isArray(oldData.results)) {
+          return { ...oldData, results: items }
+        }
+
+        // Last resort: find first array property
+        for (const propKey of Object.keys(oldData)) {
+          if (Array.isArray(oldData[propKey])) {
+            return { ...oldData, [propKey]: items }
+          }
+        }
+
+        // Couldn't safely identify the array property - don't corrupt the cache
+        // Return oldData unchanged to avoid breaking select
+        return oldData
+      })
+    } else {
+      // No select - cache contains raw array, just set it directly
+      queryClient.setQueryData(key, items)
+    }
+  }
+
   // Create write context for manual write operations
   let writeContext: {
     collection: any
@@ -1139,21 +1206,29 @@ export function queryCollectionOptions(
     begin: () => void
     write: (message: Omit<ChangeMessage<any>, `key`>) => void
     commit: () => void
+    updateCacheData?: (items: Array<any>) => void
   } | null = null
 
   // Enhanced internalSync that captures write functions for manual use
   const enhancedInternalSync: SyncConfig<any>[`sync`] = (params) => {
     const { begin, write, commit, collection } = params
 
+    // Get the base query key for the context (handle both static and function-based keys)
+    const contextQueryKey =
+      typeof queryKey === `function`
+        ? (queryKey({}) as unknown as Array<unknown>)
+        : (queryKey as unknown as Array<unknown>)
+
     // Store references for manual write operations
     writeContext = {
       collection,
       queryClient,
-      queryKey: queryKey as unknown as Array<unknown>,
+      queryKey: contextQueryKey,
       getKey: getKey as (item: any) => string | number,
       begin,
       write,
       commit,
+      updateCacheData,
     }
 
     // Call the original internalSync logic
