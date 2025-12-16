@@ -722,10 +722,29 @@ export class CollectionConfigBuilder<
 
     // Simple singular insert.
     if (inserts && deletes === 0) {
-      write({
-        value,
-        type: `insert`,
-      })
+      // Defensive check: if the key already exists and we're NOT using a custom getKey,
+      // treat as update instead. This handles edge cases in groupBy where the D2 pipeline
+      // might emit an insert for an updated aggregate without a corresponding delete
+      // (e.g., due to timing or state issues in incremental updates).
+      //
+      // We only apply this for queries WITHOUT custom getKey (like groupBy) because:
+      // - For groupBy: the key is derived from the group expression, and duplicate inserts
+      //   without deletes can happen due to D2 pipeline state issues
+      // - For custom getKey + joins: duplicates indicate a user error (e.g., using a non-unique
+      //   key for a 1:N relationship), and we should throw an error to alert the user
+      const hasCustomGetKey = !!this.config.getKey
+      const keyExists = collection.has(collection.getKeyFromItem(value))
+      if (!hasCustomGetKey && keyExists) {
+        write({
+          value,
+          type: `update`,
+        })
+      } else {
+        write({
+          value,
+          type: `insert`,
+        })
+      }
     } else if (
       // Insert & update(s) (updates are a delete & insert)
       inserts > deletes ||
