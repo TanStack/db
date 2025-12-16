@@ -31,7 +31,7 @@ The type of the key for the collection
 
 #### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -39,13 +39,13 @@ The utilities record type
 
 #### options
 
-`Omit`\<[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\>, `"utils"`\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+`Omit`\<[`CollectionConfig`](../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\>, `"utils"`\> & `object` & [`NonSingleResult`](../type-aliases/NonSingleResult.md)
 
 Collection options with optional utilities
 
 ### Returns
 
-[`Collection`](../../interfaces/Collection.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `TUtils`, `T`, [`InferSchemaInput`](../../type-aliases/InferSchemaInput.md)\<`T`\>\> & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`Collection`](../interfaces/Collection.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `TUtils`, `T`, [`InferSchemaInput`](../type-aliases/InferSchemaInput.md)\<`T`\>\> & [`NonSingleResult`](../type-aliases/NonSingleResult.md)
 
 A new Collection with utilities exposed both at top level and under .utils
 
@@ -140,7 +140,7 @@ The type of the key for the collection
 
 #### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -148,13 +148,13 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\> & `object` & [`NonSingleResult`](../type-aliases/NonSingleResult.md)
 
 Collection options with optional utilities
 
 ### Returns
 
-[`Collection`](../../interfaces/Collection.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `Exclude`\<`TUtils`, `undefined`\>, `T`, [`InferSchemaInput`](../../type-aliases/InferSchemaInput.md)\<`T`\>\> & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`Collection`](../interfaces/Collection.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `Exclude`\<`TUtils`, `undefined`\>, `T`, [`InferSchemaInput`](../type-aliases/InferSchemaInput.md)\<`T`\>\> & [`NonSingleResult`](../type-aliases/NonSingleResult.md)
 
 A new Collection with utilities exposed both at top level and under .utils
 
@@ -249,7 +249,7 @@ The type of the key for the collection
 
 #### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -257,13 +257,13 @@ The utilities record type
 
 #### options
 
-`Omit`\<[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\>, `"utils"`\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
+`Omit`\<[`CollectionConfig`](../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\>, `"utils"`\> & `object` & [`SingleResult`](../type-aliases/SingleResult.md)
 
 Collection options with optional utilities
 
 ### Returns
 
-[`Collection`](../../interfaces/Collection.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `TUtils`, `T`, [`InferSchemaInput`](../../type-aliases/InferSchemaInput.md)\<`T`\>\> & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`Collection`](../interfaces/Collection.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `TUtils`, `T`, [`InferSchemaInput`](../type-aliases/InferSchemaInput.md)\<`T`\>\> & [`SingleResult`](../type-aliases/SingleResult.md)
 
 A new Collection with utilities exposed both at top level and under .utils
 
@@ -358,7 +358,7 @@ The type of the key for the collection
 
 #### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -366,13 +366,13 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, `TUtils`\> & `object` & [`SingleResult`](../type-aliases/SingleResult.md)
 
 Collection options with optional utilities
 
 ### Returns
 
-[`Collection`](../../interfaces/Collection.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `TUtils`, `T`, [`InferSchemaInput`](../../type-aliases/InferSchemaInput.md)\<`T`\>\> & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`Collection`](../interfaces/Collection.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `TUtils`, `T`, [`InferSchemaInput`](../type-aliases/InferSchemaInput.md)\<`T`\>\> & [`SingleResult`](../type-aliases/SingleResult.md)
 
 A new Collection with utilities exposed both at top level and under .utils
 
@@ -467,7 +467,7 @@ The type of the key for the collection
 
 #### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -475,13 +475,13 @@ The utilities record type
 
 #### options
 
-`Omit`\<[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\>, `"utils"`\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+`Omit`\<[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\>, `"utils"`\> & `object` & [`NonSingleResult`](../type-aliases/NonSingleResult.md)
 
 Collection options with optional utilities
 
 ### Returns
 
-[`Collection`](../../interfaces/Collection.md)\<`T`, `TKey`, `TUtils`, `never`, `T`\> & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`Collection`](../interfaces/Collection.md)\<`T`, `TKey`, `TUtils`, `never`, `T`\> & [`NonSingleResult`](../type-aliases/NonSingleResult.md)
 
 A new Collection with utilities exposed both at top level and under .utils
 
@@ -576,7 +576,7 @@ The type of the key for the collection
 
 #### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -584,13 +584,13 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\> & `object` & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\> & `object` & [`NonSingleResult`](../type-aliases/NonSingleResult.md)
 
 Collection options with optional utilities
 
 ### Returns
 
-[`Collection`](../../interfaces/Collection.md)\<`T`, `TKey`, `TUtils`, `never`, `T`\> & [`NonSingleResult`](../../type-aliases/NonSingleResult.md)
+[`Collection`](../interfaces/Collection.md)\<`T`, `TKey`, `TUtils`, `never`, `T`\> & [`NonSingleResult`](../type-aliases/NonSingleResult.md)
 
 A new Collection with utilities exposed both at top level and under .utils
 
@@ -685,7 +685,7 @@ The type of the key for the collection
 
 #### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -693,13 +693,13 @@ The utilities record type
 
 #### options
 
-`Omit`\<[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\>, `"utils"`\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
+`Omit`\<[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\>, `"utils"`\> & `object` & [`SingleResult`](../type-aliases/SingleResult.md)
 
 Collection options with optional utilities
 
 ### Returns
 
-[`Collection`](../../interfaces/Collection.md)\<`T`, `TKey`, `TUtils`, `never`, `T`\> & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`Collection`](../interfaces/Collection.md)\<`T`, `TKey`, `TUtils`, `never`, `T`\> & [`SingleResult`](../type-aliases/SingleResult.md)
 
 A new Collection with utilities exposed both at top level and under .utils
 
@@ -794,7 +794,7 @@ The type of the key for the collection
 
 #### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -802,13 +802,13 @@ The utilities record type
 
 #### options
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\> & `object` & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, `TUtils`\> & `object` & [`SingleResult`](../type-aliases/SingleResult.md)
 
 Collection options with optional utilities
 
 ### Returns
 
-[`Collection`](../../interfaces/Collection.md)\<`T`, `TKey`, `TUtils`, `never`, `T`\> & [`SingleResult`](../../type-aliases/SingleResult.md)
+[`Collection`](../interfaces/Collection.md)\<`T`, `TKey`, `TUtils`, `never`, `T`\> & [`SingleResult`](../type-aliases/SingleResult.md)
 
 A new Collection with utilities exposed both at top level and under .utils
 

@@ -1,11 +1,13 @@
-import type { IR, LoadSubsetOptions } from "@tanstack/db"
+import type { IR, LoadSubsetOptions } from '@tanstack/db'
 
 /**
- * Serializes LoadSubsetOptions into a stable, hashable format for query keys
+ * Serializes LoadSubsetOptions into a stable, hashable format for query keys.
+ * Includes where, orderBy, limit, and offset for pagination support.
+ * Note: cursor expressions are not serialized as they are backend-specific.
  * @internal
  */
 export function serializeLoadSubsetOptions(
-  options: LoadSubsetOptions | undefined
+  options: LoadSubsetOptions | undefined,
 ): string | undefined {
   if (!options) {
     return undefined
@@ -41,6 +43,11 @@ export function serializeLoadSubsetOptions(
 
   if (options.limit !== undefined) {
     result.limit = options.limit
+  }
+
+  // Include offset for pagination support
+  if (options.offset !== undefined) {
+    result.offset = options.offset
   }
 
   return Object.keys(result).length === 0 ? undefined : JSON.stringify(result)
@@ -120,7 +127,7 @@ function serializeValue(value: unknown): unknown {
       Object.entries(value as Record<string, unknown>).map(([key, val]) => [
         key,
         serializeValue(val),
-      ])
+      ]),
     )
   }
 

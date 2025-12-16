@@ -11,7 +11,7 @@ Enhanced Collection interface that includes both data type T and utilities TUtil
 
 ## Extends
 
-- [`CollectionImpl`](../../classes/CollectionImpl.md)\<`T`, `TKey`, `TUtils`, `TSchema`, `TInsertInput`\>
+- [`CollectionImpl`](../classes/CollectionImpl.md)\<`T`, `TKey`, `TUtils`, `TSchema`, `TInsertInput`\>
 
 ## Type Parameters
 
@@ -29,7 +29,7 @@ The type of the key for the collection
 
 ### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -55,7 +55,7 @@ Defined in: [packages/db/src/collection/index.ts:283](https://github.com/TanStac
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`_lifecycle`](../../classes/CollectionImpl.md#_lifecycle)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`_lifecycle`](../classes/CollectionImpl.md#_lifecycle)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: [packages/db/src/collection/index.ts:295](https://github.com/TanStac
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`_state`](../../classes/CollectionImpl.md#_state)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`_state`](../classes/CollectionImpl.md#_state)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: [packages/db/src/collection/index.ts:284](https://github.com/TanStac
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`_sync`](../../classes/CollectionImpl.md#_sync)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`_sync`](../classes/CollectionImpl.md#_sync)
 
 ***
 
@@ -97,7 +97,7 @@ Defined in: [packages/db/src/collection/index.ts:274](https://github.com/TanStac
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`config`](../../classes/CollectionImpl.md#config)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`config`](../classes/CollectionImpl.md#config)
 
 ***
 
@@ -111,7 +111,7 @@ Defined in: [packages/db/src/collection/index.ts:273](https://github.com/TanStac
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`id`](../../classes/CollectionImpl.md#id)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`id`](../classes/CollectionImpl.md#id)
 
 ***
 
@@ -135,7 +135,7 @@ Defined in: [packages/db/src/collection/index.ts:55](https://github.com/TanStack
 
 #### Overrides
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`utils`](../../classes/CollectionImpl.md#utils)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`utils`](../classes/CollectionImpl.md#utils)
 
 ## Accessors
 
@@ -151,11 +151,11 @@ Defined in: [packages/db/src/collection/index.ts:579](https://github.com/TanStac
 
 ##### Returns
 
-[`StringCollationConfig`](../../type-aliases/StringCollationConfig.md)
+[`StringCollationConfig`](../type-aliases/StringCollationConfig.md)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`compareOptions`](../../classes/CollectionImpl.md#compareoptions)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`compareOptions`](../classes/CollectionImpl.md#compareoptions)
 
 ***
 
@@ -173,11 +173,11 @@ Get resolved indexes for query optimization
 
 ##### Returns
 
-`Map`\<`number`, [`BaseIndex`](../../classes/BaseIndex.md)\<`TKey`\>\>
+`Map`\<`number`, [`BaseIndex`](../classes/BaseIndex.md)\<`TKey`\>\>
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`indexes`](../../classes/CollectionImpl.md#indexes)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`indexes`](../classes/CollectionImpl.md#indexes)
 
 ***
 
@@ -201,7 +201,7 @@ true if the collection has pending load more operations, false otherwise
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`isLoadingSubset`](../../classes/CollectionImpl.md#isloadingsubset)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`isLoadingSubset`](../classes/CollectionImpl.md#isloadingsubset)
 
 ***
 
@@ -223,7 +223,7 @@ Get the current size of the collection (cached)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`size`](../../classes/CollectionImpl.md#size)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`size`](../classes/CollectionImpl.md#size)
 
 ***
 
@@ -263,7 +263,7 @@ Map containing all items in the collection, with keys as identifiers
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`state`](../../classes/CollectionImpl.md#state)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`state`](../classes/CollectionImpl.md#state)
 
 ***
 
@@ -281,11 +281,11 @@ Gets the current status of the collection
 
 ##### Returns
 
-[`CollectionStatus`](../../type-aliases/CollectionStatus.md)
+[`CollectionStatus`](../type-aliases/CollectionStatus.md)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`status`](../../classes/CollectionImpl.md#status)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`status`](../classes/CollectionImpl.md#status)
 
 ***
 
@@ -307,7 +307,7 @@ Get the number of subscribers to the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`subscriberCount`](../../classes/CollectionImpl.md#subscribercount)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`subscriberCount`](../classes/CollectionImpl.md#subscribercount)
 
 ***
 
@@ -331,7 +331,7 @@ An Array containing all items in the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`toArray`](../../classes/CollectionImpl.md#toarray)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`toArray`](../classes/CollectionImpl.md#toarray)
 
 ## Methods
 
@@ -351,7 +351,7 @@ Get all entries (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`[iterator]`](../../classes/CollectionImpl.md#iterator)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`[iterator]`](../classes/CollectionImpl.md#iterator)
 
 ***
 
@@ -372,7 +372,7 @@ This can be called manually or automatically by garbage collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`cleanup`](../../classes/CollectionImpl.md#cleanup)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`cleanup`](../classes/CollectionImpl.md#cleanup)
 
 ***
 
@@ -392,7 +392,7 @@ and logarithmic time range queries instead of full scans.
 
 ##### TResolver
 
-`TResolver` *extends* [`IndexResolver`](../../type-aliases/IndexResolver.md)\<`TKey`\> = *typeof* [`BTreeIndex`](../../classes/BTreeIndex.md)
+`TResolver` *extends* [`IndexResolver`](../type-aliases/IndexResolver.md)\<`TKey`\> = *typeof* [`BTreeIndex`](../classes/BTreeIndex.md)
 
 The type of the index resolver (constructor or async loader)
 
@@ -406,13 +406,13 @@ Function that extracts the indexed value from each item
 
 ##### config
 
-[`IndexOptions`](../IndexOptions.md)\<`TResolver`\> = `{}`
+[`IndexOptions`](IndexOptions.md)\<`TResolver`\> = `{}`
 
 Configuration including index type and type-specific options
 
 #### Returns
 
-[`IndexProxy`](../../classes/IndexProxy.md)\<`TKey`\>
+[`IndexProxy`](../classes/IndexProxy.md)\<`TKey`\>
 
 An index proxy that provides access to the index when ready
 
@@ -444,7 +444,7 @@ const textIndex = collection.createIndex((row) => row.content, {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`createIndex`](../../classes/CollectionImpl.md#createindex)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`createIndex`](../classes/CollectionImpl.md#createindex)
 
 ***
 
@@ -464,14 +464,14 @@ Returns the current state of the collection as an array of changes
 
 ##### options
 
-[`CurrentStateAsChangesOptions`](../CurrentStateAsChangesOptions.md) = `{}`
+[`CurrentStateAsChangesOptions`](CurrentStateAsChangesOptions.md) = `{}`
 
 Options including optional where filter
 
 #### Returns
 
   \| `void`
-  \| [`ChangeMessage`](../ChangeMessage.md)\<`T`, `string` \| `number`\>[]
+  \| [`ChangeMessage`](ChangeMessage.md)\<`T`, `string` \| `number`\>[]
 
 An array of changes
 
@@ -494,7 +494,7 @@ const activeChanges = collection.currentStateAsChanges({
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`currentStateAsChanges`](../../classes/CollectionImpl.md#currentstateaschanges)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`currentStateAsChanges`](../classes/CollectionImpl.md#currentstateaschanges)
 
 ***
 
@@ -518,13 +518,13 @@ Single key or array of keys to delete
 
 ##### config?
 
-[`OperationConfig`](../OperationConfig.md)
+[`OperationConfig`](OperationConfig.md)
 
 Optional configuration including metadata
 
 #### Returns
 
-[`Transaction`](../Transaction.md)\<`any`\>
+[`Transaction`](Transaction.md)\<`any`\>
 
 A Transaction object representing the delete operation(s)
 
@@ -561,7 +561,7 @@ try {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`delete`](../../classes/CollectionImpl.md#delete)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`delete`](../classes/CollectionImpl.md#delete)
 
 ***
 
@@ -581,7 +581,7 @@ Get all entries (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`entries`](../../classes/CollectionImpl.md#entries)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`entries`](../classes/CollectionImpl.md#entries)
 
 ***
 
@@ -607,7 +607,7 @@ Execute a callback for each entry in the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`forEach`](../../classes/CollectionImpl.md#foreach)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`forEach`](../classes/CollectionImpl.md#foreach)
 
 ***
 
@@ -633,7 +633,7 @@ Get the current value for a key (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`get`](../../classes/CollectionImpl.md#get)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`get`](../classes/CollectionImpl.md#get)
 
 ***
 
@@ -657,7 +657,7 @@ Defined in: [packages/db/src/collection/index.ts:517](https://github.com/TanStac
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`getKeyFromItem`](../../classes/CollectionImpl.md#getkeyfromitem)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`getKeyFromItem`](../classes/CollectionImpl.md#getkeyfromitem)
 
 ***
 
@@ -683,7 +683,7 @@ Check if a key exists in the collection (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`has`](../../classes/CollectionImpl.md#has)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`has`](../classes/CollectionImpl.md#has)
 
 ***
 
@@ -707,14 +707,14 @@ Inserts one or more items into the collection
 
 ##### config?
 
-[`InsertConfig`](../InsertConfig.md)
+[`InsertConfig`](InsertConfig.md)
 
 Optional configuration including metadata
 
 #### Returns
 
-  \| [`Transaction`](../Transaction.md)\<`Record`\<`string`, `unknown`\>\>
-  \| [`Transaction`](../Transaction.md)\<`T`\>
+  \| [`Transaction`](Transaction.md)\<`Record`\<`string`, `unknown`\>\>
+  \| [`Transaction`](Transaction.md)\<`T`\>
 
 A Transaction object representing the insert operation(s)
 
@@ -760,7 +760,7 @@ try {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`insert`](../../classes/CollectionImpl.md#insert)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`insert`](../classes/CollectionImpl.md#insert)
 
 ***
 
@@ -794,7 +794,7 @@ if (collection.isReady()) {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`isReady`](../../classes/CollectionImpl.md#isready)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`isReady`](../classes/CollectionImpl.md#isready)
 
 ***
 
@@ -814,7 +814,7 @@ Get all keys (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`keys`](../../classes/CollectionImpl.md#keys)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`keys`](../classes/CollectionImpl.md#keys)
 
 ***
 
@@ -846,7 +846,7 @@ Create a new array with the results of calling a function for each entry in the 
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`map`](../../classes/CollectionImpl.md#map)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`map`](../classes/CollectionImpl.md#map)
 
 ***
 
@@ -890,7 +890,7 @@ Unsubscribe from a collection event
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`off`](../../classes/CollectionImpl.md#off)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`off`](../classes/CollectionImpl.md#off)
 
 ***
 
@@ -940,7 +940,7 @@ Subscribe to a collection event
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`on`](../../classes/CollectionImpl.md#on)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`on`](../classes/CollectionImpl.md#on)
 
 ***
 
@@ -990,7 +990,7 @@ Subscribe to a collection event once
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`once`](../../classes/CollectionImpl.md#once)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`once`](../classes/CollectionImpl.md#once)
 
 ***
 
@@ -1028,7 +1028,7 @@ collection.onFirstReady(() => {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`onFirstReady`](../../classes/CollectionImpl.md#onfirstready)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`onFirstReady`](../classes/CollectionImpl.md#onfirstready)
 
 ***
 
@@ -1049,7 +1049,7 @@ Multiple concurrent calls will share the same promise
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`preload`](../../classes/CollectionImpl.md#preload)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`preload`](../classes/CollectionImpl.md#preload)
 
 ***
 
@@ -1070,7 +1070,7 @@ This bypasses lazy loading for special cases like live query results
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`startSyncImmediate`](../../classes/CollectionImpl.md#startsyncimmediate)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`startSyncImmediate`](../classes/CollectionImpl.md#startsyncimmediate)
 
 ***
 
@@ -1093,7 +1093,7 @@ Promise that resolves to a Map containing all items in the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`stateWhenReady`](../../classes/CollectionImpl.md#statewhenready)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`stateWhenReady`](../classes/CollectionImpl.md#statewhenready)
 
 ***
 
@@ -1117,7 +1117,7 @@ Function called when items change
 
 ##### options
 
-[`SubscribeChangesOptions`](../SubscribeChangesOptions.md) = `{}`
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md) = `{}`
 
 Subscription options including includeInitialState and where filter
 
@@ -1169,7 +1169,7 @@ const subscription = collection.subscribeChanges((changes) => {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`subscribeChanges`](../../classes/CollectionImpl.md#subscribechanges)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`subscribeChanges`](../classes/CollectionImpl.md#subscribechanges)
 
 ***
 
@@ -1192,7 +1192,7 @@ Promise that resolves to an Array containing all items in the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`toArrayWhenReady`](../../classes/CollectionImpl.md#toarraywhenready)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`toArrayWhenReady`](../classes/CollectionImpl.md#toarraywhenready)
 
 ***
 
@@ -1220,7 +1220,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](../Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1268,7 +1268,7 @@ try {
 
 ##### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`update`](../../classes/CollectionImpl.md#update)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`update`](../classes/CollectionImpl.md#update)
 
 #### Call Signature
 
@@ -1293,7 +1293,7 @@ Single key or array of keys to update
 
 ###### config
 
-[`OperationConfig`](../OperationConfig.md)
+[`OperationConfig`](OperationConfig.md)
 
 ###### callback
 
@@ -1301,7 +1301,7 @@ Single key or array of keys to update
 
 ##### Returns
 
-[`Transaction`](../Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1349,7 +1349,7 @@ try {
 
 ##### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`update`](../../classes/CollectionImpl.md#update)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`update`](../classes/CollectionImpl.md#update)
 
 #### Call Signature
 
@@ -1373,7 +1373,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](../Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1421,7 +1421,7 @@ try {
 
 ##### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`update`](../../classes/CollectionImpl.md#update)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`update`](../classes/CollectionImpl.md#update)
 
 #### Call Signature
 
@@ -1444,7 +1444,7 @@ Updates one or more items in the collection using a callback function
 
 ###### config
 
-[`OperationConfig`](../OperationConfig.md)
+[`OperationConfig`](OperationConfig.md)
 
 ###### callback
 
@@ -1452,7 +1452,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](../Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1500,7 +1500,7 @@ try {
 
 ##### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`update`](../../classes/CollectionImpl.md#update)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`update`](../classes/CollectionImpl.md#update)
 
 ***
 
@@ -1537,7 +1537,7 @@ Validates the data against the schema
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`validateData`](../../classes/CollectionImpl.md#validatedata)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`validateData`](../classes/CollectionImpl.md#validatedata)
 
 ***
 
@@ -1557,7 +1557,7 @@ Get all values (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`values`](../../classes/CollectionImpl.md#values)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`values`](../classes/CollectionImpl.md#values)
 
 ***
 
@@ -1601,4 +1601,4 @@ Wait for a collection event
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`waitFor`](../../classes/CollectionImpl.md#waitfor)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`waitFor`](../classes/CollectionImpl.md#waitfor)

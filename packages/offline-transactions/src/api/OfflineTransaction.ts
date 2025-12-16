@@ -1,11 +1,11 @@
-import { createTransaction } from "@tanstack/db"
-import { NonRetriableError } from "../types"
-import type { PendingMutation, Transaction } from "@tanstack/db"
+import { createTransaction } from '@tanstack/db'
+import { NonRetriableError } from '../types'
+import type { PendingMutation, Transaction } from '@tanstack/db'
 import type {
   CreateOfflineTransactionOptions,
   OfflineMutationFn,
   OfflineTransaction as OfflineTransactionType,
-} from "../types"
+} from '../types'
 
 export class OfflineTransaction {
   private offlineId: string
@@ -21,7 +21,7 @@ export class OfflineTransaction {
     options: CreateOfflineTransactionOptions,
     mutationFn: OfflineMutationFn,
     persistTransaction: (tx: OfflineTransactionType) => Promise<void>,
-    executor: any
+    executor: any,
   ) {
     this.offlineId = crypto.randomUUID()
     this.mutationFnName = options.mutationFnName
@@ -54,7 +54,7 @@ export class OfflineTransaction {
         }
 
         const completionPromise = this.executor.waitForTransactionCompletion(
-          this.offlineId
+          this.offlineId,
         )
 
         try {

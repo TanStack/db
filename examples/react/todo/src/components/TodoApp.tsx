@@ -1,11 +1,11 @@
-import React, { useState } from "react"
-import { Link } from "@tanstack/react-router"
-import { debounceStrategy, usePacedMutations } from "@tanstack/react-db"
-import type { FormEvent } from "react"
-import type { Collection, Transaction } from "@tanstack/react-db"
+import React, { useState } from 'react'
+import { Link } from '@tanstack/react-router'
+import { debounceStrategy, usePacedMutations } from '@tanstack/react-db'
+import type { FormEvent } from 'react'
+import type { Collection, Transaction } from '@tanstack/react-db'
 
-import type { SelectConfig, SelectTodo } from "@/db/validation"
-import { getComplementaryColor } from "@/lib/color"
+import type { SelectConfig, SelectTodo } from '@/db/validation'
+import { getComplementaryColor } from '@/lib/color'
 
 interface TodoAppProps {
   todos: Array<SelectTodo>
@@ -165,8 +165,8 @@ export function TodoApp({
                   todosToToggle.map((todo) => todo.id),
                   (drafts) =>
                     drafts.forEach(
-                      (draft) => (draft.completed = !draft.completed)
-                    )
+                      (draft) => (draft.completed = !draft.completed),
+                    ),
                 )
               }}
             >

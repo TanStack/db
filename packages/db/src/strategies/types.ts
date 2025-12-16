@@ -1,4 +1,4 @@
-import type { Transaction } from "../transactions"
+import type { Transaction } from '../transactions'
 
 /**
  * Base strategy interface that all strategy implementations must conform to
@@ -13,7 +13,7 @@ export interface BaseStrategy<TName extends string = string> {
    * @returns The result of the function execution (if applicable)
    */
   execute: <T extends object = Record<string, unknown>>(
-    fn: () => Transaction<T>
+    fn: () => Transaction<T>,
   ) => void | Promise<void>
 
   /**

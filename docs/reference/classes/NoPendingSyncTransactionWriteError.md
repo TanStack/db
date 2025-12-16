@@ -5,11 +5,11 @@ title: NoPendingSyncTransactionWriteError
 
 # Class: NoPendingSyncTransactionWriteError
 
-Defined in: [packages/db/src/errors.ts:307](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L307)
+Defined in: [packages/db/src/errors.ts:316](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L316)
 
 ## Extends
 
-- [`TransactionError`](../TransactionError.md)
+- [`TransactionError`](TransactionError.md)
 
 ## Constructors
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:307](https://github.com/TanStack/db/blob/
 new NoPendingSyncTransactionWriteError(): NoPendingSyncTransactionWriteError;
 ```
 
-Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L308)
+Defined in: [packages/db/src/errors.ts:317](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L317)
 
 #### Returns
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`TransactionError`](../TransactionError.md).[`constructor`](../TransactionError.md#constructor)
+[`TransactionError`](TransactionError.md).[`constructor`](TransactionError.md#constructor)
 
 ## Properties
 
@@ -41,7 +41,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TransactionError`](../TransactionError.md).[`cause`](../TransactionError.md#cause)
+[`TransactionError`](TransactionError.md).[`cause`](TransactionError.md#cause)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TransactionError`](../TransactionError.md).[`message`](../TransactionError.md#message)
+[`TransactionError`](TransactionError.md).[`message`](TransactionError.md#message)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TransactionError`](../TransactionError.md).[`name`](../TransactionError.md#name)
+[`TransactionError`](TransactionError.md).[`name`](TransactionError.md#name)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TransactionError`](../TransactionError.md).[`stack`](../TransactionError.md#stack)
+[`TransactionError`](TransactionError.md).[`stack`](TransactionError.md#stack)
 
 ***
 
@@ -107,7 +107,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`TransactionError`](../TransactionError.md).[`stackTraceLimit`](../TransactionError.md#stacktracelimit)
+[`TransactionError`](TransactionError.md).[`stackTraceLimit`](TransactionError.md#stacktracelimit)
 
 ## Methods
 
@@ -179,7 +179,7 @@ a();
 
 #### Inherited from
 
-[`TransactionError`](../TransactionError.md).[`captureStackTrace`](../TransactionError.md#capturestacktrace)
+[`TransactionError`](TransactionError.md).[`captureStackTrace`](TransactionError.md#capturestacktrace)
 
 ***
 
@@ -211,4 +211,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`TransactionError`](../TransactionError.md).[`prepareStackTrace`](../TransactionError.md#preparestacktrace)
+[`TransactionError`](TransactionError.md).[`prepareStackTrace`](TransactionError.md#preparestacktrace)

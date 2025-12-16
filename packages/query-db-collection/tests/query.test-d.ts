@@ -1,4 +1,4 @@
-import { describe, expectTypeOf, it } from "vitest"
+import { describe, expectTypeOf, it } from 'vitest'
 import {
   and,
   createCollection,
@@ -6,17 +6,17 @@ import {
   eq,
   gt,
   parseLoadSubsetOptions,
-} from "@tanstack/db"
-import { QueryClient } from "@tanstack/query-core"
-import { z } from "zod"
-import { queryCollectionOptions } from "../src/query"
-import type { QueryCollectionConfig, QueryCollectionUtils } from "../src/query"
+} from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
+import { z } from 'zod'
+import { queryCollectionOptions } from '../src/query'
+import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   LoadSubsetOptions,
   UpdateMutationFnParams,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 describe(`Query collection type resolution tests`, () => {
   // Define test types
@@ -48,21 +48,21 @@ describe(`Query collection type resolution tests`, () => {
       onInsert: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve()
       },
       onUpdate: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve()
       },
       onDelete: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].original
+          params.transaction.mutations[0].original,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve()
       },
@@ -440,7 +440,7 @@ describe(`Query collection type resolution tests`, () => {
           // Verify that loadSubsetOptions is assignable to LoadSubsetOptions
           // This ensures it can be used where LoadSubsetOptions is expected
           expectTypeOf(
-            ctx.meta!.loadSubsetOptions
+            ctx.meta!.loadSubsetOptions,
           ).toExtend<LoadSubsetOptions>()
           // so that parseLoadSubsetOptions can be called without type errors
           parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
@@ -476,7 +476,7 @@ describe(`Query collection type resolution tests`, () => {
 
           // Verify the assignment worked (this will fail at compile time if types don't match)
           expectTypeOf(
-            typedMeta.loadSubsetOptions
+            typedMeta.loadSubsetOptions,
           ).toExtend<LoadSubsetOptions>()
 
           return Promise.resolve([])

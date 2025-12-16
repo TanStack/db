@@ -1,8 +1,8 @@
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { untrack } from "svelte"
+import { untrack } from 'svelte'
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { SvelteMap } from "svelte/reactivity"
-import { BaseQueryBuilder, createLiveQueryCollection } from "@tanstack/db"
+import { SvelteMap } from 'svelte/reactivity'
+import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
@@ -12,7 +12,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   QueryBuilder,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 /**
  * Return type for useLiveQuery hook
@@ -154,15 +154,15 @@ function toValue<T>(value: MaybeGetter<T>): T {
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<() => unknown>
+  deps?: Array<() => unknown>,
 ): UseLiveQueryReturn<GetResult<TContext>>
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
   queryFn: (
-    q: InitialQueryBuilder
+    q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-  deps?: Array<() => unknown>
+  deps?: Array<() => unknown>,
 ): UseLiveQueryReturn<GetResult<TContext>>
 
 /**
@@ -205,7 +205,7 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<() => unknown>
+  deps?: Array<() => unknown>,
 ): UseLiveQueryReturn<GetResult<TContext>>
 
 /**
@@ -257,13 +257,13 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: MaybeGetter<Collection<TResult, TKey, TUtils>>
+  liveQueryCollection: MaybeGetter<Collection<TResult, TKey, TUtils>>,
 ): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
 
 // Implementation
 export function useLiveQuery(
   configOrQueryOrCollection: any,
-  deps: Array<() => unknown> = []
+  deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = $derived.by(() => {
     // First check if the original parameter might be a getter
@@ -333,7 +333,7 @@ export function useLiveQuery(
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     untrack(() => {
       internalData = []
@@ -414,7 +414,7 @@ export function useLiveQuery(
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     currentUnsubscribe = subscription.unsubscribe.bind(subscription)

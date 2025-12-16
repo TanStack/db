@@ -1,19 +1,19 @@
-import { MultiSet } from "@tanstack/db-ivm"
+import { MultiSet } from '@tanstack/db-ivm'
 import {
   normalizeExpressionPaths,
   normalizeOrderByPaths,
-} from "../compiler/expressions.js"
-import type { MultiSetArray, RootStreamBuilder } from "@tanstack/db-ivm"
-import type { Collection } from "../../collection/index.js"
-import type { ChangeMessage } from "../../types.js"
-import type { Context, GetResult } from "../builder/types.js"
-import type { BasicExpression } from "../ir.js"
-import type { OrderByOptimizationInfo } from "../compiler/order-by.js"
-import type { CollectionConfigBuilder } from "./collection-config-builder.js"
-import type { CollectionSubscription } from "../../collection/subscription.js"
+} from '../compiler/expressions.js'
+import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
+import type { Collection } from '../../collection/index.js'
+import type { ChangeMessage } from '../../types.js'
+import type { Context, GetResult } from '../builder/types.js'
+import type { BasicExpression } from '../ir.js'
+import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
+import type { CollectionConfigBuilder } from './collection-config-builder.js'
+import type { CollectionSubscription } from '../../collection/subscription.js'
 
 const loadMoreCallbackSymbol = Symbol.for(
-  `@tanstack/db.collection-config-builder`
+  `@tanstack/db.collection-config-builder`,
 )
 
 export class CollectionSubscriber<
@@ -33,7 +33,7 @@ export class CollectionSubscriber<
     private alias: string,
     private collectionId: string,
     private collection: Collection,
-    private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>
+    private collectionConfigBuilder: CollectionConfigBuilder<TContext, TResult>,
   ) {}
 
   subscribe(): CollectionSubscription {
@@ -53,17 +53,17 @@ export class CollectionSubscriber<
     if (orderByInfo) {
       subscription = this.subscribeToOrderedChanges(
         whereExpression,
-        orderByInfo
+        orderByInfo,
       )
     } else {
       // If the source alias is lazy then we should not include the initial state
       const includeInitialState = !this.collectionConfigBuilder.isLazyAlias(
-        this.alias
+        this.alias,
       )
 
       const result = this.subscribeToMatchingChanges(
         whereExpression,
-        includeInitialState
+        includeInitialState,
       )
       subscription = result.subscription
     }
@@ -80,7 +80,7 @@ export class CollectionSubscriber<
           resolve: resolve!,
         })
         this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
-          promise
+          promise,
         )
       }
     }
@@ -123,14 +123,14 @@ export class CollectionSubscriber<
     // currentSyncState is always defined when subscribe() is called
     // (called during sync session setup)
     this.collectionConfigBuilder.currentSyncState!.unsubscribeCallbacks.add(
-      unsubscribe
+      unsubscribe,
     )
     return subscription
   }
 
   private sendChangesToPipeline(
     changes: Iterable<ChangeMessage<any, string | number>>,
-    callback?: () => boolean
+    callback?: () => boolean,
   ) {
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
@@ -139,7 +139,7 @@ export class CollectionSubscriber<
     const sentChanges = sendChangesToInput(
       input,
       changes,
-      this.collection.config.getKey
+      this.collection.config.getKey,
     )
 
     // Do not provide the callback that loads more data
@@ -157,10 +157,10 @@ export class CollectionSubscriber<
 
   private subscribeToMatchingChanges(
     whereExpression: BasicExpression<boolean> | undefined,
-    includeInitialState: boolean = false
+    includeInitialState: boolean = false,
   ): { subscription: CollectionSubscription } {
     const sendChanges = (
-      changes: Array<ChangeMessage<any, string | number>>
+      changes: Array<ChangeMessage<any, string | number>>,
     ) => {
       this.sendChangesToPipeline(changes)
     }
@@ -190,12 +190,12 @@ export class CollectionSubscriber<
 
   private subscribeToOrderedChanges(
     whereExpression: BasicExpression<boolean> | undefined,
-    orderByInfo: OrderByOptimizationInfo
+    orderByInfo: OrderByOptimizationInfo,
   ) {
     const { orderBy, offset, limit, index } = orderByInfo
 
     const sendChangesInRange = (
-      changes: Iterable<ChangeMessage<any, string | number>>
+      changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
       // Split live updates into a delete of the old value and an insert of the new value
       const splittedChanges = splitUpdates(changes)
@@ -208,17 +208,41 @@ export class CollectionSubscriber<
       whereExpression,
     })
 
-    subscription.setOrderByIndex(index)
+    // Listen for truncate events to reset cursor tracking state
+    // This ensures that after a must-refetch/truncate, we don't use stale cursor data
+    const truncateUnsubscribe = this.collection.on(`truncate`, () => {
+      this.biggest = undefined
+    })
+
+    // Clean up truncate listener when subscription is unsubscribed
+    subscription.on(`unsubscribed`, () => {
+      truncateUnsubscribe()
+    })
 
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
-    // Load the first `offset + limit` values from the index
-    // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
-    subscription.requestLimitedSnapshot({
-      limit: offset + limit,
-      orderBy: normalizedOrderBy,
-    })
+    if (index) {
+      // We have an index on the first orderBy column - use lazy loading optimization
+      // This works for both single-column and multi-column orderBy:
+      // - Single-column: index provides exact ordering
+      // - Multi-column: index provides ordering on first column, secondary sort in memory
+      subscription.setOrderByIndex(index)
+
+      // Load the first `offset + limit` values from the index
+      // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
+      subscription.requestLimitedSnapshot({
+        limit: offset + limit,
+        orderBy: normalizedOrderBy,
+      })
+    } else {
+      // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
+      // so the sync layer can optimize if the backend supports it
+      subscription.requestSnapshot({
+        orderBy: normalizedOrderBy,
+        limit: offset + limit,
+      })
+    }
 
     return subscription
   }
@@ -238,11 +262,10 @@ export class CollectionSubscriber<
     const { dataNeeded } = orderByInfo
 
     if (!dataNeeded) {
-      // This should never happen because the topK operator should always set the size callback
-      // which in turn should lead to the orderBy operator setting the dataNeeded callback
-      throw new Error(
-        `Missing dataNeeded callback for collection ${this.collectionId}`
-      )
+      // dataNeeded is not set when there's no index (e.g., non-ref expression).
+      // In this case, we've already loaded all data via requestSnapshot
+      // and don't need to lazily load more.
+      return true
     }
 
     // `dataNeeded` probes the orderBy operator to see if it needs more data
@@ -256,7 +279,7 @@ export class CollectionSubscriber<
 
   private sendChangesToPipelineWithTracking(
     changes: Iterable<ChangeMessage<any, string | number>>,
-    subscription: CollectionSubscription
+    subscription: CollectionSubscription,
   ) {
     const orderByInfo = this.getOrderByInfo()
     if (!orderByInfo) {
@@ -280,7 +303,7 @@ export class CollectionSubscriber<
 
     this.sendChangesToPipeline(
       trackedChanges,
-      subscriptionWithLoader[loadMoreCallbackSymbol]
+      subscriptionWithLoader[loadMoreCallbackSymbol],
     )
   }
 
@@ -291,20 +314,33 @@ export class CollectionSubscriber<
     if (!orderByInfo) {
       return
     }
-    const { orderBy, valueExtractorForRawRow } = orderByInfo
+    const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
     const biggestSentRow = this.biggest
-    const biggestSentValue = biggestSentRow
+
+    // Extract all orderBy column values from the biggest sent row
+    // For single-column: returns single value, for multi-column: returns array
+    const extractedValues = biggestSentRow
       ? valueExtractorForRawRow(biggestSentRow)
-      : biggestSentRow
+      : undefined
+
+    // Normalize to array format for minValues
+    const minValues =
+      extractedValues !== undefined
+        ? Array.isArray(extractedValues)
+          ? extractedValues
+          : [extractedValues]
+        : undefined
 
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
     // Take the `n` items after the biggest sent value
+    // Pass the current window offset to ensure proper deduplication
     subscription.requestLimitedSnapshot({
       orderBy: normalizedOrderBy,
       limit: n,
-      minValue: biggestSentValue,
+      minValues,
+      offset,
     })
   }
 
@@ -330,13 +366,16 @@ export class CollectionSubscriber<
 
   private *trackSentValues(
     changes: Iterable<ChangeMessage<any, string | number>>,
-    comparator: (a: any, b: any) => number
+    comparator: (a: any, b: any) => number,
   ) {
     for (const change of changes) {
-      if (!this.biggest) {
-        this.biggest = change.value
-      } else if (comparator(this.biggest, change.value) < 0) {
-        this.biggest = change.value
+      // Only track inserts/updates for cursor positioning, not deletes
+      if (change.type !== `delete`) {
+        if (!this.biggest) {
+          this.biggest = change.value
+        } else if (comparator(this.biggest, change.value) < 0) {
+          this.biggest = change.value
+        }
       }
 
       yield change
@@ -350,7 +389,7 @@ export class CollectionSubscriber<
 function sendChangesToInput(
   input: RootStreamBuilder<unknown>,
   changes: Iterable<ChangeMessage>,
-  getKey: (item: ChangeMessage[`value`]) => any
+  getKey: (item: ChangeMessage[`value`]) => any,
 ): number {
   const multiSetArray: MultiSetArray<unknown> = []
   for (const change of changes) {
@@ -378,7 +417,7 @@ function* splitUpdates<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 >(
-  changes: Iterable<ChangeMessage<T, TKey>>
+  changes: Iterable<ChangeMessage<T, TKey>>,
 ): Generator<ChangeMessage<T, TKey>> {
   for (const change of changes) {
     if (change.type === `update`) {

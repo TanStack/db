@@ -1,5 +1,21 @@
 # @tanstack/offline-transactions
 
+## 1.0.2
+
+### Patch Changes
+
+- Updated dependencies [[`b3b1940`](https://github.com/TanStack/db/commit/b3b194000d8efcc2c6cc45a663029dadc26f13f0), [`09da081`](https://github.com/TanStack/db/commit/09da081b420fc915d7f0dc566c6cdbbc78582435), [`86ad40c`](https://github.com/TanStack/db/commit/86ad40c6bc37b2f5d4ad24d06f72168ca4b96161)]:
+  - @tanstack/db@0.5.12
+
+## 1.0.1
+
+### Patch Changes
+
+- Use regular dependency for @tanstack/db instead of peerDependency to match the standard pattern used by other TanStack DB packages and prevent duplicate installations ([#952](https://github.com/TanStack/db/pull/952))
+
+- Updated dependencies [[`c4b9399`](https://github.com/TanStack/db/commit/c4b93997432743d974749683059bf68a082d3e5b), [`a1a484e`](https://github.com/TanStack/db/commit/a1a484ec4d2331d702ab9c4b7e5b02622c76b3dd)]:
+  - @tanstack/db@0.5.11
+
 ## 1.0.0
 
 ### Patch Changes
@@ -82,7 +98,7 @@
   import {
     startOfflineExecutor,
     IndexedDBAdapter,
-  } from "@tanstack/offline-transactions"
+  } from '@tanstack/offline-transactions'
 
   const executor = startOfflineExecutor({
     collections: { todos: todoCollection },
@@ -94,18 +110,18 @@
       },
     },
     onStorageFailure: (diagnostic) => {
-      console.warn("Running in online-only mode:", diagnostic.message)
+      console.warn('Running in online-only mode:', diagnostic.message)
     },
   })
 
   // Create offline transaction
   const tx = executor.createOfflineTransaction({
-    mutationFnName: "syncTodos",
+    mutationFnName: 'syncTodos',
     autoCommit: false,
   })
 
   tx.mutate(() => {
-    todoCollection.insert({ id: "1", text: "Buy milk", completed: false })
+    todoCollection.insert({ id: '1', text: 'Buy milk', completed: false })
   })
 
   await tx.commit() // Persists to outbox and syncs when online

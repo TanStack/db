@@ -1,13 +1,13 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../../src/collection/index.js"
-import { createLiveQueryCollection, eq, isNull } from "../../src/query/index.js"
-import { createTransaction } from "../../src/transactions.js"
-import { createOptimisticAction } from "../../src/optimistic-action.js"
-import { transactionScopedScheduler } from "../../src/scheduler.js"
-import { CollectionConfigBuilder } from "../../src/query/live/collection-config-builder.js"
-import { mockSyncCollectionOptions } from "../utils.js"
-import type { FullSyncState } from "../../src/query/live/types.js"
-import type { SyncConfig } from "../../src/types.js"
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createLiveQueryCollection, eq, isNull } from '../../src/query/index.js'
+import { createTransaction } from '../../src/transactions.js'
+import { createOptimisticAction } from '../../src/optimistic-action.js'
+import { transactionScopedScheduler } from '../../src/scheduler.js'
+import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import type { FullSyncState } from '../../src/query/live/types.js'
+import type { SyncConfig } from '../../src/types.js'
 
 interface ChangeMessageLike {
   type: string
@@ -274,7 +274,7 @@ describe(`live query scheduler`, () => {
           .join(
             { right: liveQueryB },
             ({ left, right }) => eq(left.id, right.id),
-            `full`
+            `full`,
           )
           .select(({ left, right }) => ({
             left: left?.value,
@@ -361,7 +361,7 @@ describe(`live query scheduler`, () => {
           .join(
             { right: collectionB },
             ({ left, right }) => eq(left.id, right.id),
-            `full`
+            `full`,
           )
           .select(({ left, right }) => ({
             left: left?.value,
@@ -444,7 +444,7 @@ describe(`live query scheduler`, () => {
           .join(
             { right: collectionB },
             ({ left, right }) => eq(left.id, right.id),
-            `full`
+            `full`,
           )
           .select(({ left, right }) => ({
             left: left?.value,
@@ -563,7 +563,7 @@ describe(`live query scheduler`, () => {
         initialData: [
           { id: `account-1`, user_id: `user-1`, name: `Account 1` },
         ],
-      })
+      }),
     )
 
     const users = createCollection<UserProfile>(
@@ -571,7 +571,7 @@ describe(`live query scheduler`, () => {
         id: `left-join-bug-users`,
         getKey: (user) => user.id,
         initialData: [{ id: `user-1`, profile: `Profile 1` }],
-      })
+      }),
     )
 
     const teams = createCollection<Team>(
@@ -585,7 +585,7 @@ describe(`live query scheduler`, () => {
             deleted_ts: null as string | null,
           },
         ],
-      })
+      }),
     )
 
     // Create nested live query collections similar to the bug report
@@ -596,7 +596,7 @@ describe(`live query scheduler`, () => {
         q
           .from({ account: accounts })
           .join({ user: users }, ({ user, account }) =>
-            eq(user.id, account.user_id)
+            eq(user.id, account.user_id),
           )
           .select(({ account, user }) => ({
             account: account,
@@ -621,7 +621,7 @@ describe(`live query scheduler`, () => {
         q
           .from({ accountWithUser: accountsWithUsers })
           .leftJoin({ team: activeTeams }, ({ accountWithUser, team }) =>
-            eq(team.team.account_id, accountWithUser.account.id)
+            eq(team.team.account_id, accountWithUser.account.id),
           )
           .select(({ accountWithUser, team }) => ({
             account: accountWithUser.account,
@@ -685,7 +685,7 @@ describe(`live query scheduler`, () => {
         id: `race-base`,
         getKey: (item) => item.id,
         initialData: [{ id: `1`, value: 10 }],
-      })
+      }),
     )
 
     // QueryA: depends on base

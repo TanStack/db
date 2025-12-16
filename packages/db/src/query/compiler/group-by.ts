@@ -1,20 +1,20 @@
-import { filter, groupBy, groupByOperators, map } from "@tanstack/db-ivm"
-import { Func, PropRef, getHavingExpression } from "../ir.js"
+import { filter, groupBy, groupByOperators, map } from '@tanstack/db-ivm'
+import { Func, PropRef, getHavingExpression } from '../ir.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
   UnknownHavingExpressionTypeError,
   UnsupportedAggregateFunctionError,
-} from "../../errors.js"
-import { compileExpression, toBooleanPredicate } from "./evaluators.js"
+} from '../../errors.js'
+import { compileExpression, toBooleanPredicate } from './evaluators.js'
 import type {
   Aggregate,
   BasicExpression,
   GroupBy,
   Having,
   Select,
-} from "../ir.js"
-import type { NamespacedAndKeyedStream, NamespacedRow } from "../../types.js"
+} from '../ir.js'
+import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
 
 const { sum, count, avg, min, max } = groupByOperators
 
@@ -32,7 +32,7 @@ interface GroupBySelectMapping {
  */
 function validateAndCreateMapping(
   groupByClause: GroupBy,
-  selectClause?: Select
+  selectClause?: Select,
 ): GroupBySelectMapping {
   const selectToGroupByIndex = new Map<string, number>()
   const groupByExpressions = [...groupByClause]
@@ -50,7 +50,7 @@ function validateAndCreateMapping(
 
     // Non-aggregate expression must be in GROUP BY
     const groupIndex = groupByExpressions.findIndex((groupExpr) =>
-      expressionsEqual(expr, groupExpr)
+      expressionsEqual(expr, groupExpr),
     )
 
     if (groupIndex === -1) {
@@ -73,7 +73,7 @@ export function processGroupBy(
   groupByClause: GroupBy,
   havingClauses?: Array<Having>,
   selectClause?: Select,
-  fnHavingClauses?: Array<(row: any) => any>
+  fnHavingClauses?: Array<(row: any) => any>,
 ): NamespacedAndKeyedStream {
   // Handle empty GROUP BY (single-group aggregation)
   if (groupByClause.length === 0) {
@@ -95,7 +95,7 @@ export function processGroupBy(
 
     // Apply the groupBy operator with single group
     pipeline = pipeline.pipe(
-      groupBy(keyExtractor, aggregates)
+      groupBy(keyExtractor, aggregates),
     ) as NamespacedAndKeyedStream
 
     // Update __select_results to include aggregate values
@@ -123,7 +123,7 @@ export function processGroupBy(
             __select_results: finalResults,
           },
         ] as [unknown, Record<string, any>]
-      })
+      }),
     )
 
     // Apply HAVING clauses if present
@@ -132,7 +132,7 @@ export function processGroupBy(
         const havingExpression = getHavingExpression(havingClause)
         const transformedHavingClause = replaceAggregatesByRefs(
           havingExpression,
-          selectClause || {}
+          selectClause || {},
         )
         const compiledHaving = compileExpression(transformedHavingClause)
 
@@ -141,7 +141,7 @@ export function processGroupBy(
             // Create a namespaced row structure for HAVING evaluation
             const namespacedRow = { result: (row as any).__select_results }
             return toBooleanPredicate(compiledHaving(namespacedRow))
-          })
+          }),
         )
       }
     }
@@ -154,7 +154,7 @@ export function processGroupBy(
             // Create a namespaced row structure for functional HAVING evaluation
             const namespacedRow = { result: (row as any).__select_results }
             return toBooleanPredicate(fnHaving(namespacedRow))
-          })
+          }),
         )
       }
     }
@@ -168,7 +168,7 @@ export function processGroupBy(
 
   // Pre-compile groupBy expressions
   const compiledGroupByExpressions = groupByClause.map((e) =>
-    compileExpression(e)
+    compileExpression(e),
   )
 
   // Create a key extractor function using simple __key_X format
@@ -258,7 +258,7 @@ export function processGroupBy(
           __select_results: finalResults,
         },
       ] as [unknown, Record<string, any>]
-    })
+    }),
   )
 
   // Apply HAVING clauses if present
@@ -267,7 +267,7 @@ export function processGroupBy(
       const havingExpression = getHavingExpression(havingClause)
       const transformedHavingClause = replaceAggregatesByRefs(
         havingExpression,
-        selectClause || {}
+        selectClause || {},
       )
       const compiledHaving = compileExpression(transformedHavingClause)
 
@@ -276,7 +276,7 @@ export function processGroupBy(
           // Create a namespaced row structure for HAVING evaluation
           const namespacedRow = { result: (row as any).__select_results }
           return compiledHaving(namespacedRow)
-        })
+        }),
       )
     }
   }
@@ -289,7 +289,7 @@ export function processGroupBy(
           // Create a namespaced row structure for functional HAVING evaluation
           const namespacedRow = { result: (row as any).__select_results }
           return toBooleanPredicate(fnHaving(namespacedRow))
-        })
+        }),
       )
     }
   }
@@ -310,7 +310,7 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
       if (!expr1.path || !expr2.path) return false
       if (expr1.path.length !== expr2.path.length) return false
       return expr1.path.every(
-        (segment: string, i: number) => segment === expr2.path[i]
+        (segment: string, i: number) => segment === expr2.path[i],
       )
     case `val`:
       return expr1.value === expr2.value
@@ -319,7 +319,7 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
         expr1.name === expr2.name &&
         expr1.args?.length === expr2.args?.length &&
         (expr1.args || []).every((arg: any, i: number) =>
-          expressionsEqual(arg, expr2.args[i])
+          expressionsEqual(arg, expr2.args[i]),
         )
       )
     case `agg`:
@@ -327,7 +327,7 @@ function expressionsEqual(expr1: any, expr2: any): boolean {
         expr1.name === expr2.name &&
         expr1.args?.length === expr2.args?.length &&
         (expr1.args || []).every((arg: any, i: number) =>
-          expressionsEqual(arg, expr2.args[i])
+          expressionsEqual(arg, expr2.args[i]),
         )
       )
     default:
@@ -390,7 +390,7 @@ function getAggregateFunction(aggExpr: Aggregate) {
 export function replaceAggregatesByRefs(
   havingExpr: BasicExpression | Aggregate,
   selectClause: Select,
-  resultAlias: string = `result`
+  resultAlias: string = `result`,
 ): BasicExpression {
   switch (havingExpr.type) {
     case `agg`: {
@@ -411,7 +411,7 @@ export function replaceAggregatesByRefs(
       // Transform function arguments recursively
       const transformedArgs = funcExpr.args.map(
         (arg: BasicExpression | Aggregate) =>
-          replaceAggregatesByRefs(arg, selectClause)
+          replaceAggregatesByRefs(arg, selectClause),
       )
       return new Func(funcExpr.name, transformedArgs)
     }

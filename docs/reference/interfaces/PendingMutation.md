@@ -18,11 +18,11 @@ Contains information about the original and modified data, as well as metadata
 
 ### TOperation
 
-`TOperation` *extends* [`OperationType`](../../type-aliases/OperationType.md) = [`OperationType`](../../type-aliases/OperationType.md)
+`TOperation` *extends* [`OperationType`](../type-aliases/OperationType.md) = [`OperationType`](../type-aliases/OperationType.md)
 
 ### TCollection
 
-`TCollection` *extends* [`Collection`](../Collection.md)\<`T`, `any`, `any`, `any`, `any`\> = [`Collection`](../Collection.md)\<`T`, `any`, `any`, `any`, `any`\>
+`TCollection` *extends* [`Collection`](Collection.md)\<`T`, `any`, `any`, `any`, `any`\> = [`Collection`](Collection.md)\<`T`, `any`, `any`, `any`, `any`\>
 
 ## Properties
 

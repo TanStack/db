@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { DefaultMap } from "../src/utils.js"
-import { hash } from "../src/hashing/index.js"
+import { describe, expect, it } from 'vitest'
+import { DefaultMap } from '../src/utils.js'
+import { hash } from '../src/hashing/index.js'
 
 describe(`DefaultMap`, () => {
   it(`should return default value for missing keys`, () => {

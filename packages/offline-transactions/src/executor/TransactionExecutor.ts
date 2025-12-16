@@ -1,9 +1,9 @@
-import { DefaultRetryPolicy } from "../retry/RetryPolicy"
-import { NonRetriableError } from "../types"
-import { withNestedSpan } from "../telemetry/tracer"
-import type { KeyScheduler } from "./KeyScheduler"
-import type { OutboxManager } from "../outbox/OutboxManager"
-import type { OfflineConfig, OfflineTransaction } from "../types"
+import { DefaultRetryPolicy } from '../retry/RetryPolicy'
+import { NonRetriableError } from '../types'
+import { withNestedSpan } from '../telemetry/tracer'
+import type { KeyScheduler } from './KeyScheduler'
+import type { OutboxManager } from '../outbox/OutboxManager'
+import type { OfflineConfig, OfflineTransaction } from '../types'
 
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
 
@@ -21,7 +21,7 @@ export class TransactionExecutor {
     scheduler: KeyScheduler,
     outbox: OutboxManager,
     config: OfflineConfig,
-    offlineExecutor: any
+    offlineExecutor: any,
   ) {
     this.scheduler = scheduler
     this.outbox = outbox
@@ -62,7 +62,7 @@ export class TransactionExecutor {
       }
 
       const executions = batch.map((transaction) =>
-        this.executeTransaction(transaction)
+        this.executeTransaction(transaction),
       )
       await Promise.allSettled(executions)
     }
@@ -72,16 +72,16 @@ export class TransactionExecutor {
   }
 
   private async executeTransaction(
-    transaction: OfflineTransaction
+    transaction: OfflineTransaction,
   ): Promise<void> {
     try {
       await withNestedSpan(
         `transaction.execute`,
         {
-          "transaction.id": transaction.id,
-          "transaction.mutationFnName": transaction.mutationFnName,
-          "transaction.retryCount": transaction.retryCount,
-          "transaction.keyCount": transaction.keys.length,
+          'transaction.id': transaction.id,
+          'transaction.mutationFnName': transaction.mutationFnName,
+          'transaction.retryCount': transaction.retryCount,
+          'transaction.keyCount': transaction.keys.length,
         },
         async (span) => {
           this.scheduler.markStarted(transaction)
@@ -108,7 +108,7 @@ export class TransactionExecutor {
             ;(err as any)[HANDLED_EXECUTION_ERROR] = true
             throw err
           }
-        }
+        },
       )
     } catch (error) {
       if (
@@ -151,19 +151,19 @@ export class TransactionExecutor {
 
   private async handleError(
     transaction: OfflineTransaction,
-    error: Error
+    error: Error,
   ): Promise<void> {
     return withNestedSpan(
       `transaction.handleError`,
       {
-        "transaction.id": transaction.id,
-        "error.name": error.name,
-        "error.message": error.message,
+        'transaction.id': transaction.id,
+        'error.name': error.name,
+        'error.message': error.message,
       },
       async (span) => {
         const shouldRetry = this.retryPolicy.shouldRetry(
           error,
-          transaction.retryCount
+          transaction.retryCount,
         )
 
         span.setAttribute(`shouldRetry`, shouldRetry)
@@ -173,7 +173,7 @@ export class TransactionExecutor {
           await this.outbox.remove(transaction.id)
           console.warn(
             `Transaction ${transaction.id} failed permanently:`,
-            error
+            error,
           )
 
           span.setAttribute(`result`, `permanent_failure`)
@@ -211,7 +211,7 @@ export class TransactionExecutor {
 
         // Schedule retry timer
         this.scheduleNextRetry()
-      }
+      },
     )
   }
 
@@ -234,7 +234,7 @@ export class TransactionExecutor {
     this.scheduleNextRetry()
 
     const removedTransactions = transactions.filter(
-      (tx) => !filteredTransactions.some((filtered) => filtered.id === tx.id)
+      (tx) => !filteredTransactions.some((filtered) => filtered.id === tx.id),
     )
 
     if (removedTransactions.length > 0) {

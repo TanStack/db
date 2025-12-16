@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { Query, getQueryIR } from "../../../src/query/builder/index.js"
-import { eq, upper } from "../../../src/query/builder/functions.js"
+import { describe, expect, it } from 'vitest'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { Query, getQueryIR } from '../../../src/query/builder/index.js'
+import { eq, upper } from '../../../src/query/builder/functions.js'
 
 // Test schema
 interface Employee {
@@ -162,7 +162,7 @@ describe(`QueryBuilder.orderBy`, () => {
     expect(builtQuery.orderBy![0]!.compareOptions.stringSort).toBe(`locale`)
     expect((builtQuery.orderBy![0]!.compareOptions as any).locale).toBe(`de-DE`)
     expect(
-      (builtQuery.orderBy![0]!.compareOptions as any).localeOptions
+      (builtQuery.orderBy![0]!.compareOptions as any).localeOptions,
     ).toEqual({
       sensitivity: `base`,
     })

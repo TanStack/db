@@ -1,16 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createCollection,
   createLiveQueryCollection,
   eq,
   gt,
   lt,
-} from "@tanstack/db"
-import { electricCollectionOptions } from "../src/electric"
-import type { ElectricCollectionUtils } from "../src/electric"
-import type { Collection } from "@tanstack/db"
-import type { Message } from "@electric-sql/client"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+} from '@tanstack/db'
+import { electricCollectionOptions } from '../src/electric'
+import type { ElectricCollectionUtils } from '../src/electric'
+import type { Collection } from '@tanstack/db'
+import type { Message } from '@electric-sql/client'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 // Sample user type for tests
 type User = {
@@ -505,7 +505,7 @@ describe.each([
           getKey: (user: User) => user.id,
           startSync: true,
           autoIndex: `eager` as const,
-        })
+        }),
       )
 
       mockRequestSnapshot.mockResolvedValue({
@@ -554,7 +554,7 @@ describe.each([
       const callArgs = (index: number) =>
         mockRequestSnapshot.mock.calls[index]?.[0]
       expect(callArgs(0)).toMatchObject({
-        params: { "1": `true` },
+        params: { '1': `true` },
         where: `"active" = $1`,
         orderBy: `"age" NULLS FIRST`,
         limit: 2,
@@ -612,13 +612,12 @@ describe.each([
       // Limited queries are only deduplicated when their where clauses are equal.
       // Both queries have the same where clause (active = true), but the second query
       // with limit 6 needs more data than the first query with limit 2 provided.
-      // The internal query system makes additional requests as it processes the data.
-      // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-      expect(mockRequestSnapshot).toHaveBeenCalledTimes(6)
+      // With cursor-based pagination, initial loads (without cursor) make 1 requestSnapshot call each.
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
 
       // Check that first it requested a limit of 2 users (from first query)
       expect(callArgs(0)).toMatchObject({
-        params: { "1": `true` },
+        params: { '1': `true` },
         where: `"active" = $1`,
         orderBy: `"age" NULLS FIRST`,
         limit: 2,
@@ -626,7 +625,7 @@ describe.each([
 
       // Check that second it requested a limit of 6 users (from second query)
       expect(callArgs(1)).toMatchObject({
-        params: { "1": `true` },
+        params: { '1': `true` },
         where: `"active" = $1`,
         orderBy: `"age" NULLS FIRST`,
         limit: 6,
@@ -646,7 +645,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
   let subscriber: (messages: Array<Message<User>>) => void
 
   function createElectricCollectionWithSyncMode(
-    syncMode: `eager` | `on-demand` | `progressive`
+    syncMode: `eager` | `on-demand` | `progressive`,
   ) {
     vi.clearAllMocks()
 
@@ -740,7 +739,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
         orderBy: `"age" NULLS FIRST`,
         where: `"active" = $1`,
         params: { 1: `true` }, // Parameters are stringified
-      })
+      }),
     )
     expect(liveQuery.size).toBeGreaterThan(2)
   })
@@ -801,7 +800,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
         limit: 3, // Requests full limit from Electric
         orderBy: `"id" NULLS FIRST`,
         params: {},
-      })
+      }),
     )
     expect(mockRequestSnapshot).not.toHaveBeenCalled()
   })
@@ -876,13 +875,12 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
       expect.objectContaining({
         limit: 3,
         orderBy: `"age" NULLS FIRST`,
-      })
+      }),
     )
 
     // For limited queries, only requests with identical where clauses can be deduplicated.
-    // The internal query system may make additional requests as it processes the data.
-    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
+    // With cursor-based pagination, initial loads (without cursor) make 1 requestSnapshot call.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
   })
 
   it(`should pass correct WHERE clause to requestSnapshot when live query has filters`, async () => {
@@ -909,10 +907,10 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     expect(mockRequestSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         where: `"active" = $1`,
-        params: { "1": `true` },
+        params: { '1': `true` },
         orderBy: `"name" DESC NULLS FIRST`,
         limit: 10,
-      })
+      }),
     )
   })
 
@@ -940,10 +938,10 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     expect(mockFetchSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         where: `"age" > $1`,
-        params: { "1": `20` },
+        params: { '1': `20` },
         orderBy: `"age" NULLS FIRST`,
         limit: 5,
-      })
+      }),
     )
     expect(mockRequestSnapshot).not.toHaveBeenCalled()
   })
@@ -954,7 +952,7 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
   let subscriber: (messages: Array<Message<User>>) => void
 
   function createElectricCollectionWithSyncMode(
-    syncMode: `on-demand` | `progressive`
+    syncMode: `on-demand` | `progressive`,
   ) {
     vi.clearAllMocks()
 
@@ -1047,10 +1045,10 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     expect(mockRequestSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         where: `"active" = $1`,
-        params: { "1": `true` },
+        params: { '1': `true` },
         orderBy: `"age" NULLS FIRST`,
         limit: 10,
-      })
+      }),
     )
   })
 
@@ -1192,9 +1190,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // For limited queries, only requests with identical where clauses can be deduplicated.
-    // The internal query system may make additional requests as it processes data.
-    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
+    // With cursor-based pagination, initial loads (without cursor) make 1 requestSnapshot call.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
 
     // Simulate a must-refetch (which triggers truncate and reset)
     subscriber([{ headers: { control: `must-refetch` } }])
@@ -1204,8 +1201,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // The existing live query re-requests its data after truncate
-    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(5)
+    // After must-refetch, the query requests data again (1 initial + 1 after truncate)
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
 
     // Create the same live query again after reset
     // This should NOT be deduped because the reset cleared the deduplication state,
@@ -1224,8 +1221,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Should have more calls - the different query triggered a new request
-    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(6)
+    // 1 initial + 1 after must-refetch + 1 for new query = 3
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
   })
 
   it(`should deduplicate unlimited queries regardless of orderBy`, async () => {

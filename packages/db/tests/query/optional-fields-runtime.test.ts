@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { createLiveQueryCollection, eq } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Test types with optional fields
 type UserWithOptional = {
@@ -46,7 +46,7 @@ function createUsersCollection() {
           department_id: `dept2`,
         },
       ],
-    })
+    }),
   )
 }
 
@@ -67,7 +67,7 @@ function createDepartmentsCollection() {
           budget: 50000,
         },
       ],
-    })
+    }),
   )
 }
 
@@ -162,7 +162,7 @@ describe(`Optional Fields - Runtime Tests`, () => {
           .join(
             { dept: departmentsCollection },
             ({ user, dept }) => eq(user.department_id, dept.id),
-            `left`
+            `left`,
           )
           .select(({ user, dept }) => ({
             user_name: user.name,
@@ -207,7 +207,7 @@ describe(`Optional Fields - Runtime Tests`, () => {
 
     // Check that we have a group for undefined department_id (Bob)
     const undefinedDeptGroup = groupByResults.find(
-      (r) => r.department_id === undefined
+      (r) => r.department_id === undefined,
     )
     expect(undefinedDeptGroup).toBeDefined()
 

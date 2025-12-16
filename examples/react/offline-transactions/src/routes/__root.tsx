@@ -4,15 +4,15 @@ import {
   Link,
   Scripts,
   createRootRoute,
-} from "@tanstack/react-router"
-import { TanStackRouterDevtools } from "@tanstack/react-router-devtools"
-import { QueryClientProvider } from "@tanstack/react-query"
-import * as React from "react"
-import { DefaultCatchBoundary } from "~/components/DefaultCatchBoundary"
-import { NotFound } from "~/components/NotFound"
-import appCss from "~/styles/app.css?url"
-import { seo } from "~/utils/seo"
-import { queryClient } from "~/utils/queryClient"
+} from '@tanstack/react-router'
+import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+import { QueryClientProvider } from '@tanstack/react-query'
+import * as React from 'react'
+import { DefaultCatchBoundary } from '~/components/DefaultCatchBoundary'
+import { NotFound } from '~/components/NotFound'
+import appCss from '~/styles/app.css?url'
+import { seo } from '~/utils/seo'
+import { queryClient } from '~/utils/queryClient'
 
 export const Route = createRootRoute({
   head: () => ({

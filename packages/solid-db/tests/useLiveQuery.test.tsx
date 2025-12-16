@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { renderHook, waitFor } from "@solidjs/testing-library"
+import { describe, expect, it } from 'vitest'
+import { renderHook, waitFor } from '@solidjs/testing-library'
 import {
   Query,
   count,
@@ -8,11 +8,11 @@ import {
   createOptimisticAction,
   eq,
   gt,
-} from "@tanstack/db"
-import { createComputed, createRoot, createSignal } from "solid-js"
-import { useLiveQuery } from "../src/useLiveQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
-import type { Accessor } from "solid-js"
+} from '@tanstack/db'
+import { createComputed, createRoot, createSignal } from 'solid-js'
+import { useLiveQuery } from '../src/useLiveQuery'
+import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import type { Accessor } from 'solid-js'
 
 type Person = {
   id: string
@@ -85,7 +85,7 @@ describe(`Query Collections`, () => {
         id: `test-persons`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const rendered = renderHook(() => {
@@ -97,7 +97,7 @@ describe(`Query Collections`, () => {
             id: persons.id,
             name: persons.name,
             age: persons.age,
-          }))
+          })),
       )
     })
 
@@ -121,7 +121,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const rendered = renderHook(() => {
@@ -133,7 +133,7 @@ describe(`Query Collections`, () => {
             id: c.id,
             name: c.name,
           }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+          .orderBy(({ collection: c }) => c.id, `asc`),
       )
     })
 
@@ -190,7 +190,7 @@ describe(`Query Collections`, () => {
           id: `4`,
           name: `Kyle Doe`,
         }),
-      ])
+      ]),
     )
 
     // Update the person
@@ -227,7 +227,7 @@ describe(`Query Collections`, () => {
           id: `4`,
           name: `Kyle Doe 2`,
         }),
-      ])
+      ]),
     )
 
     // Delete the person
@@ -264,7 +264,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create issue collection
@@ -273,7 +273,7 @@ describe(`Query Collections`, () => {
         id: `issue-collection-test`,
         getKey: (issue: Issue) => issue.id,
         initialData: initialIssues,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -281,13 +281,13 @@ describe(`Query Collections`, () => {
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             name: persons.name,
-          }))
+          })),
       )
     })
 
@@ -387,7 +387,7 @@ describe(`Query Collections`, () => {
           id: `params-change-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const [minAge, setMinAge] = createSignal(30)
@@ -401,10 +401,10 @@ describe(`Query Collections`, () => {
                 id: c.id,
                 name: c.name,
                 age: c.age,
-              }))
+              })),
           )
         },
-        { initialProps: [{ minAge: minAge }] }
+        { initialProps: [{ minAge: minAge }] },
       )
 
       // Wait for collection to sync
@@ -460,7 +460,7 @@ describe(`Query Collections`, () => {
           id: `stop-query-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const [minAge, setMinAge] = createSignal(30)
@@ -473,10 +473,10 @@ describe(`Query Collections`, () => {
               .select(({ collection: c }) => ({
                 id: c.id,
                 name: c.name,
-              }))
+              })),
           )
         },
-        { initialProps: [{ minAge }] }
+        { initialProps: [{ minAge }] },
       )
 
       // Wait for collection to sync
@@ -523,7 +523,7 @@ describe(`Query Collections`, () => {
         id: `optimistic-changes-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Initial query
@@ -537,7 +537,7 @@ describe(`Query Collections`, () => {
             name: c.name,
             team: c.team,
           }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+          .orderBy(({ collection: c }) => c.id, `asc`),
       )
     })
 
@@ -553,7 +553,7 @@ describe(`Query Collections`, () => {
           .select(({ queryResult }) => ({
             team: queryResult.team,
             count: count(queryResult.id),
-          }))
+          })),
       )
     })
 
@@ -628,7 +628,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test-bug`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create issue collection
@@ -637,7 +637,7 @@ describe(`Query Collections`, () => {
         id: `issue-collection-test-bug`,
         getKey: (issue: Issue) => issue.id,
         initialData: initialIssues,
-      })
+      }),
     )
 
     // Render the hook with a query that joins persons and issues
@@ -646,13 +646,13 @@ describe(`Query Collections`, () => {
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             name: persons.name,
-          }))
+          })),
       )
 
       // Track each render state
@@ -751,7 +751,8 @@ describe(`Query Collections`, () => {
 
     // Check if we had any render where the temp key was removed but the permanent key wasn't added yet
     const hadFlicker = renderStates.some(
-      (state) => !state.hasTempKey && !state.hasPermKey && state.stateSize === 3
+      (state) =>
+        !state.hasTempKey && !state.hasPermKey && state.stateSize === 3,
     )
 
     expect(hadFlicker).toBe(false)
@@ -772,7 +773,7 @@ describe(`Query Collections`, () => {
         id: `pre-created-collection-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create a live query collection beforehand
@@ -817,7 +818,7 @@ describe(`Query Collections`, () => {
           id: `collection-1`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const collection2 = createCollection(
@@ -842,7 +843,7 @@ describe(`Query Collections`, () => {
               team: `team3`,
             },
           ],
-        })
+        }),
       )
 
       // Create two different live query collections
@@ -875,7 +876,7 @@ describe(`Query Collections`, () => {
         (props: { collection: Accessor<any> }) => {
           return useLiveQuery(props.collection)
         },
-        { initialProps: [{ collection: collection }] }
+        { initialProps: [{ collection: collection }] },
       )
 
       // Wait for first collection to sync
@@ -918,7 +919,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-config-querybuilder`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create a QueryBuilder instance beforehand
@@ -982,7 +983,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1022,7 +1023,7 @@ describe(`Query Collections`, () => {
           id: `pre-created-has-loaded-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       // Create a live query collection that's already syncing
@@ -1080,7 +1081,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1125,7 +1126,7 @@ describe(`Query Collections`, () => {
           id: `live-updates-has-loaded-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { result } = renderHook(() => {
@@ -1136,7 +1137,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1219,13 +1220,13 @@ describe(`Query Collections`, () => {
           q
             .from({ issues: issueCollection })
             .join({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1306,10 +1307,10 @@ describe(`Query Collections`, () => {
                 .select(({ collection: c }) => ({
                   id: c.id,
                   name: c.name,
-                }))
+                })),
             )
           },
-          { initialProps: [{ minAge: minAge }] }
+          { initialProps: [{ minAge: minAge }] },
         )
 
         // Initially should be false
@@ -1394,7 +1395,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1502,7 +1503,7 @@ describe(`Query Collections`, () => {
               id: persons.id,
               name: persons.name,
               team: persons.team,
-            }))
+            })),
         )
       })
 
@@ -1617,13 +1618,13 @@ describe(`Query Collections`, () => {
           q
             .from({ issues: issueCollection })
             .join({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
               userName: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1716,7 +1717,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1757,7 +1758,7 @@ describe(`Query Collections`, () => {
             id: `disabled-undefined-test`,
             getKey: (person: Person) => person.id,
             initialData: initialPersons,
-          })
+          }),
         )
 
         const [enabled, setEnabled] = createSignal(false)
@@ -1775,7 +1776,7 @@ describe(`Query Collections`, () => {
                 }))
             })
           },
-          { initialProps: [{ enabled }] }
+          { initialProps: [{ enabled }] },
         )
 
         // When callback returns undefined, should return disabled state
@@ -1814,7 +1815,7 @@ describe(`Query Collections`, () => {
             id: `disabled-null-test`,
             getKey: (person: Person) => person.id,
             initialData: initialPersons,
-          })
+          }),
         )
 
         const [enabled, setEnabled] = createSignal(false)
@@ -1832,7 +1833,7 @@ describe(`Query Collections`, () => {
                 }))
             })
           },
-          { initialProps: [{ enabled }] }
+          { initialProps: [{ enabled }] },
         )
 
         // When callback returns null, should return disabled state

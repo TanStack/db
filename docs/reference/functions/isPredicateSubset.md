@@ -18,13 +18,13 @@ Returns true if all aspects of the subset predicate are satisfied by the superse
 
 ### subset
 
-[`LoadSubsetOptions`](../../type-aliases/LoadSubsetOptions.md)
+[`LoadSubsetOptions`](../type-aliases/LoadSubsetOptions.md)
 
 The predicate requirements to check
 
 ### superset
 
-[`LoadSubsetOptions`](../../type-aliases/LoadSubsetOptions.md)
+[`LoadSubsetOptions`](../type-aliases/LoadSubsetOptions.md)
 
 The predicate that might satisfy the requirements
 

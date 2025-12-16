@@ -1,11 +1,11 @@
-import { sanitizeSQL } from "@powersync/common"
-import DebugModule from "debug"
-import { asPowerSyncRecord, mapOperationToPowerSync } from "./helpers"
-import { PendingOperationStore } from "./PendingOperationStore"
-import type { AbstractPowerSyncDatabase, LockContext } from "@powersync/common"
-import type { PendingMutation, Transaction } from "@tanstack/db"
-import type { EnhancedPowerSyncCollectionConfig } from "./definitions"
-import type { PendingOperation } from "./PendingOperationStore"
+import { sanitizeSQL } from '@powersync/common'
+import DebugModule from 'debug'
+import { asPowerSyncRecord, mapOperationToPowerSync } from './helpers'
+import { PendingOperationStore } from './PendingOperationStore'
+import type { AbstractPowerSyncDatabase, LockContext } from '@powersync/common'
+import type { PendingMutation, Transaction } from '@tanstack/db'
+import type { EnhancedPowerSyncCollectionConfig } from './definitions'
+import type { PendingOperation } from './PendingOperationStore'
 
 const debug = DebugModule.debug(`ts/db:powersync`)
 
@@ -71,7 +71,7 @@ export class PowerSyncTransactor {
      * We can do some optimizations for single-collection transactions.
      */
     const mutationsCollectionIds = mutations.map(
-      (mutation) => mutation.collection.id
+      (mutation) => mutation.collection.id,
     )
     const collectionIds = Array.from(new Set(mutationsCollectionIds))
     const lastCollectionMutationIndexes = new Map<string, number>()
@@ -81,7 +81,7 @@ export class PowerSyncTransactor {
     for (const collectionId of collectionIds) {
       lastCollectionMutationIndexes.set(
         collectionId,
-        mutationsCollectionIds.lastIndexOf(collectionId)
+        mutationsCollectionIds.lastIndexOf(collectionId),
       )
     }
 
@@ -92,7 +92,7 @@ export class PowerSyncTransactor {
           return
         }
         await new Promise<void>((resolve) => collection.onFirstReady(resolve))
-      })
+      }),
     )
 
     // Persist to PowerSync
@@ -110,17 +110,17 @@ export class PowerSyncTransactor {
           switch (mutation.type) {
             case `insert`:
               pendingOperations.push(
-                await this.handleInsert(mutation, tx, shouldWait)
+                await this.handleInsert(mutation, tx, shouldWait),
               )
               break
             case `update`:
               pendingOperations.push(
-                await this.handleUpdate(mutation, tx, shouldWait)
+                await this.handleUpdate(mutation, tx, shouldWait),
               )
               break
             case `delete`:
               pendingOperations.push(
-                await this.handleDelete(mutation, tx, shouldWait)
+                await this.handleDelete(mutation, tx, shouldWait),
               )
               break
           }
@@ -136,10 +136,10 @@ export class PowerSyncTransactor {
           whenComplete: Promise.all(
             pendingOperations
               .filter((op) => !!op)
-              .map((op) => this.pendingOperationStore.waitFor(op))
+              .map((op) => this.pendingOperationStore.waitFor(op)),
           ),
         }
-      }
+      },
     )
 
     // Wait for the change to be observed via the diff trigger
@@ -149,7 +149,7 @@ export class PowerSyncTransactor {
   protected async handleInsert(
     mutation: PendingMutation<any>,
     context: LockContext,
-    waitForCompletion: boolean = false
+    waitForCompletion: boolean = false,
   ): Promise<PendingOperation | null> {
     debug(`insert`, mutation)
 
@@ -168,16 +168,16 @@ export class PowerSyncTransactor {
         VALUES 
             (${keys.map((_) => `?`).join(`, `)})
         `,
-          Object.values(values)
+          Object.values(values),
         )
-      }
+      },
     )
   }
 
   protected async handleUpdate(
     mutation: PendingMutation<any>,
     context: LockContext,
-    waitForCompletion: boolean = false
+    waitForCompletion: boolean = false,
   ): Promise<PendingOperation | null> {
     debug(`update`, mutation)
 
@@ -195,16 +195,16 @@ export class PowerSyncTransactor {
         SET ${keys.map((key) => `${key} = ?`).join(`, `)}
         WHERE id = ?
         `,
-          [...Object.values(values), asPowerSyncRecord(mutation.modified).id]
+          [...Object.values(values), asPowerSyncRecord(mutation.modified).id],
         )
-      }
+      },
     )
   }
 
   protected async handleDelete(
     mutation: PendingMutation<any>,
     context: LockContext,
-    waitForCompletion: boolean = false
+    waitForCompletion: boolean = false,
   ): Promise<PendingOperation | null> {
     debug(`update`, mutation)
 
@@ -217,9 +217,9 @@ export class PowerSyncTransactor {
           `
         DELETE FROM ${tableName} WHERE id = ?
         `,
-          [asPowerSyncRecord(mutation.original).id]
+          [asPowerSyncRecord(mutation.original).id],
         )
-      }
+      },
     )
   }
 
@@ -236,8 +236,8 @@ export class PowerSyncTransactor {
     handler: (
       tableName: string,
       mutation: PendingMutation<any>,
-      serializeValue: (value: any) => Record<string, unknown>
-    ) => Promise<void>
+      serializeValue: (value: any) => Record<string, unknown>,
+    ) => Promise<void>,
   ): Promise<PendingOperation | null> {
     if (
       typeof (mutation.collection.config as any).utils?.getMeta != `function`
@@ -259,7 +259,7 @@ export class PowerSyncTransactor {
 
     // Need to get the operation in order to wait for it
     const diffOperation = await context.get<{ id: string; timestamp: string }>(
-      sanitizeSQL`SELECT id, timestamp FROM ${trackedTableName} ORDER BY timestamp DESC LIMIT 1`
+      sanitizeSQL`SELECT id, timestamp FROM ${trackedTableName} ORDER BY timestamp DESC LIMIT 1`,
     )
     return {
       tableName,
