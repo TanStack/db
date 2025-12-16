@@ -107,6 +107,10 @@ export class CollectionConfigBuilder<
   // Prevents duplicate listeners when updateLiveQueryStatus is called multiple times
   private hasSetupLoadingListener = false
 
+  // Unsubscribe function for loadingSubset listener
+  // Registered when waiting for initial load to complete, unregistered when sync stops
+  private unsubscribeFromLoadingListener?: () => void
+
   // Reference to the live query collection for error state transitions
   public liveQueryCollection?: Collection<TResult, any, any>
 
@@ -620,6 +624,10 @@ export class CollectionConfigBuilder<
       this.unsubscribeFromSchedulerClears?.()
       this.unsubscribeFromSchedulerClears = undefined
 
+      // Unregister from loadingSubset listener to prevent memory leaks
+      this.unsubscribeFromLoadingListener?.()
+      this.unsubscribeFromLoadingListener = undefined
+
       // Reset ready state tracking for potential restart
       this.hasMarkedReady = false
       this.hasSetupLoadingListener = false
@@ -819,11 +827,13 @@ export class CollectionConfigBuilder<
       // Set up a one-time listener if we haven't already
       if (!this.hasSetupLoadingListener) {
         this.hasSetupLoadingListener = true
-        const unsubscribe = this.liveQueryCollection.on(
+        this.unsubscribeFromLoadingListener = this.liveQueryCollection.on(
           `loadingSubset:change`,
           (event) => {
             if (!event.isLoadingSubset) {
-              unsubscribe()
+              // Clean up the listener
+              this.unsubscribeFromLoadingListener?.()
+              this.unsubscribeFromLoadingListener = undefined
               // Re-check and mark ready now that loading is complete
               this.updateLiveQueryStatus(config)
             }

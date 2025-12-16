@@ -1331,6 +1331,71 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.status).toBe(`ready`)
       expect(liveQuery.isReady()).toBe(true)
     })
+
+    it(`live query should track loading state for on-demand source`, async () => {
+      // This test verifies that when a live query depends on an on-demand
+      // collection, the live query should only become ready when the source
+      // collection has completed its initial loadSubset.
+
+      let resolveFirstSource: () => void
+      let firstSourceLoadCount = 0
+
+      // First on-demand source collection
+      const usersCollection = createCollection<{ id: number; name: string }>({
+        id: `on-demand-multi-source-users`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                firstSourceLoadCount++
+                const promise = new Promise<void>((resolve) => {
+                  resolveFirstSource = resolve
+                })
+                return promise.then(() => {
+                  begin()
+                  write({ type: `insert`, value: { id: 1, name: `Alice` } })
+                  write({ type: `insert`, value: { id: 2, name: `Bob` } })
+                  commit()
+                })
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query that uses the on-demand source
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ user: usersCollection }).select(({ user }) => user),
+        startSync: true,
+      })
+
+      await flushPromises()
+
+      // Source should have triggered loadSubset
+      expect(firstSourceLoadCount).toBe(1)
+
+      // Live query should NOT be ready yet since loadSubset hasn't completed
+      expect(liveQuery.status).toBe(`loading`)
+      expect(liveQuery.isReady()).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // Complete the source's loadSubset
+      resolveFirstSource!()
+      await flushPromises()
+
+      // NOW the live query should be ready
+      expect(liveQuery.status).toBe(`ready`)
+      expect(liveQuery.isReady()).toBe(true)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
+      // Verify results
+      expect(liveQuery.size).toBe(2)
+    })
+
   })
 
   describe(`move functionality`, () => {
