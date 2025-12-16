@@ -827,7 +827,7 @@ export class CollectionConfigBuilder<
               // Re-check and mark ready now that loading is complete
               this.updateLiveQueryStatus(config)
             }
-          }
+          },
         )
       }
       return
