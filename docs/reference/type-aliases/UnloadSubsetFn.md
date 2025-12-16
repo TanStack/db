@@ -9,7 +9,7 @@ title: UnloadSubsetFn
 type UnloadSubsetFn = (options) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:276](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L276)
+Defined in: [packages/db/src/types.ts:315](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L315)
 
 ## Parameters
 
