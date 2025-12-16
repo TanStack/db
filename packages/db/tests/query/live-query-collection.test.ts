@@ -1369,7 +1369,8 @@ describe(`createLiveQueryCollection`, () => {
 
       // Create a live query that uses the on-demand source
       const liveQuery = createLiveQueryCollection({
-        query: (q) => q.from({ user: usersCollection }).select(({ user }) => user),
+        query: (q) =>
+          q.from({ user: usersCollection }).select(({ user }) => user),
         startSync: true,
       })
 
@@ -1395,7 +1396,6 @@ describe(`createLiveQueryCollection`, () => {
       // Verify results
       expect(liveQuery.size).toBe(2)
     })
-
   })
 
   describe(`move functionality`, () => {
