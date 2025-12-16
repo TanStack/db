@@ -190,7 +190,7 @@ importers:
         specifier: ^1.0.2
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.0.7
+        specifier: ^1.0.8
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.1.56
@@ -294,7 +294,7 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.7
+        specifier: ^1.0.8
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
         specifier: ^0.1.56
