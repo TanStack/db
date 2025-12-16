@@ -769,7 +769,7 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: 1.2.0
+        specifier: ^1.2.0
         version: 1.2.0
       '@standard-schema/spec':
         specifier: ^1.0.0
