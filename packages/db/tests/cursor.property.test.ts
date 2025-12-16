@@ -133,7 +133,11 @@ describe(`buildCursor property-based tests`, () => {
       (expr, nulls, stringSort, value) => {
         const clause: OrderByClause = {
           expression: expr,
-          compareOptions: { direction: `asc`, nulls, stringSort },
+          compareOptions: {
+            direction: `asc`,
+            nulls: nulls as `first` | `last`,
+            stringSort: stringSort as `locale` | `lexical`,
+          },
         }
         const result = buildCursor([clause], [value])
 
@@ -152,7 +156,11 @@ describe(`buildCursor property-based tests`, () => {
       (expr, nulls, stringSort, value) => {
         const clause: OrderByClause = {
           expression: expr,
-          compareOptions: { direction: `desc`, nulls, stringSort },
+          compareOptions: {
+            direction: `desc`,
+            nulls: nulls as `first` | `last`,
+            stringSort: stringSort as `locale` | `lexical`,
+          },
         }
         const result = buildCursor([clause], [value])
 
@@ -304,7 +312,11 @@ describe(`buildCursor property-based tests`, () => {
     ])(`all ascending columns use gt operators`, (clauseParts, values) => {
       const orderBy: OrderBy = clauseParts.map(([expr, nulls, stringSort]) => ({
         expression: expr,
-        compareOptions: { direction: `asc` as const, nulls, stringSort },
+        compareOptions: {
+          direction: `asc` as const,
+          nulls: nulls as `first` | `last`,
+          stringSort: stringSort as `locale` | `lexical`,
+        },
       }))
 
       const minLen = Math.min(orderBy.length, values.length)
@@ -332,7 +344,11 @@ describe(`buildCursor property-based tests`, () => {
     ])(`all descending columns use lt operators`, (clauseParts, values) => {
       const orderBy: OrderBy = clauseParts.map(([expr, nulls, stringSort]) => ({
         expression: expr,
-        compareOptions: { direction: `desc` as const, nulls, stringSort },
+        compareOptions: {
+          direction: `desc` as const,
+          nulls: nulls as `first` | `last`,
+          stringSort: stringSort as `locale` | `lexical`,
+        },
       }))
 
       const minLen = Math.min(orderBy.length, values.length)
