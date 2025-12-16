@@ -1,5 +1,39 @@
 # @tanstack/angular-db
 
+## 0.1.38
+
+### Patch Changes
+
+- Updated dependencies [[`b3b1940`](https://github.com/TanStack/db/commit/b3b194000d8efcc2c6cc45a663029dadc26f13f0), [`09da081`](https://github.com/TanStack/db/commit/09da081b420fc915d7f0dc566c6cdbbc78582435), [`86ad40c`](https://github.com/TanStack/db/commit/86ad40c6bc37b2f5d4ad24d06f72168ca4b96161)]:
+  - @tanstack/db@0.5.12
+
+## 0.1.37
+
+### Patch Changes
+
+- Fixed `isReady` to return `true` for disabled queries in `useLiveQuery`/`injectLiveQuery` across all framework packages. When a query function returns `null` or `undefined` (disabling the query), there's no async operation to wait for, so the hook should be considered "ready" immediately. ([#886](https://github.com/TanStack/db/pull/886))
+
+  Additionally, all frameworks now have proper TypeScript overloads that explicitly support returning `undefined | null` from query functions, making the disabled query pattern type-safe.
+
+  This fixes the common pattern where users conditionally enable queries and don't want to show loading states when the query is disabled.
+
+- Updated dependencies [[`c4b9399`](https://github.com/TanStack/db/commit/c4b93997432743d974749683059bf68a082d3e5b), [`a1a484e`](https://github.com/TanStack/db/commit/a1a484ec4d2331d702ab9c4b7e5b02622c76b3dd)]:
+  - @tanstack/db@0.5.11
+
+## 0.1.36
+
+### Patch Changes
+
+- Updated dependencies [[`1d19d22`](https://github.com/TanStack/db/commit/1d19d2219cbbaef6483845df1c3b078077e4e3bd), [`b3e4e80`](https://github.com/TanStack/db/commit/b3e4e80c4b73d96c15391ac25efb518c7ae7ccbb)]:
+  - @tanstack/db@0.5.10
+
+## 0.1.35
+
+### Patch Changes
+
+- Updated dependencies [[`5f474f1`](https://github.com/TanStack/db/commit/5f474f1eabd57e144ba05b0f33d848f7efc8fb07)]:
+  - @tanstack/db@0.5.9
+
 ## 0.1.34
 
 ### Patch Changes

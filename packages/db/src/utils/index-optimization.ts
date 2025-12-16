@@ -15,12 +15,12 @@
  * - Optimizes IN array expressions
  */
 
-import { DEFAULT_COMPARE_OPTIONS } from "../utils.js"
-import { ReverseIndex } from "../indexes/reverse-index.js"
-import type { CompareOptions } from "../query/builder/types.js"
-import type { IndexInterface, IndexOperation } from "../indexes/base-index.js"
-import type { BasicExpression } from "../query/ir.js"
-import type { CollectionLike } from "../types.js"
+import { DEFAULT_COMPARE_OPTIONS } from '../utils.js'
+import { ReverseIndex } from '../indexes/reverse-index.js'
+import type { CompareOptions } from '../query/builder/types.js'
+import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
+import type { BasicExpression } from '../query/ir.js'
+import type { CollectionLike } from '../types.js'
 
 /**
  * Result of index-based query optimization
@@ -36,7 +36,7 @@ export interface OptimizationResult<TKey> {
 export function findIndexForField<TKey extends string | number>(
   collection: CollectionLike<any, TKey>,
   fieldPath: Array<string>,
-  compareOptions?: CompareOptions
+  compareOptions?: CompareOptions,
 ): IndexInterface<TKey> | undefined {
   const compareOpts = compareOptions ?? {
     ...DEFAULT_COMPARE_OPTIONS,
@@ -98,7 +98,7 @@ export function optimizeExpressionWithIndexes<
   TKey extends string | number,
 >(
   expression: BasicExpression,
-  collection: CollectionLike<T, TKey>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   return optimizeQueryRecursive(expression, collection)
 }
@@ -108,7 +108,7 @@ export function optimizeExpressionWithIndexes<
  */
 function optimizeQueryRecursive<T extends object, TKey extends string | number>(
   expression: BasicExpression,
-  collection: CollectionLike<T, TKey>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type === `func`) {
     switch (expression.name) {
@@ -172,7 +172,7 @@ function optimizeCompoundRangeQuery<
   TKey extends string | number,
 >(
   expression: BasicExpression,
-  collection: CollectionLike<T, TKey>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -305,7 +305,7 @@ function optimizeSimpleComparison<
   TKey extends string | number,
 >(
   expression: BasicExpression,
-  collection: CollectionLike<T, TKey>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -405,7 +405,7 @@ function canOptimizeSimpleComparison<
  */
 function optimizeAndExpression<T extends object, TKey extends string | number>(
   expression: BasicExpression,
-  collection: CollectionLike<T, TKey>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -457,7 +457,7 @@ function canOptimizeAndExpression<
  */
 function optimizeOrExpression<T extends object, TKey extends string | number>(
   expression: BasicExpression,
-  collection: CollectionLike<T, TKey>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -506,7 +506,7 @@ function optimizeInArrayExpression<
   TKey extends string | number,
 >(
   expression: BasicExpression,
-  collection: CollectionLike<T, TKey>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return { canOptimize: false, matchingKeys: new Set() }

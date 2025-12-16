@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, test } from "vitest"
-import { createLiveQueryCollection, eq } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { beforeEach, describe, expect, test } from 'vitest'
+import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 type Lock = { _id: number; name: string }
 type Vote = { _id: number; lockId: number; percent: number }
@@ -25,7 +25,7 @@ function createTestCollections() {
         getKey: (lock) => lock._id,
         initialData: locks,
         autoIndex: `eager`,
-      })
+      }),
     ),
     votesCollection: createCollection(
       mockSyncCollectionOptions<Vote>({
@@ -33,7 +33,7 @@ function createTestCollections() {
         getKey: (vote) => vote._id,
         initialData: votes,
         autoIndex: `eager`,
-      })
+      }),
     ),
   }
 }
@@ -60,7 +60,7 @@ describe(`Alias validation in subqueries`, () => {
           const locksAgg = q
             .from({ lock: locksCollection })
             .join({ vote: votesCollection }, ({ lock, vote }) =>
-              eq(lock._id, vote.lockId)
+              eq(lock._id, vote.lockId),
             )
             .select(({ lock }) => ({
               _id: lock._id,
@@ -70,7 +70,7 @@ describe(`Alias validation in subqueries`, () => {
           return q
             .from({ vote: votesCollection }) // Reuses "vote" alias from subquery
             .join({ lock: locksAgg }, ({ vote, lock }) =>
-              eq(lock._id, vote.lockId)
+              eq(lock._id, vote.lockId),
             )
             .select(({ vote, lock }) => ({
               voteId: vote._id,
@@ -89,7 +89,7 @@ describe(`Alias validation in subqueries`, () => {
           .from({ lock: locksCollection })
           .join(
             { v: votesCollection }, // Uses unique alias "v" instead of "vote"
-            ({ lock, v }) => eq(lock._id, v.lockId)
+            ({ lock, v }) => eq(lock._id, v.lockId),
           )
           .select(({ lock }) => ({
             _id: lock._id,
@@ -99,7 +99,7 @@ describe(`Alias validation in subqueries`, () => {
         return q
           .from({ vote: votesCollection })
           .join({ lock: locksAgg }, ({ vote, lock }) =>
-            eq(lock._id, vote.lockId)
+            eq(lock._id, vote.lockId),
           )
           .select(({ vote, lock }) => ({
             voteId: vote._id,

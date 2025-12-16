@@ -1,6 +1,6 @@
-import { LiteQueuer } from "@tanstack/pacer-lite/lite-queuer"
-import type { QueueStrategy, QueueStrategyOptions } from "./types"
-import type { Transaction } from "../transactions"
+import { LiteQueuer } from '@tanstack/pacer-lite/lite-queuer'
+import type { QueueStrategy, QueueStrategyOptions } from './types'
+import type { Transaction } from '../transactions'
 
 /**
  * Creates a queue strategy that processes all mutations in order with proper serialization.
@@ -71,14 +71,14 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
       addItemsTo: options?.addItemsTo ?? `back`, // Default FIFO: add to back
       getItemsFrom: options?.getItemsFrom ?? `front`, // Default FIFO: get from front
       started: true, // Start processing immediately
-    }
+    },
   )
 
   return {
     _type: `queue`,
     options,
     execute: <T extends object = Record<string, unknown>>(
-      fn: () => Transaction<T>
+      fn: () => Transaction<T>,
     ) => {
       // Add the transaction-creating function to the queue
       queuer.addItem(fn as () => Transaction)

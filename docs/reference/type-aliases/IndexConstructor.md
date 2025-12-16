@@ -27,7 +27,7 @@ Type for index constructor
 
 ### expression
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
 
 ### name?
 
@@ -39,4 +39,4 @@ Type for index constructor
 
 ## Returns
 
-[`BaseIndex`](../../classes/BaseIndex.md)\<`TKey`\>
+[`BaseIndex`](../classes/BaseIndex.md)\<`TKey`\>

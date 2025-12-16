@@ -57,7 +57,7 @@ Defined in: [PowerSyncTransactor.ts:55](https://github.com/TanStack/db/blob/main
 
 ##### options
 
-[`TransactorOptions`](../../type-aliases/TransactorOptions.md)
+[`TransactorOptions`](../type-aliases/TransactorOptions.md)
 
 #### Returns
 

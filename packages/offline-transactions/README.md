@@ -20,7 +20,7 @@ npm install @tanstack/offline-transactions
 ## Quick Start
 
 ```typescript
-import { startOfflineExecutor } from "@tanstack/offline-transactions"
+import { startOfflineExecutor } from '@tanstack/offline-transactions'
 
 // Setup offline executor
 const offline = startOfflineExecutor({
@@ -32,21 +32,21 @@ const offline = startOfflineExecutor({
   },
   onLeadershipChange: (isLeader) => {
     if (!isLeader) {
-      console.warn("Running in online-only mode (another tab is the leader)")
+      console.warn('Running in online-only mode (another tab is the leader)')
     }
   },
 })
 
 // Create offline transactions
 const offlineTx = offline.createOfflineTransaction({
-  mutationFnName: "syncTodos",
+  mutationFnName: 'syncTodos',
   autoCommit: false,
 })
 
 offlineTx.mutate(() => {
   todoCollection.insert({
     id: crypto.randomUUID(),
-    text: "Buy milk",
+    text: 'Buy milk',
     completed: false,
   })
 })
@@ -121,14 +121,14 @@ interface OfflineConfig {
 Use `NonRetriableError` for permanent failures:
 
 ```typescript
-import { NonRetriableError } from "@tanstack/offline-transactions"
+import { NonRetriableError } from '@tanstack/offline-transactions'
 
 const mutationFn = async ({ transaction }) => {
   try {
     await api.save(transaction.mutations)
   } catch (error) {
     if (error.status === 422) {
-      throw new NonRetriableError("Invalid data - will not retry")
+      throw new NonRetriableError('Invalid data - will not retry')
     }
     throw error // Will retry with backoff
   }
@@ -143,11 +143,11 @@ const mutationFn = async ({ transaction }) => {
 import {
   IndexedDBAdapter,
   LocalStorageAdapter,
-} from "@tanstack/offline-transactions"
+} from '@tanstack/offline-transactions'
 
 const executor = startOfflineExecutor({
   // Use custom storage
-  storage: new IndexedDBAdapter("my-app", "transactions"),
+  storage: new IndexedDBAdapter('my-app', 'transactions'),
   // ... other config
 })
 ```
@@ -171,13 +171,13 @@ const executor = startOfflineExecutor({
 
 ```typescript
 const tx = executor.createOfflineTransaction({
-  mutationFnName: "syncData",
+  mutationFnName: 'syncData',
   autoCommit: false,
 })
 
 tx.mutate(() => {
-  collection.insert({ id: "1", text: "Item 1" })
-  collection.insert({ id: "2", text: "Item 2" })
+  collection.insert({ id: '1', text: 'Item 1' })
+  collection.insert({ id: '2', text: 'Item 2' })
 })
 
 // Commit when ready
@@ -190,7 +190,7 @@ This package uses explicit offline transactions to provide offline capabilities:
 
 ```typescript
 // Before: Standard TanStack DB (online only)
-todoCollection.insert({ id: "1", text: "Buy milk" })
+todoCollection.insert({ id: '1', text: 'Buy milk' })
 
 // After: Explicit offline transactions
 const offline = startOfflineExecutor({
@@ -202,8 +202,8 @@ const offline = startOfflineExecutor({
   },
 })
 
-const tx = offline.createOfflineTransaction({ mutationFnName: "syncTodos" })
-tx.mutate(() => todoCollection.insert({ id: "1", text: "Buy milk" }))
+const tx = offline.createOfflineTransaction({ mutationFnName: 'syncTodos' })
+tx.mutate(() => todoCollection.insert({ id: '1', text: 'Buy milk' }))
 await tx.commit() // Works offline!
 ```
 

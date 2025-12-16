@@ -4,13 +4,13 @@
  * Tests string collation configuration and behavior
  */
 
-import { describe, expect, it } from "vitest"
-import { createLiveQueryCollection, eq } from "@tanstack/db"
-import { waitForQueryData } from "../utils/helpers"
-import type { E2ETestConfig } from "../types"
+import { describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, eq } from '@tanstack/db'
+import { waitForQueryData } from '../utils/helpers'
+import type { E2ETestConfig } from '../types'
 
 export function createCollationTestSuite(
-  getConfig: () => Promise<E2ETestConfig>
+  getConfig: () => Promise<E2ETestConfig>,
 ) {
   describe(`Collation Suite`, () => {
     describe(`Default Collation`, () => {
@@ -21,7 +21,7 @@ export function createCollationTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .orderBy(({ user }) => user.name, `asc`)
+            .orderBy(({ user }) => user.name, `asc`),
         )
 
         await query.preload()
@@ -42,7 +42,7 @@ export function createCollationTestSuite(
           (q) =>
             q
               .from({ user: usersCollection })
-              .where(({ user }) => eq(user.name, `alice 0`)) // lowercase
+              .where(({ user }) => eq(user.name, `alice 0`)), // lowercase
         )
 
         await query.preload()
@@ -124,7 +124,7 @@ export function createCollationTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .orderBy(({ user }) => user.name, `asc`)
+            .orderBy(({ user }) => user.name, `asc`),
         )
 
         await query.preload()

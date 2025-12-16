@@ -1,43 +1,12 @@
 {
   "name": "@tanstack/db-ivm",
+  "version": "0.1.14",
   "description": "Incremental View Maintenance for TanStack DB based on Differential Dataflow",
-  "version": "0.1.13",
-  "dependencies": {
-    "fractional-indexing": "^3.2.0",
-    "sorted-btree": "^1.8.1"
-  },
-  "devDependencies": {
-    "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.2.4"
-  },
-  "exports": {
-    ".": {
-      "import": {
-        "types": "./dist/esm/index.d.ts",
-        "default": "./dist/esm/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/index.d.cts",
-        "default": "./dist/cjs/index.cjs"
-      }
-    },
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "dist",
-    "src"
-  ],
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.23.0",
-  "peerDependencies": {
-    "typescript": ">=4.7"
-  },
   "author": "Sam Willis",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/db.git",
+    "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/db-ivm"
   },
   "homepage": "https://tanstack.com/db",
@@ -53,9 +22,39 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "npx vitest --run"
+    "test": "vitest --run"
+  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "sideEffects": false,
-  "type": "module",
-  "types": "dist/esm/index.d.ts"
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "fractional-indexing": "^3.2.0",
+    "sorted-btree": "^1.8.1"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.7"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.12",
+    "@vitest/coverage-istanbul": "^3.2.4"
+  }
 }

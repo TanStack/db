@@ -1,13 +1,13 @@
-import { describe, expectTypeOf, test } from "vitest"
+import { describe, expectTypeOf, test } from 'vitest'
 import {
   and,
   createLiveQueryCollection,
   eq,
   gt,
   or,
-} from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+} from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Complex nested type for testing with optional properties
 type Person = {
@@ -69,7 +69,7 @@ function createPersonsCollection() {
       id: `test-persons`,
       getKey: (person) => person.id,
       initialData: samplePersons,
-    })
+    }),
   )
 }
 
@@ -149,9 +149,9 @@ describe(`Nested Properties Types`, () => {
               gt(persons.profile?.score, 90),
               and(
                 gt(persons.profile?.stats.tasksCompleted, 100),
-                gt(persons.profile?.stats.rating, 4.5)
-              )
-            )
+                gt(persons.profile?.stats.rating, 4.5),
+              ),
+            ),
           )
           .select(({ persons }) => ({
             id: persons.id,

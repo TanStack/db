@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { Query, getQueryIR } from "../../../src/query/builder/index.js"
-import { eq, gt } from "../../../src/query/builder/functions.js"
+import { describe, expect, it } from 'vitest'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { Query, getQueryIR } from '../../../src/query/builder/index.js'
+import { eq, gt } from '../../../src/query/builder/functions.js'
 
 // Test schema
 interface Employee {
@@ -75,7 +75,7 @@ describe(`QueryBuilder functional variants (fn)`, () => {
         .join(
           { departments: departmentsCollection },
           ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)
+            eq(employees.department_id, departments.id),
         )
         .fn.select((row) => ({
           employeeName: row.employees.name,
@@ -132,7 +132,7 @@ describe(`QueryBuilder functional variants (fn)`, () => {
             row.employees.active &&
             row.employees.salary > 60000 &&
             (row.employees.department_id === 1 ||
-              row.employees.department_id === 2)
+              row.employees.department_id === 2),
         )
 
       const builtQuery = getQueryIR(query)
@@ -145,13 +145,13 @@ describe(`QueryBuilder functional variants (fn)`, () => {
         .join(
           { departments: departmentsCollection },
           ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)
+            eq(employees.department_id, departments.id),
         )
         .fn.where(
           (row) =>
             row.employees.active &&
             row.departments !== undefined &&
-            row.departments.name !== `HR`
+            row.departments.name !== `HR`,
         )
 
       const builtQuery = getQueryIR(query)
@@ -219,14 +219,14 @@ describe(`QueryBuilder functional variants (fn)`, () => {
         .join(
           { departments: departmentsCollection },
           ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)
+            eq(employees.department_id, departments.id),
         )
         .groupBy(({ departments }) => departments?.name)
         .fn.having(
           (row) =>
             row.employees.salary > 60000 &&
             row.departments !== undefined &&
-            row.departments.name !== `Temp`
+            row.departments.name !== `Temp`,
         )
 
       const builtQuery = getQueryIR(query)
@@ -241,7 +241,7 @@ describe(`QueryBuilder functional variants (fn)`, () => {
         .join(
           { departments: departmentsCollection },
           ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)
+            eq(employees.department_id, departments.id),
         )
         .fn.where((row) => row.employees.active)
         .fn.where((row) => row.employees.salary > 40000)

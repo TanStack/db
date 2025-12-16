@@ -1,8 +1,8 @@
-import { createServerFileRoute } from "@tanstack/solid-start/server"
-import { json } from "@tanstack/solid-start"
-import { sql } from "../../db/postgres"
-import { validateUpdateTodo } from "../../db/validation"
-import type { Txid } from "@tanstack/electric-db-collection"
+import { createServerFileRoute } from '@tanstack/solid-start/server'
+import { json } from '@tanstack/solid-start'
+import { sql } from '../../db/postgres'
+import { validateUpdateTodo } from '../../db/validation'
+import type { Txid } from '@tanstack/electric-db-collection'
 
 // Generate a transaction ID
 async function generateTxId(tx: any): Promise<Txid> {
@@ -34,7 +34,7 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$id`).methods({
           error: `Failed to fetch todo`,
           details: error instanceof Error ? error.message : String(error),
         },
-        { status: 500 }
+        { status: 500 },
       )
     }
   },
@@ -74,7 +74,7 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$id`).methods({
           error: `Failed to update todo`,
           details: error instanceof Error ? error.message : String(error),
         },
-        { status: 500 }
+        { status: 500 },
       )
     }
   },
@@ -109,7 +109,7 @@ export const ServerRoute = createServerFileRoute(`/api/todos/$id`).methods({
           error: `Failed to delete todo`,
           details: error instanceof Error ? error.message : String(error),
         },
-        { status: 500 }
+        { status: 500 },
       )
     }
   },

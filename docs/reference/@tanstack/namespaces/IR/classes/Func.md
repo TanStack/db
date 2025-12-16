@@ -35,7 +35,7 @@ Defined in: [packages/db/src/query/ir.ts:112](https://github.com/TanStack/db/blo
 
 ##### args
 
-[`BasicExpression`](../../type-aliases/BasicExpression.md)\<`any`\>[]
+[`BasicExpression`](../type-aliases/BasicExpression.md)\<`any`\>[]
 
 #### Returns
 

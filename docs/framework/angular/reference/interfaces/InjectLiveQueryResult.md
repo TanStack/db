@@ -30,12 +30,14 @@ Contains reactive signals for the query state and data.
 ### collection
 
 ```ts
-collection: Signal<Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>>;
+collection: Signal<
+  | Collection<TResult, TKey, TUtils, StandardSchemaV1<unknown, unknown>, TResult>
+| null>;
 ```
 
 Defined in: [index.ts:36](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L36)
 
-A signal containing the underlying collection instance
+A signal containing the underlying collection instance (null for disabled queries)
 
 ***
 
@@ -126,7 +128,7 @@ A signal containing the complete state map of results keyed by their ID
 ### status
 
 ```ts
-status: Signal<CollectionStatus>;
+status: Signal<CollectionStatus | "disabled">;
 ```
 
 Defined in: [index.ts:38](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L38)

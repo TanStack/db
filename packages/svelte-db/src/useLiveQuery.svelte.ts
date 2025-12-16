@@ -1,8 +1,8 @@
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { untrack } from "svelte"
+import { untrack } from 'svelte'
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { SvelteMap } from "svelte/reactivity"
-import { createLiveQueryCollection } from "@tanstack/db"
+import { SvelteMap } from 'svelte/reactivity'
+import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
@@ -12,7 +12,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   QueryBuilder,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 /**
  * Return type for useLiveQuery hook
@@ -151,10 +151,18 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * //   </ul>
  * // {/if}
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<() => unknown>
+  deps?: Array<() => unknown>,
+): UseLiveQueryReturn<GetResult<TContext>>
+
+// Overload 1b: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder,
+  ) => QueryBuilder<TContext> | undefined | null,
+  deps?: Array<() => unknown>,
 ): UseLiveQueryReturn<GetResult<TContext>>
 
 /**
@@ -197,7 +205,7 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<() => unknown>
+  deps?: Array<() => unknown>,
 ): UseLiveQueryReturn<GetResult<TContext>>
 
 /**
@@ -249,13 +257,13 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: MaybeGetter<Collection<TResult, TKey, TUtils>>
+  liveQueryCollection: MaybeGetter<Collection<TResult, TKey, TUtils>>,
 ): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
 
 // Implementation
 export function useLiveQuery(
   configOrQueryOrCollection: any,
-  deps: Array<() => unknown> = []
+  deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = $derived.by(() => {
     // First check if the original parameter might be a getter
@@ -293,6 +301,15 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Svelte helpers
     if (typeof unwrappedParam === `function`) {
+      // Check if query function returns null/undefined (disabled query)
+      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+      const result = unwrappedParam(queryBuilder)
+
+      if (result === undefined || result === null) {
+        // Disabled query - return null
+        return null
+      }
+
       return createLiveQueryCollection({
         query: unwrappedParam,
         startSync: true,
@@ -312,11 +329,11 @@ export function useLiveQuery(
   let internalData = $state<Array<any>>([])
 
   // Track collection status reactively
-  let status = $state(collection.status)
+  let status = $state(collection ? collection.status : (`disabled` as const))
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     untrack(() => {
       internalData = []
@@ -330,6 +347,20 @@ export function useLiveQuery(
   // Watch for collection changes and subscribe to updates
   $effect(() => {
     const currentCollection = collection
+
+    // Handle null collection (disabled query)
+    if (!currentCollection) {
+      status = `disabled` as const
+      untrack(() => {
+        state.clear()
+        internalData = []
+      })
+      if (currentUnsubscribe) {
+        currentUnsubscribe()
+        currentUnsubscribe = null
+      }
+      return
+    }
 
     // Update status state whenever the effect runs
     status = currentCollection.status
@@ -383,7 +414,7 @@ export function useLiveQuery(
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     currentUnsubscribe = subscription.unsubscribe.bind(subscription)
@@ -419,7 +450,7 @@ export function useLiveQuery(
       return status === `loading`
     },
     get isReady() {
-      return status === `ready`
+      return status === `ready` || status === `disabled`
     },
     get isIdle() {
       return status === `idle`

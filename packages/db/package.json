@@ -1,18 +1,30 @@
 {
   "name": "@tanstack/db",
+  "version": "0.5.12",
   "description": "A reactive client store for building super fast apps on sync",
-  "version": "0.5.8",
-  "dependencies": {
-    "@standard-schema/spec": "^1.0.0",
-    "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/pacer-lite": "^0.1.0"
+  "author": "Kyle Mathews",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanStack/db.git",
+    "directory": "packages/db"
   },
-  "devDependencies": {
-    "@vitest/coverage-istanbul": "^3.2.4",
-    "arktype": "^2.1.27",
-    "superjson": "^2.2.5",
-    "temporal-polyfill": "^0.3.0"
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "optimistic",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "build:minified": "vite build --minify",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "vitest --run"
   },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -26,36 +38,25 @@
     },
     "./package.json": "./package.json"
   },
+  "sideEffects": false,
   "files": [
     "dist",
     "src"
   ],
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.23.0",
+  "dependencies": {
+    "@standard-schema/spec": "^1.0.0",
+    "@tanstack/db-ivm": "workspace:*",
+    "@tanstack/pacer-lite": "^0.1.1"
+  },
   "peerDependencies": {
     "typescript": ">=4.7"
   },
-  "author": "Kyle Mathews",
-  "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/TanStack/db.git",
-    "directory": "packages/db"
-  },
-  "homepage": "https://tanstack.com/db",
-  "keywords": [
-    "optimistic",
-    "typescript"
-  ],
-  "scripts": {
-    "build": "vite build",
-    "build:minified": "vite build --minify",
-    "dev": "vite build --watch",
-    "lint": "eslint . --fix",
-    "test": "npx vitest --run"
-  },
-  "sideEffects": false,
-  "type": "module",
-  "types": "dist/esm/index.d.ts"
+  "devDependencies": {
+    "@tanstack/config": "^0.22.2",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "arktype": "^2.1.28",
+    "mitt": "^3.0.1",
+    "superjson": "^2.2.6",
+    "temporal-polyfill": "^0.3.0"
+  }
 }

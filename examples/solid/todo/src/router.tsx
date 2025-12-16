@@ -1,10 +1,10 @@
-import { createRouter as createTanstackRouter } from "@tanstack/solid-router"
+import { createRouter as createTanstackRouter } from '@tanstack/solid-router'
 
 // Import the generated route tree
-import { routeTree } from "./routeTree.gen"
-import { NotFound } from "./components/NotFound"
+import { routeTree } from './routeTree.gen'
+import { NotFound } from './components/NotFound'
 
-import "./styles.css"
+import './styles.css'
 
 // Create a new router instance
 export const createRouter = () => {
@@ -19,7 +19,7 @@ export const createRouter = () => {
 }
 
 // Register the router instance for type safety
-declare module "@tanstack/solid-router" {
+declare module '@tanstack/solid-router' {
   interface Register {
     router: ReturnType<typeof createRouter>
   }
