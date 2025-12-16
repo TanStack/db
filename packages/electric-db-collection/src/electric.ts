@@ -1000,10 +1000,10 @@ function createElectricSync<T extends Row<unknown>>(
         let hasUpToDate = false
         let hasSnapshotEnd = false
 
-        // Clear the current batch buffer at the START of processing a new batch
-        // This preserves messages from the previous batch until new ones arrive,
-        // allowing awaitMatch to find messages even if called after up-to-date
-        currentBatchMessages.setState(() => [])
+        // Don't clear the buffer between batches - this preserves messages for awaitMatch
+        // to find even if multiple batches arrive before awaitMatch is called.
+        // The buffer is naturally limited by MAX_BATCH_MESSAGES (oldest messages are dropped).
+        // Reset batchCommitted since we're starting a new batch
         batchCommitted.setState(() => false)
 
         for (const message of messages) {
