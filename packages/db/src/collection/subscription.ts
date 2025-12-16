@@ -79,6 +79,9 @@ export class CollectionSubscription
   private _status: SubscriptionStatus = `ready`
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
+  // Cleanup function for truncate event listener
+  private truncateCleanup: (() => void) | undefined
+
   public get status(): SubscriptionStatus {
     return this._status
   }
@@ -111,6 +114,47 @@ export class CollectionSubscription
     this.filteredCallback = options.whereExpression
       ? createFilteredCallback(this.callback, options)
       : this.callback
+
+    // Listen for truncate events to re-request data after must-refetch
+    // When a truncate happens (e.g., from a 409 must-refetch), all collection data is cleared.
+    // We need to re-request all previously loaded subsets to repopulate the data.
+    this.truncateCleanup = this.collection.on(`truncate`, () => {
+      this.handleTruncate()
+    })
+  }
+
+  /**
+   * Handle collection truncate event by resetting state and re-requesting subsets.
+   * This is called when the sync layer receives a must-refetch and clears all data.
+   *
+   * IMPORTANT: We intentionally do NOT clear sentKeys here. The truncate event is emitted
+   * BEFORE delete events are sent to subscribers. If we cleared sentKeys, the delete events
+   * would be filtered out by filterAndFlipChanges (which skips deletes for keys not in sentKeys).
+   * By keeping sentKeys intact, delete events pass through, and when new data arrives,
+   * inserts will still be emitted correctly (the type is already 'insert' so no conversion needed).
+   */
+  private handleTruncate() {
+    // Reset snapshot/pagination tracking state but NOT sentKeys
+    // sentKeys must remain so delete events can pass through filterAndFlipChanges
+    this.snapshotSent = false
+    this.loadedInitialState = false
+    this.limitedSnapshotRowCount = 0
+    this.lastSentKey = undefined
+
+    // Copy the loaded subsets before clearing (we'll re-request them)
+    const subsetsToReload = [...this.loadedSubsets]
+
+    // Clear the loadedSubsets array since we're re-requesting fresh
+    this.loadedSubsets = []
+
+    // Re-request all previously loaded subsets
+    for (const options of subsetsToReload) {
+      const syncResult = this.collection._sync.loadSubset(options)
+
+      // Track this loadSubset call so we can unload it later
+      this.loadedSubsets.push(options)
+      this.trackLoadSubsetPromise(syncResult)
+    }
   }
 
   setOrderByIndex(index: IndexInterface<any>) {
@@ -479,6 +523,10 @@ export class CollectionSubscription
   }
 
   unsubscribe() {
+    // Clean up truncate event listener
+    this.truncateCleanup?.()
+    this.truncateCleanup = undefined
+
     // Unload all subsets that this subscription loaded
     // We pass the exact same LoadSubsetOptions we used for loadSubset
     for (const options of this.loadedSubsets) {
