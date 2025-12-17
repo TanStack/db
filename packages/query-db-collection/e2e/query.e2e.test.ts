@@ -139,10 +139,12 @@ describe(`Query Collection E2E Tests`, () => {
     await eagerPosts.preload()
     await eagerComments.preload()
 
-    // On-demand collections don't start automatically
-    await onDemandUsers.preload()
-    await onDemandPosts.preload()
-    await onDemandComments.preload()
+    // On-demand collections need sync started but don't need preload()
+    // (preload is a no-op for on-demand and triggers a warning)
+    // They mark ready immediately when sync starts
+    onDemandUsers.startSyncImmediate()
+    onDemandPosts.startSyncImmediate()
+    onDemandComments.startSyncImmediate()
 
     config = {
       collections: {
@@ -195,22 +197,19 @@ describe(`Query Collection E2E Tests`, () => {
         },
       },
       setup: async () => {},
+      // Note: We intentionally don't clean up source collections in afterEach.
+      // On-demand collections don't need to be reset between tests since each test
+      // creates its own live queries with specific predicates. Cleaning up source
+      // collections while live queries may still be pending (e.g., if a test times
+      // out before cleanup) causes "[Live Query Error] Source collection was manually
+      // cleaned up" warnings. Final cleanup happens in teardown (afterAll).
+      //
+      // Remove inactive queries between tests while preserving active subscriptions.
+      // This prevents accumulation of stale query state without disrupting live queries.
       afterEach: async () => {
-        // Clean up and restart on-demand collections
-        // This validates cleanup() works and each test starts fresh
-        await onDemandUsers.cleanup()
-        await onDemandPosts.cleanup()
-        await onDemandComments.cleanup()
-
-        // Restart sync after cleanup
-        onDemandUsers.startSyncImmediate()
-        onDemandPosts.startSyncImmediate()
-        onDemandComments.startSyncImmediate()
-
-        // Wait for collections to be ready
-        await onDemandUsers.preload()
-        await onDemandPosts.preload()
-        await onDemandComments.preload()
+        queryClient.removeQueries({
+          predicate: (query) => query.getObserversCount() === 0,
+        })
       },
       teardown: async () => {
         await Promise.all([
