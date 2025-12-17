@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/electric-db-collection",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "description": "ElectricSQL collection for TanStack DB",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -46,7 +46,7 @@
     "src"
   ],
   "dependencies": {
-    "@electric-sql/client": "^1.2.0",
+    "@electric-sql/client": "^1.3.0",
     "@standard-schema/spec": "^1.0.0",
     "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.8.0",
