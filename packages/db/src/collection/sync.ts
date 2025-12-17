@@ -122,6 +122,10 @@ export class CollectionSyncManager<
                 !isTruncateTransaction
               ) {
                 const existingValue = this.state.syncedData.get(key)
+                const utils = this.config
+                  .utils as Partial<LiveQueryCollectionUtils> | undefined
+                const internal = utils?.[LIVE_QUERY_INTERNAL]
+
                 if (
                   existingValue !== undefined &&
                   deepEquals(existingValue, messageWithoutKey.value)
@@ -130,10 +134,12 @@ export class CollectionSyncManager<
                   // Treat it as an update so we preserve optimistic intent without
                   // throwing a duplicate-key error during reconciliation.
                   messageType = `update`
+                } else if (internal && !internal.hasCustomGetKey) {
+                  // For live queries without custom getKey (like groupBy), the D2 pipeline
+                  // might emit an insert for an updated aggregate without a corresponding
+                  // delete in certain edge cases. Convert to update to avoid duplicate key errors.
+                  messageType = `update`
                 } else {
-                  const utils = this.config
-                    .utils as Partial<LiveQueryCollectionUtils>
-                  const internal = utils[LIVE_QUERY_INTERNAL]
                   throw new DuplicateKeySyncError(key, this.id, {
                     hasCustomGetKey: internal?.hasCustomGetKey ?? false,
                     hasJoins: internal?.hasJoins ?? false,
