@@ -756,6 +756,9 @@ export function isOrderBySubset(
  * Check if one limit is a subset of another.
  * Returns true if the subset limit requirements are satisfied by the superset limit.
  *
+ * Note: This function does NOT consider offset. For offset-aware subset checking,
+ * use `isOffsetLimitSubset` instead.
+ *
  * @example
  * isLimitSubset(10, 20) // true (requesting 10 items when 20 are available)
  * isLimitSubset(20, 10) // false (requesting 20 items when only 10 are available)
@@ -785,7 +788,57 @@ export function isLimitSubset(
 }
 
 /**
- * Check if one predicate (where + orderBy + limit) is a subset of another.
+ * Check if one offset+limit range is a subset of another.
+ * Returns true if the subset range is fully contained within the superset range.
+ *
+ * A query with `{limit: 10, offset: 0}` loads rows [0, 10).
+ * A query with `{limit: 10, offset: 20}` loads rows [20, 30).
+ *
+ * For subset to be satisfied by superset:
+ * - Superset must start at or before subset (superset.offset <= subset.offset)
+ * - Superset must end at or after subset (superset.offset + superset.limit >= subset.offset + subset.limit)
+ *
+ * @example
+ * isOffsetLimitSubset({ offset: 0, limit: 5 }, { offset: 0, limit: 10 }) // true
+ * isOffsetLimitSubset({ offset: 5, limit: 5 }, { offset: 0, limit: 10 }) // true (rows 5-9 within 0-9)
+ * isOffsetLimitSubset({ offset: 5, limit: 10 }, { offset: 0, limit: 10 }) // false (rows 5-14 exceed 0-9)
+ * isOffsetLimitSubset({ offset: 20, limit: 10 }, { offset: 0, limit: 10 }) // false (rows 20-29 outside 0-9)
+ *
+ * @param subset - The offset+limit requirements to check
+ * @param superset - The offset+limit that might satisfy the requirements
+ * @returns true if subset range is fully contained within superset range
+ */
+export function isOffsetLimitSubset(
+  subset: { offset?: number; limit?: number },
+  superset: { offset?: number; limit?: number },
+): boolean {
+  const subsetOffset = subset.offset ?? 0
+  const supersetOffset = superset.offset ?? 0
+
+  // Superset must start at or before subset
+  if (supersetOffset > subsetOffset) {
+    return false
+  }
+
+  // If superset is unlimited, it covers everything from its offset onwards
+  if (superset.limit === undefined) {
+    return true
+  }
+
+  // If subset is unlimited but superset has a limit, subset can't be satisfied
+  if (subset.limit === undefined) {
+    return false
+  }
+
+  // Both have limits - check if subset range is within superset range
+  const subsetEnd = subsetOffset + subset.limit
+  const supersetEnd = supersetOffset + superset.limit
+
+  return subsetEnd <= supersetEnd
+}
+
+/**
+ * Check if one predicate (where + orderBy + limit + offset) is a subset of another.
  * Returns true if all aspects of the subset predicate are satisfied by the superset.
  *
  * @example
@@ -813,9 +866,9 @@ export function isPredicateSubset(
   // The top 10 items matching 'search%' might include items outside the overall top 10.
   //
   // However, if the where clauses are equal, then the subset relationship can
-  // be determined by orderBy and limit alone:
-  // Example: superset = {where: status='active', limit: 10, orderBy: desc}
-  //          subset = {where: status='active', limit: 5, orderBy: desc}
+  // be determined by orderBy, limit, and offset:
+  // Example: superset = {where: status='active', limit: 10, offset: 0, orderBy: desc}
+  //          subset = {where: status='active', limit: 5, offset: 0, orderBy: desc}
   // The top 5 active items ARE contained in the top 10 active items.
   if (superset.limit !== undefined) {
     // For limited supersets, where clauses must be equal
@@ -824,15 +877,17 @@ export function isPredicateSubset(
     }
     return (
       isOrderBySubset(subset.orderBy, superset.orderBy) &&
-      isLimitSubset(subset.limit, superset.limit)
+      isOffsetLimitSubset(subset, superset)
     )
   }
 
   // For unlimited supersets, use the normal subset logic
+  // Still need to consider offset - an unlimited query with offset only covers
+  // rows from that offset onwards
   return (
     isWhereSubset(subset.where, superset.where) &&
     isOrderBySubset(subset.orderBy, superset.orderBy) &&
-    isLimitSubset(subset.limit, superset.limit)
+    isOffsetLimitSubset(subset, superset)
   )
 }
 

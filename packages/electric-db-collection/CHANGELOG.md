@@ -1,5 +1,69 @@
 # @tanstack/electric-db-collection
 
+## 0.2.15
+
+### Patch Changes
+
+- Don't pin @electric-sql/client version ([#1031](https://github.com/TanStack/db/pull/1031))
+
+## 0.2.14
+
+### Patch Changes
+
+- Fix awaitMatch race condition on inserts and export isChangeMessage/isControlMessage. ([#1000](https://github.com/TanStack/db/pull/1000))
+
+  **Bug fixes:**
+  - Fixed race condition where `awaitMatch` would timeout on inserts when Electric synced faster than the API call
+  - Messages are now preserved in buffer until next batch arrives, allowing `awaitMatch` to find them
+  - Added `batchCommitted` flag to track commit state, consistent with `awaitTxId` semantics
+  - Fixed `batchCommitted` to also trigger on `snapshot-end` in `on-demand` mode (matching "ready" semantics)
+
+  **Export fixes:**
+  - `isChangeMessage` and `isControlMessage` are now exported from the package index as documented
+
+- Fix invalid Electric proxy queries with missing params for null/undefined values ([#951](https://github.com/TanStack/db/pull/951))
+
+  When comparison operators were used with null/undefined values, the SQL compiler would generate placeholders ($1, $2) in the WHERE clause but skip adding the params to the dictionary. This resulted in invalid queries being sent to Electric.
+
+  Now all comparison operators (eq, gt, lt, gte, lte, like, ilike) throw a clear error when used with null/undefined values, since comparisons with NULL always evaluate to UNKNOWN in SQL. Users should use `isNull()` or `isUndefined()` to check for null values instead.
+
+## 0.2.13
+
+### Patch Changes
+
+- Enhanced LoadSubsetOptions with separate cursor expressions and offset for flexible pagination. ([#960](https://github.com/TanStack/db/pull/960))
+
+  **⚠️ Breaking Change for Custom Sync Layers / Query Collections:**
+
+  `LoadSubsetOptions.where` no longer includes cursor expressions for pagination. If you have a custom sync layer or query collection that implements `loadSubset`, you must now handle pagination separately:
+  - **Cursor-based pagination:** Use the new `cursor` property (`cursor.whereFrom` and `cursor.whereCurrent`) and combine them with `where` yourself
+  - **Offset-based pagination:** Use the new `offset` property
+
+  Previously, cursor expressions were baked into the `where` clause. Now they are passed separately so sync layers can choose their preferred pagination strategy.
+
+  **Changes:**
+  - Added `CursorExpressions` type with `whereFrom`, `whereCurrent`, and optional `lastKey` properties
+  - Added `cursor` to `LoadSubsetOptions` for cursor-based pagination (separate from `where`)
+  - Added `offset` to `LoadSubsetOptions` for offset-based pagination support
+  - Electric sync layer now makes two parallel `requestSnapshot` calls when cursor is present:
+    - One for `whereCurrent` (all ties at boundary, no limit)
+    - One for `whereFrom` (rows after cursor, with limit)
+  - Query collection serialization now includes `offset` for query key generation
+  - Added `truncate` event to collections, emitted when synced data is truncated (e.g., after `must-refetch`)
+  - Fixed `setWindow` pagination: cursor expressions are now correctly built when paging through results
+  - Fixed offset tracking: `loadNextItems` now passes the correct window offset to prevent incorrect deduplication
+  - `CollectionSubscriber` now listens for `truncate` events to reset cursor tracking state
+
+  **Benefits:**
+  - Sync layers can choose between cursor-based or offset-based pagination strategies
+  - Electric can efficiently handle tie-breaking with two targeted requests
+  - Better separation of concerns between filtering (`where`) and pagination (`cursor`/`offset`)
+  - `setWindow` correctly triggers backend loading for subsequent pages in multi-column orderBy queries
+  - Cursor state is properly reset after truncation, preventing stale cursor data from being used
+
+- Updated dependencies [[`b3b1940`](https://github.com/TanStack/db/commit/b3b194000d8efcc2c6cc45a663029dadc26f13f0), [`09da081`](https://github.com/TanStack/db/commit/09da081b420fc915d7f0dc566c6cdbbc78582435), [`86ad40c`](https://github.com/TanStack/db/commit/86ad40c6bc37b2f5d4ad24d06f72168ca4b96161)]:
+  - @tanstack/db@0.5.12
+
 ## 0.2.12
 
 ### Patch Changes

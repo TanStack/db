@@ -4,6 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import {
   CollectionRequiresConfigError,
   DuplicateKeyError,
+  InvalidKeyError,
   KeyUpdateNotAllowedError,
   MissingDeleteHandlerError,
   MissingInsertHandlerError,
@@ -610,6 +611,151 @@ describe(`Collection`, () => {
     // Verify both items were inserted
     expect(collection.state.get(2)).toEqual({ id: 2, value: `first` })
     expect(collection.state.get(3)).toEqual({ id: 3, value: `second` })
+  })
+
+  it(`should throw InvalidKeyError when getKey returns null`, async () => {
+    const collection = createCollection<{ id: null; value: string }>({
+      id: `null-key-test`,
+      // @ts-expect-error - testing runtime behavior when getKey returns null
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+
+    expect(() => {
+      tx.mutate(() => collection.insert({ id: null, value: `test` }))
+    }).toThrow(InvalidKeyError)
+  })
+
+  it(`should throw InvalidKeyError when getKey returns an object`, async () => {
+    const collection = createCollection<{
+      id: { nested: string }
+      value: string
+    }>({
+      id: `object-key-test`,
+      // @ts-expect-error - testing runtime behavior when getKey returns an object
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+
+    expect(() => {
+      tx.mutate(() =>
+        collection.insert({ id: { nested: `value` }, value: `test` }),
+      )
+    }).toThrow(InvalidKeyError)
+  })
+
+  it(`should throw InvalidKeyError when getKey returns a boolean`, async () => {
+    const collection = createCollection<{ id: boolean; value: string }>({
+      id: `boolean-key-test`,
+      // @ts-expect-error - testing runtime behavior when getKey returns a boolean
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const mutationFn = async () => {}
+    const tx = createTransaction({ mutationFn })
+
+    expect(() => {
+      tx.mutate(() => collection.insert({ id: true, value: `test` }))
+    }).toThrow(InvalidKeyError)
+  })
+
+  it(`should accept valid string and number keys`, async () => {
+    const stringKeyCollection = createCollection<{ id: string; value: string }>(
+      {
+        id: `string-key-test`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            begin()
+            commit()
+            markReady()
+          },
+        },
+      },
+    )
+
+    const numberKeyCollection = createCollection<{ id: number; value: string }>(
+      {
+        id: `number-key-test`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            begin()
+            commit()
+            markReady()
+          },
+        },
+      },
+    )
+
+    await Promise.all([
+      stringKeyCollection.stateWhenReady(),
+      numberKeyCollection.stateWhenReady(),
+    ])
+
+    const mutationFn = async () => {}
+
+    // String key should work
+    const tx1 = createTransaction({ mutationFn })
+    expect(() => {
+      tx1.mutate(() =>
+        stringKeyCollection.insert({ id: `string-id`, value: `test` }),
+      )
+    }).not.toThrow()
+
+    // Number key should work
+    const tx2 = createTransaction({ mutationFn })
+    expect(() => {
+      tx2.mutate(() => numberKeyCollection.insert({ id: 123, value: `test` }))
+    }).not.toThrow()
+
+    // Empty string key should work
+    const tx3 = createTransaction({ mutationFn })
+    expect(() => {
+      tx3.mutate(() => stringKeyCollection.insert({ id: ``, value: `empty` }))
+    }).not.toThrow()
+
+    // Zero key should work
+    const tx4 = createTransaction({ mutationFn })
+    expect(() => {
+      tx4.mutate(() => numberKeyCollection.insert({ id: 0, value: `zero` }))
+    }).not.toThrow()
   })
 
   it(`should support operation handler functions`, async () => {
@@ -1399,6 +1545,116 @@ describe(`Collection`, () => {
     // Verify we can use stateWhenReady
     const state = await collection.stateWhenReady()
     expect(state.size).toBe(3)
+  })
+
+  it(`should allow deleting a row by passing only the key to write function`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `delete-by-key`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, markReady }
+        },
+      },
+    })
+
+    // Collection should start in loading state
+    expect(collection.status).toBe(`loading`)
+    expect(collection.size).toBe(0)
+
+    const { begin, write, commit, markReady } = testSyncFunctions
+
+    // Insert some initial data
+    begin()
+    write({ type: `insert`, value: { id: 1, value: `item 1` } })
+    write({ type: `insert`, value: { id: 2, value: `item 2` } })
+    write({ type: `insert`, value: { id: 3, value: `item 3` } })
+    commit()
+
+    // Verify data was inserted
+    expect(collection.size).toBe(3)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `item 1` })
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `item 2` })
+    expect(collection.state.get(3)).toEqual({ id: 3, value: `item 3` })
+
+    // Delete a row by passing only the key (no value)
+    begin()
+    write({ type: `delete`, key: 2 })
+    commit()
+
+    // Verify the row is gone
+    expect(collection.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `item 1` })
+    expect(collection.state.get(2)).toBeUndefined()
+    expect(collection.state.get(3)).toEqual({ id: 3, value: `item 3` })
+
+    // Delete another row by key only
+    begin()
+    write({ type: `delete`, key: 1 })
+    commit()
+
+    // Verify both rows are gone
+    expect(collection.size).toBe(1)
+    expect(collection.state.get(1)).toBeUndefined()
+    expect(collection.state.get(2)).toBeUndefined()
+    expect(collection.state.get(3)).toEqual({ id: 3, value: `item 3` })
+
+    // Mark as ready
+    markReady()
+
+    // Verify final state
+    expect(collection.status).toBe(`ready`)
+    expect(collection.size).toBe(1)
+    expect(Array.from(collection.state.keys())).toEqual([3])
+  })
+
+  it(`should allow deleting a row by key with string keys`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: string; name: string }>({
+      id: `delete-by-string-key`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          // Store the sync functions for testing
+          testSyncFunctions = { begin, write, commit, markReady }
+        },
+      },
+    })
+
+    const { begin, write, commit, markReady } = testSyncFunctions
+
+    // Insert initial data
+    begin()
+    write({ type: `insert`, value: { id: `a`, name: `Alice` } })
+    write({ type: `insert`, value: { id: `b`, name: `Bob` } })
+    write({ type: `insert`, value: { id: `c`, name: `Charlie` } })
+    commit()
+
+    // Verify data was inserted
+    expect(collection.size).toBe(3)
+    expect(collection.state.get(`a`)).toEqual({ id: `a`, name: `Alice` })
+    expect(collection.state.get(`b`)).toEqual({ id: `b`, name: `Bob` })
+    expect(collection.state.get(`c`)).toEqual({ id: `c`, name: `Charlie` })
+
+    // Delete by key only
+    begin()
+    write({ type: `delete`, key: `b` })
+    commit()
+
+    // Verify the row is gone
+    expect(collection.size).toBe(2)
+    expect(collection.state.get(`a`)).toEqual({ id: `a`, name: `Alice` })
+    expect(collection.state.get(`b`)).toBeUndefined()
+    expect(collection.state.get(`c`)).toEqual({ id: `c`, name: `Charlie` })
+
+    markReady()
+    expect(collection.status).toBe(`ready`)
   })
 })
 
