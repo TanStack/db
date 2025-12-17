@@ -2,11 +2,20 @@ import { describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '../src/trailbase'
 import type {
+  CreateOperation,
+  DeleteOperation,
   Event,
   FilterOrComposite,
+  ListOperation,
+  ListOpts,
   ListResponse,
   Pagination,
+  ReadOperation,
+  ReadOpts,
   RecordApi,
+  RecordId,
+  SubscribeOpts,
+  UpdateOperation,
 } from 'trailbase'
 
 type Data = {
@@ -27,6 +36,9 @@ class MockRecordApi<T> implements RecordApi<T> {
       return Promise.resolve({ records: [] })
     },
   )
+  listOp = vi.fn((_opts?: ListOpts): ListOperation<T> => {
+    throw `listOp`
+  });
 
   read = vi.fn(
     (
@@ -38,6 +50,9 @@ class MockRecordApi<T> implements RecordApi<T> {
       throw `read`
     },
   )
+  readOp = vi.fn((_id: RecordId, _opt?: ReadOpts): ReadOperation<T> => {
+    throw `readOp`
+  })
 
   create = vi.fn((_record: T): Promise<string | number> => {
     throw `create`
@@ -45,13 +60,24 @@ class MockRecordApi<T> implements RecordApi<T> {
   createBulk = vi.fn((_records: Array<T>): Promise<Array<string | number>> => {
     throw `createBulk`
   })
+  createOp = vi.fn((_record: T): CreateOperation<T> => {
+    throw `createOp`
+  })
 
   update = vi.fn((_id: string | number, _record: Partial<T>): Promise<void> => {
     throw `update`
   })
+  updateOp = vi.fn((_id: RecordId, _record: Partial<T>): UpdateOperation => {
+    throw `updateOp`
+  });
+
   delete = vi.fn((_id: string | number): Promise<void> => {
     throw `delete`
   })
+  deleteOp = vi.fn((_id: RecordId): DeleteOperation => {
+    throw `deleteOp`
+  })
+
   subscribe = vi.fn((_id: string | number): Promise<ReadableStream<Event>> => {
     return Promise.resolve(
       new ReadableStream({
@@ -60,6 +86,9 @@ class MockRecordApi<T> implements RecordApi<T> {
         },
       }),
     )
+  })
+  subscribeAll = vi.fn((_opts?: SubscribeOpts): Promise<ReadableStream<Event>> => {
+    throw `subscribeAll`
   })
 }
 
