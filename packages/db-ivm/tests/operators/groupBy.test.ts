@@ -1026,7 +1026,11 @@ describe(`Operators`, () => {
       const initialMessages = tracker.getMessages()
       expect(initialMessages).toHaveLength(1)
       expect(initialMessages[0]?.multiplicity).toBe(1) // Insert
-      expect(initialMessages[0]?.value).toMatchObject({ category: `A`, total: 10, count: 1 })
+      expect(initialMessages[0]?.value).toMatchObject({
+        category: `A`,
+        total: 10,
+        count: 1,
+      })
 
       tracker.clear()
 
@@ -1051,10 +1055,18 @@ describe(`Operators`, () => {
       expect(insertMsg).toBeDefined()
 
       // The delete should be for the old aggregate value
-      expect(deleteMsg?.value).toMatchObject({ category: `A`, total: 10, count: 1 })
+      expect(deleteMsg?.value).toMatchObject({
+        category: `A`,
+        total: 10,
+        count: 1,
+      })
 
       // The insert should be for the new aggregate value
-      expect(insertMsg?.value).toMatchObject({ category: `A`, total: 30, count: 2 })
+      expect(insertMsg?.value).toMatchObject({
+        category: `A`,
+        total: 30,
+        count: 2,
+      })
     })
 
     test(`rapid incremental updates should always emit paired delete+insert`, () => {
@@ -1085,7 +1097,10 @@ describe(`Operators`, () => {
 
       expect(tracker.getMessages()).toHaveLength(1)
       expect(tracker.getMessages()[0]?.multiplicity).toBe(1)
-      expect(tracker.getMessages()[0]?.value).toMatchObject({ language: `en`, count: 1 })
+      expect(tracker.getMessages()[0]?.value).toMatchObject({
+        language: `en`,
+        count: 1,
+      })
 
       // Perform multiple rapid incremental updates
       for (let i = 2; i <= 5; i++) {
@@ -1145,9 +1160,15 @@ describe(`Operators`, () => {
 
       // Should have 3 groups with count 1 each
       expect(tracker.getMessages()).toHaveLength(3)
-      const enInsert = tracker.getMessages().find((m) => m.key === `{"language":"en"}`)
-      const ruInsert = tracker.getMessages().find((m) => m.key === `{"language":"ru"}`)
-      const frInsert = tracker.getMessages().find((m) => m.key === `{"language":"fr"}`)
+      const enInsert = tracker
+        .getMessages()
+        .find((m) => m.key === `{"language":"en"}`)
+      const ruInsert = tracker
+        .getMessages()
+        .find((m) => m.key === `{"language":"ru"}`)
+      const frInsert = tracker
+        .getMessages()
+        .find((m) => m.key === `{"language":"fr"}`)
       expect(enInsert?.multiplicity).toBe(1)
       expect(ruInsert?.multiplicity).toBe(1)
       expect(frInsert?.multiplicity).toBe(1)
@@ -1196,7 +1217,9 @@ describe(`Operators`, () => {
       expect(ruUpdate?.value.count).toBe(2)
 
       // Check that fr group was NOT affected (no messages for it)
-      const frMessages = updateMessages.filter((m) => m.key === `{"language":"fr"}`)
+      const frMessages = updateMessages.filter(
+        (m) => m.key === `{"language":"fr"}`,
+      )
       expect(frMessages).toHaveLength(0)
     })
 
