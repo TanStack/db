@@ -54,15 +54,6 @@ export function compileSQL<T>(options: LoadSubsetOptions): SubsetParams {
   }
 }
 
-/**
- * Quote PostgreSQL identifiers to handle mixed case column names correctly.
- * Electric/Postgres requires quotes for case-sensitive identifiers.
- * @param name - The identifier to quote
- * @returns The quoted identifier
- */
-function quoteIdentifier(name: string): string {
-  return `"${name}"`
-}
 
 /**
  * Compiles the expression to a SQL string and mutates the params array with the values.
@@ -85,7 +76,9 @@ function compileBasicExpression(
           `Compiler can't handle nested properties: ${exp.path.join(`.`)}`,
         )
       }
-      return quoteIdentifier(exp.path[0]!)
+      // Return unquoted identifier - Electric's encodeWhereClause will handle
+      // quoting after applying columnMapper transformations (e.g., camelCase → snake_case)
+      return exp.path[0]!
     case `func`:
       return compileFunction(exp, params)
     default:
