@@ -139,10 +139,12 @@ describe(`Query Collection E2E Tests`, () => {
     await eagerPosts.preload()
     await eagerComments.preload()
 
-    // On-demand collections don't start automatically
-    await onDemandUsers.preload()
-    await onDemandPosts.preload()
-    await onDemandComments.preload()
+    // On-demand collections need sync started but don't need preload()
+    // (preload is a no-op for on-demand and triggers a warning)
+    // They mark ready immediately when sync starts
+    onDemandUsers.startSyncImmediate()
+    onDemandPosts.startSyncImmediate()
+    onDemandComments.startSyncImmediate()
 
     config = {
       collections: {
@@ -203,14 +205,11 @@ describe(`Query Collection E2E Tests`, () => {
         await onDemandComments.cleanup()
 
         // Restart sync after cleanup
+        // On-demand collections mark ready immediately when sync starts,
+        // so no need to call preload() (which is a no-op for on-demand)
         onDemandUsers.startSyncImmediate()
         onDemandPosts.startSyncImmediate()
         onDemandComments.startSyncImmediate()
-
-        // Wait for collections to be ready
-        await onDemandUsers.preload()
-        await onDemandPosts.preload()
-        await onDemandComments.preload()
       },
       teardown: async () => {
         await Promise.all([
