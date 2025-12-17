@@ -113,7 +113,9 @@ export function trailBaseCollectionOptions<
   TKey extends string | number = string | number,
 >(
   config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
-): CollectionConfig<TItem, TKey> & { utils: TrailBaseCollectionUtils } {
+): CollectionConfig<TItem, TKey> & {
+  utils: TrailBaseCollectionUtils
+} {
   const getKey = config.getKey
 
   const parse = (record: TRecord) =>
@@ -122,6 +124,8 @@ export function trailBaseCollectionOptions<
     convertPartial<TItem, TRecord>(config.serialize, item)
   const serialIns = (item: TItem) =>
     convert<TItem, TRecord>(config.serialize, item)
+
+  const abortController = new AbortController()
 
   const seenIds = new Store(new Map<string, number>())
 
@@ -139,36 +143,24 @@ export function trailBaseCollectionOptions<
     }
 
     return new Promise<void>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        unsubscribe()
-        reject(new TimeoutWaitingForIdsError(ids.toString()))
-      }, timeout)
+      const onAbort = () => {
+        clearTimeout(timeoutId)
+        reject(new TimeoutWaitingForIdsError(`Aborted while waiting for ids`))
+      }
+
+      abortController.signal.addEventListener(`abort`, onAbort)
+
+      const timeoutId = setTimeout(() => reject(new TimeoutWaitingForIdsError(ids.toString())), timeout)
 
       const unsubscribe = seenIds.subscribe((value) => {
         if (completed(value.currentVal)) {
           clearTimeout(timeoutId)
+          abortController.signal.removeEventListener(`abort`, onAbort)
           unsubscribe()
           resolve()
         }
       })
     })
-  }
-
-  let eventReader: ReadableStreamDefaultReader<Event> | undefined
-  const cancelEventReader = () => {
-    if (eventReader) {
-      try {
-        eventReader.cancel()
-      } catch {
-        // ignore
-      }
-      try {
-        eventReader.releaseLock()
-      } catch {
-        // ignore if already released
-      }
-      eventReader = undefined
-    }
   }
 
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
@@ -229,7 +221,6 @@ export function trailBaseCollectionOptions<
             } catch {
               // ignore if already released
             }
-            eventReader = undefined
             return
           }
 
@@ -261,7 +252,7 @@ export function trailBaseCollectionOptions<
 
       async function start() {
         const eventStream = await config.recordApi.subscribe(`*`)
-        const reader = (eventReader = eventStream.getReader())
+        const reader = eventStream.getReader()
 
         // Start listening for subscriptions first. Otherwise, we'd risk a gap
         // between the initial fetch and starting to listen.
@@ -274,7 +265,7 @@ export function trailBaseCollectionOptions<
             fullSyncCompleted = true
           }
         } catch (e) {
-          cancelEventReader()
+          abortController.abort()
           throw e
         } finally {
           // Mark ready both if everything went well or if there's an error to
@@ -318,12 +309,27 @@ export function trailBaseCollectionOptions<
           })
         }, 120 * 1000)
 
-        reader.closed.finally(() => clearInterval(periodicCleanupTask))
+        const onAbort = () => {
+          clearInterval(periodicCleanupTask)
+          // It's safe to call cancel and releaseLock even if the stream is already closed.
+          reader.cancel().catch(() => { /* ignore */ })
+          try {
+            reader.releaseLock()
+          } catch {
+            /* ignore */
+          }
+        }
+
+        abortController.signal.addEventListener(`abort`, onAbort)
+        reader.closed.finally(() => {
+          abortController.signal.removeEventListener(`abort`, onAbort)
+          clearInterval(periodicCleanupTask)
+        })
       }
 
       start()
 
-      // If we're in on-demand mode, expose loadSubset/unloadSubset handlers
+      // Eager mode doesn't need subset loading
       if (internalSyncMode === `eager`) {
         return
       }
@@ -341,14 +347,9 @@ export function trailBaseCollectionOptions<
           commit()
         }
       }
-
-      const unloadSubset = (_opts: any = {}) => {
-        // No-op for now
-      }
-
+      
       return {
         loadSubset,
-        unloadSubset,
         getSyncMetadata: () => ({
           syncMode: internalSyncMode,
           fullSyncComplete: fullSyncCompleted,
@@ -424,7 +425,7 @@ export function trailBaseCollectionOptions<
       await awaitIds(ids)
     },
     utils: {
-      cancel: cancelEventReader,
+      cancel: () => abortController.abort(),
     },
   }
 }
