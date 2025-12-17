@@ -122,8 +122,9 @@ export class CollectionSyncManager<
                 !isTruncateTransaction
               ) {
                 const existingValue = this.state.syncedData.get(key)
-                const utils = this.config
-                  .utils as Partial<LiveQueryCollectionUtils> | undefined
+                const utils = this.config.utils as
+                  | Partial<LiveQueryCollectionUtils>
+                  | undefined
                 const internal = utils?.[LIVE_QUERY_INTERNAL]
 
                 if (
