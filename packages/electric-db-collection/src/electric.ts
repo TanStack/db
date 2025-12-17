@@ -14,8 +14,24 @@ import {
   TimeoutWaitingForTxIdError,
 } from './errors'
 import { compileSQL } from './sql-compiler'
+import {
+  addTagToIndex,
+  findRowsMatchingPattern,
+  getTagLength,
+  isMoveOutMessage,
+  removeTagFromIndex,
+  tagMatchesPattern,
+} from './tag-index'
+import type {
+  MoveOutPattern,
+  MoveTag,
+  ParsedMoveTag,
+  RowId,
+  TagIndex,
+} from './tag-index'
 import type {
   BaseCollectionConfig,
+  ChangeMessageOrDeleteKeyMessage,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -880,6 +896,231 @@ function createElectricSync<T extends Row<unknown>>(
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
 
+  const tagCache = new Map<MoveTag, ParsedMoveTag>()
+
+  // Parses a tag string into a MoveTag.
+  // It memoizes the result parsed tag such that future calls
+  // for the same tag string return the same MoveTag array.
+  const parseTag = (tag: MoveTag): ParsedMoveTag => {
+    const cachedTag = tagCache.get(tag)
+    if (cachedTag) {
+      return cachedTag
+    }
+
+    const parsedTag = tag.split(`|`)
+    tagCache.set(tag, parsedTag)
+    return parsedTag
+  }
+
+  // Tag tracking state
+  const rowTagSets = new Map<RowId, Set<MoveTag>>()
+  const tagIndex: TagIndex = []
+  let tagLength: number | undefined = undefined
+
+  /**
+   * Initialize the tag index with the correct length
+   */
+  const initializeTagIndex = (length: number): void => {
+    if (tagIndex.length < length) {
+      // Extend the index array to the required length
+      for (let i = tagIndex.length; i < length; i++) {
+        tagIndex[i] = new Map()
+      }
+    }
+  }
+
+  /**
+   * Add tags to a row and update the tag index
+   */
+  const addTagsToRow = (
+    tags: Array<MoveTag>,
+    rowId: RowId,
+    rowTagSet: Set<MoveTag>,
+  ): void => {
+    for (const tag of tags) {
+      const parsedTag = parseTag(tag)
+
+      // Infer tag length from first tag
+      if (tagLength === undefined) {
+        tagLength = getTagLength(parsedTag)
+        initializeTagIndex(tagLength)
+      }
+
+      // Validate tag length matches
+      const currentTagLength = getTagLength(parsedTag)
+      if (currentTagLength !== tagLength) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`,
+        )
+        continue
+      }
+
+      rowTagSet.add(tag)
+      addTagToIndex(parsedTag, rowId, tagIndex, tagLength)
+    }
+  }
+
+  /**
+   * Remove tags from a row and update the tag index
+   */
+  const removeTagsFromRow = (
+    removedTags: Array<MoveTag>,
+    rowId: RowId,
+    rowTagSet: Set<MoveTag>,
+  ): void => {
+    if (tagLength === undefined) {
+      return
+    }
+
+    for (const tag of removedTags) {
+      const parsedTag = parseTag(tag)
+      rowTagSet.delete(tag)
+      removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+      // We aggresively evict the tag from the cache
+      // if this tag is shared with another row
+      // and is not removed from that other row
+      // then next time we encounter the tag it will be parsed again
+      tagCache.delete(tag)
+    }
+  }
+
+  /**
+   * Process tags for a change message (add and remove tags)
+   */
+  const processTagsForChangeMessage = (
+    tags: Array<MoveTag> | undefined,
+    removedTags: Array<MoveTag> | undefined,
+    rowId: RowId,
+  ): Set<MoveTag> => {
+    // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
+    if (!rowTagSets.has(rowId)) {
+      rowTagSets.set(rowId, new Set())
+    }
+    const rowTagSet = rowTagSets.get(rowId)!
+
+    // Add new tags
+    if (tags) {
+      addTagsToRow(tags, rowId, rowTagSet)
+    }
+
+    // Remove tags
+    if (removedTags) {
+      removeTagsFromRow(removedTags, rowId, rowTagSet)
+    }
+
+    return rowTagSet
+  }
+
+  /**
+   * Clear all tag tracking state (used when truncating)
+   */
+  const clearTagTrackingState = (): void => {
+    rowTagSets.clear()
+    tagIndex.length = 0
+    tagLength = undefined
+  }
+
+  /**
+   * Remove all tags for a row from both the tag set and the index
+   * Used when a row is deleted
+   */
+  const clearTagsForRow = (rowId: RowId): void => {
+    if (tagLength === undefined) {
+      return
+    }
+
+    const rowTagSet = rowTagSets.get(rowId)
+    if (!rowTagSet) {
+      return
+    }
+
+    // Remove each tag from the index
+    for (const tag of rowTagSet) {
+      const parsedTag = parseTag(tag)
+      const currentTagLength = getTagLength(parsedTag)
+      if (currentTagLength === tagLength) {
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+      }
+      tagCache.delete(tag)
+    }
+
+    // Remove the row from the tag sets map
+    rowTagSets.delete(rowId)
+  }
+
+  /**
+   * Remove matching tags from a row based on a pattern
+   * Returns true if the row's tag set is now empty
+   */
+  const removeMatchingTagsFromRow = (
+    rowId: RowId,
+    pattern: MoveOutPattern,
+  ): boolean => {
+    const rowTagSet = rowTagSets.get(rowId)
+    if (!rowTagSet) {
+      return false
+    }
+
+    // Find tags that match this pattern and remove them
+    for (const tag of rowTagSet) {
+      const parsedTag = parseTag(tag)
+      if (tagMatchesPattern(parsedTag, pattern)) {
+        rowTagSet.delete(tag)
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+      }
+    }
+
+    // Check if row's tag set is now empty
+    if (rowTagSet.size === 0) {
+      rowTagSets.delete(rowId)
+      return true
+    }
+
+    return false
+  }
+
+  /**
+   * Process move-out event: remove matching tags from rows and delete rows with empty tag sets
+   */
+  const processMoveOutEvent = (
+    patterns: Array<MoveOutPattern>,
+    begin: () => void,
+    write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
+    transactionStarted: boolean,
+  ): boolean => {
+    if (tagLength === undefined) {
+      debug(
+        `${collectionId ? `[${collectionId}] ` : ``}Received move-out message but no tag length set yet, ignoring`,
+      )
+      return transactionStarted
+    }
+
+    let txStarted = transactionStarted
+
+    // Process all patterns and collect rows to delete
+    for (const pattern of patterns) {
+      // Find all rows that match this pattern
+      const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+
+      for (const rowId of affectedRowIds) {
+        if (removeMatchingTagsFromRow(rowId, pattern)) {
+          // Delete rows with empty tag sets
+          if (!txStarted) {
+            begin()
+            txStarted = true
+          }
+
+          write({
+            type: `delete`,
+            key: rowId,
+          })
+        }
+      }
+    }
+
+    return txStarted
+  }
+
   /**
    * Get the sync metadata for insert operations
    * @returns Record containing relation information
@@ -992,6 +1233,38 @@ function createElectricSync<T extends Row<unknown>>(
         syncMode === `progressive` && !hasReceivedUpToDate
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
 
+      /**
+       * Process a change message: handle tags and write the mutation
+       */
+      const processChangeMessage = (changeMessage: Message<T>) => {
+        if (!isChangeMessage(changeMessage)) {
+          return
+        }
+
+        // Process tags if present
+        const tags = changeMessage.headers.tags
+        const removedTags = changeMessage.headers.removed_tags
+        const hasTags = tags || removedTags
+
+        const rowId = collection.getKeyFromItem(changeMessage.value)
+        const operation = changeMessage.headers.operation
+
+        if (operation === `delete`) {
+          clearTagsForRow(rowId)
+        } else if (hasTags) {
+          processTagsForChangeMessage(tags, removedTags, rowId)
+        }
+
+        write({
+          type: changeMessage.headers.operation,
+          value: changeMessage.value,
+          // Include the primary key and relation info in the metadata
+          metadata: {
+            ...changeMessage.headers,
+          },
+        })
+      }
+
       // Create deduplicated loadSubset wrapper for non-eager modes
       // This prevents redundant snapshot requests when multiple concurrent
       // live queries request overlapping or subset predicates
@@ -1017,7 +1290,7 @@ function createElectricSync<T extends Row<unknown>>(
 
         for (const message of messages) {
           // Add message to current batch buffer (for race condition handling)
-          if (isChangeMessage(message)) {
+          if (isChangeMessage(message) || isMoveOutMessage(message)) {
             currentBatchMessages.setState((currentBuffer) => {
               const newBuffer = [...currentBuffer, message]
               // Limit buffer size for safety
@@ -1074,14 +1347,7 @@ function createElectricSync<T extends Row<unknown>>(
                 transactionStarted = true
               }
 
-              write({
-                type: message.headers.operation,
-                value: message.value,
-                // Include the primary key and relation info in the metadata
-                metadata: {
-                  ...message.headers,
-                },
-              })
+              processChangeMessage(message)
             }
           } else if (isSnapshotEndMessage(message)) {
             // Track postgres snapshot metadata for resolving awaiting mutations
@@ -1097,6 +1363,19 @@ function createElectricSync<T extends Row<unknown>>(
             if (commitPoint !== `up-to-date`) {
               commitPoint = `subset-end`
             }
+          } else if (isMoveOutMessage(message)) {
+            // Handle move-out event: buffer if buffering, otherwise process immediately
+            if (isBufferingInitialSync()) {
+              bufferedMessages.push(message)
+            } else {
+              // Normal processing: process move-out immediately
+              transactionStarted = processMoveOutEvent(
+                message.headers.patterns,
+                begin,
+                write,
+                transactionStarted,
+              )
+            }
           } else if (isMustRefetchMessage(message)) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
@@ -1109,6 +1388,9 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             truncate()
+
+            // Clear tag tracking state
+            clearTagTrackingState()
 
             // Reset the loadSubset deduplication state since we're starting fresh
             // This ensures that previously loaded predicates don't prevent refetching after truncate
@@ -1134,16 +1416,13 @@ function createElectricSync<T extends Row<unknown>>(
             // Truncate to clear all snapshot data
             truncate()
 
+            // Clear tag tracking state for atomic swap
+            clearTagTrackingState()
+
             // Apply all buffered change messages and extract txids/snapshots
             for (const bufferedMsg of bufferedMessages) {
               if (isChangeMessage(bufferedMsg)) {
-                write({
-                  type: bufferedMsg.headers.operation,
-                  value: bufferedMsg.value,
-                  metadata: {
-                    ...bufferedMsg.headers,
-                  },
-                })
+                processChangeMessage(bufferedMsg)
 
                 // Extract txids from buffered messages (will be committed to store after transaction)
                 if (hasTxids(bufferedMsg)) {
@@ -1154,6 +1433,14 @@ function createElectricSync<T extends Row<unknown>>(
               } else if (isSnapshotEndMessage(bufferedMsg)) {
                 // Extract snapshots from buffered messages (will be committed to store after transaction)
                 newSnapshots.push(parseSnapshotMessage(bufferedMsg))
+              } else if (isMoveOutMessage(bufferedMsg)) {
+                // Process buffered move-out messages during atomic swap
+                processMoveOutEvent(
+                  bufferedMsg.headers.patterns,
+                  begin,
+                  write,
+                  transactionStarted,
+                )
               }
             }
 
