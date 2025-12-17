@@ -204,10 +204,12 @@ describe(`Query Collection E2E Tests`, () => {
       // out before cleanup) causes "[Live Query Error] Source collection was manually
       // cleaned up" warnings. Final cleanup happens in teardown (afterAll).
       //
-      // We do cancel pending queries between tests to prevent "operation was canceled"
-      // errors from accumulating observers.
+      // Remove inactive queries between tests while preserving active subscriptions.
+      // This prevents accumulation of stale query state without disrupting live queries.
       afterEach: async () => {
-        await queryClient.cancelQueries()
+        queryClient.removeQueries({
+          predicate: (query) => query.getObserversCount() === 0,
+        })
       },
       teardown: async () => {
         await Promise.all([
