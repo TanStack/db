@@ -1480,9 +1480,8 @@ describe(`createLiveQueryCollection`, () => {
         query: (q) =>
           q
             .from({ user: usersCollection })
-            .leftJoin(
-              { order: ordersCollection },
-              ({ user, order }) => eq(user.id, order.userId),
+            .leftJoin({ order: ordersCollection }, ({ user, order }) =>
+              eq(user.id, order.userId),
             )
             .select(({ user, order }) => ({
               userName: user.name,

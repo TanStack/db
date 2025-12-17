@@ -1,5 +1,11 @@
 # @tanstack/electric-db-collection
 
+## 0.2.15
+
+### Patch Changes
+
+- Don't pin @electric-sql/client version ([#1031](https://github.com/TanStack/db/pull/1031))
+
 ## 0.2.14
 
 ### Patch Changes
