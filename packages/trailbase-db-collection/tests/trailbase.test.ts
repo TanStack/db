@@ -38,7 +38,7 @@ class MockRecordApi<T> implements RecordApi<T> {
   )
   listOp = vi.fn((_opts?: ListOpts): ListOperation<T> => {
     throw `listOp`
-  });
+  })
 
   read = vi.fn(
     (
@@ -69,7 +69,7 @@ class MockRecordApi<T> implements RecordApi<T> {
   })
   updateOp = vi.fn((_id: RecordId, _record: Partial<T>): UpdateOperation => {
     throw `updateOp`
-  });
+  })
 
   delete = vi.fn((_id: string | number): Promise<void> => {
     throw `delete`
@@ -87,9 +87,11 @@ class MockRecordApi<T> implements RecordApi<T> {
       }),
     )
   })
-  subscribeAll = vi.fn((_opts?: SubscribeOpts): Promise<ReadableStream<Event>> => {
-    throw `subscribeAll`
-  })
+  subscribeAll = vi.fn(
+    (_opts?: SubscribeOpts): Promise<ReadableStream<Event>> => {
+      throw `subscribeAll`
+    },
+  )
 }
 
 function setUp(recordApi: MockRecordApi<Data>) {
