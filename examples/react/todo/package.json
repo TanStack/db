@@ -5,8 +5,8 @@
   "dependencies": {
     "@tanstack/electric-db-collection": "^0.2.12",
     "@tanstack/query-core": "^5.90.12",
-    "@tanstack/query-db-collection": "^1.0.6",
-    "@tanstack/react-db": "^0.1.55",
+    "@tanstack/query-db-collection": "^1.0.8",
+    "@tanstack/react-db": "^0.1.56",
     "@tanstack/react-router": "^1.140.0",
     "@tanstack/react-start": "^1.140.0",
     "@tanstack/trailbase-db-collection": "^0.1.55",

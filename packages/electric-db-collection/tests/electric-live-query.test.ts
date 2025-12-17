@@ -609,9 +609,8 @@ describe.each([
       // Limited queries are only deduplicated when their where clauses are equal.
       // Both queries have the same where clause (active = true), but the second query
       // with limit 6 needs more data than the first query with limit 2 provided.
-      // The internal query system makes additional requests as it processes the data.
-      // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-      expect(mockRequestSnapshot).toHaveBeenCalledTimes(6)
+      // With cursor-based pagination, initial loads (without cursor) make 1 requestSnapshot call each.
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
 
       // Check that first it requested a limit of 2 users (from first query)
       expect(callArgs(0)).toMatchObject({
@@ -877,9 +876,8 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     )
 
     // For limited queries, only requests with identical where clauses can be deduplicated.
-    // The internal query system may make additional requests as it processes the data.
-    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
+    // With cursor-based pagination, initial loads (without cursor) make 1 requestSnapshot call.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
   })
 
   it(`should pass correct WHERE clause to requestSnapshot when live query has filters`, async () => {
@@ -1189,9 +1187,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // For limited queries, only requests with identical where clauses can be deduplicated.
-    // The internal query system may make additional requests as it processes data.
-    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
+    // With cursor-based pagination, initial loads (without cursor) make 1 requestSnapshot call.
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
 
     // Simulate a must-refetch (which triggers truncate and reset)
     subscriber([{ headers: { control: `must-refetch` } }])
@@ -1201,8 +1198,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // The existing live query re-requests its data after truncate
-    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(5)
+    // After must-refetch, the query requests data again (1 initial + 1 after truncate)
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(2)
 
     // Create the same live query again after reset
     // This should NOT be deduped because the reset cleared the deduplication state,
@@ -1221,8 +1218,8 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     // Should have more calls - the different query triggered a new request
-    // TODO: Once we have cursor based pagination with the PK as a tiebreaker, we can reduce this.
-    expect(mockRequestSnapshot).toHaveBeenCalledTimes(6)
+    // 1 initial + 1 after must-refetch + 1 for new query = 3
+    expect(mockRequestSnapshot).toHaveBeenCalledTimes(3)
   })
 
   it(`should deduplicate unlimited queries regardless of orderBy`, async () => {

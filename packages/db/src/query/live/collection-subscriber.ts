@@ -190,6 +190,17 @@ export class CollectionSubscriber<
       whereExpression,
     })
 
+    // Listen for truncate events to reset cursor tracking state
+    // This ensures that after a must-refetch/truncate, we don't use stale cursor data
+    const truncateUnsubscribe = this.collection.on(`truncate`, () => {
+      this.biggest = undefined
+    })
+
+    // Clean up truncate listener when subscription is unsubscribed
+    subscription.on(`unsubscribed`, () => {
+      truncateUnsubscribe()
+    })
+
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
@@ -285,7 +296,7 @@ export class CollectionSubscriber<
     if (!orderByInfo) {
       return
     }
-    const { orderBy, valueExtractorForRawRow } = orderByInfo
+    const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
     const biggestSentRow = this.biggest
 
     // Extract all orderBy column values from the biggest sent row
@@ -306,10 +317,12 @@ export class CollectionSubscriber<
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
     // Take the `n` items after the biggest sent value
+    // Pass the current window offset to ensure proper deduplication
     subscription.requestLimitedSnapshot({
       orderBy: normalizedOrderBy,
       limit: n,
       minValues,
+      offset,
     })
   }
 
@@ -338,10 +351,13 @@ export class CollectionSubscriber<
     comparator: (a: any, b: any) => number,
   ) {
     for (const change of changes) {
-      if (!this.biggest) {
-        this.biggest = change.value
-      } else if (comparator(this.biggest, change.value) < 0) {
-        this.biggest = change.value
+      // Only track inserts/updates for cursor positioning, not deletes
+      if (change.type !== `delete`) {
+        if (!this.biggest) {
+          this.biggest = change.value
+        } else if (comparator(this.biggest, change.value) < 0) {
+          this.biggest = change.value
+        }
       }
 
       yield change

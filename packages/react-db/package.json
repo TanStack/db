@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/react-db",
-  "version": "0.1.55",
+  "version": "0.1.56",
   "description": "React integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -52,7 +52,7 @@
     "react": ">=16.8.0"
   },
   "devDependencies": {
-    "@electric-sql/client": "1.2.0",
+    "@electric-sql/client": "^1.3.0",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

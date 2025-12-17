@@ -187,13 +187,13 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/offline-transactions':
-        specifier: ^1.0.1
+        specifier: ^1.0.2
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.0.6
+        specifier: ^1.0.8
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.55
+        specifier: ^0.1.56
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.12
@@ -257,7 +257,7 @@ importers:
         specifier: ^0.5.11
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^0.1.55
+        specifier: ^0.1.56
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -294,10 +294,10 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.6
+        specifier: ^1.0.8
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.55
+        specifier: ^0.1.56
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.140.0
@@ -433,10 +433,10 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.6
+        specifier: ^1.0.8
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.55
+        specifier: ^0.1.56
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.140.0
@@ -554,7 +554,7 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.6
+        specifier: ^1.0.8
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
         specifier: ^0.1.54
@@ -769,8 +769,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: 1.2.0
-        version: 1.2.0
+        specifier: ^1.3.0
+        version: 1.3.0
       '@standard-schema/spec':
         specifier: ^1.0.0
         version: 1.0.0
@@ -876,8 +876,8 @@ importers:
         version: 1.6.0(react@19.2.1)
     devDependencies:
       '@electric-sql/client':
-        specifier: 1.2.0
-        version: 1.2.0
+        specifier: ^1.3.0
+        version: 1.3.0
       '@testing-library/react':
         specifier: ^16.3.0
         version: 16.3.0(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.7))(@types/react@19.2.7)(react-dom@19.2.1(react@19.2.1))(react@19.2.1)
@@ -941,8 +941,8 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: 1.2.0
-        version: 1.2.0
+        specifier: ^1.3.0
+        version: 1.3.0
       '@solidjs/testing-library':
         specifier: ^0.8.10
         version: 0.8.10(solid-js@1.9.10)
@@ -1022,8 +1022,8 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: 1.2.0
-        version: 1.2.0
+        specifier: ^1.3.0
+        version: 1.3.0
       '@vitejs/plugin-vue':
         specifier: ^6.0.2
         version: 6.0.2(vite@7.2.6(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))(vue@3.5.25(typescript@5.9.3))
@@ -1533,8 +1533,8 @@ packages:
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
 
-  '@electric-sql/client@1.2.0':
-    resolution: {integrity: sha512-K/MEjti3UF4aPKJJqO6Tp4f5noqc2/3icU1NPdpKfQaHwbzGtEX2aJmL2vxTEUJbfyrISkPKbOPnrz/lAvw1Vg==}
+  '@electric-sql/client@1.3.0':
+    resolution: {integrity: sha512-6pVQOBmocDBj5diGCOcyekL9gsa2Kk3j/eN3fytzLYKxqUguvuojMisoYPexHgOchJlcMzR6qpJTYj42npWWxw==}
 
   '@emnapi/core@1.5.0':
     resolution: {integrity: sha512-sbP8GzB1WDzacS8fgNPpHlp6C9VZe+SJP3F90W9rLemaQj2PzIuTEl1qDOYQf58YIpyjViI24y9aPWCjEzY2cg==}
@@ -9587,7 +9587,7 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
-  '@electric-sql/client@1.2.0':
+  '@electric-sql/client@1.3.0':
     dependencies:
       '@microsoft/fetch-event-source': 2.0.1
     optionalDependencies:

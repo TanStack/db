@@ -34,6 +34,8 @@ type RequestLimitedSnapshotOptions = {
   limit: number
   /** All column values for cursor (first value used for local index, all values for sync layer) */
   minValues?: Array<unknown>
+  /** Row offset for offset-based pagination (passed to sync layer) */
+  offset?: number
 }
 
 type CollectionSubscriptionOptions = {
@@ -62,6 +64,12 @@ export class CollectionSubscription
 
   // Keep track of the keys we've sent (needed for join and orderBy optimizations)
   private sentKeys = new Set<string | number>()
+
+  // Track the count of rows sent via requestLimitedSnapshot for offset-based pagination
+  private limitedSnapshotRowCount = 0
+
+  // Track the last key sent via requestLimitedSnapshot for cursor-based pagination
+  private lastSentKey: string | number | undefined
 
   private filteredCallback: (changes: Array<ChangeMessage<any, any>>) => void
 
@@ -258,6 +266,7 @@ export class CollectionSubscription
     orderBy,
     limit,
     minValues,
+    offset,
   }: RequestLimitedSnapshotOptions) {
     if (!limit) throw new Error(`limit is required`)
 
@@ -354,77 +363,75 @@ export class CollectionSubscription
       keys = index.take(valuesNeeded(), biggestObservedValue, filterFn)
     }
 
+    // Track row count for offset-based pagination (before sending to callback)
+    // Use the current count as the offset for this load
+    const currentOffset = this.limitedSnapshotRowCount
+
     this.callback(changes)
 
-    // Build the WHERE filter for sync layer loadSubset
-    // buildCursor handles both single-column and multi-column cases
-    let whereWithValueFilter = where
+    // Update the row count and last key after sending (for next call's offset/cursor)
+    this.limitedSnapshotRowCount += changes.length
+    if (changes.length > 0) {
+      this.lastSentKey = changes[changes.length - 1]!.key
+    }
+
+    // Build cursor expressions for sync layer loadSubset
+    // The cursor expressions are separate from the main where clause
+    // so the sync layer can choose cursor-based or offset-based pagination
+    let cursorExpressions:
+      | {
+          whereFrom: BasicExpression<boolean>
+          whereCurrent: BasicExpression<boolean>
+          lastKey?: string | number
+        }
+      | undefined
+
     if (minValues !== undefined && minValues.length > 0) {
-      const cursor = buildCursor(orderBy, minValues)
-      if (cursor) {
-        whereWithValueFilter = where ? and(where, cursor) : cursor
+      const whereFromCursor = buildCursor(orderBy, minValues)
+
+      if (whereFromCursor) {
+        const { expression } = orderBy[0]!
+        const minValue = minValues[0]
+
+        // Build the whereCurrent expression for the first orderBy column
+        // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
+        // A JS Date represents a 1ms range, so we query for all values within that range
+        let whereCurrentCursor: BasicExpression<boolean>
+        if (minValue instanceof Date) {
+          const minValuePlus1ms = new Date(minValue.getTime() + 1)
+          whereCurrentCursor = and(
+            gte(expression, new Value(minValue)),
+            lt(expression, new Value(minValuePlus1ms)),
+          )
+        } else {
+          whereCurrentCursor = eq(expression, new Value(minValue))
+        }
+
+        cursorExpressions = {
+          whereFrom: whereFromCursor,
+          whereCurrent: whereCurrentCursor,
+          lastKey: this.lastSentKey,
+        }
       }
     }
 
     // Request the sync layer to load more data
     // don't await it, we will load the data into the collection when it comes in
-    const loadOptions1: LoadSubsetOptions = {
-      where: whereWithValueFilter,
+    // Note: `where` does NOT include cursor expressions - they are passed separately
+    // The sync layer can choose to use cursor-based or offset-based pagination
+    const loadOptions: LoadSubsetOptions = {
+      where, // Main filter only, no cursor
       limit,
       orderBy,
+      cursor: cursorExpressions, // Cursor expressions passed separately
+      offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
       subscription: this,
     }
-    const syncResult = this.collection._sync.loadSubset(loadOptions1)
+    const syncResult = this.collection._sync.loadSubset(loadOptions)
 
     // Track this loadSubset call
-    this.loadedSubsets.push(loadOptions1)
-
-    // Make parallel loadSubset calls for values equal to minValue and values greater than minValue
-    const promises: Array<Promise<void>> = []
-
-    // First promise: load all values equal to minValue
-    if (typeof minValue !== `undefined`) {
-      const { expression } = orderBy[0]!
-
-      // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
-      // A JS Date represents a 1ms range, so we query for all values within that range
-      let exactValueFilter
-      if (minValue instanceof Date) {
-        const minValuePlus1ms = new Date(minValue.getTime() + 1)
-        exactValueFilter = and(
-          gte(expression, new Value(minValue)),
-          lt(expression, new Value(minValuePlus1ms)),
-        )
-      } else {
-        exactValueFilter = eq(expression, new Value(minValue))
-      }
-
-      const loadOptions2: LoadSubsetOptions = {
-        where: exactValueFilter,
-        subscription: this,
-      }
-      const equalValueResult = this.collection._sync.loadSubset(loadOptions2)
-
-      // Track this loadSubset call
-      this.loadedSubsets.push(loadOptions2)
-
-      if (equalValueResult instanceof Promise) {
-        promises.push(equalValueResult)
-      }
-    }
-
-    // Second promise: load values greater than minValue
-    if (syncResult instanceof Promise) {
-      promises.push(syncResult)
-    }
-
-    // Track the combined promise
-    if (promises.length > 0) {
-      const combinedPromise = Promise.all(promises).then(() => {})
-      this.trackLoadSubsetPromise(combinedPromise)
-    } else {
-      this.trackLoadSubsetPromise(syncResult)
-    }
+    this.loadedSubsets.push(loadOptions)
+    this.trackLoadSubsetPromise(syncResult)
   }
 
   // TODO: also add similar test but that checks that it can also load it from the collection's loadSubset function
