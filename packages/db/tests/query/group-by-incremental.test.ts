@@ -44,6 +44,137 @@ async function createReadyCollection<T extends object>(opts: {
 }
 
 describe(`GroupBy Incremental Updates`, () => {
+  describe(`Sync layer duplicate insert handling`, () => {
+    test(`sync layer should convert insert to update for live query without custom getKey when key exists`, async () => {
+      // This test directly exercises the sync layer fix by simulating the scenario
+      // where the D2 pipeline emits only an insert (without delete) for an existing key.
+      // This happens in certain edge cases with groupBy aggregates.
+      //
+      // The fix checks for utils[LIVE_QUERY_INTERNAL].hasCustomGetKey to determine
+      // if we should convert duplicate inserts to updates.
+
+      type GroupResult = {
+        language: string
+        count: number
+      }
+
+      // Import the internal symbol used by live queries
+      const { LIVE_QUERY_INTERNAL } = await import(
+        `../../src/query/live/internal.js`
+      )
+
+      // Create a collection that mimics a live query collection structure
+      // with hasCustomGetKey: false (like groupBy queries)
+      const liveQueryCollection = createCollection<GroupResult, string>({
+        id: `live-query-sync-test`,
+        getKey: (item) => item.language,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            // First batch: insert initial aggregate
+            begin()
+            write({
+              type: `insert`,
+              value: { language: `ru`, count: 1 },
+            })
+            commit()
+            markReady()
+
+            // Later: simulate D2 emitting only an insert for updated aggregate
+            // (without the corresponding delete for the old value)
+            // This is the edge case that causes the bug
+            setTimeout(() => {
+              begin()
+              // This insert should be converted to update by the sync layer
+              // because the key "ru" already exists AND hasCustomGetKey is false
+              write({
+                type: `insert`,
+                value: { language: `ru`, count: 2 },
+              })
+              commit()
+            }, 10)
+          },
+        },
+        startSync: true,
+        // This is the key part: set up utils with LIVE_QUERY_INTERNAL
+        // to indicate this is a live query without custom getKey
+        utils: {
+          [LIVE_QUERY_INTERNAL]: {
+            hasCustomGetKey: false,
+            hasJoins: false,
+            getBuilder: () => null,
+          },
+        } as any,
+      })
+
+      await liveQueryCollection.preload()
+
+      // Initial state
+      expect(liveQueryCollection.size).toBe(1)
+      expect(liveQueryCollection.get(`ru`)?.count).toBe(1)
+
+      // Wait for the second write
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // After the "insert" that should be converted to update
+      // Without the fix, this would throw: "Cannot insert document with key 'ru' ... already exists"
+      expect(liveQueryCollection.size).toBe(1)
+      expect(liveQueryCollection.get(`ru`)?.count).toBe(2)
+    })
+
+    test(`sync layer should throw error for regular collection with duplicate insert`, async () => {
+      // Regular collections (without LIVE_QUERY_INTERNAL) should still throw
+      // an error when trying to insert a duplicate key
+
+      type Item = {
+        id: string
+        value: number
+      }
+
+      const collection = createCollection<Item, string>({
+        id: `regular-collection-test`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: { id: `item1`, value: 1 },
+            })
+            commit()
+            markReady()
+
+            // This should throw because it's a regular collection
+            setTimeout(() => {
+              begin()
+              try {
+                write({
+                  type: `insert`,
+                  value: { id: `item1`, value: 2 },
+                })
+                commit()
+              } catch {
+                // Expected - error should be thrown
+              }
+            }, 10)
+          },
+        },
+        startSync: true,
+      })
+
+      await collection.preload()
+
+      expect(collection.size).toBe(1)
+      expect(collection.get(`item1`)?.value).toBe(1)
+
+      // Wait for the second write attempt
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Value should NOT be updated because the insert should have been rejected
+      expect(collection.size).toBe(1)
+      expect(collection.get(`item1`)?.value).toBe(1)
+    })
+  })
+
   describe(`Bug: Duplicate insert errors on live updates`, () => {
     test(`should update aggregate when second event with same groupBy key arrives`, async () => {
       // Create an empty collection that we'll populate incrementally
