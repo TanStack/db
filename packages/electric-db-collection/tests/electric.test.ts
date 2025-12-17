@@ -2820,9 +2820,9 @@ describe(`Electric Integration`, () => {
       expect(testCollection.status).toBe(`ready`)
     })
 
-    it(`should commit on snapshot-end in eager mode AFTER first up-to-date`, () => {
+    it(`should commit on subset-end in eager mode`, () => {
       const config = {
-        id: `eager-snapshot-end-test`,
+        id: `eager-subset-end-test`,
         shapeOptions: {
           url: `http://test-url`,
           params: { table: `test_table` },
@@ -2834,7 +2834,8 @@ describe(`Electric Integration`, () => {
 
       const testCollection = createCollection(electricCollectionOptions(config))
 
-      // First send up-to-date (with initial data) to establish the connection
+      // Send data followed by subset-end (marks end of injected subset snapshot)
+      // subset-end should trigger a commit
       subscriber([
         {
           key: `1`,
@@ -2842,20 +2843,36 @@ describe(`Electric Integration`, () => {
           headers: { operation: `insert` },
         },
         {
-          headers: { control: `up-to-date` },
+          headers: { control: `subset-end` },
         },
       ])
 
       // Data should be committed and collection ready
       expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
       expect(testCollection.status).toBe(`ready`)
+    })
 
-      // Now send more data followed by snapshot-end (simulating incremental snapshot)
-      // After the first up-to-date, snapshot-end SHOULD commit
+    it(`should NOT commit on snapshot-end (only tracks metadata)`, () => {
+      const config = {
+        id: `eager-snapshot-end-no-commit-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `eager` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send data followed by snapshot-end
+      // snapshot-end should NOT trigger a commit - only up-to-date or subset-end do
       subscriber([
         {
-          key: `2`,
-          value: { id: 2, name: `Second User` },
+          key: `1`,
+          value: { id: 1, name: `Test User` },
           headers: { operation: `insert` },
         },
         {
@@ -2868,15 +2885,25 @@ describe(`Electric Integration`, () => {
         },
       ])
 
-      // Data should be committed since we've already received up-to-date
-      expect(testCollection.has(2)).toBe(true)
-      expect(testCollection.get(2)).toEqual({ id: 2, name: `Second User` })
+      // Data should NOT be committed yet (snapshot-end doesn't trigger commit)
+      expect(testCollection.has(1)).toBe(false)
+      expect(testCollection.status).toBe(`loading`)
+
+      // Now send up-to-date to commit
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Now data should be committed
+      expect(testCollection.has(1)).toBe(true)
       expect(testCollection.status).toBe(`ready`)
     })
 
-    it(`should commit and mark ready on snapshot-end in on-demand mode`, () => {
+    it(`should commit and mark ready on subset-end in on-demand mode`, () => {
       const config = {
-        id: `on-demand-snapshot-end-test`,
+        id: `on-demand-subset-end-test`,
         shapeOptions: {
           url: `http://test-url`,
           params: { table: `test_table` },
@@ -2888,7 +2915,7 @@ describe(`Electric Integration`, () => {
 
       const testCollection = createCollection(electricCollectionOptions(config))
 
-      // Send data followed by snapshot-end (but no up-to-date)
+      // Send data followed by subset-end (marks end of injected subset snapshot)
       subscriber([
         {
           key: `1`,
@@ -2896,12 +2923,7 @@ describe(`Electric Integration`, () => {
           headers: { operation: `insert` },
         },
         {
-          headers: {
-            control: `snapshot-end`,
-            xmin: `100`,
-            xmax: `110`,
-            xip_list: [],
-          },
+          headers: { control: `subset-end` },
         },
       ])
 
