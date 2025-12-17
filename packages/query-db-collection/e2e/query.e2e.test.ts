@@ -197,20 +197,13 @@ describe(`Query Collection E2E Tests`, () => {
         },
       },
       setup: async () => {},
-      afterEach: async () => {
-        // Clean up and restart on-demand collections
-        // This validates cleanup() works and each test starts fresh
-        await onDemandUsers.cleanup()
-        await onDemandPosts.cleanup()
-        await onDemandComments.cleanup()
-
-        // Restart sync after cleanup
-        // On-demand collections mark ready immediately when sync starts,
-        // so no need to call preload() (which is a no-op for on-demand)
-        onDemandUsers.startSyncImmediate()
-        onDemandPosts.startSyncImmediate()
-        onDemandComments.startSyncImmediate()
-      },
+      // Note: We intentionally don't clean up source collections in afterEach.
+      // On-demand collections don't need to be reset between tests since each test
+      // creates its own live queries with specific predicates. Cleaning up source
+      // collections while live queries may still be pending (e.g., if a test times
+      // out before cleanup) causes "[Live Query Error] Source collection was manually
+      // cleaned up" warnings. Final cleanup happens in teardown (afterAll).
+      afterEach: async () => {},
       teardown: async () => {
         await Promise.all([
           eagerUsers.cleanup(),
