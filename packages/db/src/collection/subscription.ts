@@ -82,6 +82,13 @@ export class CollectionSubscription
   // Cleanup function for truncate event listener
   private truncateCleanup: (() => void) | undefined
 
+  // Truncate buffering state
+  // When a truncate occurs, we buffer changes until all loadSubset refetches complete
+  // This prevents a flash of missing content between deletes and new inserts
+  private isBufferingForTruncate = false
+  private truncateBuffer: Array<Array<ChangeMessage<any, any>>> = []
+  private pendingTruncateRefetches: Set<Promise<void>> = new Set()
+
   public get status(): SubscriptionStatus {
     return this._status
   }
@@ -127,6 +134,9 @@ export class CollectionSubscription
    * Handle collection truncate event by resetting state and re-requesting subsets.
    * This is called when the sync layer receives a must-refetch and clears all data.
    *
+   * To prevent a flash of missing content, we buffer all changes (deletes from truncate
+   * and inserts from refetch) until all loadSubset promises resolve, then emit them together.
+   *
    * IMPORTANT: We intentionally do NOT clear sentKeys here. The truncate event is emitted
    * BEFORE delete events are sent to subscribers. If we cleared sentKeys, the delete events
    * would be filtered out by filterAndFlipChanges (which skips deletes for keys not in sentKeys).
@@ -134,6 +144,25 @@ export class CollectionSubscription
    * inserts will still be emitted correctly (the type is already 'insert' so no conversion needed).
    */
   private handleTruncate() {
+    // Copy the loaded subsets before clearing (we'll re-request them)
+    const subsetsToReload = [...this.loadedSubsets]
+
+    // If there are no subsets to reload, no need to buffer - just reset state
+    if (subsetsToReload.length === 0) {
+      this.snapshotSent = false
+      this.loadedInitialState = false
+      this.limitedSnapshotRowCount = 0
+      this.lastSentKey = undefined
+      this.loadedSubsets = []
+      return
+    }
+
+    // Start buffering BEFORE we receive the delete events from the truncate commit
+    // This ensures we capture both the deletes and subsequent inserts
+    this.isBufferingForTruncate = true
+    this.truncateBuffer = []
+    this.pendingTruncateRefetches.clear()
+
     // Reset snapshot/pagination tracking state but NOT sentKeys
     // sentKeys must remain so delete events can pass through filterAndFlipChanges
     this.snapshotSent = false
@@ -141,20 +170,58 @@ export class CollectionSubscription
     this.limitedSnapshotRowCount = 0
     this.lastSentKey = undefined
 
-    // Copy the loaded subsets before clearing (we'll re-request them)
-    const subsetsToReload = [...this.loadedSubsets]
-
     // Clear the loadedSubsets array since we're re-requesting fresh
     this.loadedSubsets = []
 
-    // Re-request all previously loaded subsets
+    // Re-request all previously loaded subsets and track their promises
     for (const options of subsetsToReload) {
       const syncResult = this.collection._sync.loadSubset(options)
 
       // Track this loadSubset call so we can unload it later
       this.loadedSubsets.push(options)
       this.trackLoadSubsetPromise(syncResult)
+
+      // Track the promise for buffer flushing
+      if (syncResult instanceof Promise) {
+        this.pendingTruncateRefetches.add(syncResult)
+        syncResult
+          .catch(() => {
+            // Ignore errors - we still want to flush the buffer even if some requests fail
+          })
+          .finally(() => {
+            this.pendingTruncateRefetches.delete(syncResult)
+            this.checkTruncateRefetchComplete()
+          })
+      }
     }
+
+    // If all loadSubset calls were synchronous (returned true), flush immediately
+    if (this.pendingTruncateRefetches.size === 0) {
+      this.flushTruncateBuffer()
+    }
+  }
+
+  /**
+   * Check if all truncate refetch promises have completed and flush buffer if so
+   */
+  private checkTruncateRefetchComplete() {
+    if (this.pendingTruncateRefetches.size === 0 && this.isBufferingForTruncate) {
+      this.flushTruncateBuffer()
+    }
+  }
+
+  /**
+   * Flush the truncate buffer, emitting all buffered changes to the callback
+   */
+  private flushTruncateBuffer() {
+    this.isBufferingForTruncate = false
+
+    // Emit all buffered changes in order
+    for (const changes of this.truncateBuffer) {
+      this.filteredCallback(changes)
+    }
+
+    this.truncateBuffer = []
   }
 
   setOrderByIndex(index: IndexInterface<any>) {
@@ -218,7 +285,16 @@ export class CollectionSubscription
 
   emitEvents(changes: Array<ChangeMessage<any, any>>) {
     const newChanges = this.filterAndFlipChanges(changes)
-    this.filteredCallback(newChanges)
+
+    if (this.isBufferingForTruncate) {
+      // Buffer the changes instead of emitting immediately
+      // This prevents a flash of missing content during truncate/refetch
+      if (newChanges.length > 0) {
+        this.truncateBuffer.push(newChanges)
+      }
+    } else {
+      this.filteredCallback(newChanges)
+    }
   }
 
   /**
@@ -526,6 +602,11 @@ export class CollectionSubscription
     // Clean up truncate event listener
     this.truncateCleanup?.()
     this.truncateCleanup = undefined
+
+    // Clean up truncate buffer state
+    this.isBufferingForTruncate = false
+    this.truncateBuffer = []
+    this.pendingTruncateRefetches.clear()
 
     // Unload all subsets that this subscription loaded
     // We pass the exact same LoadSubsetOptions we used for loadSubset

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import type { SyncConfig } from '../src/types'
+import type { LoadSubsetOptions, SyncConfig } from '../src/types'
 
 describe(`Collection truncate operations`, () => {
   beforeEach(() => {
@@ -705,5 +705,239 @@ describe(`Collection truncate operations`, () => {
     expect(collection.state.size).toBe(2)
     expect(collection.state.has(2)).toBe(true)
     expect(collection.state.get(2)).toEqual({ id: 2, value: `optimistic` })
+  })
+
+  it(`should buffer subscription changes during truncate until loadSubset refetch completes`, async () => {
+    // This test verifies that when a truncate occurs:
+    // 1. The subscription buffers delete events from the truncate
+    // 2. The subscription re-requests its previously loaded subsets
+    // 3. Insert events from the refetch are also buffered
+    // 4. All buffered events are emitted together when loadSubset completes
+    // This prevents a flash of missing content during must-refetch scenarios
+
+    const changeEvents: Array<any> = []
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    let loadSubsetResolver: (() => void) | undefined
+    let loadSubsetCallCount = 0
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-buffering-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.markReady()
+
+          return {
+            loadSubset: (_options: LoadSubsetOptions) => {
+              loadSubsetCallCount++
+
+              // Return a promise that we control
+              return new Promise<void>((resolve) => {
+                loadSubsetResolver = () => {
+                  // When resolved, write some data
+                  cfg.begin()
+                  cfg.write({
+                    type: `insert`,
+                    value: { id: 1, value: `refetched-1` },
+                  })
+                  cfg.write({
+                    type: `insert`,
+                    value: { id: 2, value: `refetched-2` },
+                  })
+                  cfg.commit()
+                  resolve()
+                }
+              })
+            },
+          }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Subscribe with includeInitialState to trigger loadSubset
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      {
+        includeInitialState: true,
+      },
+    )
+
+    // Initially empty, waiting for loadSubset
+    expect(changeEvents.length).toBe(0)
+    expect(loadSubsetCallCount).toBe(1)
+
+    // Resolve the first loadSubset to get initial data
+    loadSubsetResolver!()
+    await vi.waitFor(() => expect(changeEvents.length).toBe(2))
+
+    // Verify initial data arrived
+    expect(changeEvents).toEqual([
+      { type: `insert`, key: 1, value: { id: 1, value: `refetched-1` } },
+      { type: `insert`, key: 2, value: { id: 2, value: `refetched-2` } },
+    ])
+
+    // Clear events for next phase
+    changeEvents.length = 0
+    loadSubsetCallCount = 0
+
+    // Now trigger a truncate (simulating must-refetch)
+    syncOps!.begin()
+    syncOps!.truncate()
+    syncOps!.commit()
+
+    // The truncate event should trigger the subscription to buffer and re-request
+    // loadSubset should be called again
+    await vi.waitFor(() => expect(loadSubsetCallCount).toBe(1))
+
+    // Changes should be buffered - subscriber should NOT see deletes yet
+    // (The subscription is buffering until loadSubset completes)
+    expect(changeEvents.length).toBe(0)
+
+    // Now resolve the loadSubset - this should flush the buffer
+    loadSubsetResolver!()
+
+    // Wait for buffered events to be flushed
+    await vi.waitFor(() => expect(changeEvents.length).toBeGreaterThan(0))
+
+    // Verify we got all events in one batch (deletes + inserts)
+    // The subscription should have received:
+    // - Delete events for the old data (from truncate)
+    // - Insert events for the new data (from refetch)
+    const deletes = changeEvents.filter((e) => e.type === `delete`)
+    const inserts = changeEvents.filter((e) => e.type === `insert`)
+
+    expect(deletes.length).toBe(2) // Deleted the old items
+    expect(inserts.length).toBe(2) // Inserted the refetched items
+
+    // Verify final state is correct
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `refetched-1` })
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `refetched-2` })
+
+    subscription.unsubscribe()
+  })
+
+  it(`should not buffer changes when there are no subsets to reload`, async () => {
+    // When a subscription has no previously loaded subsets,
+    // it should not enter buffering mode during truncate
+
+    const changeEvents: Array<any> = []
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-no-buffer-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.begin()
+          cfg.write({ type: `insert`, value: { id: 1, value: `initial` } })
+          cfg.commit()
+          cfg.markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Subscribe WITHOUT includeInitialState - no loadSubset is called
+    collection.subscribeChanges((changes) => {
+      changeEvents.push(...changes)
+    })
+
+    // No initial events since includeInitialState is false
+    expect(changeEvents.length).toBe(0)
+
+    // Trigger truncate
+    syncOps!.begin()
+    syncOps!.truncate()
+    syncOps!.write({ type: `insert`, value: { id: 1, value: `after-truncate` } })
+    syncOps!.commit()
+
+    // Since there were no loaded subsets, changes should be emitted immediately
+    // (no buffering because there's nothing to refetch)
+    expect(changeEvents.length).toBeGreaterThan(0)
+  })
+
+  it(`should handle unsubscribe during truncate buffering`, async () => {
+    // Verifies that unsubscribing while buffering cleans up properly
+
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    let loadSubsetResolver: (() => void) | undefined
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-unsubscribe-during-buffer`,
+      getKey: (item) => item.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.markReady()
+
+          return {
+            loadSubset: (_options: LoadSubsetOptions) => {
+              return new Promise<void>((resolve) => {
+                loadSubsetResolver = () => {
+                  cfg.begin()
+                  cfg.write({
+                    type: `insert`,
+                    value: { id: 1, value: `data` },
+                  })
+                  cfg.commit()
+                  resolve()
+                }
+              })
+            },
+          }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const changeEvents: Array<any> = []
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      { includeInitialState: true },
+    )
+
+    // Resolve initial load
+    loadSubsetResolver!()
+    await vi.waitFor(() => expect(changeEvents.length).toBe(1))
+    changeEvents.length = 0
+
+    // Trigger truncate
+    syncOps!.begin()
+    syncOps!.truncate()
+    syncOps!.commit()
+
+    // Unsubscribe before loadSubset completes
+    subscription.unsubscribe()
+
+    // Resolve the loadSubset - should not cause errors
+    loadSubsetResolver!()
+
+    // Give it time to process
+    await vi.advanceTimersByTimeAsync(10)
+
+    // No additional events should have been emitted to the unsubscribed callback
+    expect(changeEvents.length).toBe(0)
   })
 })
