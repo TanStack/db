@@ -362,6 +362,168 @@ describe(`Optimistic delete with limit`, () => {
     subscription.unsubscribe()
   })
 
+  it(`should emit delete and update when deleting from different page (page 1 delete while viewing page 2)`, async () => {
+    // This test captures the scenario from Marius's environment:
+    // - Viewing page 2 (items 3 and 4 with offset=2, limit=2)
+    // - Delete an item from page 1 (item 2)
+    // - The live query should update because items shift:
+    //   - After delete, sorted order is: 1, 3, 4, 5
+    //   - Page 2 (offset=2, limit=2) should now show items 4 and 5
+    //   - So: item 3 should be deleted from result, item 5 should be inserted
+
+    const pageSize = 2
+    const pageIndex = 1 // page 2 (0-indexed)
+
+    const liveQueryCollection = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.value, `desc`)
+        .limit(pageSize)
+        .offset(pageIndex * pageSize)
+        .select(({ items }) => ({
+          id: items.id,
+          value: items.value,
+          name: items.name,
+        })),
+    )
+
+    // Wait for the live query collection to be ready
+    await liveQueryCollection.preload()
+
+    // Check initial results - page 2 should show items 3 and 4 (offset 2, limit 2)
+    // Sorted by value desc: 1 (100), 2 (90), 3 (80), 4 (70), 5 (60)
+    // Page 2 = offset 2 = items 3 and 4
+    const initialResults = Array.from(liveQueryCollection.values())
+    console.log(`Initial results (page 2):`, JSON.stringify(initialResults, null, 2))
+    expect(initialResults).toHaveLength(2)
+    expect(initialResults.map((r) => r.id)).toEqual([`3`, `4`])
+
+    // Subscribe to changes with includeInitialState: true
+    const changeCallback = vi.fn()
+    const subscription = liveQueryCollection.subscribeChanges(changeCallback, {
+      includeInitialState: true,
+    })
+
+    // Wait for initial state to be sent
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    // Clear initial state calls
+    changeCallback.mockClear()
+
+    // Delete item 2 (which is on page 1, NOT in current view)
+    console.log(`Deleting item 2 (on page 1, not visible on page 2)...`)
+    sourceCollection.delete(`2`)
+
+    // Wait for microtasks to process
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // After deleting item 2:
+    // - Sorted order becomes: 1 (100), 3 (80), 4 (70), 5 (60)
+    // - Page 2 (offset 2, limit 2) should now show items 4 and 5
+    // - So: item 3 should be deleted from result, item 5 should be inserted
+
+    // Check the state after delete
+    const resultsAfterDelete = Array.from(liveQueryCollection.values())
+    console.log(`Results after delete:`, JSON.stringify(resultsAfterDelete, null, 2))
+
+    // The live query collection should now show items 4 and 5
+    expect(resultsAfterDelete).toHaveLength(2)
+    expect(resultsAfterDelete.map((r) => r.id)).toEqual([`4`, `5`])
+
+    // Check that we got the expected change events
+    console.log(`All changes (page 2 after deleting from page 1):`,
+      JSON.stringify(changeCallback.mock.calls.flatMap((call) => call[0]), null, 2))
+
+    // We should have received change events (delete for item 3, insert for item 5)
+    expect(changeCallback).toHaveBeenCalled()
+
+    const allChanges = changeCallback.mock.calls.flatMap((call) => call[0])
+
+    // Should have a delete for item 3 (shifted out of page 2)
+    const deleteEvents = allChanges.filter((c: ChangeMessage<Item>) => c.type === `delete`)
+    expect(deleteEvents.some((e: ChangeMessage<Item>) => e.key === `3`)).toBe(true)
+
+    // Should have an insert for item 5 (shifted into page 2)
+    const insertEvents = allChanges.filter((c: ChangeMessage<Item>) => c.type === `insert`)
+    expect(insertEvents.some((e: ChangeMessage<Item>) => e.key === `5`)).toBe(true)
+
+    subscription.unsubscribe()
+  })
+
+  it(`should NOT update when deleting item beyond TopK window (no-op case)`, async () => {
+    // Test scenario: delete an item that's AFTER the TopK window
+    // - Page 1: items 1 and 2 (offset=0, limit=2)
+    // - Delete item 5 (which is on page 3)
+    // - Page 1 should NOT change (items 1 and 2 are still there)
+
+    const pageSize = 2
+    const pageIndex = 0 // page 1
+
+    const liveQueryCollection = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .orderBy(({ items }) => items.value, `desc`)
+        .limit(pageSize)
+        .offset(pageIndex * pageSize)
+        .select(({ items }) => ({
+          id: items.id,
+          value: items.value,
+          name: items.name,
+        })),
+    )
+
+    // Wait for the live query collection to be ready
+    await liveQueryCollection.preload()
+
+    // Check initial results - page 1 should show items 1 and 2
+    const initialResults = Array.from(liveQueryCollection.values())
+    console.log(`Initial results (page 1 for no-op test):`, JSON.stringify(initialResults, null, 2))
+    expect(initialResults).toHaveLength(2)
+    expect(initialResults.map((r) => r.id)).toEqual([`1`, `2`])
+
+    // Subscribe to changes
+    const changeCallback = vi.fn()
+    const subscription = liveQueryCollection.subscribeChanges(changeCallback, {
+      includeInitialState: true,
+    })
+
+    // Wait for initial state to be sent
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    // Clear initial state calls
+    changeCallback.mockClear()
+
+    // Delete item 5 (which is on page 3, beyond the TopK window)
+    console.log(`Deleting item 5 (on page 3, beyond TopK window)...`)
+    sourceCollection.delete(`5`)
+
+    // Wait for microtasks to process
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // After deleting item 5:
+    // - Sorted order becomes: 1 (100), 2 (90), 3 (80), 4 (70)
+    // - Page 1 (offset 0, limit 2) still shows items 1 and 2
+    // - No change to page 1
+
+    // Check the state after delete
+    const resultsAfterDelete = Array.from(liveQueryCollection.values())
+    console.log(`Results after delete (no-op):`, JSON.stringify(resultsAfterDelete, null, 2))
+
+    // The live query collection should still show items 1 and 2
+    expect(resultsAfterDelete).toHaveLength(2)
+    expect(resultsAfterDelete.map((r) => r.id)).toEqual([`1`, `2`])
+
+    // Check that we did NOT receive any change events
+    console.log(`Change events (should be empty):`,
+      JSON.stringify(changeCallback.mock.calls.flatMap((call) => call[0]), null, 2))
+
+    // No changes expected since item 5 is outside the window
+    const allChanges = changeCallback.mock.calls.flatMap((call) => call[0])
+    expect(allChanges).toHaveLength(0)
+
+    subscription.unsubscribe()
+  })
+
   it(`should update state correctly after delete with limit`, async () => {
     // Create a live query with orderBy and limit
     const liveQueryCollection = createLiveQueryCollection((q) =>
