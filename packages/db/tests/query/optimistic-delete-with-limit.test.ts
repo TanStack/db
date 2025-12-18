@@ -394,7 +394,10 @@ describe(`Optimistic delete with limit`, () => {
     // Sorted by value desc: 1 (100), 2 (90), 3 (80), 4 (70), 5 (60)
     // Page 2 = offset 2 = items 3 and 4
     const initialResults = Array.from(liveQueryCollection.values())
-    console.log(`Initial results (page 2):`, JSON.stringify(initialResults, null, 2))
+    console.log(
+      `Initial results (page 2):`,
+      JSON.stringify(initialResults, null, 2),
+    )
     expect(initialResults).toHaveLength(2)
     expect(initialResults.map((r) => r.id)).toEqual([`3`, `4`])
 
@@ -424,15 +427,24 @@ describe(`Optimistic delete with limit`, () => {
 
     // Check the state after delete
     const resultsAfterDelete = Array.from(liveQueryCollection.values())
-    console.log(`Results after delete:`, JSON.stringify(resultsAfterDelete, null, 2))
+    console.log(
+      `Results after delete:`,
+      JSON.stringify(resultsAfterDelete, null, 2),
+    )
 
     // The live query collection should now show items 4 and 5
     expect(resultsAfterDelete).toHaveLength(2)
     expect(resultsAfterDelete.map((r) => r.id)).toEqual([`4`, `5`])
 
     // Check that we got the expected change events
-    console.log(`All changes (page 2 after deleting from page 1):`,
-      JSON.stringify(changeCallback.mock.calls.flatMap((call) => call[0]), null, 2))
+    console.log(
+      `All changes (page 2 after deleting from page 1):`,
+      JSON.stringify(
+        changeCallback.mock.calls.flatMap((call) => call[0]),
+        null,
+        2,
+      ),
+    )
 
     // We should have received change events (delete for item 3, insert for item 5)
     expect(changeCallback).toHaveBeenCalled()
@@ -440,12 +452,20 @@ describe(`Optimistic delete with limit`, () => {
     const allChanges = changeCallback.mock.calls.flatMap((call) => call[0])
 
     // Should have a delete for item 3 (shifted out of page 2)
-    const deleteEvents = allChanges.filter((c: ChangeMessage<Item>) => c.type === `delete`)
-    expect(deleteEvents.some((e: ChangeMessage<Item>) => e.key === `3`)).toBe(true)
+    const deleteEvents = allChanges.filter(
+      (c: ChangeMessage<Item>) => c.type === `delete`,
+    )
+    expect(deleteEvents.some((e: ChangeMessage<Item>) => e.key === `3`)).toBe(
+      true,
+    )
 
     // Should have an insert for item 5 (shifted into page 2)
-    const insertEvents = allChanges.filter((c: ChangeMessage<Item>) => c.type === `insert`)
-    expect(insertEvents.some((e: ChangeMessage<Item>) => e.key === `5`)).toBe(true)
+    const insertEvents = allChanges.filter(
+      (c: ChangeMessage<Item>) => c.type === `insert`,
+    )
+    expect(insertEvents.some((e: ChangeMessage<Item>) => e.key === `5`)).toBe(
+      true,
+    )
 
     subscription.unsubscribe()
   })
@@ -477,7 +497,10 @@ describe(`Optimistic delete with limit`, () => {
 
     // Check initial results - page 1 should show items 1 and 2
     const initialResults = Array.from(liveQueryCollection.values())
-    console.log(`Initial results (page 1 for no-op test):`, JSON.stringify(initialResults, null, 2))
+    console.log(
+      `Initial results (page 1 for no-op test):`,
+      JSON.stringify(initialResults, null, 2),
+    )
     expect(initialResults).toHaveLength(2)
     expect(initialResults.map((r) => r.id)).toEqual([`1`, `2`])
 
@@ -507,15 +530,24 @@ describe(`Optimistic delete with limit`, () => {
 
     // Check the state after delete
     const resultsAfterDelete = Array.from(liveQueryCollection.values())
-    console.log(`Results after delete (no-op):`, JSON.stringify(resultsAfterDelete, null, 2))
+    console.log(
+      `Results after delete (no-op):`,
+      JSON.stringify(resultsAfterDelete, null, 2),
+    )
 
     // The live query collection should still show items 1 and 2
     expect(resultsAfterDelete).toHaveLength(2)
     expect(resultsAfterDelete.map((r) => r.id)).toEqual([`1`, `2`])
 
     // Check that we did NOT receive any change events
-    console.log(`Change events (should be empty):`,
-      JSON.stringify(changeCallback.mock.calls.flatMap((call) => call[0]), null, 2))
+    console.log(
+      `Change events (should be empty):`,
+      JSON.stringify(
+        changeCallback.mock.calls.flatMap((call) => call[0]),
+        null,
+        2,
+      ),
+    )
 
     // No changes expected since item 5 is outside the window
     const allChanges = changeCallback.mock.calls.flatMap((call) => call[0])
