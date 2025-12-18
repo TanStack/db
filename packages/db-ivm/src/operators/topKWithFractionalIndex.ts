@@ -302,13 +302,36 @@ export class TopKWithFractionalIndexOperator<
   }
 
   run(): void {
+    const messages = this.inputMessages()
+    console.debug(`[TanStack-DB-DEBUG] TopKWithFractionalIndexOperator.run`, {
+      operatorId: this.id,
+      messageCount: messages.length,
+      indexSize: this.#index.size,
+    })
+
     const result: Array<[[K, IndexedValue<T>], number]> = []
-    for (const message of this.inputMessages()) {
-      for (const [item, multiplicity] of message.getInner()) {
+    for (const message of messages) {
+      const items = message.getInner()
+      console.debug(`[TanStack-DB-DEBUG] TopKWithFractionalIndexOperator: processing message`, {
+        operatorId: this.id,
+        itemCount: items.length,
+        items: items.slice(0, 5).map(([[key], mult]) => ({ key, multiplicity: mult })),
+      })
+      for (const [item, multiplicity] of items) {
         const [key, value] = item
         this.processElement(key, value, multiplicity, result)
       }
     }
+
+    console.debug(`[TanStack-DB-DEBUG] TopKWithFractionalIndexOperator.run complete`, {
+      operatorId: this.id,
+      resultCount: result.length,
+      results: result.slice(0, 5).map(([[key, [, index]], mult]) => ({
+        key,
+        index,
+        multiplicity: mult,
+      })),
+    })
 
     if (result.length > 0) {
       this.output.sendData(new MultiSet(result))
@@ -322,6 +345,20 @@ export class TopKWithFractionalIndexOperator<
     result: Array<[[K, IndexedValue<T>], number]>,
   ): void {
     const { oldMultiplicity, newMultiplicity } = this.addKey(key, multiplicity)
+
+    console.debug(`[TanStack-DB-DEBUG] TopKWithFractionalIndexOperator.processElement`, {
+      operatorId: this.id,
+      key,
+      multiplicity,
+      oldMultiplicity,
+      newMultiplicity,
+      action:
+        oldMultiplicity <= 0 && newMultiplicity > 0
+          ? 'INSERT'
+          : oldMultiplicity > 0 && newMultiplicity <= 0
+            ? 'DELETE'
+            : 'NO_CHANGE',
+    })
 
     let res: TopKChanges<[K, T]> = {
       moveIn: null,
@@ -340,6 +377,15 @@ export class TopKWithFractionalIndexOperator<
       // or it was visible and remains visible
       // so it doesn't affect the topK
     }
+
+    console.debug(`[TanStack-DB-DEBUG] TopKWithFractionalIndexOperator.processElement result`, {
+      operatorId: this.id,
+      key,
+      hasMoveIn: res.moveIn !== null,
+      hasMoveOut: res.moveOut !== null,
+      moveInKey: res.moveIn ? res.moveIn[0][0] : null,
+      moveOutKey: res.moveOut ? res.moveOut[0][0] : null,
+    })
 
     this.handleMoveIn(res.moveIn, result)
     this.handleMoveOut(res.moveOut, result)
