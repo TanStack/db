@@ -231,8 +231,22 @@ export class CollectionStateManager<
     // internal sync-driven redraws; user-triggered work (triggeredByUserAction)
     // must run so live queries stay responsive during long commits.
     if (this.isCommittingSyncTransactions && !triggeredByUserAction) {
+      console.debug(
+        `[TanStack-DB-DEBUG] recomputeOptimisticState: SKIPPING (isCommittingSyncTransactions)`,
+        { collectionId: this.collection.id },
+      )
       return
     }
+
+    console.debug(`[TanStack-DB-DEBUG] recomputeOptimisticState: STARTING`, {
+      collectionId: this.collection.id,
+      triggeredByUserAction,
+      previousUpsertsCount: this.optimisticUpserts.size,
+      previousDeletesCount: this.optimisticDeletes.size,
+      syncedDataCount: this.syncedData.size,
+      transactionCount: this.transactions.size,
+      pendingSyncedTransactionsCount: this.pendingSyncedTransactions.length,
+    })
 
     const previousState = new Map(this.optimisticUpserts)
     const previousDeletes = new Set(this.optimisticDeletes)
@@ -277,6 +291,19 @@ export class CollectionStateManager<
     // Collect events for changes
     const events: Array<ChangeMessage<TOutput, TKey>> = []
     this.collectOptimisticChanges(previousState, previousDeletes, events)
+
+    console.debug(
+      `[TanStack-DB-DEBUG] recomputeOptimisticState: collected ${events.length} events`,
+      {
+        collectionId: this.collection.id,
+        events: events.map((e) => ({
+          type: e.type,
+          key: e.key,
+        })),
+        newUpsertsCount: this.optimisticUpserts.size,
+        newDeletesCount: this.optimisticDeletes.size,
+      },
+    )
 
     // Filter out events for recently synced keys to prevent duplicates
     // BUT: Only filter out events that are actually from sync operations

@@ -136,6 +136,17 @@ export class CollectionSubscriber<
   ) {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
 
+    console.debug(
+      `[TanStack-DB-DEBUG] CollectionSubscriber.sendChangesToPipeline: INCOMING`,
+      {
+        alias: this.alias,
+        collectionId: this.collection.id,
+        changesCount: changesArray.length,
+        changes: changesArray.map((c) => ({ type: c.type, key: c.key })),
+        sentToD2KeysSize: this.sentToD2Keys.size,
+      },
+    )
+
     // Filter changes to prevent duplicate inserts to D2 pipeline.
     // This ensures D2 multiplicity stays at 1 for visible items, so deletes
     // properly reduce multiplicity to 0 (triggering DELETE output).
@@ -144,16 +155,33 @@ export class CollectionSubscriber<
       if (change.type === `insert`) {
         if (this.sentToD2Keys.has(change.key)) {
           // Skip duplicate insert - already sent to D2
+          console.debug(
+            `[TanStack-DB-DEBUG] sendChangesToPipeline: FILTERED OUT duplicate insert to D2`,
+            { alias: this.alias, key: change.key },
+          )
           continue
         }
         this.sentToD2Keys.add(change.key)
       } else if (change.type === `delete`) {
         // Remove from tracking so future re-inserts are allowed
         this.sentToD2Keys.delete(change.key)
+        console.debug(
+          `[TanStack-DB-DEBUG] sendChangesToPipeline: REMOVED key from sentToD2Keys on delete`,
+          { alias: this.alias, key: change.key },
+        )
       }
       // Updates are handled as delete+insert by splitUpdates, so no special handling needed
       filteredChanges.push(change)
     }
+
+    console.debug(
+      `[TanStack-DB-DEBUG] CollectionSubscriber.sendChangesToPipeline: AFTER D2 FILTERING`,
+      {
+        alias: this.alias,
+        outputChangesCount: filteredChanges.length,
+        outputChanges: filteredChanges.map((c) => ({ type: c.type, key: c.key })),
+      },
+    )
 
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)

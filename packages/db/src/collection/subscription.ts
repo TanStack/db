@@ -178,7 +178,26 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>) {
+    console.debug(
+      `[TanStack-DB-DEBUG] CollectionSubscription.emitEvents: INCOMING`,
+      {
+        collectionId: this.collection.id,
+        changesCount: changes.length,
+        changes: changes.map((c) => ({ type: c.type, key: c.key })),
+        sentKeysSize: this.sentKeys.size,
+        loadedInitialState: this.loadedInitialState,
+        skipFiltering: this.skipFiltering,
+      },
+    )
     const newChanges = this.filterAndFlipChanges(changes)
+    console.debug(
+      `[TanStack-DB-DEBUG] CollectionSubscription.emitEvents: AFTER FILTERING`,
+      {
+        collectionId: this.collection.id,
+        outputChangesCount: newChanges.length,
+        outputChanges: newChanges.map((c) => ({ type: c.type, key: c.key })),
+      },
+    )
     this.filteredCallback(newChanges)
   }
 
@@ -452,6 +471,10 @@ export class CollectionSubscription
     if (this.loadedInitialState || this.skipFiltering) {
       // We loaded the entire initial state or filtering is explicitly skipped
       // so no need to filter or flip changes
+      console.debug(
+        `[TanStack-DB-DEBUG] filterAndFlipChanges: BYPASSING (loadedInitialState=${this.loadedInitialState}, skipFiltering=${this.skipFiltering})`,
+        { collectionId: this.collection.id },
+      )
       return changes
     }
 
@@ -459,11 +482,30 @@ export class CollectionSubscription
     for (const change of changes) {
       let newChange = change
       const keyInSentKeys = this.sentKeys.has(change.key)
+
+      console.debug(
+        `[TanStack-DB-DEBUG] filterAndFlipChanges: processing change`,
+        {
+          collectionId: this.collection.id,
+          type: change.type,
+          key: change.key,
+          keyInSentKeys,
+        },
+      )
+
       if (!keyInSentKeys) {
         if (change.type === `update`) {
           newChange = { ...change, type: `insert`, previousValue: undefined }
+          console.debug(
+            `[TanStack-DB-DEBUG] filterAndFlipChanges: FLIPPED update->insert`,
+            { key: change.key },
+          )
         } else if (change.type === `delete`) {
           // filter out deletes for keys that have not been sent
+          console.debug(
+            `[TanStack-DB-DEBUG] filterAndFlipChanges: FILTERED OUT delete (key not in sentKeys)`,
+            { key: change.key },
+          )
           continue
         }
         this.sentKeys.add(change.key)
@@ -474,11 +516,19 @@ export class CollectionSubscription
           // This prevents D2 multiplicity from going above 1, which would
           // cause deletes to not properly remove items (multiplicity would
           // go from 2 to 1 instead of 1 to 0).
+          console.debug(
+            `[TanStack-DB-DEBUG] filterAndFlipChanges: FILTERED OUT duplicate insert`,
+            { key: change.key },
+          )
           continue
         } else if (change.type === `delete`) {
           // Remove from sentKeys so future inserts for this key are allowed
           // (e.g., after truncate + reinsert)
           this.sentKeys.delete(change.key)
+          console.debug(
+            `[TanStack-DB-DEBUG] filterAndFlipChanges: REMOVED key from sentKeys on delete`,
+            { key: change.key },
+          )
         }
       }
       newChanges.push(newChange)
