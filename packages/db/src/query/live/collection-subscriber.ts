@@ -179,7 +179,10 @@ export class CollectionSubscriber<
       {
         alias: this.alias,
         outputChangesCount: filteredChanges.length,
-        outputChanges: filteredChanges.map((c) => ({ type: c.type, key: c.key })),
+        outputChanges: filteredChanges.map((c) => ({
+          type: c.type,
+          key: c.key,
+        })),
       },
     )
 
