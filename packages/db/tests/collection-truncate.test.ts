@@ -943,4 +943,104 @@ describe(`Collection truncate operations`, () => {
     // No additional events should have been emitted to the unsubscribed callback
     expect(changeEvents.length).toBe(0)
   })
+
+  it(`should emit delete events after truncate when loadedInitialState was true`, async () => {
+    // This test specifically validates the edge case where:
+    // 1. requestSnapshot() is called without options (sets loadedInitialState = true)
+    // 2. When loadedInitialState is true, trackSentKeys early-returns, leaving sentKeys empty
+    // 3. On truncate, we must populate sentKeys BEFORE setting loadedInitialState = false
+    //    Otherwise, delete events would be filtered out by filterAndFlipChanges
+    //
+    // This is the scenario the reviewer identified where sentKeys could be empty.
+
+    const changeEvents: Array<any> = []
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+    let loadSubsetResolver: (() => void) | undefined
+    let loadSubsetCallCount = 0
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-loadedInitialState-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.markReady()
+
+          return {
+            loadSubset: (_options: LoadSubsetOptions) => {
+              loadSubsetCallCount++
+
+              return new Promise<void>((resolve) => {
+                loadSubsetResolver = () => {
+                  cfg.begin()
+                  cfg.write({
+                    type: `insert`,
+                    value: { id: 1, value: `item-1` },
+                  })
+                  cfg.write({
+                    type: `insert`,
+                    value: { id: 2, value: `item-2` },
+                  })
+                  cfg.commit()
+                  resolve()
+                }
+              })
+            },
+          }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Create subscription WITHOUT includeInitialState
+    // Then manually call requestSnapshot() without options to set loadedInitialState = true
+    const subscription = collection.subscribeChanges((changes) => {
+      changeEvents.push(...changes)
+    })
+
+    // Manually trigger requestSnapshot() without options
+    // This sets loadedInitialState = true and sentKeys stays empty
+    // (This mimics the lazy join fallback path in joins.ts line 310)
+    subscription.requestSnapshot()
+    expect(loadSubsetCallCount).toBe(1)
+
+    // Resolve the loadSubset promise
+    loadSubsetResolver!()
+    await vi.waitFor(() => expect(changeEvents.length).toBe(2))
+
+    // Verify initial data arrived
+    expect(changeEvents[0]).toMatchObject({ type: `insert`, key: 1 })
+    expect(changeEvents[1]).toMatchObject({ type: `insert`, key: 2 })
+
+    changeEvents.length = 0
+    const previousLoadSubsetCount = loadSubsetCallCount
+
+    // Now trigger a truncate
+    syncOps!.begin()
+    syncOps!.truncate()
+    syncOps!.commit()
+
+    // Wait for loadSubset to be called again
+    await vi.waitFor(() =>
+      expect(loadSubsetCallCount).toBeGreaterThan(previousLoadSubsetCount),
+    )
+
+    // Resolve the new loadSubset promise
+    loadSubsetResolver!()
+
+    // Wait for events to be emitted
+    await vi.waitFor(() => expect(changeEvents.length).toBeGreaterThan(0))
+
+    // The key assertion: we should have received delete events
+    // Without the fix, sentKeys would be empty and deletes would be filtered out
+    const deletes = changeEvents.filter((e) => e.type === `delete`)
+    expect(deletes.length).toBe(2) // Must have delete events!
+
+    subscription.unsubscribe()
+  })
 })

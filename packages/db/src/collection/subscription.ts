@@ -136,12 +136,6 @@ export class CollectionSubscription
    *
    * To prevent a flash of missing content, we buffer all changes (deletes from truncate
    * and inserts from refetch) until all loadSubset promises resolve, then emit them together.
-   *
-   * IMPORTANT: We intentionally do NOT clear sentKeys here. The truncate event is emitted
-   * BEFORE delete events are sent to subscribers. If we cleared sentKeys, the delete events
-   * would be filtered out by filterAndFlipChanges (which skips deletes for keys not in sentKeys).
-   * By keeping sentKeys intact, delete events pass through, and when new data arrives,
-   * inserts will still be emitted correctly (the type is already 'insert' so no conversion needed).
    */
   private handleTruncate() {
     // Copy the loaded subsets before clearing (we'll re-request them)
@@ -163,8 +157,9 @@ export class CollectionSubscription
     this.truncateBuffer = []
     this.pendingTruncateRefetches.clear()
 
-    // Reset snapshot/pagination tracking state but NOT sentKeys
-    // sentKeys must remain so delete events can pass through filterAndFlipChanges
+    // Reset snapshot/pagination tracking state
+    // Note: We don't need to populate sentKeys here because filterAndFlipChanges
+    // will skip the delete filter when isBufferingForTruncate is true
     this.snapshotSent = false
     this.loadedInitialState = false
     this.limitedSnapshotRowCount = 0
@@ -572,6 +567,14 @@ export class CollectionSubscription
       return changes
     }
 
+    // When buffering for truncate, we need all changes (including deletes) to pass through.
+    // This is important because:
+    // 1. If loadedInitialState was previously true, sentKeys will be empty
+    //    (trackSentKeys early-returns when loadedInitialState is true)
+    // 2. The truncate deletes are for keys that WERE sent to the subscriber
+    // 3. We're collecting all changes atomically, so filtering doesn't make sense
+    const skipDeleteFilter = this.isBufferingForTruncate
+
     const newChanges = []
     for (const change of changes) {
       let newChange = change
@@ -579,8 +582,11 @@ export class CollectionSubscription
         if (change.type === `update`) {
           newChange = { ...change, type: `insert`, previousValue: undefined }
         } else if (change.type === `delete`) {
-          // filter out deletes for keys that have not been sent
-          continue
+          // Filter out deletes for keys that have not been sent,
+          // UNLESS we're buffering for truncate (where all deletes should pass through)
+          if (!skipDeleteFilter) {
+            continue
+          }
         }
         this.sentKeys.add(change.key)
       }
