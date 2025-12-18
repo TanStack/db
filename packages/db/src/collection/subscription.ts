@@ -512,12 +512,23 @@ export class CollectionSubscription
     if (this.loadedInitialState || this.skipFiltering) {
       // No need to track sent keys if we loaded the entire state or filtering is skipped.
       // Since filtering won't be applied, all keys are effectively "observed".
+      console.debug(`[TanStack-DB-DEBUG] trackSentKeys: skipping (loadedInitialState=${this.loadedInitialState}, skipFiltering=${this.skipFiltering})`)
       return
     }
 
+    const keysAdded: Array<string | number> = []
     for (const change of changes) {
+      if (!this.sentKeys.has(change.key)) {
+        keysAdded.push(change.key)
+      }
       this.sentKeys.add(change.key)
     }
+    console.debug(`[TanStack-DB-DEBUG] trackSentKeys: added keys`, {
+      collectionId: this.collection.id,
+      keysAddedCount: keysAdded.length,
+      keysAdded: keysAdded.slice(0, 10),
+      totalSentKeys: this.sentKeys.size,
+    })
   }
 
   /**
