@@ -1117,6 +1117,12 @@ describe(`Collection truncate operations`, () => {
     expect(deletes.length).toBe(2) // Should have 2 deletes
     expect(inserts.length).toBe(2) // Should have 2 inserts
 
+    // Verify correct ordering: deletes should come before inserts
+    // (truncate clears old data, then refetch adds new data)
+    const firstDeleteIdx = changeEvents.findIndex((e) => e.type === `delete`)
+    const firstInsertIdx = changeEvents.findIndex((e) => e.type === `insert`)
+    expect(firstDeleteIdx).toBeLessThan(firstInsertIdx)
+
     // Verify collection state is correct
     expect(collection.state.size).toBe(2)
     expect(collection.state.get(1)).toEqual({ id: 1, value: `sync-item-1` })

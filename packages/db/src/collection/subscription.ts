@@ -141,8 +141,13 @@ export class CollectionSubscription
     // Copy the loaded subsets before clearing (we'll re-request them)
     const subsetsToReload = [...this.loadedSubsets]
 
-    // If there are no subsets to reload, no need to buffer - just reset state
-    if (subsetsToReload.length === 0) {
+    // Only buffer if there's an actual loadSubset handler that can do async work.
+    // Without a loadSubset handler, there's nothing to re-request and no reason to buffer.
+    // This prevents unnecessary buffering in eager sync mode or when loadSubset isn't implemented.
+    const hasLoadSubsetHandler = this.collection._sync.syncLoadSubsetFn !== null
+
+    // If there are no subsets to reload OR no loadSubset handler, just reset state
+    if (subsetsToReload.length === 0 || !hasLoadSubsetHandler) {
       this.snapshotSent = false
       this.loadedInitialState = false
       this.limitedSnapshotRowCount = 0
@@ -168,37 +173,43 @@ export class CollectionSubscription
     // Clear the loadedSubsets array since we're re-requesting fresh
     this.loadedSubsets = []
 
-    // Re-request all previously loaded subsets and track their promises
-    for (const options of subsetsToReload) {
-      const syncResult = this.collection._sync.loadSubset(options)
-
-      // Track this loadSubset call so we can unload it later
-      this.loadedSubsets.push(options)
-      this.trackLoadSubsetPromise(syncResult)
-
-      // Track the promise for buffer flushing
-      if (syncResult instanceof Promise) {
-        this.pendingTruncateRefetches.add(syncResult)
-        syncResult
-          .catch(() => {
-            // Ignore errors - we still want to flush the buffer even if some requests fail
-          })
-          .finally(() => {
-            this.pendingTruncateRefetches.delete(syncResult)
-            this.checkTruncateRefetchComplete()
-          })
+    // Defer the loadSubset calls to a microtask so the truncate commit's delete events
+    // are buffered BEFORE the loadSubset calls potentially trigger nested commits.
+    // This ensures correct event ordering: deletes first, then inserts.
+    queueMicrotask(() => {
+      // Check if we were unsubscribed while waiting
+      if (!this.isBufferingForTruncate) {
+        return
       }
-    }
 
-    // If all loadSubset calls were synchronous (returned true), flush immediately.
-    // Note: This may result in insert events arriving before delete events if the sync
-    // loadSubset triggers a nested commit. This is acceptable because:
-    // 1. The final collection state is always correct
-    // 2. UI frameworks like React derive state from collection.state, not incremental events
-    // 3. For incremental event processing, the events are still all present (just out of order)
-    if (this.pendingTruncateRefetches.size === 0) {
-      this.flushTruncateBuffer()
-    }
+      // Re-request all previously loaded subsets and track their promises
+      for (const options of subsetsToReload) {
+        const syncResult = this.collection._sync.loadSubset(options)
+
+        // Track this loadSubset call so we can unload it later
+        this.loadedSubsets.push(options)
+        this.trackLoadSubsetPromise(syncResult)
+
+        // Track the promise for buffer flushing
+        if (syncResult instanceof Promise) {
+          this.pendingTruncateRefetches.add(syncResult)
+          syncResult
+            .catch(() => {
+              // Ignore errors - we still want to flush the buffer even if some requests fail
+            })
+            .finally(() => {
+              this.pendingTruncateRefetches.delete(syncResult)
+              this.checkTruncateRefetchComplete()
+            })
+        }
+      }
+
+      // If all loadSubset calls were synchronous (returned true), flush now
+      // At this point, delete events have already been buffered from the truncate commit
+      if (this.pendingTruncateRefetches.size === 0) {
+        this.flushTruncateBuffer()
+      }
+    })
   }
 
   /**
@@ -219,9 +230,11 @@ export class CollectionSubscription
   private flushTruncateBuffer() {
     this.isBufferingForTruncate = false
 
-    // Emit all buffered changes in order
-    for (const changes of this.truncateBuffer) {
-      this.filteredCallback(changes)
+    // Flatten all buffered changes into a single array for atomic emission
+    // This ensures consumers see all truncate changes (deletes + inserts) in one callback
+    const merged = this.truncateBuffer.flat()
+    if (merged.length > 0) {
+      this.filteredCallback(merged)
     }
 
     this.truncateBuffer = []
