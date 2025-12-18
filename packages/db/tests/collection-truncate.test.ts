@@ -1043,4 +1043,85 @@ describe(`Collection truncate operations`, () => {
 
     subscription.unsubscribe()
   })
+
+  it(`should buffer truncate deletes even when loadSubset is synchronous`, async () => {
+    // This test verifies that even when loadSubset returns synchronously (true),
+    // we still capture the truncate delete events in the buffer.
+    // The truncate event is emitted BEFORE delete events are sent, so if we
+    // flush immediately, we'd miss the deletes.
+
+    const changeEvents: Array<any> = []
+    let syncOps:
+      | Parameters<SyncConfig<{ id: number; value: string }, number>[`sync`]>[0]
+      | undefined
+
+    const collection = createCollection<{ id: number; value: string }, number>({
+      id: `truncate-sync-loadSubset-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      syncMode: `on-demand`,
+      sync: {
+        sync: (cfg) => {
+          syncOps = cfg
+          cfg.markReady()
+
+          return {
+            // loadSubset returns true (synchronous) - data already available
+            loadSubset: (_options: LoadSubsetOptions) => {
+              // Synchronously write data
+              cfg.begin()
+              cfg.write({
+                type: `insert`,
+                value: { id: 1, value: `sync-item-1` },
+              })
+              cfg.write({
+                type: `insert`,
+                value: { id: 2, value: `sync-item-2` },
+              })
+              cfg.commit()
+              return true // Synchronous return
+            },
+          }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    // Subscribe with includeInitialState to trigger loadSubset
+    const subscription = collection.subscribeChanges(
+      (changes) => {
+        changeEvents.push(...changes)
+      },
+      { includeInitialState: true },
+    )
+
+    // Wait for initial data
+    await vi.waitFor(() => expect(changeEvents.length).toBe(2))
+    expect(collection.state.size).toBe(2)
+
+    changeEvents.length = 0
+
+    // Trigger truncate - loadSubset will return synchronously
+    syncOps!.begin()
+    syncOps!.truncate()
+    syncOps!.commit()
+
+    // Wait for events to settle
+    await vi.advanceTimersByTimeAsync(10)
+
+    // We should have received delete events even though loadSubset was sync
+    const deletes = changeEvents.filter((e) => e.type === `delete`)
+    const inserts = changeEvents.filter((e) => e.type === `insert`)
+
+    expect(deletes.length).toBe(2) // Should have 2 deletes
+    expect(inserts.length).toBe(2) // Should have 2 inserts
+
+    // Verify collection state is correct
+    expect(collection.state.size).toBe(2)
+    expect(collection.state.get(1)).toEqual({ id: 1, value: `sync-item-1` })
+    expect(collection.state.get(2)).toEqual({ id: 2, value: `sync-item-2` })
+
+    subscription.unsubscribe()
+  })
 })

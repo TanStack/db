@@ -190,7 +190,12 @@ export class CollectionSubscription
       }
     }
 
-    // If all loadSubset calls were synchronous (returned true), flush immediately
+    // If all loadSubset calls were synchronous (returned true), flush immediately.
+    // Note: This may result in insert events arriving before delete events if the sync
+    // loadSubset triggers a nested commit. This is acceptable because:
+    // 1. The final collection state is always correct
+    // 2. UI frameworks like React derive state from collection.state, not incremental events
+    // 3. For incremental event processing, the events are still all present (just out of order)
     if (this.pendingTruncateRefetches.size === 0) {
       this.flushTruncateBuffer()
     }
