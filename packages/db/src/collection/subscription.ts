@@ -498,6 +498,22 @@ export class CollectionSubscription
         }
         this.sentKeys.add(change.key)
       } else {
+        // Key was already sent - handle based on change type
+        if (change.type === `insert`) {
+          // Filter out duplicate inserts - the key was already inserted.
+          // This prevents D2 multiplicity from going above 1, which would
+          // cause deletes to not properly remove items (multiplicity would
+          // go from 2 to 1 instead of 1 to 0).
+          console.debug(
+            `[TanStack-DB-DEBUG] FILTERING OUT duplicate insert for key already in sentKeys`,
+            { key: change.key },
+          )
+          continue
+        } else if (change.type === `delete`) {
+          // Remove from sentKeys so future inserts for this key are allowed
+          // (e.g., after truncate + reinsert)
+          this.sentKeys.delete(change.key)
+        }
         console.debug(
           `[TanStack-DB-DEBUG] Key found in sentKeys, passing through`,
           { key: change.key, type: change.type },
@@ -519,16 +535,28 @@ export class CollectionSubscription
     }
 
     const keysAdded: Array<string | number> = []
+    const keysRemoved: Array<string | number> = []
     for (const change of changes) {
-      if (!this.sentKeys.has(change.key)) {
-        keysAdded.push(change.key)
+      if (change.type === `delete`) {
+        // Remove deleted keys from sentKeys so future re-inserts are allowed
+        if (this.sentKeys.has(change.key)) {
+          this.sentKeys.delete(change.key)
+          keysRemoved.push(change.key)
+        }
+      } else {
+        // For inserts and updates, track the key as sent
+        if (!this.sentKeys.has(change.key)) {
+          keysAdded.push(change.key)
+        }
+        this.sentKeys.add(change.key)
       }
-      this.sentKeys.add(change.key)
     }
-    console.debug(`[TanStack-DB-DEBUG] trackSentKeys: added keys`, {
+    console.debug(`[TanStack-DB-DEBUG] trackSentKeys: updated keys`, {
       collectionId: this.collection.id,
       keysAddedCount: keysAdded.length,
       keysAdded: keysAdded.slice(0, 10),
+      keysRemovedCount: keysRemoved.length,
+      keysRemoved: keysRemoved.slice(0, 10),
       totalSentKeys: this.sentKeys.size,
     })
   }
