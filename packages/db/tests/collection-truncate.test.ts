@@ -863,7 +863,10 @@ describe(`Collection truncate operations`, () => {
     // Trigger truncate
     syncOps!.begin()
     syncOps!.truncate()
-    syncOps!.write({ type: `insert`, value: { id: 1, value: `after-truncate` } })
+    syncOps!.write({
+      type: `insert`,
+      value: { id: 1, value: `after-truncate` },
+    })
     syncOps!.commit()
 
     // Since there were no loaded subsets, changes should be emitted immediately

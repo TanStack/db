@@ -205,7 +205,10 @@ export class CollectionSubscription
    * Check if all truncate refetch promises have completed and flush buffer if so
    */
   private checkTruncateRefetchComplete() {
-    if (this.pendingTruncateRefetches.size === 0 && this.isBufferingForTruncate) {
+    if (
+      this.pendingTruncateRefetches.size === 0 &&
+      this.isBufferingForTruncate
+    ) {
       this.flushTruncateBuffer()
     }
   }
