@@ -552,8 +552,8 @@ describe.each([
         mockRequestSnapshot.mock.calls[index]?.[0]
       expect(callArgs(0)).toMatchObject({
         params: { '1': `true` },
-        where: `active = $1`,
-        orderBy: `age NULLS FIRST`,
+        where: `"active" = $1`,
+        orderBy: `"age" NULLS FIRST`,
         limit: 2,
       })
 
@@ -615,16 +615,16 @@ describe.each([
       // Check that first it requested a limit of 2 users (from first query)
       expect(callArgs(0)).toMatchObject({
         params: { '1': `true` },
-        where: `active = $1`,
-        orderBy: `age NULLS FIRST`,
+        where: `"active" = $1`,
+        orderBy: `"age" NULLS FIRST`,
         limit: 2,
       })
 
       // Check that second it requested a limit of 6 users (from second query)
       expect(callArgs(1)).toMatchObject({
         params: { '1': `true` },
-        where: `active = $1`,
-        orderBy: `age NULLS FIRST`,
+        where: `"active" = $1`,
+        orderBy: `"age" NULLS FIRST`,
         limit: 6,
       })
 
@@ -733,8 +733,8 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     expect(mockRequestSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         limit: 5, // Requests full limit from Electric
-        orderBy: `age NULLS FIRST`,
-        where: `active = $1`,
+        orderBy: `"age" NULLS FIRST`,
+        where: `"active" = $1`,
         params: { 1: `true` }, // Parameters are stringified
       }),
     )
@@ -795,7 +795,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     expect(mockFetchSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         limit: 3, // Requests full limit from Electric
-        orderBy: `id NULLS FIRST`,
+        orderBy: `"id" NULLS FIRST`,
         params: {},
       }),
     )
@@ -871,7 +871,7 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     expect(mockRequestSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
         limit: 3,
-        orderBy: `age NULLS FIRST`,
+        orderBy: `"age" NULLS FIRST`,
       }),
     )
 
@@ -903,9 +903,9 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     // Should have requested snapshot with WHERE clause
     expect(mockRequestSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: `active = $1`,
+        where: `"active" = $1`,
         params: { '1': `true` },
-        orderBy: `name DESC NULLS FIRST`,
+        orderBy: `"name" DESC NULLS FIRST`,
         limit: 10,
       }),
     )
@@ -934,9 +934,9 @@ describe(`Electric Collection with Live Query - syncMode integration`, () => {
     // Should have called fetchSnapshot with complex WHERE clause (not requestSnapshot)
     expect(mockFetchSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: `age > $1`,
+        where: `"age" > $1`,
         params: { '1': `20` },
-        orderBy: `age NULLS FIRST`,
+        orderBy: `"age" NULLS FIRST`,
         limit: 5,
       }),
     )
@@ -1041,9 +1041,9 @@ describe(`Electric Collection - loadSubset deduplication`, () => {
     expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
     expect(mockRequestSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: `active = $1`,
+        where: `"active" = $1`,
         params: { '1': `true` },
-        orderBy: `age NULLS FIRST`,
+        orderBy: `"age" NULLS FIRST`,
         limit: 10,
       }),
     )

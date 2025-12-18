@@ -25,7 +25,7 @@ describe(`sql-compiler`, () => {
         const result = compileSQL({
           where: func(`eq`, [ref(`name`), val(`John`)]),
         })
-        expect(result.where).toBe(`name = $1`)
+        expect(result.where).toBe(`"name" = $1`)
         expect(result.params).toEqual({ '1': `John` })
       })
 
@@ -33,7 +33,7 @@ describe(`sql-compiler`, () => {
         const result = compileSQL({
           where: func(`eq`, [ref(`age`), val(25)]),
         })
-        expect(result.where).toBe(`age = $1`)
+        expect(result.where).toBe(`"age" = $1`)
         expect(result.params).toEqual({ '1': `25` })
       })
 
@@ -41,7 +41,7 @@ describe(`sql-compiler`, () => {
         const result = compileSQL({
           where: func(`gt`, [ref(`age`), val(18)]),
         })
-        expect(result.where).toBe(`age > $1`)
+        expect(result.where).toBe(`"age" > $1`)
         expect(result.params).toEqual({ '1': `18` })
       })
 
@@ -49,7 +49,7 @@ describe(`sql-compiler`, () => {
         const result = compileSQL({
           where: func(`lt`, [ref(`price`), val(100)]),
         })
-        expect(result.where).toBe(`price < $1`)
+        expect(result.where).toBe(`"price" < $1`)
         expect(result.params).toEqual({ '1': `100` })
       })
 
@@ -57,7 +57,7 @@ describe(`sql-compiler`, () => {
         const result = compileSQL({
           where: func(`gte`, [ref(`quantity`), val(10)]),
         })
-        expect(result.where).toBe(`quantity >= $1`)
+        expect(result.where).toBe(`"quantity" >= $1`)
         expect(result.params).toEqual({ '1': `10` })
       })
 
@@ -65,7 +65,7 @@ describe(`sql-compiler`, () => {
         const result = compileSQL({
           where: func(`lte`, [ref(`rating`), val(5)]),
         })
-        expect(result.where).toBe(`rating <= $1`)
+        expect(result.where).toBe(`"rating" <= $1`)
         expect(result.params).toEqual({ '1': `5` })
       })
     })
@@ -79,7 +79,7 @@ describe(`sql-compiler`, () => {
           ]),
         })
         // Note: 2-arg AND doesn't add parentheses around the operands
-        expect(result.where).toBe(`projectId = $1 AND name > $2`)
+        expect(result.where).toBe(`"projectId" = $1 AND "name" > $2`)
         expect(result.params).toEqual({ '1': `uuid-123`, '2': `cursor-value` })
       })
 
@@ -92,7 +92,7 @@ describe(`sql-compiler`, () => {
           ]),
         })
         // >2 args adds parentheses
-        expect(result.where).toBe(`(a = $1) AND (b = $2) AND (c = $3)`)
+        expect(result.where).toBe(`("a" = $1) AND ("b" = $2) AND ("c" = $3)`)
         expect(result.params).toEqual({ '1': `1`, '2': `2`, '3': `3` })
       })
 
@@ -103,7 +103,7 @@ describe(`sql-compiler`, () => {
             func(`eq`, [ref(`status`), val(`pending`)]),
           ]),
         })
-        expect(result.where).toBe(`status = $1 OR status = $2`)
+        expect(result.where).toBe(`"status" = $1 OR "status" = $2`)
         expect(result.params).toEqual({ '1': `active`, '2': `pending` })
       })
     })
@@ -252,7 +252,7 @@ describe(`sql-compiler`, () => {
         const isNullResult = compileSQL({
           where: func(`isNull`, [ref(`email`)]),
         })
-        expect(isNullResult.where).toBe(`email IS NULL`)
+        expect(isNullResult.where).toBe(`"email" IS NULL`)
         expect(isNullResult.params).toEqual({})
       })
 
@@ -273,7 +273,7 @@ describe(`sql-compiler`, () => {
         const result = compileSQL({
           where: func(`isNull`, [ref(`deletedAt`)]),
         })
-        expect(result.where).toBe(`deletedAt IS NULL`)
+        expect(result.where).toBe(`"deletedAt" IS NULL`)
         expect(result.params).toEqual({})
       })
 
@@ -281,7 +281,7 @@ describe(`sql-compiler`, () => {
         const result = compileSQL({
           where: func(`isUndefined`, [ref(`field`)]),
         })
-        expect(result.where).toBe(`field IS NULL`)
+        expect(result.where).toBe(`"field" IS NULL`)
         expect(result.params).toEqual({})
       })
 
@@ -289,7 +289,7 @@ describe(`sql-compiler`, () => {
         const result = compileSQL({
           where: func(`not`, [func(`isNull`, [ref(`name`)])]),
         })
-        expect(result.where).toBe(`name IS NOT NULL`)
+        expect(result.where).toBe(`"name" IS NOT NULL`)
         expect(result.params).toEqual({})
       })
     })
