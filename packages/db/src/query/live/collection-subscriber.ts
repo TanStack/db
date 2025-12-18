@@ -413,13 +413,13 @@ function sendChangesToInput(
   const multiSetArray: MultiSetArray<unknown> = []
   const changesArray = Array.isArray(changes) ? changes : [...changes]
 
-  console.debug(
-    `[TanStack-DB-DEBUG] sendChangesToInput: processing changes`,
-    {
-      changesCount: changesArray.length,
-      changeTypes: changesArray.map((c) => ({ type: c.type, key: getKey(c.value) })),
-    },
-  )
+  console.debug(`[TanStack-DB-DEBUG] sendChangesToInput: processing changes`, {
+    changesCount: changesArray.length,
+    changeTypes: changesArray.map((c) => ({
+      type: c.type,
+      key: getKey(c.value),
+    })),
+  })
 
   for (const change of changesArray) {
     const key = getKey(change.value)
@@ -469,10 +469,10 @@ function* splitUpdates<
       yield { type: `delete`, key: change.key, value: change.previousValue! }
       yield { type: `insert`, key: change.key, value: change.value }
     } else {
-      console.debug(
-        `[TanStack-DB-DEBUG] splitUpdates: passing through`,
-        { type: change.type, key: change.key },
-      )
+      console.debug(`[TanStack-DB-DEBUG] splitUpdates: passing through`, {
+        type: change.type,
+        key: change.key,
+      })
       yield change
     }
   }
