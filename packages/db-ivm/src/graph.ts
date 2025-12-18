@@ -128,27 +128,33 @@ export abstract class LinearUnaryOperator<T, U> extends UnaryOperator<T | U> {
 
   run(): void {
     const messages = this.inputMessages()
-    console.debug(`[TanStack-DB-DEBUG] LinearUnaryOperator.run (${this.operatorType})`, {
-      operatorId: this.id,
-      messageCount: messages.length,
-    })
+    console.debug(
+      `[TanStack-DB-DEBUG] LinearUnaryOperator.run (${this.operatorType})`,
+      {
+        operatorId: this.id,
+        messageCount: messages.length,
+      },
+    )
     for (const message of messages) {
       const inputItems = message.getInner()
       const result = this.inner(message)
       const outputItems = result.getInner()
-      console.debug(`[TanStack-DB-DEBUG] LinearUnaryOperator.inner (${this.operatorType})`, {
-        operatorId: this.id,
-        inputItemCount: inputItems.length,
-        outputItemCount: outputItems.length,
-        inputSample: inputItems.slice(0, 3).map(([item, mult]) => ({
-          item: typeof item === 'object' ? JSON.stringify(item) : item,
-          multiplicity: mult,
-        })),
-        outputSample: outputItems.slice(0, 3).map(([item, mult]) => ({
-          item: typeof item === 'object' ? JSON.stringify(item) : item,
-          multiplicity: mult,
-        })),
-      })
+      console.debug(
+        `[TanStack-DB-DEBUG] LinearUnaryOperator.inner (${this.operatorType})`,
+        {
+          operatorId: this.id,
+          inputItemCount: inputItems.length,
+          outputItemCount: outputItems.length,
+          inputSample: inputItems.slice(0, 3).map(([item, mult]) => ({
+            item: typeof item === 'object' ? JSON.stringify(item) : item,
+            multiplicity: mult,
+          })),
+          outputSample: outputItems.slice(0, 3).map(([item, mult]) => ({
+            item: typeof item === 'object' ? JSON.stringify(item) : item,
+            multiplicity: mult,
+          })),
+        },
+      )
       this.output.sendData(result)
     }
   }
