@@ -129,14 +129,30 @@ export class CollectionSubscriber<
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => boolean,
   ) {
+    const changesArray = Array.isArray(changes) ? changes : [...changes]
+    console.debug(
+      `[TanStack-DB-DEBUG] sendChangesToPipeline called`,
+      {
+        alias: this.alias,
+        collectionId: this.collection.id,
+        changesCount: changesArray.length,
+        changeTypes: changesArray.map((c) => ({ type: c.type, key: c.key })),
+      },
+    )
+
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
     const sentChanges = sendChangesToInput(
       input,
-      changes,
+      changesArray,
       this.collection.config.getKey,
+    )
+
+    console.debug(
+      `[TanStack-DB-DEBUG] sendChangesToInput returned`,
+      { sentChanges, alias: this.alias },
     )
 
     // Do not provide the callback that loads more data
@@ -162,8 +178,11 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
+    // Only pass includeInitialState when true. When it's false, we leave it
+    // undefined so that user subscriptions with explicit `includeInitialState: false`
+    // can be distinguished from internal lazy-loading subscriptions.
     const subscription = this.collection.subscribeChanges(sendChanges, {
-      includeInitialState,
+      ...(includeInitialState && { includeInitialState }),
       whereExpression,
     })
 

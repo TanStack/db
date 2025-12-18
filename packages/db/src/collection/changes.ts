@@ -58,10 +58,23 @@ export class CollectionChangesManager<
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false,
   ): void {
+    console.debug(
+      `[TanStack-DB-DEBUG] emitEvents called on collection`,
+      {
+        collectionId: this.collection.id,
+        changesCount: changes.length,
+        changeTypes: changes.map((c) => ({ type: c.type, key: c.key })),
+        forceEmit,
+        shouldBatchEvents: this.shouldBatchEvents,
+        subscriberCount: this.changeSubscriptions.size,
+      },
+    )
+
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
       // Add events to the batch
       this.batchedEvents.push(...changes)
+      console.debug(`[TanStack-DB-DEBUG] Batching events, not emitting yet`)
       return
     }
 
@@ -80,8 +93,14 @@ export class CollectionChangesManager<
     }
 
     if (eventsToEmit.length === 0) {
+      console.debug(`[TanStack-DB-DEBUG] No events to emit, returning early`)
       return
     }
+
+    console.debug(
+      `[TanStack-DB-DEBUG] Emitting to ${this.changeSubscriptions.size} subscriptions`,
+      { eventsToEmit: eventsToEmit.map((c) => ({ type: c.type, key: c.key })) },
+    )
 
     // Emit to all listeners
     for (const subscription of this.changeSubscriptions) {
@@ -96,6 +115,15 @@ export class CollectionChangesManager<
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
     options: SubscribeChangesOptions = {},
   ): CollectionSubscription {
+    console.debug(
+      `[TanStack-DB-DEBUG] subscribeChanges called`,
+      {
+        collectionId: this.collection.id,
+        includeInitialState: options.includeInitialState,
+        hasWhereExpression: !!options.whereExpression,
+      },
+    )
+
     // Start sync and track subscriber
     this.addSubscriber()
 
@@ -108,11 +136,25 @@ export class CollectionChangesManager<
     })
 
     if (options.includeInitialState) {
+      console.debug(
+        `[TanStack-DB-DEBUG] Requesting snapshot for subscription (includeInitialState: true)`,
+      )
       subscription.requestSnapshot({ trackLoadSubsetPromise: false })
+    } else if (options.includeInitialState === false) {
+      // When explicitly set to false (not just undefined), mark all state as "seen"
+      // so that all future changes (including deletes) pass through unfiltered.
+      console.debug(
+        `[TanStack-DB-DEBUG] markAllStateAsSeen for subscription (includeInitialState: false)`,
+      )
+      subscription.markAllStateAsSeen()
     }
 
     // Add to batched listeners
     this.changeSubscriptions.add(subscription)
+
+    console.debug(
+      `[TanStack-DB-DEBUG] Subscription added, total subscriptions: ${this.changeSubscriptions.size}`,
+    )
 
     return subscription
   }

@@ -711,6 +711,19 @@ export class CollectionConfigBuilder<
     const { write, collection } = config
     const { deletes, inserts, value, orderByIndex } = changes
 
+    console.debug(
+      `[TanStack-DB-DEBUG] applyChanges called (D2 pipeline output)`,
+      {
+        liveQueryId: this.id,
+        key,
+        deletes,
+        inserts,
+        hasValue: !!value,
+        orderByIndex,
+        collectionHasKey: collection.has(collection.getKeyFromItem(value)),
+      },
+    )
+
     // Store the key of the result so that we can retrieve it in the
     // getKey function
     this.resultKeys.set(value, key)
@@ -722,6 +735,7 @@ export class CollectionConfigBuilder<
 
     // Simple singular insert.
     if (inserts && deletes === 0) {
+      console.debug(`[TanStack-DB-DEBUG] applyChanges: writing INSERT`, { key })
       write({
         value,
         type: `insert`,
@@ -733,12 +747,14 @@ export class CollectionConfigBuilder<
       // was inserted previously).
       (inserts === deletes && collection.has(collection.getKeyFromItem(value)))
     ) {
+      console.debug(`[TanStack-DB-DEBUG] applyChanges: writing UPDATE`, { key })
       write({
         value,
         type: `update`,
       })
       // Only delete is left as an option
     } else if (deletes > 0) {
+      console.debug(`[TanStack-DB-DEBUG] applyChanges: writing DELETE`, { key })
       write({
         value,
         type: `delete`,
