@@ -66,25 +66,37 @@ Queries without `.limit()` don't use the `TopKWithFractionalIndexOperator`, so t
 
 ### Sources of Duplicate Inserts
 
-Multiple code paths could send the same item to D2:
+Two main sources could cause duplicate inserts:
 
-1. **Initial data loading** via `requestLimitedSnapshot()`
-2. **Collection change events** via subscription callbacks
-3. **Lazy loading** when scrolling/paginating
-4. **Multiple live queries** on the same source collection
+1. **Race condition during subscription**: Snapshot loading methods (`requestSnapshot`, `requestLimitedSnapshot`) were adding keys to `sentKeys` AFTER calling the callback, while change events were adding keys BEFORE. If a change event arrived during callback execution, both could send the same insert.
 
-Each `CollectionSubscriber` (one per live query) has its own D2 pipeline, and the `CollectionSubscription` on the source collection could send duplicates through different callbacks.
+2. **Truncate operations**: After a truncate, both server sync data and optimistic state recomputation can emit inserts for the same key in a single batch.
 
 ## The Fix
 
-We added deduplication at **two levels**:
+We fixed the issue at two levels:
 
-### 1. CollectionSubscription Level (`filterAndFlipChanges`)
+### 1. Race Condition Prevention (subscription.ts)
 
-Tracks `sentKeys` - a Set of keys that have been sent to subscribers:
+Changed `requestSnapshot` and `requestLimitedSnapshot` to add keys to `sentKeys` BEFORE calling the callback:
 
-- **Duplicate inserts**: Skip if key already in `sentKeys`
-- **Deletes**: Remove key from `sentKeys` (allowing future re-inserts)
+```typescript
+// Add keys to sentKeys BEFORE calling callback to prevent race condition.
+// If a change event arrives while the callback is executing, it will see
+// the keys already in sentKeys and filter out duplicates correctly.
+for (const change of filteredSnapshot) {
+  this.sentKeys.add(change.key)
+}
+
+this.snapshotSent = true
+this.callback(filteredSnapshot)
+```
+
+This ensures the timing is symmetric: both snapshot loading and change events now add to `sentKeys` before the callback sees the changes.
+
+### 2. Duplicate Insert Filtering (`filterAndFlipChanges`)
+
+The existing `filterAndFlipChanges` method now correctly filters duplicate inserts as a safety net for any remaining edge cases (like truncate + optimistic state):
 
 ```typescript
 if (change.type === 'insert' && this.sentKeys.has(change.key)) {
@@ -95,26 +107,12 @@ if (change.type === 'delete') {
 }
 ```
 
-### 2. CollectionSubscriber Level (`sendChangesToPipeline`)
-
-Each live query's `CollectionSubscriber` now tracks `sentToD2Keys` - keys that have been sent to its D2 pipeline:
-
-- **Duplicate inserts**: Skip if key already sent to this D2 pipeline
-- **Deletes**: Remove from tracking (allowing re-inserts after delete)
-- **Truncate**: Clear all tracking (allowing full reload)
-
-```typescript
-if (change.type === 'insert' && this.sentToD2Keys.has(change.key)) {
-  continue // Skip duplicate - already in D2 with multiplicity 1
-}
-```
-
-This ensures that no matter which code path sends data to D2 (initial load, change events, lazy loading), each key can only have multiplicity 1 in the D2 pipeline.
+This ensures that no matter which code path sends data to the subscription, each key can only be inserted once (until deleted).
 
 ## Testing
 
 The fix was verified by:
 
-1. Tracing through the D2 pipeline with debug logging
+1. Running the full test suite (1795 tests passing)
 2. Confirming `TopKWithFractionalIndexOperator.processElement` now shows `oldMultiplicity: 1, newMultiplicity: 0` for deletes
-3. Running the full test suite (1795 tests passing)
+3. Testing various scenarios: initial load, change events, truncate + optimistic mutations
