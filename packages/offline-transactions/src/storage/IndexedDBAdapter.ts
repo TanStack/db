@@ -1,4 +1,4 @@
-import { BaseStorageAdapter } from "./StorageAdapter"
+import { BaseStorageAdapter } from './StorageAdapter'
 
 export class IndexedDBAdapter extends BaseStorageAdapter {
   private dbName: string
@@ -82,7 +82,7 @@ export class IndexedDBAdapter extends BaseStorageAdapter {
   }
 
   private async getStore(
-    mode: IDBTransactionMode = `readonly`
+    mode: IDBTransactionMode = `readonly`,
   ): Promise<IDBObjectStore> {
     const db = await this.openDB()
     const transaction = db.transaction([this.storeName], mode)
@@ -117,7 +117,7 @@ export class IndexedDBAdapter extends BaseStorageAdapter {
         error.name === `QuotaExceededError`
       ) {
         throw new Error(
-          `Storage quota exceeded. Consider clearing old transactions.`
+          `Storage quota exceeded. Consider clearing old transactions.`,
         )
       }
       throw error

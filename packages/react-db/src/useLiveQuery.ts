@@ -1,9 +1,9 @@
-import { useRef, useSyncExternalStore } from "react"
+import { useRef, useSyncExternalStore } from 'react'
 import {
   BaseQueryBuilder,
   CollectionImpl,
   createLiveQueryCollection,
-} from "@tanstack/db"
+} from '@tanstack/db'
 import type {
   Collection,
   CollectionConfigSingleRowOption,
@@ -16,7 +16,7 @@ import type {
   NonSingleResult,
   QueryBuilder,
   SingleResult,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
 
@@ -83,7 +83,7 @@ export type UseLiveQueryStatus = CollectionStatus | `disabled`
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<unknown>
+  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
@@ -100,9 +100,9 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
   queryFn: (
-    q: InitialQueryBuilder
+    q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-  deps?: Array<unknown>
+  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
   data: InferResultType<TContext> | undefined
@@ -119,9 +119,9 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 3: Accept query function that can return LiveQueryCollectionConfig
 export function useLiveQuery<TContext extends Context>(
   queryFn: (
-    q: InitialQueryBuilder
+    q: InitialQueryBuilder,
   ) => LiveQueryCollectionConfig<TContext> | undefined | null,
-  deps?: Array<unknown>
+  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>> | undefined
   data: InferResultType<TContext> | undefined
@@ -142,9 +142,9 @@ export function useLiveQuery<
   TUtils extends Record<string, any>,
 >(
   queryFn: (
-    q: InitialQueryBuilder
+    q: InitialQueryBuilder,
   ) => Collection<TResult, TKey, TUtils> | undefined | null,
-  deps?: Array<unknown>
+  deps?: Array<unknown>,
 ): {
   state: Map<TKey, TResult> | undefined
   data: Array<TResult> | undefined
@@ -166,14 +166,14 @@ export function useLiveQuery<
   TUtils extends Record<string, any>,
 >(
   queryFn: (
-    q: InitialQueryBuilder
+    q: InitialQueryBuilder,
   ) =>
     | QueryBuilder<TContext>
     | LiveQueryCollectionConfig<TContext>
     | Collection<TResult, TKey, TUtils>
     | undefined
     | null,
-  deps?: Array<unknown>
+  deps?: Array<unknown>,
 ): {
   state:
     | Map<string | number, GetResult<TContext>>
@@ -229,7 +229,7 @@ export function useLiveQuery<
 // Overload 6: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<unknown>
+  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
@@ -278,7 +278,7 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult,
 ): {
   state: Map<TKey, TResult>
   data: Array<TResult>
@@ -298,7 +298,7 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils> & SingleResult
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & SingleResult,
 ): {
   state: Map<TKey, TResult>
   data: TResult | undefined
@@ -315,7 +315,7 @@ export function useLiveQuery<
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
   configOrQueryOrCollection: any,
-  deps: Array<unknown> = []
+  deps: Array<unknown> = [],
 ) {
   // Check if it's already a collection by checking for specific collection methods
   const isCollection =
@@ -327,7 +327,7 @@ export function useLiveQuery(
 
   // Use refs to cache collection and track dependencies
   const collectionRef = useRef<Collection<object, string | number, {}> | null>(
-    null
+    null,
   )
   const depsRef = useRef<Array<unknown> | null>(null)
   const configRef = useRef<unknown>(null)
@@ -386,7 +386,7 @@ export function useLiveQuery(
         } else {
           // Unexpected return type
           throw new Error(
-            `useLiveQuery callback must return a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof result}`
+            `useLiveQuery callback must return a QueryBuilder, LiveQueryCollectionConfig, Collection, undefined, or null. Got: ${typeof result}`,
           )
         }
         depsRef.current = [...deps]
@@ -467,7 +467,7 @@ export function useLiveQuery(
   // Use useSyncExternalStore to subscribe to collection changes
   const snapshot = useSyncExternalStore(
     subscribeRef.current,
-    getSnapshotRef.current
+    getSnapshotRef.current,
   )
 
   // Track last snapshot (from useSyncExternalStore) and the returned value separately
@@ -492,7 +492,7 @@ export function useLiveQuery(
         collection: undefined,
         status: `disabled`,
         isLoading: false,
-        isReady: false,
+        isReady: true,
         isIdle: false,
         isError: false,
         isCleanedUp: false,

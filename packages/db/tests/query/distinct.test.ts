@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, test } from "vitest"
-import { concat, createLiveQueryCollection } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
-import { DistinctRequiresSelectError } from "../../src/errors"
-import { count, eq, gte, not } from "../../src/query/builder/functions.js"
+import { beforeEach, describe, expect, test } from 'vitest'
+import { concat, createLiveQueryCollection } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import { DistinctRequiresSelectError } from '../../src/errors'
+import { count, eq, gte, not } from '../../src/query/builder/functions.js'
 
 // Sample data types for comprehensive DISTINCT testing
 type User = {
@@ -117,7 +117,7 @@ function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (user) => user.id,
       initialData: sampleUsers,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -143,7 +143,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctCountries.size).toBe(3) // USA, Canada, UK
 
         const countries = Array.from(distinctCountries.values()).map(
-          (user) => user.country
+          (user) => user.country,
         )
         expect(countries).toContain(`USA`)
         expect(countries).toContain(`Canada`)
@@ -172,7 +172,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctRoleSalary.size).toBe(4)
 
         const combinations = Array.from(distinctRoleSalary.values()).map(
-          (user) => `${user.role}-${user.salary}`
+          (user) => `${user.role}-${user.salary}`,
         )
         expect(combinations).toContain(`Developer-75000`)
         expect(combinations).toContain(`Developer-80000`)
@@ -186,7 +186,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
           createLiveQueryCollection({
             startSync: true,
             query: (q) => q.from({ users: usersCollection }).distinct(),
-          })
+          }),
         ).toThrow(DistinctRequiresSelectError)
       })
     })
@@ -218,7 +218,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctSalaryRanges.size).toBe(3) // High, Medium, Low
 
         const ranges = Array.from(distinctSalaryRanges.values()).map(
-          (user) => user.salary_range
+          (user) => user.salary_range,
         )
         expect(ranges).toContain(`High`)
         expect(ranges).toContain(`Medium`)
@@ -240,7 +240,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctFullNames.size).toBe(3) // All unique combinations of department and role
 
         const fullNames = Array.from(distinctFullNames.values()).map(
-          (user) => user.full_name
+          (user) => user.full_name,
         )
 
         expect(fullNames).toContain(`Engineering - Developer`)
@@ -309,7 +309,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctDepartments.size).toBe(4)
 
         const departments = Array.from(distinctDepartments.values()).map(
-          (user) => user.department
+          (user) => user.department,
         )
         expect(departments).toContain(`HR`)
       })
@@ -340,7 +340,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctCountries.size).toBe(4)
 
         const countries = Array.from(distinctCountries.values()).map(
-          (user) => user.country
+          (user) => user.country,
         )
         expect(countries).toContain(`Germany`)
 
@@ -359,7 +359,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctCountries.size).toBe(3)
 
         const finalCountries = Array.from(distinctCountries.values()).map(
-          (user) => user.country
+          (user) => user.country,
         )
         expect(finalCountries).not.toContain(`Germany`)
         expect(finalCountries).toContain(`Canada`)
@@ -391,7 +391,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctCities.size).toBe(4)
 
         const cities = Array.from(distinctCities.values()).map(
-          (user) => user.city
+          (user) => user.city,
         )
         expect(cities).not.toContain(`New York`)
       })
@@ -434,7 +434,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctDepartments.size).toBe(4) // Engineering, Marketing, Sales, null
 
         const departments = Array.from(distinctDepartments.values()).map(
-          (user) => user.department
+          (user) => user.department,
         )
         expect(departments).toContain(null)
       })
@@ -445,7 +445,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
             id: `empty-users`,
             getKey: (user) => user.id,
             initialData: [],
-          })
+          }),
         )
 
         const emptyDistinct = createLiveQueryCollection({
@@ -494,7 +494,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctActiveStatus.size).toBe(2) // true, false
 
         const statuses = Array.from(distinctActiveStatus.values()).map(
-          (user) => user.active
+          (user) => user.active,
         )
         expect(statuses).toContain(true)
         expect(statuses).toContain(false)
@@ -517,7 +517,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         // However, in this case each role has a salary range and those salary ranges don't overlap so it is deterministic
         // So we expect the results to be:  manager, developer, representative
         const distinctOrderedRoles = distinctOrderedData.toArray.map(
-          (r) => r.role
+          (r) => r.role,
         )
         expect(distinctOrderedRoles).toEqual([
           `Manager`,
@@ -541,7 +541,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctComputed.size).toBe(2)
 
         const locations = Array.from(distinctComputed.values()).map(
-          (user) => user.salary_tier
+          (user) => user.salary_tier,
         )
         expect(locations).toContain(`Senior`)
         expect(locations).toContain(`Junior`)
@@ -580,7 +580,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
 
         // Check that counts are correct
         const engineeringGroup = departments.find(
-          (d) => d.department === `Engineering`
+          (d) => d.department === `Engineering`,
         )
         expect(engineeringGroup?.user_count).toBe(5) // John, Jane, Alice, Diana, Frank
       })
@@ -599,7 +599,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctFilteredUsers.size).toBe(2)
 
         const countries = Array.from(distinctFilteredUsers.values()).map(
-          (u) => u.country
+          (u) => u.country,
         )
         expect(countries).toContain(`Canada`)
         expect(countries).toContain(`UK`)
@@ -619,7 +619,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(distinctOrderedCountries.size).toBe(3)
 
         const orderedCountries = distinctOrderedCountries.toArray.map(
-          (u) => u.country
+          (u) => u.country,
         )
         expect(orderedCountries).toEqual([`Canada`, `UK`, `USA`])
       })
@@ -666,7 +666,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
         expect(groupedDistinctSalaries.size).toBe(3)
 
         const counts = Array.from(groupedDistinctSalaries.values()).map(
-          (result) => result.count
+          (result) => result.count,
         )
 
         // All average salaries should be unique (distinct)
@@ -688,7 +688,7 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
             getKey: (dept) => dept.id,
             initialData: departmentsData,
             autoIndex,
-          })
+          }),
         )
 
         const distinctJoinedData = createLiveQueryCollection({
@@ -698,7 +698,8 @@ function createDistinctTests(autoIndex: `off` | `eager`): void {
               .from({ users: usersCollection })
               .join(
                 { departments: departmentsCollection },
-                ({ users, departments }) => eq(users.department, departments.id)
+                ({ users, departments }) =>
+                  eq(users.department, departments.id),
               )
               .where(({ users }) => eq(users.active, true))
               .select(({ departments }) => ({

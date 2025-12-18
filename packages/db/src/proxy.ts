@@ -3,7 +3,454 @@
  * and provides a way to retrieve those changes.
  */
 
-import { deepEquals, isTemporal } from "./utils"
+import { deepEquals, isTemporal } from './utils'
+
+/**
+ * Set of array methods that iterate with callbacks and may return elements.
+ * Hoisted to module scope to avoid creating a new Set on every property access.
+ */
+const CALLBACK_ITERATION_METHODS = new Set([
+  `find`,
+  `findLast`,
+  `findIndex`,
+  `findLastIndex`,
+  `filter`,
+  `map`,
+  `flatMap`,
+  `forEach`,
+  `some`,
+  `every`,
+  `reduce`,
+  `reduceRight`,
+])
+
+/**
+ * Set of array methods that modify the array in place.
+ */
+const ARRAY_MODIFYING_METHODS = new Set([
+  `pop`,
+  `push`,
+  `shift`,
+  `unshift`,
+  `splice`,
+  `sort`,
+  `reverse`,
+  `fill`,
+  `copyWithin`,
+])
+
+/**
+ * Set of Map/Set methods that modify the collection in place.
+ */
+const MAP_SET_MODIFYING_METHODS = new Set([`set`, `delete`, `clear`, `add`])
+
+/**
+ * Set of Map/Set iterator methods.
+ */
+const MAP_SET_ITERATOR_METHODS = new Set([
+  `entries`,
+  `keys`,
+  `values`,
+  `forEach`,
+])
+
+/**
+ * Check if a value is a proxiable object (not Date, RegExp, or Temporal)
+ */
+function isProxiableObject(
+  value: unknown,
+): value is Record<string | symbol, unknown> {
+  return (
+    value !== null &&
+    typeof value === `object` &&
+    !((value as any) instanceof Date) &&
+    !((value as any) instanceof RegExp) &&
+    !isTemporal(value)
+  )
+}
+
+/**
+ * Creates a handler for array iteration methods that ensures proxied elements
+ * are passed to callbacks and returned from methods like find/filter.
+ */
+function createArrayIterationHandler<T extends object>(
+  methodName: string,
+  methodFn: (...args: Array<unknown>) => unknown,
+  changeTracker: ChangeTracker<T>,
+  memoizedCreateChangeProxy: (
+    obj: Record<string | symbol, unknown>,
+    parent?: {
+      tracker: ChangeTracker<Record<string | symbol, unknown>>
+      prop: string | symbol
+    },
+  ) => { proxy: Record<string | symbol, unknown> },
+): ((...args: Array<unknown>) => unknown) | undefined {
+  if (!CALLBACK_ITERATION_METHODS.has(methodName)) {
+    return undefined
+  }
+
+  return function (...args: Array<unknown>) {
+    const callback = args[0]
+    if (typeof callback !== `function`) {
+      return methodFn.apply(changeTracker.copy_, args)
+    }
+
+    // Create a helper to get proxied version of an array element
+    const getProxiedElement = (element: unknown, index: number): unknown => {
+      if (isProxiableObject(element)) {
+        const nestedParent = {
+          tracker: changeTracker as unknown as ChangeTracker<
+            Record<string | symbol, unknown>
+          >,
+          prop: String(index),
+        }
+        const { proxy: elementProxy } = memoizedCreateChangeProxy(
+          element,
+          nestedParent,
+        )
+        return elementProxy
+      }
+      return element
+    }
+
+    // Wrap the callback to pass proxied elements
+    const wrappedCallback = function (
+      this: unknown,
+      element: unknown,
+      index: number,
+      array: unknown,
+    ) {
+      const proxiedElement = getProxiedElement(element, index)
+      return callback.call(this, proxiedElement, index, array)
+    }
+
+    // For reduce/reduceRight, the callback signature is different
+    if (methodName === `reduce` || methodName === `reduceRight`) {
+      const reduceCallback = function (
+        this: unknown,
+        accumulator: unknown,
+        element: unknown,
+        index: number,
+        array: unknown,
+      ) {
+        const proxiedElement = getProxiedElement(element, index)
+        return callback.call(this, accumulator, proxiedElement, index, array)
+      }
+      return methodFn.apply(changeTracker.copy_, [
+        reduceCallback,
+        ...args.slice(1),
+      ])
+    }
+
+    const result = methodFn.apply(changeTracker.copy_, [
+      wrappedCallback,
+      ...args.slice(1),
+    ])
+
+    // For find/findLast, proxy the returned element if it's an object
+    if (
+      (methodName === `find` || methodName === `findLast`) &&
+      result &&
+      typeof result === `object`
+    ) {
+      const foundIndex = (
+        changeTracker.copy_ as unknown as Array<unknown>
+      ).indexOf(result)
+      if (foundIndex !== -1) {
+        return getProxiedElement(result, foundIndex)
+      }
+    }
+
+    // For filter, proxy each element in the result array
+    if (methodName === `filter` && Array.isArray(result)) {
+      return result.map((element) => {
+        const originalIndex = (
+          changeTracker.copy_ as unknown as Array<unknown>
+        ).indexOf(element)
+        if (originalIndex !== -1) {
+          return getProxiedElement(element, originalIndex)
+        }
+        return element
+      })
+    }
+
+    return result
+  }
+}
+
+/**
+ * Creates a Symbol.iterator handler for arrays that yields proxied elements.
+ */
+function createArrayIteratorHandler<T extends object>(
+  changeTracker: ChangeTracker<T>,
+  memoizedCreateChangeProxy: (
+    obj: Record<string | symbol, unknown>,
+    parent?: {
+      tracker: ChangeTracker<Record<string | symbol, unknown>>
+      prop: string | symbol
+    },
+  ) => { proxy: Record<string | symbol, unknown> },
+): () => Iterator<unknown> {
+  return function () {
+    const array = changeTracker.copy_ as unknown as Array<unknown>
+    let index = 0
+
+    return {
+      next() {
+        if (index >= array.length) {
+          return { done: true, value: undefined }
+        }
+
+        const element = array[index]
+        let proxiedElement = element
+
+        if (isProxiableObject(element)) {
+          const nestedParent = {
+            tracker: changeTracker as unknown as ChangeTracker<
+              Record<string | symbol, unknown>
+            >,
+            prop: String(index),
+          }
+          const { proxy: elementProxy } = memoizedCreateChangeProxy(
+            element,
+            nestedParent,
+          )
+          proxiedElement = elementProxy
+        }
+
+        index++
+        return { done: false, value: proxiedElement }
+      },
+      [Symbol.iterator]() {
+        return this
+      },
+    }
+  }
+}
+
+/**
+ * Creates a wrapper for methods that modify a collection (array, Map, Set).
+ * The wrapper calls the method and marks the change tracker as modified.
+ */
+function createModifyingMethodHandler<T extends object>(
+  methodFn: (...args: Array<unknown>) => unknown,
+  changeTracker: ChangeTracker<T>,
+  markChanged: (tracker: ChangeTracker<T>) => void,
+): (...args: Array<unknown>) => unknown {
+  return function (...args: Array<unknown>) {
+    const result = methodFn.apply(changeTracker.copy_, args)
+    markChanged(changeTracker)
+    return result
+  }
+}
+
+/**
+ * Creates handlers for Map/Set iterator methods (entries, keys, values, forEach).
+ * Returns proxied values for iteration to enable change tracking.
+ */
+function createMapSetIteratorHandler<T extends object>(
+  methodName: string,
+  prop: string | symbol,
+  methodFn: (...args: Array<unknown>) => unknown,
+  target: Map<unknown, unknown> | Set<unknown>,
+  changeTracker: ChangeTracker<T>,
+  memoizedCreateChangeProxy: (
+    obj: Record<string | symbol, unknown>,
+    parent?: {
+      tracker: ChangeTracker<Record<string | symbol, unknown>>
+      prop: string | symbol
+    },
+  ) => { proxy: Record<string | symbol, unknown> },
+  markChanged: (tracker: ChangeTracker<T>) => void,
+): ((...args: Array<unknown>) => unknown) | undefined {
+  const isIteratorMethod =
+    MAP_SET_ITERATOR_METHODS.has(methodName) || prop === Symbol.iterator
+
+  if (!isIteratorMethod) {
+    return undefined
+  }
+
+  return function (this: unknown, ...args: Array<unknown>) {
+    const result = methodFn.apply(changeTracker.copy_, args)
+
+    // For forEach, wrap the callback to track changes
+    if (methodName === `forEach`) {
+      const callback = args[0]
+      if (typeof callback === `function`) {
+        const wrappedCallback = function (
+          this: unknown,
+          value: unknown,
+          key: unknown,
+          collection: unknown,
+        ) {
+          const cbresult = callback.call(this, value, key, collection)
+          markChanged(changeTracker)
+          return cbresult
+        }
+        return methodFn.apply(target, [wrappedCallback, ...args.slice(1)])
+      }
+    }
+
+    // For iterators (entries, keys, values, Symbol.iterator)
+    const isValueIterator =
+      methodName === `entries` ||
+      methodName === `values` ||
+      methodName === Symbol.iterator.toString() ||
+      prop === Symbol.iterator
+
+    if (isValueIterator) {
+      const originalIterator = result as Iterator<unknown>
+
+      // For values() iterator on Maps, create a value-to-key mapping
+      const valueToKeyMap = new Map()
+      if (methodName === `values` && target instanceof Map) {
+        for (const [key, mapValue] of (
+          changeTracker.copy_ as unknown as Map<unknown, unknown>
+        ).entries()) {
+          valueToKeyMap.set(mapValue, key)
+        }
+      }
+
+      // For Set iterators, create an original-to-modified mapping
+      const originalToModifiedMap = new Map()
+      if (target instanceof Set) {
+        for (const setValue of (
+          changeTracker.copy_ as unknown as Set<unknown>
+        ).values()) {
+          originalToModifiedMap.set(setValue, setValue)
+        }
+      }
+
+      // Return a wrapped iterator that proxies values
+      return {
+        next() {
+          const nextResult = originalIterator.next()
+
+          if (
+            !nextResult.done &&
+            nextResult.value &&
+            typeof nextResult.value === `object`
+          ) {
+            // For entries, the value is a [key, value] pair
+            if (
+              methodName === `entries` &&
+              Array.isArray(nextResult.value) &&
+              nextResult.value.length === 2
+            ) {
+              if (
+                nextResult.value[1] &&
+                typeof nextResult.value[1] === `object`
+              ) {
+                const mapKey = nextResult.value[0]
+                const mapParent = {
+                  tracker: changeTracker as unknown as ChangeTracker<
+                    Record<string | symbol, unknown>
+                  >,
+                  prop: mapKey as string | symbol,
+                  updateMap: (newValue: unknown) => {
+                    if (changeTracker.copy_ instanceof Map) {
+                      ;(changeTracker.copy_ as Map<unknown, unknown>).set(
+                        mapKey,
+                        newValue,
+                      )
+                    }
+                  },
+                }
+                const { proxy: valueProxy } = memoizedCreateChangeProxy(
+                  nextResult.value[1] as Record<string | symbol, unknown>,
+                  mapParent as unknown as {
+                    tracker: ChangeTracker<Record<string | symbol, unknown>>
+                    prop: string | symbol
+                  },
+                )
+                nextResult.value[1] = valueProxy
+              }
+            } else if (
+              methodName === `values` ||
+              methodName === Symbol.iterator.toString() ||
+              prop === Symbol.iterator
+            ) {
+              // For Map values(), use the key mapping
+              if (methodName === `values` && target instanceof Map) {
+                const mapKey = valueToKeyMap.get(nextResult.value)
+                if (mapKey !== undefined) {
+                  const mapParent = {
+                    tracker: changeTracker as unknown as ChangeTracker<
+                      Record<string | symbol, unknown>
+                    >,
+                    prop: mapKey as string | symbol,
+                    updateMap: (newValue: unknown) => {
+                      if (changeTracker.copy_ instanceof Map) {
+                        ;(changeTracker.copy_ as Map<unknown, unknown>).set(
+                          mapKey,
+                          newValue,
+                        )
+                      }
+                    },
+                  }
+                  const { proxy: valueProxy } = memoizedCreateChangeProxy(
+                    nextResult.value as Record<string | symbol, unknown>,
+                    mapParent as unknown as {
+                      tracker: ChangeTracker<Record<string | symbol, unknown>>
+                      prop: string | symbol
+                    },
+                  )
+                  nextResult.value = valueProxy
+                }
+              } else if (target instanceof Set) {
+                // For Set, track modifications
+                const setOriginalValue = nextResult.value
+                const setParent = {
+                  tracker: changeTracker as unknown as ChangeTracker<
+                    Record<string | symbol, unknown>
+                  >,
+                  prop: setOriginalValue as unknown as string | symbol,
+                  updateSet: (newValue: unknown) => {
+                    if (changeTracker.copy_ instanceof Set) {
+                      ;(changeTracker.copy_ as Set<unknown>).delete(
+                        setOriginalValue,
+                      )
+                      ;(changeTracker.copy_ as Set<unknown>).add(newValue)
+                      originalToModifiedMap.set(setOriginalValue, newValue)
+                    }
+                  },
+                }
+                const { proxy: valueProxy } = memoizedCreateChangeProxy(
+                  nextResult.value as Record<string | symbol, unknown>,
+                  setParent as unknown as {
+                    tracker: ChangeTracker<Record<string | symbol, unknown>>
+                    prop: string | symbol
+                  },
+                )
+                nextResult.value = valueProxy
+              } else {
+                // For other cases, use a symbol placeholder
+                const tempKey = Symbol(`iterator-value`)
+                const { proxy: valueProxy } = memoizedCreateChangeProxy(
+                  nextResult.value as Record<string | symbol, unknown>,
+                  {
+                    tracker: changeTracker as unknown as ChangeTracker<
+                      Record<string | symbol, unknown>
+                    >,
+                    prop: tempKey,
+                  },
+                )
+                nextResult.value = valueProxy
+              }
+            }
+          }
+
+          return nextResult
+        },
+        [Symbol.iterator]() {
+          return this
+        },
+      }
+    }
+
+    return result
+  }
+}
 
 /**
  * Simple debug utility that only logs when debug mode is enabled
@@ -66,7 +513,7 @@ interface ChangeTracker<T extends object> {
 
 function deepClone<T extends unknown>(
   obj: T,
-  visited = new WeakMap<object, unknown>()
+  visited = new WeakMap<object, unknown>(),
 ): T {
   // Handle null and undefined
   if (obj === null || obj === undefined) {
@@ -105,7 +552,7 @@ function deepClone<T extends unknown>(
     // Get the constructor to create a new instance of the same type
     const TypedArrayConstructor = Object.getPrototypeOf(obj).constructor
     const clone = new TypedArrayConstructor(
-      (obj as unknown as TypedArray).length
+      (obj as unknown as TypedArray).length,
     ) as unknown as TypedArray
     visited.set(obj as object, clone)
 
@@ -149,7 +596,7 @@ function deepClone<T extends unknown>(
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
       clone[key] = deepClone(
         (obj as Record<string | symbol, unknown>)[key],
-        visited
+        visited,
       )
     }
   }
@@ -158,7 +605,7 @@ function deepClone<T extends unknown>(
   for (const sym of symbolProps) {
     clone[sym] = deepClone(
       (obj as Record<string | symbol, unknown>)[sym],
-      visited
+      visited,
     )
   }
 
@@ -185,7 +632,7 @@ export function createChangeProxy<
   parent?: {
     tracker: ChangeTracker<Record<string | symbol, unknown>>
     prop: string | symbol
-  }
+  },
 ): {
   proxy: T
 
@@ -200,7 +647,7 @@ export function createChangeProxy<
     innerParent?: {
       tracker: ChangeTracker<Record<string | symbol, unknown>>
       prop: string | symbol
-    }
+    },
   ): {
     proxy: TInner
     getChanges: () => Record<string | symbol, any>
@@ -236,7 +683,7 @@ export function createChangeProxy<
   debugLog(
     `createChangeProxy called for target`,
     target,
-    changeTracker.proxyCount
+    changeTracker.proxyCount,
   )
   // Mark this object and all its ancestors as modified
   // Also propagate the actual changes up the chain
@@ -269,11 +716,11 @@ export function createChangeProxy<
 
   // Check if all properties in the current state have reverted to original values
   function checkIfReverted(
-    state: ChangeTracker<Record<string | symbol, unknown>>
+    state: ChangeTracker<Record<string | symbol, unknown>>,
   ): boolean {
     debugLog(
       `checkIfReverted called with assigned keys:`,
-      Object.keys(state.assigned_)
+      Object.keys(state.assigned_),
     )
 
     // If there are no assigned properties, object is unchanged
@@ -296,7 +743,7 @@ export function createChangeProxy<
           `Checking property ${String(prop)}, current:`,
           currentValue,
           `original:`,
-          originalValue
+          originalValue,
         )
 
         // If the value is not equal to original, something is still changed
@@ -338,7 +785,7 @@ export function createChangeProxy<
   // Update parent status based on child changes
   function checkParentStatus(
     parentState: ChangeTracker<Record<string | symbol, unknown>>,
-    childProp: string | symbol | unknown
+    childProp: string | symbol | unknown,
   ) {
     debugLog(`checkParentStatus called for child prop:`, childProp)
 
@@ -392,271 +839,66 @@ export function createChangeProxy<
           // For Array methods that modify the array
           if (Array.isArray(ptarget)) {
             const methodName = prop.toString()
-            const modifyingMethods = new Set([
-              `pop`,
-              `push`,
-              `shift`,
-              `unshift`,
-              `splice`,
-              `sort`,
-              `reverse`,
-              `fill`,
-              `copyWithin`,
-            ])
 
-            if (modifyingMethods.has(methodName)) {
-              return function (...args: Array<unknown>) {
-                const result = value.apply(changeTracker.copy_, args)
-                markChanged(changeTracker)
-                return result
-              }
+            if (ARRAY_MODIFYING_METHODS.has(methodName)) {
+              return createModifyingMethodHandler(
+                value,
+                changeTracker,
+                markChanged,
+              )
+            }
+
+            // Handle array iteration methods (find, filter, forEach, etc.)
+            const iterationHandler = createArrayIterationHandler(
+              methodName,
+              value,
+              changeTracker,
+              memoizedCreateChangeProxy,
+            )
+            if (iterationHandler) {
+              return iterationHandler
+            }
+
+            // Handle array Symbol.iterator for for...of loops
+            if (prop === Symbol.iterator) {
+              return createArrayIteratorHandler(
+                changeTracker,
+                memoizedCreateChangeProxy,
+              )
             }
           }
 
           // For Map and Set methods that modify the collection
           if (ptarget instanceof Map || ptarget instanceof Set) {
             const methodName = prop.toString()
-            const modifyingMethods = new Set([
-              `set`,
-              `delete`,
-              `clear`,
-              `add`,
-              `pop`,
-              `push`,
-              `shift`,
-              `unshift`,
-              `splice`,
-              `sort`,
-              `reverse`,
-            ])
 
-            if (modifyingMethods.has(methodName)) {
-              return function (...args: Array<unknown>) {
-                const result = value.apply(changeTracker.copy_, args)
-                markChanged(changeTracker)
-                return result
-              }
+            if (MAP_SET_MODIFYING_METHODS.has(methodName)) {
+              return createModifyingMethodHandler(
+                value,
+                changeTracker,
+                markChanged,
+              )
             }
 
             // Handle iterator methods for Map and Set
-            const iteratorMethods = new Set([
-              `entries`,
-              `keys`,
-              `values`,
-              `forEach`,
-              Symbol.iterator,
-            ])
-
-            if (iteratorMethods.has(methodName) || prop === Symbol.iterator) {
-              return function (this: unknown, ...args: Array<unknown>) {
-                const result = value.apply(changeTracker.copy_, args)
-
-                // For forEach, we need to wrap the callback to track changes
-                if (methodName === `forEach`) {
-                  const callback = args[0]
-                  if (typeof callback === `function`) {
-                    // Replace the original callback with our wrapped version
-                    const wrappedCallback = function (
-                      this: unknown,
-                      // eslint-disable-next-line
-                      value: unknown,
-                      key: unknown,
-                      collection: unknown
-                    ) {
-                      // Call the original callback
-                      const cbresult = callback.call(
-                        this,
-                        value,
-                        key,
-                        collection
-                      )
-                      // Mark as changed since the callback might have modified the value
-                      markChanged(changeTracker)
-                      return cbresult
-                    }
-                    // Call forEach with our wrapped callback
-                    return value.apply(ptarget, [
-                      wrappedCallback,
-                      ...args.slice(1),
-                    ])
-                  }
-                }
-
-                // For iterators (entries, keys, values, Symbol.iterator)
-                if (
-                  methodName === `entries` ||
-                  methodName === `values` ||
-                  methodName === Symbol.iterator.toString() ||
-                  prop === Symbol.iterator
-                ) {
-                  // If it's an iterator, we need to wrap the returned iterator
-                  // to track changes when the values are accessed and potentially modified
-                  const originalIterator = result
-
-                  // For values() iterator on Maps, we need to create a value-to-key mapping
-                  const valueToKeyMap = new Map()
-                  if (methodName === `values` && ptarget instanceof Map) {
-                    // Build a mapping from value to key for reverse lookup
-                    // Use the copy_ (which is the current state) to build the mapping
-                    for (const [
-                      key,
-                      mapValue,
-                    ] of changeTracker.copy_.entries()) {
-                      valueToKeyMap.set(mapValue, key)
-                    }
-                  }
-
-                  // For Set iterators, we need to create an original-to-modified mapping
-                  const originalToModifiedMap = new Map()
-                  if (ptarget instanceof Set) {
-                    // Initialize with original values
-                    for (const setValue of changeTracker.copy_.values()) {
-                      originalToModifiedMap.set(setValue, setValue)
-                    }
-                  }
-
-                  // Create a proxy for the iterator that will mark changes when next() is called
-                  return {
-                    next() {
-                      const nextResult = originalIterator.next()
-
-                      // If we have a value and it's an object, we need to track it
-                      if (
-                        !nextResult.done &&
-                        nextResult.value &&
-                        typeof nextResult.value === `object`
-                      ) {
-                        // For entries, the value is a [key, value] pair
-                        if (
-                          methodName === `entries` &&
-                          Array.isArray(nextResult.value) &&
-                          nextResult.value.length === 2
-                        ) {
-                          // The value is at index 1 in the [key, value] pair
-                          if (
-                            nextResult.value[1] &&
-                            typeof nextResult.value[1] === `object`
-                          ) {
-                            const mapKey = nextResult.value[0]
-                            // Create a special parent tracker that knows how to update the Map
-                            const mapParent = {
-                              tracker: changeTracker,
-                              prop: mapKey,
-                              updateMap: (newValue: unknown) => {
-                                // Update the Map in the copy
-                                if (changeTracker.copy_ instanceof Map) {
-                                  changeTracker.copy_.set(mapKey, newValue)
-                                }
-                              },
-                            }
-
-                            // Create a proxy for the value and replace it in the result
-                            const { proxy: valueProxy } =
-                              memoizedCreateChangeProxy(
-                                nextResult.value[1],
-                                mapParent
-                              )
-                            nextResult.value[1] = valueProxy
-                          }
-                        } else if (
-                          methodName === `values` ||
-                          methodName === Symbol.iterator.toString() ||
-                          prop === Symbol.iterator
-                        ) {
-                          // If the value is an object, create a proxy for it
-                          if (
-                            typeof nextResult.value === `object` &&
-                            nextResult.value !== null
-                          ) {
-                            // For Map values(), try to find the key using our mapping
-                            if (
-                              methodName === `values` &&
-                              ptarget instanceof Map
-                            ) {
-                              const mapKey = valueToKeyMap.get(nextResult.value)
-                              if (mapKey !== undefined) {
-                                // Create a special parent tracker for this Map value
-                                const mapParent = {
-                                  tracker: changeTracker,
-                                  prop: mapKey,
-                                  updateMap: (newValue: unknown) => {
-                                    // Update the Map in the copy
-                                    if (changeTracker.copy_ instanceof Map) {
-                                      changeTracker.copy_.set(mapKey, newValue)
-                                    }
-                                  },
-                                }
-
-                                const { proxy: valueProxy } =
-                                  memoizedCreateChangeProxy(
-                                    nextResult.value,
-                                    mapParent
-                                  )
-                                nextResult.value = valueProxy
-                              }
-                            } else if (ptarget instanceof Set) {
-                              // For Set, we need to track modifications and update the Set accordingly
-                              const setOriginalValue = nextResult.value
-                              const setParent = {
-                                tracker: changeTracker,
-                                prop: setOriginalValue, // Use the original value as the prop
-                                updateSet: (newValue: unknown) => {
-                                  // Update the Set in the copy by removing old value and adding new one
-                                  if (changeTracker.copy_ instanceof Set) {
-                                    changeTracker.copy_.delete(setOriginalValue)
-                                    changeTracker.copy_.add(newValue)
-                                    // Update our mapping for future iterations
-                                    originalToModifiedMap.set(
-                                      setOriginalValue,
-                                      newValue
-                                    )
-                                  }
-                                },
-                              }
-
-                              const { proxy: valueProxy } =
-                                memoizedCreateChangeProxy(
-                                  nextResult.value,
-                                  setParent
-                                )
-                              nextResult.value = valueProxy
-                            } else {
-                              // For other cases, use a symbol as a placeholder
-                              const tempKey = Symbol(`iterator-value`)
-                              const { proxy: valueProxy } =
-                                memoizedCreateChangeProxy(nextResult.value, {
-                                  tracker: changeTracker,
-                                  prop: tempKey,
-                                })
-                              nextResult.value = valueProxy
-                            }
-                          }
-                        }
-                      }
-
-                      return nextResult
-                    },
-                    [Symbol.iterator]() {
-                      return this
-                    },
-                  }
-                }
-
-                return result
-              }
+            const iteratorHandler = createMapSetIteratorHandler(
+              methodName,
+              prop,
+              value,
+              ptarget,
+              changeTracker,
+              memoizedCreateChangeProxy,
+              markChanged,
+            )
+            if (iteratorHandler) {
+              return iteratorHandler
             }
           }
           return value.bind(ptarget)
         }
 
         // If the value is an object (but not Date, RegExp, or Temporal), create a proxy for it
-        if (
-          value &&
-          typeof value === `object` &&
-          !((value as any) instanceof Date) &&
-          !((value as any) instanceof RegExp) &&
-          !isTemporal(value)
-        ) {
+        if (isProxiableObject(value)) {
           // Create a parent reference for the nested object
           const nestedParent = {
             tracker: changeTracker,
@@ -666,7 +908,7 @@ export function createChangeProxy<
           // Create a proxy for the nested object
           const { proxy: nestedProxy } = memoizedCreateChangeProxy(
             originalValue,
-            nestedParent
+            nestedParent,
           )
 
           // Cache the proxy
@@ -684,7 +926,7 @@ export function createChangeProxy<
           `set called for property ${String(prop)}, current:`,
           currentValue,
           `new:`,
-          value
+          value,
         )
 
         // Only track the change if the value is actually different
@@ -699,7 +941,7 @@ export function createChangeProxy<
             `original:`,
             originalValue,
             `isRevertToOriginal:`,
-            isRevertToOriginal
+            isRevertToOriginal,
           )
 
           if (isRevertToOriginal) {
@@ -752,21 +994,31 @@ export function createChangeProxy<
         return true
       },
 
-      defineProperty(_ptarget, prop, descriptor) {
-        // const result = Reflect.defineProperty(
-        //   changeTracker.copy_,
-        //   prop,
-        //   descriptor
-        // )
-        // if (result) {
-        if (`value` in descriptor) {
+      defineProperty(ptarget, prop, descriptor) {
+        // Forward the defineProperty to the target to maintain Proxy invariants
+        // This allows Object.seal() and Object.freeze() to work on the proxy
+        const result = Reflect.defineProperty(ptarget, prop, descriptor)
+        if (result && `value` in descriptor) {
           changeTracker.copy_[prop as keyof T] = deepClone(descriptor.value)
           changeTracker.assigned_[prop.toString()] = true
           markChanged(changeTracker)
         }
-        // }
-        // return result
-        return true
+        return result
+      },
+
+      getOwnPropertyDescriptor(ptarget, prop) {
+        // Forward to target to maintain Proxy invariants for seal/freeze
+        return Reflect.getOwnPropertyDescriptor(ptarget, prop)
+      },
+
+      preventExtensions(ptarget) {
+        // Forward to target to allow Object.seal() and Object.preventExtensions()
+        return Reflect.preventExtensions(ptarget)
+      },
+
+      isExtensible(ptarget) {
+        // Forward to target to maintain consistency
+        return Reflect.isExtensible(ptarget)
       },
 
       deleteProperty(dobj, prop) {
@@ -778,33 +1030,36 @@ export function createChangeProxy<
           const hadPropertyInOriginal =
             stringProp in changeTracker.originalObject
 
-          // Delete the property from the copy
-          // Use type assertion to tell TypeScript this is allowed
-          delete (changeTracker.copy_ as Record<string | symbol, unknown>)[prop]
+          // Forward the delete to the target using Reflect
+          // This respects Object.seal/preventExtensions constraints
+          const result = Reflect.deleteProperty(dobj, prop)
 
-          // If the property didn't exist in the original object, removing it
-          // should revert to the original state
-          if (!hadPropertyInOriginal) {
-            delete changeTracker.copy_[stringProp]
-            delete changeTracker.assigned_[stringProp]
+          if (result) {
+            // If the property didn't exist in the original object, removing it
+            // should revert to the original state
+            if (!hadPropertyInOriginal) {
+              delete changeTracker.assigned_[stringProp]
 
-            // If this is the last change and we're not a nested object,
-            // mark the object as unmodified
-            if (
-              Object.keys(changeTracker.assigned_).length === 0 &&
-              Object.getOwnPropertySymbols(changeTracker.assigned_).length === 0
-            ) {
-              changeTracker.modified = false
+              // If this is the last change and we're not a nested object,
+              // mark the object as unmodified
+              if (
+                Object.keys(changeTracker.assigned_).length === 0 &&
+                Object.getOwnPropertySymbols(changeTracker.assigned_).length ===
+                  0
+              ) {
+                changeTracker.modified = false
+              } else {
+                // We still have changes, keep as modified
+                changeTracker.modified = true
+              }
             } else {
-              // We still have changes, keep as modified
-              changeTracker.modified = true
+              // Mark this property as deleted
+              changeTracker.assigned_[stringProp] = false
+              markChanged(changeTracker)
             }
-          } else {
-            // Mark this property as deleted
-            changeTracker.assigned_[stringProp] = false
-            changeTracker.copy_[stringProp as keyof T] = undefined as T[keyof T]
-            markChanged(changeTracker)
           }
+
+          return result
         }
 
         return true
@@ -818,7 +1073,9 @@ export function createChangeProxy<
   }
 
   // Create a proxy for the target object
-  const proxy = createObjectProxy(target)
+  // Use the unfrozen copy_ as the proxy target to avoid Proxy invariant violations
+  // when the original target is frozen (e.g., from Immer)
+  const proxy = createObjectProxy(changeTracker.copy_ as unknown as T)
 
   // Return the proxy and a function to get the changes
   return {
@@ -871,7 +1128,7 @@ export function createChangeProxy<
  * @returns An object containing the array of proxies and a function to get all changes
  */
 export function createArrayChangeProxy<T extends object>(
-  targets: Array<T>
+  targets: Array<T>,
 ): {
   proxies: Array<T>
   getChanges: () => Array<Record<string | symbol, unknown>>
@@ -894,7 +1151,7 @@ export function createArrayChangeProxy<T extends object>(
  */
 export function withChangeTracking<T extends object>(
   target: T,
-  callback: (proxy: T) => void
+  callback: (proxy: T) => void,
 ): Record<string | symbol, unknown> {
   const { proxy, getChanges } = createChangeProxy(target)
 
@@ -913,7 +1170,7 @@ export function withChangeTracking<T extends object>(
  */
 export function withArrayChangeTracking<T extends object>(
   targets: Array<T>,
-  callback: (proxies: Array<T>) => void
+  callback: (proxies: Array<T>) => void,
 ): Array<Record<string | symbol, unknown>> {
   const { proxies, getChanges } = createArrayChangeProxy(targets)
 

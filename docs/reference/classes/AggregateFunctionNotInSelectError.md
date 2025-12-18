@@ -5,11 +5,11 @@ title: AggregateFunctionNotInSelectError
 
 # Class: AggregateFunctionNotInSelectError
 
-Defined in: [packages/db/src/errors.ts:547](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L547)
+Defined in: [packages/db/src/errors.ts:565](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L565)
 
 ## Extends
 
-- [`GroupByError`](../GroupByError.md)
+- [`GroupByError`](GroupByError.md)
 
 ## Constructors
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:547](https://github.com/TanStack/db/blob/
 new AggregateFunctionNotInSelectError(functionName): AggregateFunctionNotInSelectError;
 ```
 
-Defined in: [packages/db/src/errors.ts:548](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L548)
+Defined in: [packages/db/src/errors.ts:566](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L566)
 
 #### Parameters
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/errors.ts:548](https://github.com/TanStack/db/blob/
 
 #### Overrides
 
-[`GroupByError`](../GroupByError.md).[`constructor`](../GroupByError.md#constructor)
+[`GroupByError`](GroupByError.md).[`constructor`](GroupByError.md#constructor)
 
 ## Properties
 
@@ -47,7 +47,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`GroupByError`](../GroupByError.md).[`cause`](../GroupByError.md#cause)
+[`GroupByError`](GroupByError.md).[`cause`](GroupByError.md#cause)
 
 ***
 
@@ -61,7 +61,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`GroupByError`](../GroupByError.md).[`message`](../GroupByError.md#message)
+[`GroupByError`](GroupByError.md).[`message`](GroupByError.md#message)
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`GroupByError`](../GroupByError.md).[`name`](../GroupByError.md#name)
+[`GroupByError`](GroupByError.md).[`name`](GroupByError.md#name)
 
 ***
 
@@ -89,7 +89,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`GroupByError`](../GroupByError.md).[`stack`](../GroupByError.md#stack)
+[`GroupByError`](GroupByError.md).[`stack`](GroupByError.md#stack)
 
 ***
 
@@ -113,7 +113,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`GroupByError`](../GroupByError.md).[`stackTraceLimit`](../GroupByError.md#stacktracelimit)
+[`GroupByError`](GroupByError.md).[`stackTraceLimit`](GroupByError.md#stacktracelimit)
 
 ## Methods
 
@@ -185,7 +185,7 @@ a();
 
 #### Inherited from
 
-[`GroupByError`](../GroupByError.md).[`captureStackTrace`](../GroupByError.md#capturestacktrace)
+[`GroupByError`](GroupByError.md).[`captureStackTrace`](GroupByError.md#capturestacktrace)
 
 ***
 
@@ -217,4 +217,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`GroupByError`](../GroupByError.md).[`prepareStackTrace`](../GroupByError.md#preparestacktrace)
+[`GroupByError`](GroupByError.md).[`prepareStackTrace`](GroupByError.md#preparestacktrace)

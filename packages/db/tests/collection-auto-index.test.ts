@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { createCollection } from "../src/collection/index.js"
+import { describe, expect, it } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
 import {
   and,
   eq,
@@ -8,15 +8,15 @@ import {
   lte,
   not,
   or,
-} from "../src/query/builder/functions"
-import { createSingleRowRefProxy } from "../src/query/builder/ref-proxy"
-import { createLiveQueryCollection } from "../src"
-import { PropRef } from "../src/query/ir"
+} from '../src/query/builder/functions'
+import { createSingleRowRefProxy } from '../src/query/builder/ref-proxy'
+import { createLiveQueryCollection } from '../src'
+import { PropRef } from '../src/query/ir'
 import {
   createIndexUsageTracker,
   expectIndexUsage,
   withIndexTracking,
-} from "./utils"
+} from './utils'
 
 // Global row proxy for expressions
 const row = createSingleRowRefProxy<TestItem>()
@@ -112,7 +112,7 @@ describe(`Collection Auto-Indexing`, () => {
       {
         includeInitialState: true,
         whereExpression: eq(row.status, `active`),
-      }
+      },
     )
 
     // Should still have no indexes after subscription
@@ -154,7 +154,7 @@ describe(`Collection Auto-Indexing`, () => {
       {
         includeInitialState: true,
         whereExpression: eq(row.status, `active`),
-      }
+      },
     )
 
     // Should have created an auto-index for the status field (default is eager)
@@ -201,7 +201,7 @@ describe(`Collection Auto-Indexing`, () => {
       {
         includeInitialState: true,
         whereExpression: eq(row.status, `active`),
-      }
+      },
     )
 
     // Should have created an auto-index for the status field
@@ -302,7 +302,7 @@ describe(`Collection Auto-Indexing`, () => {
     expect(autoIndexCollection.indexes.size).toBe(3)
 
     const indexPaths = Array.from(autoIndexCollection.indexes.values()).map(
-      (index) => (index.expression as any).path
+      (index) => (index.expression as any).path,
     )
 
     expect(indexPaths).toContainEqual([`status`])
@@ -345,7 +345,7 @@ describe(`Collection Auto-Indexing`, () => {
     expect(autoIndexCollection.indexes.size).toBe(2)
 
     const indexPaths = Array.from(autoIndexCollection.indexes.values()).map(
-      (index) => (index.expression as any).path
+      (index) => (index.expression as any).path,
     )
 
     expect(indexPaths).toContainEqual([`status`])
@@ -414,7 +414,7 @@ describe(`Collection Auto-Indexing`, () => {
       whereExpression: and(
         eq(row.status, `active`),
         gt(row.age, 25),
-        lte(row.score, 90)
+        lte(row.score, 90),
       ),
     })
 
@@ -422,7 +422,7 @@ describe(`Collection Auto-Indexing`, () => {
     expect(autoIndexCollection.indexes.size).toBe(3)
 
     const indexPaths = Array.from(autoIndexCollection.indexes.values()).map(
-      (index) => (index.expression as any).path
+      (index) => (index.expression as any).path,
     )
 
     expect(indexPaths).toContainEqual([`status`])
@@ -495,7 +495,7 @@ describe(`Collection Auto-Indexing`, () => {
           .join(
             { other: rightCollection },
             ({ item, other }: any) => eq(item.id, other.id2),
-            `left`
+            `left`,
           )
           .select(({ item, other }: any) => ({
             id: item.id,
@@ -614,7 +614,7 @@ describe(`Collection Auto-Indexing`, () => {
                 })),
             },
             ({ item, other }: any) => eq(item.id, other.id2),
-            `left`
+            `left`,
           )
           .select(({ item, other }: any) => ({
             id: item.id,
@@ -831,7 +831,7 @@ describe(`Collection Auto-Indexing`, () => {
       {
         includeInitialState: true,
         whereExpression: gt(new PropRef([`profile`, `score`]), 80),
-      }
+      },
     )
 
     // Should have created an auto-index for profile.score
@@ -840,7 +840,7 @@ describe(`Collection Auto-Indexing`, () => {
         index.expression.type === `ref` &&
         (index.expression as any).path.length === 2 &&
         (index.expression as any).path[0] === `profile` &&
-        (index.expression as any).path[1] === `score`
+        (index.expression as any).path[1] === `score`,
     )
     expect(profileScoreIndex).toBeDefined()
 
@@ -858,7 +858,7 @@ describe(`Collection Auto-Indexing`, () => {
       {
         includeInitialState: true,
         whereExpression: eq(new PropRef([`metadata`, `stats`, `views`]), 200),
-      }
+      },
     )
 
     // Should have created an auto-index for metadata.stats.views
@@ -868,7 +868,7 @@ describe(`Collection Auto-Indexing`, () => {
         (index.expression as any).path.length === 3 &&
         (index.expression as any).path[0] === `metadata` &&
         (index.expression as any).path[1] === `stats` &&
-        (index.expression as any).path[2] === `views`
+        (index.expression as any).path[2] === `views`,
     )
     expect(viewsIndex).toBeDefined()
 

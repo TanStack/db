@@ -17,7 +17,7 @@ Check if a Where clause is marked as residual
 
 ### where
 
-[`Where`](../../type-aliases/Where.md)
+[`Where`](../type-aliases/Where.md)
 
 ## Returns
 

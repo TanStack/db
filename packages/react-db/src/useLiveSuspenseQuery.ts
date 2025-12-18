@@ -1,5 +1,5 @@
-import { useRef } from "react"
-import { useLiveQuery } from "./useLiveQuery"
+import { useRef } from 'react'
+import { useLiveQuery } from './useLiveQuery'
 import type {
   Collection,
   Context,
@@ -10,7 +10,7 @@ import type {
   NonSingleResult,
   QueryBuilder,
   SingleResult,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 /**
  * Create a live query with React Suspense support
@@ -75,7 +75,7 @@ import type {
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveSuspenseQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<unknown>
+  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
@@ -85,7 +85,7 @@ export function useLiveSuspenseQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveSuspenseQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<unknown>
+  deps?: Array<unknown>,
 ): {
   state: Map<string | number, GetResult<TContext>>
   data: InferResultType<TContext>
@@ -98,7 +98,7 @@ export function useLiveSuspenseQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult,
 ): {
   state: Map<TKey, TResult>
   data: Array<TResult>
@@ -111,7 +111,7 @@ export function useLiveSuspenseQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils> & SingleResult
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & SingleResult,
 ): {
   state: Map<TKey, TResult>
   data: TResult | undefined
@@ -121,7 +121,7 @@ export function useLiveSuspenseQuery<
 // Implementation - uses useLiveQuery internally and adds Suspense logic
 export function useLiveSuspenseQuery(
   configOrQueryOrCollection: any,
-  deps: Array<unknown> = []
+  deps: Array<unknown> = [],
 ) {
   const promiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
@@ -148,7 +148,7 @@ export function useLiveSuspenseQuery(
   if (!result.isEnabled) {
     // Suspense queries cannot be disabled - throw error
     throw new Error(
-      `useLiveSuspenseQuery does not support disabled queries. Use useLiveQuery instead for conditional queries.`
+      `useLiveSuspenseQuery does not support disabled queries. Use useLiveQuery instead for conditional queries.`,
     )
   }
 

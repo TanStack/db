@@ -117,7 +117,7 @@ export class BTree<K = any, V = any> {
   public constructor(
     compare: (a: K, b: K) => number,
     entries?: Array<[K, V]>,
-    maxNodeSize?: number
+    maxNodeSize?: number,
   ) {
     this._maxNodeSize = maxNodeSize! >= 4 ? Math.min(maxNodeSize!, 256) : 32
     this._compare = compare
@@ -230,7 +230,7 @@ export class BTree<K = any, V = any> {
       0,
       (k, _v) => {
         results.push(k)
-      }
+      },
     )
     return results
   }
@@ -250,7 +250,7 @@ export class BTree<K = any, V = any> {
       key,
       this._compare,
       false,
-      reusedArray
+      reusedArray,
     )
   }
 
@@ -306,7 +306,7 @@ export class BTree<K = any, V = any> {
     high: K,
     includeHigh: boolean,
     onFound?: (k: K, v: V, counter: number) => void,
-    initialCounter?: number
+    initialCounter?: number,
   ): number
 
   /**
@@ -331,7 +331,7 @@ export class BTree<K = any, V = any> {
     high: K,
     includeHigh: boolean,
     onFound?: (k: K, v: V, counter: number) => { break?: R } | void,
-    initialCounter?: number
+    initialCounter?: number,
   ): R | number {
     const r = this._root.forRange(
       low,
@@ -340,7 +340,7 @@ export class BTree<K = any, V = any> {
       false,
       this,
       initialCounter || 0,
-      onFound
+      onFound,
     )
     return typeof r === `number` ? r : r.break!
   }
@@ -379,7 +379,7 @@ export class BTree<K = any, V = any> {
     high: K,
     includeHigh: boolean,
     onFound: (k: K, v: V, counter: number) => EditRangeResult<V, R> | void,
-    initialCounter?: number
+    initialCounter?: number,
   ): R | number {
     let root = this._root
     if (root.isShared) this._root = root = root.clone()
@@ -391,7 +391,7 @@ export class BTree<K = any, V = any> {
         true,
         this,
         initialCounter || 0,
-        onFound
+        onFound,
       )
       return typeof r === `number` ? r : r.break!
     } finally {
@@ -500,7 +500,7 @@ class BNode<K, V> {
     key: K,
     compare: (a: K, b: K) => number,
     inclusive: boolean,
-    reusedArray: [K, V]
+    reusedArray: [K, V],
   ): [K, V] | undefined {
     const i = this.indexOf(key, -1, compare)
     const indexOrLower = i < 0 ? ~i - 1 : inclusive ? i : i - 1
@@ -516,7 +516,7 @@ class BNode<K, V> {
     key: K,
     compare: (a: K, b: K) => number,
     inclusive: boolean,
-    reusedArray: [K, V]
+    reusedArray: [K, V],
   ): [K, V] | undefined {
     const i = this.indexOf(key, -1, compare)
     const indexOrLower = i < 0 ? ~i : inclusive ? i : i + 1
@@ -536,7 +536,7 @@ class BNode<K, V> {
     key: K,
     value: V,
     overwrite: boolean | undefined,
-    tree: BTree<K, V>
+    tree: BTree<K, V>,
   ): boolean | BNode<K, V> {
     let i = this.indexOf(key, -1, tree._compare)
     if (i < 0) {
@@ -636,7 +636,7 @@ class BNode<K, V> {
     editMode: boolean,
     tree: BTree<K, V>,
     count: number,
-    onFound?: (k: K, v: V, counter: number) => EditRangeResult<V, R> | void
+    onFound?: (k: K, v: V, counter: number) => EditRangeResult<V, R> | void,
   ): EditRangeResult<V, R> | number {
     const cmp = tree._compare
     let iLow, iHigh
@@ -732,7 +732,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     key: K,
     compare: (a: K, b: K) => number,
     inclusive: boolean,
-    reusedArray: [K, V]
+    reusedArray: [K, V],
   ): [K, V] | undefined {
     const i = this.indexOf(key, 0, compare),
       children = this.children
@@ -741,7 +741,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
       key,
       compare,
       inclusive,
-      reusedArray
+      reusedArray,
     )
     if (result === undefined && i > 0) {
       return children[i - 1]!.maxPair(reusedArray)
@@ -753,7 +753,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     key: K,
     compare: (a: K, b: K) => number,
     inclusive: boolean,
-    reusedArray: [K, V]
+    reusedArray: [K, V],
   ): [K, V] | undefined {
     const i = this.indexOf(key, 0, compare),
       children = this.children,
@@ -763,7 +763,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
       key,
       compare,
       inclusive,
-      reusedArray
+      reusedArray,
     )
     if (result === undefined && i < length - 1) {
       return children[i + 1]!.minPair(reusedArray)
@@ -778,7 +778,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     key: K,
     value: V,
     overwrite: boolean | undefined,
-    tree: BTree<K, V>
+    tree: BTree<K, V>,
   ): boolean | BNodeInternal<K, V> {
     const c = this.children,
       max = tree._maxNodeSize,
@@ -854,7 +854,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     const half = this.children.length >> 1
     return new BNodeInternal<K, V>(
       this.children.splice(half),
-      this.keys.splice(half)
+      this.keys.splice(half),
     )
   }
 
@@ -887,7 +887,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
     editMode: boolean,
     tree: BTree<K, V>,
     count: number,
-    onFound?: (k: K, v: V, counter: number) => EditRangeResult<V, R> | void
+    onFound?: (k: K, v: V, counter: number) => EditRangeResult<V, R> | void,
   ): EditRangeResult<V, R> | number {
     const cmp = tree._compare
     const keys = this.keys,
@@ -896,7 +896,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
       i = iLow
     const iHigh = Math.min(
       high === low ? iLow : this.indexOf(high, 0, cmp),
-      keys.length - 1
+      keys.length - 1,
     )
     if (!editMode) {
       // Simple case
@@ -908,7 +908,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
           editMode,
           tree,
           count,
-          onFound
+          onFound,
         )
         if (typeof result !== `number`) return result
         count = result
@@ -924,7 +924,7 @@ class BNodeInternal<K, V> extends BNode<K, V> {
             editMode,
             tree,
             count,
-            onFound
+            onFound,
           )
           // Note: if children[i] is empty then keys[i]=undefined.
           //       This is an invalid state, but it is fixed below.

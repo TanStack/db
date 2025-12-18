@@ -1,12 +1,12 @@
-import { describe, expectTypeOf, test } from "vitest"
+import { describe, expectTypeOf, test } from 'vitest'
 import {
   count,
   createLiveQueryCollection,
   eq,
   gt,
-} from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+} from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -57,7 +57,7 @@ function createUsersCollection() {
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
-    })
+    }),
   )
 }
 
@@ -67,7 +67,7 @@ function createDepartmentsCollection() {
       id: `test-departments`,
       getKey: (dept) => dept.id,
       initialData: sampleDepartments,
-    })
+    }),
   )
 }
 
@@ -204,7 +204,7 @@ describe(`Functional Variants Types`, () => {
         q
           .from({ user: usersCollection })
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id)
+            eq(user.department_id, dept.id),
           )
           .fn.select((row) => ({
             employeeInfo: `${row.user.name} works in ${row.dept?.name || `Unknown`}`,
@@ -237,11 +237,11 @@ describe(`Functional Variants Types`, () => {
         q
           .from({ user: usersCollection })
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id)
+            eq(user.department_id, dept.id),
           )
           .fn.where(
             (row) =>
-              row.user.active && (row.dept?.name === `Engineering` || false)
+              row.user.active && (row.dept?.name === `Engineering` || false),
           ),
     })
 
@@ -261,7 +261,7 @@ describe(`Functional Variants Types`, () => {
         q
           .from({ user: usersCollection })
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id)
+            eq(user.department_id, dept.id),
           )
           .fn.where((row) => row.user.active)
           .fn.where((row) => row.user.salary > 60000)
@@ -410,7 +410,7 @@ describe(`Functional Variants Types`, () => {
         .fn.select((row) => ({
           name: row.user.name,
           isActive: row.user.active,
-        }))
+        })),
     )
 
     const results = liveCollection.toArray
@@ -448,7 +448,7 @@ describe(`Functional Variants Types`, () => {
         q
           .from({ user: usersCollection })
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id)
+            eq(user.department_id, dept.id),
           )
           .groupBy(({ dept }) => dept?.name)
           .fn.having((row) => row.dept?.name !== `HR`)

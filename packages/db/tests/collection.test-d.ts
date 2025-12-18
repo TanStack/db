@@ -1,8 +1,8 @@
-import { assertType, describe, expectTypeOf, it } from "vitest"
-import { z } from "zod"
-import { createCollection } from "../src/collection/index.js"
-import type { OperationConfig } from "../src/types"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+import { assertType, describe, expectTypeOf, it } from 'vitest'
+import { z } from 'zod'
+import { createCollection } from '../src/collection/index.js'
+import type { OperationConfig } from '../src/types'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 
 describe(`Collection.update type tests`, () => {
   type TypeTestItem = { id: string; value: number; optional?: boolean }

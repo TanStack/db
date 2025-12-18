@@ -9,13 +9,13 @@ title: LoadSubsetFn
 type LoadSubsetFn = (options) => true | Promise<void>;
 ```
 
-Defined in: [packages/db/src/types.ts:274](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L274)
+Defined in: [packages/db/src/types.ts:313](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L313)
 
 ## Parameters
 
 ### options
 
-[`LoadSubsetOptions`](../LoadSubsetOptions.md)
+[`LoadSubsetOptions`](LoadSubsetOptions.md)
 
 ## Returns
 

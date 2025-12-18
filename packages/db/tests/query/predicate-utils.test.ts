@@ -1,19 +1,20 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from 'vitest'
 import {
   isLimitSubset,
+  isOffsetLimitSubset,
   isOrderBySubset,
   isPredicateSubset,
   isWhereSubset,
   minusWherePredicates,
   unionWherePredicates,
-} from "../../src/query/predicate-utils"
-import { Func, PropRef, Value } from "../../src/query/ir"
+} from '../../src/query/predicate-utils'
+import { Func, PropRef, Value } from '../../src/query/ir'
 import type {
   BasicExpression,
   OrderBy,
   OrderByClause,
-} from "../../src/query/ir"
-import type { LoadSubsetOptions } from "../../src/types"
+} from '../../src/query/ir'
+import type { LoadSubsetOptions } from '../../src/types'
 
 // Helper functions to build expressions more easily
 function ref(path: string | Array<string>): PropRef {
@@ -62,7 +63,7 @@ function inOp(left: BasicExpression, values: Array<any>): Func {
 
 function orderByClause(
   expression: BasicExpression,
-  direction: `asc` | `desc` = `asc`
+  direction: `asc` | `desc` = `asc`,
 ): OrderByClause {
   return {
     expression,
@@ -97,7 +98,7 @@ describe(`isWhereSubset`, () => {
 
     it(`should return true for structurally equal expressions`, () => {
       expect(
-        isWhereSubset(gt(ref(`age`), val(10)), gt(ref(`age`), val(10)))
+        isWhereSubset(gt(ref(`age`), val(10)), gt(ref(`age`), val(10))),
       ).toBe(true)
     })
 
@@ -111,76 +112,76 @@ describe(`isWhereSubset`, () => {
   describe(`comparison operators`, () => {
     it(`should handle gt: age > 20 is subset of age > 10`, () => {
       expect(
-        isWhereSubset(gt(ref(`age`), val(20)), gt(ref(`age`), val(10)))
+        isWhereSubset(gt(ref(`age`), val(20)), gt(ref(`age`), val(10))),
       ).toBe(true)
     })
 
     it(`should handle gt: age > 10 is NOT subset of age > 20`, () => {
       expect(
-        isWhereSubset(gt(ref(`age`), val(10)), gt(ref(`age`), val(20)))
+        isWhereSubset(gt(ref(`age`), val(10)), gt(ref(`age`), val(20))),
       ).toBe(false)
     })
 
     it(`should handle gte: age >= 20 is subset of age >= 10`, () => {
       expect(
-        isWhereSubset(gte(ref(`age`), val(20)), gte(ref(`age`), val(10)))
+        isWhereSubset(gte(ref(`age`), val(20)), gte(ref(`age`), val(10))),
       ).toBe(true)
     })
 
     it(`should handle lt: age < 10 is subset of age < 20`, () => {
       expect(
-        isWhereSubset(lt(ref(`age`), val(10)), lt(ref(`age`), val(20)))
+        isWhereSubset(lt(ref(`age`), val(10)), lt(ref(`age`), val(20))),
       ).toBe(true)
     })
 
     it(`should handle lt: age < 20 is NOT subset of age < 10`, () => {
       expect(
-        isWhereSubset(lt(ref(`age`), val(20)), lt(ref(`age`), val(10)))
+        isWhereSubset(lt(ref(`age`), val(20)), lt(ref(`age`), val(10))),
       ).toBe(false)
     })
 
     it(`should handle lte: age <= 10 is subset of age <= 20`, () => {
       expect(
-        isWhereSubset(lte(ref(`age`), val(10)), lte(ref(`age`), val(20)))
+        isWhereSubset(lte(ref(`age`), val(10)), lte(ref(`age`), val(20))),
       ).toBe(true)
     })
 
     it(`should handle eq: age = 15 is subset of age > 10`, () => {
       expect(
-        isWhereSubset(eq(ref(`age`), val(15)), gt(ref(`age`), val(10)))
+        isWhereSubset(eq(ref(`age`), val(15)), gt(ref(`age`), val(10))),
       ).toBe(true)
     })
 
     it(`should handle eq: age = 5 is NOT subset of age > 10`, () => {
       expect(
-        isWhereSubset(eq(ref(`age`), val(5)), gt(ref(`age`), val(10)))
+        isWhereSubset(eq(ref(`age`), val(5)), gt(ref(`age`), val(10))),
       ).toBe(false)
     })
 
     it(`should handle eq: age = 15 is subset of age >= 15`, () => {
       expect(
-        isWhereSubset(eq(ref(`age`), val(15)), gte(ref(`age`), val(15)))
+        isWhereSubset(eq(ref(`age`), val(15)), gte(ref(`age`), val(15))),
       ).toBe(true)
     })
 
     it(`should handle eq: age = 15 is subset of age < 20`, () => {
       expect(
-        isWhereSubset(eq(ref(`age`), val(15)), lt(ref(`age`), val(20)))
+        isWhereSubset(eq(ref(`age`), val(15)), lt(ref(`age`), val(20))),
       ).toBe(true)
     })
 
     it(`should handle mixed operators: gt vs gte`, () => {
       expect(
-        isWhereSubset(gt(ref(`age`), val(10)), gte(ref(`age`), val(10)))
+        isWhereSubset(gt(ref(`age`), val(10)), gte(ref(`age`), val(10))),
       ).toBe(true)
     })
 
     it(`should handle mixed operators: gte vs gt`, () => {
       expect(
-        isWhereSubset(gte(ref(`age`), val(11)), gt(ref(`age`), val(10)))
+        isWhereSubset(gte(ref(`age`), val(11)), gt(ref(`age`), val(10))),
       ).toBe(true)
       expect(
-        isWhereSubset(gte(ref(`age`), val(10)), gt(ref(`age`), val(10)))
+        isWhereSubset(gte(ref(`age`), val(10)), gt(ref(`age`), val(10))),
       ).toBe(false)
     })
   })
@@ -188,73 +189,73 @@ describe(`isWhereSubset`, () => {
   describe(`IN operator`, () => {
     it(`should handle eq vs in: age = 5 is subset of age IN [5, 10, 15]`, () => {
       expect(
-        isWhereSubset(eq(ref(`age`), val(5)), inOp(ref(`age`), [5, 10, 15]))
+        isWhereSubset(eq(ref(`age`), val(5)), inOp(ref(`age`), [5, 10, 15])),
       ).toBe(true)
     })
 
     it(`should handle eq vs in: age = 20 is NOT subset of age IN [5, 10, 15]`, () => {
       expect(
-        isWhereSubset(eq(ref(`age`), val(20)), inOp(ref(`age`), [5, 10, 15]))
+        isWhereSubset(eq(ref(`age`), val(20)), inOp(ref(`age`), [5, 10, 15])),
       ).toBe(false)
     })
 
     it(`should handle in vs in: [5, 10] is subset of [5, 10, 15]`, () => {
       expect(
-        isWhereSubset(inOp(ref(`age`), [5, 10]), inOp(ref(`age`), [5, 10, 15]))
+        isWhereSubset(inOp(ref(`age`), [5, 10]), inOp(ref(`age`), [5, 10, 15])),
       ).toBe(true)
     })
 
     it(`should handle in vs in: [5, 20] is NOT subset of [5, 10, 15]`, () => {
       expect(
-        isWhereSubset(inOp(ref(`age`), [5, 20]), inOp(ref(`age`), [5, 10, 15]))
+        isWhereSubset(inOp(ref(`age`), [5, 20]), inOp(ref(`age`), [5, 10, 15])),
       ).toBe(false)
     })
 
     it(`should handle empty IN array: age IN [] is subset of age IN []`, () => {
       expect(isWhereSubset(inOp(ref(`age`), []), inOp(ref(`age`), []))).toBe(
-        true
+        true,
       )
     })
 
     it(`should handle empty IN array: age IN [] is subset of age IN [5, 10]`, () => {
       expect(
-        isWhereSubset(inOp(ref(`age`), []), inOp(ref(`age`), [5, 10]))
+        isWhereSubset(inOp(ref(`age`), []), inOp(ref(`age`), [5, 10])),
       ).toBe(true)
     })
 
     it(`should handle empty IN array: age IN [5, 10] is NOT subset of age IN []`, () => {
       expect(
-        isWhereSubset(inOp(ref(`age`), [5, 10]), inOp(ref(`age`), []))
+        isWhereSubset(inOp(ref(`age`), [5, 10]), inOp(ref(`age`), [])),
       ).toBe(false)
     })
 
     it(`should handle singleton IN array: age = 5 is subset of age IN [5]`, () => {
       expect(isWhereSubset(eq(ref(`age`), val(5)), inOp(ref(`age`), [5]))).toBe(
-        true
+        true,
       )
     })
 
     it(`should handle singleton IN array: age = 10 is NOT subset of age IN [5]`, () => {
       expect(
-        isWhereSubset(eq(ref(`age`), val(10)), inOp(ref(`age`), [5]))
+        isWhereSubset(eq(ref(`age`), val(10)), inOp(ref(`age`), [5])),
       ).toBe(false)
     })
 
     it(`should handle singleton IN array: age IN [5] is subset of age IN [5, 10, 15]`, () => {
       expect(
-        isWhereSubset(inOp(ref(`age`), [5]), inOp(ref(`age`), [5, 10, 15]))
+        isWhereSubset(inOp(ref(`age`), [5]), inOp(ref(`age`), [5, 10, 15])),
       ).toBe(true)
     })
 
     it(`should handle singleton IN array: age IN [20] is NOT subset of age IN [5, 10, 15]`, () => {
       expect(
-        isWhereSubset(inOp(ref(`age`), [20]), inOp(ref(`age`), [5, 10, 15]))
+        isWhereSubset(inOp(ref(`age`), [20]), inOp(ref(`age`), [5, 10, 15])),
       ).toBe(false)
     })
 
     it(`should handle singleton IN array: age IN [5, 10, 15] is NOT subset of age IN [5]`, () => {
       expect(
-        isWhereSubset(inOp(ref(`age`), [5, 10, 15]), inOp(ref(`age`), [5]))
+        isWhereSubset(inOp(ref(`age`), [5, 10, 15]), inOp(ref(`age`), [5])),
       ).toBe(false)
     })
   })
@@ -264,8 +265,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           and(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`))),
-          gt(ref(`age`), val(10))
-        )
+          gt(ref(`age`), val(10)),
+        ),
       ).toBe(true)
     })
 
@@ -273,8 +274,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           and(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`))),
-          eq(ref(`name`), val(`John`))
-        )
+          eq(ref(`name`), val(`John`)),
+        ),
       ).toBe(false)
     })
 
@@ -282,8 +283,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           gt(ref(`age`), val(10)),
-          and(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`)))
-        )
+          and(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`))),
+        ),
       ).toBe(false)
     })
 
@@ -291,8 +292,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           and(gt(ref(`age`), val(20)), eq(ref(`status`), val(`active`))),
-          and(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`)))
-        )
+          and(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`))),
+        ),
       ).toBe(true)
     })
   })
@@ -302,8 +303,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           gt(ref(`age`), val(10)),
-          or(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`)))
-        )
+          or(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`))),
+        ),
       ).toBe(true)
     })
 
@@ -311,8 +312,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           eq(ref(`age`), val(10)),
-          or(gt(ref(`age`), val(10)), lt(ref(`age`), val(5)))
-        )
+          or(gt(ref(`age`), val(10)), lt(ref(`age`), val(5))),
+        ),
       ).toBe(false)
     })
 
@@ -320,8 +321,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           or(gt(ref(`age`), val(20)), gt(ref(`age`), val(30))),
-          gt(ref(`age`), val(10))
-        )
+          gt(ref(`age`), val(10)),
+        ),
       ).toBe(true)
     })
 
@@ -329,8 +330,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           or(gt(ref(`age`), val(20)), eq(ref(`status`), val(`active`))),
-          or(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`)))
-        )
+          or(gt(ref(`age`), val(10)), eq(ref(`status`), val(`active`))),
+        ),
       ).toBe(true)
     })
 
@@ -338,8 +339,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           or(gt(ref(`age`), val(20)), lt(ref(`age`), val(5))),
-          gt(ref(`age`), val(10))
-        )
+          gt(ref(`age`), val(10)),
+        ),
       ).toBe(false)
     })
   })
@@ -347,7 +348,7 @@ describe(`isWhereSubset`, () => {
   describe(`different fields`, () => {
     it(`should return false for different fields with no relationship`, () => {
       expect(
-        isWhereSubset(gt(ref(`age`), val(20)), gt(ref(`salary`), val(1000)))
+        isWhereSubset(gt(ref(`age`), val(20)), gt(ref(`salary`), val(1000))),
       ).toBe(false)
     })
   })
@@ -361,8 +362,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           eq(ref(`createdAt`), val(date2)),
-          eq(ref(`createdAt`), val(date2))
-        )
+          eq(ref(`createdAt`), val(date2)),
+        ),
       ).toBe(true)
     })
 
@@ -370,8 +371,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           gt(ref(`createdAt`), val(date2)),
-          gt(ref(`createdAt`), val(date1))
-        )
+          gt(ref(`createdAt`), val(date1)),
+        ),
       ).toBe(true)
     })
 
@@ -379,8 +380,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           lt(ref(`createdAt`), val(date2)),
-          lt(ref(`createdAt`), val(date3))
-        )
+          lt(ref(`createdAt`), val(date3)),
+        ),
       ).toBe(true)
     })
 
@@ -388,8 +389,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           eq(ref(`createdAt`), val(date2)),
-          gt(ref(`createdAt`), val(date1))
-        )
+          gt(ref(`createdAt`), val(date1)),
+        ),
       ).toBe(true)
     })
 
@@ -397,8 +398,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           eq(ref(`createdAt`), val(date2)),
-          inOp(ref(`createdAt`), [date1, date2, date3])
-        )
+          inOp(ref(`createdAt`), [date1, date2, date3]),
+        ),
       ).toBe(true)
     })
 
@@ -406,8 +407,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           inOp(ref(`createdAt`), [date1, date2]),
-          inOp(ref(`createdAt`), [date1, date2, date3])
-        )
+          inOp(ref(`createdAt`), [date1, date2, date3]),
+        ),
       ).toBe(true)
     })
 
@@ -415,8 +416,8 @@ describe(`isWhereSubset`, () => {
       expect(
         isWhereSubset(
           eq(ref(`createdAt`), val(date1)),
-          inOp(ref(`createdAt`), [date2, date3])
-        )
+          inOp(ref(`createdAt`), [date2, date3]),
+        ),
       ).toBe(false)
     })
   })
@@ -647,8 +648,89 @@ describe(`isLimitSubset`, () => {
   })
 })
 
+describe(`isOffsetLimitSubset`, () => {
+  it(`should return true when subset range is within superset range (same offset)`, () => {
+    expect(
+      isOffsetLimitSubset({ offset: 0, limit: 5 }, { offset: 0, limit: 10 }),
+    ).toBe(true)
+    expect(
+      isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 0, limit: 10 }),
+    ).toBe(true)
+  })
+
+  it(`should return true when subset starts later but is still within superset range`, () => {
+    // superset loads rows [0, 10), subset loads rows [5, 10) - subset is within superset
+    expect(
+      isOffsetLimitSubset({ offset: 5, limit: 5 }, { offset: 0, limit: 10 }),
+    ).toBe(true)
+  })
+
+  it(`should return false when subset extends beyond superset range`, () => {
+    // superset loads rows [0, 10), subset loads rows [5, 15) - subset extends beyond
+    expect(
+      isOffsetLimitSubset({ offset: 5, limit: 10 }, { offset: 0, limit: 10 }),
+    ).toBe(false)
+  })
+
+  it(`should return false when subset is completely outside superset range`, () => {
+    // superset loads rows [0, 10), subset loads rows [20, 30) - no overlap
+    expect(
+      isOffsetLimitSubset({ offset: 20, limit: 10 }, { offset: 0, limit: 10 }),
+    ).toBe(false)
+  })
+
+  it(`should return false when superset starts after subset`, () => {
+    // superset loads rows [10, 20), subset loads rows [0, 10) - superset starts too late
+    expect(
+      isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 10, limit: 10 }),
+    ).toBe(false)
+  })
+
+  it(`should return true when superset is unlimited`, () => {
+    expect(isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 0 })).toBe(
+      true,
+    )
+    expect(isOffsetLimitSubset({ offset: 20, limit: 10 }, { offset: 0 })).toBe(
+      true,
+    )
+  })
+
+  it(`should return false when superset is unlimited but starts after subset`, () => {
+    // superset loads rows [10, ∞), subset loads rows [0, 10) - superset starts too late
+    expect(isOffsetLimitSubset({ offset: 0, limit: 10 }, { offset: 10 })).toBe(
+      false,
+    )
+  })
+
+  it(`should return false when subset is unlimited but superset has a limit`, () => {
+    expect(isOffsetLimitSubset({ offset: 0 }, { offset: 0, limit: 10 })).toBe(
+      false,
+    )
+  })
+
+  it(`should return true when both are unlimited and superset starts at or before subset`, () => {
+    expect(isOffsetLimitSubset({ offset: 10 }, { offset: 0 })).toBe(true)
+    expect(isOffsetLimitSubset({ offset: 10 }, { offset: 10 })).toBe(true)
+  })
+
+  it(`should return false when both are unlimited but superset starts after subset`, () => {
+    expect(isOffsetLimitSubset({ offset: 0 }, { offset: 10 })).toBe(false)
+  })
+
+  it(`should default offset to 0 when undefined`, () => {
+    expect(isOffsetLimitSubset({ limit: 5 }, { limit: 10 })).toBe(true)
+    expect(isOffsetLimitSubset({ offset: 0, limit: 5 }, { limit: 10 })).toBe(
+      true,
+    )
+    expect(isOffsetLimitSubset({ limit: 5 }, { offset: 0, limit: 10 })).toBe(
+      true,
+    )
+  })
+})
+
 describe(`isPredicateSubset`, () => {
-  it(`should check all components`, () => {
+  it(`should check all components for unlimited superset`, () => {
+    // For unlimited supersets, where-subset logic applies
     const subset: LoadSubsetOptions = {
       where: gt(ref(`age`), val(20)),
       orderBy: [orderByClause(ref(`age`), `asc`)],
@@ -660,9 +742,64 @@ describe(`isPredicateSubset`, () => {
         orderByClause(ref(`age`), `asc`),
         orderByClause(ref(`name`), `desc`),
       ],
+      // No limit - unlimited superset
+    }
+    expect(isPredicateSubset(subset, superset)).toBe(true)
+  })
+
+  it(`should require equal where clauses for limited supersets`, () => {
+    // For limited supersets, where clauses must be EQUAL
+    const sameWhere = gt(ref(`age`), val(10))
+
+    const subset: LoadSubsetOptions = {
+      where: sameWhere,
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 5,
+    }
+    const superset: LoadSubsetOptions = {
+      where: sameWhere, // Same where clause
+      orderBy: [
+        orderByClause(ref(`age`), `asc`),
+        orderByClause(ref(`name`), `desc`),
+      ],
       limit: 20,
     }
     expect(isPredicateSubset(subset, superset)).toBe(true)
+  })
+
+  it(`should return false for limited superset with different where clause`, () => {
+    // Even if subset's where is more restrictive, it can't be a subset
+    // of a limited superset with a different where clause.
+    // The top N items of "age > 20" may not be in the top M items of "age > 10"
+    const subset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(20)), // More restrictive
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 5,
+    }
+    const superset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(10)), // Less restrictive but LIMITED
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 20,
+    }
+    // This should be FALSE because the top 5 of "age > 20"
+    // might include items outside the top 20 of "age > 10"
+    expect(isPredicateSubset(subset, superset)).toBe(false)
+  })
+
+  it(`should return false for limited superset with no where vs subset with where`, () => {
+    // This is the reported bug case: pagination with search filter
+    const subset: LoadSubsetOptions = {
+      where: gt(ref(`age`), val(20)), // Has a filter
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 10,
+    }
+    const superset: LoadSubsetOptions = {
+      where: undefined, // No filter but LIMITED
+      orderBy: [orderByClause(ref(`age`), `asc`)],
+      limit: 10,
+    }
+    // The filtered results might include items outside the unfiltered top 10
+    expect(isPredicateSubset(subset, superset)).toBe(false)
   })
 
   it(`should return false if where is not subset`, () => {
@@ -699,6 +836,138 @@ describe(`isPredicateSubset`, () => {
       limit: 20,
     }
     expect(isPredicateSubset(subset, superset)).toBe(false)
+  })
+
+  describe(`with offset`, () => {
+    it(`should return true when subset offset+limit is within superset range`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 5,
+        limit: 5,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      // subset loads rows [5, 10), superset loads rows [0, 10) - subset is within
+      expect(isPredicateSubset(subset, superset)).toBe(true)
+    })
+
+    it(`should return false when subset is at different offset outside superset range`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 20,
+        limit: 10,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      // subset loads rows [20, 30), superset loads rows [0, 10) - no overlap
+      expect(isPredicateSubset(subset, superset)).toBe(false)
+    })
+
+    it(`should return false when subset extends beyond superset even with same where`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 5,
+        limit: 10,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      // subset loads rows [5, 15), superset loads rows [0, 10) - subset extends beyond
+      expect(isPredicateSubset(subset, superset)).toBe(false)
+    })
+
+    it(`should return true for unlimited superset with any subset offset`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 100,
+        limit: 10,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        // No limit - unlimited
+      }
+      expect(isPredicateSubset(subset, superset)).toBe(true)
+    })
+
+    it(`should return false when superset has offset that starts after subset needs`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      const subset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 5,
+        limit: 10,
+      }
+      // subset needs rows [0, 10), superset only has rows [5, 15)
+      expect(isPredicateSubset(subset, superset)).toBe(false)
+    })
+
+    it(`should handle pagination correctly - page 2 not subset of page 1`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      // Page 1: offset 0, limit 10
+      const page1: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 10,
+      }
+      // Page 2: offset 10, limit 10
+      const page2: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 10,
+        limit: 10,
+      }
+      // Page 2 is NOT a subset of page 1 (different rows)
+      expect(isPredicateSubset(page2, page1)).toBe(false)
+      // Page 1 is NOT a subset of page 2 (different rows)
+      expect(isPredicateSubset(page1, page2)).toBe(false)
+    })
+
+    it(`should return true when superset covers multiple pages`, () => {
+      const sameWhere = gt(ref(`age`), val(10))
+      // Superset: offset 0, limit 30 (covers pages 1-3)
+      const superset: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 0,
+        limit: 30,
+      }
+      // Page 2: offset 10, limit 10
+      const page2: LoadSubsetOptions = {
+        where: sameWhere,
+        orderBy: [orderByClause(ref(`age`), `asc`)],
+        offset: 10,
+        limit: 10,
+      }
+      // Page 2 IS a subset of superset (rows 10-19 within 0-29)
+      expect(isPredicateSubset(page2, superset)).toBe(true)
+    })
   })
 })
 
@@ -955,11 +1224,11 @@ describe(`minusWherePredicates`, () => {
     it(`should handle common conditions: (age > 10 AND status = 'active') - (age > 20 AND status = 'active') = (age > 10 AND age <= 20 AND status = 'active')`, () => {
       const from = and(
         gt(ref(`age`), val(10)),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
       const subtract = and(
         gt(ref(`age`), val(20)),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
       const result = minusWherePredicates(from, subtract)
 
@@ -978,12 +1247,12 @@ describe(`minusWherePredicates`, () => {
       const from = and(
         gt(ref(`age`), val(10)),
         eq(ref(`status`), val(`active`)),
-        eq(ref(`department`), val(`engineering`))
+        eq(ref(`department`), val(`engineering`)),
       )
       const subtract = and(
         gt(ref(`age`), val(20)),
         eq(ref(`status`), val(`active`)),
-        eq(ref(`department`), val(`engineering`))
+        eq(ref(`department`), val(`engineering`)),
       )
       const result = minusWherePredicates(from, subtract)
 
@@ -1002,11 +1271,11 @@ describe(`minusWherePredicates`, () => {
     it(`should handle IN with common conditions: (age IN [10,20,30] AND status = 'active') - (age IN [20,30] AND status = 'active') = (age IN [10] AND status = 'active')`, () => {
       const from = and(
         inOp(ref(`age`), [10, 20, 30]),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
       const subtract = and(
         inOp(ref(`age`), [20, 30]),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
       const result = minusWherePredicates(from, subtract)
 
@@ -1027,11 +1296,11 @@ describe(`minusWherePredicates`, () => {
     it(`should return null when common conditions exist but remaining difference cannot be simplified`, () => {
       const from = and(
         gt(ref(`age`), val(10)),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
       const subtract = and(
         gt(ref(`name`), val(`Z`)),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
       const result = minusWherePredicates(from, subtract)
 

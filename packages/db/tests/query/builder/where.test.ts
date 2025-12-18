@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { Query, getQueryIR } from "../../../src/query/builder/index.js"
+import { describe, expect, it } from 'vitest'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import {
   and,
   eq,
@@ -12,7 +12,7 @@ import {
   lte,
   not,
   or,
-} from "../../../src/query/builder/functions.js"
+} from '../../../src/query/builder/functions.js'
 
 // Test schema
 interface Employee {
@@ -80,7 +80,7 @@ describe(`QueryBuilder.where`, () => {
     const andQuery = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) =>
-        and(eq(employees.active, true), gt(employees.salary, 50000))
+        and(eq(employees.active, true), gt(employees.salary, 50000)),
       )
     expect((getQueryIR(andQuery).where as any)[0]?.name).toBe(`and`)
 
@@ -88,7 +88,7 @@ describe(`QueryBuilder.where`, () => {
     const orQuery = builder
       .from({ employees: employeesCollection })
       .where(({ employees }) =>
-        or(eq(employees.department_id, 1), eq(employees.department_id, 2))
+        or(eq(employees.department_id, 1), eq(employees.department_id, 2)),
       )
     expect((getQueryIR(orQuery).where as any)[0]?.name).toBe(`or`)
 
@@ -146,8 +146,8 @@ describe(`QueryBuilder.where`, () => {
       .where(({ employees }) =>
         and(
           eq(employees.active, true),
-          or(gt(employees.salary, 75000), eq(employees.department_id, 1))
-        )
+          or(gt(employees.salary, 75000), eq(employees.department_id, 1)),
+        ),
       )
 
     const builtQuery = getQueryIR(query)

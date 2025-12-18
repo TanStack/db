@@ -1,5 +1,5 @@
-import type { CollectionImpl } from "../../collection/index.js"
-import type { SingleResult, StringCollationConfig } from "../../types.js"
+import type { CollectionImpl } from '../../collection/index.js'
+import type { SingleResult, StringCollationConfig } from '../../types.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -7,8 +7,8 @@ import type {
   OrderByDirection,
   PropRef,
   Value,
-} from "../ir.js"
-import type { QueryBuilder } from "./index.js"
+} from '../ir.js'
+import type { QueryBuilder } from './index.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -121,7 +121,7 @@ export type GetAliases<TContext extends Context> = keyof TContext[`schema`]
  * Example: `(refs) => eq(refs.users.age, 25)`
  */
 export type WhereCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -290,7 +290,7 @@ type NeedsExtraction<T> = T extends
  * Example: `(refs) => refs.users.createdAt`
  */
 export type OrderByCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -326,7 +326,7 @@ export type CompareOptions = StringCollationConfig & {
  * Example: `(refs) => refs.orders.status`
  */
 export type GroupByCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -342,7 +342,7 @@ export type GroupByCallback<TContext extends Context> = (
  * Example: `(refs) => eq(refs.users.id, refs.orders.userId)`
  */
 export type JoinOnCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -371,11 +371,11 @@ export type RefsForContext<TContext extends Context> = {
   > extends true
     ? IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
-        // Extract the non-undefined and non-null part and place undefined outside
-        Ref<NonNullable<TContext[`schema`][K]>> | undefined
+          // Extract the non-undefined and non-null part and place undefined outside
+          Ref<NonNullable<TContext[`schema`][K]>> | undefined
       : // T is optional (T | undefined) but not exactly undefined, and not nullable
-        // Extract the non-undefined part and place undefined outside
-        Ref<NonUndefined<TContext[`schema`][K]>> | undefined
+          // Extract the non-undefined part and place undefined outside
+          Ref<NonUndefined<TContext[`schema`][K]>> | undefined
     : IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is nullable (T | null) but not exactly null, and not optional
         // Extract the non-null part and place null outside
@@ -612,7 +612,7 @@ export type ApplyJoinOptionalityToMergedSchema<
   // Apply optionality to new schema based on join type
   [K in keyof TNewSchema]: TJoinType extends `left` | `full`
     ? // New table becomes optional for left and full joins
-      TNewSchema[K] | undefined
+        TNewSchema[K] | undefined
     : // New table is required for inner and right joins
       TNewSchema[K]
 }

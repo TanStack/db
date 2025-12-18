@@ -5,11 +5,11 @@ title: SubscribeChangesSnapshotOptions
 
 # Interface: SubscribeChangesSnapshotOptions
 
-Defined in: [packages/db/src/types.ts:727](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L727)
+Defined in: [packages/db/src/types.ts:769](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L769)
 
 ## Extends
 
-- `Omit`\<[`SubscribeChangesOptions`](../SubscribeChangesOptions.md), `"includeInitialState"`\>
+- `Omit`\<[`SubscribeChangesOptions`](SubscribeChangesOptions.md), `"includeInitialState"`\>
 
 ## Properties
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/types.ts:727](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:730](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L730)
+Defined in: [packages/db/src/types.ts:774](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L774)
 
 ***
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/types.ts:730](https://github.com/TanStack/db/blob/m
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:729](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L729)
+Defined in: [packages/db/src/types.ts:773](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L773)
 
 ***
 
@@ -39,10 +39,10 @@ Defined in: [packages/db/src/types.ts:729](https://github.com/TanStack/db/blob/m
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:724](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L724)
+Defined in: [packages/db/src/types.ts:766](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L766)
 
 Pre-compiled expression for filtering changes
 
 #### Inherited from
 
-[`SubscribeChangesOptions`](../SubscribeChangesOptions.md).[`whereExpression`](../SubscribeChangesOptions.md#whereexpression)
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`whereExpression`](SubscribeChangesOptions.md#whereexpression)

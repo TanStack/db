@@ -9,7 +9,7 @@ title: StandardSchema
 type StandardSchema<T> = StandardSchemaV1 & object;
 ```
 
-Defined in: [packages/db/src/types.ts:333](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L333)
+Defined in: [packages/db/src/types.ts:375](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L375)
 
 The Standard Schema interface.
 This follows the standard-schema specification: https://github.com/standard-schema/standard-schema

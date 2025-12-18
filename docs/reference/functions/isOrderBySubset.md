@@ -20,13 +20,13 @@ Returns true if the subset ordering requirements are satisfied by the superset o
 
 The ordering requirements to check
 
-[`OrderBy`](../../@tanstack/namespaces/IR/type-aliases/OrderBy.md) | `undefined`
+[`OrderBy`](../@tanstack/namespaces/IR/type-aliases/OrderBy.md) | `undefined`
 
 ### superset
 
 The ordering that might satisfy the requirements
 
-[`OrderBy`](../../@tanstack/namespaces/IR/type-aliases/OrderBy.md) | `undefined`
+[`OrderBy`](../@tanstack/namespaces/IR/type-aliases/OrderBy.md) | `undefined`
 
 ## Returns
 

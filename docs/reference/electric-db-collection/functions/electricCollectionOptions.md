@@ -8,10 +8,10 @@ title: electricCollectionOptions
 ## Call Signature
 
 ```ts
-function electricCollectionOptions<T>(config): CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord> & object;
+function electricCollectionOptions<T>(config): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord>, "utils"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:293](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L293)
+Defined in: [packages/electric-db-collection/src/electric.ts:474](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L474)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -27,23 +27,23 @@ The explicit type of items in the collection (highest priority)
 
 #### config
 
-[`ElectricCollectionConfig`](../../interfaces/ElectricCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `T`\> & `object`
+[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `T`\> & `object`
 
 Configuration options for the Electric collection
 
 ### Returns
 
-`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `string` \| `number`, `T`, `UtilsRecord`\> & `object`
+`Omit`\<`CollectionConfig`\<`InferSchemaOutput`\<`T`\>, `string` \| `number`, `T`, `UtilsRecord`\>, `"utils"`\> & `object`
 
 Collection options with utilities
 
 ## Call Signature
 
 ```ts
-function electricCollectionOptions<T>(config): CollectionConfig<T, string | number, never, UtilsRecord> & object;
+function electricCollectionOptions<T>(config): Omit<CollectionConfig<T, string | number, never, UtilsRecord>, "utils"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:304](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L304)
+Defined in: [packages/electric-db-collection/src/electric.ts:485](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L485)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -59,12 +59,12 @@ The explicit type of items in the collection (highest priority)
 
 #### config
 
-[`ElectricCollectionConfig`](../../interfaces/ElectricCollectionConfig.md)\<`T`, `never`\> & `object`
+[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`T`, `never`\> & `object`
 
 Configuration options for the Electric collection
 
 ### Returns
 
-`CollectionConfig`\<`T`, `string` \| `number`, `never`, `UtilsRecord`\> & `object`
+`Omit`\<`CollectionConfig`\<`T`, `string` \| `number`, `never`, `UtilsRecord`\>, `"utils"`\> & `object`
 
 Collection options with utilities

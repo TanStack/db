@@ -43,13 +43,13 @@ The type of the key returned by getKey
 
 #### config
 
-[`LocalOnlyCollectionConfig`](../../interfaces/LocalOnlyCollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `T`, `TKey`\> & `object`
+[`LocalOnlyCollectionConfig`](../interfaces/LocalOnlyCollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `T`, `TKey`\> & `object`
 
 Configuration options for the Local-only collection
 
 ### Returns
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & `object`
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`UtilsRecord`](../type-aliases/UtilsRecord.md)\> & `object` & `object`
 
 Collection options with utilities including acceptMutations
 
@@ -155,13 +155,13 @@ The type of the key returned by getKey
 
 #### config
 
-[`LocalOnlyCollectionConfig`](../../interfaces/LocalOnlyCollectionConfig.md)\<`T`, `never`, `TKey`\> & `object`
+[`LocalOnlyCollectionConfig`](../interfaces/LocalOnlyCollectionConfig.md)\<`T`, `never`, `TKey`\> & `object`
 
 Configuration options for the Local-only collection
 
 ### Returns
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`UtilsRecord`](../../type-aliases/UtilsRecord.md)\> & `object` & `object`
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`UtilsRecord`](../type-aliases/UtilsRecord.md)\> & `object` & `object`
 
 Collection options with utilities including acceptMutations
 

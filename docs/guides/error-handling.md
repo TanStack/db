@@ -92,8 +92,8 @@ const syncedCollection = createCollection(
 // Component can check error state
 function DataList() {
   const { data } = useLiveQuery((q) => q.from({ item: syncedCollection }))
-  const isError = syncedCollection.utils.isError()
-  const errorCount = syncedCollection.utils.errorCount()
+  const isError = syncedCollection.utils.isError
+  const errorCount = syncedCollection.utils.errorCount
   
   return (
     <>
@@ -112,9 +112,9 @@ function DataList() {
 ```
 
 Error tracking methods:
-- **`lastError()`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred:
-- **`isError()`**: Returns a boolean indicating whether the collection is currently in an error state:
-- **`errorCount()`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
+- **`lastError`**: Returns the most recent error encountered by the query, or `undefined` if no errors have occurred:
+- **`isError`**: Returns a boolean indicating whether the collection is currently in an error state:
+- **`errorCount`**: Returns the number of consecutive sync failures. This counter is incremented only when queries fail completely (not per retry attempt) and is reset on successful queries:
 - **`clearError()`**: Clears the error state and triggers a refetch of the query. This method resets both `lastError` and `errorCount`:
 
 ## Collection Status and Error States
@@ -177,7 +177,7 @@ const App = () => (
 )
 ```
 
-With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](../live-queries#using-with-react-suspense) for more details.
+With this approach, loading states are handled by `<Suspense>` and error states are handled by `<ErrorBoundary>` instead of within your component logic. See the [React Suspense section in Live Queries](./live-queries#using-with-react-suspense) for more details.
 
 ## Transaction Error Handling
 
@@ -810,6 +810,6 @@ const TodoApp = () => {
 
 ## See Also
 
-- [API Reference](../../overview.md#api-reference) - Detailed API documentation
-- [Mutations Guide](../../overview.md#making-optimistic-mutations) - Learn about optimistic updates and rollbacks
+- [API Reference](../overview.md#api-reference) - Detailed API documentation
+- [Mutations Guide](../overview.md#making-optimistic-mutations) - Learn about optimistic updates and rollbacks
 - [TanStack Query Error Handling](https://tanstack.com/query/latest/docs/react/guides/error-handling) - Query-specific error handling

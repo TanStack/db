@@ -1,5 +1,194 @@
 # @tanstack/db
 
+## 0.5.12
+
+### Patch Changes
+
+- Enhanced LoadSubsetOptions with separate cursor expressions and offset for flexible pagination. ([#960](https://github.com/TanStack/db/pull/960))
+
+  **⚠️ Breaking Change for Custom Sync Layers / Query Collections:**
+
+  `LoadSubsetOptions.where` no longer includes cursor expressions for pagination. If you have a custom sync layer or query collection that implements `loadSubset`, you must now handle pagination separately:
+  - **Cursor-based pagination:** Use the new `cursor` property (`cursor.whereFrom` and `cursor.whereCurrent`) and combine them with `where` yourself
+  - **Offset-based pagination:** Use the new `offset` property
+
+  Previously, cursor expressions were baked into the `where` clause. Now they are passed separately so sync layers can choose their preferred pagination strategy.
+
+  **Changes:**
+  - Added `CursorExpressions` type with `whereFrom`, `whereCurrent`, and optional `lastKey` properties
+  - Added `cursor` to `LoadSubsetOptions` for cursor-based pagination (separate from `where`)
+  - Added `offset` to `LoadSubsetOptions` for offset-based pagination support
+  - Electric sync layer now makes two parallel `requestSnapshot` calls when cursor is present:
+    - One for `whereCurrent` (all ties at boundary, no limit)
+    - One for `whereFrom` (rows after cursor, with limit)
+  - Query collection serialization now includes `offset` for query key generation
+  - Added `truncate` event to collections, emitted when synced data is truncated (e.g., after `must-refetch`)
+  - Fixed `setWindow` pagination: cursor expressions are now correctly built when paging through results
+  - Fixed offset tracking: `loadNextItems` now passes the correct window offset to prevent incorrect deduplication
+  - `CollectionSubscriber` now listens for `truncate` events to reset cursor tracking state
+
+  **Benefits:**
+  - Sync layers can choose between cursor-based or offset-based pagination strategies
+  - Electric can efficiently handle tie-breaking with two targeted requests
+  - Better separation of concerns between filtering (`where`) and pagination (`cursor`/`offset`)
+  - `setWindow` correctly triggers backend loading for subsequent pages in multi-column orderBy queries
+  - Cursor state is properly reset after truncation, preventing stale cursor data from being used
+
+- Ensure deterministic iteration order for collections and indexes. ([#958](https://github.com/TanStack/db/pull/958))
+
+  **SortedMap improvements:**
+  - Added key-based tie-breaking when values compare as equal, ensuring deterministic ordering
+  - Optimized to skip value comparison entirely when no comparator is provided (key-only sorting)
+  - Extracted `compareKeys` utility to `utils/comparison.ts` for reuse
+
+  **BTreeIndex improvements:**
+  - Keys within the same indexed value are now returned in deterministic sorted order
+  - Optimized with fast paths for empty sets and single-key sets to avoid unnecessary allocations
+
+  **CollectionStateManager changes:**
+  - Collections now always use `SortedMap` for `syncedData`, ensuring deterministic iteration order
+  - When no `compare` function is provided, entries are sorted by key only
+
+  This ensures that live queries with `orderBy` and `limit` produce stable, deterministic results even when multiple rows have equal sort values.
+
+- Enhanced multi-column orderBy support with lazy loading and composite cursor optimization. ([#926](https://github.com/TanStack/db/pull/926))
+
+  **Changes:**
+  - Create index on first orderBy column even for multi-column orderBy queries, enabling lazy loading with first-column ordering
+  - Pass multi-column orderBy to loadSubset with precise composite cursors (e.g., `or(gt(col1, v1), and(eq(col1, v1), gt(col2, v2)))`) for backend optimization
+  - Use wide bounds (first column only) for local index operations to ensure no rows are missed
+  - Use precise composite cursor for sync layer loadSubset to minimize data transfer
+
+  **Benefits:**
+  - Multi-column orderBy queries with limit now support lazy loading (previously disabled)
+  - Sync implementations (like Electric) can optimize queries using composite indexes on the backend
+  - Local collection uses first-column index efficiently while backend gets precise cursor
+
+- Updated dependencies [[`52c29fa`](https://github.com/TanStack/db/commit/52c29fa83b390ac26341dbf93e79ce0d59543686)]:
+  - @tanstack/db-ivm@0.1.14
+
+## 0.5.11
+
+### Patch Changes
+
+- fix(db): compile filter expression once in createFilterFunctionFromExpression ([#954](https://github.com/TanStack/db/pull/954))
+
+  Fixed a performance issue in `createFilterFunctionFromExpression` where the expression was being recompiled on every filter call. This only affected realtime change event filtering for pushed-down predicates at the collection level when using orderBy + limit. The core query engine was not affected as it already compiled predicates once.
+
+- fix(query-db-collection): use deep equality for object field comparison in query observer ([#967](https://github.com/TanStack/db/pull/967))
+
+  Fixed an issue where updating object fields (non-primitives) with `refetch: false` in `onUpdate` handlers would cause the value to rollback to the previous state every other update. The query observer was using shallow equality (`===`) to compare items, which compares object properties by reference rather than by value. This caused the observer to incorrectly detect differences and write stale data back to syncedData. Now uses `deepEquals` for proper value comparison.
+
+## 0.5.10
+
+### Patch Changes
+
+- Type utils in collection options as specific type (e.g. ElectricCollectionUtils) instead of generic UtilsRecord. ([#940](https://github.com/TanStack/db/pull/940))
+
+- Fix proxy to handle frozen objects correctly. Previously, creating a proxy for a frozen object (such as data from state management libraries that freeze their state) would throw a TypeError when attempting to modify properties via the proxy. The proxy now uses an unfrozen internal copy as the Proxy target, allowing modifications to be tracked correctly while preserving the immutability of the original object. ([#933](https://github.com/TanStack/db/pull/933))
+
+  Also adds support for `Object.seal()` and `Object.preventExtensions()` on proxies, allowing these operations to work correctly on change-tracking proxies.
+
+## 0.5.9
+
+### Patch Changes
+
+- Fix bulk insert not detecting duplicate keys within the same batch. Previously, when inserting multiple items with the same key in a single bulk insert operation, later items would silently overwrite earlier ones. Now, a `DuplicateKeyError` is thrown when duplicate keys are detected within the same batch. ([#929](https://github.com/TanStack/db/pull/929))
+
+## 0.5.8
+
+### Patch Changes
+
+- Fix pagination with Date orderBy values when backend has higher precision than JavaScript's millisecond precision. When loading duplicate values during cursor-based pagination, Date values now use a 1ms range query (`gte`/`lt`) instead of exact equality (`eq`) to correctly match all rows that fall within the same millisecond, even if the backend (e.g., PostgreSQL) stores them with microsecond precision. ([#913](https://github.com/TanStack/db/pull/913))
+
+- Fixed incorrect deduplication of limited queries with different where clauses. Previously, a query like `{where: searchFilter, limit: 10}` could be incorrectly deduplicated against a prior query `{where: undefined, limit: 10}`, causing search/filter results to only show cached data. Now, limited queries are only deduplicated when their where clauses are structurally equal. ([#914](https://github.com/TanStack/db/pull/914))
+
+## 0.5.7
+
+### Patch Changes
+
+- Fix change tracking for array items accessed via iteration methods (find, forEach, for...of, etc.) ([#910](https://github.com/TanStack/db/pull/910))
+
+  Previously, modifications to array items retrieved via iteration methods were not tracked by the change proxy because these methods returned raw array elements instead of proxied versions. This caused `getChanges()` to return an empty object, which in turn caused `createOptimisticAction`'s `mutationFn` to never be called when using patterns like:
+
+  ```ts
+  collection.update(id, (draft) => {
+    const item = draft.items.find((x) => x.id === targetId)
+    if (item) {
+      item.value = newValue // This change was not tracked!
+    }
+  })
+  ```
+
+  The fix adds proxy handling for array iteration methods similar to how Map/Set iteration is already handled, ensuring that callbacks receive proxied elements and returned elements are properly proxied.
+
+  Also refactors proxy.ts for improved readability by extracting helper functions and hoisting constants to module scope.
+
+## 0.5.6
+
+### Patch Changes
+
+- Fix scheduler handling of lazy left-join/live-query dependencies: treat non-enqueued lazy deps as satisfied to avoid unresolved-dependency deadlocks, and block only when a dep actually has pending work. ([#898](https://github.com/TanStack/db/pull/898))
+
+## 0.5.5
+
+### Patch Changes
+
+- Fix data loss on component remount by implementing reference counting for QueryObserver lifecycle ([#870](https://github.com/TanStack/db/pull/870))
+
+  **What changed vs main:**
+
+  Previously, when live query subscriptions unsubscribed, there was no tracking of which rows were still needed by other active queries. This caused data loss during remounts.
+
+  This PR adds reference counting infrastructure to properly manage QueryObserver lifecycle:
+  1. Pass same predicates to `unloadSubset` that were passed to `loadSubset`
+  2. Use them to compute the queryKey (via `generateQueryKeyFromOptions`)
+  3. Use existing machinery (`queryToRows` map) to find rows that query loaded
+  4. Decrement the ref count
+  5. GC rows where count reaches 0 (no longer referenced by any active query)
+
+  **Impact:**
+  - Navigation back to previously loaded pages shows cached data immediately
+  - No unnecessary refetches during quick remounts (< gcTime)
+  - Multiple live queries with identical predicates correctly share QueryObservers
+  - Proper row-level cleanup when last subscriber leaves
+  - TanStack Query's cache lifecycle (gcTime) is fully respected
+  - No data leakage from in-flight requests when unsubscribing
+
+## 0.5.4
+
+### Patch Changes
+
+- Fix progressive mode to use fetchSnapshot and atomic swap ([#852](https://github.com/TanStack/db/pull/852))
+
+  Progressive mode was broken because `requestSnapshot()` injected snapshots into the stream in causally correct position, which didn't work properly with the `full` mode stream. This release fixes progressive mode by:
+
+  **Core Changes:**
+  - Use `fetchSnapshot()` during initial sync to fetch and apply snapshots immediately in sync transactions
+  - Buffer all stream messages during initial sync (renamed flag to `isBufferingInitialSync`)
+  - Perform atomic swap on first `up-to-date`: truncate snapshot data → apply buffered messages → mark ready
+  - Track txids/snapshots only after atomic swap (enables correct optimistic transaction confirmation)
+
+  **Test Infrastructure:**
+  - Added `ELECTRIC_TEST_HOOKS` symbol for test control (hidden from public API)
+  - Added `progressiveTestControl.releaseInitialSync()` to E2E test config for explicit transition control
+  - Created comprehensive progressive mode E2E test suite (8 tests):
+    - Explicit snapshot phase and atomic swap validation
+    - Txid tracking behavior (Electric-only)
+    - Multiple concurrent snapshots with deduplication
+    - Incremental updates after swap
+    - Predicate handling and resilience tests
+
+  **Bug Fixes:**
+  - Fixed type errors in test files
+  - All 166 unit tests + 95 E2E tests passing
+
+- Improved error messages when invalid source types are passed to `.from()` or `.join()` methods. When users mistakenly pass a string, null, array, or other invalid type instead of an object with a collection, they now receive a clear, actionable error message with an example of the correct usage (e.g., `.from({ todos: todosCollection })`). ([#875](https://github.com/TanStack/db/pull/875))
+
+- Migrated paced mutations implementation from `@tanstack/pacer` to `@tanstack/pacer-lite`. The lite version provides the same core functionality with minimal overhead and no external dependencies, making it more suitable for library use. This is an internal implementation change with no impact on the public API - all paced mutation strategies (debounce, throttle, queue) continue to work exactly as before. ([#880](https://github.com/TanStack/db/pull/880))
+
+- Add warning when calling `.preload()` on collections with `on-demand` syncMode. In on-demand mode, data is only loaded when queries request it, so calling `.preload()` on the collection itself is a no-op. Users should create a live query and call `.preload()` on that instead. ([#871](https://github.com/TanStack/db/pull/871))
+
 ## 0.5.3
 
 ### Patch Changes
@@ -75,7 +264,7 @@
   **Example:**
 
   ```typescript
-  import { parseLoadSubsetOptions } from "@tanstack/db"
+  import { parseLoadSubsetOptions } from '@tanstack/db'
   // or from "@tanstack/query-db-collection" (re-exported for convenience)
 
   queryFn: async (ctx) => {
@@ -86,8 +275,8 @@
     // Build API request from parsed filters
     const params = new URLSearchParams()
     parsed.filters.forEach(({ field, operator, value }) => {
-      if (operator === "eq") {
-        params.set(field.join("."), String(value))
+      if (operator === 'eq') {
+        params.set(field.join('.'), String(value))
       }
     })
 
@@ -178,7 +367,7 @@
       q
         .from({ profile: profiles })
         .join({ user: users }, ({ profile, user }) =>
-          eq(profile.userId, user.id)
+          eq(profile.userId, user.id),
         ),
     getKey: (profile) => profile.id, // Each profile has unique ID
   })
@@ -191,7 +380,7 @@
       q
         .from({ user: users })
         .join({ comment: comments }, ({ user, comment }) =>
-          eq(user.id, comment.userId)
+          eq(user.id, comment.userId),
         ),
     getKey: (item) => item.userId, // Multiple comments share same userId!
   })
@@ -235,11 +424,11 @@
 
   // Check sync status
   if (collection.utils.isFetching) {
-    console.log("Syncing with server...")
+    console.log('Syncing with server...')
   }
 
   if (collection.utils.isRefetching) {
-    console.log("Background refresh in progress")
+    console.log('Background refresh in progress')
   }
 
   // Show last update time
@@ -248,7 +437,7 @@
 
   // Check error state (now using getters)
   if (collection.utils.isError) {
-    console.error("Sync failed:", collection.utils.lastError)
+    console.error('Sync failed:', collection.utils.lastError)
     console.log(`Failed ${collection.utils.errorCount} times`)
   }
   ```
@@ -337,7 +526,7 @@
   import {
     startOfflineExecutor,
     IndexedDBAdapter,
-  } from "@tanstack/offline-transactions"
+  } from '@tanstack/offline-transactions'
 
   const executor = startOfflineExecutor({
     collections: { todos: todoCollection },
@@ -349,18 +538,18 @@
       },
     },
     onStorageFailure: (diagnostic) => {
-      console.warn("Running in online-only mode:", diagnostic.message)
+      console.warn('Running in online-only mode:', diagnostic.message)
     },
   })
 
   // Create offline transaction
   const tx = executor.createOfflineTransaction({
-    mutationFnName: "syncTodos",
+    mutationFnName: 'syncTodos',
     autoCommit: false,
   })
 
   tx.mutate(() => {
-    todoCollection.insert({ id: "1", text: "Buy milk", completed: false })
+    todoCollection.insert({ id: '1', text: 'Buy milk', completed: false })
   })
 
   await tx.commit() // Persists to outbox and syncs when online
@@ -391,13 +580,13 @@
   ```typescript
   const collection = createCollection({
     getKey: (item) => item.id,
-    autoIndex: "eager", // default
+    autoIndex: 'eager', // default
     // ... sync config
   })
 
   // These now automatically create and use indexes:
   collection.subscribeChanges((items) => console.log(items), {
-    whereExpression: eq(row.vehicleDispatch?.date, "2024-01-01"),
+    whereExpression: eq(row.vehicleDispatch?.date, '2024-01-01'),
   })
 
   collection.subscribeChanges((items) => console.log(items), {
@@ -442,7 +631,7 @@
   **Example Usage:**
 
   ```ts
-  import { usePacedMutations, debounceStrategy } from "@tanstack/react-db"
+  import { usePacedMutations, debounceStrategy } from '@tanstack/react-db'
 
   const mutate = usePacedMutations({
     mutationFn: async ({ transaction }) => {
@@ -490,8 +679,8 @@
     if (!cache.has(id)) {
       const collection = createCollection(/* ... */)
 
-      collection.on("status:change", ({ status }) => {
-        if (status === "cleaned-up") {
+      collection.on('status:change', ({ status }) => {
+        if (status === 'cleaned-up') {
           cache.delete(id) // This now works!
         }
       })
@@ -543,9 +732,9 @@
   const users = createLiveQueryCollection((q) =>
     q
       .from({ user: usersCollection })
-      .orderBy(({ user }) => user.name, "asc")
+      .orderBy(({ user }) => user.name, 'asc')
       .limit(10)
-      .offset(0)
+      .offset(0),
   )
 
   users.utils.setWindow({ offset: 10, limit: 10 })
@@ -706,15 +895,15 @@
   ```js
   // Before - commit() didn't throw
   await tx.commit()
-  if (tx.state === "failed") {
-    console.error("Failed:", tx.error)
+  if (tx.state === 'failed') {
+    console.error('Failed:', tx.error)
   }
 
   // After - commit() now throws
   try {
     await tx.commit()
   } catch (error) {
-    console.error("Failed:", error)
+    console.error('Failed:', error)
   }
   ```
 
@@ -1054,7 +1243,7 @@
   try {
     collection.insert(data)
   } catch (error) {
-    if (error.message.includes("already exists")) {
+    if (error.message.includes('already exists')) {
       // Handle duplicate key error
     }
   }
@@ -1063,7 +1252,7 @@
   **After:**
 
   ```ts
-  import { DuplicateKeyError } from "@tanstack/db"
+  import { DuplicateKeyError } from '@tanstack/db'
 
   try {
     collection.insert(data)
@@ -1080,14 +1269,14 @@
 
   ```ts
   // Electric collection errors were imported from @tanstack/db
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/db"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/db'
   ```
 
   **After:**
 
   ```ts
   // Now import from the specific adapter package
-  import { ElectricInsertHandlerMustReturnTxIdError } from "@tanstack/electric-db-collection"
+  import { ElectricInsertHandlerMustReturnTxIdError } from '@tanstack/electric-db-collection'
   ```
 
   ### Unified Error Handling
@@ -1095,14 +1284,14 @@
   **New:**
 
   ```ts
-  import { TanStackDBError } from "@tanstack/db"
+  import { TanStackDBError } from '@tanstack/db'
 
   try {
     // Any TanStack DB operation
   } catch (error) {
     if (error instanceof TanStackDBError) {
       // Handle all TanStack DB errors uniformly
-      console.log("TanStack DB error:", error.message)
+      console.log('TanStack DB error:', error.message)
     }
   }
   ```

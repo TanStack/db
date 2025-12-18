@@ -46,13 +46,13 @@ don't participate in the standard mutation handler flow for manual transactions.
 
 #### config
 
-[`LocalStorageCollectionConfig`](../../interfaces/LocalStorageCollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `T`, `TKey`\> & `object`
+[`LocalStorageCollectionConfig`](../interfaces/LocalStorageCollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `T`, `TKey`\> & `object`
 
 Configuration options for the localStorage collection
 
 ### Returns
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`LocalStorageCollectionUtils`](../../interfaces/LocalStorageCollectionUtils.md)\> & `object`
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`LocalStorageCollectionUtils`](../interfaces/LocalStorageCollectionUtils.md)\> & `object`
 
 Collection options with utilities including clearStorage, getStorageSize, and acceptMutations
 
@@ -161,13 +161,13 @@ don't participate in the standard mutation handler flow for manual transactions.
 
 #### config
 
-[`LocalStorageCollectionConfig`](../../interfaces/LocalStorageCollectionConfig.md)\<`T`, `never`, `TKey`\> & `object`
+[`LocalStorageCollectionConfig`](../interfaces/LocalStorageCollectionConfig.md)\<`T`, `never`, `TKey`\> & `object`
 
 Configuration options for the localStorage collection
 
 ### Returns
 
-[`CollectionConfig`](../../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`LocalStorageCollectionUtils`](../../interfaces/LocalStorageCollectionUtils.md)\> & `object`
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`LocalStorageCollectionUtils`](../interfaces/LocalStorageCollectionUtils.md)\> & `object`
 
 Collection options with utilities including clearStorage, getStorageSize, and acceptMutations
 

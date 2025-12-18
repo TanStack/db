@@ -1,12 +1,12 @@
-import { createCollection } from "@tanstack/solid-db"
-import { electricCollectionOptions } from "@tanstack/electric-db-collection"
-import { queryCollectionOptions } from "@tanstack/query-db-collection"
-import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
-import { QueryClient } from "@tanstack/query-core"
-import { initClient } from "trailbase"
-import { selectConfigSchema, selectTodoSchema } from "../db/validation"
-import { api } from "./api"
-import type { SelectConfig, SelectTodo } from "../db/validation"
+import { createCollection } from '@tanstack/solid-db'
+import { electricCollectionOptions } from '@tanstack/electric-db-collection'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import { trailBaseCollectionOptions } from '@tanstack/trailbase-db-collection'
+import { QueryClient } from '@tanstack/query-core'
+import { initClient } from 'trailbase'
+import { selectConfigSchema, selectTodoSchema } from '../db/validation'
+import { api } from './api'
+import type { SelectConfig, SelectTodo } from '../db/validation'
 
 // Create a query client for query collections
 const queryClient = new QueryClient()
@@ -45,7 +45,7 @@ export const electricTodoCollection = createCollection(
           const { original, changes } = mutation
           const response = await api.todos.update(original.id, changes)
           return response.txid
-        })
+        }),
       )
       return { txid: txids }
     },
@@ -55,11 +55,11 @@ export const electricTodoCollection = createCollection(
           const { original } = mutation
           const response = await api.todos.delete(original.id)
           return response.txid
-        })
+        }),
       )
       return { txid: txids }
     },
-  })
+  }),
 )
 
 // Query Todo Collection
@@ -93,7 +93,7 @@ export const queryTodoCollection = createCollection(
         transaction.mutations.map(async (mutation) => {
           const { original, changes } = mutation
           return await api.todos.update(original.id, changes)
-        })
+        }),
       )
     },
     onDelete: async ({ transaction }) => {
@@ -101,10 +101,10 @@ export const queryTodoCollection = createCollection(
         transaction.mutations.map(async (mutation) => {
           const { original } = mutation
           await api.todos.delete(original.id)
-        })
+        }),
       )
     },
-  })
+  }),
 )
 
 type Todo = {
@@ -131,7 +131,7 @@ export const trailBaseTodoCollection = createCollection(
       created_at: (date) => Math.floor(date.valueOf() / 1000),
       updated_at: (date) => Math.floor(date.valueOf() / 1000),
     },
-  })
+  }),
 )
 
 // Electric Config Collection
@@ -160,11 +160,11 @@ export const electricConfigCollection = createCollection(
           const { original, changes } = mutation
           const response = await api.config.update(original.id, changes)
           return response.txid
-        })
+        }),
       )
       return { txid: txids }
     },
-  })
+  }),
 )
 
 // Query Config Collection
@@ -195,11 +195,11 @@ export const queryConfigCollection = createCollection(
           const { original, changes } = mutation
           const response = await api.config.update(original.id, changes)
           return response.txid
-        })
+        }),
       )
       return { txid: txids }
     },
-  })
+  }),
 )
 
 type Config = {
@@ -226,5 +226,5 @@ export const trailBaseConfigCollection = createCollection(
       created_at: (date) => Math.floor(date.valueOf() / 1000),
       updated_at: (date) => Math.floor(date.valueOf() / 1000),
     },
-  })
+  }),
 )
