@@ -288,6 +288,15 @@ export class CollectionStateManager<
     const events: Array<ChangeMessage<TOutput, TKey>> = []
     this.collectOptimisticChanges(previousState, previousDeletes, events)
 
+    console.debug(
+      `[TanStack-DB-DEBUG] recomputeOptimisticState: collected events`,
+      {
+        collectionId: this.collection.id,
+        eventsCount: events.length,
+        eventTypes: events.map((e) => ({ type: e.type, key: e.key })),
+      },
+    )
+
     // Filter out events for recently synced keys to prevent duplicates
     // BUT: Only filter out events that are actually from sync operations
     // New user transactions should NOT be filtered even if the key was recently synced
@@ -302,6 +311,10 @@ export class CollectionStateManager<
       }
 
       // Otherwise filter out duplicate sync events
+      console.debug(
+        `[TanStack-DB-DEBUG] FILTERING OUT event due to recentlySyncedKeys`,
+        { key: event.key, type: event.type },
+      )
       return false
     })
 
@@ -332,6 +345,10 @@ export class CollectionStateManager<
           )
 
           if (!hasActiveOptimisticMutation) {
+            console.debug(
+              `[TanStack-DB-DEBUG] FILTERING OUT delete due to pendingSyncKeys`,
+              { key: event.key },
+            )
             return false // Skip this delete event as sync will restore the data
           }
         }

@@ -192,11 +192,32 @@ export class CollectionSubscriber<
   ) {
     const { orderBy, offset, limit, index } = orderByInfo
 
+    console.debug(
+      `[TanStack-DB-DEBUG] subscribeToOrderedChanges: setting up subscription`,
+      {
+        alias: this.alias,
+        collectionId: this.collection.id,
+        hasWhereExpression: !!whereExpression,
+        hasIndex: !!index,
+        offset,
+        limit,
+      },
+    )
+
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
+      const changesArray = Array.isArray(changes) ? changes : [...changes]
+      console.debug(
+        `[TanStack-DB-DEBUG] subscribeToOrderedChanges.sendChangesInRange called`,
+        {
+          alias: this.alias,
+          changesCount: changesArray.length,
+          changeTypes: changesArray.map((c) => ({ type: c.type, key: c.key })),
+        },
+      )
       // Split live updates into a delete of the old value and an insert of the new value
-      const splittedChanges = splitUpdates(changes)
+      const splittedChanges = splitUpdates(changesArray)
       this.sendChangesToPipelineWithTracking(splittedChanges, subscription)
     }
 
@@ -390,7 +411,17 @@ function sendChangesToInput(
   getKey: (item: ChangeMessage[`value`]) => any,
 ): number {
   const multiSetArray: MultiSetArray<unknown> = []
-  for (const change of changes) {
+  const changesArray = Array.isArray(changes) ? changes : [...changes]
+
+  console.debug(
+    `[TanStack-DB-DEBUG] sendChangesToInput: processing changes`,
+    {
+      changesCount: changesArray.length,
+      changeTypes: changesArray.map((c) => ({ type: c.type, key: getKey(c.value) })),
+    },
+  )
+
+  for (const change of changesArray) {
     const key = getKey(change.value)
     if (change.type === `insert`) {
       multiSetArray.push([[key, change.value], 1])
@@ -399,12 +430,24 @@ function sendChangesToInput(
       multiSetArray.push([[key, change.value], 1])
     } else {
       // change.type === `delete`
+      console.debug(
+        `[TanStack-DB-DEBUG] sendChangesToInput: adding DELETE to multiset`,
+        { key },
+      )
       multiSetArray.push([[key, change.value], -1])
     }
   }
 
   if (multiSetArray.length !== 0) {
+    console.debug(
+      `[TanStack-DB-DEBUG] sendChangesToInput: sending to D2 input`,
+      { multiSetArrayLength: multiSetArray.length },
+    )
     input.sendData(new MultiSet(multiSetArray))
+  } else {
+    console.debug(
+      `[TanStack-DB-DEBUG] sendChangesToInput: NO data to send (multiSetArray empty)`,
+    )
   }
 
   return multiSetArray.length
@@ -419,9 +462,17 @@ function* splitUpdates<
 ): Generator<ChangeMessage<T, TKey>> {
   for (const change of changes) {
     if (change.type === `update`) {
+      console.debug(
+        `[TanStack-DB-DEBUG] splitUpdates: splitting update into delete+insert`,
+        { key: change.key },
+      )
       yield { type: `delete`, key: change.key, value: change.previousValue! }
       yield { type: `insert`, key: change.key, value: change.value }
     } else {
+      console.debug(
+        `[TanStack-DB-DEBUG] splitUpdates: passing through`,
+        { type: change.type, key: change.key },
+      )
       yield change
     }
   }
