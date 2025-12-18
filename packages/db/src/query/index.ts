@@ -62,6 +62,7 @@ export {
 
 // Ref proxy utilities
 export type { Ref } from "./builder/types.js"
+export { toExpression } from "./builder/ref-proxy.js"
 
 // Compiler
 export { compileQuery } from "./compiler/index.js"
