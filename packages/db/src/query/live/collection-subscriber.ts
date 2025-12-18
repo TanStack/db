@@ -29,6 +29,11 @@ export class CollectionSubscriber<
     { resolve: () => void }
   >()
 
+  // Track keys that have been sent to the D2 pipeline to prevent duplicate inserts
+  // This is necessary because different code paths (initial load, change events)
+  // can potentially send the same item to D2 multiple times.
+  private sentToD2Keys = new Set<string | number>()
+
   constructor(
     private alias: string,
     private collectionId: string,
@@ -137,13 +142,42 @@ export class CollectionSubscriber<
       changeTypes: changesArray.map((c) => ({ type: c.type, key: c.key })),
     })
 
+    // Filter changes to prevent duplicate inserts to D2 pipeline.
+    // This ensures D2 multiplicity stays at 1 for visible items, so deletes
+    // properly reduce multiplicity to 0 (triggering DELETE output).
+    const filteredChanges: Array<ChangeMessage<any, string | number>> = []
+    for (const change of changesArray) {
+      if (change.type === `insert`) {
+        if (this.sentToD2Keys.has(change.key)) {
+          // Skip duplicate insert - already sent to D2
+          console.debug(
+            `[TanStack-DB-DEBUG] sendChangesToPipeline: FILTERING duplicate insert`,
+            { key: change.key, alias: this.alias },
+          )
+          continue
+        }
+        this.sentToD2Keys.add(change.key)
+      } else if (change.type === `delete`) {
+        // Remove from tracking so future re-inserts are allowed
+        this.sentToD2Keys.delete(change.key)
+      }
+      // Updates are handled as delete+insert by splitUpdates, so no special handling needed
+      filteredChanges.push(change)
+    }
+
+    console.debug(`[TanStack-DB-DEBUG] sendChangesToPipeline after filtering`, {
+      originalCount: changesArray.length,
+      filteredCount: filteredChanges.length,
+      alias: this.alias,
+    })
+
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
     const sentChanges = sendChangesToInput(
       input,
-      changesArray,
+      filteredChanges,
       this.collection.config.getKey,
     )
 
@@ -231,6 +265,8 @@ export class CollectionSubscriber<
     // This ensures that after a must-refetch/truncate, we don't use stale cursor data
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.biggest = undefined
+      // Also clear D2 key tracking so all items can be re-inserted after truncate
+      this.sentToD2Keys.clear()
     })
 
     // Clean up truncate listener when subscription is unsubscribed
