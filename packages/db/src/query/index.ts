@@ -45,7 +45,16 @@ export {
 } from "./builder/operators/index.js"
 
 // Aggregates - now from aggregate modules for tree-shaking
-export { count, avg, sum, min, max } from "./builder/aggregates/index.js"
+export {
+  count,
+  avg,
+  sum,
+  min,
+  max,
+  collect,
+  minStr,
+  maxStr,
+} from "./builder/aggregates/index.js"
 
 // Types for custom operators and aggregates
 // Custom operators: create a Func with your own factory as the 3rd argument

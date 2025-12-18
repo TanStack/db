@@ -1075,7 +1075,7 @@ const userStats = createCollection(liveQueryCollectionOptions({
 Use various aggregate functions to summarize your data:
 
 ```ts
-import { count, sum, avg, min, max } from '@tanstack/db'
+import { count, sum, avg, min, max, minStr, maxStr, collect } from '@tanstack/db'
 
 const orderStats = createCollection(liveQueryCollectionOptions({
   query: (q) =>
@@ -1817,10 +1817,24 @@ avg(order.amount)
 ```
 
 #### `min(value)`, `max(value)`
-Find minimum and maximum values:
+Find minimum and maximum values (coerces to numbers):
 ```ts
 min(user.salary)
 max(order.amount)
+```
+
+#### `minStr(value)`, `maxStr(value)`
+Find minimum and maximum using string comparison. Unlike `min`/`max` which coerce values to numbers, these preserve string comparison:
+```ts
+minStr(event.createdAt)  // Works correctly with ISO 8601 timestamps
+maxStr(item.code)        // Lexicographic comparison for any string
+```
+
+#### `collect(value)`
+Collect all values in a group into an array:
+```ts
+collect(order.id)        // Array of all order IDs in group
+collect(order.amount)    // Array of all amounts
 ```
 
 ### Function Composition

@@ -30,6 +30,9 @@ export { avg } from "./aggregates/avg.js"
 export { sum } from "./aggregates/sum.js"
 export { min } from "./aggregates/min.js"
 export { max } from "./aggregates/max.js"
+export { collect } from "./aggregates/collect.js"
+export { minStr } from "./aggregates/minStr.js"
+export { maxStr } from "./aggregates/maxStr.js"
 
 /**
  * List of comparison function names that can be used with indexes
@@ -83,6 +86,9 @@ export const operators = [
   `sum`,
   `min`,
   `max`,
+  `collect`,
+  `minStr`,
+  `maxStr`,
 ] as const
 
 export type OperatorName = (typeof operators)[number]
