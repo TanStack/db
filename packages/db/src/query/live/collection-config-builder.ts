@@ -349,19 +349,25 @@ export class CollectionConfigBuilder<
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
         const hasPendingWork = syncState.graph.pendingWork()
-        console.debug(`[TanStack-DB-DEBUG] maybeRunGraph: checking pending work`, {
-          liveQueryId: this.id,
-          subscribedToAllCollections: true,
-          hasPendingWork,
-        })
+        console.debug(
+          `[TanStack-DB-DEBUG] maybeRunGraph: checking pending work`,
+          {
+            liveQueryId: this.id,
+            subscribedToAllCollections: true,
+            hasPendingWork,
+          },
+        )
 
         let runCount = 0
         while (syncState.graph.pendingWork()) {
           runCount++
-          console.debug(`[TanStack-DB-DEBUG] maybeRunGraph: running graph iteration`, {
-            liveQueryId: this.id,
-            runCount,
-          })
+          console.debug(
+            `[TanStack-DB-DEBUG] maybeRunGraph: running graph iteration`,
+            {
+              liveQueryId: this.id,
+              runCount,
+            },
+          )
           syncState.graph.run()
           callback?.()
         }
