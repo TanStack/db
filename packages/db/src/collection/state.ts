@@ -225,15 +225,12 @@ export class CollectionStateManager<
   public recomputeOptimisticState(
     triggeredByUserAction: boolean = false,
   ): void {
-    console.debug(
-      `[TanStack-DB-DEBUG] recomputeOptimisticState called`,
-      {
-        collectionId: this.collection.id,
-        triggeredByUserAction,
-        isCommittingSyncTransactions: this.isCommittingSyncTransactions,
-        transactionCount: this.transactions.size,
-      },
-    )
+    console.debug(`[TanStack-DB-DEBUG] recomputeOptimisticState called`, {
+      collectionId: this.collection.id,
+      triggeredByUserAction,
+      isCommittingSyncTransactions: this.isCommittingSyncTransactions,
+      transactionCount: this.transactions.size,
+    })
 
     // Skip redundant recalculations when we're in the middle of committing sync transactions
     // While the sync pipeline is replaying a large batch we still want to honour

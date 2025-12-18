@@ -78,7 +78,10 @@ describe(`Optimistic delete with limit`, () => {
 
     // Get the changes from all calls
     const allChanges = changeCallback.mock.calls.flatMap((call) => call[0])
-    console.log(`All changes (with limit):`, JSON.stringify(allChanges, null, 2))
+    console.log(
+      `All changes (with limit):`,
+      JSON.stringify(allChanges, null, 2),
+    )
 
     // Should have a delete for item 2
     const deleteEvents = allChanges.filter(
@@ -132,7 +135,10 @@ describe(`Optimistic delete with limit`, () => {
 
     // Get the changes from all calls
     const allChanges = changeCallback.mock.calls.flatMap((call) => call[0])
-    console.log(`All changes (without limit):`, JSON.stringify(allChanges, null, 2))
+    console.log(
+      `All changes (without limit):`,
+      JSON.stringify(allChanges, null, 2),
+    )
 
     // Should have a delete for item 2
     const deleteEvents = allChanges.filter(

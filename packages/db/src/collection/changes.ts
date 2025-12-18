@@ -58,17 +58,14 @@ export class CollectionChangesManager<
     changes: Array<ChangeMessage<TOutput, TKey>>,
     forceEmit = false,
   ): void {
-    console.debug(
-      `[TanStack-DB-DEBUG] emitEvents called on collection`,
-      {
-        collectionId: this.collection.id,
-        changesCount: changes.length,
-        changeTypes: changes.map((c) => ({ type: c.type, key: c.key })),
-        forceEmit,
-        shouldBatchEvents: this.shouldBatchEvents,
-        subscriberCount: this.changeSubscriptions.size,
-      },
-    )
+    console.debug(`[TanStack-DB-DEBUG] emitEvents called on collection`, {
+      collectionId: this.collection.id,
+      changesCount: changes.length,
+      changeTypes: changes.map((c) => ({ type: c.type, key: c.key })),
+      forceEmit,
+      shouldBatchEvents: this.shouldBatchEvents,
+      subscriberCount: this.changeSubscriptions.size,
+    })
 
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
@@ -115,14 +112,11 @@ export class CollectionChangesManager<
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
     options: SubscribeChangesOptions = {},
   ): CollectionSubscription {
-    console.debug(
-      `[TanStack-DB-DEBUG] subscribeChanges called`,
-      {
-        collectionId: this.collection.id,
-        includeInitialState: options.includeInitialState,
-        hasWhereExpression: !!options.whereExpression,
-      },
-    )
+    console.debug(`[TanStack-DB-DEBUG] subscribeChanges called`, {
+      collectionId: this.collection.id,
+      includeInitialState: options.includeInitialState,
+      hasWhereExpression: !!options.whereExpression,
+    })
 
     // Start sync and track subscriber
     this.addSubscriber()

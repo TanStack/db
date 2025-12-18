@@ -130,15 +130,12 @@ export class CollectionSubscriber<
     callback?: () => boolean,
   ) {
     const changesArray = Array.isArray(changes) ? changes : [...changes]
-    console.debug(
-      `[TanStack-DB-DEBUG] sendChangesToPipeline called`,
-      {
-        alias: this.alias,
-        collectionId: this.collection.id,
-        changesCount: changesArray.length,
-        changeTypes: changesArray.map((c) => ({ type: c.type, key: c.key })),
-      },
-    )
+    console.debug(`[TanStack-DB-DEBUG] sendChangesToPipeline called`, {
+      alias: this.alias,
+      collectionId: this.collection.id,
+      changesCount: changesArray.length,
+      changeTypes: changesArray.map((c) => ({ type: c.type, key: c.key })),
+    })
 
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
@@ -150,10 +147,10 @@ export class CollectionSubscriber<
       this.collection.config.getKey,
     )
 
-    console.debug(
-      `[TanStack-DB-DEBUG] sendChangesToInput returned`,
-      { sentChanges, alias: this.alias },
-    )
+    console.debug(`[TanStack-DB-DEBUG] sendChangesToInput returned`, {
+      sentChanges,
+      alias: this.alias,
+    })
 
     // Do not provide the callback that loads more data
     // if there's no more data to load

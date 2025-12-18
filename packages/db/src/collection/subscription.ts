@@ -178,24 +178,18 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>) {
-    console.debug(
-      `[TanStack-DB-DEBUG] Subscription.emitEvents called`,
-      {
-        collectionId: this.collection.id,
-        incomingChanges: changes.map((c) => ({ type: c.type, key: c.key })),
-        loadedInitialState: this.loadedInitialState,
-        sentKeysSize: this.sentKeys.size,
-        snapshotSent: this.snapshotSent,
-      },
-    )
+    console.debug(`[TanStack-DB-DEBUG] Subscription.emitEvents called`, {
+      collectionId: this.collection.id,
+      incomingChanges: changes.map((c) => ({ type: c.type, key: c.key })),
+      loadedInitialState: this.loadedInitialState,
+      sentKeysSize: this.sentKeys.size,
+      snapshotSent: this.snapshotSent,
+    })
     const newChanges = this.filterAndFlipChanges(changes)
-    console.debug(
-      `[TanStack-DB-DEBUG] After filterAndFlipChanges`,
-      {
-        filteredChanges: newChanges.map((c) => ({ type: c.type, key: c.key })),
-        droppedCount: changes.length - newChanges.length,
-      },
-    )
+    console.debug(`[TanStack-DB-DEBUG] After filterAndFlipChanges`, {
+      filteredChanges: newChanges.map((c) => ({ type: c.type, key: c.key })),
+      droppedCount: changes.length - newChanges.length,
+    })
     this.filteredCallback(newChanges)
   }
 
@@ -470,7 +464,10 @@ export class CollectionSubscription
       // so no need to filter or flip changes
       console.debug(
         `[TanStack-DB-DEBUG] filterAndFlipChanges: skipping filtering`,
-        { loadedInitialState: this.loadedInitialState, skipFiltering: this.skipFiltering },
+        {
+          loadedInitialState: this.loadedInitialState,
+          skipFiltering: this.skipFiltering,
+        },
       )
       return changes
     }
