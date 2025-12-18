@@ -39,23 +39,6 @@ export function topK<
           .sort((a, b) => comparator(a[0] as V1Type, b[0] as V1Type))
         const result = sortedValues.slice(offset, offset + limit)
 
-        console.debug(`[TanStack-DB-DEBUG] topK: processing`, {
-          inputCount: values.length,
-          consolidatedCount: sortedValues.length,
-          offset,
-          limit,
-          resultCount: result.length,
-          // Show first few items for debugging
-          sortedFirst3: sortedValues.slice(0, 3).map(([v, m]) => ({
-            value: typeof v === 'object' ? JSON.stringify(v) : v,
-            multiplicity: m,
-          })),
-          resultItems: result.map(([v, m]) => ({
-            value: typeof v === 'object' ? JSON.stringify(v) : v,
-            multiplicity: m,
-          })),
-        })
-
         return result
       }),
     )

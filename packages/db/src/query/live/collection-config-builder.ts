@@ -308,20 +308,10 @@ export class CollectionConfigBuilder<
   // So this callback would notice that it doesn't have enough rows and load some more.
   // The callback returns a boolean, when it's true it's done loading data and we can mark the collection as ready.
   maybeRunGraph(callback?: () => boolean) {
-    console.debug(`[TanStack-DB-DEBUG] maybeRunGraph called`, {
-      liveQueryId: this.id,
-      isGraphRunning: this.isGraphRunning,
-      hasCurrentSyncConfig: !!this.currentSyncConfig,
-      hasCurrentSyncState: !!this.currentSyncState,
-    })
-
     if (this.isGraphRunning) {
       // no nested runs of the graph
       // which is possible if the `callback`
       // would call `maybeRunGraph` e.g. after it has loaded some more data
-      console.debug(
-        `[TanStack-DB-DEBUG] maybeRunGraph: EARLY RETURN - graph already running`,
-      )
       return
     }
 
@@ -340,42 +330,15 @@ export class CollectionConfigBuilder<
 
       // Don't run if the live query is in an error state
       if (this.isInErrorState) {
-        console.debug(
-          `[TanStack-DB-DEBUG] maybeRunGraph: EARLY RETURN - in error state`,
-        )
         return
       }
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
-        const hasPendingWork = syncState.graph.pendingWork()
-        console.debug(
-          `[TanStack-DB-DEBUG] maybeRunGraph: checking pending work`,
-          {
-            liveQueryId: this.id,
-            subscribedToAllCollections: true,
-            hasPendingWork,
-          },
-        )
-
-        let runCount = 0
         while (syncState.graph.pendingWork()) {
-          runCount++
-          console.debug(
-            `[TanStack-DB-DEBUG] maybeRunGraph: running graph iteration`,
-            {
-              liveQueryId: this.id,
-              runCount,
-            },
-          )
           syncState.graph.run()
           callback?.()
         }
-
-        console.debug(`[TanStack-DB-DEBUG] maybeRunGraph: graph run complete`, {
-          liveQueryId: this.id,
-          totalRuns: runCount,
-        })
 
         // On the initial run, we may need to do an empty commit to ensure that
         // the collection is initialized
@@ -386,11 +349,6 @@ export class CollectionConfigBuilder<
           // (in case all sources were already ready before we subscribed)
           this.updateLiveQueryStatus(this.currentSyncConfig)
         }
-      } else {
-        console.debug(
-          `[TanStack-DB-DEBUG] maybeRunGraph: NOT subscribed to all collections yet`,
-          { liveQueryId: this.id },
-        )
       }
     } finally {
       this.isGraphRunning = false
@@ -425,12 +383,6 @@ export class CollectionConfigBuilder<
     },
   ) {
     const contextId = options?.contextId ?? getActiveTransaction()?.id
-    console.debug(`[TanStack-DB-DEBUG] scheduleGraphRun called`, {
-      liveQueryId: this.id,
-      hasCallback: !!callback,
-      alias: options?.alias,
-      contextId: contextId ?? `immediate`,
-    })
     // Use the builder instance as the job ID for deduplication. This is memory-safe
     // because the scheduler's context Map is deleted after flushing (no long-term retention).
     const jobId = options?.jobId ?? this
@@ -529,12 +481,6 @@ export class CollectionConfigBuilder<
     contextId?: SchedulerContextId,
     pendingParam?: PendingGraphRun,
   ): void {
-    console.debug(`[TanStack-DB-DEBUG] executeGraphRun called`, {
-      liveQueryId: this.id,
-      contextId: contextId ?? `immediate`,
-      hasPendingParam: !!pendingParam,
-    })
-
     // Get pending state: either from parameter (no context) or from map (with context)
     // Remove from map BEFORE checking sync state to prevent leaking entries when sync ends
     // before the transaction flushes (e.g., unsubscribe during in-flight transaction)
@@ -547,26 +493,13 @@ export class CollectionConfigBuilder<
 
     // If no pending state, nothing to execute (context was cleared)
     if (!pending) {
-      console.debug(
-        `[TanStack-DB-DEBUG] executeGraphRun: EARLY RETURN - no pending state`,
-        { liveQueryId: this.id },
-      )
       return
     }
 
     // If sync session has ended, don't execute (graph is finalized, subscriptions cleared)
     if (!this.currentSyncConfig || !this.currentSyncState) {
-      console.debug(
-        `[TanStack-DB-DEBUG] executeGraphRun: EARLY RETURN - no sync session`,
-        { liveQueryId: this.id },
-      )
       return
     }
-
-    console.debug(`[TanStack-DB-DEBUG] executeGraphRun: proceeding to run`, {
-      liveQueryId: this.id,
-      loadCallbacksCount: pending.loadCallbacks.size,
-    })
 
     this.incrementRunCount()
 
@@ -778,19 +711,6 @@ export class CollectionConfigBuilder<
     const { write, collection } = config
     const { deletes, inserts, value, orderByIndex } = changes
 
-    console.debug(
-      `[TanStack-DB-DEBUG] applyChanges called (D2 pipeline output)`,
-      {
-        liveQueryId: this.id,
-        key,
-        deletes,
-        inserts,
-        hasValue: !!value,
-        orderByIndex,
-        collectionHasKey: collection.has(collection.getKeyFromItem(value)),
-      },
-    )
-
     // Store the key of the result so that we can retrieve it in the
     // getKey function
     this.resultKeys.set(value, key)
@@ -802,7 +722,6 @@ export class CollectionConfigBuilder<
 
     // Simple singular insert.
     if (inserts && deletes === 0) {
-      console.debug(`[TanStack-DB-DEBUG] applyChanges: writing INSERT`, { key })
       write({
         value,
         type: `insert`,
@@ -814,14 +733,12 @@ export class CollectionConfigBuilder<
       // was inserted previously).
       (inserts === deletes && collection.has(collection.getKeyFromItem(value)))
     ) {
-      console.debug(`[TanStack-DB-DEBUG] applyChanges: writing UPDATE`, { key })
       write({
         value,
         type: `update`,
       })
       // Only delete is left as an option
     } else if (deletes > 0) {
-      console.debug(`[TanStack-DB-DEBUG] applyChanges: writing DELETE`, { key })
       write({
         value,
         type: `delete`,

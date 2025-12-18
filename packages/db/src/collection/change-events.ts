@@ -248,13 +248,6 @@ export function createFilteredCallback<T extends object>(
   const filterFn = createFilterFunctionFromExpression(options.whereExpression!)
 
   return (changes: Array<ChangeMessage<T>>) => {
-    console.debug(
-      `[TanStack-DB-DEBUG] createFilteredCallback: filtering changes by whereExpression`,
-      {
-        incomingChanges: changes.map((c) => ({ type: c.type, key: c.key })),
-      },
-    )
-
     const filteredChanges: Array<ChangeMessage<T>> = []
 
     for (const change of changes) {
@@ -262,11 +255,6 @@ export function createFilteredCallback<T extends object>(
         // For inserts, check if the new value matches the filter
         if (filterFn(change.value)) {
           filteredChanges.push(change)
-        } else {
-          console.debug(
-            `[TanStack-DB-DEBUG] FILTERING OUT insert by whereExpression`,
-            { key: change.key },
-          )
         }
       } else if (change.type === `update`) {
         // For updates, we need to check both old and new values
@@ -291,23 +279,13 @@ export function createFilteredCallback<T extends object>(
             type: `delete`,
             value: change.previousValue!, // Use the previous value for the delete
           })
-        } else {
-          // If neither matches, don't emit anything
-          console.debug(
-            `[TanStack-DB-DEBUG] FILTERING OUT update by whereExpression (neither old nor new matches)`,
-            { key: change.key },
-          )
         }
+        // If neither matches, don't emit anything
       } else {
         // For deletes, include if the previous value would have matched
         // (so subscribers know something they were tracking was deleted)
         if (filterFn(change.value)) {
           filteredChanges.push(change)
-        } else {
-          console.debug(
-            `[TanStack-DB-DEBUG] FILTERING OUT delete by whereExpression`,
-            { key: change.key },
-          )
         }
       }
     }
@@ -315,22 +293,7 @@ export function createFilteredCallback<T extends object>(
     // Always call the original callback if we have filtered changes OR
     // if the original changes array was empty (which indicates a ready signal)
     if (filteredChanges.length > 0 || changes.length === 0) {
-      console.debug(
-        `[TanStack-DB-DEBUG] createFilteredCallback: calling originalCallback`,
-        {
-          filteredChangesCount: filteredChanges.length,
-          filteredChanges: filteredChanges.map((c) => ({
-            type: c.type,
-            key: c.key,
-          })),
-        },
-      )
       originalCallback(filteredChanges)
-    } else {
-      console.debug(
-        `[TanStack-DB-DEBUG] createFilteredCallback: NOT calling callback - all changes filtered out`,
-        { originalChangesCount: changes.length },
-      )
     }
   }
 }

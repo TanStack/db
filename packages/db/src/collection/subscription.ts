@@ -178,18 +178,7 @@ export class CollectionSubscription
   }
 
   emitEvents(changes: Array<ChangeMessage<any, any>>) {
-    console.debug(`[TanStack-DB-DEBUG] Subscription.emitEvents called`, {
-      collectionId: this.collection.id,
-      incomingChanges: changes.map((c) => ({ type: c.type, key: c.key })),
-      loadedInitialState: this.loadedInitialState,
-      sentKeysSize: this.sentKeys.size,
-      snapshotSent: this.snapshotSent,
-    })
     const newChanges = this.filterAndFlipChanges(changes)
-    console.debug(`[TanStack-DB-DEBUG] After filterAndFlipChanges`, {
-      filteredChanges: newChanges.map((c) => ({ type: c.type, key: c.key })),
-      droppedCount: changes.length - newChanges.length,
-    })
     this.filteredCallback(newChanges)
   }
 
@@ -457,25 +446,14 @@ export class CollectionSubscription
    * Filters and flips changes for keys that have not been sent yet.
    * Deletes are filtered out for keys that have not been sent yet.
    * Updates are flipped into inserts for keys that have not been sent yet.
+   * Duplicate inserts are filtered out to prevent D2 multiplicity > 1.
    */
   private filterAndFlipChanges(changes: Array<ChangeMessage<any, any>>) {
     if (this.loadedInitialState || this.skipFiltering) {
       // We loaded the entire initial state or filtering is explicitly skipped
       // so no need to filter or flip changes
-      console.debug(
-        `[TanStack-DB-DEBUG] filterAndFlipChanges: skipping filtering`,
-        {
-          loadedInitialState: this.loadedInitialState,
-          skipFiltering: this.skipFiltering,
-        },
-      )
       return changes
     }
-
-    console.debug(
-      `[TanStack-DB-DEBUG] filterAndFlipChanges: will filter based on sentKeys`,
-      { sentKeysSize: this.sentKeys.size },
-    )
 
     const newChanges = []
     for (const change of changes) {
@@ -483,17 +461,9 @@ export class CollectionSubscription
       const keyInSentKeys = this.sentKeys.has(change.key)
       if (!keyInSentKeys) {
         if (change.type === `update`) {
-          console.debug(
-            `[TanStack-DB-DEBUG] Flipping update to insert for key not in sentKeys`,
-            { key: change.key },
-          )
           newChange = { ...change, type: `insert`, previousValue: undefined }
         } else if (change.type === `delete`) {
           // filter out deletes for keys that have not been sent
-          console.debug(
-            `[TanStack-DB-DEBUG] FILTERING OUT delete for key not in sentKeys`,
-            { key: change.key, sentKeysSize: this.sentKeys.size },
-          )
           continue
         }
         this.sentKeys.add(change.key)
@@ -504,20 +474,12 @@ export class CollectionSubscription
           // This prevents D2 multiplicity from going above 1, which would
           // cause deletes to not properly remove items (multiplicity would
           // go from 2 to 1 instead of 1 to 0).
-          console.debug(
-            `[TanStack-DB-DEBUG] FILTERING OUT duplicate insert for key already in sentKeys`,
-            { key: change.key },
-          )
           continue
         } else if (change.type === `delete`) {
           // Remove from sentKeys so future inserts for this key are allowed
           // (e.g., after truncate + reinsert)
           this.sentKeys.delete(change.key)
         }
-        console.debug(
-          `[TanStack-DB-DEBUG] Key found in sentKeys, passing through`,
-          { key: change.key, type: change.type },
-        )
       }
       newChanges.push(newChange)
     }
@@ -528,37 +490,18 @@ export class CollectionSubscription
     if (this.loadedInitialState || this.skipFiltering) {
       // No need to track sent keys if we loaded the entire state or filtering is skipped.
       // Since filtering won't be applied, all keys are effectively "observed".
-      console.debug(
-        `[TanStack-DB-DEBUG] trackSentKeys: skipping (loadedInitialState=${this.loadedInitialState}, skipFiltering=${this.skipFiltering})`,
-      )
       return
     }
 
-    const keysAdded: Array<string | number> = []
-    const keysRemoved: Array<string | number> = []
     for (const change of changes) {
       if (change.type === `delete`) {
         // Remove deleted keys from sentKeys so future re-inserts are allowed
-        if (this.sentKeys.has(change.key)) {
-          this.sentKeys.delete(change.key)
-          keysRemoved.push(change.key)
-        }
+        this.sentKeys.delete(change.key)
       } else {
         // For inserts and updates, track the key as sent
-        if (!this.sentKeys.has(change.key)) {
-          keysAdded.push(change.key)
-        }
         this.sentKeys.add(change.key)
       }
     }
-    console.debug(`[TanStack-DB-DEBUG] trackSentKeys: updated keys`, {
-      collectionId: this.collection.id,
-      keysAddedCount: keysAdded.length,
-      keysAdded: keysAdded.slice(0, 10),
-      keysRemovedCount: keysRemoved.length,
-      keysRemoved: keysRemoved.slice(0, 10),
-      totalSentKeys: this.sentKeys.size,
-    })
   }
 
   /**
@@ -567,7 +510,6 @@ export class CollectionSubscription
    * meaning the caller doesn't want initial state but does want ALL future changes.
    */
   markAllStateAsSeen() {
-    console.debug(`[TanStack-DB-DEBUG] markAllStateAsSeen called`)
     this.skipFiltering = true
   }
 

@@ -225,22 +225,12 @@ export class CollectionStateManager<
   public recomputeOptimisticState(
     triggeredByUserAction: boolean = false,
   ): void {
-    console.debug(`[TanStack-DB-DEBUG] recomputeOptimisticState called`, {
-      collectionId: this.collection.id,
-      triggeredByUserAction,
-      isCommittingSyncTransactions: this.isCommittingSyncTransactions,
-      transactionCount: this.transactions.size,
-    })
-
     // Skip redundant recalculations when we're in the middle of committing sync transactions
     // While the sync pipeline is replaying a large batch we still want to honour
     // fresh optimistic mutations from the UI. Only skip recompute for the
     // internal sync-driven redraws; user-triggered work (triggeredByUserAction)
     // must run so live queries stay responsive during long commits.
     if (this.isCommittingSyncTransactions && !triggeredByUserAction) {
-      console.debug(
-        `[TanStack-DB-DEBUG] recomputeOptimisticState: skipping due to isCommittingSyncTransactions`,
-      )
       return
     }
 
@@ -288,15 +278,6 @@ export class CollectionStateManager<
     const events: Array<ChangeMessage<TOutput, TKey>> = []
     this.collectOptimisticChanges(previousState, previousDeletes, events)
 
-    console.debug(
-      `[TanStack-DB-DEBUG] recomputeOptimisticState: collected events`,
-      {
-        collectionId: this.collection.id,
-        eventsCount: events.length,
-        eventTypes: events.map((e) => ({ type: e.type, key: e.key })),
-      },
-    )
-
     // Filter out events for recently synced keys to prevent duplicates
     // BUT: Only filter out events that are actually from sync operations
     // New user transactions should NOT be filtered even if the key was recently synced
@@ -311,10 +292,6 @@ export class CollectionStateManager<
       }
 
       // Otherwise filter out duplicate sync events
-      console.debug(
-        `[TanStack-DB-DEBUG] FILTERING OUT event due to recentlySyncedKeys`,
-        { key: event.key, type: event.type },
-      )
       return false
     })
 
@@ -345,10 +322,6 @@ export class CollectionStateManager<
           )
 
           if (!hasActiveOptimisticMutation) {
-            console.debug(
-              `[TanStack-DB-DEBUG] FILTERING OUT delete due to pendingSyncKeys`,
-              { key: event.key },
-            )
             return false // Skip this delete event as sync will restore the data
           }
         }
@@ -356,33 +329,12 @@ export class CollectionStateManager<
       })
 
       // Update indexes for the filtered events
-      console.debug(
-        `[TanStack-DB-DEBUG] recomputeOptimisticState: emitting events (with pending sync filtering)`,
-        {
-          collectionId: this.collection.id,
-          filteredEventsCount: filteredEvents.length,
-          eventTypes: filteredEvents.map((e) => ({ type: e.type, key: e.key })),
-          triggeredByUserAction,
-        },
-      )
       if (filteredEvents.length > 0) {
         this.indexes.updateIndexes(filteredEvents)
       }
       this.changes.emitEvents(filteredEvents, triggeredByUserAction)
     } else {
       // Update indexes for all events
-      console.debug(
-        `[TanStack-DB-DEBUG] recomputeOptimisticState: emitting events (no pending sync filtering)`,
-        {
-          collectionId: this.collection.id,
-          eventsCount: filteredEventsBySyncStatus.length,
-          eventTypes: filteredEventsBySyncStatus.map((e) => ({
-            type: e.type,
-            key: e.key,
-          })),
-          triggeredByUserAction,
-        },
-      )
       if (filteredEventsBySyncStatus.length > 0) {
         this.indexes.updateIndexes(filteredEventsBySyncStatus)
       }

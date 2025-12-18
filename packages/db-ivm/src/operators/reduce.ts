@@ -29,22 +29,10 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
     for (const message of this.inputMessages()) {
       for (const [item, multiplicity] of message.getInner()) {
         const [key, value] = item
-        console.debug(`[TanStack-DB-DEBUG] ReduceOperator: adding to index`, {
-          operatorId: this.id,
-          key,
-          value: typeof value === 'object' ? JSON.stringify(value) : value,
-          multiplicity,
-        })
         this.#index.addValue(key, [value, multiplicity])
         keysTodo.add(key)
       }
     }
-
-    console.debug(`[TanStack-DB-DEBUG] ReduceOperator: processing keys`, {
-      operatorId: this.id,
-      keysCount: keysTodo.size,
-      keys: Array.from(keysTodo).slice(0, 10), // Limit to first 10 for readability
-    })
 
     // For each key, compute the reduction and delta
     const result: Array<[[K, V2], number]> = []
@@ -52,14 +40,6 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
       const curr = this.#index.get(key)
       const currOut = this.#indexOut.get(key)
       const out = this.#f(curr)
-
-      console.debug(`[TanStack-DB-DEBUG] ReduceOperator: processing key`, {
-        operatorId: this.id,
-        key,
-        inputValuesCount: curr.length,
-        previousOutputCount: currOut.length,
-        newOutputCount: out.length,
-      })
 
       // Create maps for current and previous outputs using values directly as keys
       const newOutputMap = new Map<V2, number>()
@@ -110,16 +90,6 @@ export class ReduceOperator<K, V1, V2> extends UnaryOperator<[K, V1], [K, V2]> {
         }
       }
     }
-
-    console.debug(`[TanStack-DB-DEBUG] ReduceOperator: run complete`, {
-      operatorId: this.id,
-      resultCount: result.length,
-      results: result.slice(0, 10).map(([[key, value], mult]) => ({
-        key,
-        value: typeof value === 'object' ? JSON.stringify(value) : value,
-        multiplicity: mult,
-      })),
-    })
 
     if (result.length > 0) {
       this.output.sendData(new MultiSet(result))

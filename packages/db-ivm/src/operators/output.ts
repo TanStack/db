@@ -22,20 +22,7 @@ export class OutputOperator<T> extends UnaryOperator<T> {
 
   run(): void {
     const messages = this.inputMessages()
-    console.debug(`[TanStack-DB-DEBUG] OutputOperator: run called`, {
-      operatorId: this.id,
-      messageCount: messages.length,
-    })
     for (const message of messages) {
-      const items = message.getInner()
-      console.debug(`[TanStack-DB-DEBUG] OutputOperator: processing message`, {
-        operatorId: this.id,
-        itemCount: items.length,
-        items: items.slice(0, 5).map(([item, mult]) => ({
-          item: typeof item === 'object' ? JSON.stringify(item) : item,
-          multiplicity: mult,
-        })),
-      })
       this.#fn(message)
       this.output.sendData(message)
     }
