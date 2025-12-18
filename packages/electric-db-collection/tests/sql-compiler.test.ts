@@ -308,5 +308,150 @@ describe(`sql-compiler`, () => {
         expect(result.limit).toBe(10)
       })
     })
+
+    describe(`structured expression output (whereExpr/orderByExpr)`, () => {
+      it(`should include whereExpr for simple equality`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [ref(`userId`), val(`abc-123`)]),
+        })
+        expect(result.whereExpr).toEqual({
+          type: `func`,
+          name: `eq`,
+          args: [
+            { type: `ref`, column: `userId` },
+            { type: `val`, paramIndex: 1 },
+          ],
+        })
+      })
+
+      it(`should include whereExpr for compound AND`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`eq`, [ref(`projectId`), val(`uuid-123`)]),
+            func(`gt`, [ref(`age`), val(18)]),
+          ]),
+        })
+        expect(result.whereExpr).toEqual({
+          type: `func`,
+          name: `and`,
+          args: [
+            {
+              type: `func`,
+              name: `eq`,
+              args: [
+                { type: `ref`, column: `projectId` },
+                { type: `val`, paramIndex: 1 },
+              ],
+            },
+            {
+              type: `func`,
+              name: `gt`,
+              args: [
+                { type: `ref`, column: `age` },
+                { type: `val`, paramIndex: 2 },
+              ],
+            },
+          ],
+        })
+      })
+
+      it(`should include whereExpr for isNull`, () => {
+        const result = compileSQL({
+          where: func(`isNull`, [ref(`deletedAt`)]),
+        })
+        expect(result.whereExpr).toEqual({
+          type: `func`,
+          name: `isNull`,
+          args: [{ type: `ref`, column: `deletedAt` }],
+        })
+      })
+
+      it(`should not include whereExpr when no where clause`, () => {
+        const result = compileSQL({ limit: 10 })
+        expect(result.whereExpr).toBeUndefined()
+      })
+
+      it(`should include orderByExpr for simple orderBy`, () => {
+        const result = compileSQL({
+          orderBy: [
+            {
+              expression: ref(`createdAt`),
+              compareOptions: { direction: `desc`, nulls: `first` },
+            },
+          ],
+        })
+        expect(result.orderByExpr).toEqual([
+          { column: `createdAt`, direction: `desc`, nulls: `first` },
+        ])
+      })
+
+      it(`should include orderByExpr with nulls last`, () => {
+        const result = compileSQL({
+          orderBy: [
+            {
+              expression: ref(`name`),
+              compareOptions: { direction: `asc`, nulls: `last` },
+            },
+          ],
+        })
+        expect(result.orderByExpr).toEqual([
+          { column: `name`, nulls: `last` },
+        ])
+      })
+
+      it(`should include orderByExpr for multiple columns`, () => {
+        const result = compileSQL({
+          orderBy: [
+            {
+              expression: ref(`status`),
+              compareOptions: { direction: `asc`, nulls: `first` },
+            },
+            {
+              expression: ref(`createdAt`),
+              compareOptions: { direction: `desc`, nulls: `first` },
+            },
+          ],
+        })
+        expect(result.orderByExpr).toEqual([
+          { column: `status`, nulls: `first` },
+          { column: `createdAt`, direction: `desc`, nulls: `first` },
+        ])
+      })
+
+      it(`should not include orderByExpr when no orderBy clause`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [ref(`id`), val(1)]),
+        })
+        expect(result.orderByExpr).toBeUndefined()
+      })
+
+      it(`should include both whereExpr and orderByExpr together`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [ref(`active`), val(true)]),
+          orderBy: [
+            {
+              expression: ref(`createdAt`),
+              compareOptions: { direction: `desc`, nulls: `first` },
+            },
+          ],
+          limit: 10,
+        })
+        expect(result.whereExpr).toEqual({
+          type: `func`,
+          name: `eq`,
+          args: [
+            { type: `ref`, column: `active` },
+            { type: `val`, paramIndex: 1 },
+          ],
+        })
+        expect(result.orderByExpr).toEqual([
+          { column: `createdAt`, direction: `desc`, nulls: `first` },
+        ])
+        expect(result.limit).toBe(10)
+        // Also verify backwards-compatible string fields are present
+        expect(result.where).toBe(`"active" = $1`)
+        expect(result.orderBy).toBe(`"createdAt" DESC NULLS FIRST`)
+      })
+    })
   })
 })

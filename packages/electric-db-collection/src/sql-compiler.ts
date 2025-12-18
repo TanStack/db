@@ -6,20 +6,124 @@ export type CompiledSqlRecord = Omit<SubsetParams, `params`> & {
   params?: Array<unknown>
 }
 
-export function compileSQL<T>(options: LoadSubsetOptions): SubsetParams {
+/**
+ * Serialized expression types for structured subset params.
+ * These are JSON-serializable versions of the IR expressions that Electric
+ * can use to apply columnMapper before compiling to SQL.
+ */
+export type SerializedExpression =
+  | { type: `ref`; column: string }
+  | { type: `val`; paramIndex: number }
+  | { type: `func`; name: string; args: Array<SerializedExpression> }
+
+export type SerializedOrderByClause = {
+  column: string
+  direction?: `asc` | `desc`
+  nulls?: `first` | `last`
+}
+
+/**
+ * Extended subset params that include both string-compiled SQL (for backwards
+ * compatibility) and structured expression data (for Electric to apply columnMapper).
+ */
+export interface ExtendedSubsetParams extends SubsetParams {
+  /**
+   * Structured WHERE expression. Electric should prefer this over `where` string
+   * when present, applying columnMapper to column references before compiling.
+   */
+  whereExpr?: SerializedExpression
+  /**
+   * Structured ORDER BY clauses. Electric should prefer this over `orderBy` string
+   * when present, applying columnMapper to column names before compiling.
+   */
+  orderByExpr?: Array<SerializedOrderByClause>
+}
+
+/**
+ * Serializes an IR expression to a JSON-safe structured format.
+ * Column references use their original names (no quoting) so Electric
+ * can apply columnMapper transformations.
+ */
+function serializeExpression(
+  exp: IR.BasicExpression<unknown>,
+  paramIndex: { current: number },
+): SerializedExpression {
+  switch (exp.type) {
+    case `val`:
+      paramIndex.current++
+      return { type: `val`, paramIndex: paramIndex.current }
+    case `ref`:
+      if (exp.path.length !== 1) {
+        throw new Error(
+          `Compiler can't handle nested properties: ${exp.path.join(`.`)}`,
+        )
+      }
+      return { type: `ref`, column: exp.path[0]! }
+    case `func`:
+      return {
+        type: `func`,
+        name: exp.name,
+        args: exp.args.map((arg: IR.BasicExpression) =>
+          serializeExpression(arg, paramIndex),
+        ),
+      }
+    default:
+      throw new Error(`Unknown expression type`)
+  }
+}
+
+/**
+ * Serializes IR OrderBy clauses to structured format.
+ */
+function serializeOrderBy(
+  orderBy: IR.OrderBy,
+): Array<SerializedOrderByClause> {
+  return orderBy.map((clause: IR.OrderByClause) => {
+    const { expression, compareOptions } = clause
+    if (expression.type !== `ref`) {
+      throw new Error(`OrderBy only supports column references`)
+    }
+    if (expression.path.length !== 1) {
+      throw new Error(
+        `Compiler can't handle nested properties: ${expression.path.join(`.`)}`,
+      )
+    }
+    const result: SerializedOrderByClause = {
+      column: expression.path[0]!,
+    }
+    if (compareOptions.direction === `desc`) {
+      result.direction = `desc`
+    }
+    // nulls is always 'first' or 'last' in CompareOptions
+    result.nulls = compareOptions.nulls
+    return result
+  })
+}
+
+export function compileSQL<T>(options: LoadSubsetOptions): ExtendedSubsetParams {
   const { where, orderBy, limit } = options
 
   const params: Array<T> = []
   const compiledSQL: CompiledSqlRecord = { params }
 
+  // Build structured expression data alongside compiled SQL
+  let whereExpr: SerializedExpression | undefined
+  let orderByExpr: Array<SerializedOrderByClause> | undefined
+
   if (where) {
     // TODO: this only works when the where expression's PropRefs directly reference a column of the collection
     //       doesn't work if it goes through aliases because then we need to know the entire query to be able to follow the reference until the base collection (cf. followRef function)
     compiledSQL.where = compileBasicExpression(where, params)
+
+    // Also serialize the structured expression for Electric to use with columnMapper
+    whereExpr = serializeExpression(where, { current: 0 })
   }
 
   if (orderBy) {
     compiledSQL.orderBy = compileOrderBy(orderBy, params)
+
+    // Also serialize structured orderBy for Electric to use with columnMapper
+    orderByExpr = serializeOrderBy(orderBy)
   }
 
   if (limit) {
@@ -48,10 +152,20 @@ export function compileSQL<T>(options: LoadSubsetOptions): SubsetParams {
     {} as Record<string, string>,
   )
 
-  return {
+  const result: ExtendedSubsetParams = {
     ...compiledSQL,
     params: paramsRecord,
   }
+
+  // Include structured data for Electric to use with columnMapper
+  if (whereExpr) {
+    result.whereExpr = whereExpr
+  }
+  if (orderByExpr) {
+    result.orderByExpr = orderByExpr
+  }
+
+  return result
 }
 
 /**
