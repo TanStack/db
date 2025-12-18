@@ -47,18 +47,24 @@ export class D2 implements ID2 {
     if (!this.#finalized) {
       throw new Error(`Graph not finalized`)
     }
-    console.debug(`[TanStack-DB-DEBUG] D2.step: running ${this.#operators.length} operators`)
+    console.debug(
+      `[TanStack-DB-DEBUG] D2.step: running ${this.#operators.length} operators`,
+    )
     for (const op of this.#operators) {
       const hadWork = op.hasPendingWork()
       if (hadWork) {
-        console.debug(`[TanStack-DB-DEBUG] D2.step: operator ${op.id} has pending work, running`)
+        console.debug(
+          `[TanStack-DB-DEBUG] D2.step: operator ${op.id} has pending work, running`,
+        )
       }
       op.run()
     }
   }
 
   pendingWork(): boolean {
-    const operatorsWithWork = this.#operators.filter((op) => op.hasPendingWork())
+    const operatorsWithWork = this.#operators.filter((op) =>
+      op.hasPendingWork(),
+    )
     const hasPending = operatorsWithWork.length > 0
     console.debug(`[TanStack-DB-DEBUG] D2.pendingWork:`, {
       hasPending,
@@ -75,7 +81,9 @@ export class D2 implements ID2 {
       console.debug(`[TanStack-DB-DEBUG] D2.run: step ${stepCount}`)
       this.step()
     }
-    console.debug(`[TanStack-DB-DEBUG] D2.run: complete after ${stepCount} steps`)
+    console.debug(
+      `[TanStack-DB-DEBUG] D2.run: complete after ${stepCount} steps`,
+    )
   }
 }
 

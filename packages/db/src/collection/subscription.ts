@@ -512,7 +512,9 @@ export class CollectionSubscription
     if (this.loadedInitialState || this.skipFiltering) {
       // No need to track sent keys if we loaded the entire state or filtering is skipped.
       // Since filtering won't be applied, all keys are effectively "observed".
-      console.debug(`[TanStack-DB-DEBUG] trackSentKeys: skipping (loadedInitialState=${this.loadedInitialState}, skipFiltering=${this.skipFiltering})`)
+      console.debug(
+        `[TanStack-DB-DEBUG] trackSentKeys: skipping (loadedInitialState=${this.loadedInitialState}, skipFiltering=${this.skipFiltering})`,
+      )
       return
     }
 
