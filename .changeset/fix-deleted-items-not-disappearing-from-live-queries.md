@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 fix: deleted items not disappearing from live queries with `.limit()`
@@ -32,10 +32,12 @@ The issue was caused by **duplicate inserts** reaching the D2 (differential data
 ### How D2 Multiplicity Works
 
 The `TopKWithFractionalIndexOperator` (used for `orderBy` + `limit` queries) tracks each item's "multiplicity":
+
 - When an INSERT (+1) arrives: multiplicity goes from 0 → 1, item becomes visible
 - When a DELETE (-1) arrives: multiplicity goes from 1 → 0, item becomes invisible
 
 The key insight is in `processElement`:
+
 ```typescript
 if (oldMultiplicity <= 0 && newMultiplicity > 0) {
   // INSERT: item becomes visible
@@ -51,6 +53,7 @@ if (oldMultiplicity <= 0 && newMultiplicity > 0) {
 ### The Bug
 
 If the same item was inserted **twice** (due to overlapping code paths), the multiplicity would be:
+
 1. First INSERT: 0 → 1 (item visible) ✓
 2. **Duplicate INSERT**: 1 → 2 (item still visible, but now with wrong multiplicity)
 3. DELETE: 2 → 1 (multiplicity > 0, so **NO DELETE EVENT** emitted!)
@@ -79,6 +82,7 @@ We added deduplication at **two levels**:
 ### 1. CollectionSubscription Level (`filterAndFlipChanges`)
 
 Tracks `sentKeys` - a Set of keys that have been sent to subscribers:
+
 - **Duplicate inserts**: Skip if key already in `sentKeys`
 - **Deletes**: Remove key from `sentKeys` (allowing future re-inserts)
 
@@ -94,6 +98,7 @@ if (change.type === 'delete') {
 ### 2. CollectionSubscriber Level (`sendChangesToPipeline`)
 
 Each live query's `CollectionSubscriber` now tracks `sentToD2Keys` - keys that have been sent to its D2 pipeline:
+
 - **Duplicate inserts**: Skip if key already sent to this D2 pipeline
 - **Deletes**: Remove from tracking (allowing re-inserts after delete)
 - **Truncate**: Clear all tracking (allowing full reload)
@@ -109,6 +114,7 @@ This ensures that no matter which code path sends data to D2 (initial load, chan
 ## Testing
 
 The fix was verified by:
+
 1. Tracing through the D2 pipeline with debug logging
 2. Confirming `TopKWithFractionalIndexOperator.processElement` now shows `oldMultiplicity: 1, newMultiplicity: 0` for deletes
 3. Running the full test suite (1795 tests passing)
