@@ -75,9 +75,7 @@ function serializeExpression(
 /**
  * Serializes IR OrderBy clauses to structured format.
  */
-function serializeOrderBy(
-  orderBy: IR.OrderBy,
-): Array<SerializedOrderByClause> {
+function serializeOrderBy(orderBy: IR.OrderBy): Array<SerializedOrderByClause> {
   return orderBy.map((clause: IR.OrderByClause) => {
     const { expression, compareOptions } = clause
     if (expression.type !== `ref`) {
@@ -100,7 +98,9 @@ function serializeOrderBy(
   })
 }
 
-export function compileSQL<T>(options: LoadSubsetOptions): ExtendedSubsetParams {
+export function compileSQL<T>(
+  options: LoadSubsetOptions,
+): ExtendedSubsetParams {
   const { where, orderBy, limit } = options
 
   const params: Array<T> = []

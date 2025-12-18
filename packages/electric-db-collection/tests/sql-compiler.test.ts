@@ -394,9 +394,7 @@ describe(`sql-compiler`, () => {
             },
           ],
         })
-        expect(result.orderByExpr).toEqual([
-          { column: `name`, nulls: `last` },
-        ])
+        expect(result.orderByExpr).toEqual([{ column: `name`, nulls: `last` }])
       })
 
       it(`should include orderByExpr for multiple columns`, () => {
