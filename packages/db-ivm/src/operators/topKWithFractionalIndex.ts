@@ -302,12 +302,9 @@ export class TopKWithFractionalIndexOperator<
   }
 
   run(): void {
-    const messages = this.inputMessages()
-
     const result: Array<[[K, IndexedValue<T>], number]> = []
-    for (const message of messages) {
-      const items = message.getInner()
-      for (const [item, multiplicity] of items) {
+    for (const message of this.inputMessages()) {
+      for (const [item, multiplicity] of message.getInner()) {
         const [key, value] = item
         this.processElement(key, value, multiplicity, result)
       }

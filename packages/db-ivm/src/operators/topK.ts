@@ -37,9 +37,7 @@ export function topK<
         const sortedValues = consolidated
           .getInner()
           .sort((a, b) => comparator(a[0] as V1Type, b[0] as V1Type))
-        const result = sortedValues.slice(offset, offset + limit)
-
-        return result
+        return sortedValues.slice(offset, offset + limit)
       }),
     )
     return reduced as IStreamBuilder<T>

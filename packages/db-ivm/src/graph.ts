@@ -57,7 +57,6 @@ export class DifferenceStreamWriter<T> implements IDifferenceStreamWriter<T> {
 export abstract class Operator<T> implements IOperator<T> {
   protected inputs: Array<DifferenceStreamReader<T>>
   protected output: DifferenceStreamWriter<T>
-  public operatorType = 'unknown'
 
   constructor(
     public id: number,
@@ -66,8 +65,6 @@ export abstract class Operator<T> implements IOperator<T> {
   ) {
     this.inputs = inputs
     this.output = output
-    // Set operator type from constructor name
-    this.operatorType = this.constructor.name
   }
 
   abstract run(): void
@@ -127,10 +124,8 @@ export abstract class LinearUnaryOperator<T, U> extends UnaryOperator<T | U> {
   abstract inner(collection: MultiSet<T | U>): MultiSet<U>
 
   run(): void {
-    const messages = this.inputMessages()
-    for (const message of messages) {
-      const result = this.inner(message)
-      this.output.sendData(result)
+    for (const message of this.inputMessages()) {
+      this.output.sendData(this.inner(message))
     }
   }
 }

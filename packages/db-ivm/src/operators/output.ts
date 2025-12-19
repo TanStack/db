@@ -21,8 +21,7 @@ export class OutputOperator<T> extends UnaryOperator<T> {
   }
 
   run(): void {
-    const messages = this.inputMessages()
-    for (const message of messages) {
+    for (const message of this.inputMessages()) {
       this.#fn(message)
       this.output.sendData(message)
     }

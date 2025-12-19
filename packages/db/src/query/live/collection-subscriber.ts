@@ -129,15 +129,13 @@ export class CollectionSubscriber<
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => boolean,
   ) {
-    const changesArray = Array.isArray(changes) ? changes : [...changes]
-
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
     const sentChanges = sendChangesToInput(
       input,
-      changesArray,
+      changes,
       this.collection.config.getKey,
     )
 
@@ -164,11 +162,8 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
-    // Only pass includeInitialState when true. When it's false, we leave it
-    // undefined so that user subscriptions with explicit `includeInitialState: false`
-    // can be distinguished from internal lazy-loading subscriptions.
     const subscription = this.collection.subscribeChanges(sendChanges, {
-      ...(includeInitialState && { includeInitialState }),
+      includeInitialState,
       whereExpression,
     })
 
@@ -184,9 +179,8 @@ export class CollectionSubscriber<
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
-      const changesArray = Array.isArray(changes) ? changes : [...changes]
       // Split live updates into a delete of the old value and an insert of the new value
-      const splittedChanges = splitUpdates(changesArray)
+      const splittedChanges = splitUpdates(changes)
       this.sendChangesToPipelineWithTracking(splittedChanges, subscription)
     }
 
@@ -380,9 +374,7 @@ function sendChangesToInput(
   getKey: (item: ChangeMessage[`value`]) => any,
 ): number {
   const multiSetArray: MultiSetArray<unknown> = []
-  const changesArray = Array.isArray(changes) ? changes : [...changes]
-
-  for (const change of changesArray) {
+  for (const change of changes) {
     const key = getKey(change.value)
     if (change.type === `insert`) {
       multiSetArray.push([[key, change.value], 1])
