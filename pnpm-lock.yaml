@@ -184,6 +184,8 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
 
+  examples/react/linearlarge: {}
+
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/offline-transactions':
@@ -257,7 +259,7 @@ importers:
         specifier: ^0.5.11
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^0.1.56
+        specifier: ^0.1.58
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -433,10 +435,10 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.8
+        specifier: ^1.0.10
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.56
+        specifier: ^0.1.58
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.140.0
@@ -554,7 +556,7 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.8
+        specifier: ^1.0.10
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
         specifier: ^0.1.54
@@ -682,6 +684,8 @@ importers:
         specifier: ^0.16.0
         version: 0.16.0
 
+  packages/benchmarks: {}
+
   packages/db:
     dependencies:
       '@standard-schema/spec':
@@ -747,6 +751,8 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.7.0)(@vitest/ui@3.2.4)(jiti@2.6.1)(jsdom@27.2.0(postcss@8.5.6))(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)
 
+  packages/db-devtools: {}
+
   packages/db-ivm:
     dependencies:
       fractional-indexing:
@@ -765,6 +771,8 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+
+  packages/db-tracing: {}
 
   packages/electric-db-collection:
     dependencies:
@@ -900,6 +908,8 @@ importers:
         specifier: ^19.2.1
         version: 19.2.1(react@19.2.1)
 
+  packages/rss-db-collection: {}
+
   packages/rxdb-db-collection:
     dependencies:
       '@standard-schema/spec':
@@ -930,6 +940,8 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+
+  packages/shared-types: {}
 
   packages/solid-db:
     dependencies:
