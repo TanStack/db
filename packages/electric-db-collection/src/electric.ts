@@ -427,6 +427,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       const { cursor, where, orderBy, limit } = opts
 
       if (cursor) {
+        console.log(`[DEBUG] LOAD_SUBSET: On-demand mode with cursor - making parallel requests`)
         // Make parallel requests for cursor-based pagination
         const promises: Array<Promise<unknown>> = []
 
@@ -438,6 +439,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           // No limit - get all ties
         }
         const whereCurrentParams = compileSQL<T>(whereCurrentOpts)
+        console.log(`[DEBUG] LOAD_SUBSET: requesting whereCurrent snapshot params=${JSON.stringify(whereCurrentParams)}`)
         promises.push(stream.requestSnapshot(whereCurrentParams))
 
         debug(
@@ -452,6 +454,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           limit,
         }
         const whereFromParams = compileSQL<T>(whereFromOpts)
+        console.log(`[DEBUG] LOAD_SUBSET: requesting whereFrom snapshot params=${JSON.stringify(whereFromParams)} limit=${limit}`)
         promises.push(stream.requestSnapshot(whereFromParams))
 
         debug(
@@ -459,11 +462,15 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         )
 
         // Wait for both requests to complete
+        console.log(`[DEBUG] LOAD_SUBSET: waiting for both snapshot requests to complete`)
         await Promise.all(promises)
+        console.log(`[DEBUG] LOAD_SUBSET: both snapshot requests completed`)
       } else {
         // No cursor - standard single request
         const snapshotParams = compileSQL<T>(opts)
+        console.log(`[DEBUG] LOAD_SUBSET: requesting single snapshot params=${JSON.stringify(snapshotParams)}`)
         await stream.requestSnapshot(snapshotParams)
+        console.log(`[DEBUG] LOAD_SUBSET: snapshot request completed`)
       }
     }
   }
@@ -946,18 +953,21 @@ function createElectricSync<T extends Row<unknown>>(
     rowId: RowId,
     rowTagSet: Set<MoveTag>,
   ): void => {
+    console.log(`[DEBUG] TAGS: addTagsToRow rowId=${String(rowId)} adding ${tags.length} tags: ${JSON.stringify(tags)}`)
     for (const tag of tags) {
       const parsedTag = parseTag(tag)
 
       // Infer tag length from first tag
       if (tagLength === undefined) {
         tagLength = getTagLength(parsedTag)
+        console.log(`[DEBUG] TAGS: inferred tagLength=${tagLength} from first tag`)
         initializeTagIndex(tagLength)
       }
 
       // Validate tag length matches
       const currentTagLength = getTagLength(parsedTag)
       if (currentTagLength !== tagLength) {
+        console.warn(`[DEBUG] TAGS: ⚠️ tag length mismatch: expected ${tagLength}, got ${currentTagLength}, skipping tag ${tag}`)
         debug(
           `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`,
         )
@@ -978,9 +988,11 @@ function createElectricSync<T extends Row<unknown>>(
     rowTagSet: Set<MoveTag>,
   ): void => {
     if (tagLength === undefined) {
+      console.log(`[DEBUG] TAGS: removeTagsFromRow rowId=${String(rowId)} - no tagLength set, skipping`)
       return
     }
 
+    console.log(`[DEBUG] TAGS: removeTagsFromRow rowId=${String(rowId)} removing ${removedTags.length} tags: ${JSON.stringify(removedTags)}`)
     for (const tag of removedTags) {
       const parsedTag = parseTag(tag)
       rowTagSet.delete(tag)
@@ -1029,6 +1041,7 @@ function createElectricSync<T extends Row<unknown>>(
    * Clear all tag tracking state (used when truncating)
    */
   const clearTagTrackingState = (): void => {
+    console.log(`[DEBUG] TAGS: clearing all tag tracking state (rowTagSets size=${rowTagSets.size})`)
     rowTagSets.clear()
     tagIndex.length = 0
     tagLength = undefined
@@ -1040,13 +1053,17 @@ function createElectricSync<T extends Row<unknown>>(
    */
   const clearTagsForRow = (rowId: RowId): void => {
     if (tagLength === undefined) {
+      console.log(`[DEBUG] TAGS: clearTagsForRow rowId=${String(rowId)} - no tagLength set, skipping`)
       return
     }
 
     const rowTagSet = rowTagSets.get(rowId)
     if (!rowTagSet) {
+      console.log(`[DEBUG] TAGS: clearTagsForRow rowId=${String(rowId)} - no tags to clear`)
       return
     }
+
+    console.log(`[DEBUG] TAGS: clearTagsForRow rowId=${String(rowId)} clearing ${rowTagSet.size} tags`)
 
     // Remove each tag from the index
     for (const tag of rowTagSet) {
@@ -1072,20 +1089,29 @@ function createElectricSync<T extends Row<unknown>>(
   ): boolean => {
     const rowTagSet = rowTagSets.get(rowId)
     if (!rowTagSet) {
+      console.log(`[DEBUG] TAGS: removeMatchingTagsFromRow rowId=${String(rowId)} - no tag set found`)
       return false
     }
+
+    const originalSize = rowTagSet.size
+    let removedCount = 0
 
     // Find tags that match this pattern and remove them
     for (const tag of rowTagSet) {
       const parsedTag = parseTag(tag)
       if (tagMatchesPattern(parsedTag, pattern)) {
+        console.log(`[DEBUG] TAGS: removeMatchingTagsFromRow rowId=${String(rowId)} removing matching tag ${tag}`)
         rowTagSet.delete(tag)
         removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+        removedCount++
       }
     }
 
+    console.log(`[DEBUG] TAGS: removeMatchingTagsFromRow rowId=${String(rowId)} removed ${removedCount}/${originalSize} tags, remaining=${rowTagSet.size}`)
+
     // Check if row's tag set is now empty
     if (rowTagSet.size === 0) {
+      console.log(`[DEBUG] TAGS: removeMatchingTagsFromRow rowId=${String(rowId)} - tag set now empty, row will be deleted`)
       rowTagSets.delete(rowId)
       return true
     }
@@ -1394,10 +1420,12 @@ function createElectricSync<T extends Row<unknown>>(
 
             // In buffered initial sync of progressive mode, buffer messages instead of writing
             if (isBufferingInitialSync()) {
+              console.log(`[DEBUG] BUFFERING: message buffered (progressive mode initial sync) op=${message.headers.operation} key=${message.key}`)
               bufferedMessages.push(message)
             } else {
               // Normal processing: write changes immediately
               if (!transactionStarted) {
+                console.log(`[DEBUG] TX: begin transaction`)
                 begin()
                 transactionStarted = true
               }
@@ -1408,22 +1436,29 @@ function createElectricSync<T extends Row<unknown>>(
             // Track postgres snapshot metadata for resolving awaiting mutations
             // Skip during buffered initial sync (will be extracted during atomic swap)
             if (!isBufferingInitialSync()) {
+              console.log(`[DEBUG] SNAPSHOT_END: received snapshot-end message`)
               newSnapshots.push(parseSnapshotMessage(message))
+            } else {
+              console.log(`[DEBUG] SNAPSHOT_END: buffering snapshot-end (progressive mode)`)
             }
           } else if (isUpToDateMessage(message)) {
             // up-to-date takes precedence - also triggers progressive mode atomic swap
+            console.log(`[DEBUG] UP_TO_DATE: received up-to-date message isBuffering=${isBufferingInitialSync()}`)
             commitPoint = `up-to-date`
           } else if (isSubsetEndMessage(message)) {
             // subset-end triggers commit but not progressive mode atomic swap
+            console.log(`[DEBUG] SUBSET_END: received subset-end message`)
             if (commitPoint !== `up-to-date`) {
               commitPoint = `subset-end`
             }
           } else if (isMoveOutMessage(message)) {
             // Handle move-out event: buffer if buffering, otherwise process immediately
             if (isBufferingInitialSync()) {
+              console.log(`[DEBUG] BUFFERING: move-out message buffered (progressive mode)`)
               bufferedMessages.push(message)
             } else {
               // Normal processing: process move-out immediately
+              console.log(`[DEBUG] MOVE-OUT: processing immediately`)
               transactionStarted = processMoveOutEvent(
                 message.headers.patterns,
                 begin,
@@ -1432,19 +1467,23 @@ function createElectricSync<T extends Row<unknown>>(
               )
             }
           } else if (isMustRefetchMessage(message)) {
+            console.log(`[DEBUG] MUST_REFETCH: received must-refetch, will truncate collection`)
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
             )
 
             // Start a transaction and truncate the collection
             if (!transactionStarted) {
+              console.log(`[DEBUG] TX: begin transaction for must-refetch`)
               begin()
               transactionStarted = true
             }
 
+            console.log(`[DEBUG] TRUNCATE: truncating collection`)
             truncate()
 
             // Clear tag tracking state
+            console.log(`[DEBUG] TRUNCATE: clearing tag tracking state`)
             clearTagTrackingState()
 
             // Reset the loadSubset deduplication state since we're starting fresh
@@ -1458,25 +1497,33 @@ function createElectricSync<T extends Row<unknown>>(
           }
         }
 
+        console.log(`[DEBUG] BATCH_END: commitPoint=${commitPoint} transactionStarted=${transactionStarted} isBuffering=${isBufferingInitialSync()}`)
+
         if (commitPoint !== null) {
           // PROGRESSIVE MODE: Atomic swap on first up-to-date (not subset-end)
           if (isBufferingInitialSync() && commitPoint === `up-to-date`) {
+            console.log(`[DEBUG] ATOMIC_SWAP: starting atomic swap with ${bufferedMessages.length} buffered messages`)
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`,
             )
 
             // Start atomic swap transaction
+            console.log(`[DEBUG] TX: begin transaction for atomic swap`)
             begin()
 
             // Truncate to clear all snapshot data
+            console.log(`[DEBUG] ATOMIC_SWAP: truncating collection`)
             truncate()
 
             // Clear tag tracking state for atomic swap
+            console.log(`[DEBUG] ATOMIC_SWAP: clearing tag tracking state`)
             clearTagTrackingState()
 
             // Apply all buffered change messages and extract txids/snapshots
+            console.log(`[DEBUG] ATOMIC_SWAP: replaying ${bufferedMessages.length} buffered messages`)
             for (const bufferedMsg of bufferedMessages) {
               if (isChangeMessage(bufferedMsg)) {
+                console.log(`[DEBUG] ATOMIC_SWAP: replaying change message op=${bufferedMsg.headers.operation} key=${bufferedMsg.key}`)
                 processChangeMessage(bufferedMsg)
 
                 // Extract txids from buffered messages (will be committed to store after transaction)
@@ -1486,9 +1533,11 @@ function createElectricSync<T extends Row<unknown>>(
                   )
                 }
               } else if (isSnapshotEndMessage(bufferedMsg)) {
+                console.log(`[DEBUG] ATOMIC_SWAP: processing buffered snapshot-end`)
                 // Extract snapshots from buffered messages (will be committed to store after transaction)
                 newSnapshots.push(parseSnapshotMessage(bufferedMsg))
               } else if (isMoveOutMessage(bufferedMsg)) {
+                console.log(`[DEBUG] ATOMIC_SWAP: replaying buffered move-out`)
                 // Process buffered move-out messages during atomic swap
                 processMoveOutEvent(
                   bufferedMsg.headers.patterns,
@@ -1500,12 +1549,14 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             // Commit the atomic swap
+            console.log(`[DEBUG] TX: commit atomic swap transaction`)
             commit()
 
             // Exit buffering phase by marking that we've received up-to-date
             // isBufferingInitialSync() will now return false
             bufferedMessages.length = 0
 
+            console.log(`[DEBUG] ATOMIC_SWAP: complete, now in normal sync mode`)
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Atomic swap complete, now in normal sync mode`,
             )
@@ -1513,14 +1564,19 @@ function createElectricSync<T extends Row<unknown>>(
             // Normal mode or on-demand: commit transaction if one was started
             // Both up-to-date and subset-end trigger a commit
             if (transactionStarted) {
+              console.log(`[DEBUG] TX: commit transaction (${commitPoint})`)
               commit()
               transactionStarted = false
+            } else {
+              console.log(`[DEBUG] TX: no transaction to commit (${commitPoint})`)
             }
           }
+          console.log(`[DEBUG] READY: marking collection ready`)
           wrappedMarkReady(isBufferingInitialSync())
 
           // Track that we've received the first up-to-date for progressive mode
           if (commitPoint === `up-to-date`) {
+            console.log(`[DEBUG] UP_TO_DATE: hasReceivedUpToDate = true`)
             hasReceivedUpToDate = true
           }
 
