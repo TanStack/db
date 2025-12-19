@@ -52,6 +52,11 @@ export class CollectionSubscription
 {
   private loadedInitialState = false
 
+  // Flag to skip filtering in filterAndFlipChanges.
+  // This is separate from loadedInitialState because we want to allow
+  // requestSnapshot to still work even when filtering is skipped.
+  private skipFiltering = false
+
   // Flag to indicate that we have sent at least 1 snapshot.
   // While `snapshotSent` is false we filter out all changes from subscription to the collection.
   private snapshotSent = false
@@ -244,6 +249,13 @@ export class CollectionSubscription
       (change) => !this.sentKeys.has(change.key),
     )
 
+    // Add keys to sentKeys BEFORE calling callback to prevent race condition.
+    // If a change event arrives while the callback is executing, it will see
+    // the keys already in sentKeys and filter out duplicates correctly.
+    for (const change of filteredSnapshot) {
+      this.sentKeys.add(change.key)
+    }
+
     this.snapshotSent = true
     this.callback(filteredSnapshot)
     return true
@@ -367,6 +379,13 @@ export class CollectionSubscription
     // Use the current count as the offset for this load
     const currentOffset = this.limitedSnapshotRowCount
 
+    // Add keys to sentKeys BEFORE calling callback to prevent race condition.
+    // If a change event arrives while the callback is executing, it will see
+    // the keys already in sentKeys and filter out duplicates correctly.
+    for (const change of changes) {
+      this.sentKeys.add(change.key)
+    }
+
     this.callback(changes)
 
     // Update the row count and last key after sending (for next call's offset/cursor)
@@ -441,10 +460,11 @@ export class CollectionSubscription
    * Filters and flips changes for keys that have not been sent yet.
    * Deletes are filtered out for keys that have not been sent yet.
    * Updates are flipped into inserts for keys that have not been sent yet.
+   * Duplicate inserts are filtered out to prevent D2 multiplicity > 1.
    */
   private filterAndFlipChanges(changes: Array<ChangeMessage<any, any>>) {
-    if (this.loadedInitialState) {
-      // We loaded the entire initial state
+    if (this.loadedInitialState || this.skipFiltering) {
+      // We loaded the entire initial state or filtering is explicitly skipped
       // so no need to filter or flip changes
       return changes
     }
@@ -452,7 +472,9 @@ export class CollectionSubscription
     const newChanges = []
     for (const change of changes) {
       let newChange = change
-      if (!this.sentKeys.has(change.key)) {
+      const keyInSentKeys = this.sentKeys.has(change.key)
+
+      if (!keyInSentKeys) {
         if (change.type === `update`) {
           newChange = { ...change, type: `insert`, previousValue: undefined }
         } else if (change.type === `delete`) {
@@ -460,6 +482,19 @@ export class CollectionSubscription
           continue
         }
         this.sentKeys.add(change.key)
+      } else {
+        // Key was already sent - handle based on change type
+        if (change.type === `insert`) {
+          // Filter out duplicate inserts - the key was already inserted.
+          // This prevents D2 multiplicity from going above 1, which would
+          // cause deletes to not properly remove items (multiplicity would
+          // go from 2 to 1 instead of 1 to 0).
+          continue
+        } else if (change.type === `delete`) {
+          // Remove from sentKeys so future inserts for this key are allowed
+          // (e.g., after truncate + reinsert)
+          this.sentKeys.delete(change.key)
+        }
       }
       newChanges.push(newChange)
     }
@@ -467,15 +502,30 @@ export class CollectionSubscription
   }
 
   private trackSentKeys(changes: Array<ChangeMessage<any, string | number>>) {
-    if (this.loadedInitialState) {
-      // No need to track sent keys if we loaded the entire state.
-      // Since we sent everything, all keys must have been observed.
+    if (this.loadedInitialState || this.skipFiltering) {
+      // No need to track sent keys if we loaded the entire state or filtering is skipped.
+      // Since filtering won't be applied, all keys are effectively "observed".
       return
     }
 
     for (const change of changes) {
-      this.sentKeys.add(change.key)
+      if (change.type === `delete`) {
+        // Remove deleted keys from sentKeys so future re-inserts are allowed
+        this.sentKeys.delete(change.key)
+      } else {
+        // For inserts and updates, track the key as sent
+        this.sentKeys.add(change.key)
+      }
     }
+  }
+
+  /**
+   * Mark that the subscription should not filter any changes.
+   * This is used when includeInitialState is explicitly set to false,
+   * meaning the caller doesn't want initial state but does want ALL future changes.
+   */
+  markAllStateAsSeen() {
+    this.skipFiltering = true
   }
 
   unsubscribe() {
