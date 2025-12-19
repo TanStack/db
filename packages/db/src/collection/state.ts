@@ -498,7 +498,9 @@ export class CollectionStateManager<
       for (const transaction of committedSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
-          console.log(`[DEBUG] STATE: TRUNCATE starting, current syncedData size=${this.syncedData.size}`)
+          console.log(
+            `[DEBUG] STATE: TRUNCATE starting, current syncedData size=${this.syncedData.size}`,
+          )
           // TRUNCATE PHASE
           // 1) Emit a delete for every visible key (synced + optimistic) so downstream listeners/indexes
           //    observe a clear-before-rebuild. We intentionally skip keys already in
@@ -508,7 +510,9 @@ export class CollectionStateManager<
             ...this.syncedData.keys(),
             ...(truncateOptimisticSnapshot?.upserts.keys() || []),
           ])
-          console.log(`[DEBUG] STATE: TRUNCATE clearing ${visibleKeys.size} visible keys`)
+          console.log(
+            `[DEBUG] STATE: TRUNCATE clearing ${visibleKeys.size} visible keys`,
+          )
           for (const key of visibleKeys) {
             if (truncateOptimisticSnapshot?.deletes.has(key)) continue
             const previousValue =
@@ -524,7 +528,9 @@ export class CollectionStateManager<
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.syncedKeys.clear()
-          console.log(`[DEBUG] STATE: TRUNCATE complete, syncedData size=${this.syncedData.size}`)
+          console.log(
+            `[DEBUG] STATE: TRUNCATE complete, syncedData size=${this.syncedData.size}`,
+          )
 
           // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
           //    are compared against the post-truncate state (undefined) rather than pre-truncate state
@@ -567,19 +573,29 @@ export class CollectionStateManager<
           // Update synced data
           switch (operation.type) {
             case `insert`:
-              console.log(`[DEBUG] STATE: INSERT key=${String(key)} value=${JSON.stringify(operation.value)}`)
+              console.log(
+                `[DEBUG] STATE: INSERT key=${String(key)} value=${JSON.stringify(operation.value)}`,
+              )
               this.syncedData.set(key, operation.value)
               break
             case `update`: {
               const existingData = this.syncedData.get(key)
               const hasExisting = existingData !== undefined
 
-              console.log(`[DEBUG] STATE: UPDATE key=${String(key)} mode=${rowUpdateMode} hasExisting=${hasExisting}`)
-              console.log(`[DEBUG] STATE: UPDATE existing=${JSON.stringify(existingData)}`)
-              console.log(`[DEBUG] STATE: UPDATE incoming=${JSON.stringify(operation.value)}`)
+              console.log(
+                `[DEBUG] STATE: UPDATE key=${String(key)} mode=${rowUpdateMode} hasExisting=${hasExisting}`,
+              )
+              console.log(
+                `[DEBUG] STATE: UPDATE existing=${JSON.stringify(existingData)}`,
+              )
+              console.log(
+                `[DEBUG] STATE: UPDATE incoming=${JSON.stringify(operation.value)}`,
+              )
 
               if (!hasExisting) {
-                console.warn(`[DEBUG] STATE: ⚠️ UPDATE on non-existent row! key=${String(key)} - this may cause partial data!`)
+                console.warn(
+                  `[DEBUG] STATE: ⚠️ UPDATE on non-existent row! key=${String(key)} - this may cause partial data!`,
+                )
               }
 
               if (rowUpdateMode === `partial`) {
@@ -588,7 +604,9 @@ export class CollectionStateManager<
                   this.syncedData.get(key),
                   operation.value,
                 )
-                console.log(`[DEBUG] STATE: UPDATE merged=${JSON.stringify(updatedValue)}`)
+                console.log(
+                  `[DEBUG] STATE: UPDATE merged=${JSON.stringify(updatedValue)}`,
+                )
                 this.syncedData.set(key, updatedValue)
               } else {
                 this.syncedData.set(key, operation.value)
@@ -798,7 +816,9 @@ export class CollectionStateManager<
 
       // Update cached size after synced data changes
       this.size = this.calculateSize()
-      console.log(`[DEBUG] STATE: COMMIT complete - syncedData size=${this.syncedData.size}, total visible size=${this.size}, events emitted=${events.length}`)
+      console.log(
+        `[DEBUG] STATE: COMMIT complete - syncedData size=${this.syncedData.size}, total visible size=${this.size}, events emitted=${events.length}`,
+      )
 
       // Update indexes for all events before emitting
       if (events.length > 0) {
