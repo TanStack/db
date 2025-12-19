@@ -1,7 +1,7 @@
-import { describe, expect, test } from "vitest"
-import { createCollection } from "../../src/collection/index.js"
-import { createLiveQueryCollection } from "../../src/query/index.js"
-import { createOptimisticAction } from "../../src/optimistic-action.js"
+import { describe, expect, test } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createOptimisticAction } from '../../src/optimistic-action.js'
 
 type Item = {
   id: string
@@ -64,7 +64,7 @@ function setup() {
 }
 
 function createPendingOptimisticAction(
-  source: ReturnType<typeof setup>[`source`]
+  source: ReturnType<typeof setup>[`source`],
 ) {
   let resolveMutation: (() => void) | undefined
   let startResolve: (() => void) | undefined
