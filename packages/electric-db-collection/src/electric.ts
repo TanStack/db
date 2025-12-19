@@ -1252,11 +1252,13 @@ function createElectricSync<T extends Row<unknown>>(
         offset: effectiveOffset,
         signal: abortController.signal,
         onError: (errorParams) => {
+          console.log(`[DEBUG] ERROR: ShapeStream error occurred`, errorParams)
           // Just immediately mark ready if there's an error to avoid blocking
           // apps waiting for `.preload()` to finish.
           // Note that Electric sends a 409 error on a `must-refetch` message, but the
           // ShapeStream handled this and it will not reach this handler, therefor
           // this markReady will not be triggers by a `must-refetch`.
+          console.log(`[DEBUG] ERROR: marking collection ready despite error`)
           markReady()
 
           if (shapeOptions.onError) {
@@ -1621,12 +1623,14 @@ function createElectricSync<T extends Row<unknown>>(
       return {
         loadSubset: loadSubsetDedupe?.loadSubset,
         cleanup: () => {
+          console.log(`[DEBUG] CLEANUP: cleaning up collection ${collectionId}`)
           // Unsubscribe from the stream
           unsubscribeStream()
           // Abort the abort controller to stop the stream
           abortController.abort()
           // Reset deduplication tracking so collection can load fresh data if restarted
           loadSubsetDedupe?.reset()
+          console.log(`[DEBUG] CLEANUP: complete`)
         },
       }
     },

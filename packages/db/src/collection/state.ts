@@ -498,6 +498,7 @@ export class CollectionStateManager<
       for (const transaction of committedSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
+          console.log(`[DEBUG] STATE: TRUNCATE starting, current syncedData size=${this.syncedData.size}`)
           // TRUNCATE PHASE
           // 1) Emit a delete for every visible key (synced + optimistic) so downstream listeners/indexes
           //    observe a clear-before-rebuild. We intentionally skip keys already in
@@ -507,6 +508,7 @@ export class CollectionStateManager<
             ...this.syncedData.keys(),
             ...(truncateOptimisticSnapshot?.upserts.keys() || []),
           ])
+          console.log(`[DEBUG] STATE: TRUNCATE clearing ${visibleKeys.size} visible keys`)
           for (const key of visibleKeys) {
             if (truncateOptimisticSnapshot?.deletes.has(key)) continue
             const previousValue =
@@ -522,6 +524,7 @@ export class CollectionStateManager<
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.syncedKeys.clear()
+          console.log(`[DEBUG] STATE: TRUNCATE complete, syncedData size=${this.syncedData.size}`)
 
           // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
           //    are compared against the post-truncate state (undefined) rather than pre-truncate state
@@ -795,6 +798,7 @@ export class CollectionStateManager<
 
       // Update cached size after synced data changes
       this.size = this.calculateSize()
+      console.log(`[DEBUG] STATE: COMMIT complete - syncedData size=${this.syncedData.size}, total visible size=${this.size}, events emitted=${events.length}`)
 
       // Update indexes for all events before emitting
       if (events.length > 0) {
