@@ -1440,7 +1440,7 @@ function createElectricSync<T extends Row<unknown>>(
             )
           } else {
             console.log(
-              `[DEBUG] STREAM MSG: unknown type headers=${JSON.stringify(message.headers)}`,
+              `[DEBUG] STREAM MSG: unknown type headers=${JSON.stringify((message as any).headers)}`,
             )
           }
           // Add message to current batch buffer (for race condition handling)
