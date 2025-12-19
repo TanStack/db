@@ -1,5 +1,16 @@
 # @tanstack/electric-db-collection
 
+## 0.2.16
+
+### Patch Changes
+
+- Adds support for the new subset-end message introduced in Electric. ([#1004](https://github.com/TanStack/db/pull/1004))
+
+- Support tagged rows and move out events in Electric collection. ([#942](https://github.com/TanStack/db/pull/942))
+
+- Updated dependencies [[`8ed7725`](https://github.com/TanStack/db/commit/8ed7725514a6a501482a391162f7792aa8b371e5), [`01452bf`](https://github.com/TanStack/db/commit/01452bfd0d00da8bd52941a4954af73749473651)]:
+  - @tanstack/db@0.5.13
+
 ## 0.2.15
 
 ### Patch Changes
