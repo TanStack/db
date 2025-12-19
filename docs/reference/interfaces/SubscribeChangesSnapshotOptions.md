@@ -5,7 +5,7 @@ title: SubscribeChangesSnapshotOptions
 
 # Interface: SubscribeChangesSnapshotOptions
 
-Defined in: [packages/db/src/types.ts:769](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L769)
+Defined in: [packages/db/src/types.ts:785](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L785)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/types.ts:769](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:774](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L774)
+Defined in: [packages/db/src/types.ts:790](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L790)
 
 ***
 
@@ -29,7 +29,7 @@ Defined in: [packages/db/src/types.ts:774](https://github.com/TanStack/db/blob/m
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:773](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L773)
+Defined in: [packages/db/src/types.ts:789](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L789)
 
 ***
 
@@ -39,7 +39,7 @@ Defined in: [packages/db/src/types.ts:773](https://github.com/TanStack/db/blob/m
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:766](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L766)
+Defined in: [packages/db/src/types.ts:782](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L782)
 
 Pre-compiled expression for filtering changes
 

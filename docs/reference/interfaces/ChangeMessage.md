@@ -7,10 +7,6 @@ title: ChangeMessage
 
 Defined in: [packages/db/src/types.ts:353](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L353)
 
-## Extended by
-
-- [`OptimisticChangeMessage`](OptimisticChangeMessage.md)
-
 ## Type Parameters
 
 ### T
