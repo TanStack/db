@@ -1,5 +1,44 @@
 # @tanstack/db
 
+## 0.5.15
+
+### Patch Changes
+
+- fix: prevent duplicate inserts from reaching D2 pipeline in live queries ([#1054](https://github.com/TanStack/db/pull/1054))
+
+  Added defensive measures to prevent duplicate INSERT events from reaching the D2 (differential dataflow) pipeline, which could cause items to not disappear when deleted (due to multiplicity going from 2 to 1 instead of 1 to 0).
+
+  Changes:
+  - Added `sentToD2Keys` tracking in `CollectionSubscriber` to filter duplicate inserts at the D2 pipeline entry point
+  - Fixed `includeInitialState` handling to only pass when `true`, preventing internal lazy-loading subscriptions from incorrectly disabling filtering
+  - Clear `sentToD2Keys` on truncate to allow re-inserts after collection reset
+
+## 0.5.14
+
+### Patch Changes
+
+- Fix subscriptions not re-requesting data after truncate in on-demand sync mode. When a must-refetch occurs, subscriptions now buffer changes and re-request their previously loaded subsets, preventing a flash of missing content. ([#1043](https://github.com/TanStack/db/pull/1043))
+
+  Key improvements:
+  - Buffer changes atomically: deletes and inserts are emitted together in a single callback
+  - Correct event ordering: defers loadSubset calls to a microtask so truncate deletes are buffered before refetch inserts
+  - Gated on on-demand mode: only buffers when there's an actual loadSubset handler
+  - Fixes delete filter edge case: skips delete filter during truncate buffering when `sentKeys` is empty
+
+## 0.5.13
+
+### Patch Changes
+
+- Allow rows to be deleted by key by using the write function passed to a collection's sync function. ([#1003](https://github.com/TanStack/db/pull/1003))
+
+- fix: deleted items not disappearing from live queries with `.limit()` ([#1044](https://github.com/TanStack/db/pull/1044))
+
+  Fixed a bug where deleting an item from a live query with `.orderBy()` and `.limit()` would not remove it from the query results. The `subscribeChanges` callback would never fire with a delete event.
+
+  The issue was caused by duplicate inserts reaching the D2 pipeline, which corrupted the multiplicity tracking used by `TopKWithFractionalIndexOperator`. A delete would decrement multiplicity from 2 to 1 instead of 1 to 0, so the item remained visible.
+
+  Fixed by ensuring `sentKeys` is updated before callbacks execute (preventing race conditions) and filtering duplicate inserts in `filterAndFlipChanges`.
+
 ## 0.5.12
 
 ### Patch Changes
