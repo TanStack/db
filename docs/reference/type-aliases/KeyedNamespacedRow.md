@@ -9,7 +9,7 @@ title: KeyedNamespacedRow
 type KeyedNamespacedRow = [unknown, NamespacedRow];
 ```
 
-Defined in: [packages/db/src/types.ts:750](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L750)
+Defined in: [packages/db/src/types.ts:766](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L766)
 
 A keyed namespaced row is a row with a key and a namespaced row
 This is the main representation of a row in a query pipeline
