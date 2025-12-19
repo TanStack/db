@@ -348,6 +348,12 @@ export interface SyncConfig<
    * - `full`: Updates contain the entire row.
    */
   rowUpdateMode?: `partial` | `full`
+
+  /**
+   * Allow applying synced transactions while optimistic transactions are persisting.
+   * @default false
+   */
+  allowSyncWhilePersisting?: boolean
 }
 
 export interface ChangeMessage<

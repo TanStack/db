@@ -418,8 +418,9 @@ export class CollectionStateManager<
   }
 
   /**
-   * Attempts to commit pending synced transactions if there are no active transactions
-   * This method processes operations from pending transactions and applies them to the synced data
+   * Attempts to commit pending synced transactions.
+   * Commits are normally deferred while optimistic transactions are persisting,
+   * unless allowSyncWhilePersisting is enabled on the collection's sync config.
    */
   commitPendingTransactions = () => {
     // Check if there are any persisting transaction
@@ -430,6 +431,8 @@ export class CollectionStateManager<
         break
       }
     }
+    const allowSyncWhilePersisting =
+      this.config.sync.allowSyncWhilePersisting === true
 
     // pending synced transactions could be either `committed` or still open.
     // we only want to process `committed` transactions here
@@ -460,7 +463,11 @@ export class CollectionStateManager<
       },
     )
 
-    if (!hasPersistingTransaction || hasTruncateSync) {
+    if (
+      allowSyncWhilePersisting ||
+      !hasPersistingTransaction ||
+      hasTruncateSync
+    ) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
