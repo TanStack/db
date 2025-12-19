@@ -564,15 +564,28 @@ export class CollectionStateManager<
           // Update synced data
           switch (operation.type) {
             case `insert`:
+              console.log(`[DEBUG] STATE: INSERT key=${String(key)} value=${JSON.stringify(operation.value)}`)
               this.syncedData.set(key, operation.value)
               break
             case `update`: {
+              const existingData = this.syncedData.get(key)
+              const hasExisting = existingData !== undefined
+
+              console.log(`[DEBUG] STATE: UPDATE key=${String(key)} mode=${rowUpdateMode} hasExisting=${hasExisting}`)
+              console.log(`[DEBUG] STATE: UPDATE existing=${JSON.stringify(existingData)}`)
+              console.log(`[DEBUG] STATE: UPDATE incoming=${JSON.stringify(operation.value)}`)
+
+              if (!hasExisting) {
+                console.warn(`[DEBUG] STATE: ⚠️ UPDATE on non-existent row! key=${String(key)} - this may cause partial data!`)
+              }
+
               if (rowUpdateMode === `partial`) {
                 const updatedValue = Object.assign(
                   {},
                   this.syncedData.get(key),
                   operation.value,
                 )
+                console.log(`[DEBUG] STATE: UPDATE merged=${JSON.stringify(updatedValue)}`)
                 this.syncedData.set(key, updatedValue)
               } else {
                 this.syncedData.set(key, operation.value)
@@ -580,6 +593,7 @@ export class CollectionStateManager<
               break
             }
             case `delete`:
+              console.log(`[DEBUG] STATE: DELETE key=${String(key)}`)
               this.syncedData.delete(key)
               break
           }

@@ -366,16 +366,21 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }
 
   const loadSubset = async (opts: LoadSubsetOptions) => {
+    console.log(`[DEBUG] LOAD_SUBSET: syncMode=${syncMode} isBuffering=${isBufferingInitialSync()} opts=${JSON.stringify(opts)}`)
+
     // In progressive mode, use fetchSnapshot during snapshot phase
     if (isBufferingInitialSync()) {
       // Progressive mode snapshot phase: fetch and apply immediately
       const snapshotParams = compileSQL<T>(opts)
+      console.log(`[DEBUG] LOAD_SUBSET: Progressive mode - fetching snapshot`)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
+        console.log(`[DEBUG] LOAD_SUBSET: Progressive mode - got ${rows.length} rows`)
 
         // Check again if we're still buffering - we might have received up-to-date
         // and completed the atomic swap while waiting for the snapshot
         if (!isBufferingInitialSync()) {
+          console.log(`[DEBUG] LOAD_SUBSET: Ignoring snapshot - sync completed while fetching`)
           debug(
             `${collectionId ? `[${collectionId}] ` : ``}Ignoring snapshot - sync completed while fetching`,
           )
@@ -386,6 +391,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         if (rows.length > 0) {
           begin()
           for (const row of rows) {
+            console.log(`[DEBUG] LOAD_SUBSET: Applying row from snapshot: ${JSON.stringify(row.value)}`)
             write({
               type: `insert`,
               value: row.value,
@@ -401,6 +407,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           )
         }
       } catch (error) {
+        console.log(`[DEBUG] LOAD_SUBSET: Error fetching snapshot: ${error}`)
         debug(
           `${collectionId ? `[${collectionId}] ` : ``}Error fetching snapshot: %o`,
           error,
@@ -409,9 +416,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       }
     } else if (syncMode === `progressive`) {
       // Progressive mode after full sync complete: no need to load more
+      console.log(`[DEBUG] LOAD_SUBSET: Progressive mode complete - no load needed`)
       return
     } else {
       // On-demand mode: use requestSnapshot
+      console.log(`[DEBUG] LOAD_SUBSET: On-demand mode - requesting snapshot`)
       // When cursor is provided, make two calls:
       // 1. whereCurrent (all ties, no limit)
       // 2. whereFrom (rows > cursor, with limit)
@@ -992,6 +1001,9 @@ function createElectricSync<T extends Row<unknown>>(
     removedTags: Array<MoveTag> | undefined,
     rowId: RowId,
   ): Set<MoveTag> => {
+    const hadTags = rowTagSets.has(rowId)
+    const previousTagCount = hadTags ? rowTagSets.get(rowId)!.size : 0
+
     // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
     if (!rowTagSets.has(rowId)) {
       rowTagSets.set(rowId, new Set())
@@ -1007,6 +1019,8 @@ function createElectricSync<T extends Row<unknown>>(
     if (removedTags) {
       removeTagsFromRow(removedTags, rowId, rowTagSet)
     }
+
+    console.log(`[DEBUG] TAGS: rowId=${String(rowId)} prevTags=${previousTagCount} newTags=${rowTagSet.size} added=${JSON.stringify(tags)} removed=${JSON.stringify(removedTags)}`)
 
     return rowTagSet
   }
@@ -1088,7 +1102,10 @@ function createElectricSync<T extends Row<unknown>>(
     write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
     transactionStarted: boolean,
   ): boolean => {
+    console.log(`[DEBUG] MOVE-OUT: patterns=${JSON.stringify(patterns)}`)
+
     if (tagLength === undefined) {
+      console.log(`[DEBUG] MOVE-OUT: no tag length set yet, ignoring`)
       debug(
         `${collectionId ? `[${collectionId}] ` : ``}Received move-out message but no tag length set yet, ignoring`,
       )
@@ -1101,9 +1118,13 @@ function createElectricSync<T extends Row<unknown>>(
     for (const pattern of patterns) {
       // Find all rows that match this pattern
       const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+      console.log(`[DEBUG] MOVE-OUT: pattern=${JSON.stringify(pattern)} affectedRows=${Array.from(affectedRowIds).map(String).join(',')}`)
 
       for (const rowId of affectedRowIds) {
-        if (removeMatchingTagsFromRow(rowId, pattern)) {
+        const willDelete = removeMatchingTagsFromRow(rowId, pattern)
+        console.log(`[DEBUG] MOVE-OUT: rowId=${String(rowId)} willDelete=${willDelete}`)
+
+        if (willDelete) {
           // Delete rows with empty tag sets
           if (!txStarted) {
             begin()
@@ -1191,14 +1212,18 @@ function createElectricSync<T extends Row<unknown>>(
         })
       })
 
+      const effectiveLog = syncMode === `on-demand` ? `changes_only` : undefined
+      const effectiveOffset = shapeOptions.offset ?? (syncMode === `on-demand` ? `now` : undefined)
+
+      console.log(`[DEBUG] SYNC_START: collectionId=${collectionId} syncMode=${syncMode} log=${effectiveLog} offset=${effectiveOffset} table=${shapeOptions.params?.table} where=${shapeOptions.params?.where}`)
+
       const stream = new ShapeStream({
         ...shapeOptions,
         // In on-demand mode, we only want to sync changes, so we set the log to `changes_only`
-        log: syncMode === `on-demand` ? `changes_only` : undefined,
+        log: effectiveLog,
         // In on-demand mode, we only need the changes from the point of time the collection was created
         // so we default to `now` when there is no saved offset.
-        offset:
-          shapeOptions.offset ?? (syncMode === `on-demand` ? `now` : undefined),
+        offset: effectiveOffset,
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking
@@ -1249,6 +1274,24 @@ function createElectricSync<T extends Row<unknown>>(
         const rowId = collection.getKeyFromItem(changeMessage.value)
         const operation = changeMessage.headers.operation
 
+        // Check if this row already exists in the collection
+        const existingRow = collection.state.get(rowId as any)
+        const isNewRow = existingRow === undefined
+        const existingTags = rowTagSets.get(rowId)
+        const isFirstTags = !existingTags || existingTags.size === 0
+
+        // Log all change messages
+        console.log(`[DEBUG] CHANGE: op=${operation} rowId=${String(rowId)} isNew=${isNewRow} hasTags=${hasTags} tags=${JSON.stringify(tags)} value=${JSON.stringify(changeMessage.value)}`)
+
+        // Warn on potential move-in issues
+        if (isNewRow && operation === `update`) {
+          console.warn(`[DEBUG] ⚠️ UPDATE on non-existent row! rowId=${String(rowId)} - may cause partial data`)
+        }
+
+        if (tags && tags.length > 0 && isFirstTags) {
+          console.log(`[DEBUG] 🔄 MOVE-IN: rowId=${String(rowId)} getting first tags`)
+        }
+
         if (operation === `delete`) {
           clearTagsForRow(rowId)
         } else if (hasTags) {
@@ -1279,6 +1322,8 @@ function createElectricSync<T extends Row<unknown>>(
       })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
+        console.log(`[DEBUG] STREAM: Received batch of ${messages.length} messages`)
+
         // Track commit point type - up-to-date takes precedence as it also triggers progressive mode atomic swap
         let commitPoint: `up-to-date` | `subset-end` | null = null
 
@@ -1289,6 +1334,16 @@ function createElectricSync<T extends Row<unknown>>(
         batchCommitted.setState(() => false)
 
         for (const message of messages) {
+          // Log each message type
+          if (isChangeMessage(message)) {
+            console.log(`[DEBUG] STREAM MSG: change op=${message.headers.operation} key=${message.key}`)
+          } else if (isMoveOutMessage(message)) {
+            console.log(`[DEBUG] STREAM MSG: move-out patterns=${JSON.stringify(message.headers.patterns)}`)
+          } else if (isControlMessage(message)) {
+            console.log(`[DEBUG] STREAM MSG: control=${message.headers.control}`)
+          } else {
+            console.log(`[DEBUG] STREAM MSG: unknown type headers=${JSON.stringify(message.headers)}`)
+          }
           // Add message to current batch buffer (for race condition handling)
           if (isChangeMessage(message) || isMoveOutMessage(message)) {
             currentBatchMessages.setState((currentBuffer) => {
