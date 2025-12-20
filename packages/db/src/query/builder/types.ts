@@ -491,7 +491,7 @@ export type Ref<T = any> = {
 } & RefLeaf<T>
 
 /**
- * Ref - The user-facing ref type with clean IDE display
+ * RefLeaf - The user-facing leaf ref type with clean IDE display
  *
  * An opaque branded type that represents a reference to a value in a query.
  * This shows as `Ref<T>` in the IDE without exposing internal structure.
