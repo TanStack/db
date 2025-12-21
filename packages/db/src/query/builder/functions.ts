@@ -2,7 +2,7 @@ import { Aggregate, Func } from '../ir'
 import { toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
-import type { RefLeaf } from './types.js'
+import type { Ref, RefField, RefLeaf } from './types.js'
 
 type StringRef =
   | RefLeaf<string>
@@ -376,3 +376,27 @@ export const operators = [
 ] as const
 
 export type OperatorName = (typeof operators)[number]
+
+/**
+ * refField - Helper for dynamic property access on Ref types
+ *
+ * When using generic type parameters to index Ref types, TypeScript may not
+ * be able to resolve the conditional types, creating unions that can't be indexed.
+ * This helper function provides type-safe dynamic field access.
+ *
+ * @example
+ * ```typescript
+ * // Instead of: row.data[columnName] (may cause type error)
+ * // Use: refField(row.data, columnName)
+ *
+ * function selectDynamicField<T, K extends keyof T>(ref: Ref<T>, key: K) {
+ *   return refField(ref, key) // Type-safe!
+ * }
+ * ```
+ */
+export function refField<T, K extends keyof T>(
+  ref: Ref<T> | RefLeaf<T>,
+  key: K,
+): RefField<T, K> {
+  return (ref as Record<string, unknown>)[key as string] as RefField<T, K>
+}

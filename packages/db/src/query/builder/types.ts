@@ -447,6 +447,16 @@ type NonUndefined<T> = T extends undefined ? never : T
 type NonNull<T> = T extends null ? never : T
 
 /**
+ * RefBrand - Unique symbol used to brand Ref and RefLeaf types
+ *
+ * This symbol is used to:
+ * 1. Create opaque branded types that display cleanly in IDEs
+ * 2. Enable type extraction in ResultTypeFromSelect
+ * 3. Allow spread operations to preserve the underlying type
+ */
+declare const RefBrand: unique symbol
+
+/**
  * Ref - The user-facing ref interface for the query builder
  *
  * This is a clean type that represents a reference to a value in the query,
@@ -491,6 +501,24 @@ export type Ref<T = any> = {
 } & RefLeaf<T>
 
 /**
+ * RefField - Helper type for accessing Ref properties with dynamic keys
+ *
+ * When using generic type parameters to index Ref types, TypeScript may not
+ * be able to resolve the conditional types, creating unions that can't be indexed.
+ * Use this type to assert the expected result type.
+ *
+ * @example
+ * ```typescript
+ * function selectField<T, K extends keyof T>(ref: Ref<T>, key: K): RefField<T, K> {
+ *   return (ref as any)[key]
+ * }
+ * ```
+ */
+export type RefField<T, K extends keyof T> = IsPlainObject<T[K]> extends true
+  ? Ref<T[K]>
+  : RefLeaf<T[K]>
+
+/**
  * RefLeaf - The user-facing leaf ref type with clean IDE display
  *
  * An opaque branded type that represents a reference to a value in a query.
@@ -501,7 +529,6 @@ export type Ref<T = any> = {
  * - Ref<string> displays as `Ref<string>` in IDE
  * - No internal properties like __refProxy, __path, __type are visible
  */
-declare const RefBrand: unique symbol
 export type RefLeaf<T = any> = { readonly [RefBrand]?: T }
 
 // Helper type to remove RefBrand from objects

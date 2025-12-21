@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, test } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
+import { refField } from '../../src/query/builder/functions.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import type { Ref, RefLeaf } from '../../src/query/builder/types.js'
 
@@ -76,6 +77,26 @@ describe(`dynamic indexing in select`, () => {
       id: number
       value: string | number | boolean
     }>()
+  })
+
+  test(`refField helper works for simple generic patterns`, () => {
+    // The refField helper provides type-safe dynamic field access
+    // for cases with a single level of generic type parameters
+
+    function getDynamicField<T extends Record<string, unknown>, K extends keyof T>(
+      ref: Ref<T>,
+      key: K,
+    ) {
+      // refField provides type-safe access
+      return refField(ref, key)
+    }
+
+    // Test the helper with a concrete type
+    const userRef = {} as Ref<User>
+    const nameField = getDynamicField(userRef, `name`)
+
+    // The result is properly typed as Ref or RefLeaf of the field type
+    expectTypeOf(nameField).toMatchTypeOf<Ref<string> | RefLeaf<string>>()
   })
 
   test(`dynamic field selection preserves type for specific column`, () => {
@@ -275,16 +296,19 @@ describe(`dynamic indexing in select`, () => {
     }>()
   })
 
-  test(`exact user pattern from bug report - workaround with type assertion`, () => {
-    // This test documents the known limitation and workaround for the issue
-    // reported at https://gist.github.com/nestarz/f57b738e62edb4e875b4f57399431be2
+  test(`deeply generic pattern requires type assertion`, () => {
+    // This test documents the TypeScript limitation for deeply generic patterns
+    // as reported at: https://gist.github.com/nestarz/f57b738e62edb4e875b4f57399431be2
     //
-    // The issue: When using deeply generic types like RowData<S, K> where S and K
-    // are type parameters, TypeScript can't resolve the conditional types in
-    // Ref<T>, creating a deferred union that can't be indexed with generic keys.
+    // LIMITATION: When using deeply nested generics like RowData<S, K> where both
+    // S and K are type parameters, TypeScript can't resolve the conditional types
+    // in Ref<T>. The resulting deferred union types can't be indexed with generic keys.
     //
-    // Workaround: Use type assertion (as any) when accessing dynamic properties
-    // on Ref types with deeply generic type parameters.
+    // This is a TypeScript limitation, not a bug in the library. For such patterns,
+    // use a type assertion: (row.data as any)[columnName]
+    //
+    // Note: The refField() helper works for simpler generic cases (single level of
+    // generics), but not for deeply nested generic type parameters.
 
     // The user's schema pattern
     type DatabaseSchema = {
@@ -302,7 +326,7 @@ describe(`dynamic indexing in select`, () => {
       data: T
     }
 
-    // The generic hook function pattern - using workaround
+    // The generic hook function pattern - requires type assertion
     function useDynamicFieldQuery<
       S extends DatabaseSchema,
       K extends TableNames<S>,
@@ -322,19 +346,17 @@ describe(`dynamic indexing in select`, () => {
         }),
       )
 
-      // WORKAROUND: Use type assertion for deeply generic type access
-      // This is needed because TypeScript can't resolve conditional types
-      // when the type parameter (RowData<S, K>) is itself generic.
+      // For deeply nested generics, use type assertion
       createLiveQueryCollection((q) =>
         q.from({ row: mockCollection }).select(({ row }) => ({
           key: row.key,
-          // Cast to any to bypass TypeScript's limitation with deeply generic types
+          // Type assertion required for deeply nested generic patterns
           value: (row.data as any)[columnName],
         })),
       )
     }
 
-    // These should work without type errors (using the workaround)
+    // These work correctly
     useDynamicFieldQuery<DatabaseSchema, `users`, `name`>(`users`, `name`)
     useDynamicFieldQuery<DatabaseSchema, `products`, `price`>(`products`, `price`)
   })
