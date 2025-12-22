@@ -96,7 +96,7 @@ import type {
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
-  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): Accessor<Array<GetResult<TContext>>> & {
   /**
    * @deprecated use function result instead
@@ -118,7 +118,7 @@ export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): {
+): Accessor<Array<GetResult<TContext>>> & {
   state: ReactiveMap<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
   collection: Accessor<Collection<
@@ -176,7 +176,7 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: Accessor<LiveQueryCollectionConfig<TContext>>
+  config: Accessor<LiveQueryCollectionConfig<TContext>>,
 ): Accessor<Array<GetResult<TContext>>> & {
   /**
    * @deprecated use function result instead
@@ -234,7 +234,7 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>
+  liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>,
 ): Accessor<Array<TResult>> & {
   /**
    * @deprecated use function result instead
@@ -322,6 +322,9 @@ export function useLiveQuery(
   const [getDataResource] = createResource(
     () => ({ currentCollection: collection() }),
     async ({ currentCollection }) => {
+      if (!currentCollection) {
+        return []
+      }
       setStatus(currentCollection.status)
       await currentCollection.toArrayWhenReady()
       // Initialize state with current collection data
@@ -339,11 +342,14 @@ export function useLiveQuery(
       name: `TanstackDBData`,
       deferStream: false,
       initialValue: data,
-    }
+    },
   )
 
   createEffect(() => {
     const currentCollection = collection()
+    if (!currentCollection) {
+      return
+    }
     const subscription = currentCollection.subscribeChanges(
       // Changes is fine grained, so does not work great with an array
       (changes: Array<ChangeMessage<any>>) => {
@@ -369,7 +375,7 @@ export function useLiveQuery(
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     onCleanup(() => {
