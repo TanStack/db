@@ -63,7 +63,6 @@ export class TransactionExecutor {
 
     // Check online status before executing transactions
     if (!this.onlineDetector.isOnline()) {
-      console.log('Network offline, pausing execution')
       return
     }
 
@@ -234,7 +233,6 @@ export class TransactionExecutor {
 
     if (this.config.beforeRetry) {
       filteredTransactions = this.config.beforeRetry(transactions)
-      console.log('loadPendingTransactions, transactions has been filtered', {filteredTransactions})
     }
 
 
