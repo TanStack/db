@@ -257,7 +257,7 @@ importers:
         specifier: ^0.5.11
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^0.1.58
+        specifier: ^0.1.59
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -433,10 +433,10 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.10
+        specifier: ^1.0.11
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.58
+        specifier: ^0.1.59
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.140.0
@@ -554,7 +554,7 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.10
+        specifier: ^1.0.11
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
         specifier: ^0.1.54
