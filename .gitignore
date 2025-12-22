@@ -38,6 +38,7 @@ stats.html
 .pnpm-store
 .tsup
 .svelte-kit
+*.tgz
 
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
