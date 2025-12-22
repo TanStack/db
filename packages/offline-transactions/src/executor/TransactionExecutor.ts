@@ -237,8 +237,6 @@ export class TransactionExecutor {
       console.log('loadPendingTransactions, transactions has been filtered', {filteredTransactions})
     }
 
-    // Clear scheduler before reloading to ensure filtered-out transactions are removed
-    this.scheduler.clear()
 
     for (const transaction of filteredTransactions) {
       this.scheduler.schedule(transaction)
@@ -255,7 +253,6 @@ export class TransactionExecutor {
     )
 
     if (removedTransactions.length > 0) {
-      console.log('removedTransactions', removedTransactions)
       await this.outbox.removeMany(removedTransactions.map((tx) => tx.id))
     }
   }
