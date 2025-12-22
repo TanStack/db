@@ -466,4 +466,111 @@ describe(`offline executor end-to-end`, () => {
 
     env.executor.dispose()
   })
+
+  it(`clears scheduler before reloading transactions with beforeRetry hook`, async () => {
+    // This test demonstrates the bug where filtered-out transactions
+    // remain in the scheduler after loadPendingTransactions is called
+    const storage = new FakeStorageAdapter()
+    let shouldFilterItem1 = false
+
+    // Create environment with a beforeRetry hook that can change behavior
+    const env = createTestOfflineEnvironment({
+      storage,
+      mutationFn: () => {
+        // Always fail to keep transactions in outbox
+        throw new Error(`offline`)
+      },
+      config: {
+        beforeRetry: (transactions) => {
+          if (shouldFilterItem1) {
+            // Filter out item-1 transaction, keep only item-2
+            return transactions.filter((tx) => tx.metadata?.item !== `item-1`)
+          }
+          return transactions
+        },
+      },
+    })
+
+    await env.waitForLeader()
+
+    // Create two transactions that will both fail
+    const tx1 = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+      metadata: { item: `item-1` },
+    })
+    tx1.mutate(() => {
+      env.collection.insert({
+        id: `item-1`,
+        value: `first`,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+    tx1.commit()
+
+    const tx2 = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+      metadata: { item: `item-2` },
+    })
+    tx2.mutate(() => {
+      env.collection.insert({
+        id: `item-2`,
+        value: `second`,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+    tx2.commit()
+
+    // Wait for transactions to be persisted to outbox
+    await waitUntil(async () => {
+      const entries = await env.executor.peekOutbox()
+      return entries.length === 2
+    })
+
+    // Verify both transactions attempted execution
+    await waitUntil(() => env.mutationCalls.length >= 2, 1000)
+    const initialCalls = env.mutationCalls.length
+
+    // Now lose leadership
+    env.leader.setLeader(false)
+    await flushMicrotasks()
+
+    // Enable filtering to filter out item-1 transaction
+    shouldFilterItem1 = true
+
+    // Regain leadership - this will call loadPendingTransactions
+    env.leader.setLeader(true)
+    await flushMicrotasks()
+
+    // Force immediate execution by notifying online
+    env.executor.notifyOnline()
+
+    // Wait for new execution attempts (should be much faster now)
+    await waitUntil(() => env.mutationCalls.length > initialCalls, 1000)
+
+    // Count executions after regaining leadership
+    const callsAfterReload = env.mutationCalls.slice(initialCalls)
+
+    // With the fix: Only item-2 transaction should be executed
+    // Without the fix: Both item-1 and item-2 would be executed
+    const item1Calls = callsAfterReload.filter(
+      (call) => call.transaction.metadata.item === `item-1`,
+    )
+    const item2Calls = callsAfterReload.filter(
+      (call) => call.transaction.metadata.item === `item-2`,
+    )
+
+    expect(item1Calls.length).toBe(0) // item-1 should NOT be executed
+    expect(item2Calls.length).toBeGreaterThan(0) // item-2 should be executed
+
+    // Verify only item-2 transaction remains in outbox
+    const finalOutbox = await env.executor.peekOutbox()
+    expect(finalOutbox.length).toBe(1)
+    expect(finalOutbox[0].metadata?.item).toBe(`item-2`)
+
+    env.executor.dispose()
+  })
 })
