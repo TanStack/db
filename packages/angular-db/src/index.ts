@@ -5,8 +5,8 @@ import {
   effect,
   inject,
   signal,
-} from "@angular/core"
-import { BaseQueryBuilder, createLiveQueryCollection } from "@tanstack/db"
+} from '@angular/core'
+import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
@@ -16,8 +16,8 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   QueryBuilder,
-} from "@tanstack/db"
-import type { Signal } from "@angular/core"
+} from '@tanstack/db'
+import type { Signal } from '@angular/core'
 
 /**
  * The result of calling `injectLiveQuery`.
@@ -69,20 +69,22 @@ export function injectLiveQuery<
   }) => QueryBuilder<TContext> | undefined | null
 }): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
-  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
-  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext> | undefined | null
+  queryFn: (
+    q: InitialQueryBuilder,
+  ) => QueryBuilder<TContext> | undefined | null,
 ): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<TContext extends Context>(
-  config: LiveQueryCollectionConfig<TContext>
+  config: LiveQueryCollectionConfig<TContext>,
 ): InjectLiveQueryResult<GetResult<TContext>>
 export function injectLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils>
+  liveQueryCollection: Collection<TResult, TKey, TUtils>,
 ): InjectLiveQueryResult<TResult, TKey, TUtils>
 export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
@@ -156,11 +158,11 @@ export function injectLiveQuery(opts: any) {
   const state = signal(new Map<string | number, any>())
   const data = signal<Array<any>>([])
   const status = signal<CollectionStatus | `disabled`>(
-    collection() ? `idle` : `disabled`
+    collection() ? `idle` : `disabled`,
   )
 
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     const newState = new Map(currentCollection.entries())
     const newData = Array.from(currentCollection.values())
@@ -204,7 +206,7 @@ export function injectLiveQuery(opts: any) {
     const subscription = currentCollection.subscribeChanges(
       (_: Array<ChangeMessage<any>>) => {
         syncDataFromCollection(currentCollection)
-      }
+      },
     )
     unsub = subscription.unsubscribe.bind(subscription)
 

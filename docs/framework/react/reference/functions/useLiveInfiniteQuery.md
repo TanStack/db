@@ -40,13 +40,13 @@ without recreating the live query collection on each page change.
 
 #### config
 
-[`UseLiveInfiniteQueryConfig`](../../type-aliases/UseLiveInfiniteQueryConfig.md)\<`any`\>
+[`UseLiveInfiniteQueryConfig`](../type-aliases/UseLiveInfiniteQueryConfig.md)\<`any`\>
 
 Configuration including pageSize and getNextPageParam
 
 ### Returns
 
-[`UseLiveInfiniteQueryReturn`](../../type-aliases/UseLiveInfiniteQueryReturn.md)\<`any`\>
+[`UseLiveInfiniteQueryReturn`](../type-aliases/UseLiveInfiniteQueryReturn.md)\<`any`\>
 
 Object with pages, data, and pagination controls
 
@@ -141,7 +141,7 @@ Query function that defines what data to fetch. Must include `.orderBy()` for se
 
 #### config
 
-[`UseLiveInfiniteQueryConfig`](../../type-aliases/UseLiveInfiniteQueryConfig.md)\<`TContext`\>
+[`UseLiveInfiniteQueryConfig`](../type-aliases/UseLiveInfiniteQueryConfig.md)\<`TContext`\>
 
 Configuration including pageSize and getNextPageParam
 
@@ -153,7 +153,7 @@ Array of dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveInfiniteQueryReturn`](../../type-aliases/UseLiveInfiniteQueryReturn.md)\<`TContext`\>
+[`UseLiveInfiniteQueryReturn`](../type-aliases/UseLiveInfiniteQueryReturn.md)\<`TContext`\>
 
 Object with pages, data, and pagination controls
 

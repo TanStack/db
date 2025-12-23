@@ -31,7 +31,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:128](https://github.com/
 
 ### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
 
 ## Call Signature
 
@@ -59,7 +59,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:132](https://github.com/
 
 ### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
 
 ## Call Signature
 
@@ -79,7 +79,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:136](https://github.com/
 
 #### left
 
-[`Aggregate`](../../@tanstack/namespaces/IR/classes/Aggregate.md)\<`T`\>
+[`Aggregate`](../@tanstack/namespaces/IR/classes/Aggregate.md)\<`T`\>
 
 #### right
 
@@ -87,4 +87,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:136](https://github.com/
 
 ### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>

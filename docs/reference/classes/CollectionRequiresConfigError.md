@@ -9,7 +9,7 @@ Defined in: [packages/db/src/errors.ts:78](https://github.com/TanStack/db/blob/m
 
 ## Extends
 
-- [`CollectionConfigurationError`](../CollectionConfigurationError.md)
+- [`CollectionConfigurationError`](CollectionConfigurationError.md)
 
 ## Constructors
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/errors.ts:79](https://github.com/TanStack/db/blob/m
 
 #### Overrides
 
-[`CollectionConfigurationError`](../CollectionConfigurationError.md).[`constructor`](../CollectionConfigurationError.md#constructor)
+[`CollectionConfigurationError`](CollectionConfigurationError.md).[`constructor`](CollectionConfigurationError.md#constructor)
 
 ## Properties
 
@@ -41,7 +41,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionConfigurationError`](../CollectionConfigurationError.md).[`cause`](../CollectionConfigurationError.md#cause)
+[`CollectionConfigurationError`](CollectionConfigurationError.md).[`cause`](CollectionConfigurationError.md#cause)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionConfigurationError`](../CollectionConfigurationError.md).[`message`](../CollectionConfigurationError.md#message)
+[`CollectionConfigurationError`](CollectionConfigurationError.md).[`message`](CollectionConfigurationError.md#message)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionConfigurationError`](../CollectionConfigurationError.md).[`name`](../CollectionConfigurationError.md#name)
+[`CollectionConfigurationError`](CollectionConfigurationError.md).[`name`](CollectionConfigurationError.md#name)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`CollectionConfigurationError`](../CollectionConfigurationError.md).[`stack`](../CollectionConfigurationError.md#stack)
+[`CollectionConfigurationError`](CollectionConfigurationError.md).[`stack`](CollectionConfigurationError.md#stack)
 
 ***
 
@@ -107,7 +107,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`CollectionConfigurationError`](../CollectionConfigurationError.md).[`stackTraceLimit`](../CollectionConfigurationError.md#stacktracelimit)
+[`CollectionConfigurationError`](CollectionConfigurationError.md).[`stackTraceLimit`](CollectionConfigurationError.md#stacktracelimit)
 
 ## Methods
 
@@ -179,7 +179,7 @@ a();
 
 #### Inherited from
 
-[`CollectionConfigurationError`](../CollectionConfigurationError.md).[`captureStackTrace`](../CollectionConfigurationError.md#capturestacktrace)
+[`CollectionConfigurationError`](CollectionConfigurationError.md).[`captureStackTrace`](CollectionConfigurationError.md#capturestacktrace)
 
 ***
 
@@ -211,4 +211,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`CollectionConfigurationError`](../CollectionConfigurationError.md).[`prepareStackTrace`](../CollectionConfigurationError.md#preparestacktrace)
+[`CollectionConfigurationError`](CollectionConfigurationError.md).[`prepareStackTrace`](CollectionConfigurationError.md#preparestacktrace)

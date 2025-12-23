@@ -2,7 +2,7 @@ import type {
   Collection,
   MutationFnParams,
   PendingMutation,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 // Extended mutation function that includes idempotency key
 export type OfflineMutationFnParams<
@@ -12,7 +12,7 @@ export type OfflineMutationFnParams<
 }
 
 export type OfflineMutationFn<T extends object = Record<string, unknown>> = (
-  params: OfflineMutationFnParams<T>
+  params: OfflineMutationFnParams<T>,
 ) => Promise<any>
 
 // Simplified mutation structure for serialization
@@ -95,7 +95,7 @@ export interface OfflineConfig {
   maxConcurrency?: number
   jitter?: boolean
   beforeRetry?: (
-    transactions: Array<OfflineTransaction>
+    transactions: Array<OfflineTransaction>,
   ) => Array<OfflineTransaction>
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void

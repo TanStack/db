@@ -1,4 +1,4 @@
-import { createMiddleware } from "@tanstack/react-start"
+import { createMiddleware } from '@tanstack/react-start'
 
 const preLogMiddleware = createMiddleware({ type: `function` })
   .client(async (ctx) => {

@@ -36,7 +36,7 @@ function processData(data: unknown) {
   if (isDataObject(data)) {
     return data.value
   }
-  throw new Error("Invalid data")
+  throw new Error('Invalid data')
 }
 
 const result: TQueryData = someOperation()
@@ -58,12 +58,12 @@ const result: TQueryData = someOperation()
 ```typescript
 // Duplicated logic in multiple places
 function processA() {
-  const key = typeof value === "number" ? `__number__${value}` : String(value)
+  const key = typeof value === 'number' ? `__number__${value}` : String(value)
   // ...
 }
 
 function processB() {
-  const key = typeof value === "number" ? `__number__${value}` : String(value)
+  const key = typeof value === 'number' ? `__number__${value}` : String(value)
   // ...
 }
 ```
@@ -72,7 +72,7 @@ function processB() {
 
 ```typescript
 function serializeKey(value: string | number): string {
-  return typeof value === "number" ? `__number__${value}` : String(value)
+  return typeof value === 'number' ? `__number__${value}` : String(value)
 }
 
 function processA() {
@@ -161,7 +161,7 @@ readyJobs.forEach(processJob)
 
 ```typescript
 // O(n) lookup for each check
-const items = ["foo", "bar", "baz" /* hundreds more */]
+const items = ['foo', 'bar', 'baz' /* hundreds more */]
 if (items.includes(searchValue)) {
   // ...
 }
@@ -171,7 +171,7 @@ if (items.includes(searchValue)) {
 
 ```typescript
 // O(1) lookup
-const items = new Set(["foo", "bar", "baz" /* hundreds more */])
+const items = new Set(['foo', 'bar', 'baz' /* hundreds more */])
 if (items.has(searchValue)) {
   // ...
 }
@@ -194,7 +194,7 @@ if (items.has(searchValue)) {
 // Intending to check if subset limit is more restrictive than superset
 function isLimitSubset(
   subset: number | undefined,
-  superset: number | undefined
+  superset: number | undefined,
 ) {
   return subset === undefined || superset === undefined || subset <= superset
 }
@@ -207,7 +207,7 @@ function isLimitSubset(
 ```typescript
 function isLimitSubset(
   subset: number | undefined,
-  superset: number | undefined
+  superset: number | undefined,
 ) {
   // Subset with no limit cannot be a subset of one with a limit
   return superset === undefined || (subset !== undefined && subset <= superset)
@@ -361,7 +361,7 @@ const dependentBuilders = [] // Accurately describes dependents
 ```typescript
 // Found a bug with fetchSnapshot resolving after up-to-date message
 // Should add a test:
-test("ignores snapshot that resolves after up-to-date message", async () => {
+test('ignores snapshot that resolves after up-to-date message', async () => {
   // Reproduce the corner case
   // Verify it's handled correctly
 })
@@ -520,7 +520,7 @@ const filtered = items.filter((item) => item.value > 0)
 
    ```typescript
    // ❌ Bad: numeric 1 and string "__number__1" collide
-   const key = typeof val === "number" ? `__number__${val}` : String(val)
+   const key = typeof val === 'number' ? `__number__${val}` : String(val)
 
    // ✅ Good: proper encoding with type prefix
    const key = `${typeof val}_${String(val)}`

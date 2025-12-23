@@ -1,11 +1,11 @@
-import { NegativeActiveSubscribersError } from "../errors"
-import { CollectionSubscription } from "./subscription.js"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { ChangeMessage, SubscribeChangesOptions } from "../types"
-import type { CollectionLifecycleManager } from "./lifecycle.js"
-import type { CollectionSyncManager } from "./sync.js"
-import type { CollectionEventsManager } from "./events.js"
-import type { CollectionImpl } from "./index.js"
+import { NegativeActiveSubscribersError } from '../errors'
+import { CollectionSubscription } from './subscription.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { ChangeMessage, SubscribeChangesOptions } from '../types'
+import type { CollectionLifecycleManager } from './lifecycle.js'
+import type { CollectionSyncManager } from './sync.js'
+import type { CollectionEventsManager } from './events.js'
+import type { CollectionImpl } from './index.js'
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -56,7 +56,7 @@ export class CollectionChangesManager<
    */
   public emitEvents(
     changes: Array<ChangeMessage<TOutput, TKey>>,
-    forceEmit = false
+    forceEmit = false,
   ): void {
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
@@ -94,7 +94,7 @@ export class CollectionChangesManager<
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions = {}
+    options: SubscribeChangesOptions = {},
   ): CollectionSubscription {
     // Start sync and track subscriber
     this.addSubscriber()
@@ -109,6 +109,10 @@ export class CollectionChangesManager<
 
     if (options.includeInitialState) {
       subscription.requestSnapshot({ trackLoadSubsetPromise: false })
+    } else if (options.includeInitialState === false) {
+      // When explicitly set to false (not just undefined), mark all state as "seen"
+      // so that all future changes (including deletes) pass through unfiltered.
+      subscription.markAllStateAsSeen()
     }
 
     // Add to batched listeners
@@ -135,7 +139,7 @@ export class CollectionChangesManager<
 
     this.events.emitSubscribersChange(
       this.activeSubscribersCount,
-      previousSubscriberCount
+      previousSubscriberCount,
     )
   }
 
@@ -154,7 +158,7 @@ export class CollectionChangesManager<
 
     this.events.emitSubscribersChange(
       this.activeSubscribersCount,
-      previousSubscriberCount
+      previousSubscriberCount,
     )
   }
 

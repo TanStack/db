@@ -4,10 +4,10 @@
  * Tests using Query collections with mock backend
  */
 
-import { afterAll, afterEach, beforeAll, describe } from "vitest"
-import { createCollection } from "@tanstack/db"
-import { QueryClient } from "@tanstack/query-core"
-import { queryCollectionOptions } from "../src/query"
+import { afterAll, afterEach, beforeAll, describe } from 'vitest'
+import { createCollection } from '@tanstack/db'
+import { QueryClient } from '@tanstack/query-core'
+import { queryCollectionOptions } from '../src/query'
 import {
   createCollationTestSuite,
   createDeduplicationTestSuite,
@@ -17,14 +17,14 @@ import {
   createPaginationTestSuite,
   createPredicatesTestSuite,
   generateSeedData,
-} from "../../db-collection-e2e/src/index"
-import { applyPredicates, buildQueryKey } from "./query-filter"
+} from '../../db-collection-e2e/src/index'
+import { applyPredicates, buildQueryKey } from './query-filter'
 import type {
   Comment as E2EComment,
   Post as E2EPost,
   E2ETestConfig,
   User as E2EUser,
-} from "../../db-collection-e2e/src/types"
+} from '../../db-collection-e2e/src/types'
 
 describe(`Query Collection E2E Tests`, () => {
   let config: E2ETestConfig
@@ -55,7 +55,7 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EUser) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const eagerPosts = createCollection(
@@ -68,7 +68,7 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EPost) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const eagerComments = createCollection(
@@ -81,7 +81,7 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EComment) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const onDemandUsers = createCollection(
@@ -99,7 +99,7 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EUser) => item.id,
         startSync: false,
-      })
+      }),
     )
 
     const onDemandPosts = createCollection(
@@ -115,7 +115,7 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EPost) => item.id,
         startSync: false,
-      })
+      }),
     )
 
     const onDemandComments = createCollection(
@@ -131,7 +131,7 @@ describe(`Query Collection E2E Tests`, () => {
         },
         getKey: (item: E2EComment) => item.id,
         startSync: false,
-      })
+      }),
     )
 
     // Wait for eager collections to load

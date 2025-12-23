@@ -1,5 +1,15 @@
 # @tanstack/db-ivm
 
+## 0.1.14
+
+### Patch Changes
+
+- Use row keys for stable tie-breaking in ORDER BY operations instead of hash-based object IDs. ([#957](https://github.com/TanStack/db/pull/957))
+
+  Previously, when multiple rows had equal ORDER BY values, tie-breaking used `globalObjectIdGenerator.getId(key)` which could produce hash collisions and wasn't stable across page reloads for object references. Now, the row key (which is always `string | number` and unique per row) is used directly for tie-breaking, ensuring deterministic and stable ordering.
+
+  This also simplifies the internal `TaggedValue` type from a 3-tuple `[K, V, Tag]` to a 2-tuple `[K, V]`, removing unnecessary complexity.
+
 ## 0.1.13
 
 ### Patch Changes
@@ -26,9 +36,9 @@
   const users = createLiveQueryCollection((q) =>
     q
       .from({ user: usersCollection })
-      .orderBy(({ user }) => user.name, "asc")
+      .orderBy(({ user }) => user.name, 'asc')
       .limit(10)
-      .offset(0)
+      .offset(0),
   )
 
   users.utils.setWindow({ offset: 10, limit: 10 })

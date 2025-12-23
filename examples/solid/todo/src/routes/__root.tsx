@@ -1,6 +1,6 @@
-import { Outlet, createRootRoute } from "@tanstack/solid-router"
+import { Outlet, createRootRoute } from '@tanstack/solid-router'
 
-import appCss from "../styles.css?url"
+import appCss from '../styles.css?url'
 
 export const Route = createRootRoute({
   head: () => ({

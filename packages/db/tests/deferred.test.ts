@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { createDeferred } from "../src/deferred"
-import type { Deferred } from "../src/deferred"
+import { describe, expect, it } from 'vitest'
+import { createDeferred } from '../src/deferred'
+import type { Deferred } from '../src/deferred'
 
 describe(`Deferred`, () => {
   it(`should create a deferred object with the correct shape`, () => {

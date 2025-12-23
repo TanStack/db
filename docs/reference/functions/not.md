@@ -19,4 +19,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:224](https://github.com/
 
 ## Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>

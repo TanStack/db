@@ -1,5 +1,5 @@
-import type { CollectionImpl } from "../../collection/index.js"
-import type { SingleResult, StringCollationConfig } from "../../types.js"
+import type { CollectionImpl } from '../../collection/index.js'
+import type { SingleResult, StringCollationConfig } from '../../types.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -7,8 +7,8 @@ import type {
   OrderByDirection,
   PropRef,
   Value,
-} from "../ir.js"
-import type { QueryBuilder } from "./index.js"
+} from '../ir.js'
+import type { QueryBuilder } from './index.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -121,7 +121,7 @@ export type GetAliases<TContext extends Context> = keyof TContext[`schema`]
  * Example: `(refs) => eq(refs.users.age, 25)`
  */
 export type WhereCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -290,7 +290,7 @@ type NeedsExtraction<T> = T extends
  * Example: `(refs) => refs.users.createdAt`
  */
 export type OrderByCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -326,7 +326,7 @@ export type CompareOptions = StringCollationConfig & {
  * Example: `(refs) => refs.orders.status`
  */
 export type GroupByCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -342,7 +342,7 @@ export type GroupByCallback<TContext extends Context> = (
  * Example: `(refs) => eq(refs.users.id, refs.orders.userId)`
  */
 export type JoinOnCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**

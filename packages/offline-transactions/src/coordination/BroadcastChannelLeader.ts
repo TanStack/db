@@ -1,4 +1,4 @@
-import { BaseLeaderElection } from "./LeaderElection"
+import { BaseLeaderElection } from './LeaderElection'
 
 interface LeaderMessage {
   type: `heartbeat` | `election` | `leadership-claim`

@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { buildQuery } from "../../../src/query/builder/index.js"
-import { and, eq, gt, or } from "../../../src/query/builder/functions.js"
+import { describe, expect, it } from 'vitest'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { buildQuery } from '../../../src/query/builder/index.js'
+import { and, eq, gt, or } from '../../../src/query/builder/functions.js'
 
 /**
  * This is a set of tests for the buildQuery function.
@@ -46,7 +46,7 @@ describe(`buildQuery function`, () => {
         .select(({ employees }) => ({
           id: employees.id,
           name: employees.name,
-        }))
+        })),
     )
 
     // buildQuery returns Query IR directly
@@ -63,12 +63,12 @@ describe(`buildQuery function`, () => {
         .join(
           { departments: departmentsCollection },
           ({ employees, departments }) =>
-            eq(employees.department_id, departments.id)
+            eq(employees.department_id, departments.id),
         )
         .select(({ employees, departments }) => ({
           employee_name: employees.name,
           department_name: departments?.name,
-        }))
+        })),
     )
 
     expect(query.from).toBeDefined()
@@ -82,7 +82,7 @@ describe(`buildQuery function`, () => {
       q
         .from({ employees: employeesCollection })
         .where(({ employees }) =>
-          and(eq(employees.active, true), gt(employees.salary, 50000))
+          and(eq(employees.active, true), gt(employees.salary, 50000)),
         )
         .orderBy(({ employees }) => employees.name)
         .limit(10)
@@ -90,7 +90,7 @@ describe(`buildQuery function`, () => {
           id: employees.id,
           name: employees.name,
           salary: employees.salary,
-        }))
+        })),
     )
 
     expect(query.from).toBeDefined()
@@ -122,7 +122,7 @@ describe(`buildQuery function`, () => {
       q
         .from({ comment: commentsCollection })
         .join({ user: usersCollection }, ({ comment, user }) =>
-          eq(comment.user_id, user.id)
+          eq(comment.user_id, user.id),
         )
         .where(({ comment }) => or(eq(comment.id, 1), eq(comment.id, 2)))
         .orderBy(({ comment }) => comment.date, `desc`)
@@ -130,7 +130,7 @@ describe(`buildQuery function`, () => {
           id: comment.id,
           content: comment.content,
           user,
-        }))
+        })),
     )
 
     expect(query.from).toBeDefined()

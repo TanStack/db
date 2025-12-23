@@ -13,10 +13,10 @@ Defined in: [packages/electric-db-collection/src/errors.ts:4](https://github.com
 
 ## Extended by
 
-- [`ExpectedNumberInAwaitTxIdError`](../ExpectedNumberInAwaitTxIdError.md)
-- [`TimeoutWaitingForTxIdError`](../TimeoutWaitingForTxIdError.md)
-- [`TimeoutWaitingForMatchError`](../TimeoutWaitingForMatchError.md)
-- [`StreamAbortedError`](../StreamAbortedError.md)
+- [`ExpectedNumberInAwaitTxIdError`](ExpectedNumberInAwaitTxIdError.md)
+- [`TimeoutWaitingForTxIdError`](TimeoutWaitingForTxIdError.md)
+- [`TimeoutWaitingForMatchError`](TimeoutWaitingForMatchError.md)
+- [`StreamAbortedError`](StreamAbortedError.md)
 
 ## Constructors
 
