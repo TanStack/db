@@ -1,5 +1,6 @@
 import { createDeferred } from './deferred'
 import './duplicate-instance-check'
+import { deepEquals } from './utils'
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
@@ -31,9 +32,10 @@ let sequenceNumber = 0
  * - (update, update) → update (replace with latest, union changes)
  * - (delete, delete) → delete (replace with latest)
  * - (insert, insert) → insert (replace with latest)
+ * - (delete, insert) → null if restoring original, otherwise update
  *
- * Note: (delete, update) and (delete, insert) should never occur as the collection
- * layer prevents operations on deleted items within the same transaction.
+ * Note: (delete, update) should never occur as the collection layer prevents
+ * update operations on deleted items within the same transaction.
  *
  * @param existing - The existing mutation in the transaction
  * @param incoming - The new mutation being applied
@@ -92,6 +94,33 @@ function mergePendingMutations<T extends object>(
     case `insert-insert`:
       // Same type: replace with latest
       return incoming
+
+    case `delete-insert`: {
+      // Insert after delete: check if restoring to original state
+      if (deepEquals(existing.original, incoming.modified)) {
+        // Exact restore - cancel both mutations (like insert-delete)
+        return null
+      }
+      // Different data - treat as update from original to new state
+      // Compute actual diff for changes (only properties that differ)
+      // Cast existing.original to T since delete mutations always have the full original
+      const originalData = existing.original as T
+      const changes = Object.fromEntries(
+        Object.entries(incoming.modified).filter(
+          ([key, value]) =>
+            !deepEquals(originalData[key as keyof T], value as T[keyof T]),
+        ),
+      ) as Partial<T>
+      return {
+        ...incoming,
+        type: `update` as const,
+        original: existing.original,
+        modified: incoming.modified,
+        changes,
+        metadata: incoming.metadata ?? existing.metadata,
+        syncMetadata: { ...existing.syncMetadata, ...incoming.syncMetadata },
+      }
+    }
 
     default: {
       // Exhaustiveness check

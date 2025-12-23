@@ -554,6 +554,91 @@ describe(`Transactions`, () => {
     expect(transaction3.state).toBe(`failed`)
   })
 
+  describe(`delete-insert mutation merging`, () => {
+    it(`should cancel both mutations when re-inserting the same data after delete`, () => {
+      const transaction = createTransaction({
+        mutationFn: async () => Promise.resolve(),
+        autoCommit: false,
+      })
+      const collection = createCollection<{
+        id: number
+        value: string
+      }>({
+        id: `delete-insert-same`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: () => {},
+        },
+      })
+
+      // Seed synced data
+      const originalItem = { id: 1, value: `original` }
+      collection._state.syncedData.set(1, originalItem)
+
+      // Delete then re-insert with same data
+      transaction.mutate(() => {
+        collection.delete(1)
+      })
+      expect(transaction.mutations).toHaveLength(1)
+      expect(transaction.mutations[0]!.type).toBe(`delete`)
+
+      transaction.mutate(() => {
+        collection.insert({ id: 1, value: `original` })
+      })
+
+      // Should cancel both mutations since data is identical
+      expect(transaction.mutations).toHaveLength(0)
+    })
+
+    it(`should convert to update when re-inserting different data after delete`, () => {
+      const transaction = createTransaction({
+        mutationFn: async () => Promise.resolve(),
+        autoCommit: false,
+      })
+      const collection = createCollection<{
+        id: number
+        value: string
+      }>({
+        id: `delete-insert-different`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: () => {},
+        },
+      })
+
+      // Seed synced data
+      const originalItem = { id: 1, value: `original` }
+      collection._state.syncedData.set(1, originalItem)
+
+      // Delete then re-insert with different data
+      transaction.mutate(() => {
+        collection.delete(1)
+      })
+      expect(transaction.mutations).toHaveLength(1)
+      expect(transaction.mutations[0]!.type).toBe(`delete`)
+
+      transaction.mutate(() => {
+        collection.insert({ id: 1, value: `modified` })
+      })
+
+      // Should become an update mutation
+      expect(transaction.mutations).toHaveLength(1)
+      expect(transaction.mutations[0]!.type).toBe(`update`)
+      expect(transaction.mutations[0]!.original).toEqual({
+        id: 1,
+        value: `original`,
+      })
+      expect(transaction.mutations[0]!.modified).toEqual({
+        id: 1,
+        value: `modified`,
+      })
+      // Changes should only contain the properties that actually differ
+      expect(transaction.mutations[0]!.changes).toEqual({
+        value: `modified`,
+      })
+    })
+  })
+
   describe(`duplicate instance detection`, () => {
     it(`sets a global marker in dev mode when in browser top window`, () => {
       // The duplicate instance marker should be set when the module loads in dev mode
