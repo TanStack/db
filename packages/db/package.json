@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db",
-  "version": "0.5.15",
+  "version": "0.5.16",
   "description": "A reactive client store for building super fast apps on sync",
   "author": "Kyle Mathews",
   "license": "MIT",
