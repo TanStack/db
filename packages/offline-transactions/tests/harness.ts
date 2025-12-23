@@ -5,6 +5,7 @@ import type {
   LeaderElection,
   OfflineConfig,
   OfflineMutationFnParams,
+  OnlineDetector,
   StorageAdapter,
 } from '../src/types'
 
@@ -89,6 +90,36 @@ class FakeLeaderElection implements LeaderElection {
     for (const listener of this.listeners) {
       listener(isLeader)
     }
+  }
+}
+
+export class FakeOnlineDetector implements OnlineDetector {
+  private listeners = new Set<() => void>()
+  online = true
+
+  isOnline(): boolean {
+    return this.online
+  }
+
+  subscribe(callback: () => void): () => void {
+    this.listeners.add(callback)
+    return () => {
+      this.listeners.delete(callback)
+    }
+  }
+
+  notifyOnline(): void {
+    for (const listener of this.listeners) {
+      try {
+        listener()
+      } catch (error) {
+        console.warn(`FakeOnlineDetector listener error:`, error)
+      }
+    }
+  }
+
+  dispose(): void {
+    this.listeners.clear()
   }
 }
 
@@ -243,6 +274,7 @@ export function createTestOfflineEnvironment(
     onUnknownMutationFn: options.config?.onUnknownMutationFn,
     onLeadershipChange: options.config?.onLeadershipChange,
     leaderElection: options.config?.leaderElection ?? leader,
+    onlineDetector: options.config?.onlineDetector,
   }
 
   const executor = startOfflineExecutor(config)
