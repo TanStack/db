@@ -18,6 +18,7 @@ import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
   CollectionConfig,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   CurrentStateAsChangesOptions,
   Fn,
@@ -804,6 +805,35 @@ export class CollectionImpl<
   }
 
   /**
+   * Gets the collection data when ready, returning either a single item or an array
+   * based on whether this collection was created with findOne().
+   *
+   * For collections created with findOne(), returns the first item or undefined.
+   * For regular collections, returns an array of all items.
+   *
+   * Note: The return type at the implementation level is a union type.
+   * Use `getCollectionDataWhenReady()` for proper type narrowing based on singleResult.
+   *
+   * @returns Promise that resolves to a single item, array of items, or undefined
+   */
+  toDataWhenReady(): Promise<TOutput | Array<TOutput> | undefined> {
+    const getData = () => {
+      const config = this
+        .config as unknown as CollectionConfigSingleRowOption<TOutput>
+      const data = this.toArray
+      return config.singleResult ? data[0] : data
+    }
+
+    // If we already have data or collection is ready, resolve immediately
+    if (this.size > 0 || this.isReady()) {
+      return Promise.resolve(getData())
+    }
+
+    // Use preload to ensure the collection starts loading, then return the data
+    return this.preload().then(() => getData())
+  }
+
+  /**
    * Returns the current state of the collection as an array of changes
    * @param options - Options including optional where filter
    * @returns An array of changes
@@ -921,6 +951,99 @@ export class CollectionImpl<
     this._lifecycle.cleanup()
     return Promise.resolve()
   }
+}
+
+/**
+ * Type-safe utility to get collection data with proper return type based on singleResult.
+ *
+ * When a collection is created from a query with `findOne()`, the return type is `T | undefined`.
+ * For regular queries, the return type is `T[]`.
+ *
+ * This function eliminates the need for type assertions when working with
+ * collections that may be single-result or array-result.
+ *
+ * @example
+ * ```typescript
+ * // For a single-result query (findOne)
+ * const userCollection = createLiveQueryCollection((q) =>
+ *   q.from({ users }).where(({ users }) => eq(users.id, 1)).findOne()
+ * )
+ * const user = getCollectionData(userCollection) // type: User | undefined
+ *
+ * // For an array-result query
+ * const usersCollection = createLiveQueryCollection((q) =>
+ *   q.from({ users }).where(({ users }) => eq(users.active, true))
+ * )
+ * const users = getCollectionData(usersCollection) // type: User[]
+ * ```
+ */
+// Overload for single-result collections
+export function getCollectionData<T extends object>(
+  collection: Collection<T, any, any, any, any> & SingleResult,
+): T | undefined
+
+// Overload for array-result collections
+export function getCollectionData<T extends object>(
+  collection: Collection<T, any, any, any, any> & NonSingleResult,
+): Array<T>
+
+// Overload for collections where singleResult is unknown at type level
+export function getCollectionData<T extends object>(
+  collection: Collection<T, any, any, any, any>,
+): T | Array<T> | undefined
+
+// Implementation
+export function getCollectionData<T extends object>(
+  collection: Collection<T, any, any, any, any>,
+): T | Array<T> | undefined {
+  const config = collection.config as CollectionConfigSingleRowOption<T>
+  const data = collection.toArray
+  return config.singleResult ? data[0] : data
+}
+
+/**
+ * Async type-safe utility to get collection data when ready, with proper return type based on singleResult.
+ *
+ * This function waits for the collection to be ready, then returns the data with the correct type:
+ * - For collections created with `findOne()`: returns `T | undefined`
+ * - For regular collections: returns `T[]`
+ *
+ * @example
+ * ```typescript
+ * // For a single-result query (findOne)
+ * const userCollection = createLiveQueryCollection((q) =>
+ *   q.from({ users }).where(({ users }) => eq(users.id, 1)).findOne()
+ * )
+ * const user = await getCollectionDataWhenReady(userCollection) // type: User | undefined
+ *
+ * // For an array-result query
+ * const usersCollection = createLiveQueryCollection((q) =>
+ *   q.from({ users }).where(({ users }) => eq(users.active, true))
+ * )
+ * const users = await getCollectionDataWhenReady(usersCollection) // type: User[]
+ * ```
+ */
+// Overload for single-result collections
+export function getCollectionDataWhenReady<T extends object>(
+  collection: Collection<T, any, any, any, any> & SingleResult,
+): Promise<T | undefined>
+
+// Overload for array-result collections
+export function getCollectionDataWhenReady<T extends object>(
+  collection: Collection<T, any, any, any, any> & NonSingleResult,
+): Promise<Array<T>>
+
+// Overload for collections where singleResult is unknown at type level
+export function getCollectionDataWhenReady<T extends object>(
+  collection: Collection<T, any, any, any, any>,
+): Promise<T | Array<T> | undefined>
+
+// Implementation
+export async function getCollectionDataWhenReady<T extends object>(
+  collection: Collection<T, any, any, any, any>,
+): Promise<T | Array<T> | undefined> {
+  await collection.toDataWhenReady()
+  return getCollectionData(collection)
 }
 
 function buildCompareOptionsFromConfig(
