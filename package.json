@@ -23,6 +23,8 @@
     "generate-docs": "node scripts/generate-docs.ts"
   },
   "devDependencies": {
+    "@fast-check/vitest": "^0.2.0",
+    "fast-check": "^3.23.0",
     "@changesets/cli": "^2.29.8",
     "@eslint/js": "^9.39.1",
     "@svitejs/changesets-changelog-github-compact": "^1.2.0",
