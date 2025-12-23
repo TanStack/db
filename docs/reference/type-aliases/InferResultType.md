@@ -17,4 +17,4 @@ Utility type to infer the query result size (single row or an array)
 
 ### TContext
 
-`TContext` *extends* [`Context`](../../interfaces/Context.md)
+`TContext` *extends* [`Context`](../interfaces/Context.md)

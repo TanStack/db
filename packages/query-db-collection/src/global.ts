@@ -10,7 +10,7 @@
  * users to manually import QueryCollectionMeta.
  */
 
-import type { LoadSubsetOptions } from "@tanstack/db"
+import type { LoadSubsetOptions } from '@tanstack/db'
 
 /**
  * Base interface for Query Collection meta properties.
@@ -33,7 +33,7 @@ export interface QueryCollectionMeta extends Record<string, unknown> {
 
 // Module augmentation to extend TanStack Query's Register interface
 // This ensures that ctx.meta always includes loadSubsetOptions
-declare module "@tanstack/query-core" {
+declare module '@tanstack/query-core' {
   interface Register {
     queryMeta: QueryCollectionMeta
   }

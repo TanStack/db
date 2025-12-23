@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.1
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
       - name: Setup Tools
@@ -33,13 +33,13 @@ jobs:
         with:
           main-branch-name: main
       - name: Run Checks
-        run: pnpm run build && pnpm run test
+        run: pnpm run build && pnpm run test && pnpm run test:sherif
   preview:
     name: Preview
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.1
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
       - name: Setup Tools
@@ -51,23 +51,23 @@ jobs:
       - name: Compressed Size Action - DB Package
         uses: preactjs/compressed-size-action@v2
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          pattern: "./packages/db/dist/**/*.{js,mjs}"
-          comment-key: "db-package-size"
-          build-script: "build:minified"
+          repo-token: '${{ secrets.GITHUB_TOKEN }}'
+          pattern: './packages/db/dist/**/*.{js,mjs}'
+          comment-key: 'db-package-size'
+          build-script: 'build:minified'
       - name: Compressed Size Action - React DB Package
         uses: preactjs/compressed-size-action@v2
         with:
-          repo-token: "${{ secrets.GITHUB_TOKEN }}"
-          pattern: "./packages/react-db/dist/**/*.{js,mjs}"
-          comment-key: "react-db-package-size"
-          build-script: "build:minified"
+          repo-token: '${{ secrets.GITHUB_TOKEN }}'
+          pattern: './packages/react-db/dist/**/*.{js,mjs}'
+          comment-key: 'react-db-package-size'
+          build-script: 'build:minified'
   build-example:
     name: Build Example Site
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.1
+        uses: actions/checkout@v6.0.1
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
       - name: Build Packages
@@ -81,7 +81,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.1
+        uses: actions/checkout@v6.0.1
       - name: Setup Tools
         uses: tanstack/config/.github/setup@main
       - name: Build Packages
@@ -89,4 +89,5 @@ jobs:
       - name: Build Starter Site
         run: |
           cd examples/react/projects
+          cp .env.example .env
           pnpm build

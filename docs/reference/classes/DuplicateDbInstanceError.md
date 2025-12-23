@@ -9,7 +9,7 @@ Defined in: [packages/db/src/errors.ts:45](https://github.com/TanStack/db/blob/m
 
 ## Extends
 
-- [`TanStackDBError`](../TanStackDBError.md)
+- [`TanStackDBError`](TanStackDBError.md)
 
 ## Constructors
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/errors.ts:46](https://github.com/TanStack/db/blob/m
 
 #### Overrides
 
-[`TanStackDBError`](../TanStackDBError.md).[`constructor`](../TanStackDBError.md#constructor)
+[`TanStackDBError`](TanStackDBError.md).[`constructor`](TanStackDBError.md#constructor)
 
 ## Properties
 
@@ -41,7 +41,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TanStackDBError`](../TanStackDBError.md).[`cause`](../TanStackDBError.md#cause)
+[`TanStackDBError`](TanStackDBError.md).[`cause`](TanStackDBError.md#cause)
 
 ***
 
@@ -55,7 +55,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TanStackDBError`](../TanStackDBError.md).[`message`](../TanStackDBError.md#message)
+[`TanStackDBError`](TanStackDBError.md).[`message`](TanStackDBError.md#message)
 
 ***
 
@@ -69,7 +69,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TanStackDBError`](../TanStackDBError.md).[`name`](../TanStackDBError.md#name)
+[`TanStackDBError`](TanStackDBError.md).[`name`](TanStackDBError.md#name)
 
 ***
 
@@ -83,7 +83,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`TanStackDBError`](../TanStackDBError.md).[`stack`](../TanStackDBError.md#stack)
+[`TanStackDBError`](TanStackDBError.md).[`stack`](TanStackDBError.md#stack)
 
 ***
 
@@ -107,7 +107,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`TanStackDBError`](../TanStackDBError.md).[`stackTraceLimit`](../TanStackDBError.md#stacktracelimit)
+[`TanStackDBError`](TanStackDBError.md).[`stackTraceLimit`](TanStackDBError.md#stacktracelimit)
 
 ## Methods
 
@@ -179,7 +179,7 @@ a();
 
 #### Inherited from
 
-[`TanStackDBError`](../TanStackDBError.md).[`captureStackTrace`](../TanStackDBError.md#capturestacktrace)
+[`TanStackDBError`](TanStackDBError.md).[`captureStackTrace`](TanStackDBError.md#capturestacktrace)
 
 ***
 
@@ -211,4 +211,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`TanStackDBError`](../TanStackDBError.md).[`prepareStackTrace`](../TanStackDBError.md#preparestacktrace)
+[`TanStackDBError`](TanStackDBError.md).[`prepareStackTrace`](TanStackDBError.md#preparestacktrace)

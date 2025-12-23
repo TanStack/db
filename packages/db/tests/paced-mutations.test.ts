@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection"
-import { createPacedMutations } from "../src/paced-mutations"
+import { describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../src/collection'
+import { createPacedMutations } from '../src/paced-mutations'
 import {
   debounceStrategy,
   queueStrategy,
   throttleStrategy,
-} from "../src/strategies"
-import { mockSyncCollectionOptionsNoInitialState } from "./utils"
+} from '../src/strategies'
+import { mockSyncCollectionOptionsNoInitialState } from './utils'
 
 type Item = {
   id: number
@@ -22,7 +22,7 @@ async function createReadyCollection<T extends object>(opts: {
   getKey: (item: T) => string | number
 }) {
   const collection = createCollection(
-    mockSyncCollectionOptionsNoInitialState<T>(opts)
+    mockSyncCollectionOptionsNoInitialState<T>(opts),
   )
 
   const preloadPromise = collection.preload()

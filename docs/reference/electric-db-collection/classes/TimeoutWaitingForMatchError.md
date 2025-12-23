@@ -9,7 +9,7 @@ Defined in: [packages/electric-db-collection/src/errors.ts:25](https://github.co
 
 ## Extends
 
-- [`ElectricDBCollectionError`](../ElectricDBCollectionError.md)
+- [`ElectricDBCollectionError`](ElectricDBCollectionError.md)
 
 ## Constructors
 
@@ -33,7 +33,7 @@ Defined in: [packages/electric-db-collection/src/errors.ts:26](https://github.co
 
 #### Overrides
 
-[`ElectricDBCollectionError`](../ElectricDBCollectionError.md).[`constructor`](../ElectricDBCollectionError.md#constructor)
+[`ElectricDBCollectionError`](ElectricDBCollectionError.md).[`constructor`](ElectricDBCollectionError.md#constructor)
 
 ## Properties
 
@@ -47,7 +47,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`ElectricDBCollectionError`](../ElectricDBCollectionError.md).[`cause`](../ElectricDBCollectionError.md#cause)
+[`ElectricDBCollectionError`](ElectricDBCollectionError.md).[`cause`](ElectricDBCollectionError.md#cause)
 
 ***
 
@@ -61,7 +61,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`ElectricDBCollectionError`](../ElectricDBCollectionError.md).[`message`](../ElectricDBCollectionError.md#message)
+[`ElectricDBCollectionError`](ElectricDBCollectionError.md).[`message`](ElectricDBCollectionError.md#message)
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`ElectricDBCollectionError`](../ElectricDBCollectionError.md).[`name`](../ElectricDBCollectionError.md#name)
+[`ElectricDBCollectionError`](ElectricDBCollectionError.md).[`name`](ElectricDBCollectionError.md#name)
 
 ***
 
@@ -89,7 +89,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`ElectricDBCollectionError`](../ElectricDBCollectionError.md).[`stack`](../ElectricDBCollectionError.md#stack)
+[`ElectricDBCollectionError`](ElectricDBCollectionError.md).[`stack`](ElectricDBCollectionError.md#stack)
 
 ***
 
@@ -113,7 +113,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`ElectricDBCollectionError`](../ElectricDBCollectionError.md).[`stackTraceLimit`](../ElectricDBCollectionError.md#stacktracelimit)
+[`ElectricDBCollectionError`](ElectricDBCollectionError.md).[`stackTraceLimit`](ElectricDBCollectionError.md#stacktracelimit)
 
 ## Methods
 
@@ -185,7 +185,7 @@ a();
 
 #### Inherited from
 
-[`ElectricDBCollectionError`](../ElectricDBCollectionError.md).[`captureStackTrace`](../ElectricDBCollectionError.md#capturestacktrace)
+[`ElectricDBCollectionError`](ElectricDBCollectionError.md).[`captureStackTrace`](ElectricDBCollectionError.md#capturestacktrace)
 
 ***
 
@@ -217,4 +217,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`ElectricDBCollectionError`](../ElectricDBCollectionError.md).[`prepareStackTrace`](../ElectricDBCollectionError.md#preparestacktrace)
+[`ElectricDBCollectionError`](ElectricDBCollectionError.md).[`prepareStackTrace`](ElectricDBCollectionError.md#preparestacktrace)

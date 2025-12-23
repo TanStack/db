@@ -1,13 +1,13 @@
-import * as React from "react"
-import { createFileRoute } from "@tanstack/react-router"
-import { useLiveQuery } from "@tanstack/react-db"
+import * as React from 'react'
+import { createFileRoute } from '@tanstack/react-router'
+import { useLiveQuery } from '@tanstack/react-db'
 import {
   electricConfigCollection,
   electricTodoCollection,
-} from "../lib/collections"
-import { TodoApp } from "../components/TodoApp"
-import { api } from "../lib/api"
-import type { Transaction } from "@tanstack/react-db"
+} from '../lib/collections'
+import { TodoApp } from '../components/TodoApp'
+import { api } from '../lib/api'
+import type { Transaction } from '@tanstack/react-db'
 
 export const Route = createFileRoute(`/electric`)({
   component: ElectricPage,
@@ -27,11 +27,11 @@ function ElectricPage() {
   const { data: todos } = useLiveQuery((q) =>
     q
       .from({ todo: electricTodoCollection })
-      .orderBy(({ todo }) => todo.created_at, `asc`)
+      .orderBy(({ todo }) => todo.created_at, `asc`),
   )
 
   const { data: configData } = useLiveQuery((q) =>
-    q.from({ config: electricConfigCollection })
+    q.from({ config: electricConfigCollection }),
   )
 
   // Electric collections use txid to track sync
@@ -57,14 +57,14 @@ function ElectricPage() {
       }
       const response = await api.config.update(
         mutation.original.id,
-        mutation.changes
+        mutation.changes,
       )
       txids.push(response.txid)
     }
 
     // Wait for all txids to sync back to the collection
     await Promise.all(
-      txids.map((txid) => electricConfigCollection.utils.awaitTxid(txid))
+      txids.map((txid) => electricConfigCollection.utils.awaitTxid(txid)),
     )
   }
 

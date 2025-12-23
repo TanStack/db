@@ -1,7 +1,7 @@
-import type { CompareOptions } from "../query/builder/types"
-import type { OrderByDirection } from "../query/ir"
-import type { IndexInterface, IndexOperation, IndexStats } from "./base-index"
-import type { RangeQueryOptions } from "./btree-index"
+import type { CompareOptions } from '../query/builder/types'
+import type { OrderByDirection } from '../query/ir'
+import type { IndexInterface, IndexOperation, IndexStats } from './base-index'
+import type { RangeQueryOptions } from './btree-index'
 
 export class ReverseIndex<
   TKey extends string | number,
@@ -43,7 +43,7 @@ export class ReverseIndex<
   takeReversed(
     n: number,
     from?: any,
-    filterFn?: (key: TKey) => boolean
+    filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
     return this.originalIndex.take(n, from, filterFn)
   }

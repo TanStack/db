@@ -1,10 +1,10 @@
-import { expect } from "vitest"
+import { expect } from 'vitest'
 import type {
   CollectionConfig,
   MutationFnParams,
   StringCollationConfig,
   SyncConfig,
-} from "../src/index.js"
+} from '../src/index.js'
 
 // Index usage tracking utilities
 export interface IndexUsageStats {
@@ -127,7 +127,7 @@ export function expectIndexUsage(
     shouldUseFullScan?: boolean
     indexCallCount?: number
     fullScanCallCount?: number
-  }
+  },
 ) {
   if (expectations.shouldUseIndex) {
     expect(stats.rangeQueryCalls).toBeGreaterThan(0)
@@ -157,7 +157,7 @@ export function expectIndexUsage(
 // Helper to run a test with index usage tracking (automatically handles setup/cleanup)
 export function withIndexTracking(
   collection: any,
-  testFn: (tracker: { stats: IndexUsageStats }) => void | Promise<void>
+  testFn: (tracker: { stats: IndexUsageStats }) => void | Promise<void>,
 ): void | Promise<void> {
   const tracker = createIndexUsageTracker(collection)
 
@@ -381,7 +381,7 @@ export const flushPromises = () =>
  */
 export function withExpectedRejection<T>(
   expectedMessage: string,
-  testFn: () => T | Promise<T>
+  testFn: () => T | Promise<T>,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     // Find and temporarily remove the vitest unhandled rejection handler
@@ -413,8 +413,8 @@ export function withExpectedRejection<T>(
         if (!expectedRejectionCaught) {
           reject(
             new Error(
-              `Expected rejection with message "${expectedMessage}" was not caught`
-            )
+              `Expected rejection with message "${expectedMessage}" was not caught`,
+            ),
           )
           return
         }

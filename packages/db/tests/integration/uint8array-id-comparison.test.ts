@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { createCollection, eq } from "../../src/index.js"
-import { createLiveQueryCollection } from "../../src/query/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { describe, expect, it } from 'vitest'
+import { createCollection, eq } from '../../src/index.js'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 interface Item {
   id: Uint8Array
@@ -17,7 +17,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
       (_, index): Item => ({
         id: new Uint8Array(index), // Creates arrays of different lengths
         name: makeItemName(index),
-      })
+      }),
     )
 
     const itemCollection = createCollection(
@@ -26,7 +26,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
         getKey: (item) => item.id.toString(),
         initialData: data,
         autoIndex: `eager`, // Enable auto-indexing to test index lookups
-      })
+      }),
     )
 
     const selectedItemIndex = 5
@@ -36,7 +36,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
       q
         .from({ item: itemCollection })
         .where(({ item }) => eq(item.id, new Uint8Array(selectedItemIndex)))
-        .findOne()
+        .findOne(),
     )
 
     await queryCollection.preload()
@@ -53,7 +53,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
       q
         .from({ item: itemCollection })
         .where(({ item }) => eq(item.id, new Uint8Array(0)))
-        .findOne()
+        .findOne(),
     )
 
     await queryCollection2.preload()
@@ -68,7 +68,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
       q
         .from({ item: itemCollection })
         .where(({ item }) => eq(item.name, makeItemName(selectedItemIndex)))
-        .findOne()
+        .findOne(),
     )
 
     await queryByName.preload()
@@ -99,7 +99,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
         getKey: (item) => item.name,
         initialData: data,
         autoIndex: `eager`,
-      })
+      }),
     )
 
     // Query with the exact same reference - this should work
@@ -107,7 +107,7 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
       q
         .from({ item: collection })
         .where(({ item }) => eq(item.id, largeId))
-        .findOne()
+        .findOne(),
     )
 
     await queryWithSameRef.preload()
@@ -124,12 +124,12 @@ describe(`Uint8Array ID comparison (user reproduction)`, () => {
       q
         .from({ item: collection })
         .where(({ item }) => eq(item.id, differentInstance))
-        .findOne()
+        .findOne(),
     )
 
     await queryWithDifferentRef.preload()
     const resultWithDifferentRef = Array.from(
-      queryWithDifferentRef.entries()
+      queryWithDifferentRef.entries(),
     )[0]?.[1]
 
     // Should NOT find the item because large arrays use reference equality

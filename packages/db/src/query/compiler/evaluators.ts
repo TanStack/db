@@ -2,10 +2,10 @@ import {
   EmptyReferencePathError,
   UnknownExpressionTypeError,
   UnknownFunctionError,
-} from "../../errors.js"
-import { areValuesEqual, normalizeValue } from "../../utils/comparison.js"
-import type { BasicExpression, Func, PropRef } from "../ir.js"
-import type { NamespacedRow } from "../../types.js"
+} from '../../errors.js'
+import { areValuesEqual, normalizeValue } from '../../utils/comparison.js'
+import type { BasicExpression, Func, PropRef } from '../ir.js'
+import type { NamespacedRow } from '../../types.js'
 
 /**
  * Helper function to check if a value is null or undefined (represents UNKNOWN in 3-valued logic)
@@ -46,7 +46,7 @@ export type CompiledSingleRowExpression = (item: Record<string, unknown>) => any
  */
 export function compileExpression(
   expr: BasicExpression,
-  isSingleRow: boolean = false
+  isSingleRow: boolean = false,
 ): CompiledExpression | CompiledSingleRowExpression {
   const compiledFn = compileExpressionInternal(expr, isSingleRow)
   return compiledFn
@@ -56,7 +56,7 @@ export function compileExpression(
  * Compiles a single-row expression into an optimized evaluator function.
  */
 export function compileSingleRowExpression(
-  expr: BasicExpression
+  expr: BasicExpression,
 ): CompiledSingleRowExpression {
   const compiledFn = compileExpressionInternal(expr, true)
   return compiledFn as CompiledSingleRowExpression
@@ -67,7 +67,7 @@ export function compileSingleRowExpression(
  */
 function compileExpressionInternal(
   expr: BasicExpression,
-  isSingleRow: boolean
+  isSingleRow: boolean,
 ): (data: any) => any {
   switch (expr.type) {
     case `val`: {
@@ -157,7 +157,7 @@ function compileSingleRowRef(ref: PropRef): CompiledSingleRowExpression {
 function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
   // Pre-compile all arguments using the appropriate compiler
   const compiledArgs = func.args.map((arg) =>
-    compileExpressionInternal(arg, isSingleRow)
+    compileExpressionInternal(arg, isSingleRow),
   )
 
   switch (func.name) {
@@ -463,7 +463,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
 function evaluateLike(
   value: any,
   pattern: any,
-  caseInsensitive: boolean
+  caseInsensitive: boolean,
 ): boolean {
   if (typeof value !== `string` || typeof pattern !== `string`) {
     return false

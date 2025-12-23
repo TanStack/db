@@ -1,10 +1,10 @@
-import { describe, expect, expectTypeOf, it, vi } from "vitest"
-import { createCollection, createOptimisticAction } from "../src"
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { createCollection, createOptimisticAction } from '../src'
 import type {
   MutationFnParams,
   Transaction,
   TransactionWithMutations,
-} from "../src"
+} from '../src'
 
 describe(`createOptimisticAction`, () => {
   // Runtime tests
@@ -79,7 +79,7 @@ describe(`createOptimisticAction`, () => {
     })
 
     expect(() => addTodo(`Async Todo`)).toThrowError(
-      `onMutate must be synchronous`
+      `onMutate must be synchronous`,
     )
   })
 
@@ -165,7 +165,7 @@ describe(`createOptimisticAction`, () => {
         expectTypeOf(text).toBeString()
         expectTypeOf(params).toEqualTypeOf<MutationFnParams>()
         expectTypeOf(
-          params.transaction
+          params.transaction,
         ).toEqualTypeOf<TransactionWithMutations>()
         return Promise.resolve({ success: true })
       },
@@ -196,7 +196,7 @@ describe(`createOptimisticAction`, () => {
         expectTypeOf(user.id).toBeNumber()
         expectTypeOf(params).toEqualTypeOf<MutationFnParams>()
         expectTypeOf(
-          params.transaction
+          params.transaction,
         ).toEqualTypeOf<TransactionWithMutations>()
         return Promise.resolve({ success: true })
       },

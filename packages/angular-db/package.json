@@ -1,12 +1,12 @@
 {
   "name": "@tanstack/angular-db",
+  "version": "0.1.41",
   "description": "Angular integration for @tanstack/db",
-  "version": "0.1.36",
   "author": "Ethan McDaniel",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/db.git",
+    "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/angular-db"
   },
   "homepage": "https://tanstack.com/db",
@@ -15,20 +15,16 @@
     "angular",
     "typescript"
   ],
-  "packageManager": "pnpm@10.24.0",
-  "dependencies": {
-    "@tanstack/db": "workspace:*"
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "vitest --run",
+    "lint": "eslint . --fix"
   },
-  "devDependencies": {
-    "@angular/common": "^19.2.15",
-    "@angular/compiler": "^20.0.0",
-    "@angular/core": "^19.2.16",
-    "@angular/platform-browser": "^19.2.16",
-    "@angular/platform-browser-dynamic": "^19.2.16",
-    "@vitest/coverage-istanbul": "^3.2.4",
-    "rxjs": "^7.8.2",
-    "zone.js": "^0.16.0"
-  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -42,23 +38,26 @@
     },
     "./package.json": "./package.json"
   },
+  "sideEffects": false,
   "files": [
     "dist",
     "src"
   ],
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  },
   "peerDependencies": {
     "@angular/core": ">=16.0.0",
     "rxjs": ">=6.0.0"
   },
-  "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch",
-    "test": "npx vitest --run",
-    "lint": "eslint . --fix"
-  },
-  "sideEffects": false,
-  "type": "module",
-  "types": "dist/esm/index.d.ts"
+  "devDependencies": {
+    "@angular/common": "^19.2.17",
+    "@angular/compiler": "^20.3.15",
+    "@angular/core": "^19.2.17",
+    "@angular/platform-browser": "^19.2.17",
+    "@angular/platform-browser-dynamic": "^19.2.17",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "rxjs": "^7.8.2",
+    "zone.js": "^0.16.0"
+  }
 }

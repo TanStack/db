@@ -1,9 +1,9 @@
 import {
   createServerFileRoute,
   getRequestHeaders,
-} from "@tanstack/react-start/server"
-import { createMiddleware, json } from "@tanstack/react-start"
-import type { User } from "~/utils/users"
+} from '@tanstack/react-start/server'
+import { createMiddleware, json } from '@tanstack/react-start'
+import type { User } from '~/utils/users'
 
 const userLoggerMiddleware = createMiddleware({ type: `request` }).server(
   async ({ next, _request }) => {
@@ -13,7 +13,7 @@ const userLoggerMiddleware = createMiddleware({ type: `request` }).server(
     result.response.headers.set(`x-users`, `true`)
     console.info(`Out: /users`)
     return result
-  }
+  },
 )
 
 const testParentMiddleware = createMiddleware({ type: `request` }).server(
@@ -23,7 +23,7 @@ const testParentMiddleware = createMiddleware({ type: `request` }).server(
     result.response.headers.set(`x-test-parent`, `true`)
     console.info(`Out: testParentMiddleware`)
     return result
-  }
+  },
 )
 
 const testMiddleware = createMiddleware({ type: `request` })

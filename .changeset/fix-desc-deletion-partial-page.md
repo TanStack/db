@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 Fix useLiveInfiniteQuery not updating when deleting an item from a partial page with DESC order.

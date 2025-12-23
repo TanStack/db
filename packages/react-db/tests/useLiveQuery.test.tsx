@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { act, renderHook, waitFor } from "@testing-library/react"
+import { describe, expect, it } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   Query,
   count,
@@ -9,10 +9,10 @@ import {
   eq,
   gt,
   lte,
-} from "@tanstack/db"
-import { useEffect } from "react"
-import { useLiveQuery } from "../src/useLiveQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
+} from '@tanstack/db'
+import { useEffect } from 'react'
+import { useLiveQuery } from '../src/useLiveQuery'
+import { mockSyncCollectionOptions } from '../../db/tests/utils'
 
 type Person = {
   id: string
@@ -85,7 +85,7 @@ describe(`Query Collections`, () => {
         id: `test-persons`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -97,7 +97,7 @@ describe(`Query Collections`, () => {
             id: persons.id,
             name: persons.name,
             age: persons.age,
-          }))
+          })),
       )
     })
 
@@ -121,7 +121,7 @@ describe(`Query Collections`, () => {
         id: `test-persons`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result, rerender } = renderHook(() => {
@@ -133,7 +133,7 @@ describe(`Query Collections`, () => {
             id: persons.id,
             name: persons.name,
             age: persons.age,
-          }))
+          })),
       )
     })
 
@@ -163,7 +163,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -171,7 +171,7 @@ describe(`Query Collections`, () => {
         q
           .from({ collection })
           .where(({ collection: c }) => eq(c.id, `3`))
-          .findOne()
+          .findOne(),
       )
     })
 
@@ -197,7 +197,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -232,7 +232,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const liveQueryCollection = createLiveQueryCollection({
@@ -269,7 +269,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -281,7 +281,7 @@ describe(`Query Collections`, () => {
             id: c.id,
             name: c.name,
           }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+          .orderBy(({ collection: c }) => c.id, `asc`),
       )
     })
 
@@ -340,7 +340,7 @@ describe(`Query Collections`, () => {
           id: `4`,
           name: `Kyle Doe`,
         }),
-      ])
+      ]),
     )
 
     // Update the person
@@ -379,7 +379,7 @@ describe(`Query Collections`, () => {
           id: `4`,
           name: `Kyle Doe 2`,
         }),
-      ])
+      ]),
     )
 
     // Delete the person
@@ -418,7 +418,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create issue collection
@@ -427,7 +427,7 @@ describe(`Query Collections`, () => {
         id: `issue-collection-test`,
         getKey: (issue: Issue) => issue.id,
         initialData: initialIssues,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -435,13 +435,13 @@ describe(`Query Collections`, () => {
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             name: persons?.name,
-          }))
+          })),
       )
     })
 
@@ -546,7 +546,7 @@ describe(`Query Collections`, () => {
         id: `params-change-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result, rerender } = renderHook(
@@ -561,10 +561,10 @@ describe(`Query Collections`, () => {
                 name: c.name,
                 age: c.age,
               })),
-          [minAge]
+          [minAge],
         )
       },
-      { initialProps: { minAge: 30 } }
+      { initialProps: { minAge: 30 } },
     )
 
     // Wait for collection to sync
@@ -620,7 +620,7 @@ describe(`Query Collections`, () => {
         id: `stop-query-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result, rerender } = renderHook(
@@ -634,10 +634,10 @@ describe(`Query Collections`, () => {
                 id: c.id,
                 name: c.name,
               })),
-          [minAge]
+          [minAge],
         )
       },
-      { initialProps: { minAge: 30 } }
+      { initialProps: { minAge: 30 } },
     )
 
     // Wait for collection to sync
@@ -685,7 +685,7 @@ describe(`Query Collections`, () => {
         id: `optimistic-changes-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Initial query
@@ -699,7 +699,7 @@ describe(`Query Collections`, () => {
             name: c.name,
             team: c.team,
           }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+          .orderBy(({ collection: c }) => c.id, `asc`),
       )
     })
 
@@ -715,7 +715,7 @@ describe(`Query Collections`, () => {
           .select(({ queryResult }) => ({
             team: queryResult.team,
             count: count(queryResult.id),
-          }))
+          })),
       )
     })
 
@@ -792,7 +792,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test-bug`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create issue collection
@@ -801,7 +801,7 @@ describe(`Query Collections`, () => {
         id: `issue-collection-test-bug`,
         getKey: (issue: Issue) => issue.id,
         initialData: initialIssues,
-      })
+      }),
     )
 
     // Render the hook with a query that joins persons and issues
@@ -810,13 +810,13 @@ describe(`Query Collections`, () => {
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             name: persons?.name,
-          }))
+          })),
       )
 
       // Track each render state
@@ -921,7 +921,8 @@ describe(`Query Collections`, () => {
 
     // Check if we had any render where the temp key was removed but the permanent key wasn't added yet
     const hadFlicker = renderStates.some(
-      (state) => !state.hasTempKey && !state.hasPermKey && state.stateSize === 3
+      (state) =>
+        !state.hasTempKey && !state.hasPermKey && state.stateSize === 3,
     )
 
     expect(hadFlicker).toBe(false)
@@ -942,7 +943,7 @@ describe(`Query Collections`, () => {
         id: `pre-created-collection-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create a live query collection beforehand
@@ -986,7 +987,7 @@ describe(`Query Collections`, () => {
         id: `collection-1`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const collection2 = createCollection(
@@ -1011,7 +1012,7 @@ describe(`Query Collections`, () => {
             team: `team3`,
           },
         ],
-      })
+      }),
     )
 
     // Create two different live query collections
@@ -1043,7 +1044,7 @@ describe(`Query Collections`, () => {
       ({ collection }: { collection: any }) => {
         return useLiveQuery(collection)
       },
-      { initialProps: { collection: liveQueryCollection1 } }
+      { initialProps: { collection: liveQueryCollection1 } },
     )
 
     // Wait for first collection to sync
@@ -1085,7 +1086,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-config-querybuilder`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create a QueryBuilder instance beforehand
@@ -1149,7 +1150,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1195,7 +1196,7 @@ describe(`Query Collections`, () => {
           id: `pre-created-has-loaded-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       // Create a live query collection that's already syncing
@@ -1253,7 +1254,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1302,7 +1303,7 @@ describe(`Query Collections`, () => {
           id: `live-updates-has-loaded-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { result } = renderHook(() => {
@@ -1313,7 +1314,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1398,13 +1399,13 @@ describe(`Query Collections`, () => {
           q
             .from({ issues: issueCollection })
             .join({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
               name: persons?.name,
-            }))
+            })),
         )
       })
 
@@ -1491,10 +1492,10 @@ describe(`Query Collections`, () => {
                   id: c.id,
                   name: c.name,
                 })),
-            [minAge]
+            [minAge],
           )
         },
-        { initialProps: { minAge: 30 } }
+        { initialProps: { minAge: 30 } },
       )
 
       // Initially should be false
@@ -1585,7 +1586,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1702,7 +1703,7 @@ describe(`Query Collections`, () => {
               id: persons.id,
               name: persons.name,
               team: persons.team,
-            }))
+            })),
         )
       })
 
@@ -1824,13 +1825,13 @@ describe(`Query Collections`, () => {
           q
             .from({ issues: issueCollection })
             .join({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
               userName: persons?.name,
-            }))
+            })),
         )
       })
 
@@ -1932,7 +1933,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
       })
 
@@ -1976,7 +1977,7 @@ describe(`Query Collections`, () => {
           id: `undefined-callback-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { result, rerender } = renderHook(
@@ -1993,10 +1994,10 @@ describe(`Query Collections`, () => {
                   age: persons.age,
                 }))
             },
-            [enabled]
+            [enabled],
           )
         },
-        { initialProps: { enabled: false } }
+        { initialProps: { enabled: false } },
       )
 
       // When callback returns undefined, should return the specified state
@@ -2056,7 +2057,7 @@ describe(`Query Collections`, () => {
           id: `null-callback-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { result, rerender } = renderHook(
@@ -2073,10 +2074,10 @@ describe(`Query Collections`, () => {
                   age: persons.age,
                 }))
             },
-            [enabled]
+            [enabled],
           )
         },
-        { initialProps: { enabled: false } }
+        { initialProps: { enabled: false } },
       )
 
       // When callback returns null, should return the specified state
@@ -2113,7 +2114,7 @@ describe(`Query Collections`, () => {
           id: `config-callback-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { result, rerender } = renderHook(
@@ -2144,10 +2145,10 @@ describe(`Query Collections`, () => {
                 }))
                 .orderBy(({ persons }) => persons.age)
             },
-            [useConfig]
+            [useConfig],
           )
         },
-        { initialProps: { useConfig: false } }
+        { initialProps: { useConfig: false } },
       )
 
       // Wait for collection to sync and state to update
@@ -2199,7 +2200,7 @@ describe(`Query Collections`, () => {
           id: `collection-callback-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       // Create a live query collection beforehand
@@ -2232,10 +2233,10 @@ describe(`Query Collections`, () => {
                   age: persons.age,
                 }))
             },
-            [useCollection]
+            [useCollection],
           )
         },
-        { initialProps: { useCollection: false } }
+        { initialProps: { useCollection: false } },
       )
 
       // Wait for collection to sync and state to update
@@ -2246,16 +2247,17 @@ describe(`Query Collections`, () => {
       expect(result.current.collection).toBeDefined()
       expect(result.current.status).toBeDefined()
 
+      // Results are in deterministic key order (id: 1 before id: 2)
       expect(result.current.data).toMatchObject([
-        {
-          id: `2`,
-          name: `Jane Doe`,
-          age: 25,
-        },
         {
           id: `1`,
           name: `John Doe`,
           age: 30,
+        },
+        {
+          id: `2`,
+          name: `Jane Doe`,
+          age: 25,
         },
       ])
 
@@ -2288,7 +2290,7 @@ describe(`Query Collections`, () => {
           id: `conditional-deps-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       const { result, rerender } = renderHook(
@@ -2305,10 +2307,10 @@ describe(`Query Collections`, () => {
                   age: persons.age,
                 }))
             },
-            [minAge, enabled]
+            [minAge, enabled],
           )
         },
-        { initialProps: { minAge: 30, enabled: false } }
+        { initialProps: { minAge: 30, enabled: false } },
       )
 
       // Initially disabled

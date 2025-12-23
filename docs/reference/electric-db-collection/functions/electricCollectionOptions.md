@@ -11,7 +11,7 @@ title: electricCollectionOptions
 function electricCollectionOptions<T>(config): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T, UtilsRecord>, "utils"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:427](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L427)
+Defined in: [packages/electric-db-collection/src/electric.ts:499](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L499)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -27,7 +27,7 @@ The explicit type of items in the collection (highest priority)
 
 #### config
 
-[`ElectricCollectionConfig`](../../interfaces/ElectricCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `T`\> & `object`
+[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`InferSchemaOutput`\<`T`\>, `T`\> & `object`
 
 Configuration options for the Electric collection
 
@@ -43,7 +43,7 @@ Collection options with utilities
 function electricCollectionOptions<T>(config): Omit<CollectionConfig<T, string | number, never, UtilsRecord>, "utils"> & object;
 ```
 
-Defined in: [packages/electric-db-collection/src/electric.ts:438](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L438)
+Defined in: [packages/electric-db-collection/src/electric.ts:510](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/electric.ts#L510)
 
 Creates Electric collection options for use with a standard Collection
 
@@ -59,7 +59,7 @@ The explicit type of items in the collection (highest priority)
 
 #### config
 
-[`ElectricCollectionConfig`](../../interfaces/ElectricCollectionConfig.md)\<`T`, `never`\> & `object`
+[`ElectricCollectionConfig`](../interfaces/ElectricCollectionConfig.md)\<`T`, `never`\> & `object`
 
 Configuration options for the Electric collection
 

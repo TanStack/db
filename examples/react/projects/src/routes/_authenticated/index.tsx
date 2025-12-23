@@ -1,8 +1,8 @@
-import { useEffect } from "react"
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router"
-import { useLiveQuery } from "@tanstack/react-db"
-import { projectCollection, todoCollection } from "@/lib/collections"
-import { authClient } from "@/lib/auth-client"
+import { useEffect } from 'react'
+import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
+import { useLiveQuery } from '@tanstack/react-db'
+import { projectCollection, todoCollection } from '@/lib/collections'
+import { authClient } from '@/lib/auth-client'
 
 export const Route = createFileRoute(`/_authenticated/`)({
   component: IndexRedirect,

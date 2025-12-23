@@ -1,6 +1,6 @@
-import { createInsertSchema, createSelectSchema } from "drizzle-zod"
-import { config, todos } from "./schema"
-import type { z } from "zod"
+import { createInsertSchema, createSelectSchema } from 'drizzle-zod'
+import { config, todos } from './schema'
+import type { z } from 'zod'
 
 // Auto-generated schemas from Drizzle schema (omit auto-generated fields)
 export const insertTodoSchema = createInsertSchema(todos).omit({
