@@ -744,7 +744,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 

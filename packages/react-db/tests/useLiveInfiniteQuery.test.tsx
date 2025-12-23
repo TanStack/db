@@ -376,7 +376,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `partial-page-deletion-desc-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -389,7 +389,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 20,
           getNextPageParam: (lastPage) =>
             lastPage.length === 20 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -423,7 +423,7 @@ describe(`useLiveInfiniteQuery`, () => {
 
     // Verify the deleted item is no longer in the data
     expect(
-      result.current.data.find((p) => p.id === firstItemId)
+      result.current.data.find((p) => p.id === firstItemId),
     ).toBeUndefined()
 
     // Verify the new first item is Post 2
@@ -443,7 +443,7 @@ describe(`useLiveInfiniteQuery`, () => {
         id: `partial-page-deletion-asc-test`,
         getKey: (post: Post) => post.id,
         initialData: posts,
-      })
+      }),
     )
 
     const { result } = renderHook(() => {
@@ -456,7 +456,7 @@ describe(`useLiveInfiniteQuery`, () => {
           pageSize: 20,
           getNextPageParam: (lastPage) =>
             lastPage.length === 20 ? lastPage.length : undefined,
-        }
+        },
       )
     })
 
@@ -490,7 +490,7 @@ describe(`useLiveInfiniteQuery`, () => {
 
     // Verify the deleted item is no longer in the data
     expect(
-      result.current.data.find((p) => p.id === firstItemId)
+      result.current.data.find((p) => p.id === firstItemId),
     ).toBeUndefined()
 
     // Still should have 1 page with 4 items
