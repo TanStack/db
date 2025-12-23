@@ -187,13 +187,13 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/offline-transactions':
-        specifier: ^1.0.5
+        specifier: ^1.0.6
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.0.11
+        specifier: ^1.0.12
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.59
+        specifier: ^0.1.60
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.12
@@ -294,10 +294,10 @@ importers:
         specifier: ^5.90.12
         version: 5.90.12
       '@tanstack/query-db-collection':
-        specifier: ^1.0.11
+        specifier: ^1.0.12
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.59
+        specifier: ^0.1.60
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.140.0
