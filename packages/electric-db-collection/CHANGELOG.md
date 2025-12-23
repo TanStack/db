@@ -1,5 +1,40 @@
 # @tanstack/electric-db-collection
 
+## 0.2.19
+
+### Patch Changes
+
+- Fix slow onInsert awaitMatch performance issue ([#1062](https://github.com/TanStack/db/pull/1062))
+
+  The message buffer was being cleared at the start of each new batch, causing messages to be lost when multiple batches (including heartbeats) arrived before `awaitMatch` was called. This resulted in `awaitMatch` timing out (~3-5s per attempt) and transaction rollbacks.
+
+  The fix removes the buffer clearing between batches. Messages are now preserved until the buffer reaches MAX_BATCH_MESSAGES (1000), at which point the oldest messages are dropped. This ensures `awaitMatch` can find messages even when sync activity arrives before the API call completes.
+
+## 0.2.18
+
+### Patch Changes
+
+- Updated dependencies [[`32ec4d8`](https://github.com/TanStack/db/commit/32ec4d8478cca96f76f3a49efc259c95b85baa40)]:
+  - @tanstack/db@0.5.15
+
+## 0.2.17
+
+### Patch Changes
+
+- Updated dependencies [[`26ed0aa`](https://github.com/TanStack/db/commit/26ed0aad2def60e652508a99b2e980e73f70148e)]:
+  - @tanstack/db@0.5.14
+
+## 0.2.16
+
+### Patch Changes
+
+- Adds support for the new subset-end message introduced in Electric. ([#1004](https://github.com/TanStack/db/pull/1004))
+
+- Support tagged rows and move out events in Electric collection. ([#942](https://github.com/TanStack/db/pull/942))
+
+- Updated dependencies [[`8ed7725`](https://github.com/TanStack/db/commit/8ed7725514a6a501482a391162f7792aa8b371e5), [`01452bf`](https://github.com/TanStack/db/commit/01452bfd0d00da8bd52941a4954af73749473651)]:
+  - @tanstack/db@0.5.13
+
 ## 0.2.15
 
 ### Patch Changes
