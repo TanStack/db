@@ -418,18 +418,26 @@ export class CollectionStateManager<
   }
 
   /**
-   * Attempts to commit pending synced transactions if there are no active transactions
-   * This method processes operations from pending transactions and applies them to the synced data
+   * Attempts to commit pending synced transactions.
+   * Commits are normally deferred while optimistic transactions are persisting,
+   * unless the onSyncWhilePersisting callback returns true.
    */
   commitPendingTransactions = () => {
-    // Check if there are any persisting transaction
-    let hasPersistingTransaction = false
+    // Check for persisting transactions and collect their keys
+    let persistingTransactionCount = 0
+    const persistingKeys = new Set<TKey>()
     for (const transaction of this.transactions.values()) {
       if (transaction.state === `persisting`) {
-        hasPersistingTransaction = true
-        break
+        persistingTransactionCount++
+        // Collect keys from this transaction's mutations for this collection
+        for (const mutation of transaction.mutations) {
+          if (mutation.collection === this.collection) {
+            persistingKeys.add(mutation.key as TKey)
+          }
+        }
       }
     }
+    const hasPersistingTransaction = persistingTransactionCount > 0
 
     // pending synced transactions could be either `committed` or still open.
     // we only want to process `committed` transactions here
@@ -460,7 +468,39 @@ export class CollectionStateManager<
       },
     )
 
-    if (!hasPersistingTransaction || hasTruncateSync) {
+    // Collect pending sync keys and compute conflicts
+    const pendingSyncKeys = new Set<TKey>()
+    for (const transaction of committedSyncedTransactions) {
+      for (const operation of transaction.operations) {
+        pendingSyncKeys.add(operation.key as TKey)
+      }
+    }
+
+    const conflictingKeys = new Set<TKey>()
+    for (const key of pendingSyncKeys) {
+      if (persistingKeys.has(key)) {
+        conflictingKeys.add(key)
+      }
+    }
+
+    // Determine whether to allow sync while persisting via callback
+    let allowSyncWhilePersisting = false
+    const onSyncWhilePersisting = this.config.sync.onSyncWhilePersisting
+    if (hasPersistingTransaction && onSyncWhilePersisting && !hasTruncateSync) {
+      allowSyncWhilePersisting = onSyncWhilePersisting({
+        pendingSyncKeys,
+        persistingKeys,
+        conflictingKeys,
+        persistingTransactionCount,
+        isTruncate: false,
+      })
+    }
+
+    if (
+      allowSyncWhilePersisting ||
+      !hasPersistingTransaction ||
+      hasTruncateSync
+    ) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
