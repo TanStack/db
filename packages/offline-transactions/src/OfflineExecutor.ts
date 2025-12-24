@@ -264,11 +264,17 @@ export class OfflineExecutor {
 
         // Request leadership first
         const isLeader = await this.leaderElection.requestLeadership()
+        this.isLeaderState = isLeader
         span.setAttribute(`isLeader`, isLeader)
 
         // Set up event listeners after leadership is established
         // This prevents the callback from being called multiple times
         this.setupEventListeners()
+
+        // Notify initial leadership state
+        if (this.config.onLeadershipChange) {
+          this.config.onLeadershipChange(isLeader)
+        }
 
         if (isLeader) {
           await this.loadAndReplayTransactions()
