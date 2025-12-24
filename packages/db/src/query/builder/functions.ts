@@ -325,6 +325,38 @@ export function max<T extends ExpressionLike>(arg: T): AggregateReturnType<T> {
 }
 
 /**
+ * String-typed min aggregate.
+ * Unlike min() which coerces to number, minStr() preserves string values
+ * for proper lexicographic comparison (e.g., ISO 8601 date strings).
+ */
+export function minStr<T extends ExpressionLike>(
+  arg: T,
+): Aggregate<string | null | undefined> {
+  return new Aggregate(`minstr`, [toExpression(arg)])
+}
+
+/**
+ * String-typed max aggregate.
+ * Unlike max() which coerces to number, maxStr() preserves string values
+ * for proper lexicographic comparison (e.g., ISO 8601 date strings).
+ */
+export function maxStr<T extends ExpressionLike>(
+  arg: T,
+): Aggregate<string | null | undefined> {
+  return new Aggregate(`maxstr`, [toExpression(arg)])
+}
+
+/**
+ * Collects all values in a group into an array
+ * Similar to SQL's array_agg or GROUP_CONCAT
+ */
+export function collect<T extends ExpressionLike>(
+  arg: T,
+): Aggregate<Array<ExtractType<T>>> {
+  return new Aggregate(`collect`, [toExpression(arg)])
+}
+
+/**
  * List of comparison function names that can be used with indexes
  */
 export const comparisonFunctions = [
@@ -373,6 +405,9 @@ export const operators = [
   `sum`,
   `min`,
   `max`,
+  `minStr`,
+  `maxStr`,
+  `collect`,
 ] as const
 
 export type OperatorName = (typeof operators)[number]
