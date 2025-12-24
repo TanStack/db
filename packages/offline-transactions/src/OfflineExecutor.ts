@@ -30,6 +30,7 @@ import type {
   OfflineConfig,
   OfflineMode,
   OfflineTransaction,
+  OnlineDetector,
   StorageAdapter,
   StorageDiagnostic,
 } from './types'
@@ -44,7 +45,7 @@ export class OfflineExecutor {
   private scheduler: KeyScheduler
   private executor: TransactionExecutor | null
   private leaderElection: LeaderElection | null
-  private onlineDetector: DefaultOnlineDetector
+  private onlineDetector: OnlineDetector
   private isLeaderState = false
   private unsubscribeOnline: (() => void) | null = null
   private unsubscribeLeadership: (() => void) | null = null
@@ -71,7 +72,11 @@ export class OfflineExecutor {
   constructor(config: OfflineConfig) {
     this.config = config
     this.scheduler = new KeyScheduler()
-    this.onlineDetector = new DefaultOnlineDetector()
+
+    // Initialize onlineDetector based on config
+    // undefined = use DefaultOnlineDetector (default)
+    // custom = user-provided detector
+    this.onlineDetector = config.onlineDetector ?? new DefaultOnlineDetector()
 
     // Initialize as pending - will be set by async initialization
     this.storage = null
@@ -259,6 +264,7 @@ export class OfflineExecutor {
           this.outbox,
           this.config,
           this,
+          this.onlineDetector,
         )
         this.leaderElection = this.createLeaderElection()
 
@@ -485,7 +491,7 @@ export class OfflineExecutor {
     return this.executor.getRunningCount()
   }
 
-  getOnlineDetector(): DefaultOnlineDetector {
+  getOnlineDetector(): OnlineDetector {
     return this.onlineDetector
   }
 
