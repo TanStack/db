@@ -70,6 +70,10 @@ export class DefaultOnlineDetector implements OnlineDetector {
   }
 
   notifyOnline(): void {
+    if (!this.isOnline()) {
+      console.info('notifyOnline called while offline, skipping notification')
+      return
+    }
     this.notifyListeners()
   }
 

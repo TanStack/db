@@ -110,8 +110,26 @@ interface OnlineDetector {
 }
 ```
 
-### onlineDetector 
-By default, `onlineDetector` is `undefined` and will use the built-in `DefaultOnlineDetector` which uses the browser's `navigator.onLine` API. You can provide your own implementation for more reliability.
+### onlineDetector
+
+By default, `onlineDetector` is `undefined` and the system will use the built-in `DefaultOnlineDetector`.
+
+**How it works:**
+- Provides an `isOnline()` method to check connectivity status before executing transactions
+
+**Transactions are skipped when offline** 
+- Avoid unnecessary retry attempts
+- Allows subscribers to be notified when connectivity is restored, triggering pending transaction execution
+
+**DefaultOnlineDetector behavior:**
+- Uses the browser's `navigator.onLine` API to detect online/offline state
+- Automatically triggers transaction execution on these events:
+  - `online` event (browser detects network connection)
+  - `visibilitychange` event (when tab becomes visible)
+
+**Manual trigger:**
+- `notifyOnline()` method can be used to manually trigger transaction execution
+- Only succeeds if `isOnline()` returns `true` 
 
 
 ### OfflineExecutor
@@ -126,7 +144,7 @@ By default, `onlineDetector` is `undefined` and will use the built-in `DefaultOn
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
 - `peekOutbox()` - View all pending transactions
-- `notifyOnline()` - Manually trigger retry execution
+- `notifyOnline()` - Manually trigger transaction execution (only succeeds if online) 
 - `dispose()` - Clean up resources
 
 ### Error Handling
@@ -172,7 +190,7 @@ class CustomOnlineDetector implements OnlineDetector {
       } catch {
         this.online = false
       }
-    }, 5000)
+    }, 60000)
   }
 
   isOnline(): boolean {
