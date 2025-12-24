@@ -398,6 +398,30 @@ export class QueryCompilationError extends TanStackDBError {
   }
 }
 
+export class JavaScriptOperatorInQueryError extends QueryBuilderError {
+  constructor(operator: string, hint?: string) {
+    const defaultHint =
+      operator === `||` || operator === `??`
+        ? `Use coalesce() instead: coalesce(value, defaultValue)`
+        : operator === `&&`
+          ? `Use and() for logical conditions`
+          : operator === `?:`
+            ? `Use cond() for conditional expressions: cond(condition, trueValue, falseValue)`
+            : `Use the appropriate query function instead`
+
+    super(
+      `JavaScript operator "${operator}" cannot be used in queries.\n\n` +
+        `Query callbacks should only use field references and query functions, not JavaScript logic.\n` +
+        `${hint || defaultHint}\n\n` +
+        `Example of incorrect usage:\n` +
+        `  .select(({users}) => ({ data: users.data || [] }))\n\n` +
+        `Correct usage:\n` +
+        `  .select(({users}) => ({ data: coalesce(users.data, []) }))`,
+    )
+    this.name = `JavaScriptOperatorInQueryError`
+  }
+}
+
 export class DistinctRequiresSelectError extends QueryCompilationError {
   constructor() {
     super(`DISTINCT requires a SELECT clause.`)
