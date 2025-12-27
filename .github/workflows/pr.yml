@@ -33,7 +33,21 @@ jobs:
         with:
           main-branch-name: main
       - name: Run Checks
-        run: pnpm run build && pnpm run test && pnpm run test:sherif
+        run: pnpm run build && pnpm run test
+      - name: Check dependency versions
+        run: |
+          if ! pnpm run test:sherif; then
+            echo ""
+            echo "=========================================="
+            echo "❌ Sherif found dependency version mismatches"
+            echo ""
+            echo "To fix this locally, run:"
+            echo "  pnpm exec sherif --fix -i zod"
+            echo ""
+            echo "Then commit the changes to package.json files."
+            echo "=========================================="
+            exit 1
+          fi
   preview:
     name: Preview
     runs-on: ubuntu-latest
