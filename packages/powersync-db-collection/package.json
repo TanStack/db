@@ -52,7 +52,7 @@
     "src"
   ],
   "dependencies": {
-    "@standard-schema/spec": "^1.0.0",
+    "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.8.0",
     "debug": "^4.4.3",
@@ -62,8 +62,8 @@
     "@powersync/common": "^1.41.0"
   },
   "devDependencies": {
-    "@powersync/common": "^1.43.1",
-    "@powersync/node": "^0.14.3",
+    "@powersync/common": "^1.44.0",
+    "@powersync/node": "^0.15.1",
     "@types/debug": "^4.1.12",
     "@vitest/coverage-istanbul": "^3.2.4"
   }
