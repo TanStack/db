@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/query-db-collection",
-  "version": "1.0.8",
+  "version": "1.0.12",
   "description": "TanStack Query collection for TanStack DB",
   "author": "Kyle Mathews",
   "license": "MIT",

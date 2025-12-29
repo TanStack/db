@@ -29,6 +29,11 @@ export class CollectionSubscriber<
     { resolve: () => void }
   >()
 
+  // Track keys that have been sent to the D2 pipeline to prevent duplicate inserts
+  // This is necessary because different code paths (initial load, change events)
+  // can potentially send the same item to D2 multiple times.
+  private sentToD2Keys = new Set<string | number>()
+
   constructor(
     private alias: string,
     private collectionId: string,
@@ -129,13 +134,33 @@ export class CollectionSubscriber<
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => boolean,
   ) {
+    // Filter changes to prevent duplicate inserts to D2 pipeline.
+    // This ensures D2 multiplicity stays at 1 for visible items, so deletes
+    // properly reduce multiplicity to 0 (triggering DELETE output).
+    const changesArray = Array.isArray(changes) ? changes : [...changes]
+    const filteredChanges: Array<ChangeMessage<any, string | number>> = []
+    for (const change of changesArray) {
+      if (change.type === `insert`) {
+        if (this.sentToD2Keys.has(change.key)) {
+          // Skip duplicate insert - already sent to D2
+          continue
+        }
+        this.sentToD2Keys.add(change.key)
+      } else if (change.type === `delete`) {
+        // Remove from tracking so future re-inserts are allowed
+        this.sentToD2Keys.delete(change.key)
+      }
+      // Updates are handled as delete+insert by splitUpdates, so no special handling needed
+      filteredChanges.push(change)
+    }
+
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
     const input =
       this.collectionConfigBuilder.currentSyncState!.inputs[this.alias]!
     const sentChanges = sendChangesToInput(
       input,
-      changes,
+      filteredChanges,
       this.collection.config.getKey,
     )
 
@@ -162,8 +187,13 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
+    // Only pass includeInitialState when true. When it's false, we leave it
+    // undefined so that user subscriptions with explicit `includeInitialState: false`
+    // can be distinguished from internal lazy-loading subscriptions.
+    // If we pass `false`, changes.ts would call markAllStateAsSeen() which
+    // disables filtering - but internal subscriptions still need filtering.
     const subscription = this.collection.subscribeChanges(sendChanges, {
-      includeInitialState,
+      ...(includeInitialState && { includeInitialState }),
       whereExpression,
     })
 
@@ -190,10 +220,12 @@ export class CollectionSubscriber<
       whereExpression,
     })
 
-    // Listen for truncate events to reset cursor tracking state
+    // Listen for truncate events to reset cursor tracking state and sentToD2Keys
     // This ensures that after a must-refetch/truncate, we don't use stale cursor data
+    // and allow re-inserts of previously sent keys
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.biggest = undefined
+      this.sentToD2Keys.clear()
     })
 
     // Clean up truncate listener when subscription is unsubscribed

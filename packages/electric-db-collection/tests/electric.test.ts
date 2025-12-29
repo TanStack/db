@@ -1363,6 +1363,93 @@ describe(`Electric Integration`, () => {
       await insert3.isPersisted.promise
       expect(testCollection.has(502)).toBe(true)
     })
+
+    it(`should preserve buffer across heartbeat batches until awaitMatch is called`, async () => {
+      // This test verifies the fix for the race condition where:
+      // 1. Batch 1 arrives with insert message + up-to-date
+      // 2. Batch 2 arrives (heartbeat/empty) BEFORE awaitMatch is called
+      // 3. awaitMatch is called - should still find the message from Batch 1
+      // This was failing before because the buffer was cleared when Batch 2 arrived
+
+      let resolveServerCall: () => void
+      const serverCallPromise = new Promise<void>((resolve) => {
+        resolveServerCall = resolve
+      })
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+
+          // Simulate a slow API call
+          await serverCallPromise
+
+          // awaitMatch is called AFTER multiple batches have arrived
+          await col.utils.awaitMatch((message: any) => {
+            return (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.id === item.id
+            )
+          }, 5000)
+        })
+
+      const config = {
+        id: `test-buffer-preserved-across-heartbeats`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert - will call onInsert which waits for serverCallPromise
+      const insertPromise = testCollection.insert({
+        id: 600,
+        name: `Heartbeat Race Test`,
+      })
+
+      // Wait for onInsert to start
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Batch 1: insert message + up-to-date
+      subscriber([
+        {
+          key: `600`,
+          value: { id: 600, name: `Heartbeat Race Test` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Batch 2: heartbeat (just up-to-date, no insert messages)
+      // This simulates Electric sending a heartbeat while the API call is still in progress
+      // Previously, this would clear the buffer and lose the insert message from Batch 1
+      subscriber([{ headers: { control: `up-to-date` } }])
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Batch 3: another heartbeat (to really stress the scenario)
+      subscriber([{ headers: { control: `up-to-date` } }])
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now resolve the server call - awaitMatch should still find the message
+      // from Batch 1 despite Batches 2 and 3 arriving
+      resolveServerCall!()
+
+      // Should complete successfully
+      await insertPromise.isPersisted.promise
+
+      expect(onInsert).toHaveBeenCalled()
+      expect(testCollection.has(600)).toBe(true)
+    })
   })
 
   // Tests for matching strategies utilities
