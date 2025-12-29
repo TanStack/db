@@ -197,6 +197,12 @@ export class CollectionSubscriber<
       whereExpression,
     })
 
+    // Trigger initial data load for on-demand sync collections.
+    // This is called regardless of includeInitialState because on-demand collections
+    // need to explicitly request data loading. For lazy aliases in joins,
+    // includeInitialState is false but we still need to trigger the sync layer.
+    subscription.requestSnapshot({})
+
     return subscription
   }
 
