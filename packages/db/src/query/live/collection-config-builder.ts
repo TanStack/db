@@ -866,6 +866,11 @@ export class CollectionConfigBuilder<
       })
       syncState.unsubscribeCallbacks.add(statusUnsubscribe)
 
+      // Ensure sync is started for all source collections in the query.
+      // This is critical for on-demand sync collections used in joins - without this,
+      // they remain idle and requestSnapshot() calls from lazy join loading won't work.
+      collection.startSyncImmediate()
+
       const subscription = collectionSubscriber.subscribe()
       // Store subscription by alias (not collection ID) to support lazy loading
       // which needs to look up subscriptions by their query alias
