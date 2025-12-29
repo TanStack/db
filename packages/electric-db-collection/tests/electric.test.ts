@@ -2863,8 +2863,16 @@ describe(`Electric Integration`, () => {
       ])
 
       expect(testCollection.size).toBe(2)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `User 1`, version: 1 })
-      expect(testCollection.get(2)).toEqual({ id: 2, name: `User 2`, version: 1 })
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1`,
+        version: 1,
+      })
+      expect(testCollection.get(2)).toEqual({
+        id: 2,
+        name: `User 2`,
+        version: 1,
+      })
 
       // Second batch - overlapping subset query returns same rows with different values
       subscriber([
@@ -2890,9 +2898,21 @@ describe(`Electric Integration`, () => {
 
       // All rows should be present with updated values
       expect(testCollection.size).toBe(3)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `User 1`, version: 2 })
-      expect(testCollection.get(2)).toEqual({ id: 2, name: `User 2`, version: 2 })
-      expect(testCollection.get(3)).toEqual({ id: 3, name: `User 3`, version: 1 })
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1`,
+        version: 2,
+      })
+      expect(testCollection.get(2)).toEqual({
+        id: 2,
+        name: `User 2`,
+        version: 2,
+      })
+      expect(testCollection.get(3)).toEqual({
+        id: 3,
+        name: `User 3`,
+        version: 1,
+      })
     })
 
     it(`should reset synced keys tracking on must-refetch`, () => {
@@ -2945,7 +2965,10 @@ describe(`Electric Integration`, () => {
       ])
 
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `User 1 After Refetch` })
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1 After Refetch`,
+      })
     })
 
     it(`should handle delete followed by insert of the same key`, () => {
@@ -3042,7 +3065,11 @@ describe(`Electric Integration`, () => {
 
       // Should have the latest value
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `User 1`, version: 2 })
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1`,
+        version: 2,
+      })
     })
   })
 
