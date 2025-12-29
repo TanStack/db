@@ -15,4 +15,4 @@ Defined in: [packages/db/src/query/builder/index.ts:850](https://github.com/TanS
 
 ### TContext
 
-`TContext` *extends* [`Context`](../../interfaces/Context.md)
+`TContext` *extends* [`Context`](../interfaces/Context.md)

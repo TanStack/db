@@ -20,7 +20,7 @@ Creates a live query collection directly
 
 #### TContext
 
-`TContext` *extends* [`Context`](../../interfaces/Context.md)
+`TContext` *extends* [`Context`](../interfaces/Context.md)
 
 #### TResult
 
@@ -30,7 +30,7 @@ Creates a live query collection directly
 
 #### query
 
-(`q`) => [`QueryBuilder`](../../type-aliases/QueryBuilder.md)\<`TContext`\>
+(`q`) => [`QueryBuilder`](../type-aliases/QueryBuilder.md)\<`TContext`\>
 
 ### Returns
 
@@ -83,7 +83,7 @@ Creates a live query collection directly
 
 #### TContext
 
-`TContext` *extends* [`Context`](../../interfaces/Context.md)
+`TContext` *extends* [`Context`](../interfaces/Context.md)
 
 #### TResult
 
@@ -91,14 +91,14 @@ Creates a live query collection directly
 
 #### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md) = \{
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md) = \{
 \}
 
 ### Parameters
 
 #### config
 
-[`LiveQueryCollectionConfig`](../../interfaces/LiveQueryCollectionConfig.md)\<`TContext`, `TResult`\> & `object`
+[`LiveQueryCollectionConfig`](../interfaces/LiveQueryCollectionConfig.md)\<`TContext`, `TResult`\> & `object`
 
 ### Returns
 

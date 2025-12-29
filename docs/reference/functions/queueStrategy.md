@@ -22,13 +22,13 @@ every operation must complete in order.
 
 ### options?
 
-[`QueueStrategyOptions`](../../interfaces/QueueStrategyOptions.md)
+[`QueueStrategyOptions`](../interfaces/QueueStrategyOptions.md)
 
 Configuration for queue behavior (FIFO/LIFO, timing, size limits)
 
 ## Returns
 
-[`QueueStrategy`](../../interfaces/QueueStrategy.md)
+[`QueueStrategy`](../interfaces/QueueStrategy.md)
 
 A queue strategy instance
 

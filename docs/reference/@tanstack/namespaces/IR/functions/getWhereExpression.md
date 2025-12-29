@@ -17,8 +17,8 @@ Extract the expression from a Where clause
 
 ### where
 
-[`Where`](../../type-aliases/Where.md)
+[`Where`](../type-aliases/Where.md)
 
 ## Returns
 
-[`BasicExpression`](../../type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../type-aliases/BasicExpression.md)\<`boolean`\>

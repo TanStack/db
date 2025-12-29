@@ -1,12 +1,12 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from 'vitest'
 import {
   DeduplicatedLoadSubset,
   cloneOptions,
-} from "../../src/query/subset-dedupe"
-import { Func, PropRef, Value } from "../../src/query/ir"
-import { minusWherePredicates } from "../../src/query/predicate-utils"
-import type { BasicExpression, OrderBy } from "../../src/query/ir"
-import type { LoadSubsetOptions } from "../../src/types"
+} from '../../src/query/subset-dedupe'
+import { Func, PropRef, Value } from '../../src/query/ir'
+import { minusWherePredicates } from '../../src/query/predicate-utils'
+import type { BasicExpression, OrderBy } from '../../src/query/ir'
+import type { LoadSubsetOptions } from '../../src/types'
 
 // Helper functions to build expressions more easily
 function ref(path: string | Array<string>): PropRef {
@@ -505,7 +505,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
       // First call: age > 20 AND status = 'active'
       const firstPredicate = and(
         gt(ref(`age`), val(20)),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
       await deduplicated.loadSubset({ where: firstPredicate })
       expect(callCount).toBe(1)
@@ -514,7 +514,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
       // Second call: age > 10 AND status = 'active' (should request only age > 10 AND age <= 20 AND status = 'active')
       const secondPredicate = and(
         gt(ref(`age`), val(10)),
-        eq(ref(`status`), val(`active`))
+        eq(ref(`status`), val(`active`)),
       )
 
       const test = minusWherePredicates(secondPredicate, firstPredicate)
@@ -526,7 +526,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
         where: and(
           eq(ref(`status`), val(`active`)),
           gt(ref(`age`), val(10)),
-          lte(ref(`age`), val(20))
+          lte(ref(`age`), val(20)),
         ),
       })
     })

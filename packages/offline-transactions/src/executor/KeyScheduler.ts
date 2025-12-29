@@ -1,5 +1,5 @@
-import { withSyncSpan } from "../telemetry/tracer"
-import type { OfflineTransaction } from "../types"
+import { withSyncSpan } from '../telemetry/tracer'
+import type { OfflineTransaction } from '../types'
 
 export class KeyScheduler {
   private pendingTransactions: Array<OfflineTransaction> = []
@@ -9,16 +9,16 @@ export class KeyScheduler {
     withSyncSpan(
       `scheduler.schedule`,
       {
-        "transaction.id": transaction.id,
+        'transaction.id': transaction.id,
         queueLength: this.pendingTransactions.length,
       },
       () => {
         this.pendingTransactions.push(transaction)
         // Sort by creation time to maintain FIFO order
         this.pendingTransactions.sort(
-          (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+          (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
         )
-      }
+      },
     )
   }
 
@@ -35,7 +35,7 @@ export class KeyScheduler {
 
         // Find the first transaction that's ready to run
         const readyTransaction = this.pendingTransactions.find((tx) =>
-          this.isReadyToRun(tx)
+          this.isReadyToRun(tx),
         )
 
         if (readyTransaction) {
@@ -46,7 +46,7 @@ export class KeyScheduler {
         }
 
         return readyTransaction ? [readyTransaction] : []
-      }
+      },
     )
   }
 
@@ -69,7 +69,7 @@ export class KeyScheduler {
 
   private removeTransaction(transaction: OfflineTransaction): void {
     const index = this.pendingTransactions.findIndex(
-      (tx) => tx.id === transaction.id
+      (tx) => tx.id === transaction.id,
     )
     if (index >= 0) {
       this.pendingTransactions.splice(index, 1)
@@ -78,13 +78,13 @@ export class KeyScheduler {
 
   updateTransaction(transaction: OfflineTransaction): void {
     const index = this.pendingTransactions.findIndex(
-      (tx) => tx.id === transaction.id
+      (tx) => tx.id === transaction.id,
     )
     if (index >= 0) {
       this.pendingTransactions[index] = transaction
       // Re-sort to maintain FIFO order after update
       this.pendingTransactions.sort(
-        (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+        (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
       )
     }
   }
@@ -109,7 +109,7 @@ export class KeyScheduler {
   updateTransactions(updatedTransactions: Array<OfflineTransaction>): void {
     for (const updatedTx of updatedTransactions) {
       const index = this.pendingTransactions.findIndex(
-        (tx) => tx.id === updatedTx.id
+        (tx) => tx.id === updatedTx.id,
       )
       if (index >= 0) {
         this.pendingTransactions[index] = updatedTx
@@ -117,7 +117,7 @@ export class KeyScheduler {
     }
     // Re-sort to maintain FIFO order after updates
     this.pendingTransactions.sort(
-      (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
     )
   }
 }

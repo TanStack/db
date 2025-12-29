@@ -1,10 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection, liveQueryCollectionOptions } from "../src/index"
-import { sum } from "../src/query/builder/functions"
-import { localOnlyCollectionOptions } from "../src/local-only"
-import { createTransaction } from "../src/transactions"
-import type { LocalOnlyCollectionUtils } from "../src/local-only"
-import type { Collection } from "../src/index"
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection, liveQueryCollectionOptions } from '../src/index'
+import { sum } from '../src/query/builder/functions'
+import { localOnlyCollectionOptions } from '../src/local-only'
+import { createTransaction } from '../src/transactions'
+import type { LocalOnlyCollectionUtils } from '../src/local-only'
+import type { Collection } from '../src/index'
 
 interface TestItem extends Record<string, unknown> {
   id: number
@@ -22,7 +22,7 @@ describe(`LocalOnly Collection`, () => {
       localOnlyCollectionOptions({
         id: `test-local-only`,
         getKey: (item: TestItem) => item.id,
-      })
+      }),
     )
   })
 
@@ -161,7 +161,7 @@ describe(`LocalOnly Collection`, () => {
         { id: 1, name: `Item 1` },
         { id: 2, name: `Item 2` },
         { id: 3, name: `Item 3` },
-      ])
+      ]),
     )
   })
 
@@ -179,7 +179,7 @@ describe(`LocalOnly Collection`, () => {
       expect.arrayContaining([
         [1, { id: 1, name: `Item 1` }],
         [2, { id: 2, name: `Item 2` }],
-      ])
+      ]),
     )
 
     // Test values iteration
@@ -234,7 +234,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-schema`,
           getKey: (item: TestItem) => item.id,
-        })
+        }),
       )
 
       // Basic operations should still work
@@ -259,7 +259,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-custom-callbacks`,
           getKey: (item: TestItem) => item.id,
           onInsert: onInsertSpy,
-        })
+        }),
       )
 
       testCollection.insert({ id: 1, name: `Test Item` })
@@ -275,7 +275,7 @@ describe(`LocalOnly Collection`, () => {
               }),
             ]),
           }),
-        })
+        }),
       )
 
       // Collection should still work normally
@@ -290,7 +290,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-custom-update`,
           getKey: (item: TestItem) => item.id,
           onUpdate: onUpdateSpy,
-        })
+        }),
       )
 
       testCollection.insert({ id: 1, name: `Test Item` })
@@ -309,7 +309,7 @@ describe(`LocalOnly Collection`, () => {
               }),
             ]),
           }),
-        })
+        }),
       )
 
       // Collection should still work normally
@@ -324,7 +324,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-custom-delete`,
           getKey: (item: TestItem) => item.id,
           onDelete: onDeleteSpy,
-        })
+        }),
       )
 
       testCollection.insert({ id: 1, name: `Test Item` })
@@ -341,7 +341,7 @@ describe(`LocalOnly Collection`, () => {
               }),
             ]),
           }),
-        })
+        }),
       )
 
       // Collection should still work normally
@@ -353,7 +353,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-no-callbacks`,
           getKey: (item: TestItem) => item.id,
-        })
+        }),
       )
 
       // Should work normally without callbacks
@@ -380,7 +380,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-initial-data`,
           getKey: (item: TestItem) => item.id,
           initialData: initialItems,
-        })
+        }),
       )
 
       // Collection should be populated with initial data
@@ -396,7 +396,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-empty-initial-data`,
           getKey: (item: TestItem) => item.id,
           initialData: [],
-        })
+        }),
       )
 
       // Collection should be empty
@@ -408,7 +408,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `test-no-initial-data`,
           getKey: (item: TestItem) => item.id,
-        })
+        }),
       )
 
       // Collection should be empty
@@ -423,7 +423,7 @@ describe(`LocalOnly Collection`, () => {
           id: `test-initial-plus-more`,
           getKey: (item: TestItem) => item.id,
           initialData: initialItems,
-        })
+        }),
       )
 
       // Should start with initial data
@@ -459,7 +459,7 @@ describe(`LocalOnly Collection`, () => {
             return Promise.resolve()
           },
           autoIndex: `off`,
-        })
+        }),
       )
 
       const query = createCollection(
@@ -469,7 +469,7 @@ describe(`LocalOnly Collection`, () => {
             q.from({ numbers: testCollection }).select(({ numbers }) => ({
               totalNumber: sum(numbers.number),
             })),
-        })
+        }),
       )
 
       testCollection.delete(0)
@@ -517,7 +517,7 @@ describe(`LocalOnly Collection`, () => {
         localOnlyCollectionOptions({
           id: `other-collection`,
           getKey: (item) => item.id,
-        })
+        }),
       )
 
       const tx = createTransaction({

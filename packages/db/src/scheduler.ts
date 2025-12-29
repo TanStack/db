@@ -54,7 +54,7 @@ export class Scheduler {
    * Get or create the state bucket for a context.
    */
   private getOrCreateContext(
-    contextId: SchedulerContextId
+    contextId: SchedulerContextId,
   ): SchedulerContextState {
     let context = this.contexts.get(contextId)
     if (!context) {
@@ -166,8 +166,8 @@ export class Scheduler {
       if (!ranThisPass) {
         throw new Error(
           `Scheduler detected unresolved dependencies for context ${String(
-            contextId
-          )}.`
+            contextId,
+          )}.`,
         )
       }
     }

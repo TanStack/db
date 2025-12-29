@@ -1,9 +1,9 @@
-import { topK, topKWithIndex } from "./topK.js"
-import { topKWithFractionalIndex } from "./topKWithFractionalIndex.js"
-import { map } from "./map.js"
-import { innerJoin } from "./join.js"
-import { consolidate } from "./consolidate.js"
-import type { IStreamBuilder, KeyValue } from "../types.js"
+import { topK, topKWithIndex } from './topK.js'
+import { topKWithFractionalIndex } from './topKWithFractionalIndex.js'
+import { map } from './map.js'
+import { innerJoin } from './join.js'
+import { consolidate } from './consolidate.js'
+import type { IStreamBuilder, KeyValue } from '../types.js'
 
 export interface OrderByOptions<Ve> {
   comparator?: (a: Ve, b: Ve) => number
@@ -14,7 +14,7 @@ export interface OrderByOptions<Ve> {
 type OrderByWithFractionalIndexOptions<Ve> = OrderByOptions<Ve> & {
   setSizeCallback?: (getSize: () => number) => void
   setWindowFn?: (
-    windowFn: (options: { offset?: number; limit?: number }) => void
+    windowFn: (options: { offset?: number; limit?: number }) => void,
   ) => void
 }
 
@@ -28,9 +28,9 @@ type OrderByWithFractionalIndexOptions<Ve> = OrderByOptions<Ve> & {
  */
 export function orderBy<T extends KeyValue<unknown, unknown>, Ve = unknown>(
   valueExtractor: (
-    value: T extends KeyValue<unknown, infer V> ? V : never
+    value: T extends KeyValue<unknown, infer V> ? V : never,
   ) => Ve,
-  options?: OrderByOptions<Ve>
+  options?: OrderByOptions<Ve>,
 ) {
   const limit = options?.limit ?? Infinity
   const offset = options?.offset ?? 0
@@ -54,10 +54,10 @@ export function orderBy<T extends KeyValue<unknown, unknown>, Ve = unknown>(
             [
               key,
               valueExtractor(
-                value as T extends KeyValue<unknown, infer V> ? V : never
+                value as T extends KeyValue<unknown, infer V> ? V : never,
               ),
             ],
-          ] as KeyValue<null, [KeyType, Ve]>
+          ] as KeyValue<null, [KeyType, Ve]>,
       ),
       topK((a, b) => comparator(a[1], b[1]), { limit, offset }),
       map(([_, [key]]) => [key, null] as KeyValue<KeyType, null>),
@@ -65,7 +65,7 @@ export function orderBy<T extends KeyValue<unknown, unknown>, Ve = unknown>(
       map(([key, value]) => {
         return [key, value[1]] as T
       }),
-      consolidate()
+      consolidate(),
     )
   }
 }
@@ -84,9 +84,9 @@ export function orderByWithIndex<
   Ve = unknown,
 >(
   valueExtractor: (
-    value: T extends KeyValue<unknown, infer V> ? V : never
+    value: T extends KeyValue<unknown, infer V> ? V : never,
   ) => Ve,
-  options?: OrderByOptions<Ve>
+  options?: OrderByOptions<Ve>,
 ) {
   const limit = options?.limit ?? Infinity
   const offset = options?.offset ?? 0
@@ -100,7 +100,7 @@ export function orderByWithIndex<
     })
 
   return (
-    stream: IStreamBuilder<T>
+    stream: IStreamBuilder<T>,
   ): IStreamBuilder<
     KeyValue<
       T extends KeyValue<infer K, unknown> ? K : never,
@@ -118,10 +118,10 @@ export function orderByWithIndex<
             [
               key,
               valueExtractor(
-                value as T extends KeyValue<unknown, infer V> ? V : never
+                value as T extends KeyValue<unknown, infer V> ? V : never,
               ),
             ],
-          ] as KeyValue<null, [KeyType, Ve]>
+          ] as KeyValue<null, [KeyType, Ve]>,
       ),
       topKWithIndex((a, b) => comparator(a[1], b[1]), { limit, offset }),
       map(([_, [[key], index]]) => [key, index] as KeyValue<KeyType, number>),
@@ -129,7 +129,7 @@ export function orderByWithIndex<
       map(([key, [index, value]]) => {
         return [key, [value, index]] as KeyValue<KeyType, [ValueType, number]>
       }),
-      consolidate()
+      consolidate(),
     )
   }
 }
@@ -140,9 +140,9 @@ export function orderByWithFractionalIndexBase<
 >(
   topKFunction: typeof topKWithFractionalIndex,
   valueExtractor: (
-    value: T extends KeyValue<unknown, infer V> ? V : never
+    value: T extends KeyValue<unknown, infer V> ? V : never,
   ) => Ve,
-  options?: OrderByWithFractionalIndexOptions<Ve>
+  options?: OrderByWithFractionalIndexOptions<Ve>,
 ) {
   type KeyType = T extends KeyValue<infer K, unknown> ? K : never
   type ValueType = T extends KeyValue<unknown, infer V> ? V : never
@@ -161,7 +161,7 @@ export function orderByWithFractionalIndexBase<
     })
 
   return (
-    stream: IStreamBuilder<T>
+    stream: IStreamBuilder<T>,
   ): IStreamBuilder<[KeyType, [ValueType, string]]> => {
     return stream.pipe(
       topKFunction(
@@ -172,9 +172,9 @@ export function orderByWithFractionalIndexBase<
           offset,
           setSizeCallback,
           setWindowFn,
-        }
+        },
       ),
-      consolidate()
+      consolidate(),
     )
   }
 }
@@ -193,13 +193,13 @@ export function orderByWithFractionalIndex<
   Ve = unknown,
 >(
   valueExtractor: (
-    value: T extends KeyValue<unknown, infer V> ? V : never
+    value: T extends KeyValue<unknown, infer V> ? V : never,
   ) => Ve,
-  options?: OrderByWithFractionalIndexOptions<Ve>
+  options?: OrderByWithFractionalIndexOptions<Ve>,
 ) {
   return orderByWithFractionalIndexBase(
     topKWithFractionalIndex,
     valueExtractor,
-    options
+    options,
   )
 }

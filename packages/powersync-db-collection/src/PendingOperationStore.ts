@@ -1,6 +1,6 @@
-import pDefer from "p-defer"
-import type { DiffTriggerOperation } from "@powersync/common"
-import type { DeferredPromise } from "p-defer"
+import pDefer from 'p-defer'
+import type { DiffTriggerOperation } from '@powersync/common'
+import type { DeferredPromise } from 'p-defer'
 
 export type PendingOperation = {
   tableName: string

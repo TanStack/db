@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { Query, getQueryIR } from "../../../src/query/builder/index.js"
+import { describe, expect, it } from 'vitest'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { Query, getQueryIR } from '../../../src/query/builder/index.js'
 import {
   add,
   and,
@@ -23,7 +23,7 @@ import {
   or,
   sum,
   upper,
-} from "../../../src/query/builder/functions.js"
+} from '../../../src/query/builder/functions.js'
 
 // Test schema
 interface Employee {
@@ -97,7 +97,7 @@ describe(`QueryBuilder Functions`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
         .where(({ employees }) =>
-          and(eq(employees.active, true), gt(employees.salary, 50000))
+          and(eq(employees.active, true), gt(employees.salary, 50000)),
         )
 
       const builtQuery = getQueryIR(query)
@@ -108,7 +108,7 @@ describe(`QueryBuilder Functions`, () => {
       const query = new Query()
         .from({ employees: employeesCollection })
         .where(({ employees }) =>
-          or(eq(employees.department_id, 1), eq(employees.department_id, 2))
+          or(eq(employees.department_id, 1), eq(employees.department_id, 2)),
         )
 
       const builtQuery = getQueryIR(query)

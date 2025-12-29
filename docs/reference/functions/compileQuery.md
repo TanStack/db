@@ -27,19 +27,19 @@ Compiles a query IR into a D2 pipeline
 
 ### rawQuery
 
-[`QueryIR`](../../@tanstack/namespaces/IR/interfaces/QueryIR.md)
+[`QueryIR`](../@tanstack/namespaces/IR/interfaces/QueryIR.md)
 
 The query IR to compile
 
 ### inputs
 
-`Record`\<`string`, [`KeyedStream`](../../type-aliases/KeyedStream.md)\>
+`Record`\<`string`, [`KeyedStream`](../type-aliases/KeyedStream.md)\>
 
 Mapping of source aliases to input streams (e.g., `{ employee: input1, manager: input2 }`)
 
 ### collections
 
-`Record`\<`string`, [`Collection`](../../interfaces/Collection.md)\<`any`, `any`, `any`, `any`, `any`\>\>
+`Record`\<`string`, [`Collection`](../interfaces/Collection.md)\<`any`, `any`, `any`, `any`, `any`\>\>
 
 Mapping of collection IDs to Collection instances
 

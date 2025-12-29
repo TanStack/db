@@ -1,5 +1,5 @@
-import { MurmurHashStream, randomHash } from "./murmur.js"
-import type { Hasher } from "./murmur.js"
+import { MurmurHashStream, randomHash } from './murmur.js'
+import type { Hasher } from './murmur.js'
 
 /*
  * Implementation of structural hashing based on the Composites polyfill implementation:
@@ -150,7 +150,7 @@ function updateHasher(hasher: Hasher, input: unknown): void {
       return
     default:
       console.warn(
-        `Ignored input during hashing because it is of type ${typeof input} which is not supported`
+        `Ignored input during hashing because it is of type ${typeof input} which is not supported`,
       )
   }
 }

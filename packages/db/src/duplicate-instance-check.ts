@@ -1,4 +1,4 @@
-import { DuplicateDbInstanceError } from "./errors"
+import { DuplicateDbInstanceError } from './errors'
 
 /**
  * Check if we're in a browser top-level window (not a worker, SSR, or iframe).

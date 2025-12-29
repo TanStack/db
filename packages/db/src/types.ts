@@ -1,9 +1,9 @@
-import type { IStreamBuilder } from "@tanstack/db-ivm"
-import type { Collection } from "./collection/index.js"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { Transaction } from "./transactions"
-import type { BasicExpression, OrderBy } from "./query/ir.js"
-import type { EventEmitter } from "./event-emitter.js"
+import type { IStreamBuilder } from '@tanstack/db-ivm'
+import type { Collection } from './collection/index.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { Transaction } from './transactions'
+import type { BasicExpression, OrderBy } from './query/ir.js'
+import type { EventEmitter } from './event-emitter.js'
 
 /**
  * Interface for a collection-like object that provides the necessary methods
@@ -124,7 +124,7 @@ export type MutationFnParams<T extends object = Record<string, unknown>> = {
 }
 
 export type MutationFn<T extends object = Record<string, unknown>> = (
-  params: MutationFnParams<T>
+  params: MutationFnParams<T>,
 ) => Promise<any>
 
 /**
@@ -238,9 +238,9 @@ export interface SubscriptionUnsubscribedEvent {
  * All subscription events
  */
 export type SubscriptionEvents = {
-  "status:change": SubscriptionStatusChangeEvent
-  "status:ready": SubscriptionStatusEvent<`ready`>
-  "status:loadingSubset": SubscriptionStatusEvent<`loadingSubset`>
+  'status:change': SubscriptionStatusChangeEvent
+  'status:ready': SubscriptionStatusEvent<`ready`>
+  'status:loadingSubset': SubscriptionStatusEvent<`loadingSubset`>
   unsubscribed: SubscriptionUnsubscribedEvent
 }
 
@@ -253,13 +253,52 @@ export interface Subscription extends EventEmitter<SubscriptionEvents> {
   readonly status: SubscriptionStatus
 }
 
+/**
+ * Cursor expressions for pagination, passed separately from the main `where` clause.
+ * The sync layer can choose to use cursor-based pagination (combining these with the where)
+ * or offset-based pagination (ignoring these and using the `offset` parameter).
+ *
+ * Neither expression includes the main `where` clause - they are cursor-specific only.
+ */
+export type CursorExpressions = {
+  /**
+   * Expression for rows greater than (after) the cursor value.
+   * For multi-column orderBy, this is a composite cursor using OR of conditions.
+   * Example for [col1 ASC, col2 DESC] with values [v1, v2]:
+   *   or(gt(col1, v1), and(eq(col1, v1), lt(col2, v2)))
+   */
+  whereFrom: BasicExpression<boolean>
+  /**
+   * Expression for rows equal to the current cursor value (first orderBy column only).
+   * Used to handle tie-breaking/duplicates at the boundary.
+   * Example: eq(col1, v1) or for Dates: and(gte(col1, v1), lt(col1, v1+1ms))
+   */
+  whereCurrent: BasicExpression<boolean>
+  /**
+   * The key of the last item that was loaded.
+   * Can be used by sync layers for tracking or deduplication.
+   */
+  lastKey?: string | number
+}
+
 export type LoadSubsetOptions = {
-  /** The where expression to filter the data */
+  /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
   /** The order by clause to sort the data */
   orderBy?: OrderBy
   /** The limit of the data to load */
   limit?: number
+  /**
+   * Cursor expressions for cursor-based pagination.
+   * These are separate from `where` - the sync layer should combine them if using cursor-based pagination.
+   * Neither expression includes the main `where` clause.
+   */
+  cursor?: CursorExpressions
+  /**
+   * Row offset for offset-based pagination.
+   * The sync layer can use this instead of `cursor` if it prefers offset-based pagination.
+   */
+  offset?: number
   /**
    * The subscription that triggered the load.
    * Advanced sync implementations can use this for:
@@ -289,7 +328,7 @@ export interface SyncConfig<
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
     begin: () => void
-    write: (message: Omit<ChangeMessage<T>, `key`>) => void
+    write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     commit: () => void
     markReady: () => void
     truncate: () => void
@@ -322,19 +361,35 @@ export interface ChangeMessage<
   metadata?: Record<string, unknown>
 }
 
-export interface OptimisticChangeMessage<
+export type DeleteKeyMessage<TKey extends string | number = string | number> =
+  Omit<ChangeMessage<any, TKey>, `value` | `previousValue` | `type`> & {
+    type: `delete`
+  }
+
+export type ChangeMessageOrDeleteKeyMessage<
   T extends object = Record<string, unknown>,
-> extends ChangeMessage<T> {
-  // Is this change message part of an active transaction. Only applies to optimistic changes.
-  isActive?: boolean
-}
+  TKey extends string | number = string | number,
+> = Omit<ChangeMessage<T>, `key`> | DeleteKeyMessage<TKey>
+
+export type OptimisticChangeMessage<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> =
+  | (ChangeMessage<T> & {
+      // Is this change message part of an active transaction. Only applies to optimistic changes.
+      isActive?: boolean
+    })
+  | (DeleteKeyMessage<TKey> & {
+      // Is this change message part of an active transaction. Only applies to optimistic changes.
+      isActive?: boolean
+    })
 
 /**
  * The Standard Schema interface.
  * This follows the standard-schema specification: https://github.com/standard-schema/standard-schema
  */
 export type StandardSchema<T> = StandardSchemaV1 & {
-  "~standard": {
+  '~standard': {
     types?: {
       input: T
       output: T
@@ -855,3 +910,6 @@ export type WritableDeep<T> = T extends BuiltIns
           : T extends object
             ? WritableObjectDeep<T>
             : unknown
+
+export type MakeOptional<T, K extends keyof T> = Omit<T, K> &
+  Partial<Pick<T, K>>

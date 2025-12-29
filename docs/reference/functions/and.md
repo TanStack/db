@@ -25,7 +25,7 @@ Defined in: [packages/db/src/query/builder/functions.ts:181](https://github.com/
 
 ### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
 
 ## Call Signature
 
@@ -54,4 +54,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:185](https://github.com/
 
 ### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>

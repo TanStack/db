@@ -4,13 +4,13 @@
  * Tests concurrent loadSubset calls and deduplication behavior
  */
 
-import { describe, expect, it } from "vitest"
-import { createLiveQueryCollection, eq, gt, isNull, lt } from "@tanstack/db"
-import { waitForQueryData } from "../utils/helpers"
-import type { E2ETestConfig } from "../types"
+import { describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, eq, gt, isNull, lt } from '@tanstack/db'
+import { waitForQueryData } from '../utils/helpers'
+import type { E2ETestConfig } from '../types'
 
 export function createDeduplicationTestSuite(
-  getConfig: () => Promise<E2ETestConfig>
+  getConfig: () => Promise<E2ETestConfig>,
 ) {
   describe(`Deduplication Suite`, () => {
     describe(`Identical Predicates`, () => {
@@ -22,13 +22,13 @@ export function createDeduplicationTestSuite(
         const query1 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.age, 25))
+            .where(({ user }) => eq(user.age, 25)),
         )
 
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.age, 25))
+            .where(({ user }) => eq(user.age, 25)),
         )
 
         // Execute concurrently
@@ -54,8 +54,8 @@ export function createDeduplicationTestSuite(
           createLiveQueryCollection((q) =>
             q
               .from({ user: usersCollection })
-              .where(({ user }) => gt(user.age, 30))
-          )
+              .where(({ user }) => gt(user.age, 30)),
+          ),
         )
 
         // Execute all concurrently
@@ -81,14 +81,14 @@ export function createDeduplicationTestSuite(
         const query1 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 25))
+            .where(({ user }) => gt(user.age, 25)),
         )
 
         // Query 2: age > 30 (subset of Query 1)
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 30))
+            .where(({ user }) => gt(user.age, 30)),
         )
 
         // Execute concurrently
@@ -108,14 +108,14 @@ export function createDeduplicationTestSuite(
         const query1 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 50))
+            .where(({ user }) => gt(user.age, 50)),
         )
 
         // Query 2: age < 30
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => lt(user.age, 30))
+            .where(({ user }) => lt(user.age, 30)),
         )
 
         // Execute concurrently
@@ -142,14 +142,14 @@ export function createDeduplicationTestSuite(
         const query1 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.isActive, true))
+            .where(({ user }) => eq(user.isActive, true)),
         )
 
         // Immediately start identical second query
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.isActive, true))
+            .where(({ user }) => eq(user.isActive, true)),
         )
 
         // Both should complete successfully
@@ -165,13 +165,13 @@ export function createDeduplicationTestSuite(
         const query1 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 25))
+            .where(({ user }) => gt(user.age, 25)),
         )
 
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 50))
+            .where(({ user }) => gt(user.age, 50)),
         )
 
         await Promise.all([query1.preload(), query2.preload()])
@@ -193,7 +193,7 @@ export function createDeduplicationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
             .limit(10)
-            .offset(0)
+            .offset(0),
         )
 
         const query2 = createLiveQueryCollection((q) =>
@@ -201,7 +201,7 @@ export function createDeduplicationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
             .limit(10)
-            .offset(0)
+            .offset(0),
         )
 
         await Promise.all([query1.preload(), query2.preload()])
@@ -222,14 +222,14 @@ export function createDeduplicationTestSuite(
           q
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
-            .limit(10)
+            .limit(10),
         )
 
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
-            .limit(20)
+            .limit(20),
         )
 
         await Promise.all([query1.preload(), query2.preload()])
@@ -251,7 +251,7 @@ export function createDeduplicationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
             .limit(10)
-            .offset(0)
+            .offset(0),
         )
 
         const query2 = createLiveQueryCollection((q) =>
@@ -259,7 +259,7 @@ export function createDeduplicationTestSuite(
             .from({ user: usersCollection })
             .orderBy(({ user }) => user.id, `asc`)
             .limit(10)
-            .offset(10)
+            .offset(10),
         )
 
         await Promise.all([query1.preload(), query2.preload()])
@@ -288,8 +288,8 @@ export function createDeduplicationTestSuite(
           createLiveQueryCollection((q) =>
             q
               .from({ user: usersCollection })
-              .where(({ user }) => eq(user.isActive, true))
-          )
+              .where(({ user }) => eq(user.isActive, true)),
+          ),
         )
 
         // Execute all simultaneously
@@ -314,28 +314,28 @@ export function createDeduplicationTestSuite(
           createLiveQueryCollection((q) =>
             q
               .from({ user: usersCollection })
-              .where(({ user }) => eq(user.age, 25))
+              .where(({ user }) => eq(user.age, 25)),
           ),
           createLiveQueryCollection((q) =>
             q
               .from({ user: usersCollection })
-              .where(({ user }) => gt(user.age, 50))
+              .where(({ user }) => gt(user.age, 50)),
           ),
           createLiveQueryCollection((q) =>
             q
               .from({ user: usersCollection })
-              .where(({ user }) => eq(user.isActive, true))
+              .where(({ user }) => eq(user.isActive, true)),
           ),
           createLiveQueryCollection((q) =>
             q
               .from({ user: usersCollection })
-              .where(({ user }) => isNull(user.email))
+              .where(({ user }) => isNull(user.email)),
           ),
         ]
 
         await Promise.all(queries.map((q) => q.preload()))
         await Promise.all(
-          queries.map((q) => waitForQueryData(q, { minSize: 1 }))
+          queries.map((q) => waitForQueryData(q, { minSize: 1 })),
         )
 
         // Each query should have valid results
