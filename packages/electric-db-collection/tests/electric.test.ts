@@ -3186,6 +3186,362 @@ describe(`Electric Integration`, () => {
       expect(testCollection.has(1)).toBe(true)
       expect(testCollection.status).toBe(`ready`)
     })
+
+    it(`should handle must-refetch in progressive mode without orphan transactions`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
+      const config = {
+        id: `progressive-must-refetch-orphan-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Phase 1: Complete the initial sync in progressive mode
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // After atomic swap, data should be visible
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.size).toBe(2)
+
+      // No pending uncommitted synced transactions after initial sync
+      expect(testCollection._state.pendingSyncedTransactions.length).toBe(0)
+
+      // Phase 2: Receive must-refetch
+      // This resets hasReceivedUpToDate to false but starts a transaction
+      testSubscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      // Old data should still be visible (transaction not committed yet)
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.size).toBe(2)
+
+      // There should be exactly 1 uncommitted pending transaction from must-refetch
+      expect(testCollection._state.pendingSyncedTransactions.length).toBe(1)
+      expect(
+        testCollection._state.pendingSyncedTransactions[0]?.committed,
+      ).toBe(false)
+
+      // Phase 3: Send new data after must-refetch (in separate batch)
+      // Without the fix, these would be buffered and cause orphan transaction
+      testSubscriber([
+        {
+          key: `3`,
+          value: { id: 3, name: `User 3` },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `4`,
+          value: { id: 4, name: `User 4` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Data still not committed (no up-to-date yet)
+      expect(testCollection.size).toBe(2)
+
+      // Still 1 pending transaction (with the fix, data is written to it, not buffered)
+      expect(testCollection._state.pendingSyncedTransactions.length).toBe(1)
+
+      // Phase 4: Send up-to-date (in separate batch)
+      // Without the fix: atomic swap would try to start a new transaction,
+      // leaving the must-refetch transaction uncommitted (orphan)
+      // With the fix: normal commit happens on the existing transaction
+      testSubscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // After the fix: old data truncated, new data committed
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(false) // Truncated by must-refetch
+      expect(testCollection.has(2)).toBe(false) // Truncated by must-refetch
+      expect(testCollection.has(3)).toBe(true) // New data after must-refetch
+      expect(testCollection.has(4)).toBe(true) // New data after must-refetch
+      expect(testCollection.size).toBe(2)
+
+      // CRITICAL: No orphan uncommitted transactions should remain
+      // Without the fix, there would be 1 uncommitted transaction from must-refetch
+      expect(testCollection._state.pendingSyncedTransactions.length).toBe(0)
+
+      // Verify data is correct (not undefined from orphan transaction)
+      expect(testCollection.get(3)).toEqual({ id: 3, name: `User 3` })
+      expect(testCollection.get(4)).toEqual({ id: 4, name: `User 4` })
+    })
+
+    it(`should handle must-refetch in progressive mode with txid tracking`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
+      const config = {
+        id: `progressive-must-refetch-txid-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Complete initial sync
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert`, txids: [100] },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+
+      // Must-refetch
+      testSubscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      // Send data with txids after must-refetch
+      // Without the fix, txids would not be tracked because isBufferingInitialSync() returns true
+      testSubscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2` },
+          headers: { operation: `insert`, txids: [200] },
+        },
+        {
+          key: `3`,
+          value: { id: 3, name: `User 3` },
+          headers: { operation: `insert`, txids: [201] },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.size).toBe(2)
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.has(3)).toBe(true)
+    })
+
+    it(`should handle must-refetch in progressive mode with snapshot-end metadata`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
+      const config = {
+        id: `progressive-must-refetch-snapshot-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Complete initial sync
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+
+      // Must-refetch
+      testSubscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      // Send data with snapshot-end after must-refetch
+      // Without the fix, snapshot-end metadata would not be tracked
+      testSubscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `200`,
+            xmax: `210`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.size).toBe(1)
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.get(2)).toEqual({ id: 2, name: `User 2` })
+    })
+
+    it(`should handle multiple batches after must-refetch in progressive mode`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
+      const config = {
+        id: `progressive-must-refetch-batches-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Complete initial sync
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+
+      // Must-refetch
+      testSubscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      // First batch of data after must-refetch
+      testSubscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Second batch of data after must-refetch
+      testSubscriber([
+        {
+          key: `3`,
+          value: { id: 3, name: `User 3` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Third batch of data after must-refetch
+      testSubscriber([
+        {
+          key: `4`,
+          value: { id: 4, name: `User 4` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Still waiting for up-to-date
+      expect(testCollection.size).toBe(1) // Only old data visible
+
+      // Final up-to-date
+      testSubscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // All new data should be committed
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(false) // Truncated
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.has(3)).toBe(true)
+      expect(testCollection.has(4)).toBe(true)
+      expect(testCollection.size).toBe(3)
+    })
   })
 
   describe(`syncMode configuration - GC and resync`, () => {
