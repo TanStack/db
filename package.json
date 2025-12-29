@@ -12,7 +12,7 @@
     "build:minified": "pnpm --filter \"./packages/**\" build:minified",
     "changeset": "changeset",
     "changeset:publish": "changeset publish",
-    "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
+    "changeset:version": "changeset version && tsx scripts/update-example-deps.ts && pnpm install --no-frozen-lockfile",
     "format": "prettier --experimental-cli --ignore-unknown '**/*' --write",
     "lint": "pnpm --filter \"./packages/**\" lint",
     "lint-all": "eslint . --fix",
