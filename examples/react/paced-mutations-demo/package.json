@@ -12,14 +12,14 @@
     "@tanstack/db": "^0.5.16",
     "@tanstack/react-db": "^0.1.60",
     "mitt": "^3.0.1",
-    "react": "^19.2.1",
-    "react-dom": "^19.2.1"
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
+    "@vitejs/plugin-react": "^5.1.2",
     "typescript": "^5.9.2",
-    "vite": "^7.2.6"
+    "vite": "^7.3.0"
   }
 }

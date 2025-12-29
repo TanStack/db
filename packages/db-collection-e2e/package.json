@@ -16,10 +16,10 @@
     "pg": "^8.16.3"
   },
   "devDependencies": {
-    "@types/pg": "^8.15.6",
+    "@types/pg": "^8.16.0",
     "@vitest/ui": "^3.2.4",
     "typescript": "^5.9.2",
-    "vite": "^7.2.6",
+    "vite": "^7.3.0",
     "vitest": "^3.2.4"
   }
 }
