@@ -1075,6 +1075,83 @@ describe(`createLiveQueryCollection`, () => {
   })
 
   describe(`isLoadingSubset integration`, () => {
+    it(`should not mark live query ready while isLoadingSubset is true`, async () => {
+      // This test demonstrates the bug where live query is marked ready
+      // before isLoadingSubset becomes false, causing "ready" status with no data
+
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      // Track whether loadSubset was called
+      let loadSubsetCalled = false
+
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `source-delayed-subset`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Mark source ready immediately with some initial data
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 10 } })
+            write({ type: `insert`, value: { id: 2, value: 20 } })
+            write({ type: `insert`, value: { id: 3, value: 30 } })
+            commit()
+            markReady()
+
+            return {
+              loadSubset: () => {
+                loadSubsetCalled = true
+                // Return a promise that we control to delay the subset loading
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query with orderBy + limit that triggers lazy loading
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .orderBy(({ item }) => item.value, `asc`)
+            .limit(2),
+        startSync: true,
+      })
+
+      // Wait a bit for the subscription to start and trigger loadSubset
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Source should be ready
+      expect(sourceCollection.isReady()).toBe(true)
+
+      // loadSubset should have been called (verifying our test setup is correct)
+      expect(loadSubsetCalled).toBe(true)
+
+      // Live query should have isLoadingSubset = true
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // KEY ASSERTION: Live query should NOT be ready while isLoadingSubset is true
+      // This is the bug we're fixing - without the fix, status would be 'ready' here
+      expect(liveQuery.status).not.toBe(`ready`)
+
+      // Now resolve the loadSubset promise
+      resolveLoadSubset!()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now isLoadingSubset should be false
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
+      // Now the live query should be ready
+      expect(liveQuery.status).toBe(`ready`)
+    })
+
     it(`live query result collection has isLoadingSubset property`, async () => {
       const sourceCollection = createCollection<{ id: string; value: string }>({
         id: `source`,
