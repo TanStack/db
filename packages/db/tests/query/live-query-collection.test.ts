@@ -1140,6 +1140,9 @@ describe(`createLiveQueryCollection`, () => {
       // This is the bug we're fixing - without the fix, status would be 'ready' here
       expect(liveQuery.status).not.toBe(`ready`)
 
+      // Status should be 'loading', which means useLiveQuery would return isLoading=true
+      expect(liveQuery.status).toBe(`loading`)
+
       // Now resolve the loadSubset promise
       resolveLoadSubset!()
       await flushPromises()
