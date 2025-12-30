@@ -124,6 +124,7 @@ export function useLiveSuspenseQuery(
   deps: Array<unknown> = [],
 ) {
   const promiseRef = useRef<Promise<void> | null>(null)
+  const loadingSubsetPromiseRef = useRef<Promise<void> | null>(null)
   const collectionRef = useRef<Collection<any, any, any> | null>(null)
   const hasBeenReadyRef = useRef(false)
 
@@ -133,14 +134,16 @@ export function useLiveSuspenseQuery(
   // Reset promise and ready state when collection changes (deps changed)
   if (collectionRef.current !== result.collection) {
     promiseRef.current = null
+    loadingSubsetPromiseRef.current = null
     collectionRef.current = result.collection
     hasBeenReadyRef.current = false
   }
 
-  // Track when we reach ready state
-  if (result.status === `ready`) {
+  // Track when we reach ready state AND finished loading subset
+  if (result.status === `ready` && !result.collection.isLoadingSubset) {
     hasBeenReadyRef.current = true
     promiseRef.current = null
+    loadingSubsetPromiseRef.current = null
   }
 
   // SUSPENSE LOGIC: Throw promise or error based on collection status
@@ -156,6 +159,7 @@ export function useLiveSuspenseQuery(
   // After success, errors surface as stale data (matches TanStack Query behavior)
   if (result.status === `error` && !hasBeenReadyRef.current) {
     promiseRef.current = null
+    loadingSubsetPromiseRef.current = null
     // TODO: Once collections hold a reference to their last error object (#671),
     // we should rethrow that actual error instead of creating a generic message
     throw new Error(`Collection "${result.collection.id}" failed to load`)
@@ -170,6 +174,30 @@ export function useLiveSuspenseQuery(
     // Note: We don't check React version here. In React <18, this will be caught
     // by an Error Boundary, which provides a reasonable failure mode.
     throw promiseRef.current
+  }
+
+  // Also suspend while loading subset data in on-demand mode
+  // This prevents suspense from releasing before the query's data is loaded
+  if (result.collection.isLoadingSubset && !hasBeenReadyRef.current) {
+    if (!loadingSubsetPromiseRef.current) {
+      loadingSubsetPromiseRef.current = new Promise<void>((resolve) => {
+        // Check if already done loading (race condition guard)
+        if (!result.collection.isLoadingSubset) {
+          resolve()
+          return
+        }
+        const unsubscribe = result.collection.on(
+          `loadingSubset:change`,
+          (event) => {
+            if (!event.isLoadingSubset) {
+              unsubscribe()
+              resolve()
+            }
+          },
+        )
+      })
+    }
+    throw loadingSubsetPromiseRef.current
   }
 
   // Return data without status/loading flags (handled by Suspense/ErrorBoundary)
