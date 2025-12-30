@@ -297,8 +297,10 @@ function processJoin(
             return
           }
 
-          // Request filtered snapshot from lazy collection for matching join keys
-          const joinKeys = data.getInner().map(([[joinKey]]) => joinKey)
+          // Request filtered snapshot from lazy collection for unique matching join keys
+          const joinKeys = [
+            ...new Set(data.getInner().map(([[joinKey]]) => joinKey)),
+          ]
           const lazyJoinRef = new PropRef(followRefResult.path)
           const loaded = lazySourceSubscription.requestSnapshot({
             where: inArray(lazyJoinRef, joinKeys),
