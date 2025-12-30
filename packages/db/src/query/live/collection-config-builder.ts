@@ -571,6 +571,20 @@ export class CollectionConfigBuilder<
       fullSyncState,
     )
 
+    // Listen for loadingSubset changes on the live query collection.
+    // When isLoadingSubset becomes false, we may need to mark the collection as ready
+    // (if all source collections are already ready but we were waiting for subset load to complete)
+    const loadingSubsetUnsubscribe = config.collection.on(
+      `loadingSubset:change`,
+      (event) => {
+        if (!event.isLoadingSubset) {
+          // Subset loading finished, check if we can now mark ready
+          this.updateLiveQueryStatus(config)
+        }
+      },
+    )
+    syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
+
     this.maybeRunGraphFn = () => this.scheduleGraphRun(loadSubsetDataCallbacks)
 
     // Initial run with callback to load more data if needed
@@ -793,8 +807,14 @@ export class CollectionConfigBuilder<
       return
     }
 
-    // Mark ready when all source collections are ready
-    if (this.allCollectionsReady()) {
+    // Mark ready when all source collections are ready AND
+    // the live query collection is not loading subset data.
+    // This prevents marking the live query ready before its data is loaded
+    // (fixes issue where useLiveQuery returns isReady=true with empty data)
+    if (
+      this.allCollectionsReady() &&
+      !this.liveQueryCollection?.isLoadingSubset
+    ) {
       markReady()
     }
   }
