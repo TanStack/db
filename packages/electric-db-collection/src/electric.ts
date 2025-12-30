@@ -1323,7 +1323,12 @@ function createElectricSync<T extends Row<unknown>>(
 
           // Check for txids in the message and add them to our store
           // Skip during buffered initial sync in progressive mode (txids will be extracted during atomic swap)
-          if (hasTxids(message) && !isBufferingInitialSync()) {
+          // EXCEPTION: If a transaction is already started (e.g., from must-refetch), track txids
+          // to avoid losing them when messages are written to the existing transaction.
+          if (
+            hasTxids(message) &&
+            (!isBufferingInitialSync() || transactionStarted)
+          ) {
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
           }
 
@@ -1358,7 +1363,9 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             // In buffered initial sync of progressive mode, buffer messages instead of writing
-            if (isBufferingInitialSync()) {
+            // EXCEPTION: If a transaction is already started (e.g., from must-refetch), write
+            // directly to it instead of buffering. This prevents orphan transactions.
+            if (isBufferingInitialSync() && !transactionStarted) {
               bufferedMessages.push(message)
             } else {
               // Normal processing: write changes immediately
@@ -1372,7 +1379,9 @@ function createElectricSync<T extends Row<unknown>>(
           } else if (isSnapshotEndMessage(message)) {
             // Track postgres snapshot metadata for resolving awaiting mutations
             // Skip during buffered initial sync (will be extracted during atomic swap)
-            if (!isBufferingInitialSync()) {
+            // EXCEPTION: If a transaction is already started (e.g., from must-refetch), track snapshots
+            // to avoid losing them when messages are written to the existing transaction.
+            if (!isBufferingInitialSync() || transactionStarted) {
               newSnapshots.push(parseSnapshotMessage(message))
             }
           } else if (isUpToDateMessage(message)) {
@@ -1385,7 +1394,9 @@ function createElectricSync<T extends Row<unknown>>(
             }
           } else if (isMoveOutMessage(message)) {
             // Handle move-out event: buffer if buffering, otherwise process immediately
-            if (isBufferingInitialSync()) {
+            // EXCEPTION: If a transaction is already started (e.g., from must-refetch), process
+            // immediately to avoid orphan transactions.
+            if (isBufferingInitialSync() && !transactionStarted) {
               bufferedMessages.push(message)
             } else {
               // Normal processing: process move-out immediately
@@ -1428,7 +1439,13 @@ function createElectricSync<T extends Row<unknown>>(
 
         if (commitPoint !== null) {
           // PROGRESSIVE MODE: Atomic swap on first up-to-date (not subset-end)
-          if (isBufferingInitialSync() && commitPoint === `up-to-date`) {
+          // EXCEPTION: Skip atomic swap if a transaction is already started (e.g., from must-refetch).
+          // In that case, do a normal commit to properly close the existing transaction.
+          if (
+            isBufferingInitialSync() &&
+            commitPoint === `up-to-date` &&
+            !transactionStarted
+          ) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`,
             )
