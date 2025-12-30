@@ -392,6 +392,9 @@ export function useLiveQuery(
     // Subscribe to collection changes with granular updates
     const subscription = currentCollection.subscribeChanges(
       (changes: Array<ChangeMessage<any>>) => {
+        // avoids state_unsafe_mutation
+        await tick()
+        
         // Apply each change individually to the reactive state
         untrack(() => {
           for (const change of changes) {
