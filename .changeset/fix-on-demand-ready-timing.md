@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 fix(db): prevent live query from being marked ready before subset data is loaded
