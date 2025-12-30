@@ -723,9 +723,7 @@ describe(`useLiveSuspenseQuery`, () => {
     let dataWhenSuspenseReleased: Array<any> | undefined
 
     const SuspenseTracker = ({ children }: { children: ReactNode }) => {
-      return (
-        <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
-      )
+      return <Suspense fallback={<div>Loading...</div>}>{children}</Suspense>
     }
 
     const { result } = renderHook(
