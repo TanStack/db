@@ -18,6 +18,7 @@ import {
   createMutationsTestSuite,
   createPaginationTestSuite,
   createPredicatesTestSuite,
+  createProgressiveTestSuite,
   generateSeedData,
 } from '../../db-collection-e2e/src/index'
 import { waitFor } from '../../db-collection-e2e/src/utils/helpers'
@@ -455,6 +456,8 @@ describe(`TrailBase Collection E2E Tests`, () => {
   createCollationTestSuite(getConfig)
   createMutationsTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
-  // Note: Progressive test suite from Electric is specific to Electric's snapshot phase behavior
-  // TrailBase's progressive mode works differently (background full sync instead of buffered atomic swap)
+  // Progressive test suite - tests will skip if progressiveTestControl is not available
+  // TrailBase's progressive mode doesn't have the same atomic swap mechanism as Electric,
+  // so most tests will be skipped, but we include it for completeness
+  createProgressiveTestSuite(getConfig)
 })
