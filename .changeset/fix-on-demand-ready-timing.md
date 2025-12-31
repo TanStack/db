@@ -14,6 +14,7 @@ SOURCE collections during on-demand sync. The fix now correctly checks if any so
 collection is loading subset data.
 
 Changes:
+
 - Add `anySourceCollectionLoadingSubset()` helper to check if any source collection
   has `isLoadingSubset=true`
 - Update `updateLiveQueryStatus()` to use this helper instead of checking the live
