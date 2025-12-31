@@ -162,7 +162,7 @@ await tx.commit()
 ## Complete Example: Modal State Management
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'
+import { createCollection, eq } from '@tanstack/react-db'
 import { localOnlyCollectionOptions } from '@tanstack/react-db'
 import { useLiveQuery } from '@tanstack/react-db'
 import { z } from 'zod'
@@ -194,7 +194,7 @@ export const modalStateCollection = createCollection(
 function UserProfileModal() {
   const { data: modals } = useLiveQuery((q) =>
     q.from({ modal: modalStateCollection })
-      .where(({ modal }) => modal.id === 'user-profile')
+      .where(({ modal }) => eq(modal.id, 'user-profile'))
   )
 
   const modalState = modals[0]
@@ -228,7 +228,7 @@ function UserProfileModal() {
 ## Complete Example: Form Draft State
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'
+import { createCollection, eq } from '@tanstack/react-db'
 import { localOnlyCollectionOptions } from '@tanstack/react-db'
 import { useLiveQuery } from '@tanstack/react-db'
 
@@ -250,7 +250,7 @@ export const formDraftsCollection = createCollection(
 function CreatePostForm() {
   const { data: drafts } = useLiveQuery((q) =>
     q.from({ draft: formDraftsCollection })
-      .where(({ draft }) => draft.id === 'new-post')
+      .where(({ draft }) => eq(draft.id, 'new-post'))
   )
 
   const currentDraft = drafts[0]
