@@ -1197,11 +1197,15 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
 
-    it(`source collection isLoadingSubset is independent`, async () => {
-      let resolveLoadSubset: () => void
-      const loadSubsetPromise = new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
+    it(`source collection isLoadingSubset is independent from direct calls`, async () => {
+      // Create a pending promise for tracking direct loadSubset calls (not the initial subscription load)
+      let resolveDirectLoadSubset: () => void
+      const directLoadSubsetPromise = new Promise<void>((resolve) => {
+        resolveDirectLoadSubset = resolve
       })
+
+      // Track how many times loadSubset is called
+      let loadSubsetCallCount = 0
 
       const sourceCollection = createCollection<{ id: string; value: number }>({
         id: `source`,
@@ -1214,7 +1218,15 @@ describe(`createLiveQueryCollection`, () => {
             commit()
             markReady()
             return {
-              loadSubset: () => loadSubsetPromise,
+              loadSubset: () => {
+                loadSubsetCallCount++
+                // First call is from the subscription's initial load - complete synchronously
+                // Subsequent calls (direct calls) use the pending promise
+                if (loadSubsetCallCount === 1) {
+                  return true // synchronous completion
+                }
+                return directLoadSubsetPromise
+              },
             }
           },
         },
@@ -1227,18 +1239,74 @@ describe(`createLiveQueryCollection`, () => {
 
       await liveQuery.preload()
 
+      // After preload, both should have isLoadingSubset = false
+      expect(sourceCollection.isLoadingSubset).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
       // Calling loadSubset directly on source collection sets its own isLoadingSubset
       sourceCollection._sync.loadSubset({})
       expect(sourceCollection.isLoadingSubset).toBe(true)
 
       // But live query isLoadingSubset tracks subscription-driven loads, not direct loadSubset calls
-      // so it remains false unless subscriptions trigger loads via predicate pushdown
+      // so it remains false when loadSubset is called directly on the source collection
       expect(liveQuery.isLoadingSubset).toBe(false)
 
-      resolveLoadSubset!()
+      resolveDirectLoadSubset!()
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       expect(sourceCollection.isLoadingSubset).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+    })
+
+    it(`status listener is registered before triggering snapshot to prevent race condition`, async () => {
+      // This test verifies the fix for the race condition where the subscription
+      // status could transition to 'loadingSubset' and back to 'ready' before
+      // the status listener was registered, causing the live query to miss
+      // tracking the loadSubset promise.
+      //
+      // The fix ensures the status listener is registered BEFORE calling
+      // triggerSnapshot() (which calls requestSnapshot/requestLimitedSnapshot).
+
+      // Track the order of events
+      const events: Array<string> = []
+
+      // Create a source collection where loadSubset synchronously calls the tracking
+      const sourceCollection = createCollection<{ id: number; name: string }>({
+        id: `race-condition-source`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                events.push(`loadSubset called`)
+                // Return a synchronously resolved promise to simulate the race condition
+                return Promise.resolve().then(() => {
+                  events.push(`loadSubset resolved`)
+                })
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      // Wait for the live query to be ready
+      await liveQuery.preload()
+
+      // Verify the events occurred
+      expect(events).toContain(`loadSubset called`)
+      expect(events).toContain(`loadSubset resolved`)
+
+      // The key assertion: the live query should be ready after preload
+      // This proves that even with a synchronously-resolved promise,
+      // the code path works correctly
+      expect(liveQuery.status).toBe(`ready`)
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
   })

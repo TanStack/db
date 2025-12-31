@@ -15,5 +15,9 @@ Changes:
 - Listen for `loadingSubset:change` events on the live query collection to trigger
   the ready check when subset loading completes
 - Fix race condition in `CollectionSubscriber` where the `status:change` listener was
-  registered after checking the subscription status, which could cause the listener
-  to miss status changes that occurred between the check and registration
+  registered after the snapshot was triggered. Now the subscription creation is split
+  from snapshot triggering, allowing the listener to be registered BEFORE any async
+  work starts. This ensures we never miss status transitions even if the loadSubset
+  promise resolves synchronously.
+- Add `deferSnapshot` option to `subscribeChanges()` to support the deferred snapshot
+  pattern used by the race condition fix
