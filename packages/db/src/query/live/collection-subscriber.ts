@@ -89,13 +89,11 @@ export class CollectionSubscriber<
       }
     }
 
-    // It can be that we are not yet subscribed when the first `loadSubset` call happens (i.e. the initial query).
-    // So we also check the status here and if it's `loadingSubset` then we track the load promise
-    if (subscription.status === `loadingSubset`) {
-      trackLoadPromise()
-    }
-
-    // Subscribe to subscription status changes to propagate loading state
+    // Subscribe to subscription status changes to propagate loading state.
+    // IMPORTANT: Register the listener BEFORE checking the current status to avoid a race condition.
+    // If we check status first and it's 'loadingSubset', then register the listener,
+    // the loadSubset promise might resolve between these two steps, causing us to miss
+    // the 'ready' status change event and leaving the tracked promise unresolved forever.
     const statusUnsubscribe = subscription.on(`status:change`, (event) => {
       if (event.status === `loadingSubset`) {
         trackLoadPromise()
@@ -109,6 +107,13 @@ export class CollectionSubscriber<
         }
       }
     })
+
+    // Now check the current status after the listener is registered.
+    // If status is 'loadingSubset', track it - the listener above will catch the transition to 'ready'.
+    // If status is already 'ready', we either missed a quick transition or there was no loading at all.
+    if (subscription.status === `loadingSubset`) {
+      trackLoadPromise()
+    }
 
     const unsubscribe = () => {
       // If subscription has a pending promise, resolve it before unsubscribing
