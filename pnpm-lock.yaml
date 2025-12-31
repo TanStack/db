@@ -1008,6 +1008,9 @@ importers:
         specifier: '>=4.7'
         version: 5.9.3
     devDependencies:
+      '@tanstack/db-collection-e2e':
+        specifier: workspace:*
+        version: link:../db-collection-e2e
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
