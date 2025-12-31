@@ -816,7 +816,10 @@ export class CollectionConfigBuilder<
     // no source collection is currently loading subset data.
     // This prevents marking the live query ready before its data is loaded
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
-    if (this.allCollectionsReady() && !this.anySourceCollectionLoadingSubset()) {
+    if (
+      this.allCollectionsReady() &&
+      !this.anySourceCollectionLoadingSubset()
+    ) {
       markReady()
     }
   }
