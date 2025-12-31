@@ -544,6 +544,9 @@ describe.each([
             .limit(2),
       })
 
+      // Wait for async subset loading to complete
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
       expect(limitedLiveQuery.status).toBe(`ready`)
       expect(limitedLiveQuery.size).toBe(2) // Only first 2 active users
       expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)

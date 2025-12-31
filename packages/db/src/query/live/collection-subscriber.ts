@@ -53,23 +53,31 @@ export class CollectionSubscriber<
   }
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
+    // Step 1: Create subscription and get deferred snapshot trigger
+    // The subscription is created but snapshot request is NOT triggered yet.
+    // This allows us to register the status listener BEFORE any async work starts.
     let subscription: CollectionSubscription
+    let triggerSnapshot: () => void
     const orderByInfo = this.getOrderByInfo()
     if (orderByInfo) {
-      subscription = this.subscribeToOrderedChanges(
+      const result = this.subscribeToOrderedChanges(
         whereExpression,
         orderByInfo,
       )
+      subscription = result.subscription
+      triggerSnapshot = result.triggerSnapshot
     } else {
       // If the source alias is lazy then we should not include the initial state
       const includeInitialState = !this.collectionConfigBuilder.isLazyAlias(
         this.alias,
       )
 
-      subscription = this.subscribeToMatchingChanges(
+      const result = this.subscribeToMatchingChanges(
         whereExpression,
         includeInitialState,
       )
+      subscription = result.subscription
+      triggerSnapshot = result.triggerSnapshot
     }
 
     const trackLoadPromise = () => {
@@ -89,13 +97,9 @@ export class CollectionSubscriber<
       }
     }
 
-    // It can be that we are not yet subscribed when the first `loadSubset` call happens (i.e. the initial query).
-    // So we also check the status here and if it's `loadingSubset` then we track the load promise
-    if (subscription.status === `loadingSubset`) {
-      trackLoadPromise()
-    }
-
-    // Subscribe to subscription status changes to propagate loading state
+    // Step 2: Register status listener BEFORE triggering snapshot.
+    // This ensures we don't miss any status transitions, even if the loadSubset
+    // promise resolves synchronously or very quickly.
     const statusUnsubscribe = subscription.on(`status:change`, (event) => {
       if (event.status === `loadingSubset`) {
         trackLoadPromise()
@@ -109,6 +113,16 @@ export class CollectionSubscriber<
         }
       }
     })
+
+    // Step 3: NOW trigger the snapshot request.
+    // The status listener is already registered, so we'll catch any status transitions.
+    triggerSnapshot()
+
+    // Check current status after triggering - if status is 'loadingSubset', track it.
+    // The listener above will catch the transition to 'ready'.
+    if (subscription.status === `loadingSubset`) {
+      trackLoadPromise()
+    }
 
     const unsubscribe = () => {
       // If subscription has a pending promise, resolve it before unsubscribing
@@ -180,30 +194,39 @@ export class CollectionSubscriber<
   private subscribeToMatchingChanges(
     whereExpression: BasicExpression<boolean> | undefined,
     includeInitialState: boolean = false,
-  ) {
+  ): { subscription: CollectionSubscription; triggerSnapshot: () => void } {
     const sendChanges = (
       changes: Array<ChangeMessage<any, string | number>>,
     ) => {
       this.sendChangesToPipeline(changes)
     }
 
-    // Only pass includeInitialState when true. When it's false, we leave it
-    // undefined so that user subscriptions with explicit `includeInitialState: false`
-    // can be distinguished from internal lazy-loading subscriptions.
-    // If we pass `false`, changes.ts would call markAllStateAsSeen() which
-    // disables filtering - but internal subscriptions still need filtering.
+    // Create subscription WITHOUT triggering snapshot - pass deferSnapshot: true
+    // This allows the caller to register status listeners before any async work starts
     const subscription = this.collection.subscribeChanges(sendChanges, {
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
+      deferSnapshot: true,
     })
 
-    return subscription
+    // Return the subscription and a function to trigger the snapshot later
+    // Note: For non-ordered queries (no limit/offset), we use trackLoadSubsetPromise: false
+    // to match the original behavior. The race condition fix is primarily needed for
+    // ordered queries with pagination where Electric's on-demand sync needs to wait
+    // for subset data before marking ready.
+    const triggerSnapshot = () => {
+      if (includeInitialState) {
+        subscription.requestSnapshot({ trackLoadSubsetPromise: false })
+      }
+    }
+
+    return { subscription, triggerSnapshot }
   }
 
   private subscribeToOrderedChanges(
     whereExpression: BasicExpression<boolean> | undefined,
     orderByInfo: OrderByOptimizationInfo,
-  ) {
+  ): { subscription: CollectionSubscription; triggerSnapshot: () => void } {
     const { orderBy, offset, limit, index } = orderByInfo
 
     const sendChangesInRange = (
@@ -236,29 +259,34 @@ export class CollectionSubscriber<
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
-    if (index) {
-      // We have an index on the first orderBy column - use lazy loading optimization
-      // This works for both single-column and multi-column orderBy:
-      // - Single-column: index provides exact ordering
-      // - Multi-column: index provides ordering on first column, secondary sort in memory
-      subscription.setOrderByIndex(index)
+    // Return the subscription and a deferred function to trigger the snapshot.
+    // The caller will register status listeners before calling triggerSnapshot,
+    // ensuring we don't miss any status transitions (even if loadSubset resolves quickly).
+    const triggerSnapshot = () => {
+      if (index) {
+        // We have an index on the first orderBy column - use lazy loading optimization
+        // This works for both single-column and multi-column orderBy:
+        // - Single-column: index provides exact ordering
+        // - Multi-column: index provides ordering on first column, secondary sort in memory
+        subscription.setOrderByIndex(index)
 
-      // Load the first `offset + limit` values from the index
-      // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
-      subscription.requestLimitedSnapshot({
-        limit: offset + limit,
-        orderBy: normalizedOrderBy,
-      })
-    } else {
-      // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
-      // so the sync layer can optimize if the backend supports it
-      subscription.requestSnapshot({
-        orderBy: normalizedOrderBy,
-        limit: offset + limit,
-      })
+        // Load the first `offset + limit` values from the index
+        // i.e. the K items from the collection that fall into the requested range: [offset, offset + limit[
+        subscription.requestLimitedSnapshot({
+          limit: offset + limit,
+          orderBy: normalizedOrderBy,
+        })
+      } else {
+        // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
+        // so the sync layer can optimize if the backend supports it
+        subscription.requestSnapshot({
+          orderBy: normalizedOrderBy,
+          limit: offset + limit,
+        })
+      }
     }
 
-    return subscription
+    return { subscription, triggerSnapshot }
   }
 
   // This function is called by maybeRunGraph
