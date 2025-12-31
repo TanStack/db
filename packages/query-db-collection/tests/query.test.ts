@@ -4219,7 +4219,7 @@ describe(`QueryCollection`, () => {
         defaultOptions: {
           queries: {
             gcTime: 5 * 60 * 1000, // 5 minutes
-            staleTime: 0,
+            staleTime: Infinity, // set an Infinity staleTime to prevent a refetch
             retry: false,
           },
         },
@@ -4562,7 +4562,7 @@ describe(`QueryCollection`, () => {
       const testQueryClient = new QueryClient({
         defaultOptions: {
           queries: {
-            staleTime: 0,
+            staleTime: Infinity, // set an Infinity staleTime to prevent a refetch
             gcTime: 300,
             retry: false,
           },
