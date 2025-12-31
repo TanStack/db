@@ -566,20 +566,24 @@ export class CollectionConfigBuilder<
       },
     )
 
-    // Listen for loadingSubset changes on the live query collection BEFORE subscribing.
+    // Listen for loadingSubset changes on SOURCE collections BEFORE subscribing.
     // This ensures we don't miss the event if subset loading completes synchronously.
-    // When isLoadingSubset becomes false, we may need to mark the collection as ready
-    // (if all source collections are already ready but we were waiting for subset load to complete)
-    const loadingSubsetUnsubscribe = config.collection.on(
-      `loadingSubset:change`,
-      (event) => {
-        if (!event.isLoadingSubset) {
-          // Subset loading finished, check if we can now mark ready
-          this.updateLiveQueryStatus(config)
-        }
-      },
-    )
-    syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
+    // When a source collection's isLoadingSubset becomes false, we may need to mark the
+    // live query as ready (if all source collections are already ready and no longer loading).
+    // Note: We listen to source collections, not the live query collection, because the
+    // loadSubset/trackLoadPromise mechanism runs on source collections during on-demand sync.
+    for (const collection of Object.values(this.collections)) {
+      const loadingSubsetUnsubscribe = collection.on(
+        `loadingSubset:change`,
+        (event) => {
+          if (!event.isLoadingSubset) {
+            // This source collection finished loading, check if we can now mark ready
+            this.updateLiveQueryStatus(config)
+          }
+        },
+      )
+      syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
+    }
 
     const loadSubsetDataCallbacks = this.subscribeToAllCollections(
       config,
@@ -809,13 +813,10 @@ export class CollectionConfigBuilder<
     }
 
     // Mark ready when all source collections are ready AND
-    // the live query collection is not loading subset data.
+    // no source collection is currently loading subset data.
     // This prevents marking the live query ready before its data is loaded
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
-    if (
-      this.allCollectionsReady() &&
-      !this.liveQueryCollection?.isLoadingSubset
-    ) {
+    if (this.allCollectionsReady() && !this.anySourceCollectionLoadingSubset()) {
       markReady()
     }
   }
@@ -836,6 +837,16 @@ export class CollectionConfigBuilder<
   private allCollectionsReady() {
     return Object.values(this.collections).every((collection) =>
       collection.isReady(),
+    )
+  }
+
+  /**
+   * Check if any source collection is currently loading subset data.
+   * This is used to prevent marking the live query ready before data has been loaded.
+   */
+  private anySourceCollectionLoadingSubset() {
+    return Object.values(this.collections).some(
+      (collection) => collection.isLoadingSubset,
     )
   }
 

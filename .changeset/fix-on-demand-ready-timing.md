@@ -8,13 +8,17 @@ In on-demand sync mode, the live query collection was being marked as `ready` be
 the subset data finished loading. This caused `useLiveQuery` to return `isReady=true`
 with empty data, and `useLiveSuspenseQuery` to release suspense prematurely.
 
-Changes:
+The root cause was that `updateLiveQueryStatus()` was checking `isLoadingSubset` on the
+live query collection itself, but the `loadSubset`/`trackLoadPromise` mechanism runs on
+SOURCE collections during on-demand sync. The fix now correctly checks if any source
+collection is loading subset data.
 
-- Add a check in `updateLiveQueryStatus()` to ensure that the live query is not
-  marked ready while `isLoadingSubset` is true
-- Add a listener for `loadingSubset:change` events to trigger the ready check when
-  subset loading completes
-- Register the `loadingSubset:change` listener before subscribing to avoid race conditions
+Changes:
+- Add `anySourceCollectionLoadingSubset()` helper to check if any source collection
+  has `isLoadingSubset=true`
+- Update `updateLiveQueryStatus()` to use this helper instead of checking the live
+  query collection's `isLoadingSubset`
+- Listen for `loadingSubset:change` events on SOURCE collections (not the live query
+  collection) to trigger the ready check when subset loading completes
 - Fix race condition in `CollectionSubscriber` where the `status:change` listener was
-  registered after checking the subscription status, causing missed `ready` events when
-  `loadSubset` completed quickly
+  registered after checking the subscription status
