@@ -7,9 +7,13 @@ import type { GlobalSetupContext } from 'vitest/node'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PACKAGE_DIR = resolvePath(__dirname, '..')
+const REPO_ROOT = resolvePath(PACKAGE_DIR, '../..')
 const DOCKER_DIR = resolvePath(PACKAGE_DIR, 'docker')
-const BINARY_DIR = resolvePath(PACKAGE_DIR, 'testing-bin-linux')
-const BINARY_PATH = resolvePath(BINARY_DIR, 'trail')
+// Check multiple possible binary locations
+const BINARY_PATHS = [
+  resolvePath(PACKAGE_DIR, 'testing-bin-linux', 'trail'),
+  resolvePath(REPO_ROOT, 'packages/trailbase/test-linux-bin', 'trail'),
+]
 const CONTAINER_NAME = 'trailbase-e2e-test'
 const TRAILBASE_PORT = process.env.TRAILBASE_PORT ?? '4000'
 const TRAILBASE_URL =
@@ -26,12 +30,18 @@ let serverProcess: ChildProcess | null = null
 let startedServer = false
 let usedMethod: 'binary' | 'docker' | null = null
 let tempDataDir: string | null = null
+let binaryPath: string | null = null
 
 /**
- * Check if the TrailBase binary is available
+ * Find the TrailBase binary from available paths
  */
-function isBinaryAvailable(): boolean {
-  return existsSync(BINARY_PATH)
+function findBinaryPath(): string | null {
+  for (const path of BINARY_PATHS) {
+    if (existsSync(path)) {
+      return path
+    }
+  }
+  return null
 }
 
 /**
@@ -67,7 +77,10 @@ async function isTrailBaseRunning(url: string): Promise<boolean> {
  * Start TrailBase using the local binary
  */
 function startBinaryServer(): ChildProcess {
-  console.log('🚀 Starting TrailBase using local binary...')
+  if (!binaryPath) {
+    throw new Error('Binary path not set')
+  }
+  console.log(`🚀 Starting TrailBase using local binary at ${binaryPath}...`)
 
   // Create a temp data directory for this test run
   tempDataDir = resolvePath(PACKAGE_DIR, `.trailbase-e2e-data-${Date.now()}`)
@@ -85,7 +98,7 @@ function startBinaryServer(): ChildProcess {
   )
 
   const proc = spawn(
-    BINARY_PATH,
+    binaryPath,
     ['--data-dir', tempDataDir, 'run', '--address', `0.0.0.0:${TRAILBASE_PORT}`, '--dev'],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -262,8 +275,9 @@ export default async function ({ provide }: GlobalSetupContext) {
     console.log(`✓ TrailBase already running at ${TRAILBASE_URL}`)
   } else {
     // Try binary first (preferred for CI/local testing without Docker)
-    if (isBinaryAvailable()) {
-      console.log(`✓ TrailBase binary found at ${BINARY_PATH}`)
+    binaryPath = findBinaryPath()
+    if (binaryPath) {
+      console.log(`✓ TrailBase binary found at ${binaryPath}`)
       serverProcess = startBinaryServer()
       startedServer = true
       usedMethod = 'binary'
@@ -282,11 +296,11 @@ export default async function ({ provide }: GlobalSetupContext) {
         `TrailBase is not running at ${TRAILBASE_URL} and no startup method is available.\n` +
           `Please either:\n` +
           `  1. Start TrailBase manually at ${TRAILBASE_URL}\n` +
-          `  2. Place the TrailBase binary at ${BINARY_PATH}\n` +
-          `  3. Install Docker and run the tests again\n` +
+          `  2. Place the TrailBase binary at one of:\n` +
+          BINARY_PATHS.map((p) => `     - ${p}`).join('\n') +
+          `\n  3. Install Docker and run the tests again\n` +
           `\nTo download TrailBase binary:\n` +
           `  curl -sSL https://trailbase.io/install.sh | bash\n` +
-          `  mv trail ${BINARY_PATH}\n` +
           `\nTo start TrailBase with Docker manually:\n` +
           `  cd packages/trailbase-db-collection/docker\n` +
           `  docker-compose up -d`,
