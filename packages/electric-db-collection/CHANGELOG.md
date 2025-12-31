@@ -1,5 +1,19 @@
 # @tanstack/electric-db-collection
 
+## 0.2.21
+
+### Patch Changes
+
+- Fix orphan transactions after `must-refetch` in progressive sync mode ([#1069](https://github.com/TanStack/db/pull/1069))
+
+  When a `must-refetch` message was received in progressive mode, it started a transaction with `truncate()` but reset `hasReceivedUpToDate`, causing subsequent messages to be buffered instead of written to the existing transaction. On `up-to-date`, the atomic swap code would create a new transaction, leaving the first one uncommitted forever. This caused collections to become corrupted with undefined values.
+
+  The fix ensures that when a transaction is already started (e.g., from must-refetch), messages are written directly to it instead of being buffered for atomic swap.
+
+- Fix duplicate key error when overlapping subset queries return the same row with different values. ([#1070](https://github.com/TanStack/db/pull/1070))
+
+  When multiple subset queries return the same row (e.g., different WHERE clauses that both match the same record), the server sends `insert` operations for each response. If the row's data changed between requests (e.g., timestamp field updated), this caused a `DuplicateKeySyncError`. The adapter now tracks synced keys and converts subsequent inserts to updates.
+
 ## 0.2.20
 
 ### Patch Changes
