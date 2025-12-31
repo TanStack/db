@@ -14,6 +14,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   SyncConfig,
+  SyncMode,
   UpdateMutationFnParams,
   UtilsRecord,
 } from '@tanstack/db'
@@ -82,6 +83,24 @@ function convertPartial<
 }
 
 /**
+ * The mode of sync to use for the collection.
+ * @default `eager`
+ * @description
+ * - `eager`:
+ *   - syncs all data immediately on preload
+ *   - collection will be marked as ready once the sync is complete
+ *   - there is no incremental sync
+ * - `on-demand`:
+ *   - syncs data incrementally when the collection is queried
+ *   - collection will be marked as ready immediately after the subscription starts
+ * - `progressive`:
+ *   - syncs all data for the collection in the background
+ *   - uses loadSubset during the initial sync to provide a fast path to the data required for queries
+ *   - collection will be marked as ready immediately, with full sync completing in background
+ */
+export type TrailBaseSyncMode = SyncMode | `progressive`
+
+/**
  * Configuration interface for Trailbase Collection
  */
 export interface TrailBaseCollectionConfig<
@@ -90,12 +109,18 @@ export interface TrailBaseCollectionConfig<
   TKey extends string | number = string | number,
 > extends Omit<
   BaseCollectionConfig<TItem, TKey>,
-  `onInsert` | `onUpdate` | `onDelete`
+  `onInsert` | `onUpdate` | `onDelete` | `syncMode`
 > {
   /**
    * Record API name
    */
   recordApi: RecordApi<TRecord>
+
+  /**
+   * The mode of sync to use for the collection.
+   * @default `eager`
+   */
+  syncMode?: TrailBaseSyncMode
 
   parse: Conversions<TRecord, TItem>
   serialize: Conversions<TItem, TRecord>
@@ -113,7 +138,9 @@ export function trailBaseCollectionOptions<
   TKey extends string | number = string | number,
 >(
   config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
-): CollectionConfig<TItem, TKey> & { utils: TrailBaseCollectionUtils } {
+): CollectionConfig<TItem, TKey> & {
+  utils: TrailBaseCollectionUtils
+} {
   const getKey = config.getKey
 
   const parse = (record: TRecord) =>
@@ -123,7 +150,15 @@ export function trailBaseCollectionOptions<
   const serialIns = (item: TItem) =>
     convert<TItem, TRecord>(config.serialize, item)
 
+  const abortController = new AbortController()
+
   const seenIds = new Store(new Map<string, number>())
+
+  const internalSyncMode = config.syncMode ?? `eager`
+  // For the collection config, progressive acts like on-demand (needs loadSubset)
+  const finalSyncMode =
+    internalSyncMode === `progressive` ? `on-demand` : internalSyncMode
+  let fullSyncCompleted = false
 
   const awaitIds = (
     ids: Array<string>,
@@ -136,28 +171,27 @@ export function trailBaseCollectionOptions<
     }
 
     return new Promise<void>((resolve, reject) => {
-      const timeoutId = setTimeout(() => {
-        unsubscribe()
-        reject(new TimeoutWaitingForIdsError(ids.toString()))
-      }, timeout)
+      const onAbort = () => {
+        clearTimeout(timeoutId)
+        reject(new TimeoutWaitingForIdsError(`Aborted while waiting for ids`))
+      }
+
+      abortController.signal.addEventListener(`abort`, onAbort)
+
+      const timeoutId = setTimeout(
+        () => reject(new TimeoutWaitingForIdsError(ids.toString())),
+        timeout,
+      )
 
       const unsubscribe = seenIds.subscribe((value) => {
         if (completed(value.currentVal)) {
           clearTimeout(timeoutId)
+          abortController.signal.removeEventListener(`abort`, onAbort)
           unsubscribe()
           resolve()
         }
       })
     })
-  }
-
-  let eventReader: ReadableStreamDefaultReader<Event> | undefined
-  const cancelEventReader = () => {
-    if (eventReader) {
-      eventReader.cancel()
-      eventReader.releaseLock()
-      eventReader = undefined
-    }
   }
 
   type SyncParams = Parameters<SyncConfig<TItem, TKey>[`sync`]>[0]
@@ -211,8 +245,13 @@ export function trailBaseCollectionOptions<
           const { done, value: event } = await reader.read()
 
           if (done || !event) {
-            reader.releaseLock()
-            eventReader = undefined
+            try {
+              if ((reader as any).locked) {
+                reader.releaseLock()
+              }
+            } catch {
+              // ignore if already released
+            }
             return
           }
 
@@ -244,21 +283,41 @@ export function trailBaseCollectionOptions<
 
       async function start() {
         const eventStream = await config.recordApi.subscribe(`*`)
-        const reader = (eventReader = eventStream.getReader())
+        const reader = eventStream.getReader()
 
         // Start listening for subscriptions first. Otherwise, we'd risk a gap
         // between the initial fetch and starting to listen.
         listen(reader)
 
         try {
-          await initialFetch()
+          // Eager mode: perform initial fetch to populate everything
+          if (internalSyncMode === `eager`) {
+            await initialFetch()
+            fullSyncCompleted = true
+          }
         } catch (e) {
-          cancelEventReader()
+          abortController.abort()
           throw e
         } finally {
           // Mark ready both if everything went well or if there's an error to
           // avoid blocking apps waiting for `.preload()` to finish.
+          // In on-demand/progressive mode we mark ready immediately after listener starts
+          // to allow queries to drive data loading via `loadSubset`.
           markReady()
+          // If progressive, start the background full sync after we've marked ready
+          if (internalSyncMode === `progressive`) {
+            // Defer background sync to avoid racing with preload assertions
+            setTimeout(() => {
+              void (async () => {
+                try {
+                  await initialFetch()
+                  fullSyncCompleted = true
+                } catch (e) {
+                  console.error(`TrailBase progressive full sync failed`, e)
+                }
+              })()
+            }, 0)
+          }
         }
 
         // Lastly, start a periodic cleanup task that will be removed when the
@@ -281,17 +340,73 @@ export function trailBaseCollectionOptions<
           })
         }, 120 * 1000)
 
-        reader.closed.finally(() => clearInterval(periodicCleanupTask))
+        const onAbort = () => {
+          clearInterval(periodicCleanupTask)
+          // It's safe to call cancel and releaseLock even if the stream is already closed.
+          reader.cancel().catch(() => {
+            /* ignore */
+          })
+          try {
+            reader.releaseLock()
+          } catch {
+            /* ignore */
+          }
+        }
+
+        abortController.signal.addEventListener(`abort`, onAbort)
+        reader.closed.finally(() => {
+          abortController.signal.removeEventListener(`abort`, onAbort)
+          clearInterval(periodicCleanupTask)
+        })
       }
 
       start()
+
+      // Eager mode doesn't need subset loading
+      if (internalSyncMode === `eager`) {
+        return
+      }
+
+      // On-demand and progressive modes need loadSubset for query-driven data loading
+      const loadSubset = async (opts: { limit?: number } = {}) => {
+        // In progressive mode after full sync is complete, no need to load more
+        if (internalSyncMode === `progressive` && fullSyncCompleted) {
+          return
+        }
+
+        const limit = opts.limit ?? 256
+        const response = await config.recordApi.list({ pagination: { limit } })
+        const records = response?.records ?? []
+
+        if (records.length > 0) {
+          begin()
+          for (const item of records) {
+            write({ type: `insert`, value: parse(item) })
+          }
+          commit()
+        }
+      }
+
+      return {
+        loadSubset,
+        getSyncMetadata: () =>
+          ({
+            syncMode: internalSyncMode,
+            fullSyncComplete: fullSyncCompleted,
+          }) as const,
+      }
     },
     // Expose the getSyncMetadata function
-    getSyncMetadata: undefined,
+    getSyncMetadata: () =>
+      ({
+        syncMode: internalSyncMode,
+        fullSyncComplete: fullSyncCompleted,
+      }) as const,
   }
 
   return {
     ...config,
+    syncMode: finalSyncMode,
     sync,
     getKey,
     onInsert: async (
@@ -352,7 +467,7 @@ export function trailBaseCollectionOptions<
       await awaitIds(ids)
     },
     utils: {
-      cancel: cancelEventReader,
+      cancel: () => abortController.abort(),
     },
   }
 }

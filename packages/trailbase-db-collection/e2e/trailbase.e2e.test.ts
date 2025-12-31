@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, inject } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { Client } from 'trailbase'
 import { trailBaseCollectionOptions } from '../src/trailbase'
+import type { TrailBaseSyncMode } from '../src/trailbase'
 import {
   createCollationTestSuite,
   createDeduplicationTestSuite,
@@ -20,7 +21,13 @@ import {
   generateSeedData,
 } from '../../db-collection-e2e/src/index'
 import { waitFor } from '../../db-collection-e2e/src/utils/helpers'
-import type { E2ETestConfig, User, Post, Comment } from '../../db-collection-e2e/src/types'
+import type {
+  E2ETestConfig,
+  User,
+  Post,
+  Comment,
+} from '../../db-collection-e2e/src/types'
+import type { Collection } from '@tanstack/db'
 
 declare module 'vitest' {
   export interface ProvidedContext {
@@ -63,38 +70,6 @@ interface CommentRecord {
   deleted_at: string | null
 }
 
-// Parse functions: TrailBase record -> App type
-const parseUser = (record: UserRecord): User => ({
-  id: record.id,
-  name: record.name,
-  email: record.email,
-  age: record.age,
-  isActive: record.is_active,
-  createdAt: new Date(record.created_at),
-  metadata: record.metadata ? JSON.parse(record.metadata) : null,
-  deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
-})
-
-const parsePost = (record: PostRecord): Post => ({
-  id: record.id,
-  userId: record.user_id,
-  title: record.title,
-  content: record.content,
-  viewCount: record.view_count,
-  largeViewCount: BigInt(record.large_view_count),
-  publishedAt: record.published_at ? new Date(record.published_at) : null,
-  deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
-})
-
-const parseComment = (record: CommentRecord): Comment => ({
-  id: record.id,
-  postId: record.post_id,
-  userId: record.user_id,
-  text: record.text,
-  createdAt: new Date(record.created_at),
-  deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
-})
-
 // Serialize functions: App type -> TrailBase record
 const serializeUser = (user: User): UserRecord => ({
   id: user.id,
@@ -127,21 +102,149 @@ const serializeComment = (comment: Comment): CommentRecord => ({
   deleted_at: comment.deletedAt ? comment.deletedAt.toISOString() : null,
 })
 
+// Parse config for User collection
+const userParseConfig = {
+  id: (v: string) => v,
+  name: (v: string) => v,
+  email: (v: string | null) => v,
+  age: (v: number) => v,
+  is_active: (v: boolean) => v,
+  created_at: (v: string) => new Date(v),
+  metadata: (v: string | null) => (v ? JSON.parse(v) : null),
+  deleted_at: (v: string | null) => (v ? new Date(v) : null),
+}
+
+const userSerializeConfig = {
+  id: (v: string) => v,
+  name: (v: string) => v,
+  email: (v: string | null) => v,
+  age: (v: number) => v,
+  isActive: (v: boolean) => v,
+  createdAt: (v: Date) => v.toISOString(),
+  metadata: (v: Record<string, unknown> | null) =>
+    v ? JSON.stringify(v) : null,
+  deletedAt: (v: Date | null) => (v ? v.toISOString() : null),
+}
+
+// Parse config for Post collection
+const postParseConfig = {
+  id: (v: string) => v,
+  user_id: (v: string) => v,
+  title: (v: string) => v,
+  content: (v: string | null) => v,
+  view_count: (v: number) => v,
+  large_view_count: (v: string) => BigInt(v),
+  published_at: (v: string | null) => (v ? new Date(v) : null),
+  deleted_at: (v: string | null) => (v ? new Date(v) : null),
+}
+
+const postSerializeConfig = {
+  id: (v: string) => v,
+  userId: (v: string) => v,
+  title: (v: string) => v,
+  content: (v: string | null) => v,
+  viewCount: (v: number) => v,
+  largeViewCount: (v: bigint) => v.toString(),
+  publishedAt: (v: Date | null) => (v ? v.toISOString() : null),
+  deletedAt: (v: Date | null) => (v ? v.toISOString() : null),
+}
+
+// Parse config for Comment collection
+const commentParseConfig = {
+  id: (v: string) => v,
+  post_id: (v: string) => v,
+  user_id: (v: string) => v,
+  text: (v: string) => v,
+  created_at: (v: string) => new Date(v),
+  deleted_at: (v: string | null) => (v ? new Date(v) : null),
+}
+
+const commentSerializeConfig = {
+  id: (v: string) => v,
+  postId: (v: string) => v,
+  userId: (v: string) => v,
+  text: (v: string) => v,
+  createdAt: (v: Date) => v.toISOString(),
+  deletedAt: (v: Date | null) => (v ? v.toISOString() : null),
+}
+
+/**
+ * Helper to create a set of collections for a given sync mode
+ */
+function createCollectionsForSyncMode(
+  client: Client,
+  testId: string,
+  syncMode: TrailBaseSyncMode,
+  suffix: string,
+) {
+  const usersRecordApi = client.records<UserRecord>(`users_e2e`)
+  const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
+  const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
+
+  const usersCollection = createCollection(
+    trailBaseCollectionOptions({
+      id: `trailbase-e2e-users-${suffix}-${testId}`,
+      recordApi: usersRecordApi,
+      getKey: (item: User) => item.id,
+      startSync: true,
+      syncMode,
+      parse: userParseConfig,
+      serialize: userSerializeConfig,
+    }),
+  )
+
+  const postsCollection = createCollection(
+    trailBaseCollectionOptions({
+      id: `trailbase-e2e-posts-${suffix}-${testId}`,
+      recordApi: postsRecordApi,
+      getKey: (item: Post) => item.id,
+      startSync: true,
+      syncMode,
+      parse: postParseConfig,
+      serialize: postSerializeConfig,
+    }),
+  )
+
+  const commentsCollection = createCollection(
+    trailBaseCollectionOptions({
+      id: `trailbase-e2e-comments-${suffix}-${testId}`,
+      recordApi: commentsRecordApi,
+      getKey: (item: Comment) => item.id,
+      startSync: true,
+      syncMode,
+      parse: commentParseConfig,
+      serialize: commentSerializeConfig,
+    }),
+  )
+
+  return {
+    users: usersCollection as Collection<User>,
+    posts: postsCollection as Collection<Post>,
+    comments: commentsCollection as Collection<Comment>,
+  }
+}
+
 describe(`TrailBase Collection E2E Tests`, () => {
   let config: E2ETestConfig
   let client: Client
   let testId: string
+  let seedData: ReturnType<typeof generateSeedData>
+
+  // Collections for each sync mode
+  let eagerCollections: ReturnType<typeof createCollectionsForSyncMode>
+  let onDemandCollections: ReturnType<typeof createCollectionsForSyncMode>
+  let progressiveCollections: ReturnType<typeof createCollectionsForSyncMode>
 
   beforeAll(async () => {
     const baseUrl = inject(`baseUrl`)
-    const seedData = generateSeedData()
+    seedData = generateSeedData()
 
     testId = Date.now().toString(16)
 
     // Initialize TrailBase client
     client = new Client(baseUrl)
 
-    // Get record APIs
+    // Get record APIs for seeding
     const usersRecordApi = client.records<UserRecord>(`users_e2e`)
     const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
     const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
@@ -177,138 +280,86 @@ describe(`TrailBase Collection E2E Tests`, () => {
     }
     console.log(`Inserted ${seedData.comments.length} comments successfully`)
 
-    // Create collections with sync enabled
-    // TrailBase has a unified sync mode (initial fetch + subscription)
-    // We create one set of collections and use them for both eager and onDemand
-    // since TrailBase always syncs all data eagerly
-
-    const usersCollection = createCollection(
-      trailBaseCollectionOptions({
-        id: `trailbase-e2e-users-${testId}`,
-        recordApi: usersRecordApi,
-        getKey: (item: User) => item.id,
-        startSync: true,
-        parse: {
-          id: (v: string) => v,
-          name: (v: string) => v,
-          email: (v: string | null) => v,
-          age: (v: number) => v,
-          is_active: (v: boolean) => v,
-          created_at: (v: string) => new Date(v),
-          metadata: (v: string | null) => (v ? JSON.parse(v) : null),
-          deleted_at: (v: string | null) => (v ? new Date(v) : null),
-        },
-        serialize: {
-          id: (v: string) => v,
-          name: (v: string) => v,
-          email: (v: string | null) => v,
-          age: (v: number) => v,
-          isActive: (v: boolean) => v,
-          createdAt: (v: Date) => v.toISOString(),
-          metadata: (v: Record<string, unknown> | null) =>
-            v ? JSON.stringify(v) : null,
-          deletedAt: (v: Date | null) => (v ? v.toISOString() : null),
-        },
-      }),
+    // Create collections with different sync modes
+    eagerCollections = createCollectionsForSyncMode(
+      client,
+      testId,
+      `eager`,
+      `eager`,
+    )
+    onDemandCollections = createCollectionsForSyncMode(
+      client,
+      testId,
+      `on-demand`,
+      `ondemand`,
+    )
+    progressiveCollections = createCollectionsForSyncMode(
+      client,
+      testId,
+      `progressive`,
+      `progressive`,
     )
 
-    const postsCollection = createCollection(
-      trailBaseCollectionOptions({
-        id: `trailbase-e2e-posts-${testId}`,
-        recordApi: postsRecordApi,
-        getKey: (item: Post) => item.id,
-        startSync: true,
-        parse: {
-          id: (v: string) => v,
-          user_id: (v: string) => v,
-          title: (v: string) => v,
-          content: (v: string | null) => v,
-          view_count: (v: number) => v,
-          large_view_count: (v: string) => BigInt(v),
-          published_at: (v: string | null) => (v ? new Date(v) : null),
-          deleted_at: (v: string | null) => (v ? new Date(v) : null),
-        },
-        serialize: {
-          id: (v: string) => v,
-          userId: (v: string) => v,
-          title: (v: string) => v,
-          content: (v: string | null) => v,
-          viewCount: (v: number) => v,
-          largeViewCount: (v: bigint) => v.toString(),
-          publishedAt: (v: Date | null) => (v ? v.toISOString() : null),
-          deletedAt: (v: Date | null) => (v ? v.toISOString() : null),
-        },
-      }),
-    )
-
-    const commentsCollection = createCollection(
-      trailBaseCollectionOptions({
-        id: `trailbase-e2e-comments-${testId}`,
-        recordApi: commentsRecordApi,
-        getKey: (item: Comment) => item.id,
-        startSync: true,
-        parse: {
-          id: (v: string) => v,
-          post_id: (v: string) => v,
-          user_id: (v: string) => v,
-          text: (v: string) => v,
-          created_at: (v: string) => new Date(v),
-          deleted_at: (v: string | null) => (v ? new Date(v) : null),
-        },
-        serialize: {
-          id: (v: string) => v,
-          postId: (v: string) => v,
-          userId: (v: string) => v,
-          text: (v: string) => v,
-          createdAt: (v: Date) => v.toISOString(),
-          deletedAt: (v: Date | null) => (v ? v.toISOString() : null),
-        },
-      }),
-    )
-
-    // Wait for initial sync to complete
+    // Wait for eager collections to sync (they need to fetch all data before marking ready)
     await Promise.all([
-      usersCollection.preload(),
-      postsCollection.preload(),
-      commentsCollection.preload(),
+      eagerCollections.users.preload(),
+      eagerCollections.posts.preload(),
+      eagerCollections.comments.preload(),
     ])
 
-    // Wait for data to be synced
+    // Wait for eager collections to have all data
     await Promise.all([
-      waitFor(() => usersCollection.size >= seedData.users.length, {
+      waitFor(() => eagerCollections.users.size >= seedData.users.length, {
         timeout: 30000,
         interval: 500,
-        message: `TrailBase sync has not completed for users (got ${usersCollection.size}/${seedData.users.length})`,
+        message: `TrailBase eager sync has not completed for users`,
       }),
-      waitFor(() => postsCollection.size >= seedData.posts.length, {
+      waitFor(() => eagerCollections.posts.size >= seedData.posts.length, {
         timeout: 30000,
         interval: 500,
-        message: `TrailBase sync has not completed for posts (got ${postsCollection.size}/${seedData.posts.length})`,
+        message: `TrailBase eager sync has not completed for posts`,
       }),
-      waitFor(() => commentsCollection.size >= seedData.comments.length, {
-        timeout: 30000,
-        interval: 500,
-        message: `TrailBase sync has not completed for comments (got ${commentsCollection.size}/${seedData.comments.length})`,
-      }),
+      waitFor(
+        () => eagerCollections.comments.size >= seedData.comments.length,
+        {
+          timeout: 30000,
+          interval: 500,
+          message: `TrailBase eager sync has not completed for comments`,
+        },
+      ),
     ])
 
-    // TrailBase has unified sync mode, so we use the same collections for both eager and onDemand
-    // The test suites will work because TrailBase always syncs all data
+    // On-demand and progressive collections are marked ready immediately
+    // but start empty (will load data via loadSubset when queried)
+    await Promise.all([
+      onDemandCollections.users.preload(),
+      onDemandCollections.posts.preload(),
+      onDemandCollections.comments.preload(),
+      progressiveCollections.users.preload(),
+      progressiveCollections.posts.preload(),
+      progressiveCollections.comments.preload(),
+    ])
+
+    // Wait a bit for progressive background sync to start
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
     config = {
       collections: {
         eager: {
-          users: usersCollection as any,
-          posts: postsCollection as any,
-          comments: commentsCollection as any,
+          users: eagerCollections.users,
+          posts: eagerCollections.posts,
+          comments: eagerCollections.comments,
         },
         onDemand: {
-          // TrailBase doesn't have on-demand mode, use the same collections
-          // The tests that rely on on-demand behavior may need adjustment
-          users: usersCollection as any,
-          posts: postsCollection as any,
-          comments: commentsCollection as any,
+          users: onDemandCollections.users,
+          posts: onDemandCollections.posts,
+          comments: onDemandCollections.comments,
         },
-        // TrailBase doesn't have progressive mode
+        progressive: {
+          users: progressiveCollections.users,
+          posts: progressiveCollections.posts,
+          comments: progressiveCollections.comments,
+        },
       },
       hasReplicationLag: true, // TrailBase has async subscription-based sync
       mutations: {
@@ -337,9 +388,15 @@ describe(`TrailBase Collection E2E Tests`, () => {
       },
       teardown: async () => {
         await Promise.all([
-          usersCollection.cleanup(),
-          postsCollection.cleanup(),
-          commentsCollection.cleanup(),
+          eagerCollections.users.cleanup(),
+          eagerCollections.posts.cleanup(),
+          eagerCollections.comments.cleanup(),
+          onDemandCollections.users.cleanup(),
+          onDemandCollections.posts.cleanup(),
+          onDemandCollections.comments.cleanup(),
+          progressiveCollections.users.cleanup(),
+          progressiveCollections.posts.cleanup(),
+          progressiveCollections.comments.cleanup(),
         ])
       },
     }
@@ -358,8 +415,6 @@ describe(`TrailBase Collection E2E Tests`, () => {
     const usersRecordApi = client.records<UserRecord>(`users_e2e`)
     const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
     const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
-
-    const seedData = generateSeedData()
 
     // Delete in reverse order due to FK constraints
     for (const comment of seedData.comments) {
@@ -400,5 +455,6 @@ describe(`TrailBase Collection E2E Tests`, () => {
   createCollationTestSuite(getConfig)
   createMutationsTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
-  // Note: Progressive test suite is skipped as TrailBase doesn't have progressive sync mode
+  // Note: Progressive test suite from Electric is specific to Electric's snapshot phase behavior
+  // TrailBase's progressive mode works differently (background full sync instead of buffered atomic swap)
 })
