@@ -19,6 +19,23 @@ import type {
   UtilsRecord,
 } from '@tanstack/db'
 
+/**
+ * Symbol for internal test hooks - allows tests to control sync timing
+ */
+export const TRAILBASE_TEST_HOOKS = Symbol.for(`TRAILBASE_TEST_HOOKS`)
+
+/**
+ * Test hooks interface for controlling sync behavior in tests
+ */
+export interface TrailBaseTestHooks {
+  /**
+   * Called before marking the collection as ready in progressive mode.
+   * Return a promise that resolves when the collection should be marked ready.
+   * This allows tests to pause and inspect the collection state during initial sync.
+   */
+  beforeMarkingReady?: () => Promise<void>
+}
+
 type ShapeOf<T> = Record<keyof T, unknown>
 type Conversion<I, O> = (value: I) => O
 
@@ -124,6 +141,12 @@ export interface TrailBaseCollectionConfig<
 
   parse: Conversions<TRecord, TItem>
   serialize: Conversions<TItem, TRecord>
+
+  /**
+   * Internal test hooks for controlling sync behavior.
+   * This is intended for testing only and should not be used in production.
+   */
+  [TRAILBASE_TEST_HOOKS]?: TrailBaseTestHooks
 }
 
 export type AwaitTxIdFn = (txId: string, timeout?: number) => Promise<boolean>
@@ -159,6 +182,9 @@ export function trailBaseCollectionOptions<
   const finalSyncMode =
     internalSyncMode === `progressive` ? `on-demand` : internalSyncMode
   let fullSyncCompleted = false
+
+  // Get test hooks if provided
+  const testHooks = config[TRAILBASE_TEST_HOOKS]
 
   const awaitIds = (
     ids: Array<string>,
@@ -298,13 +324,33 @@ export function trailBaseCollectionOptions<
         } catch (e) {
           abortController.abort()
           throw e
-        } finally {
-          // Mark ready both if everything went well or if there's an error to
-          // avoid blocking apps waiting for `.preload()` to finish.
-          // In on-demand/progressive mode we mark ready immediately after listener starts
-          // to allow queries to drive data loading via `loadSubset`.
+        }
+
+        // For progressive mode, wait for the beforeMarkingReady hook if provided
+        // This allows tests to pause and inspect the collection state during initial sync
+        if (internalSyncMode === `progressive` && testHooks?.beforeMarkingReady) {
+          // Start the background full sync BEFORE waiting for the hook
+          // This way the sync is running while tests can inspect intermediate state
+          const syncPromise = (async () => {
+            try {
+              await initialFetch()
+              fullSyncCompleted = true
+            } catch (e) {
+              console.error(`TrailBase progressive full sync failed`, e)
+            }
+          })()
+
+          // Wait for the test hook before marking ready
+          await testHooks.beforeMarkingReady()
           markReady()
-          // If progressive, start the background full sync after we've marked ready
+
+          // Wait for background sync to complete after marking ready
+          await syncPromise
+        } else {
+          // Mark ready immediately for eager/on-demand modes
+          markReady()
+
+          // If progressive without test hooks, start background sync
           if (internalSyncMode === `progressive`) {
             // Defer background sync to avoid racing with preload assertions
             setTimeout(() => {

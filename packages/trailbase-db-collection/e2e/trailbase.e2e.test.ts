@@ -8,7 +8,10 @@
 import { afterAll, afterEach, beforeAll, describe, inject } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { Client } from 'trailbase'
-import { trailBaseCollectionOptions } from '../src/trailbase'
+import {
+  trailBaseCollectionOptions,
+  TRAILBASE_TEST_HOOKS,
+} from '../src/trailbase'
 import type { TrailBaseSyncMode } from '../src/trailbase'
 import {
   createCollationTestSuite,
@@ -234,7 +237,34 @@ describe(`TrailBase Collection E2E Tests`, () => {
   // Collections for each sync mode
   let eagerCollections: ReturnType<typeof createCollectionsForSyncMode>
   let onDemandCollections: ReturnType<typeof createCollectionsForSyncMode>
-  let progressiveCollections: ReturnType<typeof createCollectionsForSyncMode>
+
+  // Progressive collections with test hooks (created separately)
+  let progressiveUsers: Collection<User>
+  let progressivePosts: Collection<Post>
+  let progressiveComments: Collection<Comment>
+
+  // Control mechanisms for progressive collections test hooks
+  const usersUpToDateControl = {
+    current: null as (() => void) | null,
+    createPromise: () =>
+      new Promise<void>((resolve) => {
+        usersUpToDateControl.current = resolve
+      }),
+  }
+  const postsUpToDateControl = {
+    current: null as (() => void) | null,
+    createPromise: () =>
+      new Promise<void>((resolve) => {
+        postsUpToDateControl.current = resolve
+      }),
+  }
+  const commentsUpToDateControl = {
+    current: null as (() => void) | null,
+    createPromise: () =>
+      new Promise<void>((resolve) => {
+        commentsUpToDateControl.current = resolve
+      }),
+  }
 
   beforeAll(async () => {
     const baseUrl = inject(`baseUrl`)
@@ -294,12 +324,53 @@ describe(`TrailBase Collection E2E Tests`, () => {
       `on-demand`,
       `ondemand`,
     )
-    progressiveCollections = createCollectionsForSyncMode(
-      client,
-      testId,
-      `progressive`,
-      `progressive`,
-    )
+
+    // Create progressive collections with test hooks
+    // These use startSync: false so tests can control when sync starts
+    progressiveUsers = createCollection(
+      trailBaseCollectionOptions({
+        id: `trailbase-e2e-users-progressive-${testId}`,
+        recordApi: usersRecordApi,
+        getKey: (item: User) => item.id,
+        startSync: false, // Don't start immediately - tests will start when ready
+        syncMode: `progressive`,
+        parse: userParseConfig,
+        serialize: userSerializeConfig,
+        [TRAILBASE_TEST_HOOKS]: {
+          beforeMarkingReady: () => usersUpToDateControl.createPromise(),
+        },
+      }),
+    ) as Collection<User>
+
+    progressivePosts = createCollection(
+      trailBaseCollectionOptions({
+        id: `trailbase-e2e-posts-progressive-${testId}`,
+        recordApi: postsRecordApi,
+        getKey: (item: Post) => item.id,
+        startSync: false,
+        syncMode: `progressive`,
+        parse: postParseConfig,
+        serialize: postSerializeConfig,
+        [TRAILBASE_TEST_HOOKS]: {
+          beforeMarkingReady: () => postsUpToDateControl.createPromise(),
+        },
+      }),
+    ) as Collection<Post>
+
+    progressiveComments = createCollection(
+      trailBaseCollectionOptions({
+        id: `trailbase-e2e-comments-progressive-${testId}`,
+        recordApi: commentsRecordApi,
+        getKey: (item: Comment) => item.id,
+        startSync: false,
+        syncMode: `progressive`,
+        parse: commentParseConfig,
+        serialize: commentSerializeConfig,
+        [TRAILBASE_TEST_HOOKS]: {
+          beforeMarkingReady: () => commentsUpToDateControl.createPromise(),
+        },
+      }),
+    ) as Collection<Comment>
 
     // Wait for eager collections to sync (they need to fetch all data before marking ready)
     await Promise.all([
@@ -330,19 +401,16 @@ describe(`TrailBase Collection E2E Tests`, () => {
       ),
     ])
 
-    // On-demand and progressive collections are marked ready immediately
-    // but start empty (will load data via loadSubset when queried)
+    // On-demand collections are marked ready immediately
     await Promise.all([
       onDemandCollections.users.preload(),
       onDemandCollections.posts.preload(),
       onDemandCollections.comments.preload(),
-      progressiveCollections.users.preload(),
-      progressiveCollections.posts.preload(),
-      progressiveCollections.comments.preload(),
     ])
 
-    // Wait a bit for progressive background sync to start
-    await new Promise((resolve) => setTimeout(resolve, 100))
+    // Note: We DON'T call preload() on progressive collections here
+    // because the test hooks will block. Individual progressive tests
+    // will handle preload and release as needed.
 
     config = {
       collections: {
@@ -357,12 +425,19 @@ describe(`TrailBase Collection E2E Tests`, () => {
           comments: onDemandCollections.comments,
         },
         progressive: {
-          users: progressiveCollections.users,
-          posts: progressiveCollections.posts,
-          comments: progressiveCollections.comments,
+          users: progressiveUsers,
+          posts: progressivePosts,
+          comments: progressiveComments,
         },
       },
       hasReplicationLag: true, // TrailBase has async subscription-based sync
+      progressiveTestControl: {
+        releaseInitialSync: () => {
+          usersUpToDateControl.current?.()
+          postsUpToDateControl.current?.()
+          commentsUpToDateControl.current?.()
+        },
+      },
       mutations: {
         insertUser: async (user) => {
           await usersRecordApi.create(serializeUser(user))
@@ -395,9 +470,9 @@ describe(`TrailBase Collection E2E Tests`, () => {
           onDemandCollections.users.cleanup(),
           onDemandCollections.posts.cleanup(),
           onDemandCollections.comments.cleanup(),
-          progressiveCollections.users.cleanup(),
-          progressiveCollections.posts.cleanup(),
-          progressiveCollections.comments.cleanup(),
+          progressiveUsers.cleanup(),
+          progressivePosts.cleanup(),
+          progressiveComments.cleanup(),
         ])
       },
     }
@@ -448,7 +523,7 @@ describe(`TrailBase Collection E2E Tests`, () => {
     return Promise.resolve(config)
   }
 
-  // Run shared test suites
+  // Run all shared test suites
   createPredicatesTestSuite(getConfig)
   createPaginationTestSuite(getConfig)
   createJoinsTestSuite(getConfig)
@@ -456,8 +531,5 @@ describe(`TrailBase Collection E2E Tests`, () => {
   createCollationTestSuite(getConfig)
   createMutationsTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
-  // Progressive test suite - tests will skip if progressiveTestControl is not available
-  // TrailBase's progressive mode doesn't have the same atomic swap mechanism as Electric,
-  // so most tests will be skipped, but we include it for completeness
   createProgressiveTestSuite(getConfig)
 })
