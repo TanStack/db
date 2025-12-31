@@ -60,7 +60,10 @@ export class CollectionSubscriber<
     let triggerSnapshot: () => void
     const orderByInfo = this.getOrderByInfo()
     if (orderByInfo) {
-      const result = this.subscribeToOrderedChanges(whereExpression, orderByInfo)
+      const result = this.subscribeToOrderedChanges(
+        whereExpression,
+        orderByInfo,
+      )
       subscription = result.subscription
       triggerSnapshot = result.triggerSnapshot
     } else {
