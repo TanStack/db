@@ -7,12 +7,11 @@
 
 import { afterAll, afterEach, beforeAll, describe, inject } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import { Client } from 'trailbase'
+import { initClient } from 'trailbase'
 import {
-  trailBaseCollectionOptions,
   TRAILBASE_TEST_HOOKS,
+  trailBaseCollectionOptions,
 } from '../src/trailbase'
-import type { TrailBaseSyncMode } from '../src/trailbase'
 import {
   createCollationTestSuite,
   createDeduplicationTestSuite,
@@ -25,11 +24,12 @@ import {
   generateSeedData,
 } from '../../db-collection-e2e/src/index'
 import { waitFor } from '../../db-collection-e2e/src/utils/helpers'
+import type { TrailBaseSyncMode } from '../src/trailbase'
 import type {
-  E2ETestConfig,
-  User,
-  Post,
   Comment,
+  E2ETestConfig,
+  Post,
+  User,
 } from '../../db-collection-e2e/src/types'
 import type { Collection } from '@tanstack/db'
 
@@ -176,7 +176,7 @@ const commentSerializeConfig = {
  * Helper to create a set of collections for a given sync mode
  */
 function createCollectionsForSyncMode(
-  client: Client,
+  client: ReturnType<typeof initClient>,
   testId: string,
   syncMode: TrailBaseSyncMode,
   suffix: string,
@@ -230,7 +230,7 @@ function createCollectionsForSyncMode(
 
 describe(`TrailBase Collection E2E Tests`, () => {
   let config: E2ETestConfig
-  let client: Client
+  let client: ReturnType<typeof initClient>
   let testId: string
   let seedData: ReturnType<typeof generateSeedData>
 
@@ -273,7 +273,7 @@ describe(`TrailBase Collection E2E Tests`, () => {
     testId = Date.now().toString(16)
 
     // Initialize TrailBase client
-    client = new Client(baseUrl)
+    client = initClient(baseUrl)
 
     // Get record APIs for seeding
     const usersRecordApi = client.records<UserRecord>(`users_e2e`)
