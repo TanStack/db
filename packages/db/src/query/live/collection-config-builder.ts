@@ -566,12 +566,8 @@ export class CollectionConfigBuilder<
       },
     )
 
-    const loadSubsetDataCallbacks = this.subscribeToAllCollections(
-      config,
-      fullSyncState,
-    )
-
-    // Listen for loadingSubset changes on the live query collection.
+    // Listen for loadingSubset changes on the live query collection BEFORE subscribing.
+    // This ensures we don't miss the event if subset loading completes synchronously.
     // When isLoadingSubset becomes false, we may need to mark the collection as ready
     // (if all source collections are already ready but we were waiting for subset load to complete)
     const loadingSubsetUnsubscribe = config.collection.on(
@@ -584,6 +580,11 @@ export class CollectionConfigBuilder<
       },
     )
     syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
+
+    const loadSubsetDataCallbacks = this.subscribeToAllCollections(
+      config,
+      fullSyncState,
+    )
 
     this.maybeRunGraphFn = () => this.scheduleGraphRun(loadSubsetDataCallbacks)
 
