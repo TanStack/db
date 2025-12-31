@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.33",
   "dependencies": {
-    "@tanstack/electric-db-collection": "^0.2.20",
+    "@tanstack/electric-db-collection": "^0.2.21",
     "@tanstack/query-core": "^5.90.15",
     "@tanstack/query-db-collection": "^1.0.12",
     "@tanstack/solid-db": "^0.1.59",
