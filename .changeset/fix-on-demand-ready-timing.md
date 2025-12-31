@@ -9,6 +9,7 @@ the subset data finished loading. This caused `useLiveQuery` to return `isReady=
 with empty data, and `useLiveSuspenseQuery` to release suspense prematurely.
 
 Changes:
+
 - Update `updateLiveQueryStatus()` to check `isLoadingSubset` on the live query collection
   before marking it ready
 - Listen for `loadingSubset:change` events on the live query collection to trigger
