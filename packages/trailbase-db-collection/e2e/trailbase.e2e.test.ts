@@ -74,9 +74,8 @@ interface CommentRecord {
   deleted_at: string | null
 }
 
-// Serialize functions: App type -> TrailBase record
-const serializeUser = (user: User): UserRecord => ({
-  id: user.id,
+// Serialize functions for inserts (omit id - TrailBase auto-generates with INTEGER PRIMARY KEY)
+const serializeUserForInsert = (user: User): Omit<UserRecord, 'id'> => ({
   name: user.name,
   email: user.email,
   age: user.age,
@@ -86,8 +85,7 @@ const serializeUser = (user: User): UserRecord => ({
   deleted_at: user.deletedAt ? user.deletedAt.toISOString() : null,
 })
 
-const serializePost = (post: Post): PostRecord => ({
-  id: post.id,
+const serializePostForInsert = (post: Post): Omit<PostRecord, 'id'> => ({
   user_id: post.userId,
   title: post.title,
   content: post.content,
@@ -97,8 +95,7 @@ const serializePost = (post: Post): PostRecord => ({
   deleted_at: post.deletedAt ? post.deletedAt.toISOString() : null,
 })
 
-const serializeComment = (comment: Comment): CommentRecord => ({
-  id: comment.id,
+const serializeCommentForInsert = (comment: Comment): Omit<CommentRecord, 'id'> => ({
   post_id: comment.postId,
   user_id: comment.userId,
   text: comment.text,
@@ -280,36 +277,44 @@ describe(`TrailBase Collection E2E Tests`, () => {
     const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
     const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
 
-    // Insert seed data
+    // Insert seed data (omit id - TrailBase auto-generates with INTEGER PRIMARY KEY)
     console.log(`Inserting ${seedData.users.length} users...`)
+    let userErrors = 0
     for (const user of seedData.users) {
       try {
-        await usersRecordApi.create(serializeUser(user))
-      } catch {
-        // Record may already exist
+        const serialized = serializeUserForInsert(user)
+        if (userErrors === 0) console.log('First user data:', JSON.stringify(serialized))
+        await usersRecordApi.create(serialized)
+      } catch (e) {
+        userErrors++
+        if (userErrors <= 3) console.error('User insert error:', e)
       }
     }
-    console.log(`Inserted ${seedData.users.length} users successfully`)
+    console.log(`Inserted users: ${seedData.users.length - userErrors} success, ${userErrors} errors`)
 
     console.log(`Inserting ${seedData.posts.length} posts...`)
+    let postErrors = 0
     for (const post of seedData.posts) {
       try {
-        await postsRecordApi.create(serializePost(post))
-      } catch {
-        // Record may already exist
+        await postsRecordApi.create(serializePostForInsert(post))
+      } catch (e) {
+        postErrors++
+        if (postErrors <= 3) console.error('Post insert error:', e)
       }
     }
-    console.log(`Inserted ${seedData.posts.length} posts successfully`)
+    console.log(`Inserted posts: ${seedData.posts.length - postErrors} success, ${postErrors} errors`)
 
     console.log(`Inserting ${seedData.comments.length} comments...`)
+    let commentErrors = 0
     for (const comment of seedData.comments) {
       try {
-        await commentsRecordApi.create(serializeComment(comment))
-      } catch {
-        // Record may already exist
+        await commentsRecordApi.create(serializeCommentForInsert(comment))
+      } catch (e) {
+        commentErrors++
+        if (commentErrors <= 3) console.error('Comment insert error:', e)
       }
     }
-    console.log(`Inserted ${seedData.comments.length} comments successfully`)
+    console.log(`Inserted comments: ${seedData.comments.length - commentErrors} success, ${commentErrors} errors`)
 
     // Create collections with different sync modes
     eagerCollections = createCollectionsForSyncMode(
@@ -373,11 +378,20 @@ describe(`TrailBase Collection E2E Tests`, () => {
     ) as Collection<Comment>
 
     // Wait for eager collections to sync (they need to fetch all data before marking ready)
+    console.log('Calling preload on eager collections...')
     await Promise.all([
       eagerCollections.users.preload(),
       eagerCollections.posts.preload(),
       eagerCollections.comments.preload(),
     ])
+    console.log('Preload complete, checking sizes...')
+    console.log(`Users size: ${eagerCollections.users.size}, expected: ${seedData.users.length}`)
+    console.log(`Posts size: ${eagerCollections.posts.size}, expected: ${seedData.posts.length}`)
+    console.log(`Comments size: ${eagerCollections.comments.size}, expected: ${seedData.comments.length}`)
+
+    // Debug: try direct list API call
+    const testList = await usersRecordApi.list({ pagination: { limit: 10 } })
+    console.log(`Direct list API returned ${testList.records.length} records:`, testList.records.slice(0, 2))
 
     // Wait for eager collections to have all data
     await Promise.all([
@@ -440,7 +454,7 @@ describe(`TrailBase Collection E2E Tests`, () => {
       },
       mutations: {
         insertUser: async (user) => {
-          await usersRecordApi.create(serializeUser(user))
+          await usersRecordApi.create(serializeUserForInsert(user))
         },
         updateUser: async (id, updates) => {
           const partialRecord: Partial<UserRecord> = {}
@@ -455,7 +469,7 @@ describe(`TrailBase Collection E2E Tests`, () => {
           await usersRecordApi.delete(id)
         },
         insertPost: async (post) => {
-          await postsRecordApi.create(serializePost(post))
+          await postsRecordApi.create(serializePostForInsert(post))
         },
       },
       setup: async () => {},
