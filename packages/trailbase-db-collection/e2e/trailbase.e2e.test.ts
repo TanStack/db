@@ -103,70 +103,113 @@ const serializeCommentForInsert = (comment: Comment): Omit<CommentRecord, 'id'> 
   deleted_at: comment.deletedAt ? comment.deletedAt.toISOString() : null,
 })
 
-// Parse config for User collection
-const userParseConfig = {
-  id: (v: string) => v,
-  name: (v: string) => v,
-  email: (v: string | null) => v,
-  age: (v: number) => v,
-  is_active: (v: boolean) => v,
-  created_at: (v: string) => new Date(v),
-  metadata: (v: string | null) => (v ? JSON.parse(v) : null),
-  deleted_at: (v: string | null) => (v ? new Date(v) : null),
+/**
+ * Parse functions that transform TrailBase records (snake_case) to app types (camelCase)
+ * These do proper key mapping and type conversion
+ */
+const parseUser = (record: UserRecord): User => ({
+  id: String(record.id),
+  name: record.name,
+  email: record.email,
+  age: record.age,
+  isActive: Boolean(record.is_active),
+  createdAt: new Date(record.created_at),
+  metadata: record.metadata ? JSON.parse(record.metadata) : null,
+  deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
+})
+
+const parsePost = (record: PostRecord): Post => ({
+  id: String(record.id),
+  userId: record.user_id,
+  title: record.title,
+  content: record.content,
+  viewCount: record.view_count,
+  largeViewCount: BigInt(record.large_view_count),
+  publishedAt: record.published_at ? new Date(record.published_at) : null,
+  deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
+})
+
+const parseComment = (record: CommentRecord): Comment => ({
+  id: String(record.id),
+  postId: record.post_id,
+  userId: record.user_id,
+  text: record.text,
+  createdAt: new Date(record.created_at),
+  deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
+})
+
+/**
+ * Serialize functions that transform app types (camelCase) to TrailBase records (snake_case)
+ */
+const serializeUser = (user: User): UserRecord => ({
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  age: user.age,
+  is_active: user.isActive,
+  created_at: user.createdAt.toISOString(),
+  metadata: user.metadata ? JSON.stringify(user.metadata) : null,
+  deleted_at: user.deletedAt ? user.deletedAt.toISOString() : null,
+})
+
+const serializePost = (post: Post): PostRecord => ({
+  id: post.id,
+  user_id: post.userId,
+  title: post.title,
+  content: post.content,
+  view_count: post.viewCount,
+  large_view_count: post.largeViewCount.toString(),
+  published_at: post.publishedAt ? post.publishedAt.toISOString() : null,
+  deleted_at: post.deletedAt ? post.deletedAt.toISOString() : null,
+})
+
+const serializeComment = (comment: Comment): CommentRecord => ({
+  id: comment.id,
+  post_id: comment.postId,
+  user_id: comment.userId,
+  text: comment.text,
+  created_at: comment.createdAt.toISOString(),
+  deleted_at: comment.deletedAt ? comment.deletedAt.toISOString() : null,
+})
+
+/**
+ * Partial serializers for updates (maps camelCase keys to snake_case)
+ */
+const serializeUserPartial = (user: Partial<User>): Partial<UserRecord> => {
+  const result: Partial<UserRecord> = {}
+  if (user.id !== undefined) result.id = user.id
+  if (user.name !== undefined) result.name = user.name
+  if (user.email !== undefined) result.email = user.email
+  if (user.age !== undefined) result.age = user.age
+  if (user.isActive !== undefined) result.is_active = user.isActive
+  if (user.createdAt !== undefined) result.created_at = user.createdAt.toISOString()
+  if (user.metadata !== undefined) result.metadata = user.metadata ? JSON.stringify(user.metadata) : null
+  if (user.deletedAt !== undefined) result.deleted_at = user.deletedAt ? user.deletedAt.toISOString() : null
+  return result
 }
 
-const userSerializeConfig = {
-  id: (v: string) => v,
-  name: (v: string) => v,
-  email: (v: string | null) => v,
-  age: (v: number) => v,
-  isActive: (v: boolean) => v,
-  createdAt: (v: Date) => v.toISOString(),
-  metadata: (v: Record<string, unknown> | null) =>
-    v ? JSON.stringify(v) : null,
-  deletedAt: (v: Date | null) => (v ? v.toISOString() : null),
+const serializePostPartial = (post: Partial<Post>): Partial<PostRecord> => {
+  const result: Partial<PostRecord> = {}
+  if (post.id !== undefined) result.id = post.id
+  if (post.userId !== undefined) result.user_id = post.userId
+  if (post.title !== undefined) result.title = post.title
+  if (post.content !== undefined) result.content = post.content
+  if (post.viewCount !== undefined) result.view_count = post.viewCount
+  if (post.largeViewCount !== undefined) result.large_view_count = post.largeViewCount.toString()
+  if (post.publishedAt !== undefined) result.published_at = post.publishedAt ? post.publishedAt.toISOString() : null
+  if (post.deletedAt !== undefined) result.deleted_at = post.deletedAt ? post.deletedAt.toISOString() : null
+  return result
 }
 
-// Parse config for Post collection
-const postParseConfig = {
-  id: (v: string) => v,
-  user_id: (v: string) => v,
-  title: (v: string) => v,
-  content: (v: string | null) => v,
-  view_count: (v: number) => v,
-  large_view_count: (v: string) => BigInt(v),
-  published_at: (v: string | null) => (v ? new Date(v) : null),
-  deleted_at: (v: string | null) => (v ? new Date(v) : null),
-}
-
-const postSerializeConfig = {
-  id: (v: string) => v,
-  userId: (v: string) => v,
-  title: (v: string) => v,
-  content: (v: string | null) => v,
-  viewCount: (v: number) => v,
-  largeViewCount: (v: bigint) => v.toString(),
-  publishedAt: (v: Date | null) => (v ? v.toISOString() : null),
-  deletedAt: (v: Date | null) => (v ? v.toISOString() : null),
-}
-
-// Parse config for Comment collection
-const commentParseConfig = {
-  id: (v: string) => v,
-  post_id: (v: string) => v,
-  user_id: (v: string) => v,
-  text: (v: string) => v,
-  created_at: (v: string) => new Date(v),
-  deleted_at: (v: string | null) => (v ? new Date(v) : null),
-}
-
-const commentSerializeConfig = {
-  id: (v: string) => v,
-  postId: (v: string) => v,
-  userId: (v: string) => v,
-  text: (v: string) => v,
-  createdAt: (v: Date) => v.toISOString(),
-  deletedAt: (v: Date | null) => (v ? v.toISOString() : null),
+const serializeCommentPartial = (comment: Partial<Comment>): Partial<CommentRecord> => {
+  const result: Partial<CommentRecord> = {}
+  if (comment.id !== undefined) result.id = comment.id
+  if (comment.postId !== undefined) result.post_id = comment.postId
+  if (comment.userId !== undefined) result.user_id = comment.userId
+  if (comment.text !== undefined) result.text = comment.text
+  if (comment.createdAt !== undefined) result.created_at = comment.createdAt.toISOString()
+  if (comment.deletedAt !== undefined) result.deleted_at = comment.deletedAt ? comment.deletedAt.toISOString() : null
+  return result
 }
 
 /**
@@ -189,8 +232,9 @@ function createCollectionsForSyncMode(
       getKey: (item: User) => item.id,
       startSync: true,
       syncMode,
-      parse: userParseConfig,
-      serialize: userSerializeConfig,
+      parse: parseUser,
+      serialize: serializeUser,
+      serializePartial: serializeUserPartial,
     }),
   )
 
@@ -201,8 +245,9 @@ function createCollectionsForSyncMode(
       getKey: (item: Post) => item.id,
       startSync: true,
       syncMode,
-      parse: postParseConfig,
-      serialize: postSerializeConfig,
+      parse: parsePost,
+      serialize: serializePost,
+      serializePartial: serializePostPartial,
     }),
   )
 
@@ -213,8 +258,9 @@ function createCollectionsForSyncMode(
       getKey: (item: Comment) => item.id,
       startSync: true,
       syncMode,
-      parse: commentParseConfig,
-      serialize: commentSerializeConfig,
+      parse: parseComment,
+      serialize: serializeComment,
+      serializePartial: serializeCommentPartial,
     }),
   )
 
@@ -277,43 +323,71 @@ describe(`TrailBase Collection E2E Tests`, () => {
     const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
     const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
 
-    // Insert seed data (omit id - TrailBase auto-generates with INTEGER PRIMARY KEY)
+    // Insert seed data and capture returned IDs
+    // TrailBase auto-generates INTEGER PRIMARY KEY, so we need to update seed data with actual IDs
     console.log(`Inserting ${seedData.users.length} users...`)
     let userErrors = 0
+    const userIdMap = new Map<string, string>() // Maps original UUID to TrailBase integer ID
     for (const user of seedData.users) {
       try {
         const serialized = serializeUserForInsert(user)
         if (userErrors === 0) console.log('First user data:', JSON.stringify(serialized))
-        await usersRecordApi.create(serialized)
+        const newId = await usersRecordApi.create(serialized)
+        // Store the mapping and update the user's ID
+        userIdMap.set(user.id, String(newId))
+        user.id = String(newId)
       } catch (e) {
         userErrors++
         if (userErrors <= 3) console.error('User insert error:', e)
       }
     }
+    // Update seedData.userIds with the new IDs
+    seedData.userIds = seedData.users.map(u => u.id)
     console.log(`Inserted users: ${seedData.users.length - userErrors} success, ${userErrors} errors`)
 
     console.log(`Inserting ${seedData.posts.length} posts...`)
     let postErrors = 0
+    const postIdMap = new Map<string, string>() // Maps original UUID to TrailBase integer ID
     for (const post of seedData.posts) {
       try {
-        await postsRecordApi.create(serializePostForInsert(post))
+        // Store original post ID for mapping
+        const originalPostId = post.id
+        // Update the userId reference to use the new TrailBase ID
+        if (userIdMap.has(post.userId)) {
+          post.userId = userIdMap.get(post.userId)!
+        }
+        const newId = await postsRecordApi.create(serializePostForInsert(post))
+        postIdMap.set(originalPostId, String(newId))
+        post.id = String(newId)
       } catch (e) {
         postErrors++
         if (postErrors <= 3) console.error('Post insert error:', e)
       }
     }
+    // Update seedData.postIds with the new IDs
+    seedData.postIds = seedData.posts.map(p => p.id)
     console.log(`Inserted posts: ${seedData.posts.length - postErrors} success, ${postErrors} errors`)
 
     console.log(`Inserting ${seedData.comments.length} comments...`)
     let commentErrors = 0
     for (const comment of seedData.comments) {
       try {
-        await commentsRecordApi.create(serializeCommentForInsert(comment))
+        // Update the userId and postId references using the maps
+        if (userIdMap.has(comment.userId)) {
+          comment.userId = userIdMap.get(comment.userId)!
+        }
+        if (postIdMap.has(comment.postId)) {
+          comment.postId = postIdMap.get(comment.postId)!
+        }
+        const newId = await commentsRecordApi.create(serializeCommentForInsert(comment))
+        comment.id = String(newId)
       } catch (e) {
         commentErrors++
         if (commentErrors <= 3) console.error('Comment insert error:', e)
       }
     }
+    // Update seedData.commentIds with the new IDs
+    seedData.commentIds = seedData.comments.map(c => c.id)
     console.log(`Inserted comments: ${seedData.comments.length - commentErrors} success, ${commentErrors} errors`)
 
     // Create collections with different sync modes
@@ -339,8 +413,9 @@ describe(`TrailBase Collection E2E Tests`, () => {
         getKey: (item: User) => item.id,
         startSync: false, // Don't start immediately - tests will start when ready
         syncMode: `progressive`,
-        parse: userParseConfig,
-        serialize: userSerializeConfig,
+        parse: parseUser,
+        serialize: serializeUser,
+        serializePartial: serializeUserPartial,
         [TRAILBASE_TEST_HOOKS]: {
           beforeMarkingReady: () => usersUpToDateControl.createPromise(),
         },
@@ -354,8 +429,9 @@ describe(`TrailBase Collection E2E Tests`, () => {
         getKey: (item: Post) => item.id,
         startSync: false,
         syncMode: `progressive`,
-        parse: postParseConfig,
-        serialize: postSerializeConfig,
+        parse: parsePost,
+        serialize: serializePost,
+        serializePartial: serializePostPartial,
         [TRAILBASE_TEST_HOOKS]: {
           beforeMarkingReady: () => postsUpToDateControl.createPromise(),
         },
@@ -369,8 +445,9 @@ describe(`TrailBase Collection E2E Tests`, () => {
         getKey: (item: Comment) => item.id,
         startSync: false,
         syncMode: `progressive`,
-        parse: commentParseConfig,
-        serialize: commentSerializeConfig,
+        parse: parseComment,
+        serialize: serializeComment,
+        serializePartial: serializeCommentPartial,
         [TRAILBASE_TEST_HOOKS]: {
           beforeMarkingReady: () => commentsUpToDateControl.createPromise(),
         },
@@ -454,7 +531,10 @@ describe(`TrailBase Collection E2E Tests`, () => {
       },
       mutations: {
         insertUser: async (user) => {
-          await usersRecordApi.create(serializeUserForInsert(user))
+          // TrailBase returns the auto-generated integer ID
+          const newId = await usersRecordApi.create(serializeUserForInsert(user))
+          // Update the user object with the actual ID so the test can reference it
+          ;(user as any).id = String(newId)
         },
         updateUser: async (id, updates) => {
           const partialRecord: Partial<UserRecord> = {}
@@ -469,7 +549,10 @@ describe(`TrailBase Collection E2E Tests`, () => {
           await usersRecordApi.delete(id)
         },
         insertPost: async (post) => {
-          await postsRecordApi.create(serializePostForInsert(post))
+          // TrailBase returns the auto-generated integer ID
+          const newId = await postsRecordApi.create(serializePostForInsert(post))
+          // Update the post object with the actual ID
+          ;(post as any).id = String(newId)
         },
       },
       setup: async () => {},

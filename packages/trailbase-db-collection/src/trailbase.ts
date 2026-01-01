@@ -121,8 +121,8 @@ export type TrailBaseSyncMode = SyncMode | `progressive`
  * Configuration interface for Trailbase Collection
  */
 export interface TrailBaseCollectionConfig<
-  TItem extends ShapeOf<TRecord>,
-  TRecord extends ShapeOf<TItem> = TItem,
+  TItem extends object,
+  TRecord extends object = TItem,
   TKey extends string | number = string | number,
 > extends Omit<
   BaseCollectionConfig<TItem, TKey>,
@@ -139,8 +139,23 @@ export interface TrailBaseCollectionConfig<
    */
   syncMode?: TrailBaseSyncMode
 
-  parse: Conversions<TRecord, TItem>
-  serialize: Conversions<TItem, TRecord>
+  /**
+   * Function to parse a TrailBase record into the app item type.
+   * Use this for full control over the transformation including key renaming.
+   */
+  parse: ((record: TRecord) => TItem) | Conversions<TRecord & ShapeOf<TItem>, TItem & ShapeOf<TRecord>>
+
+  /**
+   * Function to serialize an app item into a TrailBase record.
+   * Use this for full control over the transformation including key renaming.
+   */
+  serialize: ((item: TItem) => TRecord) | Conversions<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>
+
+  /**
+   * Function to serialize a partial app item into a partial TrailBase record.
+   * Used for updates. If not provided, serialize will be used.
+   */
+  serializePartial?: (item: Partial<TItem>) => Partial<TRecord>
 
   /**
    * Internal test hooks for controlling sync behavior.
@@ -156,8 +171,8 @@ export interface TrailBaseCollectionUtils extends UtilsRecord {
 }
 
 export function trailBaseCollectionOptions<
-  TItem extends ShapeOf<TRecord>,
-  TRecord extends ShapeOf<TItem> = TItem,
+  TItem extends object,
+  TRecord extends object = TItem,
   TKey extends string | number = string | number,
 >(
   config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
@@ -166,12 +181,50 @@ export function trailBaseCollectionOptions<
 } {
   const getKey = config.getKey
 
-  const parse = (record: TRecord) =>
-    convert<TRecord, TItem>(config.parse, record)
-  const serialUpd = (item: Partial<TItem>) =>
-    convertPartial<TItem, TRecord>(config.serialize, item)
-  const serialIns = (item: TItem) =>
-    convert<TItem, TRecord>(config.serialize, item)
+  // Support both function and Conversions for parse
+  const parse: (record: TRecord) => TItem =
+    typeof config.parse === `function`
+      ? config.parse
+      : (record: TRecord) =>
+          convert<TRecord & ShapeOf<TItem>, TItem & ShapeOf<TRecord>>(
+            config.parse as Conversions<TRecord & ShapeOf<TItem>, TItem & ShapeOf<TRecord>>,
+            record as TRecord & ShapeOf<TItem>,
+          ) as TItem
+
+  // Support both function and Conversions for serialize
+  const serialIns: (item: TItem) => TRecord =
+    typeof config.serialize === `function`
+      ? config.serialize
+      : (item: TItem) =>
+          convert<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>(
+            config.serialize as Conversions<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>,
+            item as TItem & ShapeOf<TRecord>,
+          ) as TRecord
+
+  // For partial updates, use serializePartial if provided, otherwise fall back to a simple implementation
+  const serialUpd: (item: Partial<TItem>) => Partial<TRecord> =
+    config.serializePartial ??
+    (typeof config.serialize === `function`
+      ? (item: Partial<TItem>) => {
+          // For function serializers, we need to handle partial items carefully
+          // We serialize and then extract only the keys that were in the partial
+          const keys = Object.keys(item) as Array<keyof TItem>
+          const full = config.serialize(item as TItem) as TRecord
+          const result: Partial<TRecord> = {}
+          for (const key of keys) {
+            // Map the key if there's a known mapping (simplified approach)
+            const recordKey = key as unknown as keyof TRecord
+            if (recordKey in full) {
+              result[recordKey] = full[recordKey]
+            }
+          }
+          return result
+        }
+      : (item: Partial<TItem>) =>
+          convertPartial<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>(
+            config.serialize as Conversions<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>,
+            item as Partial<TItem & ShapeOf<TRecord>>,
+          ) as Partial<TRecord>)
 
   const abortController = new AbortController()
 
@@ -326,26 +379,20 @@ export function trailBaseCollectionOptions<
           throw e
         }
 
-        // For progressive mode, wait for the beforeMarkingReady hook if provided
-        // This allows tests to pause and inspect the collection state during initial sync
+        // For progressive mode with test hooks, use non-blocking pattern
         if (internalSyncMode === `progressive` && testHooks?.beforeMarkingReady) {
-          // Start the background full sync BEFORE waiting for the hook
-          // This way the sync is running while tests can inspect intermediate state
-          const syncPromise = (async () => {
+          // DON'T start full sync yet - let loadSubset handle data fetching
+          // Wait for the hook to resolve, THEN do full sync and mark ready
+          testHooks.beforeMarkingReady().then(async () => {
             try {
+              // Now do the full sync
               await initialFetch()
               fullSyncCompleted = true
             } catch (e) {
               console.error(`TrailBase progressive full sync failed`, e)
             }
-          })()
-
-          // Wait for the test hook before marking ready
-          await testHooks.beforeMarkingReady()
-          markReady()
-
-          // Wait for background sync to complete after marking ready
-          await syncPromise
+            markReady()
+          })
         } else {
           // Mark ready immediately for eager/on-demand modes
           markReady()
@@ -415,21 +462,54 @@ export function trailBaseCollectionOptions<
 
       // On-demand and progressive modes need loadSubset for query-driven data loading
       const loadSubset = async (opts: { limit?: number } = {}) => {
+        console.log(`[TrailBase] loadSubset called, syncMode=${internalSyncMode}, fullSyncCompleted=${fullSyncCompleted}, opts=`, opts)
         // In progressive mode after full sync is complete, no need to load more
         if (internalSyncMode === `progressive` && fullSyncCompleted) {
+          console.log(`[TrailBase] loadSubset: skipping, full sync complete`)
           return
         }
 
         const limit = opts.limit ?? 256
+        console.log(`[TrailBase] loadSubset: fetching with limit=${limit}`)
         const response = await config.recordApi.list({ pagination: { limit } })
         const records = response?.records ?? []
+        console.log(`[TrailBase] loadSubset: got ${records.length} records`)
 
         if (records.length > 0) {
-          begin()
-          for (const item of records) {
-            write({ type: `insert`, value: parse(item) })
+          console.log(`[TrailBase] loadSubset: first raw record:`, JSON.stringify(records[0]))
+          const firstParsed = parse(records[0])
+          console.log(`[TrailBase] loadSubset: first parsed record:`, JSON.stringify(firstParsed, (_, v) => typeof v === 'bigint' ? v.toString() : v))
+
+          // Find a record with age 25 for debugging
+          const age25Record = records.find((r: any) => r.age === 25)
+          if (age25Record) {
+            console.log(`[TrailBase] loadSubset: found record with age 25:`, JSON.stringify(age25Record))
+            console.log(`[TrailBase] loadSubset: parsed age 25 record:`, JSON.stringify(parse(age25Record), (_, v) => typeof v === 'bigint' ? v.toString() : v))
+          } else {
+            console.log(`[TrailBase] loadSubset: NO record with age 25 found in ${records.length} records`)
+            // List all unique ages
+            const ages = [...new Set(records.map((r: any) => r.age))].sort((a, b) => a - b)
+            console.log(`[TrailBase] loadSubset: ages in dataset:`, ages.slice(0, 20).join(', '), '...')
           }
+
+          console.log(`[TrailBase] loadSubset: calling begin()`)
+          begin()
+          let writeCount = 0
+          let errorCount = 0
+          for (const item of records) {
+            try {
+              write({ type: `insert`, value: parse(item) })
+              writeCount++
+            } catch (e: any) {
+              errorCount++
+              if (errorCount <= 3) {
+                console.log(`[TrailBase] loadSubset: write error ${errorCount}:`, e.message || e)
+              }
+            }
+          }
+          console.log(`[TrailBase] loadSubset: wrote ${writeCount} items, ${errorCount} errors, calling commit()`)
           commit()
+          console.log(`[TrailBase] loadSubset: commit complete`)
         }
       }
 

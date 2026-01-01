@@ -1,8 +1,8 @@
 -- E2E Test Tables for TrailBase
--- Requirements: STRICT mode + INTEGER or UUID primary key
+-- Using UUID (BLOB) primary keys with TrailBase is_uuid_v7 CHECK
 
 CREATE TABLE "users_e2e" (
-  "id" INTEGER PRIMARY KEY,
+  "id" BLOB PRIMARY KEY NOT NULL CHECK(is_uuid_v7(id)) DEFAULT (uuid_v7()),
   "name" TEXT NOT NULL,
   "email" TEXT,
   "age" INTEGER NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE "users_e2e" (
 ) STRICT;
 
 CREATE TABLE "posts_e2e" (
-  "id" INTEGER PRIMARY KEY,
+  "id" BLOB PRIMARY KEY NOT NULL CHECK(is_uuid_v7(id)) DEFAULT (uuid_v7()),
   "user_id" TEXT NOT NULL,
   "title" TEXT NOT NULL,
   "content" TEXT,
@@ -24,7 +24,7 @@ CREATE TABLE "posts_e2e" (
 ) STRICT;
 
 CREATE TABLE "comments_e2e" (
-  "id" INTEGER PRIMARY KEY,
+  "id" BLOB PRIMARY KEY NOT NULL CHECK(is_uuid_v7(id)) DEFAULT (uuid_v7()),
   "post_id" TEXT NOT NULL,
   "user_id" TEXT NOT NULL,
   "text" TEXT NOT NULL,
