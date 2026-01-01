@@ -100,6 +100,56 @@ function convertPartial<
 }
 
 /**
+ * Decode a base64-encoded BLOB UUID to a standard UUID string format for proper sorting.
+ * TrailBase stores UUIDs as BLOBs and returns them as base64, which doesn't sort correctly.
+ * This function decodes the base64 to get the UUID string which sorts lexicographically.
+ */
+function decodeIdForSorting(rawId: unknown): string {
+  const idStr = String(rawId ?? ``)
+
+  // Check if it's already a UUID string format - return as-is
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr)) {
+    return idStr
+  }
+
+  // Check if it's an integer - return as-is
+  if (/^\d+$/.test(idStr)) {
+    return idStr
+  }
+
+  // Try to decode base64 to UUID
+  try {
+    // Convert URL-safe base64 to standard base64
+    const standardBase64 = idStr.replace(/-/g, `+`).replace(/_/g, `/`)
+    // Add padding if needed
+    const padded = standardBase64 + `==`.slice(0, (4 - standardBase64.length % 4) % 4)
+
+    // Decode base64 to bytes
+    const binaryString = atob(padded)
+
+    // Only process if it looks like a UUID (16 bytes)
+    if (binaryString.length !== 16) {
+      return idStr
+    }
+
+    const bytes = new Uint8Array(binaryString.length)
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i)
+    }
+
+    // Convert bytes to UUID string format
+    const hex = Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, `0`))
+      .join(``)
+
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`
+  } catch {
+    // If decoding fails, return the original string
+    return idStr
+  }
+}
+
+/**
  * The mode of sync to use for the collection.
  * @default `eager`
  * @description
@@ -287,21 +337,15 @@ export function trailBaseCollectionOptions<
           },
         })
         let cursor = response.cursor
-        let got = 0
 
-        begin()
+        // Collect all records first
+        const allRecords: Array<TRecord> = []
 
         while (true) {
           const length = response.records.length
           if (length === 0) break
 
-          got = got + length
-          for (const item of response.records) {
-            write({
-              type: `insert`,
-              value: parse(item),
-            })
-          }
+          allRecords.push(...response.records)
 
           if (length < limit) break
 
@@ -309,10 +353,26 @@ export function trailBaseCollectionOptions<
             pagination: {
               limit,
               cursor,
-              offset: cursor === undefined ? got : undefined,
+              offset: cursor === undefined ? allRecords.length : undefined,
             },
           })
           cursor = response.cursor
+        }
+
+        // Sort by ID for consistent insertion order (deterministic tie-breaking)
+        // Decode base64 IDs to UUIDs for proper lexicographic sorting
+        allRecords.sort((a: TRecord, b: TRecord) => {
+          const idA = decodeIdForSorting(a[`id` as keyof TRecord])
+          const idB = decodeIdForSorting(b[`id` as keyof TRecord])
+          return idA.localeCompare(idB)
+        })
+
+        begin()
+        for (const item of allRecords) {
+          write({
+            type: `insert`,
+            value: parse(item),
+          })
         }
 
         commit()
@@ -470,62 +530,35 @@ export function trailBaseCollectionOptions<
       let loadSubsetCompleted = false
 
       // On-demand and progressive modes need loadSubset for query-driven data loading
-      const loadSubset = async (opts: { limit?: number } = {}) => {
-        console.log(`[TrailBase] loadSubset called, syncMode=${internalSyncMode}, fullSyncCompleted=${fullSyncCompleted}, loadSubsetCompleted=${loadSubsetCompleted}, opts=`, opts)
-
+      const loadSubset = async (opts: { limit?: number } = {}): Promise<void> => {
         // Skip if already loaded to prevent race conditions and inconsistent ordering
         if (loadSubsetCompleted) {
-          console.log(`[TrailBase] loadSubset: skipping, already completed`)
           return
         }
 
         // In progressive mode after full sync is complete, no need to load more
         if (internalSyncMode === `progressive` && fullSyncCompleted) {
-          console.log(`[TrailBase] loadSubset: skipping, full sync complete`)
           return
         }
 
         const limit = opts.limit ?? 256
-        console.log(`[TrailBase] loadSubset: fetching with limit=${limit}`)
         const response = await config.recordApi.list({ pagination: { limit } })
         const records = response?.records ?? []
-        console.log(`[TrailBase] loadSubset: got ${records.length} records`)
 
         if (records.length > 0) {
-          console.log(`[TrailBase] loadSubset: first raw record:`, JSON.stringify(records[0]))
-          const firstParsed = parse(records[0])
-          console.log(`[TrailBase] loadSubset: first parsed record:`, JSON.stringify(firstParsed, (_, v) => typeof v === 'bigint' ? v.toString() : v))
+          // Sort records by ID to ensure consistent insertion order (for deterministic tie-breaking)
+          // Decode base64 IDs to UUIDs for proper lexicographic sorting
+          const sortedRecords = [...records].sort((a: TRecord, b: TRecord) => {
+            const idA = decodeIdForSorting(a[`id` as keyof TRecord])
+            const idB = decodeIdForSorting(b[`id` as keyof TRecord])
+            return idA.localeCompare(idB)
+          })
 
-          // Find a record with age 25 for debugging
-          const age25Record = records.find((r: any) => r.age === 25)
-          if (age25Record) {
-            console.log(`[TrailBase] loadSubset: found record with age 25:`, JSON.stringify(age25Record))
-            console.log(`[TrailBase] loadSubset: parsed age 25 record:`, JSON.stringify(parse(age25Record), (_, v) => typeof v === 'bigint' ? v.toString() : v))
-          } else {
-            console.log(`[TrailBase] loadSubset: NO record with age 25 found in ${records.length} records`)
-            // List all unique ages
-            const ages = [...new Set(records.map((r: any) => r.age))].sort((a, b) => a - b)
-            console.log(`[TrailBase] loadSubset: ages in dataset:`, ages.slice(0, 20).join(', '), '...')
-          }
-
-          console.log(`[TrailBase] loadSubset: calling begin()`)
           begin()
-          let writeCount = 0
-          let errorCount = 0
-          for (const item of records) {
-            try {
-              write({ type: `insert`, value: parse(item) })
-              writeCount++
-            } catch (e: any) {
-              errorCount++
-              if (errorCount <= 3) {
-                console.log(`[TrailBase] loadSubset: write error ${errorCount}:`, e.message || e)
-              }
-            }
+          for (const item of sortedRecords) {
+            write({ type: `insert`, value: parse(item) })
           }
-          console.log(`[TrailBase] loadSubset: wrote ${writeCount} items, ${errorCount} errors, calling commit()`)
           commit()
-          console.log(`[TrailBase] loadSubset: commit complete`)
           loadSubsetCompleted = true
         }
       }

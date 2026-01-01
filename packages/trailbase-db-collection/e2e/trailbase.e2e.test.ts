@@ -117,147 +117,111 @@ function parseTrailBaseId(rawId: unknown): string {
 }
 
 /**
- * TrailBase record types matching the shared schema
- * TrailBase uses snake_case column names and INTEGER PRIMARY KEY
+ * TrailBase record types matching the camelCase schema
+ * Column names match the app types, only types differ for storage
  */
 interface UserRecord {
-  id: string
+  id: string // base64 encoded UUID
   name: string
   email: string | null
   age: number
-  is_active: boolean
-  created_at: string
+  isActive: number // SQLite INTEGER (0/1) for boolean
+  createdAt: string // ISO date string
   metadata: string | null // JSON stored as string
-  deleted_at: string | null
+  deletedAt: string | null // ISO date string
 }
 
 interface PostRecord {
   id: string
-  user_id: string
+  userId: string
   title: string
   content: string | null
-  view_count: number
-  large_view_count: string // BigInt as string
-  published_at: string | null
-  deleted_at: string | null
+  viewCount: number
+  largeViewCount: string // BigInt as string
+  publishedAt: string | null
+  deletedAt: string | null
 }
 
 interface CommentRecord {
   id: string
-  post_id: string
-  user_id: string
+  postId: string
+  userId: string
   text: string
-  created_at: string
-  deleted_at: string | null
+  createdAt: string
+  deletedAt: string | null
 }
 
-// Serialize functions for inserts - include ID as base64-encoded UUID for BLOB storage
-// TrailBase allows providing the ID (validated with is_uuid() CHECK constraint)
-const serializeUserForInsert = (user: User): UserRecord => ({
-  id: uuidToBase64(user.id),
-  name: user.name,
-  email: user.email,
-  age: user.age,
-  is_active: user.isActive,
-  created_at: user.createdAt.toISOString(),
-  metadata: user.metadata ? JSON.stringify(user.metadata) : null,
-  deleted_at: user.deletedAt ? user.deletedAt.toISOString() : null,
-})
-
-const serializePostForInsert = (post: Post): PostRecord => ({
-  id: uuidToBase64(post.id),
-  user_id: post.userId,
-  title: post.title,
-  content: post.content,
-  view_count: post.viewCount,
-  large_view_count: post.largeViewCount.toString(),
-  published_at: post.publishedAt ? post.publishedAt.toISOString() : null,
-  deleted_at: post.deletedAt ? post.deletedAt.toISOString() : null,
-})
-
-const serializeCommentForInsert = (comment: Comment): CommentRecord => ({
-  id: uuidToBase64(comment.id),
-  post_id: comment.postId,
-  user_id: comment.userId,
-  text: comment.text,
-  created_at: comment.createdAt.toISOString(),
-  deleted_at: comment.deletedAt ? comment.deletedAt.toISOString() : null,
-})
-
 /**
- * Parse functions that transform TrailBase records (snake_case) to app types (camelCase)
- * These do proper key mapping and type conversion
- * IDs can be returned in various formats (base64, URL-safe base64, UUID string, integer)
+ * Parse functions - only transform types that differ between DB and app
  */
 const parseUser = (record: UserRecord): User => ({
   id: parseTrailBaseId(record.id),
   name: record.name,
   email: record.email,
   age: record.age,
-  isActive: Boolean(record.is_active),
-  createdAt: new Date(record.created_at),
+  isActive: Boolean(record.isActive),
+  createdAt: new Date(record.createdAt),
   metadata: record.metadata ? JSON.parse(record.metadata) : null,
-  deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
+  deletedAt: record.deletedAt ? new Date(record.deletedAt) : null,
 })
 
 const parsePost = (record: PostRecord): Post => ({
   id: parseTrailBaseId(record.id),
-  userId: record.user_id,
+  userId: record.userId,
   title: record.title,
   content: record.content,
-  viewCount: record.view_count,
-  largeViewCount: BigInt(record.large_view_count),
-  publishedAt: record.published_at ? new Date(record.published_at) : null,
-  deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
+  viewCount: record.viewCount,
+  largeViewCount: BigInt(record.largeViewCount),
+  publishedAt: record.publishedAt ? new Date(record.publishedAt) : null,
+  deletedAt: record.deletedAt ? new Date(record.deletedAt) : null,
 })
 
 const parseComment = (record: CommentRecord): Comment => ({
   id: parseTrailBaseId(record.id),
-  postId: record.post_id,
-  userId: record.user_id,
+  postId: record.postId,
+  userId: record.userId,
   text: record.text,
-  createdAt: new Date(record.created_at),
-  deletedAt: record.deleted_at ? new Date(record.deleted_at) : null,
+  createdAt: new Date(record.createdAt),
+  deletedAt: record.deletedAt ? new Date(record.deletedAt) : null,
 })
 
 /**
- * Serialize functions that transform app types (camelCase) to TrailBase records (snake_case)
- * IDs need to be encoded as base64 for TrailBase BLOB storage
+ * Serialize functions - transform app types to DB storage types
+ * ID is base64 encoded for TrailBase BLOB storage
  */
 const serializeUser = (user: User): UserRecord => ({
   id: uuidToBase64(user.id),
   name: user.name,
   email: user.email,
   age: user.age,
-  is_active: user.isActive,
-  created_at: user.createdAt.toISOString(),
+  isActive: user.isActive ? 1 : 0,
+  createdAt: user.createdAt.toISOString(),
   metadata: user.metadata ? JSON.stringify(user.metadata) : null,
-  deleted_at: user.deletedAt ? user.deletedAt.toISOString() : null,
+  deletedAt: user.deletedAt ? user.deletedAt.toISOString() : null,
 })
 
 const serializePost = (post: Post): PostRecord => ({
   id: uuidToBase64(post.id),
-  user_id: post.userId,
+  userId: post.userId,
   title: post.title,
   content: post.content,
-  view_count: post.viewCount,
-  large_view_count: post.largeViewCount.toString(),
-  published_at: post.publishedAt ? post.publishedAt.toISOString() : null,
-  deleted_at: post.deletedAt ? post.deletedAt.toISOString() : null,
+  viewCount: post.viewCount,
+  largeViewCount: post.largeViewCount.toString(),
+  publishedAt: post.publishedAt ? post.publishedAt.toISOString() : null,
+  deletedAt: post.deletedAt ? post.deletedAt.toISOString() : null,
 })
 
 const serializeComment = (comment: Comment): CommentRecord => ({
   id: uuidToBase64(comment.id),
-  post_id: comment.postId,
-  user_id: comment.userId,
+  postId: comment.postId,
+  userId: comment.userId,
   text: comment.text,
-  created_at: comment.createdAt.toISOString(),
-  deleted_at: comment.deletedAt ? comment.deletedAt.toISOString() : null,
+  createdAt: comment.createdAt.toISOString(),
+  deletedAt: comment.deletedAt ? comment.deletedAt.toISOString() : null,
 })
 
 /**
- * Partial serializers for updates (maps camelCase keys to snake_case)
- * IDs need to be encoded as base64 for TrailBase BLOB storage
+ * Partial serializers for updates
  */
 const serializeUserPartial = (user: Partial<User>): Partial<UserRecord> => {
   const result: Partial<UserRecord> = {}
@@ -265,34 +229,34 @@ const serializeUserPartial = (user: Partial<User>): Partial<UserRecord> => {
   if (user.name !== undefined) result.name = user.name
   if (user.email !== undefined) result.email = user.email
   if (user.age !== undefined) result.age = user.age
-  if (user.isActive !== undefined) result.is_active = user.isActive
-  if (user.createdAt !== undefined) result.created_at = user.createdAt.toISOString()
+  if (user.isActive !== undefined) result.isActive = user.isActive ? 1 : 0
+  if (user.createdAt !== undefined) result.createdAt = user.createdAt.toISOString()
   if (user.metadata !== undefined) result.metadata = user.metadata ? JSON.stringify(user.metadata) : null
-  if (user.deletedAt !== undefined) result.deleted_at = user.deletedAt ? user.deletedAt.toISOString() : null
+  if (user.deletedAt !== undefined) result.deletedAt = user.deletedAt ? user.deletedAt.toISOString() : null
   return result
 }
 
 const serializePostPartial = (post: Partial<Post>): Partial<PostRecord> => {
   const result: Partial<PostRecord> = {}
   if (post.id !== undefined) result.id = uuidToBase64(post.id)
-  if (post.userId !== undefined) result.user_id = post.userId
+  if (post.userId !== undefined) result.userId = post.userId
   if (post.title !== undefined) result.title = post.title
   if (post.content !== undefined) result.content = post.content
-  if (post.viewCount !== undefined) result.view_count = post.viewCount
-  if (post.largeViewCount !== undefined) result.large_view_count = post.largeViewCount.toString()
-  if (post.publishedAt !== undefined) result.published_at = post.publishedAt ? post.publishedAt.toISOString() : null
-  if (post.deletedAt !== undefined) result.deleted_at = post.deletedAt ? post.deletedAt.toISOString() : null
+  if (post.viewCount !== undefined) result.viewCount = post.viewCount
+  if (post.largeViewCount !== undefined) result.largeViewCount = post.largeViewCount.toString()
+  if (post.publishedAt !== undefined) result.publishedAt = post.publishedAt ? post.publishedAt.toISOString() : null
+  if (post.deletedAt !== undefined) result.deletedAt = post.deletedAt ? post.deletedAt.toISOString() : null
   return result
 }
 
 const serializeCommentPartial = (comment: Partial<Comment>): Partial<CommentRecord> => {
   const result: Partial<CommentRecord> = {}
   if (comment.id !== undefined) result.id = uuidToBase64(comment.id)
-  if (comment.postId !== undefined) result.post_id = comment.postId
-  if (comment.userId !== undefined) result.user_id = comment.userId
+  if (comment.postId !== undefined) result.postId = comment.postId
+  if (comment.userId !== undefined) result.userId = comment.userId
   if (comment.text !== undefined) result.text = comment.text
-  if (comment.createdAt !== undefined) result.created_at = comment.createdAt.toISOString()
-  if (comment.deletedAt !== undefined) result.deleted_at = comment.deletedAt ? comment.deletedAt.toISOString() : null
+  if (comment.createdAt !== undefined) result.createdAt = comment.createdAt.toISOString()
+  if (comment.deletedAt !== undefined) result.deletedAt = comment.deletedAt ? comment.deletedAt.toISOString() : null
   return result
 }
 
@@ -432,10 +396,9 @@ describe(`TrailBase Collection E2E Tests`, () => {
     let userErrors = 0
     for (const user of seedData.users) {
       try {
-        const serialized = serializeUserForInsert(user)
+        const serialized = serializeUser(user)
         if (userErrors === 0) console.log('First user data:', JSON.stringify(serialized))
         await usersRecordApi.create(serialized)
-        // ID is preserved from the original seed data
       } catch (e) {
         userErrors++
         if (userErrors <= 3) console.error('User insert error:', e)
@@ -448,8 +411,7 @@ describe(`TrailBase Collection E2E Tests`, () => {
     let postErrors = 0
     for (const post of seedData.posts) {
       try {
-        await postsRecordApi.create(serializePostForInsert(post))
-        // ID is preserved from the original seed data
+        await postsRecordApi.create(serializePost(post))
       } catch (e) {
         postErrors++
         if (postErrors <= 3) console.error('Post insert error:', e)
@@ -461,8 +423,7 @@ describe(`TrailBase Collection E2E Tests`, () => {
     let commentErrors = 0
     for (const comment of seedData.comments) {
       try {
-        await commentsRecordApi.create(serializeCommentForInsert(comment))
-        // ID is preserved from the original seed data
+        await commentsRecordApi.create(serializeComment(comment))
       } catch (e) {
         commentErrors++
         if (commentErrors <= 3) console.error('Comment insert error:', e)
@@ -599,7 +560,7 @@ describe(`TrailBase Collection E2E Tests`, () => {
       mutations: {
         insertUser: async (user) => {
           // Insert with the provided ID (base64-encoded UUID)
-          await usersRecordApi.create(serializeUserForInsert(user))
+          await usersRecordApi.create(serializeUser(user))
           // ID is preserved from the user object
         },
         updateUser: async (id, updates) => {
@@ -607,8 +568,7 @@ describe(`TrailBase Collection E2E Tests`, () => {
           if (updates.age !== undefined) partialRecord.age = updates.age
           if (updates.name !== undefined) partialRecord.name = updates.name
           if (updates.email !== undefined) partialRecord.email = updates.email
-          if (updates.isActive !== undefined)
-            partialRecord.is_active = updates.isActive
+          if (updates.isActive !== undefined) partialRecord.isActive = updates.isActive ? 1 : 0
           const encodedId = uuidToBase64(id)
           await usersRecordApi.update(encodedId, partialRecord)
         },
@@ -618,7 +578,7 @@ describe(`TrailBase Collection E2E Tests`, () => {
         },
         insertPost: async (post) => {
           // Insert with the provided ID
-          await postsRecordApi.create(serializePostForInsert(post))
+          await postsRecordApi.create(serializePost(post))
         },
       },
       setup: async () => {},
