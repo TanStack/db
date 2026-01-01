@@ -320,10 +320,12 @@ export function trailBaseCollectionOptions<
 
       // Afterwards subscribe.
       async function listen(reader: ReadableStreamDefaultReader<Event>) {
+        console.log(`[TrailBase] Subscription listener started`)
         while (true) {
           const { done, value: event } = await reader.read()
 
           if (done || !event) {
+            console.log(`[TrailBase] Subscription stream ended`)
             try {
               if ((reader as any).locked) {
                 reader.releaseLock()
@@ -334,16 +336,20 @@ export function trailBaseCollectionOptions<
             return
           }
 
+          console.log(`[TrailBase] Received event:`, JSON.stringify(event).slice(0, 200))
           begin()
           let value: TItem | undefined
           if (`Insert` in event) {
             value = parse(event.Insert as TRecord)
+            console.log(`[TrailBase] Insert event for item with key: ${getKey(value)}`)
             write({ type: `insert`, value })
           } else if (`Delete` in event) {
             value = parse(event.Delete as TRecord)
+            console.log(`[TrailBase] Delete event for item with key: ${getKey(value)}`)
             write({ type: `delete`, value })
           } else if (`Update` in event) {
             value = parse(event.Update as TRecord)
+            console.log(`[TrailBase] Update event for item with key: ${getKey(value)}`)
             write({ type: `update`, value })
           } else {
             console.error(`Error: ${event.Error}`)
