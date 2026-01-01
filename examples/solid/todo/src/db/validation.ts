@@ -1,34 +1,24 @@
 import { createInsertSchema, createSelectSchema } from 'drizzle-zod'
-import { z } from 'zod'
 import { config, todos } from './schema'
+import type { z } from 'zod'
 
-// Date transformation schema - handles Date objects, ISO strings, and parseable date strings
-const dateStringToDate = z
-  .union([
-    z.date(), // Already a Date object
-    z
-      .string()
-      .datetime()
-      .transform((str) => new Date(str)), // ISO datetime string
-    z.string().transform((str) => new Date(str)), // Any parseable date string
-  ])
-  .optional()
-
-// Auto-generated schemas from Drizzle schema with date transformation
-export const insertTodoSchema = createInsertSchema(todos, {
-  created_at: dateStringToDate,
-  updated_at: dateStringToDate,
+// Auto-generated schemas from Drizzle schema (omit auto-generated fields)
+export const insertTodoSchema = createInsertSchema(todos).omit({
+  id: true,
+  created_at: true,
+  updated_at: true,
 })
 export const selectTodoSchema = createSelectSchema(todos)
 
 // Partial schema for updates
 export const updateTodoSchema = insertTodoSchema.partial().strict()
 
-// Config schemas with date transformation
-export const insertConfigSchema = createInsertSchema(config, {
-  created_at: dateStringToDate,
-  updated_at: dateStringToDate,
-}).strict()
+// Config schemas (omit auto-generated fields)
+export const insertConfigSchema = createInsertSchema(config).omit({
+  id: true,
+  created_at: true,
+  updated_at: true,
+})
 export const selectConfigSchema = createSelectSchema(config)
 export const updateConfigSchema = insertConfigSchema.partial().strict()
 
