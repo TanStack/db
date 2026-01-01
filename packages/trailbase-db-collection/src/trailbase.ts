@@ -466,9 +466,19 @@ export function trailBaseCollectionOptions<
         return
       }
 
+      // Track if loadSubset has been called to prevent redundant fetches
+      let loadSubsetCompleted = false
+
       // On-demand and progressive modes need loadSubset for query-driven data loading
       const loadSubset = async (opts: { limit?: number } = {}) => {
-        console.log(`[TrailBase] loadSubset called, syncMode=${internalSyncMode}, fullSyncCompleted=${fullSyncCompleted}, opts=`, opts)
+        console.log(`[TrailBase] loadSubset called, syncMode=${internalSyncMode}, fullSyncCompleted=${fullSyncCompleted}, loadSubsetCompleted=${loadSubsetCompleted}, opts=`, opts)
+
+        // Skip if already loaded to prevent race conditions and inconsistent ordering
+        if (loadSubsetCompleted) {
+          console.log(`[TrailBase] loadSubset: skipping, already completed`)
+          return
+        }
+
         // In progressive mode after full sync is complete, no need to load more
         if (internalSyncMode === `progressive` && fullSyncCompleted) {
           console.log(`[TrailBase] loadSubset: skipping, full sync complete`)
@@ -516,6 +526,7 @@ export function trailBaseCollectionOptions<
           console.log(`[TrailBase] loadSubset: wrote ${writeCount} items, ${errorCount} errors, calling commit()`)
           commit()
           console.log(`[TrailBase] loadSubset: commit complete`)
+          loadSubsetCompleted = true
         }
       }
 
