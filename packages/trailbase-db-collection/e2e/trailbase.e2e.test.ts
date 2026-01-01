@@ -40,8 +40,14 @@ declare module 'vitest' {
 }
 
 /**
+ * ID mapping for mutations - maps client-provided UUIDs to TrailBase-generated integer IDs
+ * This allows delete/update operations to find records by their actual TrailBase ID
+ */
+const userIdMap = new Map<string, string>()
+
+/**
  * TrailBase record types matching the shared schema
- * TrailBase uses snake_case column names
+ * TrailBase uses snake_case column names and INTEGER PRIMARY KEY
  */
 interface UserRecord {
   id: string
@@ -74,7 +80,7 @@ interface CommentRecord {
   deleted_at: string | null
 }
 
-// Serialize functions for inserts (omit id - TrailBase auto-generates with INTEGER PRIMARY KEY)
+// Serialize functions for inserts - omit ID since TrailBase auto-generates INTEGER PRIMARY KEY
 const serializeUserForInsert = (user: User): Omit<UserRecord, 'id'> => ({
   name: user.name,
   email: user.email,
@@ -324,17 +330,17 @@ describe(`TrailBase Collection E2E Tests`, () => {
     const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
 
     // Insert seed data and capture returned IDs
-    // TrailBase auto-generates INTEGER PRIMARY KEY, so we need to update seed data with actual IDs
+    // TrailBase auto-generates INTEGER PRIMARY KEY, so we update seed data with actual IDs
     console.log(`Inserting ${seedData.users.length} users...`)
     let userErrors = 0
-    const userIdMap = new Map<string, string>() // Maps original UUID to TrailBase integer ID
+    const localUserIdMap = new Map<string, string>() // Maps original UUID to TrailBase integer ID
     for (const user of seedData.users) {
       try {
         const serialized = serializeUserForInsert(user)
         if (userErrors === 0) console.log('First user data:', JSON.stringify(serialized))
         const newId = await usersRecordApi.create(serialized)
         // Store the mapping and update the user's ID
-        userIdMap.set(user.id, String(newId))
+        localUserIdMap.set(user.id, String(newId))
         user.id = String(newId)
       } catch (e) {
         userErrors++
@@ -353,8 +359,8 @@ describe(`TrailBase Collection E2E Tests`, () => {
         // Store original post ID for mapping
         const originalPostId = post.id
         // Update the userId reference to use the new TrailBase ID
-        if (userIdMap.has(post.userId)) {
-          post.userId = userIdMap.get(post.userId)!
+        if (localUserIdMap.has(post.userId)) {
+          post.userId = localUserIdMap.get(post.userId)!
         }
         const newId = await postsRecordApi.create(serializePostForInsert(post))
         postIdMap.set(originalPostId, String(newId))
@@ -373,8 +379,8 @@ describe(`TrailBase Collection E2E Tests`, () => {
     for (const comment of seedData.comments) {
       try {
         // Update the userId and postId references using the maps
-        if (userIdMap.has(comment.userId)) {
-          comment.userId = userIdMap.get(comment.userId)!
+        if (localUserIdMap.has(comment.userId)) {
+          comment.userId = localUserIdMap.get(comment.userId)!
         }
         if (postIdMap.has(comment.postId)) {
           comment.postId = postIdMap.get(comment.postId)!
@@ -531,10 +537,12 @@ describe(`TrailBase Collection E2E Tests`, () => {
       },
       mutations: {
         insertUser: async (user) => {
-          // TrailBase returns the auto-generated integer ID
+          // TrailBase generates INTEGER ID - store mapping and update user object
+          const originalId = user.id
           const newId = await usersRecordApi.create(serializeUserForInsert(user))
-          // Update the user object with the actual ID so the test can reference it
-          ;(user as any).id = String(newId)
+          const trailbaseId = String(newId)
+          userIdMap.set(originalId, trailbaseId)
+          ;(user as any).id = trailbaseId
         },
         updateUser: async (id, updates) => {
           const partialRecord: Partial<UserRecord> = {}
@@ -543,16 +551,18 @@ describe(`TrailBase Collection E2E Tests`, () => {
           if (updates.email !== undefined) partialRecord.email = updates.email
           if (updates.isActive !== undefined)
             partialRecord.is_active = updates.isActive
-          await usersRecordApi.update(id, partialRecord)
+          // Use mapped ID if available, otherwise use as-is (for seed data records)
+          const trailbaseId = userIdMap.get(id) ?? id
+          await usersRecordApi.update(trailbaseId, partialRecord)
         },
         deleteUser: async (id) => {
-          await usersRecordApi.delete(id)
+          // Use mapped ID if available, otherwise use as-is (for seed data records)
+          const trailbaseId = userIdMap.get(id) ?? id
+          await usersRecordApi.delete(trailbaseId)
         },
         insertPost: async (post) => {
-          // TrailBase returns the auto-generated integer ID
-          const newId = await postsRecordApi.create(serializePostForInsert(post))
-          // Update the post object with the actual ID
-          ;(post as any).id = String(newId)
+          // TrailBase generates INTEGER ID
+          await postsRecordApi.create(serializePostForInsert(post))
         },
       },
       setup: async () => {},
