@@ -390,6 +390,19 @@ export class QueryMustHaveFromClauseError extends QueryBuilderError {
   }
 }
 
+export class InvalidWhereExpressionError extends QueryBuilderError {
+  constructor(valueType: string) {
+    super(
+      `Invalid where() expression: Expected a query expression, but received a ${valueType}. ` +
+        `This usually happens when using JavaScript's comparison operators (===, !==, <, >, etc.) directly. ` +
+        `Instead, use the query builder functions:\n\n` +
+        `  ❌ .where(({ user }) => user.id === 'abc')\n` +
+        `  ✅ .where(({ user }) => eq(user.id, 'abc'))\n\n` +
+        `Available comparison functions: eq, gt, gte, lt, lte, and, or, not, like, ilike, isNull, isUndefined`,
+    )
+  }
+}
+
 // Query Compilation Errors
 export class QueryCompilationError extends TanStackDBError {
   constructor(message: string) {

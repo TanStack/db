@@ -11,6 +11,7 @@ import {
 import {
   InvalidSourceError,
   InvalidSourceTypeError,
+  InvalidWhereExpressionError,
   JoinConditionMustBeEqualityError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
@@ -361,6 +362,21 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
 
+    // Validate that the callback returned a valid expression
+    // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
+    // which return boolean primitives instead of expression objects
+    if (!isExpressionLike(expression)) {
+      const valueType =
+        expression === null
+          ? `null`
+          : expression === undefined
+            ? `undefined`
+            : typeof expression === `object`
+              ? `object`
+              : typeof expression
+      throw new InvalidWhereExpressionError(valueType)
+    }
+
     const existingWhere = this.query.where || []
 
     return new BaseQueryBuilder({
@@ -401,6 +417,21 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
+
+    // Validate that the callback returned a valid expression
+    // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
+    // which return boolean primitives instead of expression objects
+    if (!isExpressionLike(expression)) {
+      const valueType =
+        expression === null
+          ? `null`
+          : expression === undefined
+            ? `undefined`
+            : typeof expression === `object`
+              ? `object`
+              : typeof expression
+      throw new InvalidWhereExpressionError(valueType)
+    }
 
     const existingHaving = this.query.having || []
 
