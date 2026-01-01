@@ -527,13 +527,14 @@ export function trailBaseCollectionOptions<
       }
 
       // Track if loadSubset has been called to prevent redundant fetches
-      let loadSubsetCompleted = false
+      // Using a promise to handle concurrent calls properly
+      let loadSubsetPromise: Promise<void> | null = null
 
       // On-demand and progressive modes need loadSubset for query-driven data loading
       const loadSubset = async (opts: { limit?: number } = {}): Promise<void> => {
-        // Skip if already loaded to prevent race conditions and inconsistent ordering
-        if (loadSubsetCompleted) {
-          return
+        // If already loading or completed, return the existing promise or resolve immediately
+        if (loadSubsetPromise) {
+          return loadSubsetPromise
         }
 
         // In progressive mode after full sync is complete, no need to load more
@@ -541,26 +542,30 @@ export function trailBaseCollectionOptions<
           return
         }
 
-        const limit = opts.limit ?? 256
-        const response = await config.recordApi.list({ pagination: { limit } })
-        const records = response?.records ?? []
+        // Create the promise before any async work to prevent race conditions
+        loadSubsetPromise = (async () => {
+          const limit = opts.limit ?? 256
+          const response = await config.recordApi.list({ pagination: { limit } })
+          const records = response?.records ?? []
 
-        if (records.length > 0) {
-          // Sort records by ID to ensure consistent insertion order (for deterministic tie-breaking)
-          // Decode base64 IDs to UUIDs for proper lexicographic sorting
-          const sortedRecords = [...records].sort((a: TRecord, b: TRecord) => {
-            const idA = decodeIdForSorting(a[`id` as keyof TRecord])
-            const idB = decodeIdForSorting(b[`id` as keyof TRecord])
-            return idA.localeCompare(idB)
-          })
+          if (records.length > 0) {
+            // Sort records by ID to ensure consistent insertion order (for deterministic tie-breaking)
+            // Decode base64 IDs to UUIDs for proper lexicographic sorting
+            const sortedRecords = [...records].sort((a: TRecord, b: TRecord) => {
+              const idA = decodeIdForSorting(a[`id` as keyof TRecord])
+              const idB = decodeIdForSorting(b[`id` as keyof TRecord])
+              return idA.localeCompare(idB)
+            })
 
-          begin()
-          for (const item of sortedRecords) {
-            write({ type: `insert`, value: parse(item) })
+            begin()
+            for (const item of sortedRecords) {
+              write({ type: `insert`, value: parse(item) })
+            }
+            commit()
           }
-          commit()
-          loadSubsetCompleted = true
-        }
+        })()
+
+        return loadSubsetPromise
       }
 
       return {
