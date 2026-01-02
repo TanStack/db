@@ -32,10 +32,15 @@ const CONTRACTS_ENABLED =
  */
 export class ContractViolationError extends Error {
   constructor(
-    public readonly violationType: `precondition` | `postcondition` | `invariant`,
+    public readonly violationType:
+      | `precondition`
+      | `postcondition`
+      | `invariant`,
     message: string,
   ) {
-    super(`${violationType.charAt(0).toUpperCase() + violationType.slice(1)} violation: ${message}`)
+    super(
+      `${violationType.charAt(0).toUpperCase() + violationType.slice(1)} violation: ${message}`,
+    )
     this.name = `ContractViolationError`
   }
 }
