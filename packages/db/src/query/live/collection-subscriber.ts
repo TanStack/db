@@ -3,6 +3,11 @@ import {
   normalizeExpressionPaths,
   normalizeOrderByPaths,
 } from '../compiler/expressions.js'
+import {
+  captureForPostcondition,
+  invariant,
+  postcondition,
+} from '../../contracts.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type { ChangeMessage } from '../../types.js'
@@ -130,15 +135,32 @@ export class CollectionSubscriber<
     return subscription
   }
 
+  /**
+   * Sends filtered changes to the D2 pipeline, ensuring multiplicity invariants.
+   *
+   * @contract
+   * @invariant D2 multiplicity === 1 for all visible items (no duplicates)
+   * @invariant sentToD2Keys accurately tracks all keys currently in D2
+   * @postcondition All inserts in filteredChanges have unique keys
+   * @postcondition For each insert: key is added to sentToD2Keys
+   * @postcondition For each delete: key is removed from sentToD2Keys
+   */
   private sendChangesToPipeline(
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => boolean,
   ) {
+    // Capture state before filtering for postcondition verification
+    const sentKeysBefore = captureForPostcondition(
+      () => new Set(this.sentToD2Keys),
+    )
+
     // Filter changes to prevent duplicate inserts to D2 pipeline.
     // This ensures D2 multiplicity stays at 1 for visible items, so deletes
     // properly reduce multiplicity to 0 (triggering DELETE output).
     const changesArray = Array.isArray(changes) ? changes : [...changes]
     const filteredChanges: Array<ChangeMessage<any, string | number>> = []
+    const insertKeysInBatch = new Set<string | number>()
+
     for (const change of changesArray) {
       if (change.type === `insert`) {
         if (this.sentToD2Keys.has(change.key)) {
@@ -146,12 +168,41 @@ export class CollectionSubscriber<
           continue
         }
         this.sentToD2Keys.add(change.key)
+        insertKeysInBatch.add(change.key)
       } else if (change.type === `delete`) {
         // Remove from tracking so future re-inserts are allowed
         this.sentToD2Keys.delete(change.key)
       }
       // Updates are handled as delete+insert by splitUpdates, so no special handling needed
       filteredChanges.push(change)
+    }
+
+    // Contract: Verify no duplicate insert keys in filtered output
+    // This invariant ensures D2 multiplicity stays at 1
+    const insertKeys = filteredChanges
+      .filter((c) => c.type === `insert`)
+      .map((c) => c.key)
+    const uniqueInsertKeys = new Set(insertKeys)
+    invariant(
+      insertKeys.length === uniqueInsertKeys.size,
+      `D2 multiplicity invariant violated: duplicate insert keys detected in batch: [${insertKeys.join(`, `)}]`,
+    )
+
+    // Contract: Verify sentToD2Keys state is consistent
+    if (sentKeysBefore !== undefined) {
+      for (const change of filteredChanges) {
+        if (change.type === `insert`) {
+          postcondition(
+            this.sentToD2Keys.has(change.key),
+            `sentToD2Keys must contain key ${change.key} after insert`,
+          )
+        } else if (change.type === `delete`) {
+          postcondition(
+            !this.sentToD2Keys.has(change.key),
+            `sentToD2Keys must not contain key ${change.key} after delete`,
+          )
+        }
+      }
     }
 
     // currentSyncState and input are always defined when this method is called

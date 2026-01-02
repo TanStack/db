@@ -55,6 +55,7 @@
     "@tanstack/config": "^0.22.2",
     "@vitest/coverage-istanbul": "^3.2.4",
     "arktype": "^2.1.29",
+    "fast-check": "^4.5.3",
     "mitt": "^3.0.1",
     "superjson": "^2.2.6",
     "temporal-polyfill": "^0.3.0"
