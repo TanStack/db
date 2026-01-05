@@ -1,4 +1,10 @@
-import { filter, groupBy, groupByOperators, map, serializeValue } from '@tanstack/db-ivm'
+import {
+  filter,
+  groupBy,
+  groupByOperators,
+  map,
+  serializeValue,
+} from '@tanstack/db-ivm'
 import { Func, PropRef, getHavingExpression } from '../ir.js'
 import {
   AggregateFunctionNotInSelectError,
