@@ -1272,7 +1272,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         // Check the group with the February date
         const group3 = Array.from(eventSummary.values()).find(
-          (e) => e.event_date.getTime() === new Date('2023-02-01T09:00:00Z').getTime(),
+          (e) =>
+            e.event_date.getTime() ===
+            new Date('2023-02-01T09:00:00Z').getTime(),
         )
         expect(group3).toBeDefined()
         expect(group3?.count).toBe(1) // Event 4
@@ -1344,7 +1346,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Find the group with timestamp1 and 'error'
         const group1 = Array.from(logSummary.values()).find(
           (l) =>
-            l.timestamp.getTime() === timestamp1.getTime() && l.level === 'error',
+            l.timestamp.getTime() === timestamp1.getTime() &&
+            l.level === 'error',
         )
         expect(group1).toBeDefined()
         expect(group1?.count).toBe(2) // Logs 1 and 3 (same timestamp, same level)
@@ -1352,7 +1355,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Find the group with timestamp1 and 'info'
         const group2 = Array.from(logSummary.values()).find(
           (l) =>
-            l.timestamp.getTime() === timestamp1.getTime() && l.level === 'info',
+            l.timestamp.getTime() === timestamp1.getTime() &&
+            l.level === 'info',
         )
         expect(group2).toBeDefined()
         expect(group2?.count).toBe(1) // Log 2
@@ -1360,7 +1364,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Find the group with the different timestamp and 'warning'
         const group3 = Array.from(logSummary.values()).find(
           (l) =>
-            l.timestamp.getTime() === new Date('2023-01-20T14:30:00Z').getTime() &&
+            l.timestamp.getTime() ===
+              new Date('2023-01-20T14:30:00Z').getTime() &&
             l.level === 'warning',
         )
         expect(group3).toBeDefined()
@@ -1424,7 +1429,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Find the group with BigInt('9007199254740991') and 'active'
         const group1 = Array.from(schoolSummary.values()).find(
           (s) =>
-            s.district_id === BigInt('9007199254740991') && s.status === 'active',
+            s.district_id === BigInt('9007199254740991') &&
+            s.status === 'active',
         )
         expect(group1).toBeDefined()
         expect(group1?.count).toBe(2) // Schools 1 and 2
