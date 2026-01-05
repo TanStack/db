@@ -1164,7 +1164,6 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .select(({ districts }) => ({
                 district_id: districts.district_id,
                 count: count(districts.id),
-                statuses: districts.status,
               })),
         })
 
@@ -1251,7 +1250,6 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .select(({ events }) => ({
                 event_date: events.event_date,
                 count: count(events.id),
-                names: events.name,
               })),
         })
 
