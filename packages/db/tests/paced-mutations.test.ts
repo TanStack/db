@@ -646,9 +646,7 @@ describe(`createPacedMutations`, () => {
       expect(Math.abs(tx1Start.time - tx3Start.time)).toBeLessThan(20)
 
       // tx2 (second item 1 mutation) should start after tx1 ends
-      const tx1End = executionLog.find(
-        (l) => l.id === 1 && l.action === `end`,
-      )!
+      const tx1End = executionLog.find((l) => l.id === 1 && l.action === `end`)!
       const tx2Start = executionLog.filter(
         (l) => l.id === 1 && l.action === `start`,
       )[1]!
@@ -698,15 +696,13 @@ describe(`createPacedMutations`, () => {
     })
 
     it(`should process independent items after one fails`, async () => {
-      const mutationFn = vi
-        .fn()
-        .mockImplementation(async ({ transaction }) => {
-          const id = transaction.mutations[0].changes.id
-          if (id === 1) {
-            throw new Error(`Item 1 failed`)
-          }
-          await new Promise((resolve) => setTimeout(resolve, 10))
-        })
+      const mutationFn = vi.fn().mockImplementation(async ({ transaction }) => {
+        const id = transaction.mutations[0].changes.id
+        if (id === 1) {
+          throw new Error(`Item 1 failed`)
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      })
 
       const collection = await createReadyCollection<Item>({
         id: `test`,

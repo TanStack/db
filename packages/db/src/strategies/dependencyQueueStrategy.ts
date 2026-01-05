@@ -81,7 +81,9 @@ export function dependencyQueueStrategy(
   /**
    * Get all dependency keys for a transaction
    */
-  function getDependencyKeys<T extends object>(tx: Transaction<T>): Set<string> {
+  function getDependencyKeys<T extends object>(
+    tx: Transaction<T>,
+  ): Set<string> {
     const keys = new Set<string>()
 
     // Add all globalKeys from mutations
@@ -116,7 +118,10 @@ export function dependencyQueueStrategy(
   /**
    * Mark keys as in-flight for a transaction
    */
-  function markInFlight<T extends object>(tx: Transaction<T>, keys: Set<string>): void {
+  function markInFlight<T extends object>(
+    tx: Transaction<T>,
+    keys: Set<string>,
+  ): void {
     for (const key of keys) {
       if (!inFlightByKey.has(key)) {
         inFlightByKey.set(key, new Set())
@@ -128,7 +133,10 @@ export function dependencyQueueStrategy(
   /**
    * Remove transaction from in-flight tracking and process pending items
    */
-  function markCompleted<T extends object>(tx: Transaction<T>, keys: Set<string>): void {
+  function markCompleted<T extends object>(
+    tx: Transaction<T>,
+    keys: Set<string>,
+  ): void {
     for (const key of keys) {
       const inFlight = inFlightByKey.get(key)
       if (inFlight) {
@@ -172,7 +180,10 @@ export function dependencyQueueStrategy(
   /**
    * Start committing a transaction and handle completion
    */
-  function startCommit<T extends object>(tx: Transaction<T>, keys: Set<string>): void {
+  function startCommit<T extends object>(
+    tx: Transaction<T>,
+    keys: Set<string>,
+  ): void {
     tx.commit()
       .catch(() => {
         // Errors are handled via transaction.isPersisted.promise
