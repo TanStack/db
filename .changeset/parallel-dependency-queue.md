@@ -7,6 +7,7 @@ Add `dependencyQueueStrategy` for parallel execution of independent mutations.
 This new paced mutations strategy enables mutations on different records to run in parallel while still serializing mutations that share dependencies (based on `globalKey`). This provides better performance than `queueStrategy` when mutations are independent, without sacrificing correctness.
 
 Key features:
+
 - Mutations on different records run concurrently
 - Mutations on the same record are serialized in order
 - Supports custom dependency declarations via `getDependencies` callback for semantic relationships
