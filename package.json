@@ -5,7 +5,7 @@
     "type": "git",
     "url": "git+https://github.com/TanStack/db.git"
   },
-  "packageManager": "pnpm@10.26.2",
+  "packageManager": "pnpm@10.27.0",
   "type": "module",
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
@@ -42,7 +42,7 @@
     "eslint-plugin-react": "^7.37.5",
     "husky": "^9.1.7",
     "jsdom": "^27.4.0",
-    "knip": "^5.78.0",
+    "knip": "^5.79.0",
     "lint-staged": "^15.5.2",
     "markdown-link-extractor": "^4.0.3",
     "prettier": "^3.7.4",

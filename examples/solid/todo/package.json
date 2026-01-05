@@ -4,11 +4,11 @@
   "version": "0.0.33",
   "dependencies": {
     "@tanstack/electric-db-collection": "^0.2.20",
-    "@tanstack/query-core": "^5.90.15",
+    "@tanstack/query-core": "^5.90.16",
     "@tanstack/query-db-collection": "^1.0.12",
     "@tanstack/solid-db": "^0.1.59",
     "@tanstack/solid-router": "^1.144.0",
-    "@tanstack/solid-start": "^1.145.0",
+    "@tanstack/solid-start": "^1.145.5",
     "@tanstack/trailbase-db-collection": "^0.1.60",
     "cors": "^2.8.5",
     "drizzle-orm": "^0.45.1",
