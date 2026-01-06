@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   and,
+  coalesce,
   createLiveQueryCollection,
   eq,
   gt,
@@ -472,7 +473,7 @@ export function createPredicatesTestSuite(
             .where(({ post }) =>
               or(
                 like(lower(post.title), `%${searchLower}%`),
-                like(lower(post.content ?? ``), `%${searchLower}%`),
+                like(lower(coalesce(post.content, ``)), `%${searchLower}%`),
               ),
             ),
         )

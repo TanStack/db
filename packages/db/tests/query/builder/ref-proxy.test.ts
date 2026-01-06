@@ -242,6 +242,16 @@ describe(`ref-proxy`, () => {
       expect(() => checkCallbackForJsOperators(callback)).toThrow(`??`)
     })
 
+    it(`throws error for ternary operator`, () => {
+      const callback = ({ users }: any) => ({
+        status: users.active ? `active` : `inactive`,
+      })
+      expect(() => checkCallbackForJsOperators(callback)).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
+      expect(() => checkCallbackForJsOperators(callback)).toThrow(`?:`)
+    })
+
     it(`does not throw for valid query callbacks`, () => {
       // Simple property access
       expect(() =>
@@ -272,6 +282,27 @@ describe(`ref-proxy`, () => {
       expect(() =>
         checkCallbackForJsOperators(() => ({ message: `a && b is valid` })),
       ).not.toThrow()
+
+      // ?: in a string literal should not trigger error
+      expect(() =>
+        checkCallbackForJsOperators(() => ({ message: `a ? b : c is valid` })),
+      ).not.toThrow()
+    })
+
+    it(`does not throw for optional chaining`, () => {
+      // Optional chaining should not be confused with ternary
+      expect(() =>
+        checkCallbackForJsOperators(({ users }: any) => users?.name),
+      ).not.toThrow()
+    })
+
+    it(`throws for operators in regex literals (known limitation)`, () => {
+      // This is a known limitation - regex literals containing operators
+      // will trigger false positives. Document the behavior.
+      const callbackWithRegexOr = () => ({ pattern: /a||b/ })
+      expect(() => checkCallbackForJsOperators(callbackWithRegexOr)).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
     })
   })
 

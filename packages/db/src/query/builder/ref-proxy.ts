@@ -278,6 +278,13 @@ const JS_OPERATOR_PATTERNS: Array<{
     operator: `??`,
     description: `nullish coalescing`,
   },
+  {
+    // Match ternary operator - looks for ? followed by : with something in between
+    // but not ?. (optional chaining) or ?? (nullish coalescing)
+    pattern: /\?[^.?][^:]*:/,
+    operator: `?:`,
+    description: `ternary`,
+  },
 ]
 
 /**
