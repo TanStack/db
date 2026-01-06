@@ -390,14 +390,14 @@ function getAggregateFunction(aggExpr: Aggregate) {
  * This function is used in both ORDER BY and HAVING clauses to transform expressions that reference:
  * 1. Aggregate functions (e.g., `max()`, `count()`) - replaces with references to computed aggregates in SELECT
  * 2. SELECT field references via $selected namespace (e.g., `$selected.latestActivity`) - replaces with references to __select_results
- * 
+ *
  * For aggregate expressions, it finds matching aggregates in the SELECT clause and replaces them with
  * PropRef([resultAlias, alias]) to reference the computed aggregate value.
- * 
+ *
  * For ref expressions, it only transforms references that use the $selected namespace (e.g., ['$selected', 'latestActivity']).
  * These are transformed to reference __select_results[alias]. All other ref expressions are passed through unchanged
  * (treating them as table column references). SELECT fields should only be accessed via the $selected namespace.
- * 
+ *
  * @param havingExpr - The expression to transform (can be aggregate, ref, func, or val)
  * @param selectClause - The SELECT clause containing aliases and aggregate definitions
  * @param resultAlias - The namespace alias for SELECT results (default: 'result', '__select_results' for ORDER BY)
