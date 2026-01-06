@@ -118,10 +118,7 @@ function processRow(
       ...namespacedRow,
       $selected: selectResults,
     },
-  ] as [
-    unknown,
-    typeof namespacedRow & { $selected: typeof selectResults },
-  ]
+  ] as [unknown, typeof namespacedRow & { $selected: typeof selectResults }]
 }
 
 /**
