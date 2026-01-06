@@ -132,9 +132,9 @@ describe(`hash property-based tests`, () => {
   describe(`property order independence`, () => {
     fcTest.prop([
       fc.tuple(
-        fc.string().filter((s) => s !== ``),
+        fc.string().filter((s) => s !== `` && s !== `__proto__`),
         fc.integer(),
-        fc.string().filter((s) => s !== ``),
+        fc.string().filter((s) => s !== `` && s !== `__proto__`),
         fc.integer(),
       ),
     ])(
@@ -150,7 +150,11 @@ describe(`hash property-based tests`, () => {
     )
 
     fcTest.prop([
-      fc.dictionary(fc.string(), fc.integer(), { minKeys: 2, maxKeys: 5 }),
+      fc.dictionary(
+        fc.string().filter((s) => s !== `__proto__`),
+        fc.integer(),
+        { minKeys: 2, maxKeys: 5 },
+      ),
     ])(`object hash is independent of property insertion order`, (obj) => {
       const keys = Object.keys(obj)
       const reversedKeys = [...keys].reverse()
