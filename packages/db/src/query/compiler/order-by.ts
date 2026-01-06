@@ -71,8 +71,9 @@ export function processOrderBy(
     // The namespaced row contains:
     // 1. Table aliases as top-level properties (e.g., row["tableName"])
     // 2. SELECT results in __select_results (e.g., row.__select_results["aggregateAlias"])
-    // The replaceAggregatesByRefs function has already transformed any aggregate expressions
-    // that match SELECT aggregates to use the __select_results namespace.
+    // The replaceAggregatesByRefs function has already transformed:
+    // - Aggregate expressions that match SELECT aggregates to use the __select_results namespace
+    // - Ref expressions that match SELECT aliases to use the __select_results namespace
     const orderByContext = row
 
     if (orderByClause.length > 1) {
