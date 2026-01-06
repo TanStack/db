@@ -15,7 +15,10 @@ export default defineConfig({
     alias: {
       '@tanstack/db': resolve(packagesDir, 'db/src/index.ts'),
       '@tanstack/db-ivm': resolve(packagesDir, 'db-ivm/src/index.ts'),
-      '@tanstack/db-collection-e2e': resolve(packagesDir, 'db-collection-e2e/src/index.ts'),
+      '@tanstack/db-collection-e2e': resolve(
+        packagesDir,
+        'db-collection-e2e/src/index.ts',
+      ),
     },
   },
 })

@@ -108,7 +108,11 @@ function decodeIdForSorting(rawId: unknown): string {
   const idStr = String(rawId ?? ``)
 
   // Check if it's already a UUID string format - return as-is
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr)) {
+  if (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      idStr,
+    )
+  ) {
     return idStr
   }
 
@@ -122,7 +126,8 @@ function decodeIdForSorting(rawId: unknown): string {
     // Convert URL-safe base64 to standard base64
     const standardBase64 = idStr.replace(/-/g, `+`).replace(/_/g, `/`)
     // Add padding if needed
-    const padded = standardBase64 + `==`.slice(0, (4 - standardBase64.length % 4) % 4)
+    const padded =
+      standardBase64 + `==`.slice(0, (4 - (standardBase64.length % 4)) % 4)
 
     // Decode base64 to bytes
     const binaryString = atob(padded)
@@ -193,13 +198,17 @@ export interface TrailBaseCollectionConfig<
    * Function to parse a TrailBase record into the app item type.
    * Use this for full control over the transformation including key renaming.
    */
-  parse: ((record: TRecord) => TItem) | Conversions<TRecord & ShapeOf<TItem>, TItem & ShapeOf<TRecord>>
+  parse:
+    | ((record: TRecord) => TItem)
+    | Conversions<TRecord & ShapeOf<TItem>, TItem & ShapeOf<TRecord>>
 
   /**
    * Function to serialize an app item into a TrailBase record.
    * Use this for full control over the transformation including key renaming.
    */
-  serialize: ((item: TItem) => TRecord) | Conversions<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>
+  serialize:
+    | ((item: TItem) => TRecord)
+    | Conversions<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>
 
   /**
    * Function to serialize a partial app item into a partial TrailBase record.
@@ -237,7 +246,10 @@ export function trailBaseCollectionOptions<
       ? config.parse
       : (record: TRecord) =>
           convert<TRecord & ShapeOf<TItem>, TItem & ShapeOf<TRecord>>(
-            config.parse as Conversions<TRecord & ShapeOf<TItem>, TItem & ShapeOf<TRecord>>,
+            config.parse as Conversions<
+              TRecord & ShapeOf<TItem>,
+              TItem & ShapeOf<TRecord>
+            >,
             record as TRecord & ShapeOf<TItem>,
           ) as TItem
 
@@ -247,7 +259,10 @@ export function trailBaseCollectionOptions<
       ? config.serialize
       : (item: TItem) =>
           convert<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>(
-            config.serialize as Conversions<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>,
+            config.serialize as Conversions<
+              TItem & ShapeOf<TRecord>,
+              TRecord & ShapeOf<TItem>
+            >,
             item as TItem & ShapeOf<TRecord>,
           ) as TRecord
 
@@ -272,7 +287,10 @@ export function trailBaseCollectionOptions<
         }
       : (item: Partial<TItem>) =>
           convertPartial<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>(
-            config.serialize as Conversions<TItem & ShapeOf<TRecord>, TRecord & ShapeOf<TItem>>,
+            config.serialize as Conversions<
+              TItem & ShapeOf<TRecord>,
+              TRecord & ShapeOf<TItem>
+            >,
             item as Partial<TItem & ShapeOf<TRecord>>,
           ) as Partial<TRecord>)
 
@@ -396,20 +414,29 @@ export function trailBaseCollectionOptions<
             return
           }
 
-          console.log(`[TrailBase] Received event:`, JSON.stringify(event).slice(0, 200))
+          console.log(
+            `[TrailBase] Received event:`,
+            JSON.stringify(event).slice(0, 200),
+          )
           begin()
           let value: TItem | undefined
           if (`Insert` in event) {
             value = parse(event.Insert as TRecord)
-            console.log(`[TrailBase] Insert event for item with key: ${getKey(value)}`)
+            console.log(
+              `[TrailBase] Insert event for item with key: ${getKey(value)}`,
+            )
             write({ type: `insert`, value })
           } else if (`Delete` in event) {
             value = parse(event.Delete as TRecord)
-            console.log(`[TrailBase] Delete event for item with key: ${getKey(value)}`)
+            console.log(
+              `[TrailBase] Delete event for item with key: ${getKey(value)}`,
+            )
             write({ type: `delete`, value })
           } else if (`Update` in event) {
             value = parse(event.Update as TRecord)
-            console.log(`[TrailBase] Update event for item with key: ${getKey(value)}`)
+            console.log(
+              `[TrailBase] Update event for item with key: ${getKey(value)}`,
+            )
             write({ type: `update`, value })
           } else {
             console.error(`Error: ${event.Error}`)
@@ -446,7 +473,10 @@ export function trailBaseCollectionOptions<
         }
 
         // For progressive mode with test hooks, use non-blocking pattern
-        if (internalSyncMode === `progressive` && testHooks?.beforeMarkingReady) {
+        if (
+          internalSyncMode === `progressive` &&
+          testHooks?.beforeMarkingReady
+        ) {
           // DON'T start full sync yet - let loadSubset handle data fetching
           // Wait for the hook to resolve, THEN do full sync and mark ready
           testHooks.beforeMarkingReady().then(async () => {
@@ -531,7 +561,9 @@ export function trailBaseCollectionOptions<
       let loadSubsetPromise: Promise<void> | null = null
 
       // On-demand and progressive modes need loadSubset for query-driven data loading
-      const loadSubset = async (opts: { limit?: number } = {}): Promise<void> => {
+      const loadSubset = async (
+        opts: { limit?: number } = {},
+      ): Promise<void> => {
         // If already loading or completed, return the existing promise or resolve immediately
         if (loadSubsetPromise) {
           return loadSubsetPromise
@@ -545,17 +577,21 @@ export function trailBaseCollectionOptions<
         // Create the promise before any async work to prevent race conditions
         loadSubsetPromise = (async () => {
           const limit = opts.limit ?? 256
-          const response = await config.recordApi.list({ pagination: { limit } })
+          const response = await config.recordApi.list({
+            pagination: { limit },
+          })
           const records = response?.records ?? []
 
           if (records.length > 0) {
             // Sort records by ID to ensure consistent insertion order (for deterministic tie-breaking)
             // Decode base64 IDs to UUIDs for proper lexicographic sorting
-            const sortedRecords = [...records].sort((a: TRecord, b: TRecord) => {
-              const idA = decodeIdForSorting(a[`id` as keyof TRecord])
-              const idB = decodeIdForSorting(b[`id` as keyof TRecord])
-              return idA.localeCompare(idB)
-            })
+            const sortedRecords = [...records].sort(
+              (a: TRecord, b: TRecord) => {
+                const idA = decodeIdForSorting(a[`id` as keyof TRecord])
+                const idB = decodeIdForSorting(b[`id` as keyof TRecord])
+                return idA.localeCompare(idB)
+              },
+            )
 
             begin()
             for (const item of sortedRecords) {
