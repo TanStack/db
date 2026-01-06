@@ -366,15 +366,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
     // which return boolean primitives instead of expression objects
     if (!isExpressionLike(expression)) {
-      const valueType =
-        expression === null
-          ? `null`
-          : expression === undefined
-            ? `undefined`
-            : typeof expression === `object`
-              ? `object`
-              : typeof expression
-      throw new InvalidWhereExpressionError(valueType)
+      throw new InvalidWhereExpressionError(getValueTypeName(expression))
     }
 
     const existingWhere = this.query.where || []
@@ -422,15 +414,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
     // which return boolean primitives instead of expression objects
     if (!isExpressionLike(expression)) {
-      const valueType =
-        expression === null
-          ? `null`
-          : expression === undefined
-            ? `undefined`
-            : typeof expression === `object`
-              ? `object`
-              : typeof expression
-      throw new InvalidWhereExpressionError(valueType)
+      throw new InvalidWhereExpressionError(getValueTypeName(expression))
     }
 
     const existingHaving = this.query.having || []
@@ -818,6 +802,14 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }
     return this.query as QueryIR
   }
+}
+
+// Helper to get a descriptive type name for error messages
+function getValueTypeName(value: unknown): string {
+  if (value === null) return `null`
+  if (value === undefined) return `undefined`
+  if (typeof value === `object`) return `object`
+  return typeof value
 }
 
 // Helper to ensure we have a BasicExpression/Aggregate for a value
