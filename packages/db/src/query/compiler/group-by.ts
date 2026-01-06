@@ -272,26 +272,26 @@ export function processGroupBy(
       )
       const compiledHaving = compileExpression(transformedHavingClause)
 
-        pipeline = pipeline.pipe(
-          filter(([, row]) => {
-            // Create a namespaced row structure for HAVING evaluation
-            const namespacedRow = { $selected: (row as any).$selected }
-            return compiledHaving(namespacedRow)
-          }),
-        )
+      pipeline = pipeline.pipe(
+        filter(([, row]) => {
+          // Create a namespaced row structure for HAVING evaluation
+          const namespacedRow = { $selected: (row as any).$selected }
+          return compiledHaving(namespacedRow)
+        }),
+      )
     }
   }
 
   // Apply functional HAVING clauses if present
   if (fnHavingClauses && fnHavingClauses.length > 0) {
     for (const fnHaving of fnHavingClauses) {
-        pipeline = pipeline.pipe(
-          filter(([, row]) => {
-            // Create a namespaced row structure for functional HAVING evaluation
-            const namespacedRow = { $selected: (row as any).$selected }
-            return toBooleanPredicate(fnHaving(namespacedRow))
-          }),
-        )
+      pipeline = pipeline.pipe(
+        filter(([, row]) => {
+          // Create a namespaced row structure for functional HAVING evaluation
+          const namespacedRow = { $selected: (row as any).$selected }
+          return toBooleanPredicate(fnHaving(namespacedRow))
+        }),
+      )
     }
   }
 
@@ -391,14 +391,14 @@ function getAggregateFunction(aggExpr: Aggregate) {
  * This function is used in both ORDER BY and HAVING clauses to transform expressions that reference:
  * 1. Aggregate functions (e.g., `max()`, `count()`) - replaces with references to computed aggregates in SELECT
  * 2. SELECT field references via $selected namespace (e.g., `$selected.latestActivity`) - validates and passes through unchanged
- * 
+ *
  * For aggregate expressions, it finds matching aggregates in the SELECT clause and replaces them with
  * PropRef([resultAlias, alias]) to reference the computed aggregate value.
- * 
+ *
  * For ref expressions using the $selected namespace, it validates that the field exists in the SELECT clause
  * and passes them through unchanged (since $selected is already the correct namespace). All other ref expressions
  * are passed through unchanged (treating them as table column references).
- * 
+ *
  * @param havingExpr - The expression to transform (can be aggregate, ref, func, or val)
  * @param selectClause - The SELECT clause containing aliases and aggregate definitions
  * @param resultAlias - The namespace alias for SELECT results (default: '$selected', used for aggregate references)
