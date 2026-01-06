@@ -386,18 +386,18 @@ function getAggregateFunction(aggExpr: Aggregate) {
 
 /**
  * Transforms expressions to replace aggregate functions and SELECT field references with references to computed values.
- * 
+ *
  * This function is used in both ORDER BY and HAVING clauses to transform expressions that reference:
  * 1. Aggregate functions (e.g., `max()`, `count()`) - replaces with references to computed aggregates in SELECT
  * 2. SELECT field aliases (e.g., `taskId`, `latestActivity`) - replaces with references to __select_results
- * 
+ *
  * For aggregate expressions, it finds matching aggregates in the SELECT clause and replaces them with
  * PropRef([resultAlias, alias]) to reference the computed aggregate value.
- * 
+ *
  * For ref expressions, it checks if the field path matches any SELECT alias (including nested aliases
  * like 'meta.author.name') and transforms them to reference __select_results[alias]. If no match is
  * found, the ref is passed through unchanged (treating it as a table column reference).
- * 
+ *
  * @param havingExpr - The expression to transform (can be aggregate, ref, func, or val)
  * @param selectClause - The SELECT clause containing aliases and aggregate definitions
  * @param resultAlias - The namespace alias for SELECT results (default: 'result', '__select_results' for ORDER BY)
@@ -437,16 +437,16 @@ export function replaceAggregatesByRefs(
       // Check if this ref matches a SELECT alias
       // Ref paths are like ['tableAlias', 'field'] or ['tableAlias', 'nested', 'field']
       // SELECT aliases are the keys in selectClause, which can be simple ('taskId') or nested ('meta.author')
-      
+
       // Extract the field path (everything after the table alias, or the whole path if no table alias)
       const path = refExpr.path
       let fieldPath: Array<string>
-      
+
       if (path.length === 0) {
         // Empty path - pass through
         return havingExpr as BasicExpression
       }
-      
+
       // If path has more than one element, assume first is table alias, rest is field path
       // If path has one element, it might be just a field name
       if (path.length > 1) {
@@ -456,14 +456,14 @@ export function replaceAggregatesByRefs(
         // Check if it matches a SELECT alias directly
         fieldPath = path
       }
-      
+
       // Check if the field path matches any SELECT alias
       // SELECT aliases can be simple ('taskId') or nested ('meta.author.name')
       // We need to match the field path against SELECT aliases
       for (const alias of Object.keys(selectClause)) {
         // Split nested alias by dot to compare with field path
         const aliasParts = alias.split(`.`)
-        
+
         // Check if field path matches alias parts
         if (
           fieldPath.length === aliasParts.length &&
@@ -474,7 +474,7 @@ export function replaceAggregatesByRefs(
           return new PropRef([resultAlias, ...aliasParts])
         }
       }
-      
+
       // No match found - this is a table column reference, pass through unchanged
       return havingExpr as BasicExpression
     }
