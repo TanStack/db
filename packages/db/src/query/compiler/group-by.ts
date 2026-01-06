@@ -389,17 +389,6 @@ function getAggregateFunction(aggExpr: Aggregate) {
  *
  * This function is used in both ORDER BY and HAVING clauses to transform expressions that reference:
  * 1. Aggregate functions (e.g., `max()`, `count()`) - replaces with references to computed aggregates in SELECT
-<<<<<<< HEAD
- * 2. SELECT field aliases (e.g., `taskId`, `latestActivity`) - replaces with references to __select_results
- *
- * For aggregate expressions, it finds matching aggregates in the SELECT clause and replaces them with
- * PropRef([resultAlias, alias]) to reference the computed aggregate value.
- *
- * For ref expressions, it checks if the field path matches any SELECT alias (including nested aliases
- * like 'meta.author.name') and transforms them to reference __select_results[alias]. If no match is
- * found, the ref is passed through unchanged (treating it as a table column reference).
- *
-=======
  * 2. SELECT field references via $selected namespace (e.g., `$selected.latestActivity`) - replaces with references to __select_results
  * 
  * For aggregate expressions, it finds matching aggregates in the SELECT clause and replaces them with
@@ -409,7 +398,6 @@ function getAggregateFunction(aggExpr: Aggregate) {
  * These are transformed to reference __select_results[alias]. All other ref expressions are passed through unchanged
  * (treating them as table column references). SELECT fields should only be accessed via the $selected namespace.
  * 
->>>>>>> 118465ad (Expose selected fields on a special  namespace)
  * @param havingExpr - The expression to transform (can be aggregate, ref, func, or val)
  * @param selectClause - The SELECT clause containing aliases and aggregate definitions
  * @param resultAlias - The namespace alias for SELECT results (default: 'result', '__select_results' for ORDER BY)
