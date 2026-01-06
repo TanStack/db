@@ -1384,15 +1384,15 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
     describe(`ORDER BY and HAVING with SELECT fields (Bug Reproduction)`, () => {
       /**
        * These tests reproduce bug #1078: Unable to use aggregate fields from SELECT in ORDER BY
-       * 
+       *
        * The bug: When using aggregate functions in SELECT (e.g., count(), max()), you cannot
        * reference those SELECT fields in ORDER BY or HAVING clauses. The TypeScript types don't
        * expose SELECT fields in the callback context, and the runtime doesn't transform references
        * to SELECT aliases to use __select_results.
-       * 
+       *
        * Expected behavior: Should be able to order by and filter using fields defined in SELECT,
        * both aggregate and non-aggregate fields.
-       * 
+       *
        * Current behavior: TypeScript errors prevent compilation, and even if bypassed, runtime
        * fails because the expressions reference table columns instead of __select_results.
        */
@@ -1462,7 +1462,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               // 2. Runtime: Expression tries to access sessions.taskId (table column)
               //    instead of __select_results.taskId
               // @ts-expect-error - TypeScript error: Property 'taskId' does not exist
-              .orderBy(({ sessions }) => sessions.taskId, { direction: `desc` }),
+              .orderBy(({ sessions }) => sessions.taskId, {
+                direction: `desc`,
+              }),
         })
 
         // Once bug is fixed, this should work and return results ordered by taskId
