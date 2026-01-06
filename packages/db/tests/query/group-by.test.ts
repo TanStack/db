@@ -1434,9 +1434,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         // Find the group with MAX_SAFE_BIGINT and 'active'
         const group1 = Array.from(schoolSummary.values()).find(
-          (s) =>
-            s.district_id === MAX_SAFE_BIGINT &&
-            s.status === 'active',
+          (s) => s.district_id === MAX_SAFE_BIGINT && s.status === 'active',
         )
         expect(group1).toBeDefined()
         expect(group1?.count).toBe(2) // Schools 1 and 2
@@ -1444,8 +1442,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Find the group with MAX_SAFE_BIGINT + 1n and 'inactive'
         const group2 = Array.from(schoolSummary.values()).find(
           (s) =>
-            s.district_id === MAX_SAFE_BIGINT + 1n &&
-            s.status === 'inactive',
+            s.district_id === MAX_SAFE_BIGINT + 1n && s.status === 'inactive',
         )
         expect(group2).toBeDefined()
         expect(group2?.count).toBe(1) // School 3
