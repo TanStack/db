@@ -1423,7 +1423,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               // 2. Runtime: Expression tries to access sessions.latestActivity (table column)
               //    instead of __select_results.latestActivity
               // @ts-expect-error - TypeScript error: Property 'latestActivity' does not exist
-              .orderBy(({ sessions }) => sessions.latestActivity),
+              .orderBy(({ $selected }) => $selected.latestActivity),
         })
 
         // Once bug is fixed, this should work and return results ordered by latestActivity
@@ -1462,7 +1462,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               // 2. Runtime: Expression tries to access sessions.taskId (table column)
               //    instead of __select_results.taskId
               // @ts-expect-error - TypeScript error: Property 'taskId' does not exist
-              .orderBy(({ sessions }) => sessions.taskId, {
+              .orderBy(({ $selected }) => $selected.taskId, {
                 direction: `desc`,
               }),
         })
@@ -1503,7 +1503,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               //    instead of __select_results.sessionCount
               // Note: replaceAggregatesByRefs only handles aggregate EXPRESSIONS, not SELECT aliases
               // @ts-expect-error - TypeScript error: Property 'sessionCount' does not exist
-              .having(({ sessions }) => gt(sessions.sessionCount, 2)),
+              .having(({ $selected }) => gt($selected.sessionCount, 2)),
         })
 
         // Once bug is fixed, this should filter groups where sessionCount > 2
@@ -1536,7 +1536,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               // 2. Runtime: Expression tries to access sessions.taskId (table column)
               //    instead of __select_results.taskId
               // @ts-expect-error - TypeScript error: Property 'taskId' does not exist
-              .having(({ sessions }) => gt(sessions.taskId, 0)),
+              .having(({ $selected }) => gt($selected.taskId, 0)),
         })
 
         // Once bug is fixed, this should filter groups where taskId > 0

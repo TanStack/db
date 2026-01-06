@@ -176,6 +176,92 @@ export function createRefProxy<T extends Record<string, any>>(
 }
 
 /**
+ * Creates a ref proxy with $selected namespace for SELECT fields
+ * 
+ * Adds a $selected property that allows accessing SELECT fields via $selected.fieldName syntax.
+ * The $selected proxy creates paths like ['$selected', 'fieldName'] which are then transformed
+ * to reference __select_results.
+ * 
+ * @param aliases - Array of table aliases to create proxies for
+ * @returns A ref proxy with table aliases and $selected namespace
+ */
+export function createRefProxyWithSelected<T extends Record<string, any>>(
+  aliases: Array<string>,
+): RefProxy<T> & T & { $selected: SingleRowRefProxy<any> } {
+  const baseProxy = createRefProxy(aliases)
+
+  // Create a proxy for $selected that prefixes all paths with '$selected'
+  const cache = new Map<string, any>()
+  
+  function createSelectedProxy(path: Array<string>): any {
+    const pathKey = path.join(`.`)
+    if (cache.has(pathKey)) {
+      return cache.get(pathKey)
+    }
+
+    const proxy = new Proxy({} as any, {
+      get(target, prop, receiver) {
+        if (prop === `__refProxy`) return true
+        if (prop === `__path`) return [`$selected`, ...path]
+        if (prop === `__type`) return undefined
+        if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
+
+        const newPath = [...path, String(prop)]
+        return createSelectedProxy(newPath)
+      },
+
+      has(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__type`)
+          return true
+        return Reflect.has(target, prop)
+      },
+
+      ownKeys(target) {
+        return Reflect.ownKeys(target)
+      },
+
+      getOwnPropertyDescriptor(target, prop) {
+        if (prop === `__refProxy` || prop === `__path` || prop === `__type`) {
+          return { enumerable: false, configurable: true }
+        }
+        return Reflect.getOwnPropertyDescriptor(target, prop)
+      },
+    })
+
+    cache.set(pathKey, proxy)
+    return proxy
+  }
+
+  const wrappedSelectedProxy = createSelectedProxy([])
+
+  // Wrap the base proxy to also handle $selected access
+  return new Proxy(baseProxy, {
+    get(target, prop, receiver) {
+      if (prop === `$selected`) {
+        return wrappedSelectedProxy
+      }
+      return Reflect.get(target, prop, receiver)
+    },
+
+    has(target, prop) {
+      if (prop === `$selected`) return true
+      return Reflect.has(target, prop)
+    },
+
+    ownKeys(target) {
+      return [...Reflect.ownKeys(target), `$selected`]
+    },
+
+    getOwnPropertyDescriptor(target, prop) {
+      if (prop === `$selected`) {
+        return { enumerable: true, configurable: true, value: wrappedSelectedProxy }
+      }
+      return Reflect.getOwnPropertyDescriptor(target, prop)
+    },
+  }) as RefProxy<T> & T & { $selected: SingleRowRefProxy<any> }
+}
+
+/**
  * Converts a value to an Expression
  * If it's a RefProxy, creates a Ref, otherwise creates a Value
  */
