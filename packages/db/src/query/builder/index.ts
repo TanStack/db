@@ -16,7 +16,11 @@ import {
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
-import { createRefProxy, toExpression } from './ref-proxy.js'
+import {
+  createRefProxy,
+  createRefProxyWithSelected,
+  toExpression,
+} from './ref-proxy.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
@@ -29,6 +33,7 @@ import type {
 import type {
   CompareOptions,
   Context,
+  FunctionalHavingRow,
   GroupByCallback,
   JoinOnCallback,
   MergeContextForJoinCallback,
@@ -399,7 +404,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   having(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    // Add $selected namespace if SELECT clause exists
+    const refProxy = (
+      this.query.select
+        ? createRefProxyWithSelected(aliases)
+        : createRefProxy(aliases)
+    ) as RefsForContext<TContext>
     const expression = callback(refProxy)
 
     const existingHaving = this.query.having || []
@@ -490,7 +500,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     options: OrderByDirection | OrderByOptions = `asc`,
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    // Add $selected namespace if SELECT clause exists
+    const refProxy = (
+      this.query.select
+        ? createRefProxyWithSelected(aliases)
+        : createRefProxy(aliases)
+    ) as RefsForContext<TContext>
     const result = callback(refProxy)
 
     const opts: CompareOptions =
@@ -755,7 +770,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
        * Filter grouped rows using a function that operates on each aggregated row
        * Warning: This cannot be optimized by the query compiler
        *
-       * @param callback - A function that receives an aggregated row and returns a boolean
+       * @param callback - A function that receives an aggregated row (with $selected when select() was called) and returns a boolean
        * @returns A QueryBuilder with functional having filter applied
        *
        * @example
@@ -764,11 +779,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
        * query
        *   .from({ posts: postsCollection })
        *   .groupBy(({posts}) => posts.userId)
-       *   .fn.having(row => row.count > 5)
+       *   .select(({posts}) => ({ userId: posts.userId, count: count(posts.id) }))
+       *   .fn.having(({ $selected }) => $selected.count > 5)
        * ```
        */
       having(
-        callback: (row: TContext[`schema`]) => any,
+        callback: (row: FunctionalHavingRow<TContext>) => any,
       ): QueryBuilder<TContext> {
         return new BaseQueryBuilder({
           ...builder.query,

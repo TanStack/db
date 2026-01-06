@@ -216,7 +216,7 @@ export function compileQuery(
     throw new DistinctRequiresSelectError()
   }
 
-  // Process the SELECT clause early - always create __select_results
+  // Process the SELECT clause early - always create $selected
   // This eliminates duplication and allows for DISTINCT implementation
   if (query.fnSelect) {
     // Handle functional select - apply the function to transform the row
@@ -227,15 +227,15 @@ export function compileQuery(
           key,
           {
             ...namespacedRow,
-            __select_results: selectResults,
+            $selected: selectResults,
           },
-        ] as [string, typeof namespacedRow & { __select_results: any }]
+        ] as [string, typeof namespacedRow & { $selected: any }]
       }),
     )
   } else if (query.select) {
     pipeline = processSelect(pipeline, query.select, allInputs)
   } else {
-    // If no SELECT clause, create __select_results with the main table data
+    // If no SELECT clause, create $selected with the main table data
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
         const selectResults =
@@ -247,9 +247,9 @@ export function compileQuery(
           key,
           {
             ...namespacedRow,
-            __select_results: selectResults,
+            $selected: selectResults,
           },
-        ] as [string, typeof namespacedRow & { __select_results: any }]
+        ] as [string, typeof namespacedRow & { $selected: any }]
       }),
     )
   }
@@ -310,7 +310,7 @@ export function compileQuery(
 
   // Process the DISTINCT clause if it exists
   if (query.distinct) {
-    pipeline = pipeline.pipe(distinct(([_key, row]) => row.__select_results))
+    pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected))
   }
 
   // Process orderBy parameter if it exists
@@ -327,11 +327,11 @@ export function compileQuery(
       query.offset,
     )
 
-    // Final step: extract the __select_results and include orderBy index
+    // Final step: extract the $selected and include orderBy index
     const resultPipeline = orderedPipeline.pipe(
       map(([key, [row, orderByIndex]]) => {
-        // Extract the final results from __select_results and include orderBy index
-        const raw = (row as any).__select_results
+        // Extract the final results from $selected and include orderBy index
+        const raw = (row as any).$selected
         const finalResults = unwrapValue(raw)
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       }),
@@ -354,11 +354,11 @@ export function compileQuery(
     throw new LimitOffsetRequireOrderByError()
   }
 
-  // Final step: extract the __select_results and return tuple format (no orderBy)
+  // Final step: extract the $selected and return tuple format (no orderBy)
   const resultPipeline: ResultStream = pipeline.pipe(
     map(([key, row]) => {
-      // Extract the final results from __select_results and return [key, [results, undefined]]
-      const raw = (row as any).__select_results
+      // Extract the final results from $selected and return [key, [results, undefined]]
+      const raw = (row as any).$selected
       const finalResults = unwrapValue(raw)
       return [key, [finalResults, undefined]] as [
         unknown,
