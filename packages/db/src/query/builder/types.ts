@@ -374,11 +374,11 @@ export type RefsForContext<TContext extends Context> = {
   > extends true
     ? IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
-        // Extract the non-undefined and non-null part and place undefined outside
-        Ref<NonNullable<TContext[`schema`][K]>> | undefined
+          // Extract the non-undefined and non-null part and place undefined outside
+          Ref<NonNullable<TContext[`schema`][K]>> | undefined
       : // T is optional (T | undefined) but not exactly undefined, and not nullable
-        // Extract the non-undefined part and place undefined outside
-        Ref<NonUndefined<TContext[`schema`][K]>> | undefined
+          // Extract the non-undefined part and place undefined outside
+          Ref<NonUndefined<TContext[`schema`][K]>> | undefined
     : IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is nullable (T | null) but not exactly null, and not optional
         // Extract the non-null part and place null outside

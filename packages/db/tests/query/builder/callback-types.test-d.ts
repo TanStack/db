@@ -584,12 +584,16 @@ describe(`Query Builder Callback Types`, () => {
         }))
         .orderBy(({ user, $selected }) => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
-          expectTypeOf(user.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf(
+            user.department_id,
+          ).toEqualTypeOf<RefLeaf<number> | null>()
 
           expectTypeOf($selected.user_count).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf($selected.avg_age).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf($selected.max_salary).toEqualTypeOf<RefLeaf<number>>()
-          expectTypeOf($selected.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf(
+            $selected.department_id,
+          ).toEqualTypeOf<RefLeaf<number> | null>()
 
           // Can now order by SELECT fields
           return $selected.user_count
@@ -609,7 +613,9 @@ describe(`Query Builder Callback Types`, () => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
 
           expectTypeOf($selected.taskId).toEqualTypeOf<RefLeaf<number> | null>()
-          expectTypeOf($selected.department_name).toEqualTypeOf<RefLeaf<string>>()
+          expectTypeOf($selected.department_name).toEqualTypeOf<
+            RefLeaf<string>
+          >()
           expectTypeOf($selected.user_count).toEqualTypeOf<RefLeaf<number>>()
 
           // Can now order by SELECT fields
@@ -633,7 +639,9 @@ describe(`Query Builder Callback Types`, () => {
           expectTypeOf($selected.user_count).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf($selected.avg_age).toEqualTypeOf<RefLeaf<number>>()
           expectTypeOf($selected.total_salary).toEqualTypeOf<RefLeaf<number>>()
-          expectTypeOf($selected.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf(
+            $selected.department_id,
+          ).toEqualTypeOf<RefLeaf<number> | null>()
 
           // Can now use SELECT aliases in HAVING
           return gt($selected.user_count, 5)
@@ -653,7 +661,9 @@ describe(`Query Builder Callback Types`, () => {
           expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
 
           expectTypeOf($selected.taskId).toEqualTypeOf<RefLeaf<number> | null>()
-          expectTypeOf($selected.department_name).toEqualTypeOf<RefLeaf<string>>()
+          expectTypeOf($selected.department_name).toEqualTypeOf<
+            RefLeaf<string>
+          >()
           expectTypeOf($selected.user_count).toEqualTypeOf<RefLeaf<number>>()
 
           // Can now use SELECT fields in HAVING
