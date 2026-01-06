@@ -1193,8 +1193,10 @@ describe(`Collection.subscribeChanges`, () => {
     f.write({ type: `insert`, value: { id: 1, value: `server-after` } })
     f.commit()
 
-    // Expect delete, insert with optimistic value, and an empty event from markReady
-    expect(changeEvents.length).toBe(3)
+    // Expect delete and insert with optimistic value
+    // Note: Previously there was a duplicate insert event that was incorrectly
+    // being sent, causing 3 events. Now duplicates are filtered correctly.
+    expect(changeEvents.length).toBe(2)
     expect(changeEvents[0]).toEqual({
       type: `delete`,
       key: 1,

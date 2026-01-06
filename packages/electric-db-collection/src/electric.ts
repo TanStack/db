@@ -14,8 +14,24 @@ import {
   TimeoutWaitingForTxIdError,
 } from './errors'
 import { compileSQL } from './sql-compiler'
+import {
+  addTagToIndex,
+  findRowsMatchingPattern,
+  getTagLength,
+  isMoveOutMessage,
+  removeTagFromIndex,
+  tagMatchesPattern,
+} from './tag-index'
+import type {
+  MoveOutPattern,
+  MoveTag,
+  ParsedMoveTag,
+  RowId,
+  TagIndex,
+} from './tag-index'
 import type {
   BaseCollectionConfig,
+  ChangeMessageOrDeleteKeyMessage,
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
@@ -288,6 +304,15 @@ function isSnapshotEndMessage<T extends Row<unknown>>(
   return isControlMessage(message) && message.headers.control === `snapshot-end`
 }
 
+function isSubsetEndMessage<T extends Row<unknown>>(
+  message: Message<T>,
+): message is ControlMessage & { headers: { control: `subset-end` } } {
+  return (
+    isControlMessage(message) &&
+    (message.headers.control as string) === `subset-end`
+  )
+}
+
 function parseSnapshotMessage(message: SnapshotEndMessage): PostgresSnapshot {
   return {
     xmin: message.headers.xmin,
@@ -523,6 +548,10 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   // Buffer messages since last up-to-date to handle race conditions
   const currentBatchMessages = new Store<Array<Message<any>>>([])
 
+  // Track whether the current batch has been committed (up-to-date received)
+  // This allows awaitMatch to resolve immediately for messages from committed batches
+  const batchCommitted = new Store<boolean>(false)
+
   /**
    * Helper function to remove multiple matches from the pendingMatches store
    */
@@ -560,6 +589,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     syncMode: internalSyncMode,
     pendingMatches,
     currentBatchMessages,
+    batchCommitted,
     removePendingMatches,
     resolveMatchedPendingMatches,
     collectionId: config.id,
@@ -689,10 +719,21 @@ export function electricCollectionOptions<T extends Row<unknown>>(
       // Check against current batch messages first to handle race conditions
       for (const message of currentBatchMessages.state) {
         if (matchFn(message)) {
+          // If batch is committed (up-to-date already received), resolve immediately
+          // just like awaitTxId does when it finds a txid in seenTxids
+          if (batchCommitted.state) {
+            debug(
+              `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in committed batch, resolving immediately`,
+            )
+            clearTimeout(timeoutId)
+            resolve(true)
+            return
+          }
+
+          // If batch is not yet committed, register match and wait for up-to-date
           debug(
             `${config.id ? `[${config.id}] ` : ``}awaitMatch found immediate match in current batch, waiting for up-to-date`,
           )
-          // Register match as already matched
           pendingMatches.setState((current) => {
             const newMatches = new Map(current)
             newMatches.set(matchId, {
@@ -700,7 +741,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
               resolve,
               reject,
               timeoutId,
-              matched: true, // Already matched
+              matched: true, // Already matched, will resolve on up-to-date
             })
             return newMatches
           })
@@ -831,6 +872,7 @@ function createElectricSync<T extends Row<unknown>>(
       >
     >
     currentBatchMessages: Store<Array<Message<T>>>
+    batchCommitted: Store<boolean>
     removePendingMatches: (matchIds: Array<string>) => void
     resolveMatchedPendingMatches: () => void
     collectionId?: string
@@ -843,6 +885,7 @@ function createElectricSync<T extends Row<unknown>>(
     syncMode,
     pendingMatches,
     currentBatchMessages,
+    batchCommitted,
     removePendingMatches,
     resolveMatchedPendingMatches,
     collectionId,
@@ -852,6 +895,231 @@ function createElectricSync<T extends Row<unknown>>(
 
   // Store for the relation schema information
   const relationSchema = new Store<string | undefined>(undefined)
+
+  const tagCache = new Map<MoveTag, ParsedMoveTag>()
+
+  // Parses a tag string into a MoveTag.
+  // It memoizes the result parsed tag such that future calls
+  // for the same tag string return the same MoveTag array.
+  const parseTag = (tag: MoveTag): ParsedMoveTag => {
+    const cachedTag = tagCache.get(tag)
+    if (cachedTag) {
+      return cachedTag
+    }
+
+    const parsedTag = tag.split(`|`)
+    tagCache.set(tag, parsedTag)
+    return parsedTag
+  }
+
+  // Tag tracking state
+  const rowTagSets = new Map<RowId, Set<MoveTag>>()
+  const tagIndex: TagIndex = []
+  let tagLength: number | undefined = undefined
+
+  /**
+   * Initialize the tag index with the correct length
+   */
+  const initializeTagIndex = (length: number): void => {
+    if (tagIndex.length < length) {
+      // Extend the index array to the required length
+      for (let i = tagIndex.length; i < length; i++) {
+        tagIndex[i] = new Map()
+      }
+    }
+  }
+
+  /**
+   * Add tags to a row and update the tag index
+   */
+  const addTagsToRow = (
+    tags: Array<MoveTag>,
+    rowId: RowId,
+    rowTagSet: Set<MoveTag>,
+  ): void => {
+    for (const tag of tags) {
+      const parsedTag = parseTag(tag)
+
+      // Infer tag length from first tag
+      if (tagLength === undefined) {
+        tagLength = getTagLength(parsedTag)
+        initializeTagIndex(tagLength)
+      }
+
+      // Validate tag length matches
+      const currentTagLength = getTagLength(parsedTag)
+      if (currentTagLength !== tagLength) {
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}Tag length mismatch: expected ${tagLength}, got ${currentTagLength}`,
+        )
+        continue
+      }
+
+      rowTagSet.add(tag)
+      addTagToIndex(parsedTag, rowId, tagIndex, tagLength)
+    }
+  }
+
+  /**
+   * Remove tags from a row and update the tag index
+   */
+  const removeTagsFromRow = (
+    removedTags: Array<MoveTag>,
+    rowId: RowId,
+    rowTagSet: Set<MoveTag>,
+  ): void => {
+    if (tagLength === undefined) {
+      return
+    }
+
+    for (const tag of removedTags) {
+      const parsedTag = parseTag(tag)
+      rowTagSet.delete(tag)
+      removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+      // We aggresively evict the tag from the cache
+      // if this tag is shared with another row
+      // and is not removed from that other row
+      // then next time we encounter the tag it will be parsed again
+      tagCache.delete(tag)
+    }
+  }
+
+  /**
+   * Process tags for a change message (add and remove tags)
+   */
+  const processTagsForChangeMessage = (
+    tags: Array<MoveTag> | undefined,
+    removedTags: Array<MoveTag> | undefined,
+    rowId: RowId,
+  ): Set<MoveTag> => {
+    // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
+    if (!rowTagSets.has(rowId)) {
+      rowTagSets.set(rowId, new Set())
+    }
+    const rowTagSet = rowTagSets.get(rowId)!
+
+    // Add new tags
+    if (tags) {
+      addTagsToRow(tags, rowId, rowTagSet)
+    }
+
+    // Remove tags
+    if (removedTags) {
+      removeTagsFromRow(removedTags, rowId, rowTagSet)
+    }
+
+    return rowTagSet
+  }
+
+  /**
+   * Clear all tag tracking state (used when truncating)
+   */
+  const clearTagTrackingState = (): void => {
+    rowTagSets.clear()
+    tagIndex.length = 0
+    tagLength = undefined
+  }
+
+  /**
+   * Remove all tags for a row from both the tag set and the index
+   * Used when a row is deleted
+   */
+  const clearTagsForRow = (rowId: RowId): void => {
+    if (tagLength === undefined) {
+      return
+    }
+
+    const rowTagSet = rowTagSets.get(rowId)
+    if (!rowTagSet) {
+      return
+    }
+
+    // Remove each tag from the index
+    for (const tag of rowTagSet) {
+      const parsedTag = parseTag(tag)
+      const currentTagLength = getTagLength(parsedTag)
+      if (currentTagLength === tagLength) {
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength)
+      }
+      tagCache.delete(tag)
+    }
+
+    // Remove the row from the tag sets map
+    rowTagSets.delete(rowId)
+  }
+
+  /**
+   * Remove matching tags from a row based on a pattern
+   * Returns true if the row's tag set is now empty
+   */
+  const removeMatchingTagsFromRow = (
+    rowId: RowId,
+    pattern: MoveOutPattern,
+  ): boolean => {
+    const rowTagSet = rowTagSets.get(rowId)
+    if (!rowTagSet) {
+      return false
+    }
+
+    // Find tags that match this pattern and remove them
+    for (const tag of rowTagSet) {
+      const parsedTag = parseTag(tag)
+      if (tagMatchesPattern(parsedTag, pattern)) {
+        rowTagSet.delete(tag)
+        removeTagFromIndex(parsedTag, rowId, tagIndex, tagLength!)
+      }
+    }
+
+    // Check if row's tag set is now empty
+    if (rowTagSet.size === 0) {
+      rowTagSets.delete(rowId)
+      return true
+    }
+
+    return false
+  }
+
+  /**
+   * Process move-out event: remove matching tags from rows and delete rows with empty tag sets
+   */
+  const processMoveOutEvent = (
+    patterns: Array<MoveOutPattern>,
+    begin: () => void,
+    write: (message: ChangeMessageOrDeleteKeyMessage<T>) => void,
+    transactionStarted: boolean,
+  ): boolean => {
+    if (tagLength === undefined) {
+      debug(
+        `${collectionId ? `[${collectionId}] ` : ``}Received move-out message but no tag length set yet, ignoring`,
+      )
+      return transactionStarted
+    }
+
+    let txStarted = transactionStarted
+
+    // Process all patterns and collect rows to delete
+    for (const pattern of patterns) {
+      // Find all rows that match this pattern
+      const affectedRowIds = findRowsMatchingPattern(pattern, tagIndex)
+
+      for (const rowId of affectedRowIds) {
+        if (removeMatchingTagsFromRow(rowId, pattern)) {
+          // Delete rows with empty tag sets
+          if (!txStarted) {
+            begin()
+            txStarted = true
+          }
+
+          write({
+            type: `delete`,
+            key: rowId,
+          })
+        }
+      }
+    }
+
+    return txStarted
+  }
 
   /**
    * Get the sync metadata for insert operations
@@ -965,6 +1233,58 @@ function createElectricSync<T extends Row<unknown>>(
         syncMode === `progressive` && !hasReceivedUpToDate
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
 
+      // Track keys that have been synced to handle overlapping subset queries.
+      // When multiple subset queries return the same row, the server sends `insert`
+      // for each response. We convert subsequent inserts to updates to avoid
+      // duplicate key errors when the row's data has changed between requests.
+      const syncedKeys = new Set<string | number>()
+
+      /**
+       * Process a change message: handle tags and write the mutation
+       */
+      const processChangeMessage = (changeMessage: Message<T>) => {
+        if (!isChangeMessage(changeMessage)) {
+          return
+        }
+
+        // Process tags if present
+        const tags = changeMessage.headers.tags
+        const removedTags = changeMessage.headers.removed_tags
+        const hasTags = tags || removedTags
+
+        const rowId = collection.getKeyFromItem(changeMessage.value)
+        const operation = changeMessage.headers.operation
+
+        // Track synced keys and handle overlapping subset queries.
+        // When multiple subset queries return the same row, the server sends
+        // `insert` for each response. We convert subsequent inserts to updates
+        // to avoid duplicate key errors when the row's data has changed.
+        const isDelete = operation === `delete`
+        const isDuplicateInsert =
+          operation === `insert` && syncedKeys.has(rowId)
+
+        if (isDelete) {
+          syncedKeys.delete(rowId)
+        } else {
+          syncedKeys.add(rowId)
+        }
+
+        if (isDelete) {
+          clearTagsForRow(rowId)
+        } else if (hasTags) {
+          processTagsForChangeMessage(tags, removedTags, rowId)
+        }
+
+        write({
+          type: isDuplicateInsert ? `update` : operation,
+          value: changeMessage.value,
+          // Include the primary key and relation info in the metadata
+          metadata: {
+            ...changeMessage.headers,
+          },
+        })
+      }
+
       // Create deduplicated loadSubset wrapper for non-eager modes
       // This prevents redundant snapshot requests when multiple concurrent
       // live queries request overlapping or subset predicates
@@ -979,12 +1299,18 @@ function createElectricSync<T extends Row<unknown>>(
       })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
-        let hasUpToDate = false
-        let hasSnapshotEnd = false
+        // Track commit point type - up-to-date takes precedence as it also triggers progressive mode atomic swap
+        let commitPoint: `up-to-date` | `subset-end` | null = null
+
+        // Don't clear the buffer between batches - this preserves messages for awaitMatch
+        // to find even if multiple batches arrive before awaitMatch is called.
+        // The buffer is naturally limited by MAX_BATCH_MESSAGES (oldest messages are dropped).
+        // Reset batchCommitted since we're starting a new batch
+        batchCommitted.setState(() => false)
 
         for (const message of messages) {
           // Add message to current batch buffer (for race condition handling)
-          if (isChangeMessage(message)) {
+          if (isChangeMessage(message) || isMoveOutMessage(message)) {
             currentBatchMessages.setState((currentBuffer) => {
               const newBuffer = [...currentBuffer, message]
               // Limit buffer size for safety
@@ -997,7 +1323,12 @@ function createElectricSync<T extends Row<unknown>>(
 
           // Check for txids in the message and add them to our store
           // Skip during buffered initial sync in progressive mode (txids will be extracted during atomic swap)
-          if (hasTxids(message) && !isBufferingInitialSync()) {
+          // EXCEPTION: If a transaction is already started (e.g., from must-refetch), track txids
+          // to avoid losing them when messages are written to the existing transaction.
+          if (
+            hasTxids(message) &&
+            (!isBufferingInitialSync() || transactionStarted)
+          ) {
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
           }
 
@@ -1032,7 +1363,9 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             // In buffered initial sync of progressive mode, buffer messages instead of writing
-            if (isBufferingInitialSync()) {
+            // EXCEPTION: If a transaction is already started (e.g., from must-refetch), write
+            // directly to it instead of buffering. This prevents orphan transactions.
+            if (isBufferingInitialSync() && !transactionStarted) {
               bufferedMessages.push(message)
             } else {
               // Normal processing: write changes immediately
@@ -1041,23 +1374,39 @@ function createElectricSync<T extends Row<unknown>>(
                 transactionStarted = true
               }
 
-              write({
-                type: message.headers.operation,
-                value: message.value,
-                // Include the primary key and relation info in the metadata
-                metadata: {
-                  ...message.headers,
-                },
-              })
+              processChangeMessage(message)
             }
           } else if (isSnapshotEndMessage(message)) {
-            // Skip snapshot-end tracking during buffered initial sync (will be extracted during atomic swap)
-            if (!isBufferingInitialSync()) {
+            // Track postgres snapshot metadata for resolving awaiting mutations
+            // Skip during buffered initial sync (will be extracted during atomic swap)
+            // EXCEPTION: If a transaction is already started (e.g., from must-refetch), track snapshots
+            // to avoid losing them when messages are written to the existing transaction.
+            if (!isBufferingInitialSync() || transactionStarted) {
               newSnapshots.push(parseSnapshotMessage(message))
             }
-            hasSnapshotEnd = true
           } else if (isUpToDateMessage(message)) {
-            hasUpToDate = true
+            // up-to-date takes precedence - also triggers progressive mode atomic swap
+            commitPoint = `up-to-date`
+          } else if (isSubsetEndMessage(message)) {
+            // subset-end triggers commit but not progressive mode atomic swap
+            if (commitPoint !== `up-to-date`) {
+              commitPoint = `subset-end`
+            }
+          } else if (isMoveOutMessage(message)) {
+            // Handle move-out event: buffer if buffering, otherwise process immediately
+            // EXCEPTION: If a transaction is already started (e.g., from must-refetch), process
+            // immediately to avoid orphan transactions.
+            if (isBufferingInitialSync() && !transactionStarted) {
+              bufferedMessages.push(message)
+            } else {
+              // Normal processing: process move-out immediately
+              transactionStarted = processMoveOutEvent(
+                message.headers.patterns,
+                begin,
+                write,
+                transactionStarted,
+              )
+            }
           } else if (isMustRefetchMessage(message)) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
@@ -1071,21 +1420,32 @@ function createElectricSync<T extends Row<unknown>>(
 
             truncate()
 
+            // Clear tag tracking state
+            clearTagTrackingState()
+
+            // Clear synced keys tracking since we're starting fresh
+            syncedKeys.clear()
+
             // Reset the loadSubset deduplication state since we're starting fresh
             // This ensures that previously loaded predicates don't prevent refetching after truncate
             loadSubsetDedupe?.reset()
 
             // Reset flags so we continue accumulating changes until next up-to-date
-            hasUpToDate = false
-            hasSnapshotEnd = false
+            commitPoint = null
             hasReceivedUpToDate = false // Reset for progressive mode (isBufferingInitialSync will reflect this)
             bufferedMessages.length = 0 // Clear buffered messages
           }
         }
 
-        if (hasUpToDate || hasSnapshotEnd) {
-          // PROGRESSIVE MODE: Atomic swap on first up-to-date
-          if (isBufferingInitialSync() && hasUpToDate) {
+        if (commitPoint !== null) {
+          // PROGRESSIVE MODE: Atomic swap on first up-to-date (not subset-end)
+          // EXCEPTION: Skip atomic swap if a transaction is already started (e.g., from must-refetch).
+          // In that case, do a normal commit to properly close the existing transaction.
+          if (
+            isBufferingInitialSync() &&
+            commitPoint === `up-to-date` &&
+            !transactionStarted
+          ) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`,
             )
@@ -1096,16 +1456,16 @@ function createElectricSync<T extends Row<unknown>>(
             // Truncate to clear all snapshot data
             truncate()
 
+            // Clear tag tracking state for atomic swap
+            clearTagTrackingState()
+
+            // Clear synced keys tracking for atomic swap
+            syncedKeys.clear()
+
             // Apply all buffered change messages and extract txids/snapshots
             for (const bufferedMsg of bufferedMessages) {
               if (isChangeMessage(bufferedMsg)) {
-                write({
-                  type: bufferedMsg.headers.operation,
-                  value: bufferedMsg.value,
-                  metadata: {
-                    ...bufferedMsg.headers,
-                  },
-                })
+                processChangeMessage(bufferedMsg)
 
                 // Extract txids from buffered messages (will be committed to store after transaction)
                 if (hasTxids(bufferedMsg)) {
@@ -1116,6 +1476,14 @@ function createElectricSync<T extends Row<unknown>>(
               } else if (isSnapshotEndMessage(bufferedMsg)) {
                 // Extract snapshots from buffered messages (will be committed to store after transaction)
                 newSnapshots.push(parseSnapshotMessage(bufferedMsg))
+              } else if (isMoveOutMessage(bufferedMsg)) {
+                // Process buffered move-out messages during atomic swap
+                processMoveOutEvent(
+                  bufferedMsg.headers.patterns,
+                  begin,
+                  write,
+                  transactionStarted,
+                )
               }
             }
 
@@ -1131,28 +1499,16 @@ function createElectricSync<T extends Row<unknown>>(
             )
           } else {
             // Normal mode or on-demand: commit transaction if one was started
-            // In eager mode, only commit on snapshot-end if we've already received
-            // the first up-to-date, because the snapshot-end in the log could be from
-            // a significant period before the stream is actually up to date
-            const shouldCommit =
-              hasUpToDate || syncMode === `on-demand` || hasReceivedUpToDate
-
-            if (transactionStarted && shouldCommit) {
+            // Both up-to-date and subset-end trigger a commit
+            if (transactionStarted) {
               commit()
               transactionStarted = false
             }
           }
-
-          // Clear the current batch buffer since we're now up-to-date
-          currentBatchMessages.setState(() => [])
-
-          if (hasUpToDate || (hasSnapshotEnd && syncMode === `on-demand`)) {
-            // Mark the collection as ready now that sync is up to date
-            wrappedMarkReady(isBufferingInitialSync())
-          }
+          wrappedMarkReady(isBufferingInitialSync())
 
           // Track that we've received the first up-to-date for progressive mode
-          if (hasUpToDate) {
+          if (commitPoint === `up-to-date`) {
             hasReceivedUpToDate = true
           }
 
@@ -1183,7 +1539,11 @@ function createElectricSync<T extends Row<unknown>>(
             return seen
           })
 
-          // Resolve all matched pending matches on up-to-date
+          // Resolve all matched pending matches on up-to-date or subset-end
+          // Set batchCommitted BEFORE resolving to avoid timing window where late awaitMatch
+          // calls could register as "matched" after resolver pass already ran
+          batchCommitted.setState(() => true)
+
           resolveMatchedPendingMatches()
         }
       })

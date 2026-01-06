@@ -236,7 +236,7 @@ await tx.commit()
 ## Complete Example
 
 ```typescript
-import { createCollection } from '@tanstack/react-db'
+import { createCollection, eq } from '@tanstack/react-db'
 import { localStorageCollectionOptions } from '@tanstack/react-db'
 import { useLiveQuery } from '@tanstack/react-db'
 import { z } from 'zod'
@@ -265,7 +265,7 @@ export const userPreferencesCollection = createCollection(
 function SettingsPanel() {
   const { data: prefs } = useLiveQuery((q) =>
     q.from({ pref: userPreferencesCollection })
-      .where(({ pref }) => pref.id === 'current-user')
+      .where(({ pref }) => eq(pref.id, 'current-user'))
   )
 
   const currentPrefs = prefs[0]

@@ -109,6 +109,10 @@ export class CollectionChangesManager<
 
     if (options.includeInitialState) {
       subscription.requestSnapshot({ trackLoadSubsetPromise: false })
+    } else if (options.includeInitialState === false) {
+      // When explicitly set to false (not just undefined), mark all state as "seen"
+      // so that all future changes (including deletes) pass through unfiltered.
+      subscription.markAllStateAsSeen()
     }
 
     // Add to batched listeners

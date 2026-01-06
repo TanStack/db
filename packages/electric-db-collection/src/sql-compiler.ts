@@ -124,6 +124,13 @@ function compileOrderByClause(
   return sql
 }
 
+/**
+ * Check if a BasicExpression represents a null/undefined value
+ */
+function isNullValue(exp: IR.BasicExpression<unknown>): boolean {
+  return exp.type === `val` && (exp.value === null || exp.value === undefined)
+}
+
 function compileFunction(
   exp: IR.Func<unknown>,
   params: Array<unknown> = [],
@@ -131,6 +138,26 @@ function compileFunction(
   const { name, args } = exp
 
   const opName = getOpName(name)
+
+  // Handle comparison operators with null/undefined values
+  // These would create invalid queries with missing params (e.g., "col = $1" with empty params)
+  // In SQL, all comparisons with NULL return UNKNOWN, so these are almost always mistakes
+  if (isComparisonOp(name)) {
+    const nullArgIndex = args.findIndex((arg: IR.BasicExpression) =>
+      isNullValue(arg),
+    )
+
+    if (nullArgIndex !== -1) {
+      // All comparison operators (including eq) throw an error for null values
+      // Users should use isNull() or isUndefined() to check for null values
+      throw new Error(
+        `Cannot use null/undefined value with '${name}' operator. ` +
+          `Comparisons with null always evaluate to UNKNOWN in SQL. ` +
+          `Use isNull() or isUndefined() to check for null values, ` +
+          `or filter out null values before building the query.`,
+      )
+    }
+  }
 
   const compiledArgs = args.map((arg: IR.BasicExpression) =>
     compileBasicExpression(arg, params),
@@ -176,7 +203,7 @@ function compileFunction(
     // Special case for comparison operators with boolean values
     // PostgreSQL doesn't support < > <= >= on booleans
     // Transform to equivalent equality checks or constant expressions
-    if (isComparisonOp(name)) {
+    if (isBooleanComparisonOp(name)) {
       const lhsArg = args[0]
       const rhsArg = args[1]
 
@@ -313,10 +340,20 @@ function isBinaryOp(name: string): boolean {
 }
 
 /**
+ * Check if operator is a comparison operator that takes two values
+ * These operators cannot accept null/undefined as values
+ * (null comparisons in SQL always evaluate to UNKNOWN)
+ */
+function isComparisonOp(name: string): boolean {
+  const comparisonOps = [`eq`, `gt`, `gte`, `lt`, `lte`, `like`, `ilike`]
+  return comparisonOps.includes(name)
+}
+
+/**
  * Checks if the operator is a comparison operator (excluding eq)
  * These operators don't work on booleans in PostgreSQL without casting
  */
-function isComparisonOp(name: string): boolean {
+function isBooleanComparisonOp(name: string): boolean {
   return [`gt`, `gte`, `lt`, `lte`].includes(name)
 }
 
