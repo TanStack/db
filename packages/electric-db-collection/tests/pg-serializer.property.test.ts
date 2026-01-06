@@ -41,14 +41,11 @@ describe(`pg-serializer property-based tests`, () => {
       fc
         .double({ noNaN: true, noDefaultInfinity: true })
         .filter((n) => !Object.is(n, -0)),
-    ])(
-      `finite doubles round-trip through parseFloat`,
-      (n) => {
-        // Note: -0 is excluded because parseFloat("-0") returns 0
-        const serialized = serialize(n)
-        expect(parseFloat(serialized)).toBe(n)
-      },
-    )
+    ])(`finite doubles round-trip through parseFloat`, (n) => {
+      // Note: -0 is excluded because parseFloat("-0") returns 0
+      const serialized = serialize(n)
+      expect(parseFloat(serialized)).toBe(n)
+    })
 
     fcTest.prop([fc.integer()])(`integers produce numeric strings`, (n) => {
       const serialized = serialize(n)
