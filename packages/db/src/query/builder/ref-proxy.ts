@@ -177,11 +177,11 @@ export function createRefProxy<T extends Record<string, any>>(
 
 /**
  * Creates a ref proxy with $selected namespace for SELECT fields
- * 
+ *
  * Adds a $selected property that allows accessing SELECT fields via $selected.fieldName syntax.
  * The $selected proxy creates paths like ['$selected', 'fieldName'] which are then transformed
  * to reference __select_results.
- * 
+ *
  * @param aliases - Array of table aliases to create proxies for
  * @returns A ref proxy with table aliases and $selected namespace
  */
@@ -192,7 +192,7 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
 
   // Create a proxy for $selected that prefixes all paths with '$selected'
   const cache = new Map<string, any>()
-  
+
   function createSelectedProxy(path: Array<string>): any {
     const pathKey = path.join(`.`)
     if (cache.has(pathKey)) {
@@ -254,7 +254,11 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
 
     getOwnPropertyDescriptor(target, prop) {
       if (prop === `$selected`) {
-        return { enumerable: true, configurable: true, value: wrappedSelectedProxy }
+        return {
+          enumerable: true,
+          configurable: true,
+          value: wrappedSelectedProxy,
+        }
       }
       return Reflect.getOwnPropertyDescriptor(target, prop)
     },
