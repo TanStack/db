@@ -103,21 +103,21 @@ function compileRef(ref: PropRef): CompiledExpression {
 
   // Handle $selected namespace - references SELECT result fields
   if (namespace === `$selected`) {
-    // Access __select_results directly
+    // Access $selected directly
     if (propertyPath.length === 0) {
-      // Just $selected - return entire __select_results object
-      return (namespacedRow) => (namespacedRow as any).__select_results
+      // Just $selected - return entire $selected object
+      return (namespacedRow) => (namespacedRow as any).$selected
     } else if (propertyPath.length === 1) {
       // Single property access - most common case
       const prop = propertyPath[0]!
       return (namespacedRow) => {
-        const selectResults = (namespacedRow as any).__select_results
+        const selectResults = (namespacedRow as any).$selected
         return selectResults?.[prop]
       }
     } else {
       // Multiple property navigation (nested SELECT fields)
       return (namespacedRow) => {
-        const selectResults = (namespacedRow as any).__select_results
+        const selectResults = (namespacedRow as any).$selected
         if (selectResults === undefined) {
           return undefined
         }
