@@ -246,6 +246,11 @@ export type PowerSyncCollectionMeta<TTable extends Table = Table> = {
    * Serializes a collection value to the SQLite type
    */
   serializeValue: (value: any) => ExtractedTable<TTable>
+
+  /**
+   * Whether the PowerSync table tracks metadata.
+   */
+  metadataIsTracked: boolean
 }
 
 /**
