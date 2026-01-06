@@ -36,7 +36,6 @@ declare module 'vitest' {
   }
 }
 
-
 /**
  * Decode base64-encoded BLOB UUID to standard UUID string format
  * TrailBase stores UUIDs as BLOBs and returns them as base64
@@ -88,7 +87,11 @@ function parseTrailBaseId(rawId: unknown): string {
   const idStr = String(rawId)
 
   // Check if it's already a UUID string format
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idStr)) {
+  if (
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      idStr,
+    )
+  ) {
     return idStr
   }
 
@@ -102,7 +105,8 @@ function parseTrailBaseId(rawId: unknown): string {
     // Convert URL-safe base64 to standard base64
     const standardBase64 = idStr.replace(/-/g, '+').replace(/_/g, '/')
     // Add padding if needed
-    const padded = standardBase64 + '=='.slice(0, (4 - standardBase64.length % 4) % 4)
+    const padded =
+      standardBase64 + '=='.slice(0, (4 - (standardBase64.length % 4)) % 4)
     return base64ToUuid(padded)
   } catch {
     // If that fails, try standard base64
@@ -230,9 +234,12 @@ const serializeUserPartial = (user: Partial<User>): Partial<UserRecord> => {
   if (user.email !== undefined) result.email = user.email
   if (user.age !== undefined) result.age = user.age
   if (user.isActive !== undefined) result.isActive = user.isActive ? 1 : 0
-  if (user.createdAt !== undefined) result.createdAt = user.createdAt.toISOString()
-  if (user.metadata !== undefined) result.metadata = user.metadata ? JSON.stringify(user.metadata) : null
-  if (user.deletedAt !== undefined) result.deletedAt = user.deletedAt ? user.deletedAt.toISOString() : null
+  if (user.createdAt !== undefined)
+    result.createdAt = user.createdAt.toISOString()
+  if (user.metadata !== undefined)
+    result.metadata = user.metadata ? JSON.stringify(user.metadata) : null
+  if (user.deletedAt !== undefined)
+    result.deletedAt = user.deletedAt ? user.deletedAt.toISOString() : null
   return result
 }
 
@@ -243,20 +250,31 @@ const serializePostPartial = (post: Partial<Post>): Partial<PostRecord> => {
   if (post.title !== undefined) result.title = post.title
   if (post.content !== undefined) result.content = post.content
   if (post.viewCount !== undefined) result.viewCount = post.viewCount
-  if (post.largeViewCount !== undefined) result.largeViewCount = post.largeViewCount.toString()
-  if (post.publishedAt !== undefined) result.publishedAt = post.publishedAt ? post.publishedAt.toISOString() : null
-  if (post.deletedAt !== undefined) result.deletedAt = post.deletedAt ? post.deletedAt.toISOString() : null
+  if (post.largeViewCount !== undefined)
+    result.largeViewCount = post.largeViewCount.toString()
+  if (post.publishedAt !== undefined)
+    result.publishedAt = post.publishedAt
+      ? post.publishedAt.toISOString()
+      : null
+  if (post.deletedAt !== undefined)
+    result.deletedAt = post.deletedAt ? post.deletedAt.toISOString() : null
   return result
 }
 
-const serializeCommentPartial = (comment: Partial<Comment>): Partial<CommentRecord> => {
+const serializeCommentPartial = (
+  comment: Partial<Comment>,
+): Partial<CommentRecord> => {
   const result: Partial<CommentRecord> = {}
   if (comment.id !== undefined) result.id = uuidToBase64(comment.id)
   if (comment.postId !== undefined) result.postId = comment.postId
   if (comment.userId !== undefined) result.userId = comment.userId
   if (comment.text !== undefined) result.text = comment.text
-  if (comment.createdAt !== undefined) result.createdAt = comment.createdAt.toISOString()
-  if (comment.deletedAt !== undefined) result.deletedAt = comment.deletedAt ? comment.deletedAt.toISOString() : null
+  if (comment.createdAt !== undefined)
+    result.createdAt = comment.createdAt.toISOString()
+  if (comment.deletedAt !== undefined)
+    result.deletedAt = comment.deletedAt
+      ? comment.deletedAt.toISOString()
+      : null
   return result
 }
 
@@ -376,15 +394,27 @@ describe(`TrailBase Collection E2E Tests`, () => {
     try {
       const existingComments = await commentsRecordApi.list({})
       for (const comment of existingComments.records) {
-        try { await commentsRecordApi.delete(comment.id) } catch { /* ignore */ }
+        try {
+          await commentsRecordApi.delete(comment.id)
+        } catch {
+          /* ignore */
+        }
       }
       const existingPosts = await postsRecordApi.list({})
       for (const post of existingPosts.records) {
-        try { await postsRecordApi.delete(post.id) } catch { /* ignore */ }
+        try {
+          await postsRecordApi.delete(post.id)
+        } catch {
+          /* ignore */
+        }
       }
       const existingUsers = await usersRecordApi.list({})
       for (const user of existingUsers.records) {
-        try { await usersRecordApi.delete(user.id) } catch { /* ignore */ }
+        try {
+          await usersRecordApi.delete(user.id)
+        } catch {
+          /* ignore */
+        }
       }
       console.log(`Cleanup complete`)
     } catch (e) {
@@ -397,15 +427,19 @@ describe(`TrailBase Collection E2E Tests`, () => {
     for (const user of seedData.users) {
       try {
         const serialized = serializeUser(user)
-        if (userErrors === 0) console.log('First user data:', JSON.stringify(serialized))
+        if (userErrors === 0)
+          console.log('First user data:', JSON.stringify(serialized))
         await usersRecordApi.create(serialized)
       } catch (e) {
         userErrors++
         if (userErrors <= 3) console.error('User insert error:', e)
       }
     }
-    console.log(`Inserted users: ${seedData.users.length - userErrors} success, ${userErrors} errors`)
-    if (seedData.users.length > 0) console.log(`First user ID: ${seedData.users[0].id}`)
+    console.log(
+      `Inserted users: ${seedData.users.length - userErrors} success, ${userErrors} errors`,
+    )
+    if (seedData.users.length > 0)
+      console.log(`First user ID: ${seedData.users[0].id}`)
 
     console.log(`Inserting ${seedData.posts.length} posts...`)
     let postErrors = 0
@@ -417,7 +451,9 @@ describe(`TrailBase Collection E2E Tests`, () => {
         if (postErrors <= 3) console.error('Post insert error:', e)
       }
     }
-    console.log(`Inserted posts: ${seedData.posts.length - postErrors} success, ${postErrors} errors`)
+    console.log(
+      `Inserted posts: ${seedData.posts.length - postErrors} success, ${postErrors} errors`,
+    )
 
     console.log(`Inserting ${seedData.comments.length} comments...`)
     let commentErrors = 0
@@ -429,7 +465,9 @@ describe(`TrailBase Collection E2E Tests`, () => {
         if (commentErrors <= 3) console.error('Comment insert error:', e)
       }
     }
-    console.log(`Inserted comments: ${seedData.comments.length - commentErrors} success, ${commentErrors} errors`)
+    console.log(
+      `Inserted comments: ${seedData.comments.length - commentErrors} success, ${commentErrors} errors`,
+    )
 
     // Create collections with different sync modes
     eagerCollections = createCollectionsForSyncMode(
@@ -494,13 +532,22 @@ describe(`TrailBase Collection E2E Tests`, () => {
       eagerCollections.comments.preload(),
     ])
     console.log('Preload complete, checking sizes...')
-    console.log(`Users size: ${eagerCollections.users.size}, expected: ${seedData.users.length}`)
-    console.log(`Posts size: ${eagerCollections.posts.size}, expected: ${seedData.posts.length}`)
-    console.log(`Comments size: ${eagerCollections.comments.size}, expected: ${seedData.comments.length}`)
+    console.log(
+      `Users size: ${eagerCollections.users.size}, expected: ${seedData.users.length}`,
+    )
+    console.log(
+      `Posts size: ${eagerCollections.posts.size}, expected: ${seedData.posts.length}`,
+    )
+    console.log(
+      `Comments size: ${eagerCollections.comments.size}, expected: ${seedData.comments.length}`,
+    )
 
     // Debug: try direct list API call
     const testList = await usersRecordApi.list({ pagination: { limit: 10 } })
-    console.log(`Direct list API returned ${testList.records.length} records:`, testList.records.slice(0, 2))
+    console.log(
+      `Direct list API returned ${testList.records.length} records:`,
+      testList.records.slice(0, 2),
+    )
 
     // Wait for eager collections to have all data
     await Promise.all([
@@ -568,7 +615,8 @@ describe(`TrailBase Collection E2E Tests`, () => {
           if (updates.age !== undefined) partialRecord.age = updates.age
           if (updates.name !== undefined) partialRecord.name = updates.name
           if (updates.email !== undefined) partialRecord.email = updates.email
-          if (updates.isActive !== undefined) partialRecord.isActive = updates.isActive ? 1 : 0
+          if (updates.isActive !== undefined)
+            partialRecord.isActive = updates.isActive ? 1 : 0
           const encodedId = uuidToBase64(id)
           await usersRecordApi.update(encodedId, partialRecord)
         },

@@ -1,8 +1,8 @@
-import {  execSync, spawn } from 'node:child_process'
+import { execSync, spawn } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type {ChildProcess} from 'node:child_process';
+import type { ChildProcess } from 'node:child_process'
 import type { GlobalSetupContext } from 'vitest/node'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -99,7 +99,14 @@ function startBinaryServer(): ChildProcess {
 
   const proc = spawn(
     binaryPath,
-    ['--data-dir', tempDataDir, 'run', '--address', `0.0.0.0:${TRAILBASE_PORT}`, '--dev'],
+    [
+      '--data-dir',
+      tempDataDir,
+      'run',
+      '--address',
+      `0.0.0.0:${TRAILBASE_PORT}`,
+      '--dev',
+    ],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
       cwd: PACKAGE_DIR,
