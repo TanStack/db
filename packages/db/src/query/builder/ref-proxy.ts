@@ -179,8 +179,8 @@ export function createRefProxy<T extends Record<string, any>>(
  * Creates a ref proxy with $selected namespace for SELECT fields
  *
  * Adds a $selected property that allows accessing SELECT fields via $selected.fieldName syntax.
- * The $selected proxy creates paths like ['$selected', 'fieldName'] which are then transformed
- * to reference __select_results.
+ * The $selected proxy creates paths like ['$selected', 'fieldName'] which directly reference
+ * the $selected property on the namespaced row.
  *
  * @param aliases - Array of table aliases to create proxies for
  * @returns A ref proxy with table aliases and $selected namespace
