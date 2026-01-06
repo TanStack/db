@@ -17,7 +17,7 @@ import {
   QueryMustHaveFromClauseError,
   SubQueryMustHaveFromClauseError,
 } from '../../errors.js'
-import { createRefProxy, toExpression } from './ref-proxy.js'
+import { createRefProxy, createRefProxyWithSelected, toExpression } from './ref-proxy.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
@@ -408,7 +408,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   having(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    // Add $selected namespace if SELECT clause exists
+    const refProxy = (this.query.select
+      ? createRefProxyWithSelected(aliases)
+      : createRefProxy(aliases)) as RefsForContext<TContext>
     const expression = callback(refProxy)
 
     // Validate that the callback returned a valid expression
@@ -506,7 +509,10 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     options: OrderByDirection | OrderByOptions = `asc`,
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    // Add $selected namespace if SELECT clause exists
+    const refProxy = (this.query.select
+      ? createRefProxyWithSelected(aliases)
+      : createRefProxy(aliases)) as RefsForContext<TContext>
     const result = callback(refProxy)
 
     const opts: CompareOptions =

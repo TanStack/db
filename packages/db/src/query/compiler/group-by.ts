@@ -389,6 +389,7 @@ function getAggregateFunction(aggExpr: Aggregate) {
  *
  * This function is used in both ORDER BY and HAVING clauses to transform expressions that reference:
  * 1. Aggregate functions (e.g., `max()`, `count()`) - replaces with references to computed aggregates in SELECT
+<<<<<<< HEAD
  * 2. SELECT field aliases (e.g., `taskId`, `latestActivity`) - replaces with references to __select_results
  *
  * For aggregate expressions, it finds matching aggregates in the SELECT clause and replaces them with
@@ -398,6 +399,17 @@ function getAggregateFunction(aggExpr: Aggregate) {
  * like 'meta.author.name') and transforms them to reference __select_results[alias]. If no match is
  * found, the ref is passed through unchanged (treating it as a table column reference).
  *
+=======
+ * 2. SELECT field references via $selected namespace (e.g., `$selected.latestActivity`) - replaces with references to __select_results
+ * 
+ * For aggregate expressions, it finds matching aggregates in the SELECT clause and replaces them with
+ * PropRef([resultAlias, alias]) to reference the computed aggregate value.
+ * 
+ * For ref expressions, it only transforms references that use the $selected namespace (e.g., ['$selected', 'latestActivity']).
+ * These are transformed to reference __select_results[alias]. All other ref expressions are passed through unchanged
+ * (treating them as table column references). SELECT fields should only be accessed via the $selected namespace.
+ * 
+>>>>>>> 118465ad (Expose selected fields on a special  namespace)
  * @param havingExpr - The expression to transform (can be aggregate, ref, func, or val)
  * @param selectClause - The SELECT clause containing aliases and aggregate definitions
  * @param resultAlias - The namespace alias for SELECT results (default: 'result', '__select_results' for ORDER BY)
@@ -434,48 +446,42 @@ export function replaceAggregatesByRefs(
 
     case `ref`: {
       const refExpr = havingExpr
-      // Check if this ref matches a SELECT alias
-      // Ref paths are like ['tableAlias', 'field'] or ['tableAlias', 'nested', 'field']
-      // SELECT aliases are the keys in selectClause, which can be simple ('taskId') or nested ('meta.author')
-
-      // Extract the field path (everything after the table alias, or the whole path if no table alias)
       const path = refExpr.path
-      let fieldPath: Array<string>
-
+      
       if (path.length === 0) {
         // Empty path - pass through
         return havingExpr as BasicExpression
       }
-
-      // If path has more than one element, assume first is table alias, rest is field path
-      // If path has one element, it might be just a field name
-      if (path.length > 1) {
-        fieldPath = path.slice(1)
-      } else {
-        // Single element - could be a field name or table alias
-        // Check if it matches a SELECT alias directly
-        fieldPath = path
-      }
-
-      // Check if the field path matches any SELECT alias
-      // SELECT aliases can be simple ('taskId') or nested ('meta.author.name')
-      // We need to match the field path against SELECT aliases
-      for (const alias of Object.keys(selectClause)) {
-        // Split nested alias by dot to compare with field path
-        const aliasParts = alias.split(`.`)
-
-        // Check if field path matches alias parts
-        if (
-          fieldPath.length === aliasParts.length &&
-          fieldPath.every((part, i) => part === aliasParts[i])
-        ) {
-          // Match found! Transform to reference __select_results[alias]
+      
+      // Check if this is a $selected reference
+      // Paths like ['$selected', 'latestActivity'] should be transformed to ['__select_results', 'latestActivity']
+      if (path.length > 0 && path[0] === `$selected`) {
+        // Extract the field path after $selected
+        const fieldPath = path.slice(1)
+        
+        if (fieldPath.length === 0) {
+          // Just $selected without a field - return reference to entire __select_results
+          return new PropRef([resultAlias])
+        }
+        
+        // Join the field path to get the SELECT alias (handles nested fields)
+        const alias = fieldPath.join(`.`)
+        
+        // Verify the field exists in SELECT clause
+        if (alias in selectClause) {
+          // Transform to reference __select_results[alias]
           // For nested aliases like 'meta.author', create path ['result', 'meta', 'author']
+          const aliasParts = alias.split(`.`)
           return new PropRef([resultAlias, ...aliasParts])
         }
+        
+        // Field doesn't exist in SELECT - this is an error, but we'll pass through for now
+        // (Could throw an error here in the future)
+        return havingExpr as BasicExpression
       }
-
-      // No match found - this is a table column reference, pass through unchanged
+      
+      // Not a $selected reference - this is a table column reference, pass through unchanged
+      // SELECT fields should only be accessed via $selected namespace
       return havingExpr as BasicExpression
     }
 
