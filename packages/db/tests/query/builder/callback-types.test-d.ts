@@ -733,5 +733,45 @@ describe(`Query Builder Callback Types`, () => {
           return gt($selected.user_count, 5)
         })
     })
+
+    test(`fn.having has access to SELECT fields via $selected`, () => {
+      new Query()
+        .from({ user: usersCollection })
+        .groupBy(({ user }) => user.department_id)
+        .select(({ user }) => ({
+          taskId: user.department_id,
+          user_count: count(user.id),
+          avg_salary: avg(user.salary),
+          total_salary: sum(user.salary),
+        }))
+        .fn.having(({ $selected }) => {
+          expectTypeOf($selected.taskId).toEqualTypeOf<number | null>()
+          expectTypeOf($selected.user_count).toEqualTypeOf<number>()
+          expectTypeOf($selected.avg_salary).toEqualTypeOf<number>()
+          expectTypeOf($selected.total_salary).toEqualTypeOf<number>()
+
+          return $selected.user_count > 5 && $selected.avg_salary > 50000
+        })
+    })
+
+    test(`fn.having can access nested SELECT fields`, () => {
+      new Query()
+        .from({ user: usersCollection })
+        .groupBy(({ user }) => user.department_id)
+        .select(({ user }) => ({
+          taskId: user.department_id,
+          stats: {
+            user_count: count(user.id),
+            avg_salary: avg(user.salary),
+          },
+        }))
+        .fn.having(({ $selected }) => {
+          expectTypeOf($selected.taskId).toEqualTypeOf<number | null>()
+          expectTypeOf($selected.stats.user_count).toEqualTypeOf<number>()
+          expectTypeOf($selected.stats.avg_salary).toEqualTypeOf<number>()
+
+          return $selected.stats.user_count > 2
+        })
+    })
   })
 })
