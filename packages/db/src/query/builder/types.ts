@@ -364,6 +364,9 @@ export type JoinOnCallback<TContext extends Context> = (
  *
  * The logic prioritizes optional chaining by always placing `undefined` outside when
  * a type is both optional and nullable (e.g., `string | null | undefined`).
+ *
+ * After `select()` is called, this type also includes `$selected` which provides access
+ * to the SELECT result fields via `$selected.fieldName` syntax.
  */
 export type RefsForContext<TContext extends Context> = {
   [K in keyof TContext[`schema`]]: IsNonExactOptional<
@@ -371,11 +374,11 @@ export type RefsForContext<TContext extends Context> = {
   > extends true
     ? IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
-          // Extract the non-undefined and non-null part and place undefined outside
-          Ref<NonNullable<TContext[`schema`][K]>> | undefined
+        // Extract the non-undefined and non-null part and place undefined outside
+        Ref<NonNullable<TContext[`schema`][K]>> | undefined
       : // T is optional (T | undefined) but not exactly undefined, and not nullable
-          // Extract the non-undefined part and place undefined outside
-          Ref<NonUndefined<TContext[`schema`][K]>> | undefined
+        // Extract the non-undefined part and place undefined outside
+        Ref<NonUndefined<TContext[`schema`][K]>> | undefined
     : IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is nullable (T | null) but not exactly null, and not optional
         // Extract the non-null part and place null outside
@@ -383,7 +386,9 @@ export type RefsForContext<TContext extends Context> = {
       : // T is exactly undefined, exactly null, or neither optional nor nullable
         // Wrap in RefProxy as-is (includes exact undefined, exact null, and normal types)
         Ref<TContext[`schema`][K]>
-}
+} & (TContext[`result`] extends object
+  ? { $selected: Ref<TContext[`result`]> }
+  : {})
 
 /**
  * Type Detection Helpers
