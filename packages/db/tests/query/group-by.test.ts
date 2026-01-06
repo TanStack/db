@@ -1121,25 +1121,25 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         const sampleDistricts: Array<District> = [
           {
             id: 1,
-            district_id: BigInt('9007199254740991'), // Max safe integer + 1
+            district_id: BigInt(Number.MAX_SAFE_INTEGER + 1),
             name: 'District A',
             status: 'active',
           },
           {
             id: 2,
-            district_id: BigInt('9007199254740992'),
+            district_id: BigInt(Number.MAX_SAFE_INTEGER + 1) + 1n,
             name: 'District B',
             status: 'active',
           },
           {
             id: 3,
-            district_id: BigInt('9007199254740991'), // Same as first
+            district_id: BigInt(Number.MAX_SAFE_INTEGER + 1), // Same as first
             name: 'District C',
             status: 'inactive',
           },
           {
             id: 4,
-            district_id: BigInt('9007199254740993'),
+            district_id: BigInt(Number.MAX_SAFE_INTEGER + 1) + 2n,
             name: 'District D',
             status: 'active',
           },
@@ -1170,23 +1170,23 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Should have 3 groups (two districts share the same district_id)
         expect(districtSummary.size).toBe(3)
 
-        // Check the group with BigInt('9007199254740991')
+        // Check the group with BigInt(Number.MAX_SAFE_INTEGER + 1)
         const group1 = Array.from(districtSummary.values()).find(
-          (d) => d.district_id === BigInt('9007199254740991'),
+          (d) => d.district_id === BigInt(Number.MAX_SAFE_INTEGER + 1),
         )
         expect(group1).toBeDefined()
         expect(group1?.count).toBe(2) // Districts 1 and 3
 
-        // Check the group with BigInt('9007199254740992')
+        // Check the group with BigInt(Number.MAX_SAFE_INTEGER + 1) + 1n
         const group2 = Array.from(districtSummary.values()).find(
-          (d) => d.district_id === BigInt('9007199254740992'),
+          (d) => d.district_id === BigInt(Number.MAX_SAFE_INTEGER + 1) + 1n,
         )
         expect(group2).toBeDefined()
         expect(group2?.count).toBe(1) // District 2
 
-        // Check the group with BigInt('9007199254740993')
+        // Check the group with BigInt(Number.MAX_SAFE_INTEGER + 1) + 2n
         const group3 = Array.from(districtSummary.values()).find(
-          (d) => d.district_id === BigInt('9007199254740993'),
+          (d) => d.district_id === BigInt(Number.MAX_SAFE_INTEGER + 1) + 2n,
         )
         expect(group3).toBeDefined()
         expect(group3?.count).toBe(1) // District 4
@@ -1383,19 +1383,19 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         const sampleSchools: Array<School> = [
           {
             id: 1,
-            district_id: BigInt('9007199254740991'),
+            district_id: BigInt(Number.MAX_SAFE_INTEGER + 1),
             name: 'School A',
             status: 'active',
           },
           {
             id: 2,
-            district_id: BigInt('9007199254740991'),
+            district_id: BigInt(Number.MAX_SAFE_INTEGER + 1),
             name: 'School B',
             status: 'active',
           },
           {
             id: 3,
-            district_id: BigInt('9007199254740992'),
+            district_id: BigInt(Number.MAX_SAFE_INTEGER + 1) + 1n,
             name: 'School C',
             status: 'inactive',
           },
@@ -1426,19 +1426,19 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         expect(schoolSummary.size).toBe(2) // Two distinct combinations
 
-        // Find the group with BigInt('9007199254740991') and 'active'
+        // Find the group with BigInt(Number.MAX_SAFE_INTEGER + 1) and 'active'
         const group1 = Array.from(schoolSummary.values()).find(
           (s) =>
-            s.district_id === BigInt('9007199254740991') &&
+            s.district_id === BigInt(Number.MAX_SAFE_INTEGER + 1) &&
             s.status === 'active',
         )
         expect(group1).toBeDefined()
         expect(group1?.count).toBe(2) // Schools 1 and 2
 
-        // Find the group with BigInt('9007199254740992') and 'inactive'
+        // Find the group with BigInt(Number.MAX_SAFE_INTEGER + 1) + 1n and 'inactive'
         const group2 = Array.from(schoolSummary.values()).find(
           (s) =>
-            s.district_id === BigInt('9007199254740992') &&
+            s.district_id === BigInt(Number.MAX_SAFE_INTEGER + 1) + 1n &&
             s.status === 'inactive',
         )
         expect(group2).toBeDefined()
