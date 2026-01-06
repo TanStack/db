@@ -1381,21 +1381,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
       })
     })
 
-    describe(`ORDER BY and HAVING with SELECT fields (Bug Reproduction)`, () => {
-      /**
-       * These tests reproduce bug #1078: Unable to use aggregate fields from SELECT in ORDER BY
-       *
-       * The bug: When using aggregate functions in SELECT (e.g., count(), max()), you cannot
-       * reference those SELECT fields in ORDER BY or HAVING clauses. The TypeScript types don't
-       * expose SELECT fields in the callback context, and the runtime doesn't transform references
-       * to SELECT aliases to use __select_results.
-       *
-       * Expected behavior: Should be able to order by and filter using fields defined in SELECT,
-       * both aggregate and non-aggregate fields.
-       *
-       * Current behavior: TypeScript errors prevent compilation, and even if bypassed, runtime
-       * fails because the expressions reference table columns instead of __select_results.
-       */
+    describe(`ORDER BY and HAVING with SELECT fields`, () => {
       let sessionsCollection: ReturnType<typeof createOrdersCollection>
 
       beforeEach(() => {
@@ -1403,9 +1389,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         sessionsCollection = createOrdersCollection(autoIndex)
       })
 
-      test(`BUG: orderBy cannot reference aggregate field from SELECT`, () => {
-        // Reproduces: Cannot order by aggregate fields defined in SELECT clause
-        // Issue: https://github.com/TanStack/db/issues/1078
+      test(`orderBy can reference aggregate field from SELECT`, () => {
         const sessionStats = createLiveQueryCollection({
           startSync: true,
           query: (q) =>
@@ -1418,16 +1402,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 latestActivity: max(sessions.date),
                 sessionCount: count(sessions.id),
               }))
-              // BUG: This should work but fails because:
-              // 1. TypeScript: 'latestActivity' doesn't exist on sessions type
-              // 2. Runtime: Expression tries to access sessions.latestActivity (table column)
-              //    instead of __select_results.latestActivity
-              // @ts-expect-error - TypeScript error: Property 'latestActivity' does not exist
               .orderBy(({ $selected }) => $selected.latestActivity),
         })
 
-        // Once bug is fixed, this should work and return results ordered by latestActivity
-        // Currently: May fail at runtime or return incorrect ordering
         expect(sessionStats.toArray).toEqual([
           {
             taskId: 2,
@@ -1442,9 +1419,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      test(`BUG: orderBy cannot reference non-aggregate field from SELECT`, () => {
-        // Reproduces: Cannot order by non-aggregate fields defined in SELECT clause
-        // Issue: https://github.com/TanStack/db/issues/1078
+      test(`orderBy can reference non-aggregate field from SELECT`, () => {
         const sessionStats = createLiveQueryCollection({
           startSync: true,
           query: (q) =>
@@ -1457,17 +1432,11 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 latestActivity: max(sessions.date),
                 sessionCount: count(sessions.id),
               }))
-              // BUG: This should work but fails because:
-              // 1. TypeScript: 'taskId' doesn't exist on sessions type
-              // 2. Runtime: Expression tries to access sessions.taskId (table column)
-              //    instead of __select_results.taskId
-              // @ts-expect-error - TypeScript error: Property 'taskId' does not exist
               .orderBy(({ $selected }) => $selected.taskId, {
                 direction: `desc`,
               }),
         })
 
-        // Once bug is fixed, this should work and return results ordered by taskId
         expect(sessionStats.toArray).toEqual([
           {
             taskId: 2,
@@ -1482,9 +1451,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      test(`BUG: having cannot reference aggregate field from SELECT`, () => {
-        // Reproduces: Cannot use aggregate fields from SELECT in HAVING clause
-        // Issue: https://github.com/TanStack/db/issues/1078
+      test(`HAVING can reference aggregate field from SELECT`, () => {
         const sessionStats = createLiveQueryCollection({
           startSync: true,
           query: (q) =>
@@ -1497,16 +1464,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 latestActivity: max(sessions.date),
                 sessionCount: count(sessions.id),
               }))
-              // BUG: This should work but fails because:
-              // 1. TypeScript: 'sessionCount' doesn't exist on sessions type
-              // 2. Runtime: Expression tries to access sessions.sessionCount (table column)
-              //    instead of __select_results.sessionCount
-              // Note: replaceAggregatesByRefs only handles aggregate EXPRESSIONS, not SELECT aliases
-              // @ts-expect-error - TypeScript error: Property 'sessionCount' does not exist
               .having(({ $selected }) => gt($selected.sessionCount, 2)),
         })
 
-        // Once bug is fixed, this should filter groups where sessionCount > 2
         expect(sessionStats.toArray).toEqual([
           {
             taskId: 1,
@@ -1516,9 +1476,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         ])
       })
 
-      test(`BUG: having cannot reference non-aggregate field from SELECT`, () => {
-        // Reproduces: Cannot use non-aggregate fields from SELECT in HAVING clause
-        // Issue: https://github.com/TanStack/db/issues/1078
+      test(`HAVING can reference non-aggregate field from SELECT`, () => {
         const sessionStats = createLiveQueryCollection({
           startSync: true,
           query: (q) =>
@@ -1531,11 +1489,6 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 latestActivity: max(sessions.date),
                 sessionCount: count(sessions.id),
               }))
-              // BUG: This should work but fails because:
-              // 1. TypeScript: 'taskId' doesn't exist on sessions type
-              // 2. Runtime: Expression tries to access sessions.taskId (table column)
-              //    instead of __select_results.taskId
-              // @ts-expect-error - TypeScript error: Property 'taskId' does not exist
               .having(({ $selected }) => gt($selected.taskId, 0)),
         })
 

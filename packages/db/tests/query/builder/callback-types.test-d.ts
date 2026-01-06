@@ -570,4 +570,158 @@ describe(`Query Builder Callback Types`, () => {
         })
     })
   })
+
+  describe(`ORDER BY and HAVING with SELECT fields`, () => {
+    test(`orderBy callback can access aggregate fields from SELECT`, () => {
+      new Query()
+        .from({ user: usersCollection })
+        .groupBy(({ user }) => user.department_id)
+        .select(({ user }) => ({
+          department_id: user.department_id,
+          user_count: count(user.id),
+          avg_age: avg(user.age),
+          max_salary: max(user.salary),
+        }))
+        .orderBy(({ user, $selected }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf(user.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+
+          expectTypeOf($selected.user_count).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf($selected.avg_age).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf($selected.max_salary).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf($selected.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+
+          // Can now order by SELECT fields
+          return $selected.user_count
+        })
+    })
+
+    test(`orderBy callback can access non-aggregate fields from SELECT`, () => {
+      new Query()
+        .from({ user: usersCollection })
+        .groupBy(({ user }) => user.department_id)
+        .select(({ user }) => ({
+          taskId: user.department_id,
+          department_name: user.name, // Non-aggregate field
+          user_count: count(user.id),
+        }))
+        .orderBy(({ user, $selected }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+
+          expectTypeOf($selected.taskId).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf($selected.department_name).toEqualTypeOf<RefLeaf<string>>()
+          expectTypeOf($selected.user_count).toEqualTypeOf<RefLeaf<number>>()
+
+          // Can now order by SELECT fields
+          return $selected.taskId
+        })
+    })
+
+    test(`having callback can access aggregate fields from SELECT`, () => {
+      new Query()
+        .from({ user: usersCollection })
+        .groupBy(({ user }) => user.department_id)
+        .select(({ user }) => ({
+          department_id: user.department_id,
+          user_count: count(user.id),
+          avg_age: avg(user.age),
+          total_salary: sum(user.salary),
+        }))
+        .having(({ user, $selected }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+
+          expectTypeOf($selected.user_count).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf($selected.avg_age).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf($selected.total_salary).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf($selected.department_id).toEqualTypeOf<RefLeaf<number> | null>()
+
+          // Can now use SELECT aliases in HAVING
+          return gt($selected.user_count, 5)
+        })
+    })
+
+    test(`having callback can access non-aggregate fields from SELECT`, () => {
+      new Query()
+        .from({ user: usersCollection })
+        .groupBy(({ user }) => user.department_id)
+        .select(({ user }) => ({
+          taskId: user.department_id,
+          department_name: user.name,
+          user_count: count(user.id),
+        }))
+        .having(({ user, $selected }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+
+          expectTypeOf($selected.taskId).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf($selected.department_name).toEqualTypeOf<RefLeaf<string>>()
+          expectTypeOf($selected.user_count).toEqualTypeOf<RefLeaf<number>>()
+
+          // Can now use SELECT fields in HAVING
+          return gt($selected.user_count, 2)
+        })
+    })
+
+    test(`orderBy can access nested SELECT fields`, () => {
+      new Query()
+        .from({ user: usersCollection })
+        .select(({ user }) => ({
+          id: user.id,
+          profile: {
+            name: user.name,
+            email: user.email,
+          },
+          stats: {
+            age: user.age,
+            salary: user.salary,
+          },
+        }))
+        .orderBy(({ user, $selected }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+
+          expectTypeOf($selected.profile.name).toEqualTypeOf<RefLeaf<string>>()
+          expectTypeOf($selected.stats.age).toEqualTypeOf<RefLeaf<number>>()
+
+          return $selected.stats.age
+        })
+    })
+
+    test(`orderBy has access to SELECT fields via $selected`, () => {
+      new Query()
+        .from({ user: usersCollection })
+        .groupBy(({ user }) => user.department_id)
+        .select(({ user }) => ({
+          taskId: user.department_id,
+          latestActivity: max(user.created_at),
+          sessionCount: count(user.id),
+        }))
+        .orderBy(({ user, $selected }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+
+          expectTypeOf($selected.taskId).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf($selected.sessionCount).toEqualTypeOf<RefLeaf<number>>()
+
+          return $selected.latestActivity
+        })
+    })
+
+    test(`having has access to SELECT fields via $selected`, () => {
+      new Query()
+        .from({ user: usersCollection })
+        .groupBy(({ user }) => user.department_id)
+        .select(({ user }) => ({
+          taskId: user.department_id,
+          user_count: count(user.id),
+          avg_salary: avg(user.salary),
+        }))
+        .having(({ user, $selected }) => {
+          expectTypeOf(user.id).toEqualTypeOf<RefLeaf<number>>()
+
+          expectTypeOf($selected.taskId).toEqualTypeOf<RefLeaf<number> | null>()
+          expectTypeOf($selected.user_count).toEqualTypeOf<RefLeaf<number>>()
+          expectTypeOf($selected.avg_salary).toEqualTypeOf<RefLeaf<number>>()
+
+          return gt($selected.user_count, 5)
+        })
+    })
+  })
 })
