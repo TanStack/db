@@ -1566,8 +1566,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               }))
               .fn.having(
                 ({ $selected }) =>
-                  $selected.sessionCount >= 2 &&
-                  $selected.totalAmount > 300,
+                  $selected.sessionCount >= 2 && $selected.totalAmount > 300,
               ),
         })
 
