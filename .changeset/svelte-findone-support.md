@@ -1,5 +1,5 @@
 ---
-'@tanstack/svelte-db': minor
+'@tanstack/svelte-db': patch
 ---
 
 Add `findOne()` / `SingleResult` support to `useLiveQuery` hook.
