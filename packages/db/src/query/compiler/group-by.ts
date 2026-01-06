@@ -447,26 +447,26 @@ export function replaceAggregatesByRefs(
     case `ref`: {
       const refExpr = havingExpr
       const path = refExpr.path
-      
+
       if (path.length === 0) {
         // Empty path - pass through
         return havingExpr as BasicExpression
       }
-      
+
       // Check if this is a $selected reference
       // Paths like ['$selected', 'latestActivity'] should be transformed to ['__select_results', 'latestActivity']
       if (path.length > 0 && path[0] === `$selected`) {
         // Extract the field path after $selected
         const fieldPath = path.slice(1)
-        
+
         if (fieldPath.length === 0) {
           // Just $selected without a field - return reference to entire __select_results
           return new PropRef([resultAlias])
         }
-        
+
         // Join the field path to get the SELECT alias (handles nested fields)
         const alias = fieldPath.join(`.`)
-        
+
         // Verify the field exists in SELECT clause
         if (alias in selectClause) {
           // Transform to reference __select_results[alias]
@@ -474,12 +474,12 @@ export function replaceAggregatesByRefs(
           const aliasParts = alias.split(`.`)
           return new PropRef([resultAlias, ...aliasParts])
         }
-        
+
         // Field doesn't exist in SELECT - this is an error, but we'll pass through for now
         // (Could throw an error here in the future)
         return havingExpr as BasicExpression
       }
-      
+
       // Not a $selected reference - this is a table column reference, pass through unchanged
       // SELECT fields should only be accessed via $selected namespace
       return havingExpr as BasicExpression
