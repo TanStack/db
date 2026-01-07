@@ -1155,6 +1155,73 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.status).toBe(`ready`)
     })
 
+    it(`should handle synchronously resolving loadSubset without race condition`, async () => {
+      // This test specifically targets the race condition where loadSubset resolves
+      // synchronously (or extremely fast). The fix must ensure we don't miss the
+      // transient loadingSubset -> ready transition even in this case.
+
+      // Track whether loadSubset was called
+      let loadSubsetCalled = false
+
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `source-sync-subset`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Mark source ready immediately with some initial data
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 10 } })
+            write({ type: `insert`, value: { id: 2, value: 20 } })
+            write({ type: `insert`, value: { id: 3, value: 30 } })
+            commit()
+            markReady()
+
+            return {
+              loadSubset: () => {
+                loadSubsetCalled = true
+                // Return an IMMEDIATELY resolving promise - this is the tricky case
+                // where the status transition could be missed if listener registration
+                // happens after snapshot triggering
+                return Promise.resolve()
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query with orderBy + limit that triggers lazy loading
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .orderBy(({ item }) => item.value, `asc`)
+            .limit(2),
+        startSync: true,
+      })
+
+      // Wait for everything to settle
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Source should be ready
+      expect(sourceCollection.isReady()).toBe(true)
+
+      // loadSubset should have been called
+      expect(loadSubsetCalled).toBe(true)
+
+      // KEY ASSERTION: Even with sync resolution, isLoadingSubset should now be false
+      // (the promise resolved immediately)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
+      // And the live query should be ready (not stuck in loading)
+      expect(liveQuery.status).toBe(`ready`)
+
+      // Verify we have data (not empty due to race condition)
+      expect(liveQuery.size).toBeGreaterThan(0)
+    })
+
     it(`live query result collection has isLoadingSubset property`, async () => {
       const sourceCollection = createCollection<{ id: string; value: string }>({
         id: `source`,
