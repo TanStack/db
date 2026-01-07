@@ -74,7 +74,7 @@ class FakeLeaderElection implements LeaderElection {
 
   onLeadershipChange(callback: (isLeader: boolean) => void): () => void {
     this.listeners.add(callback)
-    callback(this.leader)
+    // Don't call callback immediately - matches real BaseLeaderElection behavior
     return () => {
       this.listeners.delete(callback)
     }
