@@ -27,21 +27,21 @@ type OptionalConversions<
   InputType extends ShapeOf<OutputType>,
   OutputType extends ShapeOf<InputType>,
 > = {
-    // Excludes all keys that require a conversation.
-    [K in keyof InputType as InputType[K] extends OutputType[K]
+  // Excludes all keys that require a conversation.
+  [K in keyof InputType as InputType[K] extends OutputType[K]
     ? K
     : never]?: Conversion<InputType[K], OutputType[K]>
-  }
+}
 
 type RequiredConversions<
   InputType extends ShapeOf<OutputType>,
   OutputType extends ShapeOf<InputType>,
 > = {
-    // Excludes all keys that do not strictly require a conversation.
-    [K in keyof InputType as InputType[K] extends OutputType[K]
+  // Excludes all keys that do not strictly require a conversation.
+  [K in keyof InputType as InputType[K] extends OutputType[K]
     ? never
     : K]: Conversion<InputType[K], OutputType[K]>
-  }
+}
 
 type Conversions<
   InputType extends ShapeOf<OutputType>,
@@ -181,16 +181,21 @@ export function trailBaseCollectionOptions<
       // NOTE: We cache cursors from prior fetches. TanStack/db expects that
       // cursors can be derived from a key, which is not true for TB, since
       // cursors are encrypted. This is leaky and therefore not ideal.
-      const cursors = new Map<string | number, string>
+      const cursors = new Map<string | number, string>()
 
       // Load (more) data.
       async function load(opts: LoadSubsetOptions) {
         const lastKey = opts.cursor?.lastKey
-        let cursor: string | undefined = lastKey !== undefined ? cursors.get(lastKey) : undefined
-        let offset: number | undefined = (opts.offset ?? 0) > 0 ? opts.offset : undefined
+        let cursor: string | undefined =
+          lastKey !== undefined ? cursors.get(lastKey) : undefined
+        let offset: number | undefined =
+          (opts.offset ?? 0) > 0 ? opts.offset : undefined
 
         const order: Array<string> | undefined = buildOrder(opts)
-        const filters: Array<FilterOrComposite> | undefined = buildFilters(opts, config)
+        const filters: Array<FilterOrComposite> | undefined = buildFilters(
+          opts,
+          config,
+        )
 
         let remaining: number = opts.limit ?? Number.MAX_VALUE
         if (remaining <= 0) {
@@ -231,7 +236,10 @@ export function trailBaseCollectionOptions<
           // Drained or read enough.
           if (length < limit || remaining <= 0) {
             if (response.cursor) {
-              cursors.set(getKey(parse(response.records.at(-1)!)), response.cursor)
+              cursors.set(
+                getKey(parse(response.records.at(-1)!)),
+                response.cursor,
+              )
             }
             break
           }
@@ -420,48 +428,55 @@ export function trailBaseCollectionOptions<
 }
 
 function buildOrder(opts: LoadSubsetOptions): undefined | Array<string> {
-  return opts.orderBy?.map((o) => {
-    switch (o.expression.type) {
-      case "ref": {
-        const field = o.expression.path[0]
-        if (o.compareOptions.direction == "asc") {
-          return `+${field}`
+  return opts.orderBy
+    ?.map((o) => {
+      switch (o.expression.type) {
+        case 'ref': {
+          const field = o.expression.path[0]
+          if (o.compareOptions.direction == 'asc') {
+            return `+${field}`
+          }
+          return `-${field}`
         }
-        return `-${field}`
+        default: {
+          console.warn(
+            'Skipping unsupported order clause:',
+            JSON.stringify(o.expression),
+          )
+          return undefined
+        }
       }
-      default: {
-        console.warn("Skipping unsupported order clause:", JSON.stringify(o.expression))
-        return undefined
-      }
-    }
-  }).filter((f) => f !== undefined)
+    })
+    .filter((f) => f !== undefined)
 }
 
 function buildCompareOp(name: string): CompareOp | undefined {
   switch (name) {
-    case "eq":
-      return "equal"
-    case "ne":
-      return "notEqual"
-    case "gt":
-      return "greaterThan"
-    case "gte":
-      return "greaterThanEqual"
-    case "lt":
-      return "lessThan"
-    case "lte":
-      return "lessThanEqual"
+    case 'eq':
+      return 'equal'
+    case 'ne':
+      return 'notEqual'
+    case 'gt':
+      return 'greaterThan'
+    case 'gte':
+      return 'greaterThanEqual'
+    case 'lt':
+      return 'lessThan'
+    case 'lte':
+      return 'lessThanEqual'
     default:
       return undefined
   }
 }
 
-
 function buildFilters<
   TItem extends ShapeOf<TRecord>,
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
->(opts: LoadSubsetOptions, config: TrailBaseCollectionConfig<TItem, TRecord, TKey>): undefined | Array<FilterOrComposite> {
+>(
+  opts: LoadSubsetOptions,
+  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
+): undefined | Array<FilterOrComposite> {
   const where = opts.where
   if (where === undefined) {
     return undefined
@@ -473,15 +488,15 @@ function buildFilters<
       return `${convert(value)}`
     }
 
-    if (typeof value === "boolean") {
-      return value ? "1" : "0"
+    if (typeof value === 'boolean') {
+      return value ? '1' : '0'
     }
 
     return `${value}`
   }
 
   switch (where.type) {
-    case "func": {
+    case 'func': {
       const field = where.args[0]
       const val = where.args[1]
 
@@ -490,26 +505,28 @@ function buildFilters<
         break
       }
 
-      if (field?.type === "ref" && val?.type === "val") {
+      if (field?.type === 'ref' && val?.type === 'val') {
         const column = field.path.at(0)
         if (column) {
-          const f = [{
-            column: field.path.at(0) ?? "",
-            op,
-            value: serializeValue(column, val.value),
-          }]
+          const f = [
+            {
+              column: field.path.at(0) ?? '',
+              op,
+              value: serializeValue(column, val.value),
+            },
+          ]
 
           return f
         }
       }
       break
     }
-    case "ref":
-    case "val":
+    case 'ref':
+    case 'val':
       break
   }
 
-  console.warn("where clause which is not (yet) supported", opts.where)
+  console.warn('where clause which is not (yet) supported', opts.where)
 
   return undefined
 }

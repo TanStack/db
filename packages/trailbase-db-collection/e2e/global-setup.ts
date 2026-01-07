@@ -20,7 +20,7 @@ function isDockerAvailable(): boolean {
   try {
     execSync('docker --version', { stdio: 'pipe' })
     return true
-  } catch { }
+  } catch {}
 
   return false
 }
@@ -29,7 +29,7 @@ async function isTrailBaseRunning(url: string): Promise<boolean> {
   try {
     const res = await fetch(`${url}/api/healthcheck`)
     return res.ok
-  } catch { }
+  } catch {}
 
   return false
 }
@@ -107,7 +107,7 @@ async function waitForTrailBase(url: string): Promise<void> {
           clearTimeout(timeout)
           return resolve()
         }
-      } catch { }
+      } catch {}
 
       setTimeout(() => void check(), 500)
     }
@@ -119,7 +119,7 @@ async function waitForTrailBase(url: string): Promise<void> {
 /**
  * Global setup for TrailBase e2e test suite
  */
-export default async function({ provide }: TestProject) {
+export default async function ({ provide }: TestProject) {
   let serverProcess: ChildProcess | null = null
 
   // Check if TrailBase is already running
@@ -129,9 +129,9 @@ export default async function({ provide }: TestProject) {
     if (!isDockerAvailable()) {
       throw new Error(
         `TrailBase is not running at ${TRAILBASE_URL} and no startup method is available.\n` +
-        `Please either:\n` +
-        `  1. Start TrailBase manually at ${TRAILBASE_URL}\n` +
-        `  2. Install Docker and run the tests again\n`,
+          `Please either:\n` +
+          `  1. Start TrailBase manually at ${TRAILBASE_URL}\n` +
+          `  2. Install Docker and run the tests again\n`,
       )
     }
 
