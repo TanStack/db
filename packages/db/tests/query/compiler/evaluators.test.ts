@@ -504,11 +504,10 @@ describe(`evaluators`, () => {
             // But they have the same time value
             expect(date1.getTime()).toBe(date2.getTime())
 
-            const func = new Func(`eq`, [new Value(date1), new Value(date2)])
+            const func = eq(new Value(date1), new Value(date2))
             const compiled = compileExpression(func)
 
             // Should return true because they represent the same time
-            // Currently this fails because eq() does referential comparison
             expect(compiled({})).toBe(true)
           })
 
@@ -516,7 +515,7 @@ describe(`evaluators`, () => {
             const date1 = new Date(`2024-01-15T10:30:45.123Z`)
             const date2 = new Date(`2024-01-15T10:30:45.124Z`) // 1ms later
 
-            const func = new Func(`eq`, [new Value(date1), new Value(date2)])
+            const func = eq(new Value(date1), new Value(date2))
             const compiled = compileExpression(func)
 
             // Should return false because they represent different times
