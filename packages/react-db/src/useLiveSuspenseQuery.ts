@@ -71,6 +71,39 @@ import type {
  *     </ErrorBoundary>
  *   )
  * }
+ *
+ * @remarks
+ * **Important:** This hook does NOT support disabled queries (returning undefined/null).
+ * Following TanStack Query's useSuspenseQuery design, the query callback must always
+ * return a valid query, collection, or config object.
+ *
+ * ❌ **This will cause a type error:**
+ * ```ts
+ * useLiveSuspenseQuery(
+ *   (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+ * )
+ * ```
+ *
+ * ✅ **Use conditional rendering instead:**
+ * ```ts
+ * function Profile({ userId }: { userId: string }) {
+ *   const { data } = useLiveSuspenseQuery(
+ *     (q) => q.from({ users }).where(({ users }) => eq(users.id, userId))
+ *   )
+ *   return <div>{data.name}</div>
+ * }
+ *
+ * // In parent component:
+ * {userId ? <Profile userId={userId} /> : <div>No user</div>}
+ * ```
+ *
+ * ✅ **Or use useLiveQuery for conditional queries:**
+ * ```ts
+ * const { data, isEnabled } = useLiveQuery(
+ *   (q) => userId ? q.from({ users }) : undefined,  // ✅ Supported!
+ *   [userId]
+ * )
+ * ```
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveSuspenseQuery<TContext extends Context>(
@@ -146,9 +179,13 @@ export function useLiveSuspenseQuery(
   // SUSPENSE LOGIC: Throw promise or error based on collection status
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!result.isEnabled) {
-    // Suspense queries cannot be disabled - throw error
+    // Suspense queries cannot be disabled - this matches TanStack Query's useSuspenseQuery behavior
     throw new Error(
-      `useLiveSuspenseQuery does not support disabled queries. Use useLiveQuery instead for conditional queries.`,
+      `useLiveSuspenseQuery does not support disabled queries (callback returned undefined/null). ` +
+        `The Suspense pattern requires data to always be defined (T, not T | undefined). ` +
+        `Solutions: ` +
+        `1) Use conditional rendering - don't render the component until the condition is met. ` +
+        `2) Use useLiveQuery instead, which supports disabled queries with the 'isEnabled' flag.`,
     )
   }
 
