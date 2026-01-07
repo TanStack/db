@@ -871,7 +871,7 @@ export class CollectionImpl<
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions<TOutput> = {}
+    options: SubscribeChangesOptions<TOutput> = {},
   ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
   }

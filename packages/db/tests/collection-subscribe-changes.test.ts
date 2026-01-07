@@ -1,9 +1,9 @@
-import { describe, expect, it, vi } from "vitest"
-import mitt from "mitt"
-import { createCollection } from "../src/collection/index.js"
-import { createTransaction } from "../src/transactions"
-import { and, eq, gt } from "../src/query/builder/functions"
-import { PropRef } from "../src/query/ir"
+import { describe, expect, it, vi } from 'vitest'
+import mitt from 'mitt'
+import { createCollection } from '../src/collection/index.js'
+import { createTransaction } from '../src/transactions'
+import { and, eq, gt } from '../src/query/builder/functions'
+import { PropRef } from '../src/query/ir'
 import type {
   ChangeMessage,
   ChangesPayload,
@@ -1972,7 +1972,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx1.mutate(() =>
       collection.update(1, (draft) => {
         draft.status = `active`
-      })
+      }),
     )
 
     // Should emit an insert event for the newly active item
@@ -1995,7 +1995,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx2.mutate(() =>
       collection.update(2, (draft) => {
         draft.status = `inactive`
-      })
+      }),
     )
 
     // Should emit a delete event for the newly inactive item

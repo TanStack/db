@@ -1,15 +1,15 @@
-import { NegativeActiveSubscribersError } from "../errors"
+import { NegativeActiveSubscribersError } from '../errors'
 import {
   createSingleRowRefProxy,
   toExpression,
-} from "../query/builder/ref-proxy.js"
-import { CollectionSubscription } from "./subscription.js"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { ChangeMessage, SubscribeChangesOptions } from "../types"
-import type { CollectionLifecycleManager } from "./lifecycle.js"
-import type { CollectionSyncManager } from "./sync.js"
-import type { CollectionEventsManager } from "./events.js"
-import type { CollectionImpl } from "./index.js"
+} from '../query/builder/ref-proxy.js'
+import { CollectionSubscription } from './subscription.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { ChangeMessage, SubscribeChangesOptions } from '../types'
+import type { CollectionLifecycleManager } from './lifecycle.js'
+import type { CollectionSyncManager } from './sync.js'
+import type { CollectionEventsManager } from './events.js'
+import type { CollectionImpl } from './index.js'
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -98,7 +98,7 @@ export class CollectionChangesManager<
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions<TOutput> = {}
+    options: SubscribeChangesOptions<TOutput> = {},
   ): CollectionSubscription {
     // Start sync and track subscriber
     this.addSubscriber()
@@ -106,7 +106,7 @@ export class CollectionChangesManager<
     // Compile where callback to whereExpression if provided
     if (options.where && options.whereExpression) {
       throw new Error(
-        `Cannot specify both 'where' and 'whereExpression' options. Use one or the other.`
+        `Cannot specify both 'where' and 'whereExpression' options. Use one or the other.`,
       )
     }
 
