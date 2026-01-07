@@ -1,33 +1,39 @@
 ---
-id: InvalidJoinConditionSourceMismatchError
-title: InvalidJoinConditionSourceMismatchError
+id: InvalidWhereExpressionError
+title: InvalidWhereExpressionError
 ---
 
-# Class: InvalidJoinConditionSourceMismatchError
+# Class: InvalidWhereExpressionError
 
-Defined in: [packages/db/src/errors.ts:522](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L522)
+Defined in: [packages/db/src/errors.ts:393](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L393)
 
 ## Extends
 
-- [`JoinError`](JoinError.md)
+- [`QueryBuilderError`](QueryBuilderError.md)
 
 ## Constructors
 
 ### Constructor
 
 ```ts
-new InvalidJoinConditionSourceMismatchError(): InvalidJoinConditionSourceMismatchError;
+new InvalidWhereExpressionError(valueType): InvalidWhereExpressionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:523](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L523)
+Defined in: [packages/db/src/errors.ts:394](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L394)
+
+#### Parameters
+
+##### valueType
+
+`string`
 
 #### Returns
 
-`InvalidJoinConditionSourceMismatchError`
+`InvalidWhereExpressionError`
 
 #### Overrides
 
-[`JoinError`](JoinError.md).[`constructor`](JoinError.md#constructor)
+[`QueryBuilderError`](QueryBuilderError.md).[`constructor`](QueryBuilderError.md#constructor)
 
 ## Properties
 
@@ -41,7 +47,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`cause`](JoinError.md#cause)
+[`QueryBuilderError`](QueryBuilderError.md).[`cause`](QueryBuilderError.md#cause)
 
 ***
 
@@ -55,7 +61,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`message`](JoinError.md#message)
+[`QueryBuilderError`](QueryBuilderError.md).[`message`](QueryBuilderError.md#message)
 
 ***
 
@@ -69,7 +75,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`name`](JoinError.md#name)
+[`QueryBuilderError`](QueryBuilderError.md).[`name`](QueryBuilderError.md#name)
 
 ***
 
@@ -83,7 +89,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`stack`](JoinError.md#stack)
+[`QueryBuilderError`](QueryBuilderError.md).[`stack`](QueryBuilderError.md#stack)
 
 ***
 
@@ -107,7 +113,7 @@ not capture any frames.
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`stackTraceLimit`](JoinError.md#stacktracelimit)
+[`QueryBuilderError`](QueryBuilderError.md).[`stackTraceLimit`](QueryBuilderError.md#stacktracelimit)
 
 ## Methods
 
@@ -179,7 +185,7 @@ a();
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`captureStackTrace`](JoinError.md#capturestacktrace)
+[`QueryBuilderError`](QueryBuilderError.md).[`captureStackTrace`](QueryBuilderError.md#capturestacktrace)
 
 ***
 
@@ -211,4 +217,4 @@ https://v8.dev/docs/stack-trace-api#customizing-stack-traces
 
 #### Inherited from
 
-[`JoinError`](JoinError.md).[`prepareStackTrace`](JoinError.md#preparestacktrace)
+[`QueryBuilderError`](QueryBuilderError.md).[`prepareStackTrace`](QueryBuilderError.md#preparestacktrace)
