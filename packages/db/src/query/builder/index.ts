@@ -29,6 +29,7 @@ import type {
 import type {
   CompareOptions,
   Context,
+  GetResult,
   GroupByCallback,
   JoinOnCallback,
   MergeContextForJoinCallback,
@@ -863,6 +864,9 @@ export type ExtractContext<T> =
     : T extends QueryBuilder<infer TContext>
       ? TContext
       : never
+
+// Helper type to extract the result type from a QueryBuilder (similar to Zod's z.infer)
+export type QueryResult<T> = GetResult<ExtractContext<T>>
 
 // Export the types from types.ts for convenience
 export type {
