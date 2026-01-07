@@ -13,7 +13,9 @@ import type {
   CollectionConfig,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  LoadSubsetOptions,
   SyncConfig,
+  SyncMode,
   UpdateMutationFnParams,
   UtilsRecord,
 } from '@tanstack/db'
@@ -81,6 +83,8 @@ function convertPartial<
   ) as OutputType
 }
 
+export type TrailBaseSyncMode = SyncMode
+
 /**
  * Configuration interface for Trailbase Collection
  */
@@ -90,12 +94,18 @@ export interface TrailBaseCollectionConfig<
   TKey extends string | number = string | number,
 > extends Omit<
   BaseCollectionConfig<TItem, TKey>,
-  `onInsert` | `onUpdate` | `onDelete`
+  `onInsert` | `onUpdate` | `onDelete` | `syncMode`
 > {
   /**
    * Record API name
    */
   recordApi: RecordApi<TRecord>
+
+  /**
+   * The mode of sync to use for the collection.
+   * @default `eager`
+   */
+  syncMode?: TrailBaseSyncMode
 
   parse: Conversions<TRecord, TItem>
   serialize: Conversions<TItem, TRecord>
@@ -126,6 +136,9 @@ export function trailBaseCollectionOptions<
     convert<TItem, TRecord>(config.serialize, item)
 
   const seenIds = new Store(new Map<string, number>())
+
+  const internalSyncMode = config.syncMode ?? `eager`
+  let fullSyncCompleted = false
 
   const awaitIds = (
     ids: Array<string>,
@@ -185,6 +198,7 @@ export function trailBaseCollectionOptions<
           if (length === 0) break
 
           got = got + length
+
           for (const item of response.records) {
             write({
               type: `insert`,
@@ -253,7 +267,11 @@ export function trailBaseCollectionOptions<
         listen(reader)
 
         try {
-          await initialFetch()
+          // Eager mode: perform initial fetch to populate everything
+          if (internalSyncMode === `eager`) {
+            await initialFetch()
+            fullSyncCompleted = true
+          }
         } catch (e) {
           cancelEventReader()
           throw e
@@ -287,9 +305,44 @@ export function trailBaseCollectionOptions<
       }
 
       start()
+
+      // Eager mode doesn't need subset loading
+      if (internalSyncMode === `eager`) {
+        return
+      }
+
+      const loadSubset = async (opts: LoadSubsetOptions): Promise<void> => {
+        if (
+          opts.cursor ||
+          opts.orderBy ||
+          opts.subscription ||
+          opts.offset ||
+          opts.limit ||
+          opts.where
+        ) {
+          console.warn(`Got unsupported subset opts: ${opts}`)
+        }
+
+        // TODO: Support (some) of the above subset options to enable pagination etc.
+        await initialFetch()
+        fullSyncCompleted = true
+      }
+
+      return {
+        loadSubset,
+        getSyncMetadata: () =>
+          ({
+            syncMode: internalSyncMode,
+            fullSyncComplete: fullSyncCompleted,
+          }) as const,
+      }
     },
     // Expose the getSyncMetadata function
-    getSyncMetadata: undefined,
+    getSyncMetadata: () =>
+      ({
+        syncMode: internalSyncMode,
+        fullSyncComplete: fullSyncCompleted,
+      }) as const,
   }
 
   return {
