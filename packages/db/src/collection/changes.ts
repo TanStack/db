@@ -110,15 +110,16 @@ export class CollectionChangesManager<
       )
     }
 
-    let whereExpression = options.whereExpression
-    if (options.where) {
+    const { where, ...opts } = options
+    let whereExpression = opts.whereExpression
+    if (where) {
       const proxy = createSingleRowRefProxy<TOutput>()
-      const result = options.where(proxy)
+      const result = where(proxy)
       whereExpression = toExpression(result)
     }
 
     const subscription = new CollectionSubscription(this.collection, callback, {
-      includeInitialState: options.includeInitialState,
+      ...opts,
       whereExpression,
       onUnsubscribe: () => {
         this.removeSubscriber()
