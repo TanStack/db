@@ -6,7 +6,8 @@ import {
   ExpectedUpdateTypeError,
   TimeoutWaitingForIdsError,
 } from './errors'
-import type { Event, RecordApi } from 'trailbase'
+import type { OrderByClause } from '../../db/dist/esm/query/ir'
+import type { CompareOp, Event, FilterOrComposite, RecordApi } from 'trailbase'
 
 import type {
   BaseCollectionConfig,
@@ -178,45 +179,79 @@ export function trailBaseCollectionOptions<
     sync: (params: SyncParams) => {
       const { begin, write, commit, markReady } = params
 
-      // Initial fetch.
-      async function initialFetch() {
-        const limit = 256
-        let response = await config.recordApi.list({
-          pagination: {
-            limit,
-          },
-        })
-        let cursor = response.cursor
-        let got = 0
+      // NOTE: We cache cursors from prior fetches. TanStack/db expects that
+      // cursors can be derived from a key, which is not true for TB, since
+      // cursors are encrypted. This is leaky and therefore not ideal.
+      const cursors = new Map<string | number, string>()
 
-        begin()
+      // Load (more) data.
+      async function load(opts: LoadSubsetOptions) {
+        const lastKey = opts.cursor?.lastKey
+        let cursor: string | undefined =
+          lastKey !== undefined ? cursors.get(lastKey) : undefined
+        let offset: number | undefined =
+          (opts.offset ?? 0) > 0 ? opts.offset : undefined
+
+        const order: Array<string> | undefined = buildOrder(opts)
+        const filters: Array<FilterOrComposite> | undefined = buildFilters(
+          opts,
+          config,
+        )
+
+        let remaining: number = opts.limit ?? Number.MAX_VALUE
+        if (remaining <= 0) {
+          return
+        }
 
         while (true) {
+          const limit = Math.min(remaining, 256)
+          const response = await config.recordApi.list({
+            pagination: {
+              limit,
+              offset,
+              cursor,
+            },
+            order,
+            filters,
+          })
+
           const length = response.records.length
-          if (length === 0) break
+          if (length === 0) {
+            // Drained - read everything.
+            break
+          }
 
-          got = got + length
+          begin()
 
-          for (const item of response.records) {
+          for (let i = 0; i < Math.min(length, remaining); ++i) {
             write({
               type: `insert`,
-              value: parse(item),
+              value: parse(response.records[i]!),
             })
           }
 
-          if (length < limit) break
+          commit()
 
-          response = await config.recordApi.list({
-            pagination: {
-              limit,
-              cursor,
-              offset: cursor === undefined ? got : undefined,
-            },
-          })
-          cursor = response.cursor
+          remaining -= length
+
+          // Drained or read enough.
+          if (length < limit || remaining <= 0) {
+            if (response.cursor) {
+              cursors.set(
+                getKey(parse(response.records.at(-1)!)),
+                response.cursor,
+              )
+            }
+            break
+          }
+
+          // Update params for next iteration.
+          if (offset !== undefined) {
+            offset += length
+          } else {
+            cursor = response.cursor
+          }
         }
-
-        commit()
       }
 
       // Afterwards subscribe.
@@ -267,7 +302,8 @@ export function trailBaseCollectionOptions<
         try {
           // Eager mode: perform initial fetch to populate everything
           if (internalSyncMode === `eager`) {
-            await initialFetch()
+            // Load everything on initial load.
+            await load({})
             fullSyncCompleted = true
           }
         } catch (e) {
@@ -309,29 +345,11 @@ export function trailBaseCollectionOptions<
         return
       }
 
-      const loadSubset = async (opts: LoadSubsetOptions): Promise<void> => {
-        if (
-          opts.cursor ||
-          opts.orderBy ||
-          opts.subscription ||
-          opts.offset ||
-          opts.limit ||
-          opts.where
-        ) {
-          console.warn(`Got unsupported subset opts: ${opts}`)
-        }
-
-        // TODO: Support (some) of the above subset options to enable pagination etc.
-        await initialFetch()
-        fullSyncCompleted = true
-      }
-
       return {
-        loadSubset,
+        loadSubset: load,
         getSyncMetadata: () =>
           ({
             syncMode: internalSyncMode,
-            fullSyncComplete: fullSyncCompleted,
           }) as const,
       }
     },
@@ -408,4 +426,108 @@ export function trailBaseCollectionOptions<
       cancel: cancelEventReader,
     },
   }
+}
+
+function buildOrder(opts: LoadSubsetOptions): undefined | Array<string> {
+  return opts.orderBy
+    ?.map((o: OrderByClause) => {
+      switch (o.expression.type) {
+        case 'ref': {
+          const field = o.expression.path[0]
+          if (o.compareOptions.direction == 'asc') {
+            return `+${field}`
+          }
+          return `-${field}`
+        }
+        default: {
+          console.warn(
+            'Skipping unsupported order clause:',
+            JSON.stringify(o.expression),
+          )
+          return undefined
+        }
+      }
+    })
+    .filter((f: string | undefined) => f !== undefined)
+}
+
+function buildCompareOp(name: string): CompareOp | undefined {
+  switch (name) {
+    case 'eq':
+      return 'equal'
+    case 'ne':
+      return 'notEqual'
+    case 'gt':
+      return 'greaterThan'
+    case 'gte':
+      return 'greaterThanEqual'
+    case 'lt':
+      return 'lessThan'
+    case 'lte':
+      return 'lessThanEqual'
+    default:
+      return undefined
+  }
+}
+
+function buildFilters<
+  TItem extends ShapeOf<TRecord>,
+  TRecord extends ShapeOf<TItem> = TItem,
+  TKey extends string | number = string | number,
+>(
+  opts: LoadSubsetOptions,
+  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
+): undefined | Array<FilterOrComposite> {
+  const where = opts.where
+  if (where === undefined) {
+    return undefined
+  }
+
+  function serializeValue<T = any>(column: string, value: T): string {
+    const convert = (config.serialize as any)[column]
+    if (convert) {
+      return `${convert(value)}`
+    }
+
+    if (typeof value === 'boolean') {
+      return value ? '1' : '0'
+    }
+
+    return `${value}`
+  }
+
+  switch (where.type) {
+    case 'func': {
+      const field = where.args[0]
+      const val = where.args[1]
+
+      const op = buildCompareOp(where.name)
+      if (op === undefined) {
+        break
+      }
+
+      if (field?.type === 'ref' && val?.type === 'val') {
+        const column = field.path.at(0)
+        if (column) {
+          const f = [
+            {
+              column: field.path.at(0) ?? '',
+              op,
+              value: serializeValue(column, val.value),
+            },
+          ]
+
+          return f
+        }
+      }
+      break
+    }
+    case 'ref':
+    case 'val':
+      break
+  }
+
+  console.warn('where clause which is not (yet) supported', opts.where)
+
+  return undefined
 }

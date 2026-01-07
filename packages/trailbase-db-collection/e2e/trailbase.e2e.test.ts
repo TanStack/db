@@ -16,7 +16,7 @@ import {
   createJoinsTestSuite,
   createLiveUpdatesTestSuite,
   createMutationsTestSuite,
-  // createPaginationTestSuite,
+  createPaginationTestSuite,
   createPredicatesTestSuite,
   createProgressiveTestSuite,
   generateSeedData,
@@ -405,7 +405,7 @@ describe(`TrailBase Collection E2E Tests`, async () => {
 
   // Run all shared test suites
   createPredicatesTestSuite(getConfig)
-  // createPaginationTestSuite(getConfig)
+  createPaginationTestSuite(getConfig)
   createJoinsTestSuite(getConfig)
   createDeduplicationTestSuite(getConfig)
   createCollationTestSuite(getConfig)
