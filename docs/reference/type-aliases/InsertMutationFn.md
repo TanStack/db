@@ -9,7 +9,7 @@ title: InsertMutationFn
 type InsertMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:443](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L443)
+Defined in: [packages/db/src/types.ts:444](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L444)
 
 ## Type Parameters
 

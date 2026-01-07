@@ -5,7 +5,7 @@ title: SetWindowRequiresOrderByError
 
 # Class: SetWindowRequiresOrderByError
 
-Defined in: [packages/db/src/errors.ts:705](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L705)
+Defined in: [packages/db/src/errors.ts:718](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L718)
 
 Error thrown when setWindow is called on a collection without an ORDER BY clause.
 
@@ -21,7 +21,7 @@ Error thrown when setWindow is called on a collection without an ORDER BY clause
 new SetWindowRequiresOrderByError(): SetWindowRequiresOrderByError;
 ```
 
-Defined in: [packages/db/src/errors.ts:706](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L706)
+Defined in: [packages/db/src/errors.ts:719](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L719)
 
 #### Returns
 

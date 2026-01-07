@@ -9,7 +9,7 @@ title: CollectionConfigSingleRowOption
 type CollectionConfigSingleRowOption<T, TKey, TSchema, TUtils> = CollectionConfig<T, TKey, TSchema, TUtils> & MaybeSingleResult;
 ```
 
-Defined in: [packages/db/src/types.ts:729](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L729)
+Defined in: [packages/db/src/types.ts:730](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L730)
 
 ## Type Parameters
 

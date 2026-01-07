@@ -9,7 +9,7 @@ title: CleanupFn
 type CleanupFn = () => void;
 ```
 
-Defined in: [packages/db/src/types.ts:317](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L317)
+Defined in: [packages/db/src/types.ts:318](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L318)
 
 ## Returns
 

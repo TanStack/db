@@ -3,11 +3,17 @@ id: SubscribeChangesOptions
 title: SubscribeChangesOptions
 ---
 
-# Interface: SubscribeChangesOptions
+# Interface: SubscribeChangesOptions\<T\>
 
-Defined in: [packages/db/src/types.ts:778](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L778)
+Defined in: [packages/db/src/types.ts:779](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L779)
 
 Options for subscribing to collection changes
+
+## Type Parameters
+
+### T
+
+`T` *extends* `object` = `Record`\<`string`, `unknown`\>
 
 ## Properties
 
@@ -17,9 +23,43 @@ Options for subscribing to collection changes
 optional includeInitialState: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:780](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L780)
+Defined in: [packages/db/src/types.ts:783](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L783)
 
 Whether to include the current state as initial changes
+
+***
+
+### where()?
+
+```ts
+optional where: (row) => any;
+```
+
+Defined in: [packages/db/src/types.ts:798](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L798)
+
+Callback function for filtering changes using a row proxy.
+The callback receives a proxy object that records property access,
+allowing you to use query builder functions like `eq`, `gt`, etc.
+
+#### Parameters
+
+##### row
+
+`SingleRowRefProxy`\<`T`\>
+
+#### Returns
+
+`any`
+
+#### Example
+
+```ts
+import { eq } from "@tanstack/db"
+
+collection.subscribeChanges(callback, {
+  where: (row) => eq(row.status, "active")
+})
+```
 
 ***
 
@@ -29,6 +69,6 @@ Whether to include the current state as initial changes
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:782](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L782)
+Defined in: [packages/db/src/types.ts:800](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L800)
 
 Pre-compiled expression for filtering changes
