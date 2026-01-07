@@ -27,21 +27,21 @@ type OptionalConversions<
   InputType extends ShapeOf<OutputType>,
   OutputType extends ShapeOf<InputType>,
 > = {
-    // Excludes all keys that require a conversation.
-    [K in keyof InputType as InputType[K] extends OutputType[K]
+  // Excludes all keys that require a conversation.
+  [K in keyof InputType as InputType[K] extends OutputType[K]
     ? K
     : never]?: Conversion<InputType[K], OutputType[K]>
-  }
+}
 
 type RequiredConversions<
   InputType extends ShapeOf<OutputType>,
   OutputType extends ShapeOf<InputType>,
 > = {
-    // Excludes all keys that do not strictly require a conversation.
-    [K in keyof InputType as InputType[K] extends OutputType[K]
+  // Excludes all keys that do not strictly require a conversation.
+  [K in keyof InputType as InputType[K] extends OutputType[K]
     ? never
     : K]: Conversion<InputType[K], OutputType[K]>
-  }
+}
 
 type Conversions<
   InputType extends ShapeOf<OutputType>,
@@ -310,8 +310,15 @@ export function trailBaseCollectionOptions<
       }
 
       const loadSubset = async (opts: LoadSubsetOptions): Promise<void> => {
-        if (opts.cursor || opts.orderBy || opts.subscription || opts.offset || opts.limit || opts.where) {
-          console.warn(`Got unsupported subset opts: ${opts}`);
+        if (
+          opts.cursor ||
+          opts.orderBy ||
+          opts.subscription ||
+          opts.offset ||
+          opts.limit ||
+          opts.where
+        ) {
+          console.warn(`Got unsupported subset opts: ${opts}`)
         }
 
         // TODO: Support (some) of the above subset options to enable pagination etc.

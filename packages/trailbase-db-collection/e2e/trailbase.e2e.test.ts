@@ -19,11 +19,10 @@ import {
   // createPaginationTestSuite,
   createPredicatesTestSuite,
   createProgressiveTestSuite,
-  generateSeedData
-
+  generateSeedData,
 } from '../../db-collection-e2e/src/index'
-import type { Client } from 'trailbase';
-import type { SeedDataResult } from '../../db-collection-e2e/src/index';
+import type { Client } from 'trailbase'
+import type { SeedDataResult } from '../../db-collection-e2e/src/index'
 import type { TrailBaseSyncMode } from '../src/trailbase'
 import type {
   Comment,
@@ -41,16 +40,21 @@ declare module 'vitest' {
 
 // / Decode a "url-safe" base64 string to bytes.
 function urlSafeBase64Decode(base64: string): Uint8Array {
-  return Uint8Array.from(atob(base64.replace(/_/g, "/").replace(/-/g, "+")), (c) => c.charCodeAt(0));
+  return Uint8Array.from(
+    atob(base64.replace(/_/g, '/').replace(/-/g, '+')),
+    (c) => c.charCodeAt(0),
+  )
 }
 
 // / Encode an arbitrary string input as a "url-safe" base64 string.
 function urlSafeBase64Encode(bytes: Uint8Array): string {
-  return btoa(String.fromCharCode(...bytes)).replace(/\//g, "_").replace(/\+/g, "-");
+  return btoa(String.fromCharCode(...bytes))
+    .replace(/\//g, '_')
+    .replace(/\+/g, '-')
 }
 
 function parseTrailBaseId(id: string): string {
-  return uuidStringify(urlSafeBase64Decode(id));
+  return uuidStringify(urlSafeBase64Decode(id))
 }
 
 function toTrailBaseId(id: string): string {
@@ -141,15 +145,15 @@ function createCollectionsForSyncMode(
         id: parseTrailBaseId,
         isActive: (isActive) => Boolean(isActive),
         createdAt: (createdAt) => new Date(createdAt),
-        metadata: (m) => m ? JSON.parse(m) : null,
-        deletedAt: (d) => d ? new Date(d) : null,
+        metadata: (m) => (m ? JSON.parse(m) : null),
+        deletedAt: (d) => (d ? new Date(d) : null),
       },
       serialize: {
         id: toTrailBaseId,
-        isActive: (a) => a ? 1 : 0,
+        isActive: (a) => (a ? 1 : 0),
         createdAt: (c) => c.toISOString(),
-        metadata: (m) => m ? JSON.stringify(m) : null,
-        deletedAt: (d) => d ? d.toISOString() : null,
+        metadata: (m) => (m ? JSON.stringify(m) : null),
+        deletedAt: (d) => (d ? d.toISOString() : null),
       },
     }),
   )
@@ -164,14 +168,14 @@ function createCollectionsForSyncMode(
       parse: {
         id: parseTrailBaseId,
         largeViewCount: (l) => BigInt(l),
-        publishedAt: (v) => v ? new Date(v) : null,
-        deletedAt: (d) => d ? new Date(d) : null,
+        publishedAt: (v) => (v ? new Date(v) : null),
+        deletedAt: (d) => (d ? new Date(d) : null),
       },
       serialize: {
         id: toTrailBaseId,
         largeViewCount: (v) => v.toString(),
-        publishedAt: (v) => v ? v.toISOString() : null,
-        deletedAt: (d) => d ? d.toISOString() : null,
+        publishedAt: (v) => (v ? v.toISOString() : null),
+        deletedAt: (d) => (d ? d.toISOString() : null),
       },
     }),
   )
@@ -186,12 +190,12 @@ function createCollectionsForSyncMode(
       parse: {
         id: parseTrailBaseId,
         createdAt: (v) => new Date(v),
-        deletedAt: (d) => d ? new Date(d) : null,
+        deletedAt: (d) => (d ? new Date(d) : null),
       },
       serialize: {
         id: toTrailBaseId,
         createdAt: (v) => v.toISOString(),
-        deletedAt: (d) => d ? d.toISOString() : null,
+        deletedAt: (d) => (d ? d.toISOString() : null),
       },
     }),
   )
@@ -239,10 +243,7 @@ async function initialCleanup(client: Client) {
   console.log(`Cleanup complete`)
 }
 
-async function setupInitialData(
-  client: Client,
-  seedData: SeedDataResult,
-) {
+async function setupInitialData(client: Client, seedData: SeedDataResult) {
   const usersRecordApi = client.records<UserRecord>(`users_e2e`)
   const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
   const commentsRecordApi = client.records<CommentRecord>(`comments_e2e`)
@@ -300,10 +301,10 @@ describe(`TrailBase Collection E2E Tests`, async () => {
   const client = initClient(baseUrl)
 
   // Wipe all pre-existing data, e.g. when using a persistent TB instance.
-  await initialCleanup(client);
+  await initialCleanup(client)
 
   const seedData = generateSeedData()
-  await setupInitialData(client, seedData);
+  await setupInitialData(client, seedData)
 
   async function getConfig(): Promise<E2ETestConfig> {
     // Create collections with different sync modes
@@ -337,11 +338,13 @@ describe(`TrailBase Collection E2E Tests`, async () => {
       eagerCollections.posts.preload(),
       eagerCollections.comments.preload(),
     ])
-    expect(eagerCollections.posts.size).toEqual(seedData.posts.length);
-    expect(eagerCollections.comments.size).toEqual(seedData.comments.length);
+    expect(eagerCollections.posts.size).toEqual(seedData.posts.length)
+    expect(eagerCollections.comments.size).toEqual(seedData.comments.length)
 
     // NOTE: One of the tests deletes a user :/
-    expect(eagerCollections.users.size).toBeGreaterThanOrEqual(seedData.users.length - 1);
+    expect(eagerCollections.users.size).toBeGreaterThanOrEqual(
+      seedData.users.length - 1,
+    )
 
     const usersRecordApi = client.records<UserRecord>(`users_e2e`)
     const postsRecordApi = client.records<PostRecord>(`posts_e2e`)
@@ -386,7 +389,7 @@ describe(`TrailBase Collection E2E Tests`, async () => {
           await postsRecordApi.create(serializePost(post))
         },
       },
-      setup: async () => { },
+      setup: async () => {},
       teardown: async () => {
         await Promise.all([
           eagerCollections.users.cleanup(),
