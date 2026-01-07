@@ -1,6 +1,6 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { BasicExpression, CompiledExpression } from "../../ir.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { BasicExpression, CompiledExpression } from '../../ir.js'
 
 // ============================================================
 // TYPES
@@ -20,7 +20,7 @@ type BinaryNumericReturnType<_T1, _T2> = BasicExpression<
 
 function multiplyEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   const argA = compiledArgs[0]!
   const argB = compiledArgs[1]!
@@ -38,11 +38,11 @@ function multiplyEvaluatorFactory(
 
 export function multiply<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
-  right: T2
+  right: T2,
 ): BinaryNumericReturnType<T1, T2> {
   return new Func(
     `multiply`,
     [toExpression(left), toExpression(right)],
-    multiplyEvaluatorFactory
+    multiplyEvaluatorFactory,
   ) as BinaryNumericReturnType<T1, T2>
 }

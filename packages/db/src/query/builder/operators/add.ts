@@ -1,7 +1,7 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { CompiledExpression } from "../../ir.js"
-import type { BinaryNumericReturnType, ExpressionLike } from "./types.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { CompiledExpression } from '../../ir.js'
+import type { BinaryNumericReturnType, ExpressionLike } from './types.js'
 
 // ============================================================
 // EVALUATOR
@@ -9,7 +9,7 @@ import type { BinaryNumericReturnType, ExpressionLike } from "./types.js"
 
 function addEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   const argA = compiledArgs[0]!
   const argB = compiledArgs[1]!
@@ -27,11 +27,11 @@ function addEvaluatorFactory(
 
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
-  right: T2
+  right: T2,
 ): BinaryNumericReturnType<T1, T2> {
   return new Func(
     `add`,
     [toExpression(left), toExpression(right)],
-    addEvaluatorFactory
+    addEvaluatorFactory,
   ) as BinaryNumericReturnType<T1, T2>
 }

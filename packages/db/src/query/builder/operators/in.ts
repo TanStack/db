@@ -1,6 +1,6 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { BasicExpression, CompiledExpression } from "../../ir.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { BasicExpression, CompiledExpression } from '../../ir.js'
 
 // ============================================================
 // TYPES
@@ -19,7 +19,7 @@ function isUnknown(value: any): boolean {
 
 function inEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   const valueEvaluator = compiledArgs[0]!
   const arrayEvaluator = compiledArgs[1]!
@@ -44,11 +44,11 @@ function inEvaluatorFactory(
 
 export function inArray(
   value: ExpressionLike,
-  array: ExpressionLike
+  array: ExpressionLike,
 ): BasicExpression<boolean> {
   return new Func(
     `in`,
     [toExpression(value), toExpression(array)],
-    inEvaluatorFactory
+    inEvaluatorFactory,
   )
 }

@@ -1,6 +1,6 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { BasicExpression, CompiledExpression } from "../../ir.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { BasicExpression, CompiledExpression } from '../../ir.js'
 
 // ============================================================
 // TYPES
@@ -15,7 +15,7 @@ type ExpressionLike = BasicExpression | any
 
 function concatEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   return (data: any) => {
     return compiledArgs
@@ -45,6 +45,6 @@ export function concat(
   return new Func(
     `concat`,
     args.map((arg) => toExpression(arg)),
-    concatEvaluatorFactory
+    concatEvaluatorFactory,
   )
 }

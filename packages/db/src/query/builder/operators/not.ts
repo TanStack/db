@@ -1,6 +1,6 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { BasicExpression, CompiledExpression } from "../../ir.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { BasicExpression, CompiledExpression } from '../../ir.js'
 
 // ============================================================
 // TYPES
@@ -19,7 +19,7 @@ function isUnknown(value: any): boolean {
 
 function notEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   const arg = compiledArgs[0]!
 

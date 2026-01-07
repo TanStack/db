@@ -88,7 +88,7 @@ describe(`select compiler`, () => {
       const arg = concat(
         new PropRef([`users`, `firstName`]),
         new Value(` `),
-        new PropRef([`users`, `lastName`])
+        new PropRef([`users`, `lastName`]),
       )
       const namespacedRow = {
         users: {
@@ -152,7 +152,7 @@ describe(`select compiler`, () => {
     it(`processes mathematical function expressions`, () => {
       const arg = add(
         new PropRef([`order`, `subtotal`]),
-        new PropRef([`order`, `tax`])
+        new PropRef([`order`, `tax`]),
       )
       const namespacedRow = {
         order: {

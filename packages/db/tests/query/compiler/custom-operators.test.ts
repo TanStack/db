@@ -1,19 +1,19 @@
-import { describe, expect, it } from "vitest"
-import { compileExpression } from "../../../src/query/compiler/evaluators.js"
-import { Func, PropRef, Value } from "../../../src/query/ir.js"
-import { toExpression } from "../../../src/query/builder/ref-proxy.js"
-import { and } from "../../../src/query/builder/operators/index.js"
+import { describe, expect, it } from 'vitest'
+import { compileExpression } from '../../../src/query/compiler/evaluators.js'
+import { Func, PropRef, Value } from '../../../src/query/ir.js'
+import { toExpression } from '../../../src/query/builder/ref-proxy.js'
+import { and } from '../../../src/query/builder/operators/index.js'
 import type {
   BasicExpression,
   CompiledExpression,
   EvaluatorFactory,
-} from "../../../src/query/ir.js"
+} from '../../../src/query/ir.js'
 
 describe(`custom operators`, () => {
   // Define factory for the "between" operator
   const betweenFactory: EvaluatorFactory = (
     compiledArgs: Array<CompiledExpression>,
-    _isSingleRow: boolean
+    _isSingleRow: boolean,
   ): CompiledExpression => {
     const valueEval = compiledArgs[0]!
     const minEval = compiledArgs[1]!
@@ -37,7 +37,7 @@ describe(`custom operators`, () => {
     return new Func(
       `between`,
       [toExpression(value), toExpression(min), toExpression(max)],
-      betweenFactory
+      betweenFactory,
     )
   }
 
@@ -67,7 +67,7 @@ describe(`custom operators`, () => {
     it(`allows creating a custom "startsWith" operator`, () => {
       const startsWithFactory: EvaluatorFactory = (
         compiledArgs: Array<CompiledExpression>,
-        _isSingleRow: boolean
+        _isSingleRow: boolean,
       ): CompiledExpression => {
         const strEval = compiledArgs[0]!
         const prefixEval = compiledArgs[1]!
@@ -91,7 +91,7 @@ describe(`custom operators`, () => {
         return new Func(
           `startsWith`,
           [toExpression(str), toExpression(prefix)],
-          startsWithFactory
+          startsWithFactory,
         )
       }
 
@@ -105,7 +105,7 @@ describe(`custom operators`, () => {
       // Define a custom "isEmpty" operator
       const isEmptyFactory: EvaluatorFactory = (
         compiledArgs: Array<CompiledExpression>,
-        _isSingleRow: boolean
+        _isSingleRow: boolean,
       ): CompiledExpression => {
         const valueEval = compiledArgs[0]!
 
@@ -142,7 +142,7 @@ describe(`custom operators`, () => {
     it(`allows creating a custom "modulo" operator`, () => {
       const moduloFactory: EvaluatorFactory = (
         compiledArgs: Array<CompiledExpression>,
-        _isSingleRow: boolean
+        _isSingleRow: boolean,
       ): CompiledExpression => {
         const leftEval = compiledArgs[0]!
         const rightEval = compiledArgs[1]!
@@ -166,7 +166,7 @@ describe(`custom operators`, () => {
         return new Func(
           `modulo`,
           [toExpression(left), toExpression(right)],
-          moduloFactory
+          moduloFactory,
         )
       }
 
@@ -180,7 +180,7 @@ describe(`custom operators`, () => {
       // Use the "between" operator with an "and" operator
       const func = and(
         between(new Value(5), new Value(1), new Value(10)),
-        between(new Value(15), new Value(10), new Value(20))
+        between(new Value(15), new Value(10), new Value(20)),
       )
       const compiled = compileExpression(func)
 
@@ -191,7 +191,7 @@ describe(`custom operators`, () => {
       // Define a custom version of "length" that also handles objects
       const customLengthFactory: EvaluatorFactory = (
         compiledArgs: Array<CompiledExpression>,
-        _isSingleRow: boolean
+        _isSingleRow: boolean,
       ): CompiledExpression => {
         const valueEval = compiledArgs[0]!
 
@@ -216,7 +216,7 @@ describe(`custom operators`, () => {
         return new Func(
           `customLength`,
           [toExpression(value)],
-          customLengthFactory
+          customLengthFactory,
         )
       }
 

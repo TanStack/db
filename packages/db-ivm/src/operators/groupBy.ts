@@ -372,7 +372,7 @@ export function mode<T>(
  * @param valueExtractor Function to extract a value from each data entry
  */
 export function collect<T, V = T>(
-  valueExtractor: (value: T) => V = (v) => v as unknown as V
+  valueExtractor: (value: T) => V = (v) => v as unknown as V,
 ): AggregateFunction<T, Array<V>, Array<V>> {
   return {
     preMap: (data: T) => [valueExtractor(data)],

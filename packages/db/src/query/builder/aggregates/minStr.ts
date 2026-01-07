@@ -1,7 +1,7 @@
-import { groupByOperators } from "@tanstack/db-ivm"
-import { Aggregate } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { ExpressionLike } from "../operators/types.js"
+import { groupByOperators } from '@tanstack/db-ivm'
+import { Aggregate } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { ExpressionLike } from '../operators/types.js'
 
 // ============================================================
 // CONFIG
@@ -36,7 +36,7 @@ const minStrConfig = {
  * ```
  */
 export function minStr<T extends ExpressionLike>(
-  arg: T
+  arg: T,
 ): Aggregate<string | null | undefined> {
   return new Aggregate(`minStr`, [toExpression(arg)], minStrConfig)
 }

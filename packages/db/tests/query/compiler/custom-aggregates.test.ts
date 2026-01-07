@@ -1,18 +1,18 @@
-import { describe, expect, it } from "vitest"
-import { createCollection } from "../../../src/collection/index.js"
+import { describe, expect, it } from 'vitest'
+import { createCollection } from '../../../src/collection/index.js'
 import {
   Aggregate,
   avg,
   count,
   createLiveQueryCollection,
   sum,
-} from "../../../src/query/index.js"
-import { toExpression } from "../../../src/query/builder/ref-proxy.js"
-import { mockSyncCollectionOptions } from "../../utils.js"
+} from '../../../src/query/index.js'
+import { toExpression } from '../../../src/query/builder/ref-proxy.js'
+import { mockSyncCollectionOptions } from '../../utils.js'
 import type {
   AggregateConfig,
   ValueExtractor,
-} from "../../../src/query/index.js"
+} from '../../../src/query/index.js'
 
 interface TestItem {
   id: number
@@ -34,7 +34,7 @@ function createTestCollection() {
       id: `test-custom-aggregates`,
       getKey: (item) => item.id,
       initialData: sampleItems,
-    })
+    }),
   )
 }
 
@@ -70,7 +70,7 @@ const varianceConfig: AggregateConfig = {
       return { sum: value, sumSq: value * value, n: 1 }
     },
     reduce: (
-      values: Array<[{ sum: number; sumSq: number; n: number }, number]>
+      values: Array<[{ sum: number; sumSq: number; n: number }, number]>,
     ) => {
       let totalSum = 0
       let totalSumSq = 0

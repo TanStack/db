@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 Refactor operators and aggregates to embed their evaluators directly in IR nodes for true tree-shaking support and custom extensibility.
@@ -18,8 +18,8 @@ import {
   Func,
   type EvaluatorFactory,
   type CompiledExpression,
-} from "@tanstack/db"
-import { toExpression } from "@tanstack/db/query"
+} from '@tanstack/db'
+import { toExpression } from '@tanstack/db/query'
 
 const betweenFactory: EvaluatorFactory = (compiledArgs, _isSingleRow) => {
   const [valueEval, minEval, maxEval] = compiledArgs
@@ -31,9 +31,9 @@ const betweenFactory: EvaluatorFactory = (compiledArgs, _isSingleRow) => {
 
 function between(value: any, min: any, max: any) {
   return new Func(
-    "between",
+    'between',
     [toExpression(value), toExpression(min), toExpression(max)],
-    betweenFactory
+    betweenFactory,
   )
 }
 ```
@@ -45,8 +45,8 @@ import {
   Aggregate,
   type AggregateConfig,
   type ValueExtractor,
-} from "@tanstack/db"
-import { toExpression } from "@tanstack/db/query"
+} from '@tanstack/db'
+import { toExpression } from '@tanstack/db/query'
 
 const productConfig: AggregateConfig = {
   factory: (valueExtractor: ValueExtractor) => ({
@@ -59,10 +59,10 @@ const productConfig: AggregateConfig = {
       return product
     },
   }),
-  valueTransform: "numeric",
+  valueTransform: 'numeric',
 }
 
 function product<T>(arg: T): Aggregate<number> {
-  return new Aggregate("product", [toExpression(arg)], productConfig)
+  return new Aggregate('product', [toExpression(arg)], productConfig)
 }
 ```

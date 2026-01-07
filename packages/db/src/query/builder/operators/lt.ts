@@ -1,12 +1,12 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
 import type {
   Aggregate,
   BasicExpression,
   CompiledExpression,
-} from "../../ir.js"
-import type { RefProxy } from "../ref-proxy.js"
-import type { RefLeaf } from "../types.js"
+} from '../../ir.js'
+import type { RefProxy } from '../ref-proxy.js'
+import type { RefLeaf } from '../types.js'
 
 // ============================================================
 // TYPES
@@ -36,7 +36,7 @@ function isUnknown(value: any): boolean {
 
 function ltEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   const argA = compiledArgs[0]!
   const argB = compiledArgs[1]!
@@ -60,17 +60,17 @@ function ltEvaluatorFactory(
 
 export function lt<T>(
   left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
+  right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
 export function lt<T extends string | number>(
   left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
+  right: ComparisonOperandPrimitive<T>,
 ): BasicExpression<boolean>
 export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lt(left: any, right: any): BasicExpression<boolean> {
   return new Func(
     `lt`,
     [toExpression(left), toExpression(right)],
-    ltEvaluatorFactory
+    ltEvaluatorFactory,
   )
 }

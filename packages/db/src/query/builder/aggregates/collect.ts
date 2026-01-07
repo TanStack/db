@@ -1,7 +1,7 @@
-import { groupByOperators } from "@tanstack/db-ivm"
-import { Aggregate } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { ExpressionLike, ExtractType } from "../operators/types.js"
+import { groupByOperators } from '@tanstack/db-ivm'
+import { Aggregate } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { ExpressionLike, ExtractType } from '../operators/types.js'
 
 // ============================================================
 // CONFIG
@@ -33,7 +33,7 @@ const collectConfig = {
  * ```
  */
 export function collect<T extends ExpressionLike>(
-  arg: T
+  arg: T,
 ): Aggregate<Array<ExtractType<T>>> {
   return new Aggregate(`collect`, [toExpression(arg)], collectConfig)
 }

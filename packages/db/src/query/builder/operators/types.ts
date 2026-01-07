@@ -3,9 +3,9 @@
  * These helper types preserve nullability information in return types
  */
 
-import type { Aggregate, BasicExpression } from "../../ir.js"
-import type { RefProxy } from "../ref-proxy.js"
-import type { RefLeaf } from "../types.js"
+import type { Aggregate, BasicExpression } from '../../ir.js'
+import type { RefProxy } from '../ref-proxy.js'
+import type { RefLeaf } from '../types.js'
 
 // String-like types
 type StringRef =

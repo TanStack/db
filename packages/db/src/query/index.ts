@@ -42,7 +42,7 @@ export {
   subtract,
   multiply,
   divide,
-} from "./builder/operators/index.js"
+} from './builder/operators/index.js'
 
 // Aggregates - now from aggregate modules for tree-shaking
 export {

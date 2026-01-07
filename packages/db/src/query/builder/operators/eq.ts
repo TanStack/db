@@ -1,13 +1,13 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import { areValuesEqual, normalizeValue } from "../../../utils/comparison.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import { areValuesEqual, normalizeValue } from '../../../utils/comparison.js'
 import type {
   Aggregate,
   BasicExpression,
   CompiledExpression,
-} from "../../ir.js"
-import type { RefProxy } from "../ref-proxy.js"
-import type { RefLeaf } from "../types.js"
+} from '../../ir.js'
+import type { RefProxy } from '../ref-proxy.js'
+import type { RefLeaf } from '../types.js'
 
 // ============================================================
 // TYPES
@@ -37,7 +37,7 @@ function isUnknown(value: any): boolean {
 
 function eqEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   const argA = compiledArgs[0]!
   const argB = compiledArgs[1]!
@@ -61,17 +61,17 @@ function eqEvaluatorFactory(
 
 export function eq<T>(
   left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
+  right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
 export function eq<T extends string | number | boolean>(
   left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
+  right: ComparisonOperandPrimitive<T>,
 ): BasicExpression<boolean>
 export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function eq(left: any, right: any): BasicExpression<boolean> {
   return new Func(
     `eq`,
     [toExpression(left), toExpression(right)],
-    eqEvaluatorFactory
+    eqEvaluatorFactory,
   )
 }

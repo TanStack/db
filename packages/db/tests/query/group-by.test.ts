@@ -1413,7 +1413,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(completed?.order_ids).toContain(4)
         expect(completed?.order_ids).toContain(7)
         expect(completed?.amounts).toEqual(
-          expect.arrayContaining([100, 200, 300, 400])
+          expect.arrayContaining([100, 200, 300, 400]),
         )
 
         const pending = statusOrders.get(`pending`)
@@ -1493,7 +1493,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             getKey: (event) => event.id,
             initialData: sampleEvents,
             autoIndex,
-          })
+          }),
         )
       }
 
@@ -1570,7 +1570,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             getKey: (item) => item.id,
             initialData: items,
             autoIndex,
-          })
+          }),
         )
 
         const comparison = createLiveQueryCollection({

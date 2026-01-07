@@ -1,6 +1,6 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { BasicExpression, CompiledExpression } from "../../ir.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { BasicExpression, CompiledExpression } from '../../ir.js'
 
 // ============================================================
 // TYPES
@@ -19,7 +19,7 @@ function isUnknown(value: any): boolean {
 
 function orEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   return (data: any) => {
     // 3-valued logic for OR:
@@ -53,7 +53,7 @@ function orEvaluatorFactory(
 // Overloads for or() - support 2 or more arguments, or an array
 export function or(
   left: ExpressionLike,
-  right: ExpressionLike
+  right: ExpressionLike,
 ): BasicExpression<boolean>
 export function or(
   left: ExpressionLike,
@@ -71,7 +71,7 @@ export function or(
     return new Func(
       `or`,
       leftOrArgs.map((arg) => toExpression(arg)),
-      orEvaluatorFactory
+      orEvaluatorFactory,
     )
   }
   // Handle variadic overload
@@ -79,6 +79,6 @@ export function or(
   return new Func(
     `or`,
     allArgs.map((arg) => toExpression(arg)),
-    orEvaluatorFactory
+    orEvaluatorFactory,
   )
 }

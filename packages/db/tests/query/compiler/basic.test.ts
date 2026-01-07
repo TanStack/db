@@ -237,7 +237,7 @@ describe(`Query2 Compiler`, () => {
         where: [
           and(
             gt(new PropRef([`users`, `age`]), new Value(20)),
-            eq(new PropRef([`users`, `active`]), new Value(true))
+            eq(new PropRef([`users`, `active`]), new Value(true)),
           ),
         ],
       }

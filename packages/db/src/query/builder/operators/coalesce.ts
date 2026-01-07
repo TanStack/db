@@ -1,6 +1,6 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { BasicExpression, CompiledExpression } from "../../ir.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { BasicExpression, CompiledExpression } from '../../ir.js'
 
 // ============================================================
 // TYPES
@@ -15,7 +15,7 @@ type ExpressionLike = BasicExpression | any
 
 function coalesceEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   return (data: any) => {
     for (const evaluator of compiledArgs) {
@@ -36,6 +36,6 @@ export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
   return new Func(
     `coalesce`,
     args.map((arg) => toExpression(arg)),
-    coalesceEvaluatorFactory
+    coalesceEvaluatorFactory,
   )
 }

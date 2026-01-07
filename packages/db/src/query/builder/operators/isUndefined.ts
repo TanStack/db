@@ -1,6 +1,6 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { BasicExpression, CompiledExpression } from "../../ir.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { BasicExpression, CompiledExpression } from '../../ir.js'
 
 // ============================================================
 // TYPES
@@ -15,7 +15,7 @@ type ExpressionLike = BasicExpression | any
 
 function isUndefinedEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   const arg = compiledArgs[0]!
 
@@ -33,6 +33,6 @@ export function isUndefined(value: ExpressionLike): BasicExpression<boolean> {
   return new Func(
     `isUndefined`,
     [toExpression(value)],
-    isUndefinedEvaluatorFactory
+    isUndefinedEvaluatorFactory,
   )
 }

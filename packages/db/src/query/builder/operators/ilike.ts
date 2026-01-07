@@ -1,7 +1,7 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import { evaluateLike } from "./like.js"
-import type { BasicExpression, CompiledExpression } from "../../ir.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import { evaluateLike } from './like.js'
+import type { BasicExpression, CompiledExpression } from '../../ir.js'
 
 // ============================================================
 // TYPES
@@ -23,7 +23,7 @@ function isUnknown(value: any): boolean {
 
 function ilikeEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   const valueEvaluator = compiledArgs[0]!
   const patternEvaluator = compiledArgs[1]!
@@ -45,11 +45,11 @@ function ilikeEvaluatorFactory(
 
 export function ilike(
   left: StringLike,
-  right: StringLike
+  right: StringLike,
 ): BasicExpression<boolean> {
   return new Func(
     `ilike`,
     [toExpression(left), toExpression(right)],
-    ilikeEvaluatorFactory
+    ilikeEvaluatorFactory,
   )
 }

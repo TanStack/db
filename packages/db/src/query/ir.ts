@@ -16,7 +16,7 @@ export type CompiledExpression = (data: any) => any
  */
 export type EvaluatorFactory = (
   compiledArgs: Array<CompiledExpression>,
-  isSingleRow: boolean
+  isSingleRow: boolean,
 ) => CompiledExpression
 
 /**

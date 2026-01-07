@@ -677,7 +677,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -687,7 +687,7 @@ describe(`Operators`, () => {
           [{ category: `A`, item: `apple` }, 1],
           [{ category: `A`, item: `avocado` }, 1],
           [{ category: `B`, item: `banana` }, 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -697,13 +697,13 @@ describe(`Operators`, () => {
       expect(result).toHaveLength(2)
 
       const categoryA = result.find(
-        ([key]: any) => key[0] === `{"category":"A"}`
+        ([key]: any) => key[0] === `{"category":"A"}`,
       )
       expect(categoryA).toBeDefined()
       expect(categoryA[0][1].items).toEqual([`apple`, `avocado`])
 
       const categoryB = result.find(
-        ([key]: any) => key[0] === `{"category":"B"}`
+        ([key]: any) => key[0] === `{"category":"B"}`,
       )
       expect(categoryB).toBeDefined()
       expect(categoryB[0][1].items).toEqual([`banana`])
@@ -715,7 +715,7 @@ describe(`Operators`, () => {
       const updatedResult = latestMessage.getInner()
       // IVM returns deltas: -1 for old state, +1 for new state
       const updatedCategoryA = updatedResult.find(
-        ([[key], weight]: any) => key === `{"category":"A"}` && weight === 1
+        ([[key], weight]: any) => key === `{"category":"A"}` && weight === 1,
       )
       expect(updatedCategoryA).toBeDefined()
       expect(updatedCategoryA[0][1].items).toEqual([
@@ -730,7 +730,7 @@ describe(`Operators`, () => {
 
       const afterRemoval = latestMessage.getInner()
       const categoryAAfterRemoval = afterRemoval.find(
-        ([[key], weight]: any) => key === `{"category":"A"}` && weight === 1
+        ([[key], weight]: any) => key === `{"category":"A"}` && weight === 1,
       )
       expect(categoryAAfterRemoval).toBeDefined()
       expect(categoryAAfterRemoval[0][1].items).toEqual([`avocado`, `apricot`])

@@ -1,7 +1,7 @@
-import { Func } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { CompiledExpression } from "../../ir.js"
-import type { ExpressionLike, StringFunctionReturnType } from "./types.js"
+import { Func } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { CompiledExpression } from '../../ir.js'
+import type { ExpressionLike, StringFunctionReturnType } from './types.js'
 
 // ============================================================
 // EVALUATOR
@@ -9,7 +9,7 @@ import type { ExpressionLike, StringFunctionReturnType } from "./types.js"
 
 function lowerEvaluatorFactory(
   compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean
+  _isSingleRow: boolean,
 ): CompiledExpression {
   const arg = compiledArgs[0]!
 
@@ -24,11 +24,11 @@ function lowerEvaluatorFactory(
 // ============================================================
 
 export function lower<T extends ExpressionLike>(
-  arg: T
+  arg: T,
 ): StringFunctionReturnType<T> {
   return new Func(
     `lower`,
     [toExpression(arg)],
-    lowerEvaluatorFactory
+    lowerEvaluatorFactory,
   ) as StringFunctionReturnType<T>
 }

@@ -137,7 +137,7 @@ describe(`evaluators`, () => {
             new Value(undefined),
             new Value(42),
             new Value({ a: 1 }),
-            new Value([1, 2, 3])
+            new Value([1, 2, 3]),
           )
           const compiled = compileExpression(func)
 
@@ -162,7 +162,7 @@ describe(`evaluators`, () => {
           const func = coalesce(
             new Value(null),
             new Value(undefined),
-            new Value(null)
+            new Value(null),
           )
           const compiled = compileExpression(func)
 
@@ -173,7 +173,7 @@ describe(`evaluators`, () => {
           const func = coalesce(
             new Value(null),
             new Value(`first`),
-            new Value(`second`)
+            new Value(`second`),
           )
           const compiled = compileExpression(func)
 

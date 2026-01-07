@@ -1,7 +1,7 @@
-import { groupByOperators } from "@tanstack/db-ivm"
-import { Aggregate } from "../../ir.js"
-import { toExpression } from "../ref-proxy.js"
-import type { AggregateReturnType, ExpressionLike } from "../operators/types.js"
+import { groupByOperators } from '@tanstack/db-ivm'
+import { Aggregate } from '../../ir.js'
+import { toExpression } from '../ref-proxy.js'
+import type { AggregateReturnType, ExpressionLike } from '../operators/types.js'
 
 // ============================================================
 // CONFIG
@@ -20,6 +20,6 @@ export function avg<T extends ExpressionLike>(arg: T): AggregateReturnType<T> {
   return new Aggregate(
     `avg`,
     [toExpression(arg)],
-    avgConfig
+    avgConfig,
   ) as AggregateReturnType<T>
 }
