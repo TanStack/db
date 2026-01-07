@@ -682,5 +682,4 @@ describe(`useLiveSuspenseQuery`, () => {
     // Data should still be available
     expect(result.current.data).toHaveLength(3)
   })
-
 })

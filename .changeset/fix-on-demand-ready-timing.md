@@ -9,7 +9,7 @@ the subset data finished loading. This caused `useLiveQuery` to return `isReady=
 with empty data, and `useLiveSuspenseQuery` to release suspense prematurely.
 
 The root cause was a race condition: the `status:change` listener in `CollectionSubscriber`
-was registered *after* the snapshot was triggered. If `loadSubset` resolved quickly
+was registered _after_ the snapshot was triggered. If `loadSubset` resolved quickly
 (or synchronously), the `loadingSubset` status transition would be missed entirely,
 so `trackLoadPromise` was never called on the live query collection.
 
