@@ -11,6 +11,7 @@ import {
 import {
   InvalidSourceError,
   InvalidSourceTypeError,
+  InvalidWhereExpressionError,
   JoinConditionMustBeEqualityError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
@@ -361,6 +362,13 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
 
+    // Validate that the callback returned a valid expression
+    // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
+    // which return boolean primitives instead of expression objects
+    if (!isExpressionLike(expression)) {
+      throw new InvalidWhereExpressionError(getValueTypeName(expression))
+    }
+
     const existingWhere = this.query.where || []
 
     return new BaseQueryBuilder({
@@ -401,6 +409,13 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
+
+    // Validate that the callback returned a valid expression
+    // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
+    // which return boolean primitives instead of expression objects
+    if (!isExpressionLike(expression)) {
+      throw new InvalidWhereExpressionError(getValueTypeName(expression))
+    }
 
     const existingHaving = this.query.having || []
 
@@ -787,6 +802,14 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }
     return this.query as QueryIR
   }
+}
+
+// Helper to get a descriptive type name for error messages
+function getValueTypeName(value: unknown): string {
+  if (value === null) return `null`
+  if (value === undefined) return `undefined`
+  if (typeof value === `object`) return `object`
+  return typeof value
 }
 
 // Helper to ensure we have a BasicExpression/Aggregate for a value
