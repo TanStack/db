@@ -1,16 +1,16 @@
-import type { AbstractPowerSyncDatabase, Table } from "@powersync/common"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
+import type { AbstractPowerSyncDatabase, Table } from '@powersync/common'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
   BaseCollectionConfig,
   CollectionConfig,
   InferSchemaOutput,
-} from "@tanstack/db"
+} from '@tanstack/db'
 import type {
   AnyTableColumnType,
   ExtractedTable,
   OptionalExtractedTable,
   PowerSyncRecord,
-} from "./helpers"
+} from './helpers'
 
 /**
  * Small helper which determines the output type if:
@@ -54,7 +54,7 @@ export type CustomSQLiteSerializer<
   TSQLite extends Record<string, unknown>,
 > = Partial<{
   [Key in keyof TOutput]: (
-    value: TOutput[Key]
+    value: TOutput[Key],
   ) => Key extends keyof TSQLite ? TSQLite[Key] : never
 }>
 
@@ -246,6 +246,11 @@ export type PowerSyncCollectionMeta<TTable extends Table = Table> = {
    * Serializes a collection value to the SQLite type
    */
   serializeValue: (value: any) => ExtractedTable<TTable>
+
+  /**
+   * Whether the PowerSync table tracks metadata.
+   */
+  metadataIsTracked: boolean
 }
 
 /**

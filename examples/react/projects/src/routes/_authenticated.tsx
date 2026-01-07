@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState } from 'react'
 import {
   Link,
   Outlet,
   createFileRoute,
   useNavigate,
-} from "@tanstack/react-router"
-import { useLiveQuery } from "@tanstack/react-db"
-import { authClient } from "@/lib/auth-client"
-import { projectCollection } from "@/lib/collections"
+} from '@tanstack/react-router'
+import { useLiveQuery } from '@tanstack/react-db'
+import { authClient } from '@/lib/auth-client'
+import { projectCollection } from '@/lib/collections'
 
 export const Route = createFileRoute(`/_authenticated`)({
   component: AuthenticatedLayout,

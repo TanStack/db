@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5.0.0
+        uses: actions/checkout@v6.0.1
         with:
           fetch-depth: 0
       - name: Setup Tools
@@ -36,14 +36,13 @@ jobs:
         with:
           version: pnpm run changeset:version
           publish: pnpm run changeset:publish
-          commit: "ci: Version Packages"
-          title: "ci: Version Packages"
+          commit: 'ci: Version Packages'
+          title: 'ci: Version Packages'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Generate Docs
         if: steps.changesets.outputs.published == 'true'
-        run: pnpm docs:generate
+        run: pnpm generate-docs
       - name: Commit Generated Docs
         if: steps.changesets.outputs.published == 'true'
         run: |
@@ -62,8 +61,6 @@ jobs:
               --body "Automated documentation update from release" \
               --base main \
               --head "$BRANCH"
-
-            gh pr merge "$BRANCH" --auto --squash
           else
             echo "No changes in generated docs"
           fi

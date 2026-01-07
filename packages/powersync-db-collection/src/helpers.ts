@@ -1,9 +1,9 @@
-import { DiffTriggerOperation } from "@powersync/common"
+import { DiffTriggerOperation } from '@powersync/common'
 import type {
   BaseColumnType,
   ExtractColumnValueType,
   Table,
-} from "@powersync/common"
+} from '@powersync/common'
 
 /**
  * All PowerSync table records include a UUID `id` column.

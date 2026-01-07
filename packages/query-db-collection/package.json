@@ -1,45 +1,12 @@
 {
   "name": "@tanstack/query-db-collection",
+  "version": "1.0.12",
   "description": "TanStack Query collection for TanStack DB",
-  "version": "1.0.2",
-  "dependencies": {
-    "@standard-schema/spec": "^1.0.0"
-  },
-  "devDependencies": {
-    "@tanstack/db": "workspace:*",
-    "@tanstack/query-core": "^5.90.10",
-    "@vitest/coverage-istanbul": "^3.2.4"
-  },
-  "exports": {
-    ".": {
-      "import": {
-        "types": "./dist/esm/index.d.ts",
-        "default": "./dist/esm/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/index.d.cts",
-        "default": "./dist/cjs/index.cjs"
-      }
-    },
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "dist",
-    "src"
-  ],
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.22.0",
-  "peerDependencies": {
-    "@tanstack/db": "*",
-    "@tanstack/query-core": "^5.0.0",
-    "typescript": ">=4.7"
-  },
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/db.git",
+    "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/query-db-collection"
   },
   "homepage": "https://tanstack.com/db",
@@ -53,10 +20,41 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "npx vitest run",
-    "test:e2e": "npx vitest run --config vitest.e2e.config.ts"
+    "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "sideEffects": false,
-  "type": "module",
-  "types": "dist/esm/index.d.ts"
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "@standard-schema/spec": "^1.1.0",
+    "@tanstack/db": "workspace:*"
+  },
+  "peerDependencies": {
+    "@tanstack/query-core": "^5.0.0",
+    "typescript": ">=4.7"
+  },
+  "devDependencies": {
+    "@tanstack/query-core": "^5.90.16",
+    "@vitest/coverage-istanbul": "^3.2.4"
+  }
 }

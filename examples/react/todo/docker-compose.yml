@@ -1,4 +1,4 @@
-version: "3.8"
+version: '3.8'
 services:
   postgres:
     image: postgres:17-alpine
@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "54322:5432"
+      - '54322:5432'
     volumes:
       - ./postgres.conf:/etc/postgresql/postgresql.conf:ro
     tmpfs:
@@ -18,7 +18,7 @@ services:
       - -c
       - config_file=/etc/postgresql/postgresql.conf
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ['CMD-SHELL', 'pg_isready -U postgres']
       interval: 5s
       timeout: 5s
       retries: 5
@@ -37,11 +37,11 @@ services:
   trailbase:
     image: trailbase/trailbase:latest
     ports:
-      - "${PORT:-4000}:4000"
+      - '${PORT:-4000}:4000'
     restart: unless-stopped
     volumes:
       - ./traildepot:/app/traildepot
-    command: "/app/trail --data-dir /app/traildepot run --address 0.0.0.0:4000 --dev"
+    command: '/app/trail --data-dir /app/traildepot run --address 0.0.0.0:4000 --dev'
 
 volumes:
   postgres_data:

@@ -11,7 +11,7 @@ Base abstract class that all index types extend
 
 ## Extended by
 
-- [`BTreeIndex`](../BTreeIndex.md)
+- [`BTreeIndex`](BTreeIndex.md)
 
 ## Type Parameters
 
@@ -21,7 +21,7 @@ Base abstract class that all index types extend
 
 ## Implements
 
-- [`IndexInterface`](../../interfaces/IndexInterface.md)\<`TKey`\>
+- [`IndexInterface`](../interfaces/IndexInterface.md)\<`TKey`\>
 
 ## Constructors
 
@@ -45,7 +45,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:89](https://github.com/TanSta
 
 ##### expression
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
 
 ##### name?
 
@@ -157,7 +157,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:126](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`indexedKeysSet`](../../interfaces/IndexInterface.md#indexedkeysset)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`indexedKeysSet`](../interfaces/IndexInterface.md#indexedkeysset)
 
 ***
 
@@ -177,7 +177,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:119](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`keyCount`](../../interfaces/IndexInterface.md#keycount)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`keyCount`](../interfaces/IndexInterface.md#keycount)
 
 ***
 
@@ -197,7 +197,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:124](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`orderedEntriesArray`](../../interfaces/IndexInterface.md#orderedentriesarray)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`orderedEntriesArray`](../interfaces/IndexInterface.md#orderedentriesarray)
 
 ***
 
@@ -217,7 +217,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:125](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`orderedEntriesArrayReversed`](../../interfaces/IndexInterface.md#orderedentriesarrayreversed)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`orderedEntriesArrayReversed`](../interfaces/IndexInterface.md#orderedentriesarrayreversed)
 
 ***
 
@@ -237,7 +237,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:127](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`valueMapData`](../../interfaces/IndexInterface.md#valuemapdata)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`valueMapData`](../interfaces/IndexInterface.md#valuemapdata)
 
 ## Methods
 
@@ -265,7 +265,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:103](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`add`](../../interfaces/IndexInterface.md#add)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`add`](../interfaces/IndexInterface.md#add)
 
 ***
 
@@ -289,7 +289,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:106](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`build`](../../interfaces/IndexInterface.md#build)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`build`](../interfaces/IndexInterface.md#build)
 
 ***
 
@@ -307,7 +307,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:107](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`clear`](../../interfaces/IndexInterface.md#clear)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`clear`](../interfaces/IndexInterface.md#clear)
 
 ***
 
@@ -331,7 +331,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:120](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`equalityLookup`](../../interfaces/IndexInterface.md#equalitylookup)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`equalityLookup`](../interfaces/IndexInterface.md#equalitylookup)
 
 ***
 
@@ -365,11 +365,11 @@ Defined in: [packages/db/src/indexes/base-index.ts:169](https://github.com/TanSt
 
 #### Returns
 
-[`IndexStats`](../../interfaces/IndexStats.md)
+[`IndexStats`](../interfaces/IndexStats.md)
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`getStats`](../../interfaces/IndexInterface.md#getstats)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`getStats`](../interfaces/IndexInterface.md#getstats)
 
 ***
 
@@ -393,7 +393,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:121](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`inArrayLookup`](../../interfaces/IndexInterface.md#inarraylookup)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`inArrayLookup`](../interfaces/IndexInterface.md#inarraylookup)
 
 ***
 
@@ -441,7 +441,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:108](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`lookup`](../../interfaces/IndexInterface.md#lookup)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`lookup`](../interfaces/IndexInterface.md#lookup)
 
 ***
 
@@ -468,7 +468,7 @@ The direction is ignored because the index can be reversed if the direction is d
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`matchesCompareOptions`](../../interfaces/IndexInterface.md#matchescompareoptions)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`matchesCompareOptions`](../interfaces/IndexInterface.md#matchescompareoptions)
 
 ***
 
@@ -486,7 +486,7 @@ Checks if the index matches the provided direction.
 
 ##### direction
 
-[`OrderByDirection`](../../@tanstack/namespaces/IR/type-aliases/OrderByDirection.md)
+[`OrderByDirection`](../@tanstack/namespaces/IR/type-aliases/OrderByDirection.md)
 
 #### Returns
 
@@ -494,7 +494,7 @@ Checks if the index matches the provided direction.
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`matchesDirection`](../../interfaces/IndexInterface.md#matchesdirection)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`matchesDirection`](../interfaces/IndexInterface.md#matchesdirection)
 
 ***
 
@@ -518,7 +518,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:134](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`matchesField`](../../interfaces/IndexInterface.md#matchesfield)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`matchesField`](../interfaces/IndexInterface.md#matchesfield)
 
 ***
 
@@ -534,7 +534,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:122](https://github.com/TanSt
 
 ##### options
 
-[`RangeQueryOptions`](../../interfaces/RangeQueryOptions.md)
+[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md)
 
 #### Returns
 
@@ -542,7 +542,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:122](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`rangeQuery`](../../interfaces/IndexInterface.md#rangequery)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`rangeQuery`](../interfaces/IndexInterface.md#rangequery)
 
 ***
 
@@ -558,7 +558,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:123](https://github.com/TanSt
 
 ##### options
 
-[`RangeQueryOptions`](../../interfaces/RangeQueryOptions.md)
+[`RangeQueryOptions`](../interfaces/RangeQueryOptions.md)
 
 #### Returns
 
@@ -566,7 +566,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:123](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`rangeQueryReversed`](../../interfaces/IndexInterface.md#rangequeryreversed)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`rangeQueryReversed`](../interfaces/IndexInterface.md#rangequeryreversed)
 
 ***
 
@@ -594,7 +594,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:104](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`remove`](../../interfaces/IndexInterface.md#remove)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`remove`](../interfaces/IndexInterface.md#remove)
 
 ***
 
@@ -618,7 +618,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:130](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`supports`](../../interfaces/IndexInterface.md#supports)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`supports`](../interfaces/IndexInterface.md#supports)
 
 ***
 
@@ -653,7 +653,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:109](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`take`](../../interfaces/IndexInterface.md#take)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`take`](../interfaces/IndexInterface.md#take)
 
 ***
 
@@ -688,7 +688,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:114](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`takeReversed`](../../interfaces/IndexInterface.md#takereversed)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`takeReversed`](../interfaces/IndexInterface.md#takereversed)
 
 ***
 
@@ -743,7 +743,7 @@ Defined in: [packages/db/src/indexes/base-index.ts:105](https://github.com/TanSt
 
 #### Implementation of
 
-[`IndexInterface`](../../interfaces/IndexInterface.md).[`update`](../../interfaces/IndexInterface.md#update)
+[`IndexInterface`](../interfaces/IndexInterface.md).[`update`](../interfaces/IndexInterface.md#update)
 
 ***
 

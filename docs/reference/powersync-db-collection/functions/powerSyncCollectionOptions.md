@@ -32,7 +32,7 @@ Input and Output types are the SQLite column types.
 
 ### Returns
 
-[`EnhancedPowerSyncCollectionConfig`](../../type-aliases/EnhancedPowerSyncCollectionConfig.md)\<`TTable`, `OptionalExtractedTable`\<`TTable`\>, `never`\>
+[`EnhancedPowerSyncCollectionConfig`](../type-aliases/EnhancedPowerSyncCollectionConfig.md)\<`TTable`, `OptionalExtractedTable`\<`TTable`\>, `never`\>
 
 ### Example
 
@@ -92,11 +92,11 @@ serializer specifications. Partial column overrides can be supplied to `serializ
 
 #### config
 
-`Omit`\<`BaseCollectionConfig`\<`ExtractedTable`\<`TTable`\>, `string`, `TSchema`, `UtilsRecord`, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"getKey"`\> & `object` & [`SerializerConfig`](../../type-aliases/SerializerConfig.md)\<`InferOutput`\<`TSchema`\>, `ExtractedTable`\<`TTable`\>\> & `object`
+`Omit`\<`BaseCollectionConfig`\<`ExtractedTable`\<`TTable`\>, `string`, `TSchema`, `UtilsRecord`, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"getKey"`\> & `object` & [`SerializerConfig`](../type-aliases/SerializerConfig.md)\<`InferOutput`\<`TSchema`\>, `ExtractedTable`\<`TTable`\>\> & `object`
 
 ### Returns
 
-`CollectionConfig`\<[`InferPowerSyncOutputType`](../../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
+`CollectionConfig`\<[`InferPowerSyncOutputType`](../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
 
 ### Example
 
@@ -169,11 +169,11 @@ serializer specifications. Partial column overrides can be supplied to `serializ
 
 #### config
 
-`Omit`\<`BaseCollectionConfig`\<`ExtractedTable`\<`TTable`\>, `string`, `TSchema`, `UtilsRecord`, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"getKey"`\> & `object` & [`SerializerConfig`](../../type-aliases/SerializerConfig.md)\<`InferOutput`\<`TSchema`\>, `ExtractedTable`\<`TTable`\>\> & `object`
+`Omit`\<`BaseCollectionConfig`\<`ExtractedTable`\<`TTable`\>, `string`, `TSchema`, `UtilsRecord`, `any`\>, `"onInsert"` \| `"onUpdate"` \| `"onDelete"` \| `"getKey"`\> & `object` & [`SerializerConfig`](../type-aliases/SerializerConfig.md)\<`InferOutput`\<`TSchema`\>, `ExtractedTable`\<`TTable`\>\> & `object`
 
 ### Returns
 
-`CollectionConfig`\<[`InferPowerSyncOutputType`](../../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
+`CollectionConfig`\<[`InferPowerSyncOutputType`](../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
 
 ### Example
 

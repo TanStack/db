@@ -4,10 +4,10 @@
  * Tests multi-collection joins with various syncMode combinations
  */
 
-import { describe, expect, it } from "vitest"
-import { createLiveQueryCollection, eq, gt, isNull } from "@tanstack/db"
-import { waitFor, waitForQueryData } from "../utils/helpers"
-import type { E2ETestConfig } from "../types"
+import { describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, eq, gt, isNull } from '@tanstack/db'
+import { waitFor, waitForQueryData } from '../utils/helpers'
+import type { E2ETestConfig } from '../types'
 
 export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
   describe(`Joins Suite`, () => {
@@ -21,13 +21,13 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           q
             .from({ user: usersCollection })
             .join({ post: postsCollection }, ({ user, post }) =>
-              eq(user.id, post.userId)
+              eq(user.id, post.userId),
             )
             .select(({ user, post }) => ({
               id: post!.id,
               userName: user.name,
               postTitle: post!.title,
-            }))
+            })),
         )
 
         await query.preload()
@@ -51,7 +51,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .from({ user: usersCollection })
             .where(({ user }) => eq(user.isActive, true))
             .join({ post: postsCollection }, ({ user, post }) =>
-              eq(user.id, post.userId)
+              eq(user.id, post.userId),
             )
             .where(({ post }) => gt(post!.viewCount, 10))
             .select(({ user, post }) => ({
@@ -59,7 +59,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
               userName: user.name,
               postTitle: post!.title,
               viewCount: post!.viewCount,
-            }))
+            })),
         )
 
         await query.preload()
@@ -85,13 +85,13 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             q
               .from({ user: usersEager })
               .join({ post: postsOnDemand }, ({ user, post }) =>
-                eq(user.id, post.userId)
+                eq(user.id, post.userId),
               )
               .select(({ user, post }) => ({
                 id: post!.id,
                 userName: user.name,
                 postTitle: post!.title,
-              }))
+              })),
           )
 
           await query.preload()
@@ -103,7 +103,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           expect(results.length).toBeGreaterThan(0)
 
           await query.cleanup()
-        }
+        },
       )
 
       it(`should join with ordering across collections`, async () => {
@@ -115,7 +115,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           q
             .from({ user: usersCollection })
             .join({ post: postsCollection }, ({ user, post }) =>
-              eq(user.id, post.userId)
+              eq(user.id, post.userId),
             )
             .orderBy(({ post }) => post!.viewCount, `desc`)
             .select(({ user, post }) => ({
@@ -123,7 +123,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
               userName: user.name,
               postTitle: post!.title,
               viewCount: post!.viewCount,
-            }))
+            })),
         )
 
         await query.preload()
@@ -164,7 +164,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           q
             .from({ user: usersCollection })
             .join({ post: postsCollection }, ({ user, post }) =>
-              eq(user.id, post.userId)
+              eq(user.id, post.userId),
             )
             .orderBy(({ post }) => post!.id, `asc`)
             .limit(10)
@@ -173,7 +173,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
               id: post!.id,
               userName: user.name,
               postTitle: post!.title,
-            }))
+            })),
         )
 
         await query.preload()
@@ -194,14 +194,14 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .from({ user: users })
             .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId))
             .join({ comment: comments }, ({ post, comment }) =>
-              eq(post!.id, comment.postId)
+              eq(post!.id, comment.postId),
             )
             .select(({ user, post, comment }) => ({
               id: comment!.id,
               userName: user.name,
               postTitle: post!.title,
               commentText: comment!.text,
-            }))
+            })),
         )
 
         await query.preload()
@@ -227,7 +227,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId))
             .where(({ post }) => isNull(post!.deletedAt))
             .join({ comment: comments }, ({ post, comment }) =>
-              eq(post!.id, comment.postId)
+              eq(post!.id, comment.postId),
             )
             .where(({ comment }) => isNull(comment!.deletedAt))
             .select(({ user, post, comment }) => ({
@@ -235,7 +235,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
               userName: user.name,
               postTitle: post!.title,
               commentText: comment!.text,
-            }))
+            })),
         )
 
         await query.preload()
@@ -261,17 +261,17 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             q
               .from({ user: usersEager })
               .join({ post: postsOnDemand }, ({ user, post }) =>
-                eq(user.id, post.userId)
+                eq(user.id, post.userId),
               )
               .join({ comment: commentsOnDemand }, ({ post, comment }) =>
-                eq(post!.id, comment.postId)
+                eq(post!.id, comment.postId),
               )
               .select(({ user, post, comment }) => ({
                 id: comment!.id,
                 userName: user.name,
                 postTitle: post!.title,
                 commentText: comment!.text,
-              }))
+              })),
           )
 
           await query.preload()
@@ -283,7 +283,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           expect(results.length).toBeGreaterThan(0)
 
           await query.cleanup()
-        }
+        },
       )
     })
 
@@ -302,7 +302,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
               userName: user.name,
               postTitle: post!.title,
               viewCount: post!.viewCount,
-            }))
+            })),
         )
 
         await query.preload()
@@ -330,7 +330,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
               userName: user.name,
               userAge: user.age,
               postTitle: post!.title,
-            }))
+            })),
         )
 
         await query.preload()
@@ -354,13 +354,13 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           q
             .from({ user: users })
             .leftJoin({ post: posts }, ({ user, post }) =>
-              eq(user.id, post.userId)
+              eq(user.id, post.userId),
             )
             .select(({ user, post }) => ({
               id: user.id,
               userName: user.name,
               postTitle: post!.title, // May be null for users without posts
-            }))
+            })),
         )
 
         await query.preload()

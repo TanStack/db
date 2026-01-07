@@ -1,11 +1,12 @@
-import { describe, expect, it } from "vitest"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { Query, getQueryIR } from "../../../src/query/builder/index.js"
-import { eq } from "../../../src/query/builder/functions.js"
+import { describe, expect, it } from 'vitest'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { Query, getQueryIR } from '../../../src/query/builder/index.js'
+import { eq } from '../../../src/query/builder/functions.js'
 import {
+  InvalidSourceTypeError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
-} from "../../../src/errors"
+} from '../../../src/errors'
 
 // Test schema
 interface Employee {
@@ -107,5 +108,61 @@ describe(`QueryBuilder.from`, () => {
         departments: departmentsCollection,
       } as any)
     }).toThrow(OnlyOneSourceAllowedError)
+  })
+
+  it(`throws helpful error when passing a string instead of an object`, () => {
+    const builder = new Query()
+
+    expect(() => {
+      builder.from(`employees` as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from(`employees` as any)
+    }).toThrow(
+      /Invalid source for from clause: Expected an object with a single key-value pair/,
+    )
+  })
+
+  it(`throws helpful error when passing null`, () => {
+    const builder = new Query()
+
+    expect(() => {
+      builder.from(null as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from(null as any)
+    }).toThrow(
+      /Invalid source for from clause: Expected an object with a single key-value pair/,
+    )
+  })
+
+  it(`throws helpful error when passing an array`, () => {
+    const builder = new Query()
+
+    expect(() => {
+      builder.from([employeesCollection] as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from([employeesCollection] as any)
+    }).toThrow(
+      /Invalid source for from clause: Expected an object with a single key-value pair/,
+    )
+  })
+
+  it(`throws helpful error when passing undefined`, () => {
+    const builder = new Query()
+
+    expect(() => {
+      builder.from(undefined as any)
+    }).toThrow(InvalidSourceTypeError)
+
+    expect(() => {
+      builder.from(undefined as any)
+    }).toThrow(
+      /Invalid source for from clause: Expected an object with a single key-value pair/,
+    )
   })
 })

@@ -9,7 +9,7 @@ title: withArrayChangeTracking
 function withArrayChangeTracking<T>(targets, callback): Record<string | symbol, unknown>[];
 ```
 
-Defined in: [packages/db/src/proxy.ts:914](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L914)
+Defined in: [packages/db/src/proxy.ts:1171](https://github.com/TanStack/db/blob/main/packages/db/src/proxy.ts#L1171)
 
 Creates proxies for an array of objects, passes them to a callback function,
 and returns the changes made by the callback for each object

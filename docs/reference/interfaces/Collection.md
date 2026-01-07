@@ -11,7 +11,7 @@ Enhanced Collection interface that includes both data type T and utilities TUtil
 
 ## Extends
 
-- [`CollectionImpl`](../../classes/CollectionImpl.md)\<`T`, `TKey`, `TUtils`, `TSchema`, `TInsertInput`\>
+- [`CollectionImpl`](../classes/CollectionImpl.md)\<`T`, `TKey`, `TUtils`, `TSchema`, `TInsertInput`\>
 
 ## Type Parameters
 
@@ -29,7 +29,7 @@ The type of the key for the collection
 
 ### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../../type-aliases/UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](../type-aliases/UtilsRecord.md) = [`UtilsRecord`](../type-aliases/UtilsRecord.md)
 
 The utilities record type
 
@@ -51,11 +51,11 @@ The type for insert operations (can be different from T for schemas with default
 _lifecycle: CollectionLifecycleManager<T, TKey, TSchema, TInsertInput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:220](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L220)
+Defined in: [packages/db/src/collection/index.ts:283](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L283)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`_lifecycle`](../../classes/CollectionImpl.md#_lifecycle)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`_lifecycle`](../classes/CollectionImpl.md#_lifecycle)
 
 ***
 
@@ -65,11 +65,11 @@ Defined in: [packages/db/src/collection/index.ts:220](https://github.com/TanStac
 _state: CollectionStateManager<T, TKey, TSchema, TInsertInput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:232](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L232)
+Defined in: [packages/db/src/collection/index.ts:295](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L295)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`_state`](../../classes/CollectionImpl.md#_state)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`_state`](../classes/CollectionImpl.md#_state)
 
 ***
 
@@ -79,11 +79,11 @@ Defined in: [packages/db/src/collection/index.ts:232](https://github.com/TanStac
 _sync: CollectionSyncManager<T, TKey, TSchema, TInsertInput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:221](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L221)
+Defined in: [packages/db/src/collection/index.ts:284](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L284)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`_sync`](../../classes/CollectionImpl.md#_sync)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`_sync`](../classes/CollectionImpl.md#_sync)
 
 ***
 
@@ -93,11 +93,11 @@ Defined in: [packages/db/src/collection/index.ts:221](https://github.com/TanStac
 config: CollectionConfig<T, TKey, TSchema>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:211](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L211)
+Defined in: [packages/db/src/collection/index.ts:274](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L274)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`config`](../../classes/CollectionImpl.md#config)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`config`](../classes/CollectionImpl.md#config)
 
 ***
 
@@ -107,11 +107,11 @@ Defined in: [packages/db/src/collection/index.ts:211](https://github.com/TanStac
 id: string;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:210](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L210)
+Defined in: [packages/db/src/collection/index.ts:273](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L273)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`id`](../../classes/CollectionImpl.md#id)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`id`](../classes/CollectionImpl.md#id)
 
 ***
 
@@ -135,7 +135,7 @@ Defined in: [packages/db/src/collection/index.ts:55](https://github.com/TanStack
 
 #### Overrides
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`utils`](../../classes/CollectionImpl.md#utils)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`utils`](../classes/CollectionImpl.md#utils)
 
 ## Accessors
 
@@ -147,15 +147,15 @@ Defined in: [packages/db/src/collection/index.ts:55](https://github.com/TanStack
 get compareOptions(): StringCollationConfig;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:516](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L516)
+Defined in: [packages/db/src/collection/index.ts:580](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L580)
 
 ##### Returns
 
-[`StringCollationConfig`](../../type-aliases/StringCollationConfig.md)
+[`StringCollationConfig`](../type-aliases/StringCollationConfig.md)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`compareOptions`](../../classes/CollectionImpl.md#compareoptions)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`compareOptions`](../classes/CollectionImpl.md#compareoptions)
 
 ***
 
@@ -167,17 +167,17 @@ Defined in: [packages/db/src/collection/index.ts:516](https://github.com/TanStac
 get indexes(): Map<number, BaseIndex<TKey>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:501](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L501)
+Defined in: [packages/db/src/collection/index.ts:565](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L565)
 
 Get resolved indexes for query optimization
 
 ##### Returns
 
-`Map`\<`number`, [`BaseIndex`](../../classes/BaseIndex.md)\<`TKey`\>\>
+`Map`\<`number`, [`BaseIndex`](../classes/BaseIndex.md)\<`TKey`\>\>
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`indexes`](../../classes/CollectionImpl.md#indexes)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`indexes`](../classes/CollectionImpl.md#indexes)
 
 ***
 
@@ -189,7 +189,7 @@ Get resolved indexes for query optimization
 get isLoadingSubset(): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:367](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L367)
+Defined in: [packages/db/src/collection/index.ts:431](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L431)
 
 Check if the collection is currently loading more data
 
@@ -201,7 +201,7 @@ true if the collection has pending load more operations, false otherwise
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`isLoadingSubset`](../../classes/CollectionImpl.md#isloadingsubset)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`isLoadingSubset`](../classes/CollectionImpl.md#isloadingsubset)
 
 ***
 
@@ -213,7 +213,7 @@ true if the collection has pending load more operations, false otherwise
 get size(): number;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:404](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L404)
+Defined in: [packages/db/src/collection/index.ts:468](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L468)
 
 Get the current size of the collection (cached)
 
@@ -223,7 +223,7 @@ Get the current size of the collection (cached)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`size`](../../classes/CollectionImpl.md#size)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`size`](../classes/CollectionImpl.md#size)
 
 ***
 
@@ -235,7 +235,7 @@ Get the current size of the collection (cached)
 get state(): Map<TKey, TOutput>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:693](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L693)
+Defined in: [packages/db/src/collection/index.ts:757](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L757)
 
 Gets the current state of the collection as a Map
 
@@ -263,7 +263,7 @@ Map containing all items in the collection, with keys as identifiers
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`state`](../../classes/CollectionImpl.md#state)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`state`](../classes/CollectionImpl.md#state)
 
 ***
 
@@ -275,17 +275,17 @@ Map containing all items in the collection, with keys as identifiers
 get status(): CollectionStatus;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:322](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L322)
+Defined in: [packages/db/src/collection/index.ts:386](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L386)
 
 Gets the current status of the collection
 
 ##### Returns
 
-[`CollectionStatus`](../../type-aliases/CollectionStatus.md)
+[`CollectionStatus`](../type-aliases/CollectionStatus.md)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`status`](../../classes/CollectionImpl.md#status)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`status`](../classes/CollectionImpl.md#status)
 
 ***
 
@@ -297,7 +297,7 @@ Gets the current status of the collection
 get subscriberCount(): number;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:329](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L329)
+Defined in: [packages/db/src/collection/index.ts:393](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L393)
 
 Get the number of subscribers to the collection
 
@@ -307,7 +307,7 @@ Get the number of subscribers to the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`subscriberCount`](../../classes/CollectionImpl.md#subscribercount)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`subscriberCount`](../classes/CollectionImpl.md#subscribercount)
 
 ***
 
@@ -319,7 +319,7 @@ Get the number of subscribers to the collection
 get toArray(): TOutput[];
 ```
 
-Defined in: [packages/db/src/collection/index.ts:722](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L722)
+Defined in: [packages/db/src/collection/index.ts:786](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L786)
 
 Gets the current state of the collection as an Array
 
@@ -331,7 +331,7 @@ An Array containing all items in the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`toArray`](../../classes/CollectionImpl.md#toarray)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`toArray`](../classes/CollectionImpl.md#toarray)
 
 ## Methods
 
@@ -341,7 +341,7 @@ An Array containing all items in the collection
 iterator: IterableIterator<[TKey, T]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:432](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L432)
+Defined in: [packages/db/src/collection/index.ts:496](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L496)
 
 Get all entries (virtual derived state)
 
@@ -351,7 +351,7 @@ Get all entries (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`[iterator]`](../../classes/CollectionImpl.md#iterator)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`[iterator]`](../classes/CollectionImpl.md#iterator)
 
 ***
 
@@ -361,7 +361,7 @@ Get all entries (virtual derived state)
 cleanup(): Promise<void>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:856](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L856)
+Defined in: [packages/db/src/collection/index.ts:920](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L920)
 
 Clean up the collection by stopping sync and clearing data
 This can be called manually or automatically by garbage collection
@@ -372,7 +372,7 @@ This can be called manually or automatically by garbage collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`cleanup`](../../classes/CollectionImpl.md#cleanup)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`cleanup`](../classes/CollectionImpl.md#cleanup)
 
 ***
 
@@ -382,7 +382,7 @@ This can be called manually or automatically by garbage collection
 createIndex<TResolver>(indexCallback, config): IndexProxy<TKey>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:491](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L491)
+Defined in: [packages/db/src/collection/index.ts:555](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L555)
 
 Creates an index on a collection for faster queries.
 Indexes significantly improve query performance by allowing constant time lookups
@@ -392,7 +392,7 @@ and logarithmic time range queries instead of full scans.
 
 ##### TResolver
 
-`TResolver` *extends* [`IndexResolver`](../../type-aliases/IndexResolver.md)\<`TKey`\> = *typeof* [`BTreeIndex`](../../classes/BTreeIndex.md)
+`TResolver` *extends* [`IndexResolver`](../type-aliases/IndexResolver.md)\<`TKey`\> = *typeof* [`BTreeIndex`](../classes/BTreeIndex.md)
 
 The type of the index resolver (constructor or async loader)
 
@@ -406,13 +406,13 @@ Function that extracts the indexed value from each item
 
 ##### config
 
-[`IndexOptions`](../IndexOptions.md)\<`TResolver`\> = `{}`
+[`IndexOptions`](IndexOptions.md)\<`TResolver`\> = `{}`
 
 Configuration including index type and type-specific options
 
 #### Returns
 
-[`IndexProxy`](../../classes/IndexProxy.md)\<`TKey`\>
+[`IndexProxy`](../classes/IndexProxy.md)\<`TKey`\>
 
 An index proxy that provides access to the index when ready
 
@@ -444,7 +444,7 @@ const textIndex = collection.createIndex((row) => row.content, {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`createIndex`](../../classes/CollectionImpl.md#createindex)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`createIndex`](../classes/CollectionImpl.md#createindex)
 
 ***
 
@@ -456,7 +456,7 @@ currentStateAsChanges(options):
   | ChangeMessage<T, string | number>[];
 ```
 
-Defined in: [packages/db/src/collection/index.ts:760](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L760)
+Defined in: [packages/db/src/collection/index.ts:824](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L824)
 
 Returns the current state of the collection as an array of changes
 
@@ -464,14 +464,14 @@ Returns the current state of the collection as an array of changes
 
 ##### options
 
-[`CurrentStateAsChangesOptions`](../CurrentStateAsChangesOptions.md) = `{}`
+[`CurrentStateAsChangesOptions`](CurrentStateAsChangesOptions.md) = `{}`
 
 Options including optional where filter
 
 #### Returns
 
   \| `void`
-  \| [`ChangeMessage`](../ChangeMessage.md)\<`T`, `string` \| `number`\>[]
+  \| [`ChangeMessage`](ChangeMessage.md)\<`T`, `string` \| `number`\>[]
 
 An array of changes
 
@@ -494,7 +494,7 @@ const activeChanges = collection.currentStateAsChanges({
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`currentStateAsChanges`](../../classes/CollectionImpl.md#currentstateaschanges)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`currentStateAsChanges`](../classes/CollectionImpl.md#currentstateaschanges)
 
 ***
 
@@ -504,7 +504,7 @@ const activeChanges = collection.currentStateAsChanges({
 delete(keys, config?): Transaction<any>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:670](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L670)
+Defined in: [packages/db/src/collection/index.ts:734](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L734)
 
 Deletes one or more items from the collection
 
@@ -518,13 +518,13 @@ Single key or array of keys to delete
 
 ##### config?
 
-[`OperationConfig`](../OperationConfig.md)
+[`OperationConfig`](OperationConfig.md)
 
 Optional configuration including metadata
 
 #### Returns
 
-[`Transaction`](../Transaction.md)\<`any`\>
+[`Transaction`](Transaction.md)\<`any`\>
 
 A Transaction object representing the delete operation(s)
 
@@ -561,7 +561,7 @@ try {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`delete`](../../classes/CollectionImpl.md#delete)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`delete`](../classes/CollectionImpl.md#delete)
 
 ***
 
@@ -571,7 +571,7 @@ try {
 entries(): IterableIterator<[TKey, T]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:425](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L425)
+Defined in: [packages/db/src/collection/index.ts:489](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L489)
 
 Get all entries (virtual derived state)
 
@@ -581,7 +581,7 @@ Get all entries (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`entries`](../../classes/CollectionImpl.md#entries)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`entries`](../classes/CollectionImpl.md#entries)
 
 ***
 
@@ -591,7 +591,7 @@ Get all entries (virtual derived state)
 forEach(callbackfn): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:439](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L439)
+Defined in: [packages/db/src/collection/index.ts:503](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L503)
 
 Execute a callback for each entry in the collection
 
@@ -607,7 +607,7 @@ Execute a callback for each entry in the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`forEach`](../../classes/CollectionImpl.md#foreach)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`forEach`](../classes/CollectionImpl.md#foreach)
 
 ***
 
@@ -617,7 +617,7 @@ Execute a callback for each entry in the collection
 get(key): T | undefined;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:390](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L390)
+Defined in: [packages/db/src/collection/index.ts:454](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L454)
 
 Get the current value for a key (virtual derived state)
 
@@ -633,7 +633,7 @@ Get the current value for a key (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`get`](../../classes/CollectionImpl.md#get)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`get`](../classes/CollectionImpl.md#get)
 
 ***
 
@@ -643,7 +643,7 @@ Get the current value for a key (virtual derived state)
 getKeyFromItem(item): TKey;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:454](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L454)
+Defined in: [packages/db/src/collection/index.ts:518](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L518)
 
 #### Parameters
 
@@ -657,7 +657,7 @@ Defined in: [packages/db/src/collection/index.ts:454](https://github.com/TanStac
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`getKeyFromItem`](../../classes/CollectionImpl.md#getkeyfromitem)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`getKeyFromItem`](../classes/CollectionImpl.md#getkeyfromitem)
 
 ***
 
@@ -667,7 +667,7 @@ Defined in: [packages/db/src/collection/index.ts:454](https://github.com/TanStac
 has(key): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:397](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L397)
+Defined in: [packages/db/src/collection/index.ts:461](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L461)
 
 Check if a key exists in the collection (virtual derived state)
 
@@ -683,7 +683,7 @@ Check if a key exists in the collection (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`has`](../../classes/CollectionImpl.md#has)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`has`](../classes/CollectionImpl.md#has)
 
 ***
 
@@ -695,7 +695,7 @@ insert(data, config?):
 | Transaction<T>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:557](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L557)
+Defined in: [packages/db/src/collection/index.ts:621](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L621)
 
 Inserts one or more items into the collection
 
@@ -707,14 +707,14 @@ Inserts one or more items into the collection
 
 ##### config?
 
-[`InsertConfig`](../InsertConfig.md)
+[`InsertConfig`](InsertConfig.md)
 
 Optional configuration including metadata
 
 #### Returns
 
-  \| [`Transaction`](../Transaction.md)\<`Record`\<`string`, `unknown`\>\>
-  \| [`Transaction`](../Transaction.md)\<`T`\>
+  \| [`Transaction`](Transaction.md)\<`Record`\<`string`, `unknown`\>\>
+  \| [`Transaction`](Transaction.md)\<`T`\>
 
 A Transaction object representing the insert operation(s)
 
@@ -760,7 +760,7 @@ try {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`insert`](../../classes/CollectionImpl.md#insert)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`insert`](../classes/CollectionImpl.md#insert)
 
 ***
 
@@ -770,7 +770,7 @@ try {
 isReady(): boolean;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:359](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L359)
+Defined in: [packages/db/src/collection/index.ts:423](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L423)
 
 Check if the collection is ready for use
 Returns true if the collection has been marked as ready by its sync implementation
@@ -794,7 +794,7 @@ if (collection.isReady()) {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`isReady`](../../classes/CollectionImpl.md#isready)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`isReady`](../classes/CollectionImpl.md#isready)
 
 ***
 
@@ -804,7 +804,7 @@ if (collection.isReady()) {
 keys(): IterableIterator<TKey>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:411](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L411)
+Defined in: [packages/db/src/collection/index.ts:475](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L475)
 
 Get all keys (virtual derived state)
 
@@ -814,7 +814,7 @@ Get all keys (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`keys`](../../classes/CollectionImpl.md#keys)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`keys`](../classes/CollectionImpl.md#keys)
 
 ***
 
@@ -824,7 +824,7 @@ Get all keys (virtual derived state)
 map<U>(callbackfn): U[];
 ```
 
-Defined in: [packages/db/src/collection/index.ts:448](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L448)
+Defined in: [packages/db/src/collection/index.ts:512](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L512)
 
 Create a new array with the results of calling a function for each entry in the collection
 
@@ -846,7 +846,7 @@ Create a new array with the results of calling a function for each entry in the 
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`map`](../../classes/CollectionImpl.md#map)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`map`](../classes/CollectionImpl.md#map)
 
 ***
 
@@ -856,7 +856,7 @@ Create a new array with the results of calling a function for each entry in the 
 off<T>(event, callback): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:835](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L835)
+Defined in: [packages/db/src/collection/index.ts:899](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L899)
 
 Unsubscribe from a collection event
 
@@ -873,6 +873,7 @@ Unsubscribe from a collection event
   \| `"status:change"`
   \| `"subscribers:change"`
   \| `"loadingSubset:change"`
+  \| `"truncate"`
 
 #### Parameters
 
@@ -890,7 +891,7 @@ Unsubscribe from a collection event
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`off`](../../classes/CollectionImpl.md#off)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`off`](../classes/CollectionImpl.md#off)
 
 ***
 
@@ -900,7 +901,7 @@ Unsubscribe from a collection event
 on<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:815](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L815)
+Defined in: [packages/db/src/collection/index.ts:879](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L879)
 
 Subscribe to a collection event
 
@@ -917,6 +918,7 @@ Subscribe to a collection event
   \| `"status:change"`
   \| `"subscribers:change"`
   \| `"loadingSubset:change"`
+  \| `"truncate"`
 
 #### Parameters
 
@@ -940,7 +942,7 @@ Subscribe to a collection event
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`on`](../../classes/CollectionImpl.md#on)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`on`](../classes/CollectionImpl.md#on)
 
 ***
 
@@ -950,7 +952,7 @@ Subscribe to a collection event
 once<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:825](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L825)
+Defined in: [packages/db/src/collection/index.ts:889](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L889)
 
 Subscribe to a collection event once
 
@@ -967,6 +969,7 @@ Subscribe to a collection event once
   \| `"status:change"`
   \| `"subscribers:change"`
   \| `"loadingSubset:change"`
+  \| `"truncate"`
 
 #### Parameters
 
@@ -990,7 +993,7 @@ Subscribe to a collection event once
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`once`](../../classes/CollectionImpl.md#once)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`once`](../classes/CollectionImpl.md#once)
 
 ***
 
@@ -1000,7 +1003,7 @@ Subscribe to a collection event once
 onFirstReady(callback): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:343](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L343)
+Defined in: [packages/db/src/collection/index.ts:407](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L407)
 
 Register a callback to be executed when the collection first becomes ready
 Useful for preloading collections
@@ -1028,7 +1031,7 @@ collection.onFirstReady(() => {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`onFirstReady`](../../classes/CollectionImpl.md#onfirstready)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`onFirstReady`](../classes/CollectionImpl.md#onfirstready)
 
 ***
 
@@ -1038,7 +1041,7 @@ collection.onFirstReady(() => {
 preload(): Promise<void>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:383](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L383)
+Defined in: [packages/db/src/collection/index.ts:447](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L447)
 
 Preload the collection data by starting sync if not already started
 Multiple concurrent calls will share the same promise
@@ -1049,7 +1052,7 @@ Multiple concurrent calls will share the same promise
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`preload`](../../classes/CollectionImpl.md#preload)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`preload`](../classes/CollectionImpl.md#preload)
 
 ***
 
@@ -1059,7 +1062,7 @@ Multiple concurrent calls will share the same promise
 startSyncImmediate(): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:375](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L375)
+Defined in: [packages/db/src/collection/index.ts:439](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L439)
 
 Start sync immediately - internal method for compiled queries
 This bypasses lazy loading for special cases like live query results
@@ -1070,7 +1073,7 @@ This bypasses lazy loading for special cases like live query results
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`startSyncImmediate`](../../classes/CollectionImpl.md#startsyncimmediate)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`startSyncImmediate`](../classes/CollectionImpl.md#startsyncimmediate)
 
 ***
 
@@ -1080,7 +1083,7 @@ This bypasses lazy loading for special cases like live query results
 stateWhenReady(): Promise<Map<TKey, T>>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:707](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L707)
+Defined in: [packages/db/src/collection/index.ts:771](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L771)
 
 Gets the current state of the collection as a Map, but only resolves when data is available
 Waits for the first sync commit to complete before resolving
@@ -1093,7 +1096,7 @@ Promise that resolves to a Map containing all items in the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`stateWhenReady`](../../classes/CollectionImpl.md#statewhenready)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`stateWhenReady`](../classes/CollectionImpl.md#statewhenready)
 
 ***
 
@@ -1103,7 +1106,7 @@ Promise that resolves to a Map containing all items in the collection
 subscribeChanges(callback, options): CollectionSubscription;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:805](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L805)
+Defined in: [packages/db/src/collection/index.ts:869](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L869)
 
 Subscribe to changes in the collection
 
@@ -1117,7 +1120,7 @@ Function called when items change
 
 ##### options
 
-[`SubscribeChangesOptions`](../SubscribeChangesOptions.md) = `{}`
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md) = `{}`
 
 Subscription options including includeInitialState and where filter
 
@@ -1169,7 +1172,7 @@ const subscription = collection.subscribeChanges((changes) => {
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`subscribeChanges`](../../classes/CollectionImpl.md#subscribechanges)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`subscribeChanges`](../classes/CollectionImpl.md#subscribechanges)
 
 ***
 
@@ -1179,7 +1182,7 @@ const subscription = collection.subscribeChanges((changes) => {
 toArrayWhenReady(): Promise<T[]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:732](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L732)
+Defined in: [packages/db/src/collection/index.ts:796](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L796)
 
 Gets the current state of the collection as an Array, but only resolves when data is available
 Waits for the first sync commit to complete before resolving
@@ -1192,7 +1195,7 @@ Promise that resolves to an Array containing all items in the collection
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`toArrayWhenReady`](../../classes/CollectionImpl.md#toarraywhenready)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`toArrayWhenReady`](../classes/CollectionImpl.md#toarraywhenready)
 
 ***
 
@@ -1204,7 +1207,7 @@ Promise that resolves to an Array containing all items in the collection
 update(key, callback): Transaction;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:602](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L602)
+Defined in: [packages/db/src/collection/index.ts:666](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L666)
 
 Updates one or more items in the collection using a callback function
 
@@ -1220,7 +1223,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](../Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1268,7 +1271,7 @@ try {
 
 ##### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`update`](../../classes/CollectionImpl.md#update)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`update`](../classes/CollectionImpl.md#update)
 
 #### Call Signature
 
@@ -1279,7 +1282,7 @@ update(
    callback): Transaction;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:608](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L608)
+Defined in: [packages/db/src/collection/index.ts:672](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L672)
 
 Updates one or more items in the collection using a callback function
 
@@ -1293,7 +1296,7 @@ Single key or array of keys to update
 
 ###### config
 
-[`OperationConfig`](../OperationConfig.md)
+[`OperationConfig`](OperationConfig.md)
 
 ###### callback
 
@@ -1301,7 +1304,7 @@ Single key or array of keys to update
 
 ##### Returns
 
-[`Transaction`](../Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1349,7 +1352,7 @@ try {
 
 ##### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`update`](../../classes/CollectionImpl.md#update)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`update`](../classes/CollectionImpl.md#update)
 
 #### Call Signature
 
@@ -1357,7 +1360,7 @@ try {
 update(id, callback): Transaction;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:615](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L615)
+Defined in: [packages/db/src/collection/index.ts:679](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L679)
 
 Updates one or more items in the collection using a callback function
 
@@ -1373,7 +1376,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](../Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1421,7 +1424,7 @@ try {
 
 ##### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`update`](../../classes/CollectionImpl.md#update)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`update`](../classes/CollectionImpl.md#update)
 
 #### Call Signature
 
@@ -1432,7 +1435,7 @@ update(
    callback): Transaction;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:621](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L621)
+Defined in: [packages/db/src/collection/index.ts:685](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L685)
 
 Updates one or more items in the collection using a callback function
 
@@ -1444,7 +1447,7 @@ Updates one or more items in the collection using a callback function
 
 ###### config
 
-[`OperationConfig`](../OperationConfig.md)
+[`OperationConfig`](OperationConfig.md)
 
 ###### callback
 
@@ -1452,7 +1455,7 @@ Updates one or more items in the collection using a callback function
 
 ##### Returns
 
-[`Transaction`](../Transaction.md)
+[`Transaction`](Transaction.md)
 
 A Transaction object representing the update operation(s)
 
@@ -1500,7 +1503,7 @@ try {
 
 ##### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`update`](../../classes/CollectionImpl.md#update)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`update`](../classes/CollectionImpl.md#update)
 
 ***
 
@@ -1513,7 +1516,7 @@ validateData(
    key?): T;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:508](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L508)
+Defined in: [packages/db/src/collection/index.ts:572](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L572)
 
 Validates the data against the schema
 
@@ -1537,7 +1540,7 @@ Validates the data against the schema
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`validateData`](../../classes/CollectionImpl.md#validatedata)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`validateData`](../classes/CollectionImpl.md#validatedata)
 
 ***
 
@@ -1547,7 +1550,7 @@ Validates the data against the schema
 values(): IterableIterator<T>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:418](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L418)
+Defined in: [packages/db/src/collection/index.ts:482](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L482)
 
 Get all values (virtual derived state)
 
@@ -1557,7 +1560,7 @@ Get all values (virtual derived state)
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`values`](../../classes/CollectionImpl.md#values)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`values`](../classes/CollectionImpl.md#values)
 
 ***
 
@@ -1567,7 +1570,7 @@ Get all values (virtual derived state)
 waitFor<T>(event, timeout?): Promise<AllCollectionEvents[T]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:845](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L845)
+Defined in: [packages/db/src/collection/index.ts:909](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L909)
 
 Wait for a collection event
 
@@ -1584,6 +1587,7 @@ Wait for a collection event
   \| `"status:change"`
   \| `"subscribers:change"`
   \| `"loadingSubset:change"`
+  \| `"truncate"`
 
 #### Parameters
 
@@ -1601,4 +1605,4 @@ Wait for a collection event
 
 #### Inherited from
 
-[`CollectionImpl`](../../classes/CollectionImpl.md).[`waitFor`](../../classes/CollectionImpl.md#waitfor)
+[`CollectionImpl`](../classes/CollectionImpl.md).[`waitFor`](../classes/CollectionImpl.md#waitfor)

@@ -1,7 +1,7 @@
-import { describe, expectTypeOf, test } from "vitest"
-import { createLiveQueryCollection, eq, gt } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { describe, expectTypeOf, test } from 'vitest'
+import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Sample data types for join-subquery testing
 type Issue = {
@@ -67,7 +67,7 @@ function createIssuesCollection() {
       id: `join-subquery-test-issues-types`,
       getKey: (issue) => issue.id,
       initialData: sampleIssues,
-    })
+    }),
   )
 }
 
@@ -77,7 +77,7 @@ function createUsersCollection() {
       id: `join-subquery-test-users-types`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
-    })
+    }),
   )
 }
 
@@ -101,7 +101,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { user: usersCollection },
               ({ issue, user }) => eq(issue.userId, user.id),
-              `inner`
+              `inner`,
             )
             .select(({ issue, user }) => ({
               issue_title: issue.title,
@@ -138,7 +138,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { activeUser: activeUsers },
               ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-              `left`
+              `left`,
             )
         },
       })
@@ -173,7 +173,7 @@ describe(`Join Subquery Types`, () => {
               { activeUser: activeUsers },
               ({ longIssue, activeUser }) =>
                 eq(longIssue.userId, activeUser.id),
-              `inner`
+              `inner`,
             )
             .select(({ longIssue, activeUser }) => ({
               issue_title: longIssue.title,
@@ -211,7 +211,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { engUser: engineeringUsers },
               ({ issue, engUser }) => eq(issue.userId, engUser.id),
-              `inner`
+              `inner`,
             )
             .select(({ issue, engUser }) => ({
               issue_title: issue.title,
@@ -245,7 +245,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { activeUser: activeUsers },
               ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-              `left`
+              `left`,
             )
         },
       })
@@ -292,7 +292,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { profile: userProfiles },
               ({ task, profile }) => eq(task.assigneeId, profile.profileId),
-              `inner`
+              `inner`,
             )
             .select(({ task, profile }) => ({
               id: task.taskId,
@@ -336,7 +336,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { user: usersCollection },
               ({ issue, user }) => eq(issue.userId, user.id),
-              `inner`
+              `inner`,
             )
             .select(({ issue, user }) => ({
               // Should have access to all original Issue properties
@@ -382,7 +382,7 @@ describe(`Join Subquery Types`, () => {
             .join(
               { activeUser: activeUsers },
               ({ issue, activeUser }) => eq(issue.userId, activeUser.id),
-              `left`
+              `left`,
             )
             .select(({ issue, activeUser }) => ({
               issue_title: issue.title,

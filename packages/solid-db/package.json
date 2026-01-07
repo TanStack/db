@@ -1,12 +1,12 @@
 {
   "name": "@tanstack/solid-db",
+  "version": "0.1.59",
   "description": "Solid integration for @tanstack/db",
-  "version": "0.1.46",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/db.git",
+    "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/solid-db"
   },
   "homepage": "https://tanstack.com/db",
@@ -15,20 +15,16 @@
     "solid",
     "typescript"
   ],
-  "packageManager": "pnpm@10.22.0",
-  "dependencies": {
-    "@solid-primitives/map": "^0.7.2",
-    "@tanstack/db": "workspace:*"
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "test": "vitest --run",
+    "lint": "eslint . --fix"
   },
-  "devDependencies": {
-    "@electric-sql/client": "1.1.4",
-    "@solidjs/testing-library": "^0.8.10",
-    "@vitest/coverage-istanbul": "^3.2.4",
-    "jsdom": "^27.2.0",
-    "solid-js": "^1.9.10",
-    "vite-plugin-solid": "^2.11.10",
-    "vitest": "^3.2.4"
-  },
+  "type": "module",
+  "main": "dist/esm/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
   "exports": {
     ".": {
       "import": {
@@ -38,22 +34,25 @@
     },
     "./package.json": "./package.json"
   },
+  "sideEffects": false,
   "files": [
     "dist",
     "src"
   ],
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
+  "dependencies": {
+    "@solid-primitives/map": "^0.7.2",
+    "@tanstack/db": "workspace:*"
+  },
   "peerDependencies": {
     "solid-js": ">=1.9.0"
   },
-  "scripts": {
-    "build": "vite build",
-    "dev": "vite build --watch",
-    "test": "vitest --run",
-    "lint": "eslint . --fix"
-  },
-  "sideEffects": false,
-  "type": "module",
-  "types": "dist/esm/index.d.ts"
+  "devDependencies": {
+    "@electric-sql/client": "^1.3.1",
+    "@solidjs/testing-library": "^0.8.10",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "jsdom": "^27.4.0",
+    "solid-js": "^1.9.10",
+    "vite-plugin-solid": "^2.11.10",
+    "vitest": "^3.2.4"
+  }
 }

@@ -1,4 +1,4 @@
-import { TanStackDBError } from "@tanstack/db"
+import { TanStackDBError } from '@tanstack/db'
 
 // Query Collection Errors
 export class QueryCollectionError extends TanStackDBError {
@@ -39,7 +39,7 @@ export class GetKeyRequiredError extends QueryCollectionError {
 export class SyncNotInitializedError extends QueryCollectionError {
   constructor() {
     super(
-      `Collection must be in 'ready' state for manual sync operations. Sync not initialized yet.`
+      `Collection must be in 'ready' state for manual sync operations. Sync not initialized yet.`,
     )
     this.name = `SyncNotInitializedError`
   }

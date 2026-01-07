@@ -9,7 +9,7 @@ title: InsertMutationFn
 type InsertMutationFn<T, TKey, TUtils, TReturn> = (params) => Promise<TReturn>;
 ```
 
-Defined in: [packages/db/src/types.ts:385](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L385)
+Defined in: [packages/db/src/types.ts:443](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L443)
 
 ## Type Parameters
 
@@ -23,7 +23,7 @@ Defined in: [packages/db/src/types.ts:385](https://github.com/TanStack/db/blob/m
 
 ### TUtils
 
-`TUtils` *extends* [`UtilsRecord`](../UtilsRecord.md) = [`UtilsRecord`](../UtilsRecord.md)
+`TUtils` *extends* [`UtilsRecord`](UtilsRecord.md) = [`UtilsRecord`](UtilsRecord.md)
 
 ### TReturn
 
@@ -33,7 +33,7 @@ Defined in: [packages/db/src/types.ts:385](https://github.com/TanStack/db/blob/m
 
 ### params
 
-[`InsertMutationFnParams`](../InsertMutationFnParams.md)\<`T`, `TKey`, `TUtils`\>
+[`InsertMutationFnParams`](InsertMutationFnParams.md)\<`T`, `TKey`, `TUtils`\>
 
 ## Returns
 

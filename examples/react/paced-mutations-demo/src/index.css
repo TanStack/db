@@ -6,8 +6,8 @@
 
 body {
   font-family:
-    -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Oxygen", "Ubuntu",
-    "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu',
+    'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   background: #f5f5f5;
@@ -16,7 +16,7 @@ body {
 
 code {
   font-family:
-    source-code-pro, Menlo, Monaco, Consolas, "Courier New", monospace;
+    source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
   background: #f0f0f0;
   padding: 2px 6px;
   border-radius: 3px;
@@ -74,7 +74,7 @@ h1 {
 }
 
 .control-group select,
-.control-group input[type="number"] {
+.control-group input[type='number'] {
   width: 100%;
   padding: 8px;
   border: 1px solid #ddd;
@@ -89,7 +89,7 @@ h1 {
   margin-bottom: 8px;
 }
 
-.checkbox-group input[type="checkbox"] {
+.checkbox-group input[type='checkbox'] {
   width: 16px;
   height: 16px;
 }

@@ -5,11 +5,15 @@ import {
   createResource,
   createSignal,
   onCleanup,
-} from "solid-js"
-import { ReactiveMap } from "@solid-primitives/map"
-import { CollectionImpl, createLiveQueryCollection } from "@tanstack/db"
-import { createStore, reconcile } from "solid-js/store"
-import type { Accessor } from "solid-js"
+} from 'solid-js'
+import { ReactiveMap } from '@solid-primitives/map'
+import {
+  BaseQueryBuilder,
+  CollectionImpl,
+  createLiveQueryCollection,
+} from '@tanstack/db'
+import { createStore, reconcile } from 'solid-js/store'
+import type { Accessor } from 'solid-js'
 import type {
   ChangeMessage,
   Collection,
@@ -19,7 +23,7 @@ import type {
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
   QueryBuilder,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 /**
  * Create a live query using a query function
@@ -76,14 +80,35 @@ import type {
  *   </Switch>
  * )
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
-  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>
+  queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): {
   state: ReactiveMap<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
   collection: Accessor<Collection<GetResult<TContext>, string | number, {}>>
   status: Accessor<CollectionStatus>
+  isLoading: Accessor<boolean>
+  isReady: Accessor<boolean>
+  isIdle: Accessor<boolean>
+  isError: Accessor<boolean>
+  isCleanedUp: Accessor<boolean>
+}
+
+// Overload 1b: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder,
+  ) => QueryBuilder<TContext> | undefined | null,
+): {
+  state: ReactiveMap<string | number, GetResult<TContext>>
+  data: Array<GetResult<TContext>>
+  collection: Accessor<Collection<
+    GetResult<TContext>,
+    string | number,
+    {}
+  > | null>
+  status: Accessor<CollectionStatus | `disabled`>
   isLoading: Accessor<boolean>
   isReady: Accessor<boolean>
   isIdle: Accessor<boolean>
@@ -133,7 +158,7 @@ export function useLiveQuery<TContext extends Context>(
  */
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
-  config: Accessor<LiveQueryCollectionConfig<TContext>>
+  config: Accessor<LiveQueryCollectionConfig<TContext>>,
 ): {
   state: ReactiveMap<string | number, GetResult<TContext>>
   data: Array<GetResult<TContext>>
@@ -187,7 +212,7 @@ export function useLiveQuery<
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>
+  liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>,
 ): {
   state: ReactiveMap<TKey, TResult>
   data: Array<TResult>
@@ -202,11 +227,20 @@ export function useLiveQuery<
 
 // Implementation - use function overloads to infer the actual collection type
 export function useLiveQuery(
-  configOrQueryOrCollection: (queryFn?: any) => any
+  configOrQueryOrCollection: (queryFn?: any) => any,
 ) {
   const collection = createMemo(
     () => {
       if (configOrQueryOrCollection.length === 1) {
+        // This is a query function - check if it returns null/undefined
+        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+        const result = configOrQueryOrCollection(queryBuilder)
+
+        if (result === undefined || result === null) {
+          // Disabled query - return null
+          return null
+        }
+
         return createLiveQueryCollection({
           query: configOrQueryOrCollection,
           startSync: true,
@@ -214,6 +248,12 @@ export function useLiveQuery(
       }
 
       const innerCollection = configOrQueryOrCollection()
+
+      if (innerCollection === undefined || innerCollection === null) {
+        // Disabled query - return null
+        return null
+      }
+
       if (innerCollection instanceof CollectionImpl) {
         innerCollection.startSyncImmediate()
         return innerCollection as Collection
@@ -225,7 +265,7 @@ export function useLiveQuery(
       })
     },
     undefined,
-    { name: `TanstackDBCollectionMemo` }
+    { name: `TanstackDBCollectionMemo` },
   )
 
   // Reactive state that gets updated granularly through change events
@@ -237,16 +277,19 @@ export function useLiveQuery(
   })
 
   // Track collection status reactively
-  const [status, setStatus] = createSignal(collection().status, {
-    name: `TanstackDBStatus`,
-  })
+  const [status, setStatus] = createSignal(
+    collection() ? collection()!.status : (`disabled` as const),
+    {
+      name: `TanstackDBStatus`,
+    },
+  )
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     setData((prev) =>
-      reconcile(Array.from(currentCollection.values()))(prev).filter(Boolean)
+      reconcile(Array.from(currentCollection.values()))(prev).filter(Boolean),
     )
   }
 
@@ -256,6 +299,18 @@ export function useLiveQuery(
   createComputed(
     () => {
       const currentCollection = collection()
+
+      // Handle null collection (disabled query)
+      if (!currentCollection) {
+        setStatus(`disabled` as const)
+        state.clear()
+        setData([])
+        if (currentUnsubscribe) {
+          currentUnsubscribe()
+          currentUnsubscribe = null
+        }
+        return
+      }
 
       // Update status ref whenever the effect runs
       setStatus(currentCollection.status)
@@ -292,7 +347,7 @@ export function useLiveQuery(
         },
         {
           includeInitialState: true,
-        }
+        },
       )
 
       currentUnsubscribe = subscription.unsubscribe.bind(subscription)
@@ -311,7 +366,7 @@ export function useLiveQuery(
       })
     },
     undefined,
-    { name: `TanstackDBSyncComputed` }
+    { name: `TanstackDBSyncComputed` },
   )
 
   return {
@@ -320,7 +375,7 @@ export function useLiveQuery(
     collection,
     status,
     isLoading: () => status() === `loading`,
-    isReady: () => status() === `ready`,
+    isReady: () => status() === `ready` || status() === `disabled`,
     isIdle: () => status() === `idle`,
     isError: () => status() === `error`,
     isCleanedUp: () => status() === `cleaned-up`,

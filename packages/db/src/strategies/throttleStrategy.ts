@@ -1,6 +1,6 @@
-import { Throttler } from "@tanstack/pacer/throttler"
-import type { ThrottleStrategy, ThrottleStrategyOptions } from "./types"
-import type { Transaction } from "../transactions"
+import { LiteThrottler } from '@tanstack/pacer-lite/lite-throttler'
+import type { ThrottleStrategy, ThrottleStrategyOptions } from './types'
+import type { Transaction } from '../transactions'
 
 /**
  * Creates a throttle strategy that ensures transactions are evenly spaced
@@ -46,18 +46,18 @@ import type { Transaction } from "../transactions"
  * ```
  */
 export function throttleStrategy(
-  options: ThrottleStrategyOptions
+  options: ThrottleStrategyOptions,
 ): ThrottleStrategy {
-  const throttler = new Throttler(
+  const throttler = new LiteThrottler(
     (callback: () => Transaction) => callback(),
-    options
+    options,
   )
 
   return {
     _type: `throttle`,
     options,
     execute: <T extends object = Record<string, unknown>>(
-      fn: () => Transaction<T>
+      fn: () => Transaction<T>,
     ) => {
       throttler.maybeExecute(fn as () => Transaction)
     },

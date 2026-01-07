@@ -1,4 +1,4 @@
-import type { LeaderElection } from "../types"
+import type { LeaderElection } from '../types'
 
 export abstract class BaseLeaderElection implements LeaderElection {
   protected isLeaderState = false

@@ -19,11 +19,11 @@ Parses an ORDER BY expression into a simple array of sort specifications.
 
 The ORDER BY expression array
 
-[`OrderBy`](../../@tanstack/namespaces/IR/type-aliases/OrderBy.md) | `null` | `undefined`
+[`OrderBy`](../@tanstack/namespaces/IR/type-aliases/OrderBy.md) | `null` | `undefined`
 
 ## Returns
 
-[`ParsedOrderBy`](../../interfaces/ParsedOrderBy.md)[]
+[`ParsedOrderBy`](../interfaces/ParsedOrderBy.md)[]
 
 Array of parsed order by specifications
 

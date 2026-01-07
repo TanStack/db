@@ -33,7 +33,7 @@ in-memory TanStack DB collection.
 
 #### Remarks
 
-- Defaults to [DEFAULT\_BATCH\_SIZE](../../variables/DEFAULT_BATCH_SIZE.md) if not specified.
+- Defaults to [DEFAULT\_BATCH\_SIZE](../variables/DEFAULT_BATCH_SIZE.md) if not specified.
 - Larger values reduce the number of round trips to the storage
   engine but increase memory usage per batch.
 - Smaller values may lower memory usage and allow earlier

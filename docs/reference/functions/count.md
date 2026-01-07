@@ -19,4 +19,4 @@ Defined in: [packages/db/src/query/builder/functions.ts:307](https://github.com/
 
 ## Returns
 
-[`Aggregate`](../../@tanstack/namespaces/IR/classes/Aggregate.md)\<`number`\>
+[`Aggregate`](../@tanstack/namespaces/IR/classes/Aggregate.md)\<`number`\>

@@ -77,6 +77,126 @@ The `queryCollectionOptions` function accepts the following options:
 - `onUpdate`: Handler called before update operations
 - `onDelete`: Handler called before delete operations
 
+## Extending Meta with Custom Properties
+
+The `meta` option allows you to pass additional metadata to your query function. By default, Query Collections automatically include `loadSubsetOptions` in the meta object, which contains filtering, sorting, and pagination options for on-demand queries.
+
+### Type-Safe Meta Access
+
+The `ctx.meta.loadSubsetOptions` property is automatically typed as `LoadSubsetOptions` without requiring any additional imports or type assertions:
+
+```typescript
+import { parseLoadSubsetOptions } from "@tanstack/query-db-collection"
+
+const collection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["products"],
+    syncMode: "on-demand",
+    queryFn: async (ctx) => {
+      // ✅ Type-safe access - no @ts-ignore needed!
+      const options = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
+
+      // Use the parsed options to fetch only what you need
+      return api.getProducts(options)
+    },
+    queryClient,
+    getKey: (item) => item.id,
+  })
+)
+```
+
+### Adding Custom Meta Properties
+
+You can extend the meta type to include your own custom properties using TypeScript's module augmentation:
+
+```typescript
+// In a global type definition file (e.g., types.d.ts or global.d.ts)
+declare module "@tanstack/query-db-collection" {
+  interface QueryCollectionMeta {
+    // Add your custom properties here
+    userId?: string
+    includeDeleted?: boolean
+    cacheTTL?: number
+  }
+}
+```
+
+Once you've extended the interface, your custom properties are fully typed throughout your application:
+
+```typescript
+const collection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["todos"],
+    queryFn: async (ctx) => {
+      // ✅ Both loadSubsetOptions and custom properties are typed
+      const { loadSubsetOptions, userId, includeDeleted } = ctx.meta
+
+      return api.getTodos({
+        ...parseLoadSubsetOptions(loadSubsetOptions),
+        userId,
+        includeDeleted,
+      })
+    },
+    queryClient,
+    getKey: (item) => item.id,
+    // Pass custom meta alongside Query Collection defaults
+    meta: {
+      userId: "user-123",
+      includeDeleted: false,
+    },
+  })
+)
+```
+
+### Important Notes
+
+- The module augmentation pattern follows TanStack Query's official approach for typing meta
+- `QueryCollectionMeta` is an interface (not a type alias), enabling proper TypeScript declaration merging
+- Your custom properties are merged with the base `loadSubsetOptions` property
+- All meta properties must be compatible with `Record<string, unknown>`
+- The augmentation should be done in a file that's included in your TypeScript compilation
+
+### Example: API Request Context
+
+A common use case is passing request context to your query function:
+
+```typescript
+// types.d.ts
+declare module "@tanstack/query-db-collection" {
+  interface QueryCollectionMeta {
+    authToken?: string
+    locale?: string
+    version?: string
+  }
+}
+
+// collections.ts
+const productsCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["products"],
+    queryFn: async (ctx) => {
+      const { loadSubsetOptions, authToken, locale, version } = ctx.meta
+
+      return api.getProducts({
+        ...parseLoadSubsetOptions(loadSubsetOptions),
+        headers: {
+          Authorization: `Bearer ${authToken}`,
+          "Accept-Language": locale,
+          "API-Version": version,
+        },
+      })
+    },
+    queryClient,
+    getKey: (item) => item.id,
+    meta: {
+      authToken: session.token,
+      locale: "en-US",
+      version: "v1",
+    },
+  })
+)
+```
+
 ## Persistence Handlers
 
 You can define handlers that are called when mutations occur. These handlers can persist changes to your backend and control whether the query should refetch after the operation:
@@ -401,7 +521,7 @@ All direct write methods are available on `collection.utils`:
 
 ## QueryFn and Predicate Push-Down
 
-When using `syncMode: 'on-demand'`, the collection automatically pushes down query predicates (where clauses, orderBy, and limit) to your `queryFn`. This allows you to fetch only the data needed for each specific query, rather than fetching the entire dataset.
+When using `syncMode: 'on-demand'`, the collection automatically pushes down query predicates (where clauses, orderBy, limit, and offset) to your `queryFn`. This allows you to fetch only the data needed for each specific query, rather than fetching the entire dataset.
 
 ### How LoadSubsetOptions Are Passed
 
@@ -410,9 +530,13 @@ LoadSubsetOptions are passed to your `queryFn` via the query context's `meta` pr
 ```typescript
 queryFn: async (ctx) => {
   // Extract LoadSubsetOptions from the context
-  const { limit, where, orderBy } = ctx.meta.loadSubsetOptions
+  const { limit, offset, where, orderBy } = ctx.meta.loadSubsetOptions
 
   // Use these to fetch only the data you need
+  // - where: filter expression (AST)
+  // - orderBy: sort expression (AST)
+  // - limit: maximum number of rows
+  // - offset: number of rows to skip (for pagination)
   // ...
 }
 ```
@@ -452,7 +576,7 @@ const productsCollection = createCollection(
     syncMode: 'on-demand', // Enable predicate push-down
 
     queryFn: async (ctx) => {
-      const { limit, where, orderBy } = ctx.meta.loadSubsetOptions
+      const { limit, offset, where, orderBy } = ctx.meta.loadSubsetOptions
 
       // Parse the expressions into simple format
       const parsed = parseLoadSubsetOptions({ where, orderBy, limit })
@@ -485,6 +609,11 @@ const productsCollection = createCollection(
         params.set('limit', String(parsed.limit))
       }
 
+      // Add offset for pagination
+      if (offset) {
+        params.set('offset', String(offset))
+      }
+
       const response = await fetch(`/api/products?${params}`)
       return response.json()
     },
@@ -509,6 +638,7 @@ const affordableElectronics = createLiveQueryCollection({
 
 // This triggers a queryFn call with:
 // GET /api/products?category=electronics&price_lt=100&sort=price:asc&limit=10
+// When paginating, offset is included: &offset=20
 ```
 
 ### Custom Handlers for Complex APIs
@@ -611,10 +741,11 @@ queryFn: async (ctx) => {
 Convenience function that parses all LoadSubsetOptions at once. Good for simple use cases.
 
 ```typescript
-const { filters, sorts, limit } = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
+const { filters, sorts, limit, offset } = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
 // filters: [{ field: ['category'], operator: 'eq', value: 'electronics' }]
 // sorts: [{ field: ['price'], direction: 'asc', nulls: 'last' }]
 // limit: 10
+// offset: 20 (for pagination)
 ```
 
 #### `parseWhereExpression(expr, options)`
