@@ -8,7 +8,7 @@
 export function findInsertPosition<T>(
   sortedArray: Array<[T, any]>,
   value: T,
-  compareFn: (a: T, b: T) => number
+  compareFn: (a: T, b: T) => number,
 ): number {
   let left = 0
   let right = sortedArray.length

@@ -1,4 +1,4 @@
-import type { Collection } from "@tanstack/db"
+import type { Collection } from '@tanstack/db'
 
 /**
  * Test data schema types
@@ -20,6 +20,7 @@ export interface Post {
   title: string
   content: string | null
   viewCount: number
+  largeViewCount: bigint // BIGINT field for testing large number serialization
   publishedAt: Date | null
   deletedAt: Date | null
 }
@@ -104,6 +105,6 @@ export interface DbClient {
   end: () => Promise<void>
   query: (
     sql: string,
-    values?: Array<unknown>
+    values?: Array<unknown>,
   ) => Promise<{ rows: Array<unknown> }>
 }

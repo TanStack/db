@@ -5,7 +5,7 @@ title: BTreeIndexOptions
 
 # Interface: BTreeIndexOptions
 
-Defined in: [packages/db/src/indexes/btree-index.ts:11](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L11)
+Defined in: [packages/db/src/indexes/btree-index.ts:12](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L12)
 
 Options for Ordered index
 
@@ -17,7 +17,7 @@ Options for Ordered index
 optional compareFn: (a, b) => number;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:12](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L12)
+Defined in: [packages/db/src/indexes/btree-index.ts:13](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L13)
 
 #### Parameters
 
@@ -41,4 +41,4 @@ Defined in: [packages/db/src/indexes/btree-index.ts:12](https://github.com/TanSt
 optional compareOptions: CompareOptions;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:13](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L13)
+Defined in: [packages/db/src/indexes/btree-index.ts:14](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L14)

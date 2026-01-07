@@ -17,8 +17,8 @@ Create a residual Where clause from an expression
 
 ### expression
 
-[`BasicExpression`](../../type-aliases/BasicExpression.md)\<`boolean`\>
+[`BasicExpression`](../type-aliases/BasicExpression.md)\<`boolean`\>
 
 ## Returns
 
-[`Where`](../../type-aliases/Where.md)
+[`Where`](../type-aliases/Where.md)

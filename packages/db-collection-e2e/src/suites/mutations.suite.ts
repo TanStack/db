@@ -4,14 +4,14 @@
  * Tests data mutations with on-demand syncMode
  */
 
-import { randomUUID } from "node:crypto"
-import { describe, expect, it } from "vitest"
-import { createLiveQueryCollection, eq, gt, isNull } from "@tanstack/db"
-import { waitFor, waitForQueryData } from "../utils/helpers"
-import type { E2ETestConfig } from "../types"
+import { randomUUID } from 'node:crypto'
+import { describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, eq, gt, isNull } from '@tanstack/db'
+import { waitFor, waitForQueryData } from '../utils/helpers'
+import type { E2ETestConfig } from '../types'
 
 export function createMutationsTestSuite(
-  getConfig: () => Promise<E2ETestConfig>
+  getConfig: () => Promise<E2ETestConfig>,
 ) {
   describe(`Mutations Suite`, () => {
     describe(`Insert Mutations`, () => {
@@ -26,7 +26,7 @@ export function createMutationsTestSuite(
 
         // Load initial data
         const query = createLiveQueryCollection((q) =>
-          q.from({ user: usersCollection })
+          q.from({ user: usersCollection }),
         )
 
         await query.preload()
@@ -82,7 +82,7 @@ export function createMutationsTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 30))
+            .where(({ user }) => gt(user.age, 30)),
         )
 
         await query.preload()
@@ -140,7 +140,7 @@ export function createMutationsTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 30))
+            .where(({ user }) => gt(user.age, 30)),
         )
 
         await query.preload()
@@ -180,7 +180,7 @@ export function createMutationsTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 30))
+            .where(({ user }) => gt(user.age, 30)),
         )
 
         await query.preload()
@@ -220,7 +220,7 @@ export function createMutationsTestSuite(
         const usersCollection = config.collections.onDemand.users
 
         const query = createLiveQueryCollection((q) =>
-          q.from({ user: usersCollection })
+          q.from({ user: usersCollection }),
         )
 
         await query.preload()
@@ -256,7 +256,7 @@ export function createMutationsTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => isNull(user.deletedAt))
+            .where(({ user }) => isNull(user.deletedAt)),
         )
 
         await query.preload()
@@ -277,7 +277,7 @@ export function createMutationsTestSuite(
         const usersCollection = config.collections.onDemand.users
 
         const query = createLiveQueryCollection((q) =>
-          q.from({ user: usersCollection })
+          q.from({ user: usersCollection }),
         )
 
         await query.preload()
@@ -303,7 +303,7 @@ export function createMutationsTestSuite(
             .from({ user: usersCollection })
             .where(({ user }) => eq(user.isActive, true))
             .orderBy(({ user }) => user.age, `asc`)
-            .limit(10)
+            .limit(10),
         )
 
         await query.preload()

@@ -33,7 +33,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:132](https://github.com/TanSt
 
 ##### lazyIndex
 
-[`LazyIndexWrapper`](../LazyIndexWrapper.md)\<`TKey`\>
+[`LazyIndexWrapper`](LazyIndexWrapper.md)\<`TKey`\>
 
 #### Returns
 
@@ -55,7 +55,7 @@ Get the index expression (available immediately)
 
 ##### Returns
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)
 
 ***
 
@@ -91,7 +91,7 @@ Get the resolved index (throws if not ready)
 
 ##### Returns
 
-[`BaseIndex`](../BaseIndex.md)\<`TKey`\>
+[`BaseIndex`](BaseIndex.md)\<`TKey`\>
 
 ***
 
@@ -207,7 +207,7 @@ Defined in: [packages/db/src/indexes/lazy-index.ts:248](https://github.com/TanSt
 
 #### Returns
 
-[`LazyIndexWrapper`](../LazyIndexWrapper.md)\<`TKey`\>
+[`LazyIndexWrapper`](LazyIndexWrapper.md)\<`TKey`\>
 
 ***
 
@@ -243,7 +243,7 @@ Get index statistics (throws if not ready)
 
 #### Returns
 
-[`IndexStats`](../../interfaces/IndexStats.md)
+[`IndexStats`](../interfaces/IndexStats.md)
 
 ***
 
@@ -343,4 +343,4 @@ Wait for index to be ready
 
 #### Returns
 
-`Promise`\<[`BaseIndex`](../BaseIndex.md)\<`TKey`\>\>
+`Promise`\<[`BaseIndex`](BaseIndex.md)\<`TKey`\>\>

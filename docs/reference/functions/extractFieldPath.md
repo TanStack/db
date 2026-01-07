@@ -24,7 +24,7 @@ The expression to extract from
 
 ## Returns
 
-[`FieldPath`](../../type-aliases/FieldPath.md) \| `null`
+[`FieldPath`](../type-aliases/FieldPath.md) \| `null`
 
 The field path array, or null
 

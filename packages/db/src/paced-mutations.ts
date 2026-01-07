@@ -1,6 +1,6 @@
-import { createTransaction } from "./transactions"
-import type { MutationFn, Transaction } from "./types"
-import type { Strategy } from "./strategies/types"
+import { createTransaction } from './transactions'
+import type { MutationFn, Transaction } from './types'
+import type { Strategy } from './strategies/types'
 
 /**
  * Configuration for creating a paced mutations manager
@@ -88,7 +88,7 @@ export function createPacedMutations<
   TVariables = unknown,
   T extends object = Record<string, unknown>,
 >(
-  config: PacedMutationsConfig<TVariables, T>
+  config: PacedMutationsConfig<TVariables, T>,
 ): (variables: TVariables) => Transaction<T> {
   const { onMutate, mutationFn, strategy, ...transactionConfig } = config
 
@@ -99,13 +99,13 @@ export function createPacedMutations<
   const commitCallback = () => {
     if (!activeTransaction) {
       throw new Error(
-        `Strategy callback called but no active transaction exists. This indicates a bug in the strategy implementation.`
+        `Strategy callback called but no active transaction exists. This indicates a bug in the strategy implementation.`,
       )
     }
 
     if (activeTransaction.state !== `pending`) {
       throw new Error(
-        `Strategy callback called but active transaction is in state "${activeTransaction.state}". Expected "pending".`
+        `Strategy callback called but active transaction is in state "${activeTransaction.state}". Expected "pending".`,
       )
     }
 

@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, test } from "vitest"
-import { Index } from "../src/indexes.js"
+import { beforeEach, describe, expect, test } from 'vitest'
+import { Index } from '../src/indexes.js'
 
 describe(`Index`, () => {
   let index: Index<string, number>

@@ -1,28 +1,28 @@
 // Storage adapters
-import { createOptimisticAction, createTransaction } from "@tanstack/db"
-import { IndexedDBAdapter } from "./storage/IndexedDBAdapter"
-import { LocalStorageAdapter } from "./storage/LocalStorageAdapter"
+import { createOptimisticAction, createTransaction } from '@tanstack/db'
+import { IndexedDBAdapter } from './storage/IndexedDBAdapter'
+import { LocalStorageAdapter } from './storage/LocalStorageAdapter'
 
 // Core components
-import { OutboxManager } from "./outbox/OutboxManager"
-import { KeyScheduler } from "./executor/KeyScheduler"
-import { TransactionExecutor } from "./executor/TransactionExecutor"
+import { OutboxManager } from './outbox/OutboxManager'
+import { KeyScheduler } from './executor/KeyScheduler'
+import { TransactionExecutor } from './executor/TransactionExecutor'
 
 // Coordination
-import { WebLocksLeader } from "./coordination/WebLocksLeader"
-import { BroadcastChannelLeader } from "./coordination/BroadcastChannelLeader"
+import { WebLocksLeader } from './coordination/WebLocksLeader'
+import { BroadcastChannelLeader } from './coordination/BroadcastChannelLeader'
 
 // Connectivity
-import { DefaultOnlineDetector } from "./connectivity/OnlineDetector"
+import { DefaultOnlineDetector } from './connectivity/OnlineDetector'
 
 // API
-import { OfflineTransaction as OfflineTransactionAPI } from "./api/OfflineTransaction"
-import { createOfflineAction } from "./api/OfflineAction"
+import { OfflineTransaction as OfflineTransactionAPI } from './api/OfflineTransaction'
+import { createOfflineAction } from './api/OfflineAction'
 
 // TanStack DB primitives
 
 // Replay
-import { withNestedSpan, withSpan } from "./telemetry/tracer"
+import { withNestedSpan, withSpan } from './telemetry/tracer'
 import type {
   CreateOfflineActionOptions,
   CreateOfflineTransactionOptions,
@@ -32,8 +32,8 @@ import type {
   OfflineTransaction,
   StorageAdapter,
   StorageDiagnostic,
-} from "./types"
-import type { Transaction } from "@tanstack/db"
+} from './types'
+import type { Transaction } from '@tanstack/db'
 
 export class OfflineExecutor {
   private config: OfflineConfig
@@ -210,7 +210,7 @@ export class OfflineExecutor {
           if (isLeader) {
             this.loadAndReplayTransactions()
           }
-        }
+        },
       )
     }
 
@@ -221,7 +221,7 @@ export class OfflineExecutor {
         this.executor.executeAll().catch((error) => {
           console.warn(
             `Failed to execute transactions on connectivity change:`,
-            error
+            error,
           )
         })
       }
@@ -258,17 +258,23 @@ export class OfflineExecutor {
           this.scheduler,
           this.outbox,
           this.config,
-          this
+          this,
         )
         this.leaderElection = this.createLeaderElection()
 
         // Request leadership first
         const isLeader = await this.leaderElection.requestLeadership()
+        this.isLeaderState = isLeader
         span.setAttribute(`isLeader`, isLeader)
 
         // Set up event listeners after leadership is established
         // This prevents the callback from being called multiple times
         this.setupEventListeners()
+
+        // Notify initial leadership state
+        if (this.config.onLeadershipChange) {
+          this.config.onLeadershipChange(isLeader)
+        }
 
         if (isLeader) {
           await this.loadAndReplayTransactions()
@@ -279,7 +285,7 @@ export class OfflineExecutor {
         console.warn(`Failed to initialize offline executor:`, error)
         span.setAttribute(`result`, `failed`)
         this.initReject(
-          error instanceof Error ? error : new Error(String(error))
+          error instanceof Error ? error : new Error(String(error)),
         )
       }
     })
@@ -303,7 +309,7 @@ export class OfflineExecutor {
   }
 
   createOfflineTransaction(
-    options: CreateOfflineTransactionOptions
+    options: CreateOfflineTransactionOptions,
   ): Transaction | OfflineTransactionAPI {
     const mutationFn = this.config.mutationFns[options.mutationFnName]
 
@@ -331,7 +337,7 @@ export class OfflineExecutor {
       options,
       mutationFn,
       this.persistTransaction.bind(this),
-      this
+      this,
     )
   }
 
@@ -364,14 +370,14 @@ export class OfflineExecutor {
         options,
         mutationFn,
         this.persistTransaction.bind(this),
-        this
+        this,
       )
       return action(variables)
     }
   }
 
   private async persistTransaction(
-    transaction: OfflineTransaction
+    transaction: OfflineTransaction,
   ): Promise<void> {
     // Wait for initialization to complete
     await this.initPromise
@@ -379,8 +385,8 @@ export class OfflineExecutor {
     return withNestedSpan(
       `executor.persistTransaction`,
       {
-        "transaction.id": transaction.id,
-        "transaction.mutationFnName": transaction.mutationFnName,
+        'transaction.id': transaction.id,
+        'transaction.mutationFnName': transaction.mutationFnName,
       },
       async (span) => {
         if (!this.isOfflineEnabled || !this.outbox || !this.executor) {
@@ -396,12 +402,12 @@ export class OfflineExecutor {
         } catch (error) {
           console.error(
             `Failed to persist offline transaction ${transaction.id}:`,
-            error
+            error,
           )
           span.setAttribute(`result`, `failed`)
           throw error
         }
-      }
+      },
     )
   }
 

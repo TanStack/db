@@ -21,7 +21,7 @@ Defined in: [packages/db/src/types.ts:126](https://github.com/TanStack/db/blob/m
 
 ### params
 
-[`MutationFnParams`](../MutationFnParams.md)\<`T`\>
+[`MutationFnParams`](MutationFnParams.md)\<`T`\>
 
 ## Returns
 

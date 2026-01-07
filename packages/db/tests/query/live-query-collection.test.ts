@@ -1,21 +1,21 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Temporal } from "temporal-polyfill"
-import { createCollection } from "../../src/collection/index.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
+import { createCollection } from '../../src/collection/index.js'
 import {
   and,
   createLiveQueryCollection,
   eq,
   ilike,
   liveQueryCollectionOptions,
-} from "../../src/query/index.js"
-import { Query } from "../../src/query/builder/index.js"
+} from '../../src/query/index.js'
+import { Query } from '../../src/query/builder/index.js'
 import {
   flushPromises,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
-} from "../utils.js"
-import { createDeferred } from "../../src/deferred"
-import type { ChangeMessage, LoadSubsetOptions } from "../../src/types.js"
+} from '../utils.js'
+import { createDeferred } from '../../src/deferred'
+import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
 
 // Sample user type for tests
 type User = {
@@ -37,7 +37,7 @@ function createUsersCollection() {
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
-    })
+    }),
   )
 }
 
@@ -52,7 +52,7 @@ describe(`createLiveQueryCollection`, () => {
     const activeUsers = createLiveQueryCollection((q) =>
       q
         .from({ user: usersCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     await activeUsers.preload()
@@ -81,7 +81,7 @@ describe(`createLiveQueryCollection`, () => {
     const activeUsers1 = createLiveQueryCollection((q) =>
       q
         .from({ user: usersCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     // Test with QueryBuilder instance via config
@@ -113,12 +113,12 @@ describe(`createLiveQueryCollection`, () => {
           defaultStringCollation: {
             stringSort: `lexical`,
           },
-        })
+        }),
       )
 
       // Create a live query collection from the source collection
       const liveQuery = createLiveQueryCollection((q) =>
-        q.from({ user: sourceCollection })
+        q.from({ user: sourceCollection }),
       )
 
       // The live query should inherit the compareOptions from the source collection
@@ -141,7 +141,7 @@ describe(`createLiveQueryCollection`, () => {
             stringSort: `locale`,
             locale: `de-DE`,
           },
-        })
+        }),
       )
 
       // Create a live query collection with a subquery
@@ -175,7 +175,7 @@ describe(`createLiveQueryCollection`, () => {
           getKey: (user) => user.id,
           initialData: sampleUsers,
           // No compareOptions specified - uses defaults
-        })
+        }),
       )
 
       // Create a live query collection with a subquery
@@ -209,7 +209,7 @@ describe(`createLiveQueryCollection`, () => {
           defaultStringCollation: {
             stringSort: `lexical`,
           },
-        })
+        }),
       )
 
       // Create a live query collection with explicitly provided compareOptions
@@ -242,14 +242,14 @@ describe(`createLiveQueryCollection`, () => {
         id: `empty-test-users`,
         getKey: (user) => user.id,
         initialData: [], // Empty initial data
-      })
+      }),
     )
 
     // Create a live query collection that depends on the empty source collection
     const liveQuery = createLiveQueryCollection((q) =>
       q
         .from({ user: emptyUsersCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     // This should resolve and not hang, even though the source collection is empty
@@ -277,7 +277,7 @@ describe(`createLiveQueryCollection`, () => {
 
     // Create a live query collection that depends on the problematic source collection
     const liveQuery = createLiveQueryCollection((q) =>
-      q.from({ user: problemCollection })
+      q.from({ user: problemCollection }),
     )
 
     // This should resolve and not hang, even though the source collection doesn't commit data
@@ -307,7 +307,7 @@ describe(`createLiveQueryCollection`, () => {
     const liveQuery = createLiveQueryCollection((q) =>
       q
         .from({ user: problemCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     // This should resolve and not hang, even though the source collection doesn't commit data
@@ -379,7 +379,7 @@ describe(`createLiveQueryCollection`, () => {
     const liveQuery = createLiveQueryCollection((q) =>
       q
         .from({ user: sourceCollection })
-        .where(({ user }) => eq(user.active, true))
+        .where(({ user }) => eq(user.active, true)),
     )
 
     // Initially, the live query should be in idle state (default startSync: false)
@@ -470,7 +470,7 @@ describe(`createLiveQueryCollection`, () => {
           { id: `t1`, last_email_id: `e1`, last_sent_at: 3 },
           { id: `t2`, last_email_id: `e2`, last_sent_at: 2 },
         ],
-      })
+      }),
     )
 
     const labelsByEmail = createCollection(
@@ -481,7 +481,7 @@ describe(`createLiveQueryCollection`, () => {
           { email_id: `e1`, label: `inbox` },
           { email_id: `e2`, label: `work` },
         ],
-      })
+      }),
     )
 
     // Source live query (pre-created)
@@ -509,7 +509,7 @@ describe(`createLiveQueryCollection`, () => {
               { label: labelsByEmail },
               ({ thread, label }: any) =>
                 eq(thread.last_email_id, label.email_id),
-              `inner`
+              `inner`,
             )
             .orderBy(({ thread }: any) => thread.last_sent_at, {
               direction: `desc`,
@@ -599,12 +599,12 @@ describe(`createLiveQueryCollection`, () => {
         id: `test-tasks`,
         getKey: (task) => task.id,
         initialData: [initialTask],
-      })
+      }),
     )
 
     // Create a live query collection that includes the temporal value
     const liveQuery = createLiveQueryCollection((q) =>
-      q.from({ task: taskCollection })
+      q.from({ task: taskCollection }),
     )
 
     await liveQuery.preload()
@@ -649,7 +649,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `player`,
           getKey: (post) => post.id,
           autoIndex,
-        })
+        }),
       )
 
       const challenge1Collection = createCollection(
@@ -657,7 +657,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `challenge1`,
           getKey: (post) => post.id,
           autoIndex,
-        })
+        }),
       )
 
       const challenge2Collection = createCollection(
@@ -665,7 +665,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `challenge2`,
           getKey: (post) => post.id,
           autoIndex,
-        })
+        }),
       )
 
       const liveQuery = createLiveQueryCollection((q) =>
@@ -673,12 +673,12 @@ describe(`createLiveQueryCollection`, () => {
           .from({ player: playerCollection })
           .leftJoin(
             { challenge1: challenge1Collection },
-            ({ player, challenge1 }) => eq(player.id, challenge1.id)
+            ({ player, challenge1 }) => eq(player.id, challenge1.id),
           )
           .leftJoin(
             { challenge2: challenge2Collection },
-            ({ player, challenge2 }) => eq(player.id, challenge2.id)
-          )
+            ({ player, challenge2 }) => eq(player.id, challenge2.id),
+          ),
       )
 
       // Start the query, but don't wait it, we are doing to write the data to the
@@ -743,7 +743,7 @@ describe(`createLiveQueryCollection`, () => {
         id: `test-tasks`,
         getKey: (task) => `source:${task.id}`,
         initialData: [initialTask],
-      })
+      }),
     )
 
     const liveQuery = createLiveQueryCollection({
@@ -902,7 +902,7 @@ describe(`createLiveQueryCollection`, () => {
           base.insert({
             id: `${index + 1}`,
             created_at: Date.now() + index,
-          })
+          }),
         )
 
         await vi.advanceTimersByTimeAsync(5000)
@@ -947,7 +947,7 @@ describe(`createLiveQueryCollection`, () => {
                 write({
                   type: `insert`,
                   value: todo,
-                })
+                }),
               )
               commit()
               markReady()
@@ -1087,7 +1087,7 @@ describe(`createLiveQueryCollection`, () => {
       })
 
       const liveQuery = createLiveQueryCollection((q) =>
-        q.from({ item: sourceCollection })
+        q.from({ item: sourceCollection }),
       )
 
       await liveQuery.preload()
@@ -1178,7 +1178,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1187,7 +1187,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `desc`)
           .limit(3)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1228,7 +1228,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1237,7 +1237,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(3)
-          .offset(3)
+          .offset(3),
       )
 
       await activeUsers.preload()
@@ -1277,7 +1277,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 4, name: `David`, active: true },
             { id: 5, name: `Eve`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1286,7 +1286,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1337,7 +1337,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1346,7 +1346,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(1)
+          .offset(1),
       )
 
       await activeUsers.preload()
@@ -1391,7 +1391,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 4, name: `David`, active: true },
             { id: 5, name: `Eve`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1400,7 +1400,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1442,7 +1442,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1451,7 +1451,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(1)
+          .offset(1),
       )
 
       await activeUsers.preload()
@@ -1495,7 +1495,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 2, name: `Bob`, active: true },
             { id: 3, name: `Charlie`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1504,7 +1504,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
           .limit(2)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1564,7 +1564,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, name: `Eve`, active: true },
             { id: 6, name: `Frank`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1573,7 +1573,7 @@ describe(`createLiveQueryCollection`, () => {
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `desc`)
           .limit(3)
-          .offset(0)
+          .offset(0),
       )
 
       await activeUsers.preload()
@@ -1606,7 +1606,7 @@ describe(`createLiveQueryCollection`, () => {
         (q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => eq(user.active, true))
+            .where(({ user }) => eq(user.active, true)),
         // No orderBy clause
       )
 
@@ -1619,7 +1619,7 @@ describe(`createLiveQueryCollection`, () => {
       expect(() => {
         activeUsers.utils.setWindow({ offset: 1, limit: 1 })
       }).toThrow(
-        /setWindow\(\) can only be called on collections with an ORDER BY clause/
+        /setWindow\(\) can only be called on collections with an ORDER BY clause/,
       )
     })
 
@@ -1643,7 +1643,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 5, title: `Post E`, authorId: 1, published: true },
             { id: 6, title: `Post F`, authorId: 2, published: true },
           ],
-        })
+        }),
       )
 
       const userPosts = createLiveQueryCollection((q) =>
@@ -1652,14 +1652,14 @@ describe(`createLiveQueryCollection`, () => {
           .join(
             { post: posts },
             ({ user, post }) => eq(user.id, post.authorId),
-            `inner`
+            `inner`,
           )
           .where(({ user, post }) =>
-            and(eq(user.active, true), eq(post.published, true))
+            and(eq(user.active, true), eq(post.published, true)),
           )
           .orderBy(({ post }) => post.title, `asc`)
           .limit(3)
-          .offset(0)
+          .offset(0),
       )
 
       await userPosts.preload()
@@ -1697,7 +1697,7 @@ describe(`createLiveQueryCollection`, () => {
             { id: 2, name: `Bob`, active: true },
             { id: 3, name: `Charlie`, active: true },
           ],
-        })
+        }),
       )
 
       const activeUsers = createLiveQueryCollection((q) =>
@@ -1705,7 +1705,7 @@ describe(`createLiveQueryCollection`, () => {
           .from({ user: extendedUsers })
           .where(({ user }) => eq(user.active, true))
           .orderBy(({ user }) => user.name, `asc`)
-          .limit(2)
+          .limit(2),
       )
 
       await activeUsers.preload()
@@ -1851,7 +1851,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `base-with-custom-key`,
           getKey: (item) => item.id,
           initialData: [{ id: `1`, name: `Item 1` }],
-        })
+        }),
       )
 
       const related = createCollection(
@@ -1859,7 +1859,7 @@ describe(`createLiveQueryCollection`, () => {
           id: `related-with-custom-key`,
           getKey: (item) => item.id,
           initialData: [{ id: `1`, value: 100 }],
-        })
+        }),
       )
 
       // Custom getKey is allowed - error only occurs if actual duplicates happen
@@ -1970,7 +1970,7 @@ describe(`createLiveQueryCollection`, () => {
       // Create a live query collection with a where clause
       // This will go through convertToBasicExpression
       const liveQueryCollection = createLiveQueryCollection((q) =>
-        q.from({ item: baseCollection }).where(({ item }) => eq(item.id, 2))
+        q.from({ item: baseCollection }).where(({ item }) => eq(item.id, 2)),
       )
 
       // Trigger sync which will call loadSubset
@@ -2019,7 +2019,7 @@ describe(`createLiveQueryCollection`, () => {
       const liveQueryCollection = createLiveQueryCollection((q) =>
         q
           .from({ item: baseCollection })
-          .where(({ item }) => ilike(item.name, `%test%`))
+          .where(({ item }) => ilike(item.name, `%test%`)),
       )
 
       // Trigger sync which will call loadSubset
@@ -2037,6 +2037,122 @@ describe(`createLiveQueryCollection`, () => {
       if (lastCall?.where?.type === `func`) {
         expect(lastCall.where.name).toBe(`ilike`)
       }
+
+      resolveLoadSubset!()
+      await flushPromises()
+    })
+
+    it(`passes single orderBy clause to loadSubset when using limit`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const baseCollection = createCollection<{
+        id: number
+        name: string
+        age: number
+      }>({
+        id: `test-base-orderby`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with orderBy and limit
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q
+          .from({ item: baseCollection })
+          .orderBy(({ item }) => item.age, `asc`)
+          .limit(10),
+      )
+
+      // Trigger sync which will call loadSubset
+      await liveQueryCollection.preload()
+      await flushPromises()
+
+      expect(capturedOptions.length).toBeGreaterThan(0)
+
+      // Find the call that has orderBy (the limited snapshot request)
+      const callWithOrderBy = capturedOptions.find(
+        (opt) => opt.orderBy !== undefined,
+      )
+      expect(callWithOrderBy).toBeDefined()
+      expect(callWithOrderBy?.orderBy).toHaveLength(1)
+      expect(callWithOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
+      expect(callWithOrderBy?.limit).toBe(10)
+
+      resolveLoadSubset!()
+      await flushPromises()
+    })
+
+    it(`passes multiple orderBy columns to loadSubset when using limit`, async () => {
+      const capturedOptions: Array<LoadSubsetOptions> = []
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      const baseCollection = createCollection<{
+        id: number
+        name: string
+        age: number
+        department: string
+      }>({
+        id: `test-base-multi-orderby`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                capturedOptions.push(options)
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query collection with multiple orderBy columns and limit
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q
+          .from({ item: baseCollection })
+          .orderBy(({ item }) => item.department, `asc`)
+          .orderBy(({ item }) => item.age, `desc`)
+          .limit(10),
+      )
+
+      // Trigger sync which will call loadSubset
+      await liveQueryCollection.preload()
+      await flushPromises()
+
+      expect(capturedOptions.length).toBeGreaterThan(0)
+
+      // Find the call that has orderBy with multiple columns
+      const callWithMultiOrderBy = capturedOptions.find(
+        (opt) => opt.orderBy !== undefined && opt.orderBy.length > 1,
+      )
+
+      // Multi-column orderBy should be passed to loadSubset so the sync layer
+      // can optimize the query if the backend supports composite ordering
+      expect(callWithMultiOrderBy).toBeDefined()
+      expect(callWithMultiOrderBy?.orderBy).toHaveLength(2)
+      expect(callWithMultiOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
+      expect(callWithMultiOrderBy?.orderBy?.[1]?.expression.type).toBe(`ref`)
+      expect(callWithMultiOrderBy?.limit).toBe(10)
 
       resolveLoadSubset!()
       await flushPromises()

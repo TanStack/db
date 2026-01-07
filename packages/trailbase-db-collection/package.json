@@ -1,46 +1,12 @@
 {
   "name": "@tanstack/trailbase-db-collection",
+  "version": "0.1.60",
   "description": "TrailBase collection for TanStack DB",
-  "version": "0.1.52",
-  "dependencies": {
-    "@standard-schema/spec": "^1.0.0",
-    "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.8.0",
-    "debug": "^4.4.3",
-    "trailbase": "^0.8.0"
-  },
-  "devDependencies": {
-    "@types/debug": "^4.1.12",
-    "@vitest/coverage-istanbul": "^3.2.4"
-  },
-  "exports": {
-    ".": {
-      "import": {
-        "types": "./dist/esm/index.d.ts",
-        "default": "./dist/esm/index.js"
-      },
-      "require": {
-        "types": "./dist/cjs/index.d.cts",
-        "default": "./dist/cjs/index.cjs"
-      }
-    },
-    "./package.json": "./package.json"
-  },
-  "files": [
-    "dist",
-    "src"
-  ],
-  "main": "dist/cjs/index.cjs",
-  "module": "dist/esm/index.js",
-  "packageManager": "pnpm@10.23.0",
-  "peerDependencies": {
-    "typescript": ">=4.7"
-  },
   "author": "Sebastian Jeltsch",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/TanStack/db.git",
+    "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/trailbase-db-collection"
   },
   "homepage": "https://tanstack.com/db",
@@ -54,9 +20,42 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "npx vitest --run"
+    "test": "vitest --run"
+  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "sideEffects": false,
-  "type": "module",
-  "types": "dist/esm/index.d.ts"
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "@standard-schema/spec": "^1.1.0",
+    "@tanstack/db": "workspace:*",
+    "@tanstack/store": "^0.8.0",
+    "debug": "^4.4.3",
+    "trailbase": "^0.8.0"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.7"
+  },
+  "devDependencies": {
+    "@types/debug": "^4.1.12",
+    "@vitest/coverage-istanbul": "^3.2.4"
+  }
 }

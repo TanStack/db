@@ -1,16 +1,16 @@
-import { describe, expect, it } from "vitest"
-import { createCollection } from "@tanstack/db"
+import { describe, expect, it } from 'vitest'
+import { createCollection } from '@tanstack/db'
 import {
   addRxPlugin,
   createRxDatabase,
   getFromMapOrCreate,
-} from "rxdb/plugins/core"
-import { RxDBDevModePlugin } from "rxdb/plugins/dev-mode"
-import { getRxStorageMemory } from "rxdb/plugins/storage-memory"
-import { wrappedValidateAjvStorage } from "rxdb/plugins/validate-ajv"
-import { OPEN_RXDB_SUBSCRIPTIONS, rxdbCollectionOptions } from "../src/rxdb"
-import type { RxCollection } from "rxdb/plugins/core"
-import type { RxDBCollectionConfig } from "../src/rxdb"
+} from 'rxdb/plugins/core'
+import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode'
+import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
+import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv'
+import { OPEN_RXDB_SUBSCRIPTIONS, rxdbCollectionOptions } from '../src/rxdb'
+import type { RxCollection } from 'rxdb/plugins/core'
+import type { RxDBCollectionConfig } from '../src/rxdb'
 
 type TestDocType = {
   id: string
@@ -36,7 +36,7 @@ describe(`RxDB Integration`, () => {
 
   async function getDatababase(
     initialDocs: Array<TestDocType> = [],
-    dbId = dbNameId++
+    dbId = dbNameId++,
   ) {
     const db = await createRxDatabase<RxCollections, unknown, unknown, unknown>(
       {
@@ -45,7 +45,7 @@ describe(`RxDB Integration`, () => {
         storage: wrappedValidateAjvStorage({
           storage: getRxStorageMemory(),
         }),
-      }
+      },
     )
     const collections = await db.addCollections<RxCollections>({
       test: {
@@ -76,7 +76,7 @@ describe(`RxDB Integration`, () => {
 
   async function createTestState(
     initialDocs: Array<TestDocType> = [],
-    config: Partial<RxDBCollectionConfig<TestDocType, any>> = {}
+    config: Partial<RxDBCollectionConfig<TestDocType, any>> = {},
   ) {
     const db = await getDatababase(initialDocs, dbNameId++)
     const rxCollection: RxCollection<TestDocType> = db.test
@@ -205,7 +205,7 @@ describe(`RxDB Integration`, () => {
       const subs = getFromMapOrCreate(
         OPEN_RXDB_SUBSCRIPTIONS,
         rxCollection,
-        () => new Set()
+        () => new Set(),
       )
       expect(subs.size).toEqual(0)
 
@@ -249,13 +249,13 @@ describe(`RxDB Integration`, () => {
         rxdbCollectionOptions({
           rxCollection: db1.test,
           startSync: true,
-        })
+        }),
       )
       const col2 = createCollection(
         rxdbCollectionOptions({
           rxCollection: db2.test,
           startSync: true,
-        })
+        }),
       )
       await col1.stateWhenReady()
       await col2.stateWhenReady()

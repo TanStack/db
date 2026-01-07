@@ -4,14 +4,14 @@
  * Tests reactive updates for sync-enabled collections
  */
 
-import { randomUUID } from "node:crypto"
-import { describe, expect, it } from "vitest"
-import { createLiveQueryCollection, gt } from "@tanstack/db"
-import { waitFor, waitForQueryData } from "../utils/helpers"
-import type { E2ETestConfig } from "../types"
+import { randomUUID } from 'node:crypto'
+import { describe, expect, it } from 'vitest'
+import { createLiveQueryCollection, gt } from '@tanstack/db'
+import { waitFor, waitForQueryData } from '../utils/helpers'
+import type { E2ETestConfig } from '../types'
 
 export function createLiveUpdatesTestSuite(
-  getConfig: () => Promise<E2ETestConfig>
+  getConfig: () => Promise<E2ETestConfig>,
 ) {
   describe(`Live Updates Suite`, () => {
     describe(`Reactive Updates`, () => {
@@ -27,7 +27,7 @@ export function createLiveUpdatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 30))
+            .where(({ user }) => gt(user.age, 30)),
         )
 
         await query.preload()
@@ -66,7 +66,7 @@ export function createLiveUpdatesTestSuite(
             {
               timeout: 5000,
               message: `Deletion of user ${newUserId} did not propagate`,
-            }
+            },
           )
         }
 
@@ -85,7 +85,7 @@ export function createLiveUpdatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 30))
+            .where(({ user }) => gt(user.age, 30)),
         )
 
         await query.preload()
@@ -124,7 +124,7 @@ export function createLiveUpdatesTestSuite(
             {
               timeout: 5000,
               message: `Deletion of user ${newUserId} did not propagate`,
-            }
+            },
           )
         }
 
@@ -143,7 +143,7 @@ export function createLiveUpdatesTestSuite(
         const query = createLiveQueryCollection((q) =>
           q
             .from({ user: usersCollection })
-            .where(({ user }) => gt(user.age, 30))
+            .where(({ user }) => gt(user.age, 30)),
         )
 
         await query.preload()
@@ -183,7 +183,7 @@ export function createLiveUpdatesTestSuite(
         const usersCollection = config.collections.onDemand.users
 
         const query = createLiveQueryCollection((q) =>
-          q.from({ user: usersCollection })
+          q.from({ user: usersCollection }),
         )
 
         await query.preload()
@@ -227,7 +227,7 @@ export function createLiveUpdatesTestSuite(
             {
               timeout: 5000,
               message: `Deletion of user ${newUserId} did not propagate`,
-            }
+            },
           )
         }
 
@@ -246,7 +246,7 @@ export function createLiveUpdatesTestSuite(
         const usersCollection = config.collections.onDemand.users
 
         const query = createLiveQueryCollection((q) =>
-          q.from({ user: usersCollection })
+          q.from({ user: usersCollection }),
         )
 
         await query.preload()
@@ -270,7 +270,7 @@ export function createLiveUpdatesTestSuite(
               const updated = query.get(userToUpdate.id)
               return updated?.age === originalAge + 10
             },
-            { timeout: 5000, message: `Update did not sync to query` }
+            { timeout: 5000, message: `Update did not sync to query` },
           )
 
           // Verify the update

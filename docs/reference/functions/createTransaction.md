@@ -23,13 +23,13 @@ Creates a new transaction for grouping multiple collection operations
 
 ### config
 
-[`TransactionConfig`](../../interfaces/TransactionConfig.md)\<`T`\>
+[`TransactionConfig`](../interfaces/TransactionConfig.md)\<`T`\>
 
 Transaction configuration with mutation function
 
 ## Returns
 
-[`Transaction`](../../interfaces/Transaction.md)\<`T`\>
+[`Transaction`](../interfaces/Transaction.md)\<`T`\>
 
 A new Transaction instance
 

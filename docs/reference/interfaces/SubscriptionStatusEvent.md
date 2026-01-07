@@ -13,7 +13,7 @@ Event emitted when subscription status changes to a specific status
 
 ### T
 
-`T` *extends* [`SubscriptionStatus`](../../type-aliases/SubscriptionStatus.md)
+`T` *extends* [`SubscriptionStatus`](../type-aliases/SubscriptionStatus.md)
 
 ## Properties
 

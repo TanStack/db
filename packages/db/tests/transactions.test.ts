@@ -1,12 +1,12 @@
-import { describe, expect, it } from "vitest"
-import { createTransaction } from "../src/transactions"
-import { createCollection } from "../src/collection/index.js"
+import { describe, expect, it } from 'vitest'
+import { createTransaction } from '../src/transactions'
+import { createCollection } from '../src/collection/index.js'
 import {
   MissingMutationFunctionError,
   TransactionAlreadyCompletedRollbackError,
   TransactionNotPendingCommitError,
   TransactionNotPendingMutateError,
-} from "../src/errors"
+} from '../src/errors'
 
 describe(`Transactions`, () => {
   it(`calling createTransaction creates a transaction`, () => {
@@ -39,13 +39,13 @@ describe(`Transactions`, () => {
     await transaction.commit()
 
     await expect(transaction.commit()).rejects.toThrow(
-      TransactionNotPendingCommitError
+      TransactionNotPendingCommitError,
     )
     expect(() => transaction.rollback()).toThrow(
-      TransactionAlreadyCompletedRollbackError
+      TransactionAlreadyCompletedRollbackError,
     )
     expect(() => transaction.mutate(() => {})).toThrow(
-      TransactionNotPendingMutateError
+      TransactionNotPendingMutateError,
     )
   })
   it(`should allow manually controlling the transaction lifecycle`, () => {

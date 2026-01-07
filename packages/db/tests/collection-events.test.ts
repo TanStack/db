@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection/index.js"
-import type { Collection } from "../src/collection/index.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
+import type { Collection } from '../src/collection/index.js'
 
 describe(`Collection Events System`, () => {
   let collection: Collection
@@ -149,7 +149,7 @@ describe(`Collection Events System`, () => {
       vi.advanceTimersByTime(1001)
 
       await expect(waitPromise).rejects.toThrow(
-        `Timeout waiting for event status:change`
+        `Timeout waiting for event status:change`,
       )
 
       vi.useRealTimers()

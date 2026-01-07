@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from 'vitest'
 import {
   createRefProxy,
   isRefProxy,
   toExpression,
   val,
-} from "../../../src/query/builder/ref-proxy.js"
-import { PropRef, Value } from "../../../src/query/ir.js"
+} from '../../../src/query/builder/ref-proxy.js'
+import { PropRef, Value } from '../../../src/query/ir.js'
 
 describe(`ref-proxy`, () => {
   describe(`createRefProxy`, () => {
@@ -100,7 +100,7 @@ describe(`ref-proxy`, () => {
 
       const nonexistentDesc = Object.getOwnPropertyDescriptor(
         proxy,
-        `nonexistent`
+        `nonexistent`,
       )
       expect(nonexistentDesc).toBeUndefined()
     })
@@ -114,7 +114,7 @@ describe(`ref-proxy`, () => {
       const keys = Object.getOwnPropertyNames((proxy as any).users)
       // table spread sentinel should exist on table proxy
       expect(keys.some((k) => k.startsWith(`__SPREAD_SENTINEL__users__`))).toBe(
-        true
+        true,
       )
     })
 

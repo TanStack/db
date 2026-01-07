@@ -4,26 +4,27 @@
  * end-to-end tests using actual Postgres + Electric sync
  */
 
-import { afterAll, afterEach, beforeAll, describe, inject } from "vitest"
-import { createCollection } from "@tanstack/db"
-import { ELECTRIC_TEST_HOOKS, electricCollectionOptions } from "../src/electric"
-import { makePgClient } from "../../db-collection-e2e/support/global-setup"
+import { afterAll, afterEach, beforeAll, describe, inject } from 'vitest'
+import { createCollection } from '@tanstack/db'
+import { ELECTRIC_TEST_HOOKS, electricCollectionOptions } from '../src/electric'
+import { makePgClient } from '../../db-collection-e2e/support/global-setup'
 import {
   createCollationTestSuite,
   createDeduplicationTestSuite,
   createJoinsTestSuite,
   createLiveUpdatesTestSuite,
+  createMovesTestSuite,
   createMutationsTestSuite,
   createPaginationTestSuite,
   createPredicatesTestSuite,
   createProgressiveTestSuite,
   generateSeedData,
-} from "../../db-collection-e2e/src/index"
-import { waitFor } from "../../db-collection-e2e/src/utils/helpers"
-import type { E2ETestConfig } from "../../db-collection-e2e/src/types"
-import type { Client } from "pg"
+} from '../../db-collection-e2e/src/index'
+import { waitFor } from '../../db-collection-e2e/src/utils/helpers'
+import type { E2ETestConfig } from '../../db-collection-e2e/src/types'
+import type { Client } from 'pg'
 
-declare module "vitest" {
+declare module 'vitest' {
   export interface ProvidedContext {
     baseUrl: string
     testSchema: string
@@ -31,7 +32,15 @@ declare module "vitest" {
 }
 
 describe(`Electric Collection E2E Tests`, () => {
-  let config: E2ETestConfig
+  let config: E2ETestConfig & {
+    tagsTestSetup?: {
+      dbClient: Client
+      baseUrl: string
+      testSchema: string
+      usersTable: string
+      postsTable: string
+    }
+  }
   let dbClient: Client
   let usersTable: string
   let postsTable: string
@@ -74,6 +83,7 @@ describe(`Electric Collection E2E Tests`, () => {
         title TEXT NOT NULL,
         content TEXT,
         "viewCount" INTEGER NOT NULL DEFAULT 0,
+        "largeViewCount" BIGINT NOT NULL,
         "publishedAt" TIMESTAMP,
         "deletedAt" TIMESTAMP
       )
@@ -105,24 +115,25 @@ describe(`Electric Collection E2E Tests`, () => {
           user.createdAt,
           user.metadata ? JSON.stringify(user.metadata) : null,
           user.deletedAt,
-        ]
+        ],
       )
     }
     console.log(`Inserted ${seedData.users.length} users successfully`)
 
     for (const post of seedData.posts) {
       await dbClient.query(
-        `INSERT INTO ${postsTable} (id, "userId", title, content, "viewCount", "publishedAt", "deletedAt")
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        `INSERT INTO ${postsTable} (id, "userId", title, content, "viewCount", "largeViewCount", "publishedAt", "deletedAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           post.id,
           post.userId,
           post.title,
           post.content,
           post.viewCount,
+          post.largeViewCount.toString(), // BigInt must be converted to string for pg
           post.publishedAt,
           post.deletedAt,
-        ]
+        ],
       )
     }
 
@@ -137,7 +148,7 @@ describe(`Electric Collection E2E Tests`, () => {
           comment.text,
           comment.createdAt,
           comment.deletedAt,
-        ]
+        ],
       )
     }
 
@@ -157,7 +168,7 @@ describe(`Electric Collection E2E Tests`, () => {
         syncMode: `eager`,
         getKey: (item: any) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const tempPostsCollection = createCollection(
@@ -172,7 +183,7 @@ describe(`Electric Collection E2E Tests`, () => {
         syncMode: `eager`,
         getKey: (item: any) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const tempCommentsCollection = createCollection(
@@ -187,7 +198,7 @@ describe(`Electric Collection E2E Tests`, () => {
         syncMode: `eager`,
         getKey: (item: any) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     await Promise.all([
@@ -234,7 +245,7 @@ describe(`Electric Collection E2E Tests`, () => {
         syncMode: `eager`,
         getKey: (item: any) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const eagerPosts = createCollection(
@@ -249,7 +260,7 @@ describe(`Electric Collection E2E Tests`, () => {
         syncMode: `eager`,
         getKey: (item: any) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const eagerComments = createCollection(
@@ -264,7 +275,7 @@ describe(`Electric Collection E2E Tests`, () => {
         syncMode: `eager`,
         getKey: (item: any) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const onDemandUsers = createCollection(
@@ -279,7 +290,7 @@ describe(`Electric Collection E2E Tests`, () => {
         syncMode: `on-demand`,
         getKey: (item: any) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const onDemandPosts = createCollection(
@@ -294,7 +305,7 @@ describe(`Electric Collection E2E Tests`, () => {
         syncMode: `on-demand`,
         getKey: (item: any) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     const onDemandComments = createCollection(
@@ -309,7 +320,7 @@ describe(`Electric Collection E2E Tests`, () => {
         syncMode: `on-demand`,
         getKey: (item: any) => item.id,
         startSync: true,
-      })
+      }),
     )
 
     // Create control mechanisms for progressive collections
@@ -352,7 +363,7 @@ describe(`Electric Collection E2E Tests`, () => {
         [ELECTRIC_TEST_HOOKS]: {
           beforeMarkingReady: () => usersUpToDateControl.createPromise(),
         },
-      })
+      }),
     )
 
     const progressivePosts = createCollection(
@@ -370,7 +381,7 @@ describe(`Electric Collection E2E Tests`, () => {
         [ELECTRIC_TEST_HOOKS]: {
           beforeMarkingReady: () => postsUpToDateControl.createPromise(),
         },
-      })
+      }),
     )
 
     const progressiveComments = createCollection(
@@ -388,7 +399,7 @@ describe(`Electric Collection E2E Tests`, () => {
         [ELECTRIC_TEST_HOOKS]: {
           beforeMarkingReady: () => commentsUpToDateControl.createPromise(),
         },
-      })
+      }),
     )
 
     // Wait for eager collections to sync all data
@@ -431,13 +442,20 @@ describe(`Electric Collection E2E Tests`, () => {
           commentsUpToDateControl.current?.()
         },
       },
+      tagsTestSetup: {
+        dbClient,
+        baseUrl,
+        testSchema,
+        usersTable,
+        postsTable,
+      },
       getTxid: async () => {
         // Get the current transaction ID from the last operation
         // This uses pg_current_xact_id_if_assigned() which returns the txid
         // Note: This gets the CURRENT transaction's ID, so must be called
         // immediately after an insert in the same transaction context
         const result = await dbClient.query(
-          `SELECT pg_current_xact_id_if_assigned()::text::bigint as txid`
+          `SELECT pg_current_xact_id_if_assigned()::text::bigint as txid`,
         )
         return result.rows[0]?.txid || null
       },
@@ -457,7 +475,7 @@ describe(`Electric Collection E2E Tests`, () => {
               user.createdAt,
               user.metadata ? JSON.stringify(user.metadata) : null,
               user.deletedAt || null,
-            ]
+            ],
           )
         },
         updateUser: async (id, updates) => {
@@ -485,7 +503,7 @@ describe(`Electric Collection E2E Tests`, () => {
           values.push(id)
           await dbClient.query(
             `UPDATE ${usersTable} SET ${setClauses.join(`, `)} WHERE id = $${paramIndex}`,
-            values
+            values,
           )
         },
         deleteUser: async (id) => {
@@ -493,17 +511,18 @@ describe(`Electric Collection E2E Tests`, () => {
         },
         insertPost: async (post) => {
           await dbClient.query(
-            `INSERT INTO ${postsTable} (id, "userId", title, content, "viewCount", "publishedAt", "deletedAt")
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            `INSERT INTO ${postsTable} (id, "userId", title, content, "viewCount", "largeViewCount", "publishedAt", "deletedAt")
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
             [
               post.id,
               post.userId,
               post.title,
               post.content || null,
               post.viewCount,
+              post.largeViewCount.toString(), // BigInt must be converted to string for pg
               post.publishedAt || null,
               post.deletedAt || null,
-            ]
+            ],
           )
         },
       },
@@ -575,4 +594,5 @@ describe(`Electric Collection E2E Tests`, () => {
   createMutationsTestSuite(getConfig)
   createLiveUpdatesTestSuite(getConfig)
   createProgressiveTestSuite(getConfig)
+  createMovesTestSuite(getConfig as any)
 })
