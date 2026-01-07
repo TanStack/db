@@ -1,5 +1,5 @@
 ---
-"@tanstack/react-db": patch
+'@tanstack/react-db': patch
 ---
 
 Improve runtime error message and documentation when `useLiveSuspenseQuery` receives `undefined` from query callback.
