@@ -1,9 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
-import { and, createLiveQueryCollection, eq, gte } from '../../src/query/index.js'
+import {
+  and,
+  createLiveQueryCollection,
+  eq,
+  gte,
+} from '../../src/query/index.js'
 import { PropRef, Value } from '../../src/query/ir.js'
-import type { Collection} from '../../src/collection/index.js';
-import type { LoadSubsetOptions, NonSingleResult, UtilsRecord } from '../../src/types.js'
+import type { Collection } from '../../src/collection/index.js'
+import type {
+  LoadSubsetOptions,
+  NonSingleResult,
+  UtilsRecord,
+} from '../../src/types.js'
 
 // Sample types for testing
 type Order = {
@@ -137,12 +146,12 @@ describe(`loadSubset with subqueries`, () => {
     const lastCall = loadSubsetCalls[loadSubsetCalls.length - 1]
     expect(lastCall).toBeDefined()
     expect(lastCall!.where).toBeDefined()
-    
+
     const expectedWhereClause = and(
       gte(new PropRef([`scheduled_at`]), new Value(today)),
       eq(new PropRef([`status`]), new Value(`queued`)),
     )
-    
+
     expect(lastCall!.where).toEqual(expectedWhereClause)
   })
 
