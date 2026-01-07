@@ -148,6 +148,7 @@ export function compileQuery(
     queryMapping,
     aliasToCollectionId,
     aliasRemapping,
+    sourceWhereClauses,
   )
   sources[mainSource] = mainInput
 
@@ -184,6 +185,7 @@ export function compileQuery(
       compileQuery,
       aliasToCollectionId,
       aliasRemapping,
+      sourceWhereClauses,
     )
   }
 
@@ -466,6 +468,7 @@ function processFrom(
   queryMapping: QueryMapping,
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -503,6 +506,12 @@ function processFrom(
       // any existing remappings from nested subquery levels.
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // Pull up source WHERE clauses from subquery to parent scope.
+      // This enables loadSubset to receive the correct where clauses for subquery collections.
+      for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
+        sourceWhereClauses.set(alias, whereClause)
+      }
 
       // Create a FLATTENED remapping from outer alias to innermost alias.
       // For nested subqueries, this ensures one-hop lookups (not recursive chains).
