@@ -13,21 +13,21 @@ Defined in: [packages/db/src/errors.ts:2](https://github.com/TanStack/db/blob/ma
 
 ## Extended by
 
-- [`NonRetriableError`](../NonRetriableError.md)
-- [`SchemaValidationError`](../SchemaValidationError.md)
-- [`DuplicateDbInstanceError`](../DuplicateDbInstanceError.md)
-- [`CollectionConfigurationError`](../CollectionConfigurationError.md)
-- [`CollectionStateError`](../CollectionStateError.md)
-- [`CollectionOperationError`](../CollectionOperationError.md)
-- [`MissingHandlerError`](../MissingHandlerError.md)
-- [`TransactionError`](../TransactionError.md)
-- [`QueryBuilderError`](../QueryBuilderError.md)
-- [`QueryCompilationError`](../QueryCompilationError.md)
-- [`JoinError`](../JoinError.md)
-- [`GroupByError`](../GroupByError.md)
-- [`StorageError`](../StorageError.md)
-- [`SyncCleanupError`](../SyncCleanupError.md)
-- [`QueryOptimizerError`](../QueryOptimizerError.md)
+- [`NonRetriableError`](NonRetriableError.md)
+- [`SchemaValidationError`](SchemaValidationError.md)
+- [`DuplicateDbInstanceError`](DuplicateDbInstanceError.md)
+- [`CollectionConfigurationError`](CollectionConfigurationError.md)
+- [`CollectionStateError`](CollectionStateError.md)
+- [`CollectionOperationError`](CollectionOperationError.md)
+- [`MissingHandlerError`](MissingHandlerError.md)
+- [`TransactionError`](TransactionError.md)
+- [`QueryBuilderError`](QueryBuilderError.md)
+- [`QueryCompilationError`](QueryCompilationError.md)
+- [`JoinError`](JoinError.md)
+- [`GroupByError`](GroupByError.md)
+- [`StorageError`](StorageError.md)
+- [`SyncCleanupError`](SyncCleanupError.md)
+- [`QueryOptimizerError`](QueryOptimizerError.md)
 
 ## Constructors
 

@@ -1,5 +1,5 @@
-import { Func, PropRef, Value } from "../ir.js"
-import type { BasicExpression, OrderBy } from "../ir.js"
+import { Func, PropRef, Value } from '../ir.js'
+import type { BasicExpression, OrderBy } from '../ir.js'
 
 /**
  * Normalizes a WHERE clause expression by removing table aliases from property references.
@@ -20,7 +20,7 @@ import type { BasicExpression, OrderBy } from "../ir.js"
  */
 export function normalizeExpressionPaths(
   whereClause: BasicExpression<boolean>,
-  collectionAlias: string
+  collectionAlias: string,
 ): BasicExpression<boolean> {
   const tpe = whereClause.type
   if (tpe === `val`) {
@@ -44,7 +44,7 @@ export function normalizeExpressionPaths(
     for (const arg of whereClause.args) {
       const convertedArg = normalizeExpressionPaths(
         arg as BasicExpression<boolean>,
-        collectionAlias
+        collectionAlias,
       )
       args.push(convertedArg)
     }
@@ -55,12 +55,12 @@ export function normalizeExpressionPaths(
 
 export function normalizeOrderByPaths(
   orderBy: OrderBy,
-  collectionAlias: string
+  collectionAlias: string,
 ): OrderBy {
   const normalizedOrderBy = orderBy.map((clause) => {
     const basicExp = normalizeExpressionPaths(
       clause.expression,
-      collectionAlias
+      collectionAlias,
     )
 
     return {

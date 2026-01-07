@@ -25,7 +25,7 @@ Defined in: [packages/db/src/query/ir.ts:74](https://github.com/TanStack/db/blob
 
 ##### collection
 
-[`CollectionImpl`](../../../../../classes/CollectionImpl.md)
+[`CollectionImpl`](../../../../classes/CollectionImpl.md)
 
 ##### alias
 

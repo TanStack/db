@@ -1,11 +1,11 @@
-import * as React from "react"
-import { createFileRoute } from "@tanstack/react-router"
-import { useLiveQuery } from "@tanstack/react-db"
+import * as React from 'react'
+import { createFileRoute } from '@tanstack/react-router'
+import { useLiveQuery } from '@tanstack/react-db'
 import {
   trailBaseConfigCollection,
   trailBaseTodoCollection,
-} from "../lib/collections"
-import { TodoApp } from "../components/TodoApp"
+} from '../lib/collections'
+import { TodoApp } from '../components/TodoApp'
 
 export const Route = createFileRoute(`/trailbase`)({
   component: TrailBasePage,
@@ -25,11 +25,11 @@ function TrailBasePage() {
   const { data: todos } = useLiveQuery((q) =>
     q
       .from({ todo: trailBaseTodoCollection })
-      .orderBy(({ todo }) => todo.created_at, `asc`)
+      .orderBy(({ todo }) => todo.created_at, `asc`),
   )
 
   const { data: configData } = useLiveQuery((q) =>
-    q.from({ config: trailBaseConfigCollection })
+    q.from({ config: trailBaseConfigCollection }),
   )
 
   // Note: TrailBase collections use recordApi internally, which is not exposed

@@ -1,7 +1,7 @@
-import { describe, expectTypeOf, it } from "vitest"
-import { z } from "zod"
-import { createCollection } from "../src/index"
-import { localOnlyCollectionOptions } from "../src/local-only"
+import { describe, expectTypeOf, it } from 'vitest'
+import { z } from 'zod'
+import { createCollection } from '../src/index'
+import { localOnlyCollectionOptions } from '../src/local-only'
 
 interface TestItem extends Record<string, unknown> {
   id: number
@@ -158,19 +158,19 @@ describe(`LocalOnly Collection Types`, () => {
       schema: testSchema,
       onInsert: (params) => {
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExpectedType>()
         return Promise.resolve()
       },
       onUpdate: (params) => {
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExpectedType>()
         return Promise.resolve()
       },
       onDelete: (params) => {
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExpectedType>()
         return Promise.resolve()
       },
@@ -215,23 +215,23 @@ describe(`LocalOnly Collection Types`, () => {
         schema: testSchema,
         onInsert: (params) => {
           expectTypeOf(
-            params.transaction.mutations[0].modified
+            params.transaction.mutations[0].modified,
           ).toEqualTypeOf<ExpectedType>()
           return Promise.resolve()
         },
         onUpdate: (params) => {
           expectTypeOf(
-            params.transaction.mutations[0].modified
+            params.transaction.mutations[0].modified,
           ).toEqualTypeOf<ExpectedType>()
           return Promise.resolve()
         },
         onDelete: (params) => {
           expectTypeOf(
-            params.transaction.mutations[0].modified
+            params.transaction.mutations[0].modified,
           ).toEqualTypeOf<ExpectedType>()
           return Promise.resolve()
         },
-      })
+      }),
     )
 
     collection.insert({

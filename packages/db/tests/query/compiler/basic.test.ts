@@ -1,10 +1,10 @@
-import { describe, expect, test } from "vitest"
-import { D2, MultiSet, output } from "@tanstack/db-ivm"
-import { compileQuery } from "../../../src/query/compiler/index.js"
-import { CollectionRef, PropRef, Value } from "../../../src/query/ir.js"
-import { and, eq, gt } from "../../../src/query/builder/operators/index.js"
-import type { QueryIR } from "../../../src/query/ir.js"
-import type { CollectionImpl } from "../../../src/collection/index.js"
+import { describe, expect, test } from 'vitest'
+import { D2, MultiSet, output } from '@tanstack/db-ivm'
+import { compileQuery } from '../../../src/query/compiler/index.js'
+import { CollectionRef, PropRef, Value } from '../../../src/query/ir.js'
+import { and, eq, gt } from '../../../src/query/builder/operators/index.js'
+import type { QueryIR } from '../../../src/query/ir.js'
+import type { CollectionImpl } from '../../../src/collection/index.js'
 
 // Sample user type for tests
 type User = {
@@ -52,20 +52,20 @@ describe(`Query2 Compiler`, () => {
         {},
         new Set(),
         {},
-        () => {}
+        () => {},
       )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
 
       input.sendData(
-        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1])),
       )
 
       graph.run()
@@ -108,20 +108,20 @@ describe(`Query2 Compiler`, () => {
         {},
         new Set(),
         {},
-        () => {}
+        () => {},
       )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
 
       input.sendData(
-        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1])),
       )
 
       graph.run()
@@ -186,20 +186,20 @@ describe(`Query2 Compiler`, () => {
         {},
         new Set(),
         {},
-        () => {}
+        () => {},
       )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
 
       input.sendData(
-        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1])),
       )
 
       graph.run()
@@ -252,20 +252,20 @@ describe(`Query2 Compiler`, () => {
         {},
         new Set(),
         {},
-        () => {}
+        () => {},
       )
 
       const messages: Array<MultiSet<any>> = []
       pipeline.pipe(
         output((message) => {
           messages.push(message)
-        })
+        }),
       )
 
       graph.finalize()
 
       input.sendData(
-        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1]))
+        new MultiSet(sampleUsers.map((user) => [[user.id, user], 1])),
       )
 
       graph.run()

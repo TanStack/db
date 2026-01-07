@@ -23,17 +23,17 @@ Returns the simplified predicate, or null if the difference cannot be simplified
 
 The predicate to subtract from
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\> | `undefined`
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\> | `undefined`
 
 ### subtractPredicate
 
 The predicate to subtract
 
-[`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\> | `undefined`
+[`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\> | `undefined`
 
 ## Returns
 
-  \| [`BasicExpression`](../../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
+  \| [`BasicExpression`](../@tanstack/namespaces/IR/type-aliases/BasicExpression.md)\<`boolean`\>
   \| `null`
 
 The simplified difference, or null if cannot be simplified

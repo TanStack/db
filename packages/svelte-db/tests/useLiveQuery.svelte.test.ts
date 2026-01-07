@@ -1,14 +1,14 @@
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it } from 'vitest'
 import {
   count,
   createCollection,
   createLiveQueryCollection,
   eq,
   gt,
-} from "@tanstack/db"
-import { flushSync } from "svelte"
-import { useLiveQuery } from "../src/useLiveQuery.svelte.js"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
+} from '@tanstack/db'
+import { flushSync } from 'svelte'
+import { useLiveQuery } from '../src/useLiveQuery.svelte.js'
+import { mockSyncCollectionOptions } from '../../db/tests/utils'
 
 type Person = {
   id: string
@@ -87,7 +87,7 @@ describe(`Query Collections`, () => {
         id: `test-persons`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     cleanup = $effect.root(() => {
@@ -99,7 +99,7 @@ describe(`Query Collections`, () => {
             id: persons.id,
             name: persons.name,
             age: persons.age,
-          }))
+          })),
       )
 
       flushSync()
@@ -122,7 +122,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-destructure`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     cleanup = $effect.root(() => {
@@ -136,7 +136,7 @@ describe(`Query Collections`, () => {
             id: persons.id,
             name: persons.name,
             age: persons.age,
-          }))
+          })),
       )
 
       // Destructure using $derived to maintain reactivity
@@ -212,7 +212,7 @@ describe(`Query Collections`, () => {
         id: `test-persons-2`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     cleanup = $effect.root(() => {
@@ -224,7 +224,7 @@ describe(`Query Collections`, () => {
             id: c.id,
             name: c.name,
           }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+          .orderBy(({ collection: c }) => c.id, `asc`),
       )
 
       // Wait for collection to sync
@@ -280,7 +280,7 @@ describe(`Query Collections`, () => {
             id: `4`,
             name: `Kyle Doe`,
           }),
-        ])
+        ]),
       )
 
       // Update the person
@@ -317,7 +317,7 @@ describe(`Query Collections`, () => {
             id: `4`,
             name: `Kyle Doe 2`,
           }),
-        ])
+        ]),
       )
 
       // Delete the person
@@ -355,7 +355,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     cleanup = $effect.root(() => {
@@ -365,20 +365,20 @@ describe(`Query Collections`, () => {
           id: `issue-collection-test`,
           getKey: (issue: Issue) => issue.id,
           initialData: initialIssues,
-        })
+        }),
       )
 
       const query = useLiveQuery((q) =>
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             name: persons.name,
-          }))
+          })),
       )
 
       // Wait for collections to sync
@@ -476,7 +476,7 @@ describe(`Query Collections`, () => {
         id: `params-change-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     cleanup = $effect.root(() => {
@@ -492,7 +492,7 @@ describe(`Query Collections`, () => {
               name: c.name,
               age: c.age,
             })),
-        [() => minAge]
+        [() => minAge],
       )
 
       // Wait for collection to sync
@@ -545,7 +545,7 @@ describe(`Query Collections`, () => {
         id: `optimistic-changes-test`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     cleanup = $effect.root(() => {
@@ -559,7 +559,7 @@ describe(`Query Collections`, () => {
             name: c.name,
             team: c.team,
           }))
-          .orderBy(({ collection: c }) => c.id, `asc`)
+          .orderBy(({ collection: c }) => c.id, `asc`),
       )
 
       // Wait for collection to sync
@@ -573,7 +573,7 @@ describe(`Query Collections`, () => {
           .select(({ queryResult }) => ({
             team: queryResult.team,
             count: count(queryResult.id),
-          }))
+          })),
       )
 
       // Wait for grouped query to sync
@@ -640,7 +640,7 @@ describe(`Query Collections`, () => {
         id: `person-collection-test-bug`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Create issue collection
@@ -649,7 +649,7 @@ describe(`Query Collections`, () => {
         id: `issue-collection-test-bug`,
         getKey: (issue: Issue) => issue.id,
         initialData: initialIssues,
-      })
+      }),
     )
 
     cleanup = $effect.root(() => {
@@ -658,13 +658,13 @@ describe(`Query Collections`, () => {
         q
           .from({ issues: issueCollection })
           .join({ persons: personCollection }, ({ issues, persons }) =>
-            eq(issues.userId, persons.id)
+            eq(issues.userId, persons.id),
           )
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
             name: persons.name,
-          }))
+          })),
       )
 
       // Wait for collections to sync and verify initial state
@@ -703,7 +703,7 @@ describe(`Query Collections`, () => {
         id: `pre-created-collection-test-vue`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     cleanup = $effect.root(() => {
@@ -747,7 +747,7 @@ describe(`Query Collections`, () => {
         id: `collection-1-vue`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const collection2 = createCollection(
@@ -772,7 +772,7 @@ describe(`Query Collections`, () => {
             team: `team3`,
           },
         ],
-      })
+      }),
     )
 
     cleanup = $effect.root(() => {
@@ -869,7 +869,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
 
         // Initially isReady should be false (collection is in idle state)
@@ -907,7 +907,7 @@ describe(`Query Collections`, () => {
           id: `pre-created-is-ready-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       cleanup = $effect.root(() => {
@@ -994,7 +994,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
 
         expect(query.isReady).toBe(false)
@@ -1047,7 +1047,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
 
         // Initially should be true
@@ -1091,7 +1091,7 @@ describe(`Query Collections`, () => {
           id: `live-updates-is-ready-test`,
           getKey: (person: Person) => person.id,
           initialData: initialPersons,
-        })
+        }),
       )
 
       cleanup = $effect.root(() => {
@@ -1102,7 +1102,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
 
         flushSync()
@@ -1173,13 +1173,13 @@ describe(`Query Collections`, () => {
           q
             .from({ issues: issueCollection })
             .join({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
               name: persons.name,
-            }))
+            })),
         )
 
         expect(query.isReady).toBe(false)
@@ -1248,7 +1248,7 @@ describe(`Query Collections`, () => {
                 id: c.id,
                 name: c.name,
               })),
-          [() => minAge]
+          [() => minAge],
         )
 
         expect(query.isReady).toBe(false)
@@ -1312,7 +1312,7 @@ describe(`Query Collections`, () => {
             .select(({ collection: c }) => ({
               id: c.id,
               name: c.name,
-            }))
+            })),
         )
 
         // Initially should be loading
@@ -1376,7 +1376,7 @@ describe(`Query Collections`, () => {
             .select(({ collection: c }) => ({
               id: c.id,
               name: c.name,
-            }))
+            })),
         )
 
         let readyEffectCount = 0
@@ -1439,7 +1439,7 @@ describe(`Query Collections`, () => {
         id: `config-querybuilder-test-vue`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { Query } = await import(`@tanstack/db`)
@@ -1506,7 +1506,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
 
         // Initially isLoading should be true
@@ -1612,7 +1612,7 @@ describe(`Query Collections`, () => {
               id: persons.id,
               name: persons.name,
               team: persons.team,
-            }))
+            })),
         )
 
         // Start sync
@@ -1725,13 +1725,13 @@ describe(`Query Collections`, () => {
           q
             .from({ issues: issueCollection })
             .join({ persons: personCollection }, ({ issues, persons }) =>
-              eq(issues.userId, persons.id)
+              eq(issues.userId, persons.id),
             )
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
               userName: persons.name,
-            }))
+            })),
         )
 
         // Start sync for both
@@ -1822,7 +1822,7 @@ describe(`Query Collections`, () => {
             .select(({ persons }) => ({
               id: persons.id,
               name: persons.name,
-            }))
+            })),
         )
 
         // Initially isLoading should be true
@@ -1849,6 +1849,223 @@ describe(`Query Collections`, () => {
         expect(query.state.size).toBe(0) // Still no data
         expect(query.data).toEqual([]) // Empty array
         expect(query.status).toBe(`ready`)
+      })
+    })
+  })
+
+  describe(`findOne() - single result queries`, () => {
+    it(`should return a single row when using findOne() with query function`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-1`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+        )
+
+        flushSync()
+
+        // State should still contain the item as a Map entry
+        expect(query.state.size).toBe(1)
+        expect(query.state.get(`3`)).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+
+        // Data should be a single object, not an array
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+        expect(Array.isArray(query.data)).toBe(false)
+      })
+    })
+
+    it(`should return a single row when using findOne() with config object`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-2`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery({
+          query: (q) =>
+            q
+              .from({ collection })
+              .where(({ collection: c }) => eq(c.id, `3`))
+              .findOne(),
+        })
+
+        flushSync()
+
+        expect(query.state.size).toBe(1)
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+        expect(Array.isArray(query.data)).toBe(false)
+      })
+    })
+
+    it(`should return a single row with pre-created collection using findOne()`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-3`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const liveQueryCollection = createLiveQueryCollection({
+          query: (q) =>
+            q
+              .from({ collection })
+              .where(({ collection: c }) => eq(c.id, `3`))
+              .findOne(),
+        })
+
+        const query = useLiveQuery(liveQueryCollection)
+
+        flushSync()
+
+        expect(query.state.size).toBe(1)
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+        expect(Array.isArray(query.data)).toBe(false)
+      })
+    })
+
+    it(`should return undefined when findOne() matches no rows`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-empty`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `999`)) // Non-existent ID
+            .findOne(),
+        )
+
+        flushSync()
+
+        expect(query.state.size).toBe(0)
+        expect(query.data).toBeUndefined()
+      })
+    })
+
+    it(`should reactively update single result when data changes`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-reactive`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+        )
+
+        flushSync()
+
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+
+        // Update the person
+        collection.utils.begin()
+        collection.utils.write({
+          type: `update`,
+          value: {
+            id: `3`,
+            name: `John Smith Updated`,
+            age: 36,
+            email: `john.smith@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        collection.utils.commit()
+
+        flushSync()
+
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith Updated`,
+          age: 36,
+        })
+        expect(Array.isArray(query.data)).toBe(false)
+      })
+    })
+
+    it(`should transition from single result to undefined when item is deleted`, () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-delete`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      cleanup = $effect.root(() => {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ collection })
+            .where(({ collection: c }) => eq(c.id, `3`))
+            .findOne(),
+        )
+
+        flushSync()
+
+        expect(query.data).toMatchObject({
+          id: `3`,
+          name: `John Smith`,
+        })
+
+        // Delete the person
+        collection.utils.begin()
+        collection.utils.write({
+          type: `delete`,
+          value: {
+            id: `3`,
+            name: `John Smith`,
+            age: 35,
+            email: `john.smith@example.com`,
+            isActive: true,
+            team: `team1`,
+          },
+        })
+        collection.utils.commit()
+
+        flushSync()
+
+        expect(query.data).toBeUndefined()
+        expect(query.state.size).toBe(0)
       })
     })
   })

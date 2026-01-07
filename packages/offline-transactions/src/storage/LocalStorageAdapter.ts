@@ -1,4 +1,4 @@
-import { BaseStorageAdapter } from "./StorageAdapter"
+import { BaseStorageAdapter } from './StorageAdapter'
 
 export class LocalStorageAdapter extends BaseStorageAdapter {
   private prefix: string
@@ -70,8 +70,8 @@ export class LocalStorageAdapter extends BaseStorageAdapter {
       ) {
         return Promise.reject(
           new Error(
-            `Storage quota exceeded. Consider clearing old transactions.`
-          )
+            `Storage quota exceeded. Consider clearing old transactions.`,
+          ),
         )
       }
       return Promise.reject(error)

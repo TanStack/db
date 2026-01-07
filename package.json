@@ -3,56 +3,56 @@
   "private": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/tanstack/db.git"
+    "url": "git+https://github.com/TanStack/db.git"
   },
-  "packageManager": "pnpm@10.24.0",
+  "packageManager": "pnpm@10.27.0",
   "type": "module",
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
     "build:minified": "pnpm --filter \"./packages/**\" build:minified",
     "changeset": "changeset",
     "changeset:publish": "changeset publish",
-    "changeset:version": "changeset version && pnpm install --no-frozen-lockfile",
-    "docs:generate": "tsx scripts/generateDocs.ts",
-    "format": "prettier --write \"**/*.{js,jsx,ts,tsx,json,md}\"",
+    "changeset:version": "changeset version && tsx scripts/update-example-deps.ts && pnpm install --no-frozen-lockfile",
+    "format": "prettier --experimental-cli --ignore-unknown '**/*' --write",
     "lint": "pnpm --filter \"./packages/**\" lint",
     "lint-all": "eslint . --fix",
     "prepare": "husky",
     "test": "pnpm --filter \"./packages/**\" test",
-    "test:verify-links": "node scripts/verify-links.ts"
+    "test:docs": "node scripts/verify-links.ts",
+    "test:sherif": "sherif -i zod",
+    "generate-docs": "node scripts/generate-docs.ts"
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.8",
-    "@eslint/js": "^9.39.1",
-    "@stylistic/eslint-plugin": "^4.4.1",
+    "@eslint/js": "^9.39.2",
     "@svitejs/changesets-changelog-github-compact": "^1.2.0",
-    "@tanstack/config": "^0.22.2",
+    "@tanstack/eslint-config": "0.3.4",
+    "@tanstack/typedoc-config": "0.3.3",
+    "@tanstack/vite-config": "0.4.3",
     "@testing-library/jest-dom": "^6.9.1",
     "@types/node": "^24.6.2",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@types/use-sync-external-store": "^1.5.0",
-    "@typescript-eslint/eslint-plugin": "^8.48.0",
-    "@typescript-eslint/parser": "^8.48.0",
-    "@vitejs/plugin-react": "^5.1.1",
-    "eslint": "^9.39.1",
-    "eslint-config-prettier": "^10.1.8",
+    "@typescript-eslint/eslint-plugin": "^8.51.0",
+    "@typescript-eslint/parser": "^8.51.0",
+    "@vitejs/plugin-react": "^5.1.2",
+    "eslint": "^9.39.2",
     "eslint-import-resolver-typescript": "^4.4.4",
-    "eslint-plugin-prettier": "^5.5.4",
     "eslint-plugin-react": "^7.37.5",
     "husky": "^9.1.7",
-    "jsdom": "^27.2.0",
-    "knip": "^5.70.2",
+    "jsdom": "^27.4.0",
+    "knip": "^5.79.0",
     "lint-staged": "^15.5.2",
     "markdown-link-extractor": "^4.0.3",
-    "mitt": "^3.0.1",
-    "prettier": "^3.7.3",
-    "publint": "^0.3.15",
+    "prettier": "^3.7.4",
+    "publint": "^0.3.16",
     "sherif": "^1.9.0",
     "shx": "^0.4.0",
     "tinyglobby": "^0.2.15",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.2",
-    "vite": "^7.2.6",
+    "vite": "^7.3.0",
     "vitest": "^3.2.4",
     "zod": "^3.25.76"
   },
@@ -60,30 +60,5 @@
     "*.{ts,tsx}": [
       "eslint --fix"
     ]
-  },
-  "workspaces": [
-    "packages/*",
-    "examples/*",
-    "examples/react/*"
-  ],
-  "pnpm": {
-    "overrides": {
-      "@tanstack/angular-db": "workspace:*",
-      "@tanstack/db": "workspace:*",
-      "@tanstack/db-ivm": "workspace:*",
-      "@tanstack/electric-db-collection": "workspace:*",
-      "@tanstack/offline-transactions": "workspace:*",
-      "@tanstack/powersync-db-collection": "workspace:*",
-      "@tanstack/query-db-collection": "workspace:*",
-      "@tanstack/react-db": "workspace:*",
-      "@tanstack/rxdb-db-collection": "workspace:*",
-      "@tanstack/solid-db": "workspace:*",
-      "@tanstack/svelte-db": "workspace:*",
-      "@tanstack/trailbase-db-collection": "workspace:*",
-      "@tanstack/vue-db": "workspace:*"
-    }
-  },
-  "dependencies": {
-    "tsx": "^4.21.0"
   }
 }

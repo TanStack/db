@@ -20,9 +20,9 @@ HAVING clauses can contain aggregates, unlike regular WHERE clauses
 
 ### having
 
-[`Where`](../../type-aliases/Where.md)
+[`Where`](../type-aliases/Where.md)
 
 ## Returns
 
-  \| [`Aggregate`](../../classes/Aggregate.md)\<`any`\>
-  \| [`BasicExpression`](../../type-aliases/BasicExpression.md)\<`any`\>
+  \| [`Aggregate`](../classes/Aggregate.md)\<`any`\>
+  \| [`BasicExpression`](../type-aliases/BasicExpression.md)\<`any`\>

@@ -1,8 +1,6 @@
-import { readFileSync, writeFileSync } from "node:fs"
-import { resolve } from "node:path"
-import { fileURLToPath } from "node:url"
-import { generateReferenceDocs } from "@tanstack/config/typedoc"
-import { glob } from "tinyglobby"
+import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { generateReferenceDocs } from '@tanstack/typedoc-config'
 
 const __dirname = fileURLToPath(new URL(`.`, import.meta.url))
 
@@ -21,7 +19,7 @@ await generateReferenceDocs({
       ],
       tsconfig: resolve(
         __dirname,
-        `../packages/electric-db-collection/tsconfig.docs.json`
+        `../packages/electric-db-collection/tsconfig.docs.json`,
       ),
       outputDir: resolve(__dirname, `../docs/reference/electric-db-collection`),
       exclude: [`packages/db/**/*`],
@@ -33,7 +31,7 @@ await generateReferenceDocs({
       ],
       tsconfig: resolve(
         __dirname,
-        `../packages/query-db-collection/tsconfig.docs.json`
+        `../packages/query-db-collection/tsconfig.docs.json`,
       ),
       outputDir: resolve(__dirname, `../docs/reference/query-db-collection`),
       exclude: [`packages/db/**/*`],
@@ -45,11 +43,11 @@ await generateReferenceDocs({
       ],
       tsconfig: resolve(
         __dirname,
-        `../packages/powersync-db-collection/tsconfig.docs.json`
+        `../packages/powersync-db-collection/tsconfig.docs.json`,
       ),
       outputDir: resolve(
         __dirname,
-        `../docs/reference/powersync-db-collection`
+        `../docs/reference/powersync-db-collection`,
       ),
       exclude: [`packages/db/**/*`],
     },
@@ -81,11 +79,11 @@ await generateReferenceDocs({
       ],
       tsconfig: resolve(
         __dirname,
-        `../packages/trailbase-db-collection/tsconfig.docs.json`
+        `../packages/trailbase-db-collection/tsconfig.docs.json`,
       ),
       outputDir: resolve(
         __dirname,
-        `../docs/reference/trailbase-db-collection`
+        `../docs/reference/trailbase-db-collection`,
       ),
       exclude: [`packages/db/**/*`],
     },
@@ -104,32 +102,6 @@ await generateReferenceDocs({
       exclude: [`packages/db/**/*`],
     },
   ],
-})
-
-// Find all markdown files matching the pattern
-const markdownFiles = [
-  ...(await glob(`docs/reference/**/*.md`)),
-  ...(await glob(`docs/framework/*/reference/**/*.md`)),
-]
-
-console.log(`Found ${markdownFiles.length} markdown files to process\n`)
-
-// Process each markdown file
-markdownFiles.forEach((file) => {
-  const content = readFileSync(file, `utf-8`)
-  let updatedContent = content
-  updatedContent = updatedContent.replaceAll(/\]\(\.\.\//gm, `](../../`)
-  // updatedContent = content.replaceAll(/\]\(\.\//gm, '](../')
-  updatedContent = updatedContent.replaceAll(
-    /\]\((?!https?:\/\/|\/\/|\/|\.\/|\.\.\/|#)([^)]+)\)/gm,
-    (match, p1) => `](../${p1})`
-  )
-
-  // Write the updated content back to the file
-  if (updatedContent !== content) {
-    writeFileSync(file, updatedContent, `utf-8`)
-    console.log(`Processed file: ${file}`)
-  }
 })
 
 console.log(`\n✅ All markdown files have been processed!`)

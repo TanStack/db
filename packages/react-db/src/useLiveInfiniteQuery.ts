@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { CollectionImpl } from "@tanstack/db"
-import { useLiveQuery } from "./useLiveQuery"
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { CollectionImpl } from '@tanstack/db'
+import { useLiveQuery } from './useLiveQuery'
 import type {
   Collection,
   Context,
@@ -9,13 +9,13 @@ import type {
   LiveQueryCollectionUtils,
   NonSingleResult,
   QueryBuilder,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 /**
  * Type guard to check if utils object has setWindow method (LiveQueryCollectionUtils)
  */
 function isLiveQueryCollectionUtils(
-  utils: unknown
+  utils: unknown,
 ): utils is LiveQueryCollectionUtils {
   return typeof (utils as any).setWindow === `function`
 }
@@ -27,7 +27,7 @@ export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
     lastPage: Array<InferResultType<TContext>[number]>,
     allPages: Array<Array<InferResultType<TContext>[number]>>,
     lastPageParam: number,
-    allPageParams: Array<number>
+    allPageParams: Array<number>,
   ) => number | undefined
 }
 
@@ -116,21 +116,21 @@ export function useLiveInfiniteQuery<
   TUtils extends Record<string, any>,
 >(
   liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult,
-  config: UseLiveInfiniteQueryConfig<any>
+  config: UseLiveInfiniteQueryConfig<any>,
 ): UseLiveInfiniteQueryReturn<any>
 
 // Overload for query function
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   config: UseLiveInfiniteQueryConfig<TContext>,
-  deps?: Array<unknown>
+  deps?: Array<unknown>,
 ): UseLiveInfiniteQueryReturn<TContext>
 
 // Implementation
 export function useLiveInfiniteQuery<TContext extends Context>(
   queryFnOrCollection: any,
   config: UseLiveInfiniteQueryConfig<TContext>,
-  deps: Array<unknown> = []
+  deps: Array<unknown> = [],
 ): UseLiveInfiniteQueryReturn<TContext> {
   const pageSize = config.pageSize || 20
   const initialPageParam = config.initialPageParam ?? 0
@@ -142,7 +142,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   if (!isCollection && typeof queryFnOrCollection !== `function`) {
     throw new Error(
       `useLiveInfiniteQuery: First argument must be either a pre-created live query collection (CollectionImpl) ` +
-        `or a query function. Received: ${typeof queryFnOrCollection}`
+        `or a query function. Received: ${typeof queryFnOrCollection}`,
     )
   }
 
@@ -188,7 +188,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     ? useLiveQuery(queryFnOrCollection)
     : useLiveQuery(
         (q) => queryFnOrCollection(q).limit(pageSize).offset(0),
-        deps
+        deps,
       )
 
   // Adjust window when pagination changes
@@ -203,7 +203,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       if (isCollection) {
         throw new Error(
           `useLiveInfiniteQuery: Pre-created live query collection must have an orderBy clause for infinite pagination to work. ` +
-            `Please add .orderBy() to your createLiveQueryCollection query.`
+            `Please add .orderBy() to your createLiveQueryCollection query.`,
         )
       }
       return
@@ -219,7 +219,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       ) {
         console.warn(
           `useLiveInfiniteQuery: Pre-created collection has window {offset: ${currentWindow.offset}, limit: ${currentWindow.limit}} ` +
-            `but hook expects {offset: ${expectedOffset}, limit: ${expectedLimit}}. Adjusting window now.`
+            `but hook expects {offset: ${expectedOffset}, limit: ${expectedLimit}}. Adjusting window now.`,
         )
       }
       hasValidatedCollectionRef.current = true
@@ -273,7 +273,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     // Flatten the pages for the data return (without peek ahead item)
     const flatDataResult = dataArray.slice(
       0,
-      totalItemsRequested
+      totalItemsRequested,
     ) as InferResultType<TContext>
 
     return {

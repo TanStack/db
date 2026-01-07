@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
-import { compileExpression } from "../../../src/query/compiler/evaluators.js"
-import { Func, PropRef, Value } from "../../../src/query/ir.js"
+import { describe, expect, it } from 'vitest'
+import { compileExpression } from '../../../src/query/compiler/evaluators.js'
+import { Func, PropRef, Value } from '../../../src/query/ir.js'
 import {
   add,
   and,
@@ -22,15 +22,15 @@ import {
   or,
   subtract,
   upper,
-} from "../../../src/query/builder/operators/index.js"
-import type { NamespacedRow } from "../../../src/types.js"
+} from '../../../src/query/builder/operators/index.js'
+import type { NamespacedRow } from '../../../src/types.js'
 
 describe(`evaluators`, () => {
   describe(`compileExpression`, () => {
     it(`handles unknown expression type`, () => {
       const unknownExpr = { type: `unknown` } as any
       expect(() => compileExpression(unknownExpr)).toThrow(
-        `Unknown expression type: unknown`
+        `Unknown expression type: unknown`,
       )
     })
 
@@ -38,7 +38,7 @@ describe(`evaluators`, () => {
       it(`throws error for empty reference path`, () => {
         const emptyRef = new PropRef([])
         expect(() => compileExpression(emptyRef)).toThrow(
-          `Reference path cannot be empty`
+          `Reference path cannot be empty`,
         )
       })
 
@@ -97,7 +97,7 @@ describe(`evaluators`, () => {
       it(`throws error for unknown function`, () => {
         const unknownFunc = new Func(`unknownFunc`, [])
         expect(() => compileExpression(unknownFunc)).toThrow(
-          `Unknown function: unknownFunc`
+          `Unknown function: unknownFunc`,
         )
       })
 
@@ -491,6 +491,36 @@ describe(`evaluators`, () => {
               // Should return true because content is the same
               expect(compiled({})).toBe(true)
             }
+          })
+
+          it(`handles eq with Date objects (should compare by getTime(), not reference)`, () => {
+            // Create two Date objects with the same time value
+            // They are different object instances but represent the same moment
+            const date1 = new Date(`2024-01-15T10:30:45.123Z`)
+            const date2 = new Date(`2024-01-15T10:30:45.123Z`)
+
+            // Verify they are different object references
+            expect(date1).not.toBe(date2)
+            // But they have the same time value
+            expect(date1.getTime()).toBe(date2.getTime())
+
+            const func = new Func(`eq`, [new Value(date1), new Value(date2)])
+            const compiled = compileExpression(func)
+
+            // Should return true because they represent the same time
+            // Currently this fails because eq() does referential comparison
+            expect(compiled({})).toBe(true)
+          })
+
+          it(`handles eq with Date objects with different times`, () => {
+            const date1 = new Date(`2024-01-15T10:30:45.123Z`)
+            const date2 = new Date(`2024-01-15T10:30:45.124Z`) // 1ms later
+
+            const func = new Func(`eq`, [new Value(date1), new Value(date2)])
+            const compiled = compileExpression(func)
+
+            // Should return false because they represent different times
+            expect(compiled({})).toBe(false)
           })
 
           it(`handles eq with Uint8Arrays created with length (repro case)`, () => {

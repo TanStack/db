@@ -10,7 +10,7 @@ export {
   type Source,
   type GetResult,
   type InferResultType,
-} from "./builder/index.js"
+} from './builder/index.js'
 
 // Expression functions exports - now from operator modules for tree-shaking
 export {
@@ -54,7 +54,7 @@ export {
   collect,
   minStr,
   maxStr,
-} from "./builder/aggregates/index.js"
+} from './builder/aggregates/index.js'
 
 // Types for custom operators and aggregates
 // Custom operators: create a Func with your own factory as the 3rd argument
@@ -67,23 +67,23 @@ export {
   type AggregateConfig,
   type AggregateFactory,
   type ValueExtractor,
-} from "./ir.js"
+} from './ir.js'
 
 // Ref proxy utilities
-export type { Ref } from "./builder/types.js"
-export { toExpression } from "./builder/ref-proxy.js"
+export type { Ref } from './builder/types.js'
+export { toExpression } from './builder/ref-proxy.js'
 
 // Compiler
-export { compileQuery } from "./compiler/index.js"
+export { compileQuery } from './compiler/index.js'
 
 // Live query collection utilities
 export {
   createLiveQueryCollection,
   liveQueryCollectionOptions,
-} from "./live-query-collection.js"
+} from './live-query-collection.js'
 
-export { type LiveQueryCollectionConfig } from "./live/types.js"
-export { type LiveQueryCollectionUtils } from "./live/collection-config-builder.js"
+export { type LiveQueryCollectionConfig } from './live/types.js'
+export { type LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 
 // Predicate utilities for predicate push-down
 export {
@@ -92,7 +92,8 @@ export {
   minusWherePredicates,
   isOrderBySubset,
   isLimitSubset,
+  isOffsetLimitSubset,
   isPredicateSubset,
-} from "./predicate-utils.js"
+} from './predicate-utils.js'
 
-export { DeduplicatedLoadSubset } from "./subset-dedupe.js"
+export { DeduplicatedLoadSubset } from './subset-dedupe.js'

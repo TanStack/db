@@ -1,6 +1,6 @@
-import { NonRetriableError } from "../types"
-import { BackoffCalculator } from "./BackoffCalculator"
-import type { RetryPolicy } from "../types"
+import { NonRetriableError } from '../types'
+import { BackoffCalculator } from './BackoffCalculator'
+import type { RetryPolicy } from '../types'
 
 export class DefaultRetryPolicy implements RetryPolicy {
   private backoffCalculator: BackoffCalculator

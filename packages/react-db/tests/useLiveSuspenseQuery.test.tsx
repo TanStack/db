@@ -1,15 +1,15 @@
-import { describe, expect, it } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
+import { describe, expect, it } from 'vitest'
+import { renderHook, waitFor } from '@testing-library/react'
 import {
   createCollection,
   createLiveQueryCollection,
   eq,
   gt,
-} from "@tanstack/db"
-import { StrictMode, Suspense } from "react"
-import { useLiveSuspenseQuery } from "../src/useLiveSuspenseQuery"
-import { mockSyncCollectionOptions } from "../../db/tests/utils"
-import type { ReactNode } from "react"
+} from '@tanstack/db'
+import { StrictMode, Suspense } from 'react'
+import { useLiveSuspenseQuery } from '../src/useLiveSuspenseQuery'
+import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import type { ReactNode } from 'react'
 
 type Person = {
   id: string
@@ -59,7 +59,7 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-1`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(
@@ -72,12 +72,12 @@ describe(`useLiveSuspenseQuery`, () => {
               id: persons.id,
               name: persons.name,
               age: persons.age,
-            }))
+            })),
         )
       },
       {
         wrapper: SuspenseWrapper,
-      }
+      },
     )
 
     // Wait for data to load
@@ -100,7 +100,7 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-2`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(
@@ -109,7 +109,7 @@ describe(`useLiveSuspenseQuery`, () => {
       },
       {
         wrapper: SuspenseWrapper,
-      }
+      },
     )
 
     await waitFor(() => {
@@ -127,7 +127,7 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-3`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(
@@ -136,12 +136,12 @@ describe(`useLiveSuspenseQuery`, () => {
           q
             .from({ collection })
             .where(({ collection: c }) => eq(c.id, `3`))
-            .findOne()
+            .findOne(),
         )
       },
       {
         wrapper: SuspenseWrapper,
-      }
+      },
     )
 
     await waitFor(() => {
@@ -161,13 +161,13 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-4`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const liveQuery = createLiveQueryCollection((q) =>
       q
         .from({ persons: collection })
-        .where(({ persons }) => gt(persons.age, 30))
+        .where(({ persons }) => gt(persons.age, 30)),
     )
 
     const { result } = renderHook(() => useLiveSuspenseQuery(liveQuery), {
@@ -191,7 +191,7 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-5`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result, rerender } = renderHook(
@@ -201,13 +201,13 @@ describe(`useLiveSuspenseQuery`, () => {
             q
               .from({ persons: collection })
               .where(({ persons }) => gt(persons.age, minAge)),
-          [minAge]
+          [minAge],
         )
       },
       {
         wrapper: SuspenseWrapper,
         initialProps: { minAge: 30 },
-      }
+      },
     )
 
     // Initial load - age > 30
@@ -231,14 +231,14 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-6`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(
       () => useLiveSuspenseQuery((q) => q.from({ persons: collection })),
       {
         wrapper: SuspenseWrapper,
-      }
+      },
     )
 
     // Wait for initial data
@@ -270,7 +270,7 @@ describe(`useLiveSuspenseQuery`, () => {
         },
         {
           wrapper: SuspenseWrapper,
-        }
+        },
       )
     }).toThrow(/does not support disabled queries/)
   })
@@ -281,7 +281,7 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-7`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(
@@ -292,7 +292,7 @@ describe(`useLiveSuspenseQuery`, () => {
       },
       {
         wrapper: SuspenseWrapper,
-      }
+      },
     )
 
     await waitFor(() => {
@@ -306,14 +306,14 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-8`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result, rerender } = renderHook(
       () => useLiveSuspenseQuery((q) => q.from({ persons: collection })),
       {
         wrapper: SuspenseWrapper,
-      }
+      },
     )
 
     await waitFor(() => {
@@ -338,25 +338,25 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-9`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result } = renderHook(
       () => {
         const persons = useLiveSuspenseQuery((q) =>
-          q.from({ persons: personsCollection })
+          q.from({ persons: personsCollection }),
         )
         const johnDoe = useLiveSuspenseQuery((q) =>
           q
             .from({ persons: personsCollection })
             .where(({ persons: p }) => eq(p.id, `1`))
-            .findOne()
+            .findOne(),
         )
         return { persons, johnDoe }
       },
       {
         wrapper: SuspenseWrapper,
-      }
+      },
     )
 
     await waitFor(() => {
@@ -376,14 +376,14 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-10`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result, unmount } = renderHook(
       () => useLiveSuspenseQuery((q) => q.from({ persons: collection })),
       {
         wrapper: SuspenseWrapper,
-      }
+      },
     )
 
     await waitFor(() => {
@@ -400,7 +400,7 @@ describe(`useLiveSuspenseQuery`, () => {
       () => {
         expect(liveQueryCollection.status).toBe(`cleaned-up`)
       },
-      { timeout: 1000 }
+      { timeout: 1000 },
     )
   })
 
@@ -410,7 +410,7 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-11`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     let suspenseCount = 0
@@ -435,7 +435,7 @@ describe(`useLiveSuspenseQuery`, () => {
       () => useLiveSuspenseQuery((q) => q.from({ persons: collection })),
       {
         wrapper: SuspenseCounter,
-      }
+      },
     )
 
     // Wait for initial load
@@ -488,7 +488,7 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-12`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const { result, rerender } = renderHook(
@@ -498,12 +498,12 @@ describe(`useLiveSuspenseQuery`, () => {
             q
               .from({ persons: collection })
               .where(({ persons }) => gt(persons.age, minAge)),
-          [minAge]
+          [minAge],
         ),
       {
         wrapper: SuspenseWrapper,
         initialProps: { minAge: 20 },
-      }
+      },
     )
 
     // Wait for initial load
@@ -540,7 +540,7 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-single`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     // Pre-create a SingleResult live query collection
@@ -548,14 +548,14 @@ describe(`useLiveSuspenseQuery`, () => {
       q
         .from({ persons: collection })
         .where(({ persons }) => eq(persons.id, `1`))
-        .findOne()
+        .findOne(),
     )
 
     const { result } = renderHook(
       () => useLiveSuspenseQuery(singlePersonQuery),
       {
         wrapper: SuspenseWrapper,
-      }
+      },
     )
 
     await waitFor(() => {
@@ -575,7 +575,7 @@ describe(`useLiveSuspenseQuery`, () => {
         id: `test-persons-suspense-strict`,
         getKey: (person: Person) => person.id,
         initialData: initialPersons,
-      })
+      }),
     )
 
     const StrictModeWrapper = ({ children }: { children: ReactNode }) => (
@@ -588,7 +588,7 @@ describe(`useLiveSuspenseQuery`, () => {
       () => useLiveSuspenseQuery((q) => q.from({ persons: collection })),
       {
         wrapper: StrictModeWrapper,
-      }
+      },
     )
 
     await waitFor(() => {

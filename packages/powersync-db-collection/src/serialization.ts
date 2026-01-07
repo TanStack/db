@@ -1,11 +1,11 @@
-import { ColumnType } from "@powersync/common"
-import type { Table } from "@powersync/common"
-import type { CustomSQLiteSerializer } from "./definitions"
+import { ColumnType } from '@powersync/common'
+import type { Table } from '@powersync/common'
+import type { CustomSQLiteSerializer } from './definitions'
 import type {
   ExtractedTable,
   ExtractedTableColumns,
   MapBaseColumnType,
-} from "./helpers"
+} from './helpers'
 
 /**
  * Serializes an object for persistence to a SQLite table, mapping its values to appropriate SQLite types.
@@ -48,7 +48,7 @@ export function serializeForSQLite<
   tableSchema: TTable,
   customSerializer: Partial<
     CustomSQLiteSerializer<TOutput, ExtractedTableColumns<TTable>>
-  > = {}
+  > = {},
 ): ExtractedTable<TTable> {
   return Object.fromEntries(
     Object.entries(value).map(([key, value]) => {
@@ -90,12 +90,12 @@ export function serializeForSQLite<
             const numberValue = Number(value)
             if (isNaN(numberValue)) {
               throw new Error(
-                `Could not convert ${key}=${value} to a number for SQLite`
+                `Could not convert ${key}=${value} to a number for SQLite`,
               )
             }
             return [key, numberValue]
           }
       }
-    })
+    }),
   )
 }

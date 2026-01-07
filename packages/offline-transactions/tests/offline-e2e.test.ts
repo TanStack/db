@@ -1,16 +1,16 @@
-import { describe, expect, it } from "vitest"
-import { NonRetriableError } from "../src/types"
-import { FakeStorageAdapter, createTestOfflineEnvironment } from "./harness"
-import type { TestItem } from "./harness"
-import type { OfflineMutationFnParams } from "../src/types"
-import type { PendingMutation } from "@tanstack/db"
+import { describe, expect, it } from 'vitest'
+import { NonRetriableError } from '../src/types'
+import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
+import type { TestItem } from './harness'
+import type { OfflineMutationFnParams } from '../src/types'
+import type { PendingMutation } from '@tanstack/db'
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 const waitUntil = async (
   predicate: () => boolean | Promise<boolean>,
   timeoutMs = 5000,
-  intervalMs = 20
+  intervalMs = 20,
 ) => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -280,7 +280,7 @@ describe(`offline executor end-to-end`, () => {
       `[TEST] After flush, mutationCalls:`,
       env.mutationCalls.length,
       `resolvers:`,
-      pendingResolvers.length
+      pendingResolvers.length,
     )
     expect(env.mutationCalls.length).toBe(1)
     expect(pendingResolvers.length).toBe(1)
@@ -306,7 +306,7 @@ describe(`offline executor end-to-end`, () => {
       `[TEST] After second flush, mutationCalls:`,
       env.mutationCalls.length,
       `resolvers:`,
-      pendingResolvers.length
+      pendingResolvers.length,
     )
     expect(env.mutationCalls.length).toBe(1)
     expect(pendingResolvers.length).toBe(1)
@@ -336,7 +336,7 @@ describe(`offline executor end-to-end`, () => {
     let env: ReturnType<typeof createTestOfflineEnvironment> | undefined
 
     const deferredMutation = async (
-      params: OfflineMutationFnParams & { attempt: number }
+      params: OfflineMutationFnParams & { attempt: number },
     ) => {
       const runtimeEnv = env
       if (!runtimeEnv) {
@@ -370,7 +370,7 @@ describe(`offline executor end-to-end`, () => {
       autoCommit: false,
     })
     const waitFirst = runtimeEnv.executor.waitForTransactionCompletion(
-      firstTx.id
+      firstTx.id,
     )
     firstTx.mutate(() => {
       runtimeEnv.collection.insert({
@@ -387,7 +387,7 @@ describe(`offline executor end-to-end`, () => {
       autoCommit: false,
     })
     const waitSecond = runtimeEnv.executor.waitForTransactionCompletion(
-      secondTx.id
+      secondTx.id,
     )
     secondTx.mutate(() => {
       runtimeEnv.collection.insert({

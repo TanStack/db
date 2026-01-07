@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, test } from "vitest"
-import { createLiveQueryCollection } from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+import { beforeEach, describe, expect, test } from 'vitest'
+import { createLiveQueryCollection } from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 import {
   and,
   avg,
@@ -19,7 +19,7 @@ import {
   not,
   or,
   sum,
-} from "../../src/query/builder/functions.js"
+} from '../../src/query/builder/functions.js'
 
 // Sample data types for comprehensive GROUP BY testing
 type Order = {
@@ -218,7 +218,7 @@ function createOrdersCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (order) => order.id,
       initialData: sampleOrders,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -262,10 +262,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer1?.min_amount).toBe(100)
         expect(customer1?.max_amount).toBe(400)
         expect(customer1?.min_date.toISOString()).toBe(
-          new Date(`2023-01-01`).toISOString()
+          new Date(`2023-01-01`).toISOString(),
         )
         expect(customer1?.max_date.toISOString()).toBe(
-          new Date(`2023-03-01`).toISOString()
+          new Date(`2023-03-01`).toISOString(),
         )
 
         // Customer 2: orders 3, 4 (amounts: 150, 300)
@@ -278,10 +278,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer2?.min_amount).toBe(150)
         expect(customer2?.max_amount).toBe(300)
         expect(customer2?.min_date.toISOString()).toBe(
-          new Date(`2023-01-20`).toISOString()
+          new Date(`2023-01-20`).toISOString(),
         )
         expect(customer2?.max_date.toISOString()).toBe(
-          new Date(`2023-02-01`).toISOString()
+          new Date(`2023-02-01`).toISOString(),
         )
 
         // Customer 3: orders 5, 6 (amounts: 250, 75)
@@ -294,10 +294,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer3?.min_amount).toBe(75)
         expect(customer3?.max_amount).toBe(250)
         expect(customer3?.min_date.toISOString()).toBe(
-          new Date(`2023-02-10`).toISOString()
+          new Date(`2023-02-10`).toISOString(),
         )
         expect(customer3?.max_date.toISOString()).toBe(
-          new Date(`2023-02-15`).toISOString()
+          new Date(`2023-02-15`).toISOString(),
         )
       })
 
@@ -487,7 +487,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         // Completed electronics: orders 1, 2, 4
         const completedElectronics = statusCategorySummary.get(
-          `["completed","electronics"]`
+          `["completed","electronics"]`,
         )
         expect(completedElectronics?.status).toBe(`completed`)
         expect(completedElectronics?.product_category).toBe(`electronics`)
@@ -545,9 +545,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                   gt(orders.amount, 150),
                   or(
                     eq(orders.status, `completed`),
-                    eq(orders.status, `pending`)
-                  )
-                )
+                    eq(orders.status, `pending`),
+                  ),
+                ),
               )
               .groupBy(({ orders }) => orders.product_category)
               .select(({ orders }) => ({
@@ -672,7 +672,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 avg_amount: avg(orders.amount),
               }))
               .having(({ orders }) =>
-                and(gt(count(orders.id), 1), gte(sum(orders.amount), 450))
+                and(gt(count(orders.id), 1), gte(sum(orders.amount), 450)),
               ),
         })
 
@@ -702,7 +702,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 min_amount: min(orders.amount),
               }))
               .having(({ orders }) =>
-                or(gt(count(orders.id), 2), lt(min(orders.amount), 100))
+                or(gt(count(orders.id), 2), lt(min(orders.amount), 100)),
               ),
         })
 
@@ -764,8 +764,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 and(
                   gte(min(orders.amount), 75),
                   gte(max(orders.amount), 300),
-                  gte(max(orders.date), new Date(`2020-09-17`))
-                )
+                  gte(max(orders.date), new Date(`2020-09-17`)),
+                ),
               ),
         })
 
@@ -1035,7 +1035,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             id: `empty-orders`,
             getKey: (order) => order.id,
             initialData: [],
-          })
+          }),
         )
 
         const emptyGroupBy = createLiveQueryCollection({
@@ -1221,8 +1221,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .where(({ orders }) =>
                 and(
                   not(isUndefined(orders.customer)),
-                  not(isUndefined(orders.shipping))
-                )
+                  not(isUndefined(orders.shipping)),
+                ),
               )
               .groupBy(({ orders }) => orders.customer?.tier)
               .groupBy(({ orders }) => orders.shipping?.method)
@@ -1239,14 +1239,14 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         // Should have groups for each tier-method combination
         const goldExpress = results.find(
-          (r) => r.tier === `gold` && r.method === `express`
+          (r) => r.tier === `gold` && r.method === `express`,
         )
         expect(goldExpress).toBeDefined()
         expect(goldExpress?.order_count).toBe(1)
         expect(goldExpress?.total_amount).toBe(100)
 
         const goldStandard = results.find(
-          (r) => r.tier === `gold` && r.method === `standard`
+          (r) => r.tier === `gold` && r.method === `standard`,
         )
         expect(goldStandard).toBeDefined()
         expect(goldStandard?.order_count).toBe(1)
@@ -1260,7 +1260,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .where(({ orders }) =>
-                not(isUndefined(orders.customer?.preferences))
+                not(isUndefined(orders.customer?.preferences)),
               )
               .groupBy(({ orders }) => orders.customer?.preferences.newsletter)
               .select(({ orders }) => ({
@@ -1275,14 +1275,14 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(results).toHaveLength(2) // true and false
 
         const subscribedUsers = results.find(
-          (r) => r.newsletter_subscribed === true
+          (r) => r.newsletter_subscribed === true,
         )
         expect(subscribedUsers).toBeDefined()
         expect(subscribedUsers?.order_count).toBe(2) // Orders from John Doe (gold tier)
         expect(subscribedUsers?.total_amount).toBe(300) // 100 + 200
 
         const unsubscribedUsers = results.find(
-          (r) => r.newsletter_subscribed === false
+          (r) => r.newsletter_subscribed === false,
         )
         expect(unsubscribedUsers).toBeDefined()
         expect(unsubscribedUsers?.order_count).toBe(1) // Order from Jane Smith
@@ -1296,7 +1296,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             q
               .from({ orders: ordersCollection })
               .groupBy(({ orders }) =>
-                not(isUndefined(orders.shipping?.tracking))
+                not(isUndefined(orders.shipping?.tracking)),
               )
               .select(({ orders }) => ({
                 tracking_status: not(isUndefined(orders.shipping?.tracking)),

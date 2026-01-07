@@ -2,9 +2,9 @@ import {
   EmptyReferencePathError,
   UnknownExpressionTypeError,
   UnknownFunctionError,
-} from "../../errors.js"
-import type { BasicExpression, Func, PropRef } from "../ir.js"
-import type { NamespacedRow } from "../../types.js"
+} from '../../errors.js'
+import type { BasicExpression, Func, PropRef } from '../ir.js'
+import type { NamespacedRow } from '../../types.js'
 
 // Each operator's Func node carries its own factory function.
 // No global registry is needed - the factory is passed directly to Func.
@@ -41,7 +41,7 @@ export type CompiledSingleRowExpression = (item: Record<string, unknown>) => any
  */
 export function compileExpression(
   expr: BasicExpression,
-  isSingleRow: boolean = false
+  isSingleRow: boolean = false,
 ): CompiledExpression | CompiledSingleRowExpression {
   const compiledFn = compileExpressionInternal(expr, isSingleRow)
   return compiledFn
@@ -51,7 +51,7 @@ export function compileExpression(
  * Compiles a single-row expression into an optimized evaluator function.
  */
 export function compileSingleRowExpression(
-  expr: BasicExpression
+  expr: BasicExpression,
 ): CompiledSingleRowExpression {
   const compiledFn = compileExpressionInternal(expr, true)
   return compiledFn as CompiledSingleRowExpression
@@ -63,7 +63,7 @@ export function compileSingleRowExpression(
  */
 export function compileExpressionInternal(
   expr: BasicExpression,
-  isSingleRow: boolean
+  isSingleRow: boolean,
 ): (data: any) => any {
   switch (expr.type) {
     case `val`: {
@@ -153,7 +153,7 @@ function compileSingleRowRef(ref: PropRef): CompiledSingleRowExpression {
 function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
   // Pre-compile all arguments using the appropriate compiler
   const compiledArgs = func.args.map((arg) =>
-    compileExpressionInternal(arg, isSingleRow)
+    compileExpressionInternal(arg, isSingleRow),
   )
 
   // Use the factory embedded in the Func node

@@ -1,8 +1,8 @@
-import { describe, expect, test } from "vitest"
-import { D2 } from "../../src/d2.js"
-import { MultiSet } from "../../src/multiset.js"
-import { topK } from "../../src/operators/topK.js"
-import { output } from "../../src/operators/output.js"
+import { describe, expect, test } from 'vitest'
+import { D2 } from '../../src/d2.js'
+import { MultiSet } from '../../src/multiset.js'
+import { topK } from '../../src/operators/topK.js'
+import { output } from '../../src/operators/output.js'
 
 describe(`Operators`, () => {
   describe(`TopK operation`, () => {
@@ -23,7 +23,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -35,7 +35,7 @@ describe(`Operators`, () => {
           [[null, { id: 3, value: `b` }], 1],
           [[null, { id: 4, value: `y` }], 1],
           [[null, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -69,7 +69,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -81,7 +81,7 @@ describe(`Operators`, () => {
           [[null, { id: 3, value: `b` }], 1],
           [[null, { id: 4, value: `y` }], 1],
           [[null, { id: 5, value: `c` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -113,7 +113,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -130,7 +130,7 @@ describe(`Operators`, () => {
           [[`two`, { id: 8, value: `2` }], 1],
           [[`two`, { id: 9, value: `1` }], 1],
           [[`two`, { id: 10, value: `0` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -168,7 +168,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -185,7 +185,7 @@ describe(`Operators`, () => {
           [[`two`, { id: 8, value: `2` }], 1],
           [[`two`, { id: 9, value: `1` }], 1],
           [[`two`, { id: 10, value: `0` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -221,7 +221,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -232,7 +232,7 @@ describe(`Operators`, () => {
           [[null, { id: 1, value: `d` }], 1],
           [[null, { id: 2, value: `e` }], 1],
           [[null, { id: 3, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -273,7 +273,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -285,7 +285,7 @@ describe(`Operators`, () => {
           [[null, { id: 2, value: `b` }], 1],
           [[null, { id: 3, value: `c` }], 1],
           [[null, { id: 4, value: `d` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -326,7 +326,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value), { limit: 3 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -337,7 +337,7 @@ describe(`Operators`, () => {
           [[null, { id: 1, value: `c` }], 1],
           [[null, { id: 2, value: `d` }], 1],
           [[null, { id: 3, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -354,7 +354,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[null, { id: 4, value: `a` }], 1],
           [[null, { id: 5, value: `b` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -388,7 +388,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -400,7 +400,7 @@ describe(`Operators`, () => {
           [[null, { id: 2, value: `b` }], 1],
           [[null, { id: 3, value: `c` }], 1],
           [[null, { id: 4, value: `d` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -415,7 +415,7 @@ describe(`Operators`, () => {
       input.sendData(
         new MultiSet([
           [[null, { id: 5, value: `0` }], 1], // Should be first alphabetically
-        ])
+        ]),
       )
       graph.run()
 
@@ -444,7 +444,7 @@ describe(`Operators`, () => {
         topK((a, b) => a.value.localeCompare(b.value), { limit: 2 }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -458,7 +458,7 @@ describe(`Operators`, () => {
           [[`group2`, { id: 4, value: `a` }], 1],
           [[`group2`, { id: 5, value: `b` }], 1],
           [[`group2`, { id: 6, value: `f` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -477,7 +477,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[`group1`, { id: 7, value: `a` }], 1], // Should be first in group1
           [[`group2`, { id: 4, value: `a` }], -1], // Remove from group2
-        ])
+        ]),
       )
       graph.run()
 
@@ -511,7 +511,7 @@ describe(`Operators`, () => {
         }),
         output((message) => {
           latestMessage = message
-        })
+        }),
       )
 
       graph.finalize()
@@ -524,7 +524,7 @@ describe(`Operators`, () => {
           [[null, { id: 3, value: `c` }], 1],
           [[null, { id: 4, value: `d` }], 1],
           [[null, { id: 5, value: `e` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -545,7 +545,7 @@ describe(`Operators`, () => {
           [[null, { id: 3, value: `c` }], -1],
           [[null, { id: 6, value: `_` }], 1],
           [[null, { id: 7, value: `aa` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -566,7 +566,7 @@ describe(`Operators`, () => {
         new MultiSet([
           [[null, { id: 1, value: `a` }], -1],
           [[null, { id: 8, value: `z` }], 1],
-        ])
+        ]),
       )
       graph.run()
 
@@ -590,10 +590,10 @@ function sortResults(results: Array<any>) {
   return [...results]
     .sort(
       ([_a, aMultiplicity], [_b, bMultiplicity]) =>
-        aMultiplicity - bMultiplicity
+        aMultiplicity - bMultiplicity,
     )
     .sort(
       ([[_aKey, aValue], _aMultiplicity], [[_bKey, bValue], _bMultiplicity]) =>
-        aValue.id - bValue.id
+        aValue.id - bValue.id,
     )
 }

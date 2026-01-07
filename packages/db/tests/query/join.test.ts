@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest"
+import { beforeEach, describe, expect, test } from 'vitest'
 import {
   concat,
   createLiveQueryCollection,
@@ -9,9 +9,9 @@ import {
   lt,
   not,
   or,
-} from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+} from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Sample data types for join testing
 type User = {
@@ -49,7 +49,7 @@ function createUsersCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (user) => user.id,
       initialData: sampleUsers,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -60,7 +60,7 @@ function createDepartmentsCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (dept) => dept.id,
       initialData: sampleDepartments,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -115,7 +115,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             .join(
               { dept: departmentsCollection },
               ({ user, dept }) => eq(user.department_id, dept.id),
-              joinType
+              joinType,
             )
             .select(({ user, dept }) => ({
               user_name: user?.name,
@@ -203,7 +203,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             .join(
               { dept: departmentsCollection },
               ({ user, dept }) => eq(user.department_id, dept.id),
-              joinType
+              joinType,
             ),
       })
 
@@ -296,7 +296,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             .join(
               { dept: departmentsCollection },
               ({ user, dept }) => eq(user.department_id, dept.id),
-              joinType
+              joinType,
             )
             .select(({ user, dept }) => ({
               user_name: user?.name,
@@ -339,7 +339,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             .join(
               { dept: departmentsCollection },
               ({ user, dept }) => eq(user.department_id, dept.id),
-              joinType
+              joinType,
             )
             .select(({ user, dept }) => ({
               user_name: user?.name,
@@ -378,7 +378,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .join(
                 { dept: departmentsCollection },
                 ({ user, dept }) => eq(user.department_id, dept.id),
-                joinType
+                joinType,
               )
               .select(({ user, dept }) => ({
                 user_name: user?.name,
@@ -427,7 +427,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .join(
                 { dept: departmentsCollection },
                 ({ user, dept }) => eq(user.department_id, dept.id),
-                joinType
+                joinType,
               )
               .select(({ user, dept }) => ({
                 user_name: user?.name,
@@ -437,7 +437,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
 
         // Initially Marketing has no users
         const marketingResults = joinQuery.toArray.filter(
-          (r) => r.department_name === `Marketing`
+          (r) => r.department_name === `Marketing`,
         )
         expect(marketingResults).toHaveLength(1)
         expect(marketingResults[0]?.user_name).toBeUndefined()
@@ -456,7 +456,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
 
         // Should now have Eve in Marketing instead of null
         const updatedMarketingResults = joinQuery.toArray.filter(
-          (r) => r.department_name === `Marketing`
+          (r) => r.department_name === `Marketing`,
         )
         expect(updatedMarketingResults).toHaveLength(1)
         expect(updatedMarketingResults[0]).toMatchObject({
@@ -504,7 +504,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           getKey: (team) => team.id,
           initialData: teams,
           autoIndex,
-        })
+        }),
       )
 
       const teamMembersCollection = createCollection(
@@ -513,7 +513,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           getKey: (member) => member.id,
           initialData: teamMembers,
           autoIndex,
-        })
+        }),
       )
 
       // Test WHERE clause that filters on the nullable side based on join type
@@ -528,7 +528,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             q
               .from({ team: teamsCollection })
               .leftJoin({ member: teamMembersCollection }, ({ team, member }) =>
-                eq(team.id, member.team_id)
+                eq(team.id, member.team_id),
               )
               .where(({ member }) => eq(member?.user_id, 100))
               .select(({ team, member }) => ({
@@ -548,7 +548,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .from({ team: teamsCollection })
               .rightJoin(
                 { member: teamMembersCollection },
-                ({ team, member }) => eq(team.id, member.team_id)
+                ({ team, member }) => eq(team.id, member.team_id),
               )
               .where(({ team }) => eq(team?.active, true))
               .select(({ team, member }) => ({
@@ -567,7 +567,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             q
               .from({ team: teamsCollection })
               .fullJoin({ member: teamMembersCollection }, ({ team, member }) =>
-                eq(team.id, member.team_id)
+                eq(team.id, member.team_id),
               )
               .where(({ member }) => eq(member?.role, `admin`))
               .select(({ team, member }) => ({
@@ -587,7 +587,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .from({ team: teamsCollection })
               .innerJoin(
                 { member: teamMembersCollection },
-                ({ team, member }) => eq(team.id, member.team_id)
+                ({ team, member }) => eq(team.id, member.team_id),
               )
               .where(({ member }) => eq(member.user_id, 100))
               .select(({ team, member }) => ({
@@ -698,7 +698,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           getKey: (company) => company.id,
           initialData: companies,
           autoIndex,
-        })
+        }),
       )
 
       const projectsCollection = createCollection(
@@ -707,7 +707,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           getKey: (project) => project.id,
           initialData: projects,
           autoIndex,
-        })
+        }),
       )
 
       const tasksCollection = createCollection(
@@ -716,7 +716,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
           getKey: (task) => task.id,
           initialData: tasks,
           autoIndex,
-        })
+        }),
       )
 
       // Create chained join query: Company -> Project -> Task
@@ -729,12 +729,12 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             .join(
               { project: projectsCollection },
               ({ company, project }) => eq(project.company_id, company.id),
-              joinType
+              joinType,
             )
             .join(
               { task: tasksCollection },
               ({ task, project }) => eq(task.project_id, project?.id),
-              joinType
+              joinType,
             )
             .select(({ company, project, task }) => ({
               company_name: company?.name,
@@ -753,13 +753,13 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
         (r) =>
           r.company_name === `TechCorp` &&
           r.project_name === `Website` &&
-          r.task_name === `Design`
+          r.task_name === `Design`,
       )
       const dataIncChain = results.find(
         (r) =>
           r.company_name === `DataInc` &&
           r.project_name === `Analytics` &&
-          r.task_name === `Research`
+          r.task_name === `Research`,
       )
 
       expect(techCorpChain).toBeDefined()
@@ -784,7 +784,7 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
       expect(resultsAfterInsert.length).toBeGreaterThanOrEqual(initialCount)
 
       const newTaskResult = resultsAfterInsert.find(
-        (r) => r.task_name === `New Task`
+        (r) => r.task_name === `New Task`,
       )
       expect(newTaskResult).toBeDefined()
       expect(newTaskResult!.project_name).toBe(`Website`)
@@ -818,7 +818,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               .join(
                 { dept: departmentsCollection },
                 ({ user, dept }) => eq(user.department_id, dept.id),
-                `inner`
+                `inner`,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -868,7 +868,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         expect(resultNames).toEqual([`Bob`, `Charlie`, `Dave`, `Eve`])
 
         const daveResult = innerJoinQuery.toArray.find(
-          (r) => r.user_name === `Dave`
+          (r) => r.user_name === `Dave`,
         )
         expect(daveResult).toMatchObject({
           user_name: `Dave`,
@@ -882,7 +882,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             id: `empty-users`,
             getKey: (user) => user.id,
             initialData: [],
-          })
+          }),
         )
 
         const innerJoinQuery = createLiveQueryCollection({
@@ -893,7 +893,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               .join(
                 { dept: departmentsCollection },
                 ({ user, dept }) => eq(user.department_id, dept.id),
-                `inner`
+                `inner`,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -932,7 +932,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               .join(
                 { dept: departmentsCollection },
                 ({ user, dept }) => eq(user.department_id, dept.id),
-                `left`
+                `left`,
               )
               .select(({ user, dept }) => ({
                 user_id: user.id,
@@ -970,9 +970,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 ({ user, dept }) =>
                   eq(
                     concat(`dept`, user.department_id),
-                    concat(`dept`, dept.id)
+                    concat(`dept`, dept.id),
                   ),
-                `inner`
+                `inner`,
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
@@ -1030,7 +1030,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           getKey: (player) => player.name,
           initialData: samplePlayers,
           autoIndex,
-        })
+        }),
       )
 
       const clientsCollection = createCollection(
@@ -1039,7 +1039,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           getKey: (client) => client.name,
           initialData: sampleClients,
           autoIndex,
-        })
+        }),
       )
 
       const balancesCollection = createCollection(
@@ -1048,7 +1048,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           getKey: (balance) => balance.name,
           initialData: sampleBalances,
           autoIndex,
-        })
+        }),
       )
 
       // Create chained join query: Player -> Client -> Balance
@@ -1061,10 +1061,10 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           q
             .from({ player: playersCollection })
             .innerJoin({ client: clientsCollection }, ({ client, player }) =>
-              eq(client.player, player.name)
+              eq(client.player, player.name),
             )
             .innerJoin({ balance: balancesCollection }, ({ balance, client }) =>
-              eq(balance.client, client.name)
+              eq(balance.client, client.name),
             )
             .select(({ player, client, balance }) => ({
               player_name: player.name,
@@ -1101,7 +1101,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       expect(resultsAfterClientUpdate).toHaveLength(3)
 
       const updatedResult1 = resultsAfterClientUpdate.find(
-        (r) => r.player_name === `player1`
+        (r) => r.player_name === `player1`,
       )
       expect(updatedResult1!.client_email).toBe(`updated-client1@example.com`)
       expect(updatedResult1!.balance_amount).toBe(1000) // Balance should remain the same
@@ -1124,7 +1124,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       expect(resultsAfterBalanceUpdate).toHaveLength(3)
 
       const updatedResult2 = resultsAfterBalanceUpdate.find(
-        (r) => r.player_name === `player2`
+        (r) => r.player_name === `player2`,
       )
       expect(updatedResult2!.balance_amount).toBe(3000) // Updated amount
       expect(updatedResult2!.client_name).toBe(`client2`) // Client should remain the same
@@ -1160,7 +1160,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       expect(resultsAfterBalanceInsert).toHaveLength(4)
 
       const newResult = resultsAfterBalanceInsert.find(
-        (r) => r.client_name === `client4`
+        (r) => r.client_name === `client4`,
       )
       expect(newResult).toBeDefined()
       expect(newResult!.player_name).toBe(`player1`)
@@ -1175,7 +1175,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       const resultsAfterClientDelete = chainedJoinQuery.toArray
       expect(resultsAfterClientDelete).toHaveLength(3)
       expect(
-        resultsAfterClientDelete.find((r) => r.client_name === `client4`)
+        resultsAfterClientDelete.find((r) => r.client_name === `client4`),
       ).toBeUndefined()
     })
 
@@ -1200,7 +1200,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           id: `test-users-self-join`,
           getKey: (user) => user.id,
           initialData: selfJoinSampleUsers,
-        })
+        }),
       )
 
       const selfJoinQuery = createLiveQueryCollection({
@@ -1211,7 +1211,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             .join(
               { parentUsers: selfJoinUsersCollection },
               ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
-              `inner`
+              `inner`,
             )
             .select(({ users, parentUsers }) => ({
               user_id: users.id,
@@ -1271,7 +1271,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           id: `test-users-bidirectional`,
           getKey: (user) => user.id,
           initialData: bidirectionalSampleUsers,
-        })
+        }),
       )
 
       // Test forward direction: eq(users.parentId, parentUsers.id)
@@ -1283,7 +1283,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             .join(
               { parentUsers: bidirectionalUsersCollection },
               ({ users, parentUsers }) => eq(users.parentId, parentUsers.id),
-              `inner`
+              `inner`,
             )
             .select(({ users, parentUsers }) => ({
               user_name: users.name,
@@ -1303,7 +1303,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             .join(
               { parentUsers: bidirectionalUsersCollection },
               ({ users, parentUsers }) => eq(parentUsers.id, users.parentId),
-              `inner`
+              `inner`,
             )
             .select(({ users, parentUsers }) => ({
               user_name: users.name,
@@ -1333,7 +1333,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           id: `test-users-same-table`,
           getKey: (user) => user.id,
           initialData: sampleUsers,
-        })
+        }),
       )
 
       const departmentsCollection = createDepartmentsCollection(autoIndex)
@@ -1345,11 +1345,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             q.from({ user: usersCollection }).join(
               { dept: departmentsCollection },
               ({ user }) => eq(user.id, user.department_id), // Both refer to 'user' table
-              `inner`
+              `inner`,
             ),
         })
       }).toThrow(
-        `Invalid join condition: both expressions refer to the same source "user"`
+        `Invalid join condition: both expressions refer to the same source "user"`,
       )
     })
 
@@ -1359,7 +1359,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           id: `test-users-no-refs`,
           getKey: (user) => user.id,
           initialData: sampleUsers,
-        })
+        }),
       )
 
       const departmentsCollection = createDepartmentsCollection(autoIndex)
@@ -1371,11 +1371,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             q.from({ user: usersCollection }).join(
               { dept: departmentsCollection },
               () => eq(1, 2), // Constants, no table references
-              `inner`
+              `inner`,
             ),
         })
       }).toThrow(
-        `Invalid join condition: expressions must reference source aliases`
+        `Invalid join condition: expressions must reference source aliases`,
       )
     })
 
@@ -1385,7 +1385,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           id: `test-users-no-refs`,
           getKey: (user) => user.id,
           initialData: sampleUsers,
-        })
+        }),
       )
 
       const departmentsCollection = createDepartmentsCollection(autoIndex)
@@ -1401,16 +1401,16 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               .join(
                 { dept: departmentsCollection },
                 ({ user, dept }) => eq(dept.id, user.department_id),
-                `inner`
+                `inner`,
               )
               .join(
                 { dept2: departmentsCollection2 },
                 ({ user, dept }) => eq(dept.id, user.department_id),
-                `inner`
+                `inner`,
               ),
         })
       }).toThrow(
-        `Invalid join condition: right expression does not refer to the joined source "dept2"`
+        `Invalid join condition: right expression does not refer to the joined source "dept2"`,
       )
     })
 
@@ -1420,7 +1420,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           id: `test-users-mixed-refs`,
           getKey: (user) => user.id,
           initialData: sampleUsers,
-        })
+        }),
       )
 
       const departmentsCollection = createDepartmentsCollection(autoIndex)
@@ -1432,11 +1432,11 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             q.from({ user: usersCollection }).join(
               { dept: departmentsCollection },
               ({ user }) => eq(user.id, user.department_id), // Both refer to 'user' table
-              `inner`
+              `inner`,
             ),
         })
       }).toThrow(
-        `Invalid join condition: both expressions refer to the same source "user"`
+        `Invalid join condition: both expressions refer to the same source "user"`,
       )
     })
 
@@ -1447,7 +1447,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           id: `special-users`,
           getKey: (user) => user.id,
           initialData: [{ id: 1, special: true }],
-        })
+        }),
       )
 
       const joinQuery = createLiveQueryCollection({
@@ -1457,7 +1457,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             .from({ user: usersCollection })
             .leftJoin(
               { special: specialUsersCollection },
-              ({ user, special }) => eq(user.id, special.id)
+              ({ user, special }) => eq(user.id, special.id),
             )
             .where(({ special }) => isUndefined(special)),
       })
@@ -1514,7 +1514,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           getKey: (event) => event.id,
           initialData: sampleEvents,
           autoIndex,
-        })
+        }),
       )
 
       const queryWithWhere = createLiveQueryCollection({
@@ -1523,12 +1523,12 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           q
             .from({ event: eventCollection })
             .where(({ event }) =>
-              eq(event.id, `3770a4a6-3260-4566-9f79-f50864ebdd46`)
+              eq(event.id, `3770a4a6-3260-4566-9f79-f50864ebdd46`),
             )
             .join(
               { parent: eventCollection },
               ({ event, parent }) => eq(parent.id, event.parent_id),
-              `left`
+              `left`,
             )
             .select(({ event, parent }) => ({
               id: event.id,
@@ -1546,13 +1546,13 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       expect(childEventWithWhere).toBeDefined()
 
       expect(childEventWithWhere.id).toBe(
-        `3770a4a6-3260-4566-9f79-f50864ebdd46`
+        `3770a4a6-3260-4566-9f79-f50864ebdd46`,
       )
       expect(childEventWithWhere.parent_id).toBe(
-        `ba224e71-a464-418d-a0a9-5959b490775d`
+        `ba224e71-a464-418d-a0a9-5959b490775d`,
       )
       expect(childEventWithWhere.parent.id).toBe(
-        `ba224e71-a464-418d-a0a9-5959b490775d`
+        `ba224e71-a464-418d-a0a9-5959b490775d`,
       )
     })
 
@@ -1580,7 +1580,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           getKey: (person) => person.id,
           initialData: samplePeople,
           autoIndex,
-        })
+        }),
       )
 
       // Query: Find employees aged > 30 and their managers aged > 35
@@ -1593,10 +1593,10 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             .join(
               { manager: peopleCollection },
               ({ employee, manager }) => eq(employee.manager_id, manager.id),
-              `left`
+              `left`,
             )
             .where(({ manager }) =>
-              or(isNull(manager?.id), gt(manager?.age, 35))
+              or(isNull(manager?.id), gt(manager?.age, 35)),
             )
             .select(({ employee, manager }) => ({
               employeeId: employee.id,
@@ -1664,7 +1664,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         getKey: (item) => item.id,
         initialData: collection1Data,
         autoIndex,
-      })
+      }),
     )
 
     const collection2 = createCollection(
@@ -1673,7 +1673,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         getKey: (item) => item.id,
         initialData: collection2Data,
         autoIndex,
-      })
+      }),
     )
 
     const multipleJoinQuery = createLiveQueryCollection({
@@ -1688,7 +1688,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 .where(({ join1 }) => not(gt(join1.other, 20))),
             },
             ({ main, join1 }) => eq(main.value, join1.value),
-            `left`
+            `left`,
           )
           .join(
             {
@@ -1697,7 +1697,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 .where(({ join2 }) => not(lt(join2.other, 20))),
             },
             ({ main, join2 }) => eq(main.value, join2.value),
-            `left`
+            `left`,
           ),
     })
 

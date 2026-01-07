@@ -9,7 +9,7 @@ title: ChangesPayload
 type ChangesPayload<T> = ChangeMessage<T>[];
 ```
 
-Defined in: [packages/db/src/types.ts:681](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L681)
+Defined in: [packages/db/src/types.ts:736](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L736)
 
 ## Type Parameters
 

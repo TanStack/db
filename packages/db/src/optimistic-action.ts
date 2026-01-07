@@ -1,7 +1,7 @@
-import { createTransaction } from "./transactions"
-import { OnMutateMustBeSynchronousError } from "./errors"
-import { isPromiseLike } from "./utils/type-guards"
-import type { CreateOptimisticActionsOptions, Transaction } from "./types"
+import { createTransaction } from './transactions'
+import { OnMutateMustBeSynchronousError } from './errors'
+import { isPromiseLike } from './utils/type-guards'
+import type { CreateOptimisticActionsOptions, Transaction } from './types'
 
 /**
  * Creates an optimistic action function that applies local optimistic updates immediately
@@ -52,7 +52,7 @@ import type { CreateOptimisticActionsOptions, Transaction } from "./types"
  * @returns A function that accepts variables of type TVariables and returns a Transaction
  */
 export function createOptimisticAction<TVariables = unknown>(
-  options: CreateOptimisticActionsOptions<TVariables>
+  options: CreateOptimisticActionsOptions<TVariables>,
 ) {
   const { mutationFn, onMutate, ...config } = options
 

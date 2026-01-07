@@ -1,16 +1,16 @@
-import type { GlobalSetupContext } from "vitest/node"
-import { Client, type ClientConfig } from "pg"
+import type { GlobalSetupContext } from 'vitest/node'
+import { Client, type ClientConfig } from 'pg'
 
-const ELECTRIC_URL = process.env.ELECTRIC_URL ?? "http://localhost:3000"
-const POSTGRES_HOST = process.env.POSTGRES_HOST ?? "localhost"
-const POSTGRES_PORT = parseInt(process.env.POSTGRES_PORT ?? "54321")
-const POSTGRES_USER = process.env.POSTGRES_USER ?? "postgres"
-const POSTGRES_PASSWORD = process.env.POSTGRES_PASSWORD ?? "password"
-const POSTGRES_DB = process.env.POSTGRES_DB ?? "e2e_test"
-const TEST_SCHEMA = "e2e_test"
+const ELECTRIC_URL = process.env.ELECTRIC_URL ?? 'http://localhost:3000'
+const POSTGRES_HOST = process.env.POSTGRES_HOST ?? 'localhost'
+const POSTGRES_PORT = parseInt(process.env.POSTGRES_PORT ?? '54321')
+const POSTGRES_USER = process.env.POSTGRES_USER ?? 'postgres'
+const POSTGRES_PASSWORD = process.env.POSTGRES_PASSWORD ?? 'password'
+const POSTGRES_DB = process.env.POSTGRES_DB ?? 'e2e_test'
+const TEST_SCHEMA = 'e2e_test'
 
 // Module augmentation for type-safe context injection
-declare module "vitest" {
+declare module 'vitest' {
   export interface ProvidedContext {
     baseUrl: string
     testSchema: string
@@ -53,7 +53,7 @@ async function waitForElectric(url: string): Promise<void> {
         const res = await fetch(`${url}/v1/health`)
         if (res.ok) {
           const data = (await res.json()) as { status: string }
-          if (data.status === "active") {
+          if (data.status === 'active') {
             clearTimeout(timeout)
             return resolve()
           }
@@ -74,7 +74,7 @@ async function waitForElectric(url: string): Promise<void> {
 async function waitForPostgres(client: Client): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error("Timed out waiting for Postgres"))
+      reject(new Error('Timed out waiting for Postgres'))
     }, 10000)
 
     const check = async (): Promise<void> => {
@@ -102,30 +102,30 @@ async function waitForPostgres(client: Client): Promise<void> {
  * 5. Returns cleanup function
  */
 export default async function ({ provide }: GlobalSetupContext) {
-  console.log("🚀 Starting e2e test suite global setup...")
+  console.log('🚀 Starting e2e test suite global setup...')
 
   // Wait for Electric server to be ready
   console.log(`⏳ Waiting for Electric at ${ELECTRIC_URL}...`)
   await waitForElectric(ELECTRIC_URL)
-  console.log("✓ Electric is ready")
+  console.log('✓ Electric is ready')
 
   // Connect to Postgres
   console.log(
-    `⏳ Connecting to Postgres at ${POSTGRES_HOST}:${POSTGRES_PORT}...`
+    `⏳ Connecting to Postgres at ${POSTGRES_HOST}:${POSTGRES_PORT}...`,
   )
   const client = makePgClient()
   await waitForPostgres(client)
-  console.log("✓ Postgres is ready")
+  console.log('✓ Postgres is ready')
 
   // Create test schema
   console.log(`⏳ Creating test schema: ${TEST_SCHEMA}...`)
   await client.query(`CREATE SCHEMA IF NOT EXISTS ${TEST_SCHEMA}`)
-  console.log("✓ Test schema created")
+  console.log('✓ Test schema created')
 
   // Provide context values to all tests
-  provide("baseUrl", ELECTRIC_URL)
-  provide("testSchema", TEST_SCHEMA)
-  provide("postgresConfig", {
+  provide('baseUrl', ELECTRIC_URL)
+  provide('testSchema', TEST_SCHEMA)
+  provide('postgresConfig', {
     host: POSTGRES_HOST,
     port: POSTGRES_PORT,
     user: POSTGRES_USER,
@@ -133,20 +133,20 @@ export default async function ({ provide }: GlobalSetupContext) {
     database: POSTGRES_DB,
   })
 
-  console.log("✅ Global setup complete\n")
+  console.log('✅ Global setup complete\n')
 
   // Return cleanup function (runs once after all tests)
   return async () => {
-    console.log("\n🧹 Running global teardown...")
+    console.log('\n🧹 Running global teardown...')
     try {
       await client.query(`DROP SCHEMA IF EXISTS ${TEST_SCHEMA} CASCADE`)
-      console.log("✓ Test schema dropped")
+      console.log('✓ Test schema dropped')
     } catch (error) {
-      console.error("Error dropping test schema:", error)
+      console.error('Error dropping test schema:', error)
     } finally {
       await client.end()
-      console.log("✓ Postgres connection closed")
-      console.log("✅ Global teardown complete")
+      console.log('✓ Postgres connection closed')
+      console.log('✅ Global teardown complete')
     }
   }
 }

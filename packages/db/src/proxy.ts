@@ -3,7 +3,7 @@
  * and provides a way to retrieve those changes.
  */
 
-import { deepEquals, isTemporal } from "./utils"
+import { deepEquals, isTemporal } from './utils'
 
 /**
  * Set of array methods that iterate with callbacks and may return elements.
@@ -58,7 +58,7 @@ const MAP_SET_ITERATOR_METHODS = new Set([
  * Check if a value is a proxiable object (not Date, RegExp, or Temporal)
  */
 function isProxiableObject(
-  value: unknown
+  value: unknown,
 ): value is Record<string | symbol, unknown> {
   return (
     value !== null &&
@@ -82,8 +82,8 @@ function createArrayIterationHandler<T extends object>(
     parent?: {
       tracker: ChangeTracker<Record<string | symbol, unknown>>
       prop: string | symbol
-    }
-  ) => { proxy: Record<string | symbol, unknown> }
+    },
+  ) => { proxy: Record<string | symbol, unknown> },
 ): ((...args: Array<unknown>) => unknown) | undefined {
   if (!CALLBACK_ITERATION_METHODS.has(methodName)) {
     return undefined
@@ -106,7 +106,7 @@ function createArrayIterationHandler<T extends object>(
         }
         const { proxy: elementProxy } = memoizedCreateChangeProxy(
           element,
-          nestedParent
+          nestedParent,
         )
         return elementProxy
       }
@@ -118,7 +118,7 @@ function createArrayIterationHandler<T extends object>(
       this: unknown,
       element: unknown,
       index: number,
-      array: unknown
+      array: unknown,
     ) {
       const proxiedElement = getProxiedElement(element, index)
       return callback.call(this, proxiedElement, index, array)
@@ -131,7 +131,7 @@ function createArrayIterationHandler<T extends object>(
         accumulator: unknown,
         element: unknown,
         index: number,
-        array: unknown
+        array: unknown,
       ) {
         const proxiedElement = getProxiedElement(element, index)
         return callback.call(this, accumulator, proxiedElement, index, array)
@@ -188,8 +188,8 @@ function createArrayIteratorHandler<T extends object>(
     parent?: {
       tracker: ChangeTracker<Record<string | symbol, unknown>>
       prop: string | symbol
-    }
-  ) => { proxy: Record<string | symbol, unknown> }
+    },
+  ) => { proxy: Record<string | symbol, unknown> },
 ): () => Iterator<unknown> {
   return function () {
     const array = changeTracker.copy_ as unknown as Array<unknown>
@@ -213,7 +213,7 @@ function createArrayIteratorHandler<T extends object>(
           }
           const { proxy: elementProxy } = memoizedCreateChangeProxy(
             element,
-            nestedParent
+            nestedParent,
           )
           proxiedElement = elementProxy
         }
@@ -235,7 +235,7 @@ function createArrayIteratorHandler<T extends object>(
 function createModifyingMethodHandler<T extends object>(
   methodFn: (...args: Array<unknown>) => unknown,
   changeTracker: ChangeTracker<T>,
-  markChanged: (tracker: ChangeTracker<T>) => void
+  markChanged: (tracker: ChangeTracker<T>) => void,
 ): (...args: Array<unknown>) => unknown {
   return function (...args: Array<unknown>) {
     const result = methodFn.apply(changeTracker.copy_, args)
@@ -259,9 +259,9 @@ function createMapSetIteratorHandler<T extends object>(
     parent?: {
       tracker: ChangeTracker<Record<string | symbol, unknown>>
       prop: string | symbol
-    }
+    },
   ) => { proxy: Record<string | symbol, unknown> },
-  markChanged: (tracker: ChangeTracker<T>) => void
+  markChanged: (tracker: ChangeTracker<T>) => void,
 ): ((...args: Array<unknown>) => unknown) | undefined {
   const isIteratorMethod =
     MAP_SET_ITERATOR_METHODS.has(methodName) || prop === Symbol.iterator
@@ -281,7 +281,7 @@ function createMapSetIteratorHandler<T extends object>(
           this: unknown,
           value: unknown,
           key: unknown,
-          collection: unknown
+          collection: unknown,
         ) {
           const cbresult = callback.call(this, value, key, collection)
           markChanged(changeTracker)
@@ -351,7 +351,7 @@ function createMapSetIteratorHandler<T extends object>(
                     if (changeTracker.copy_ instanceof Map) {
                       ;(changeTracker.copy_ as Map<unknown, unknown>).set(
                         mapKey,
-                        newValue
+                        newValue,
                       )
                     }
                   },
@@ -361,7 +361,7 @@ function createMapSetIteratorHandler<T extends object>(
                   mapParent as unknown as {
                     tracker: ChangeTracker<Record<string | symbol, unknown>>
                     prop: string | symbol
-                  }
+                  },
                 )
                 nextResult.value[1] = valueProxy
               }
@@ -383,7 +383,7 @@ function createMapSetIteratorHandler<T extends object>(
                       if (changeTracker.copy_ instanceof Map) {
                         ;(changeTracker.copy_ as Map<unknown, unknown>).set(
                           mapKey,
-                          newValue
+                          newValue,
                         )
                       }
                     },
@@ -393,7 +393,7 @@ function createMapSetIteratorHandler<T extends object>(
                     mapParent as unknown as {
                       tracker: ChangeTracker<Record<string | symbol, unknown>>
                       prop: string | symbol
-                    }
+                    },
                   )
                   nextResult.value = valueProxy
                 }
@@ -408,7 +408,7 @@ function createMapSetIteratorHandler<T extends object>(
                   updateSet: (newValue: unknown) => {
                     if (changeTracker.copy_ instanceof Set) {
                       ;(changeTracker.copy_ as Set<unknown>).delete(
-                        setOriginalValue
+                        setOriginalValue,
                       )
                       ;(changeTracker.copy_ as Set<unknown>).add(newValue)
                       originalToModifiedMap.set(setOriginalValue, newValue)
@@ -420,7 +420,7 @@ function createMapSetIteratorHandler<T extends object>(
                   setParent as unknown as {
                     tracker: ChangeTracker<Record<string | symbol, unknown>>
                     prop: string | symbol
-                  }
+                  },
                 )
                 nextResult.value = valueProxy
               } else {
@@ -433,7 +433,7 @@ function createMapSetIteratorHandler<T extends object>(
                       Record<string | symbol, unknown>
                     >,
                     prop: tempKey,
-                  }
+                  },
                 )
                 nextResult.value = valueProxy
               }
@@ -513,7 +513,7 @@ interface ChangeTracker<T extends object> {
 
 function deepClone<T extends unknown>(
   obj: T,
-  visited = new WeakMap<object, unknown>()
+  visited = new WeakMap<object, unknown>(),
 ): T {
   // Handle null and undefined
   if (obj === null || obj === undefined) {
@@ -552,7 +552,7 @@ function deepClone<T extends unknown>(
     // Get the constructor to create a new instance of the same type
     const TypedArrayConstructor = Object.getPrototypeOf(obj).constructor
     const clone = new TypedArrayConstructor(
-      (obj as unknown as TypedArray).length
+      (obj as unknown as TypedArray).length,
     ) as unknown as TypedArray
     visited.set(obj as object, clone)
 
@@ -596,7 +596,7 @@ function deepClone<T extends unknown>(
     if (Object.prototype.hasOwnProperty.call(obj, key)) {
       clone[key] = deepClone(
         (obj as Record<string | symbol, unknown>)[key],
-        visited
+        visited,
       )
     }
   }
@@ -605,7 +605,7 @@ function deepClone<T extends unknown>(
   for (const sym of symbolProps) {
     clone[sym] = deepClone(
       (obj as Record<string | symbol, unknown>)[sym],
-      visited
+      visited,
     )
   }
 
@@ -632,7 +632,7 @@ export function createChangeProxy<
   parent?: {
     tracker: ChangeTracker<Record<string | symbol, unknown>>
     prop: string | symbol
-  }
+  },
 ): {
   proxy: T
 
@@ -647,7 +647,7 @@ export function createChangeProxy<
     innerParent?: {
       tracker: ChangeTracker<Record<string | symbol, unknown>>
       prop: string | symbol
-    }
+    },
   ): {
     proxy: TInner
     getChanges: () => Record<string | symbol, any>
@@ -683,7 +683,7 @@ export function createChangeProxy<
   debugLog(
     `createChangeProxy called for target`,
     target,
-    changeTracker.proxyCount
+    changeTracker.proxyCount,
   )
   // Mark this object and all its ancestors as modified
   // Also propagate the actual changes up the chain
@@ -716,11 +716,11 @@ export function createChangeProxy<
 
   // Check if all properties in the current state have reverted to original values
   function checkIfReverted(
-    state: ChangeTracker<Record<string | symbol, unknown>>
+    state: ChangeTracker<Record<string | symbol, unknown>>,
   ): boolean {
     debugLog(
       `checkIfReverted called with assigned keys:`,
-      Object.keys(state.assigned_)
+      Object.keys(state.assigned_),
     )
 
     // If there are no assigned properties, object is unchanged
@@ -743,7 +743,7 @@ export function createChangeProxy<
           `Checking property ${String(prop)}, current:`,
           currentValue,
           `original:`,
-          originalValue
+          originalValue,
         )
 
         // If the value is not equal to original, something is still changed
@@ -785,7 +785,7 @@ export function createChangeProxy<
   // Update parent status based on child changes
   function checkParentStatus(
     parentState: ChangeTracker<Record<string | symbol, unknown>>,
-    childProp: string | symbol | unknown
+    childProp: string | symbol | unknown,
   ) {
     debugLog(`checkParentStatus called for child prop:`, childProp)
 
@@ -844,7 +844,7 @@ export function createChangeProxy<
               return createModifyingMethodHandler(
                 value,
                 changeTracker,
-                markChanged
+                markChanged,
               )
             }
 
@@ -853,7 +853,7 @@ export function createChangeProxy<
               methodName,
               value,
               changeTracker,
-              memoizedCreateChangeProxy
+              memoizedCreateChangeProxy,
             )
             if (iterationHandler) {
               return iterationHandler
@@ -863,7 +863,7 @@ export function createChangeProxy<
             if (prop === Symbol.iterator) {
               return createArrayIteratorHandler(
                 changeTracker,
-                memoizedCreateChangeProxy
+                memoizedCreateChangeProxy,
               )
             }
           }
@@ -876,7 +876,7 @@ export function createChangeProxy<
               return createModifyingMethodHandler(
                 value,
                 changeTracker,
-                markChanged
+                markChanged,
               )
             }
 
@@ -888,7 +888,7 @@ export function createChangeProxy<
               ptarget,
               changeTracker,
               memoizedCreateChangeProxy,
-              markChanged
+              markChanged,
             )
             if (iteratorHandler) {
               return iteratorHandler
@@ -908,7 +908,7 @@ export function createChangeProxy<
           // Create a proxy for the nested object
           const { proxy: nestedProxy } = memoizedCreateChangeProxy(
             originalValue,
-            nestedParent
+            nestedParent,
           )
 
           // Cache the proxy
@@ -926,7 +926,7 @@ export function createChangeProxy<
           `set called for property ${String(prop)}, current:`,
           currentValue,
           `new:`,
-          value
+          value,
         )
 
         // Only track the change if the value is actually different
@@ -941,7 +941,7 @@ export function createChangeProxy<
             `original:`,
             originalValue,
             `isRevertToOriginal:`,
-            isRevertToOriginal
+            isRevertToOriginal,
           )
 
           if (isRevertToOriginal) {
@@ -1128,7 +1128,7 @@ export function createChangeProxy<
  * @returns An object containing the array of proxies and a function to get all changes
  */
 export function createArrayChangeProxy<T extends object>(
-  targets: Array<T>
+  targets: Array<T>,
 ): {
   proxies: Array<T>
   getChanges: () => Array<Record<string | symbol, unknown>>
@@ -1151,7 +1151,7 @@ export function createArrayChangeProxy<T extends object>(
  */
 export function withChangeTracking<T extends object>(
   target: T,
-  callback: (proxy: T) => void
+  callback: (proxy: T) => void,
 ): Record<string | symbol, unknown> {
   const { proxy, getChanges } = createChangeProxy(target)
 
@@ -1170,7 +1170,7 @@ export function withChangeTracking<T extends object>(
  */
 export function withArrayChangeTracking<T extends object>(
   targets: Array<T>,
-  callback: (proxies: Array<T>) => void
+  callback: (proxies: Array<T>) => void,
 ): Array<Record<string | symbol, unknown>> {
   const { proxies, getChanges } = createArrayChangeProxy(targets)
 

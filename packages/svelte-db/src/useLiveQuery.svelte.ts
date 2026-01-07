@@ -1,23 +1,27 @@
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { untrack } from "svelte"
+import { untrack } from 'svelte'
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
-import { SvelteMap } from "svelte/reactivity"
-import { createLiveQueryCollection } from "@tanstack/db"
+import { SvelteMap } from 'svelte/reactivity'
+import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
-} from "@tanstack/db"
+  SingleResult,
+} from '@tanstack/db'
 
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
- * @property data - Reactive array of query results in order
+ * @property data - Reactive array of query results in order, or single item when using findOne()
  * @property collection - The underlying query collection instance
  * @property status - Current query status
  * @property isLoading - True while initial query data is loading
@@ -26,9 +30,9 @@ import type {
  * @property isError - True when query encountered an error
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<T extends object> {
+export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
   state: Map<string | number, T>
-  data: Array<T>
+  data: TData
   collection: Collection<T, string | number, {}>
   status: CollectionStatus
   isLoading: boolean
@@ -42,9 +46,10 @@ export interface UseLiveQueryReturnWithCollection<
   T extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
+  TData = Array<T>,
 > {
   state: Map<TKey, T>
-  data: Array<T>
+  data: TData
   collection: Collection<T, TKey, TUtils>
   status: CollectionStatus
   isLoading: boolean
@@ -151,11 +156,22 @@ function toValue<T>(value: MaybeGetter<T>): T {
  * //   </ul>
  * // {/if}
  */
-// Overload 1: Accept just the query function
+// Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-  deps?: Array<() => unknown>
-): UseLiveQueryReturn<GetResult<TContext>>
+  deps?: Array<() => unknown>,
+): UseLiveQueryReturn<GetResult<TContext>, InferResultType<TContext>>
+
+// Overload 1b: Accept query function that can return undefined/null
+export function useLiveQuery<TContext extends Context>(
+  queryFn: (
+    q: InitialQueryBuilder,
+  ) => QueryBuilder<TContext> | undefined | null,
+  deps?: Array<() => unknown>,
+): UseLiveQueryReturn<
+  GetResult<TContext>,
+  InferResultType<TContext> | undefined
+>
 
 /**
  * Create a live query using configuration object
@@ -197,8 +213,8 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-  deps?: Array<() => unknown>
-): UseLiveQueryReturn<GetResult<TContext>>
+  deps?: Array<() => unknown>,
+): UseLiveQueryReturn<GetResult<TContext>, InferResultType<TContext>>
 
 /**
  * Subscribe to an existing query collection (can be reactive)
@@ -243,19 +259,32 @@ export function useLiveQuery<TContext extends Context>(
  * //   {/each}
  * // {/if}
  */
-// Overload 3: Accept pre-created live query collection (can be reactive)
+// Overload 3: Accept pre-created live query collection WITHOUT SingleResult (returns array)
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: MaybeGetter<Collection<TResult, TKey, TUtils>>
-): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
+  liveQueryCollection: MaybeGetter<
+    Collection<TResult, TKey, TUtils> & NonSingleResult
+  >,
+): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, Array<TResult>>
+
+// Overload 4: Accept pre-created live query collection WITH SingleResult (returns single item)
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: MaybeGetter<
+    Collection<TResult, TKey, TUtils> & SingleResult
+  >,
+): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult | undefined>
 
 // Implementation
 export function useLiveQuery(
   configOrQueryOrCollection: any,
-  deps: Array<() => unknown> = []
+  deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
   const collection = $derived.by(() => {
     // First check if the original parameter might be a getter
@@ -293,6 +322,15 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Svelte helpers
     if (typeof unwrappedParam === `function`) {
+      // Check if query function returns null/undefined (disabled query)
+      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+      const result = unwrappedParam(queryBuilder)
+
+      if (result === undefined || result === null) {
+        // Disabled query - return null
+        return null
+      }
+
       return createLiveQueryCollection({
         query: unwrappedParam,
         startSync: true,
@@ -312,11 +350,11 @@ export function useLiveQuery(
   let internalData = $state<Array<any>>([])
 
   // Track collection status reactively
-  let status = $state(collection.status)
+  let status = $state(collection ? collection.status : (`disabled` as const))
 
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
-    currentCollection: Collection<any, any, any>
+    currentCollection: Collection<any, any, any>,
   ) => {
     untrack(() => {
       internalData = []
@@ -330,6 +368,20 @@ export function useLiveQuery(
   // Watch for collection changes and subscribe to updates
   $effect(() => {
     const currentCollection = collection
+
+    // Handle null collection (disabled query)
+    if (!currentCollection) {
+      status = `disabled` as const
+      untrack(() => {
+        state.clear()
+        internalData = []
+      })
+      if (currentUnsubscribe) {
+        currentUnsubscribe()
+        currentUnsubscribe = null
+      }
+      return
+    }
 
     // Update status state whenever the effect runs
     status = currentCollection.status
@@ -383,7 +435,7 @@ export function useLiveQuery(
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     currentUnsubscribe = subscription.unsubscribe.bind(subscription)
@@ -407,6 +459,18 @@ export function useLiveQuery(
       return state
     },
     get data() {
+      const currentCollection = collection
+      if (currentCollection) {
+        const config =
+          currentCollection.config as CollectionConfigSingleRowOption<
+            any,
+            any,
+            any
+          >
+        if (config.singleResult) {
+          return internalData[0]
+        }
+      }
       return internalData
     },
     get collection() {
@@ -419,7 +483,7 @@ export function useLiveQuery(
       return status === `loading`
     },
     get isReady() {
-      return status === `ready`
+      return status === `ready` || status === `disabled`
     },
     get isIdle() {
       return status === `idle`

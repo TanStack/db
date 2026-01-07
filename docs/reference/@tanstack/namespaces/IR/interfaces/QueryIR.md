@@ -31,7 +31,7 @@ Defined in: [packages/db/src/query/ir.ts:25](https://github.com/TanStack/db/blob
 
 ##### row
 
-[`NamespacedRow`](../../../../../type-aliases/NamespacedRow.md)
+[`NamespacedRow`](../../../../type-aliases/NamespacedRow.md)
 
 #### Returns
 
@@ -51,7 +51,7 @@ Defined in: [packages/db/src/query/ir.ts:23](https://github.com/TanStack/db/blob
 
 ##### row
 
-[`NamespacedRow`](../../../../../type-aliases/NamespacedRow.md)
+[`NamespacedRow`](../../../../type-aliases/NamespacedRow.md)
 
 #### Returns
 
@@ -71,7 +71,7 @@ Defined in: [packages/db/src/query/ir.ts:24](https://github.com/TanStack/db/blob
 
 ##### row
 
-[`NamespacedRow`](../../../../../type-aliases/NamespacedRow.md)
+[`NamespacedRow`](../../../../type-aliases/NamespacedRow.md)
 
 #### Returns
 

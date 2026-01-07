@@ -1,21 +1,21 @@
-import { createCollection } from "../collection/index.js"
-import { CollectionConfigBuilder } from "./live/collection-config-builder.js"
+import { createCollection } from '../collection/index.js'
+import { CollectionConfigBuilder } from './live/collection-config-builder.js'
 import {
   getBuilderFromConfig,
   registerCollectionBuilder,
-} from "./live/collection-registry.js"
-import type { LiveQueryCollectionUtils } from "./live/collection-config-builder.js"
-import type { LiveQueryCollectionConfig } from "./live/types.js"
-import type { InitialQueryBuilder, QueryBuilder } from "./builder/index.js"
-import type { Collection } from "../collection/index.js"
+} from './live/collection-registry.js'
+import type { LiveQueryCollectionUtils } from './live/collection-config-builder.js'
+import type { LiveQueryCollectionConfig } from './live/types.js'
+import type { InitialQueryBuilder, QueryBuilder } from './builder/index.js'
+import type { Collection } from '../collection/index.js'
 import type {
   CollectionConfig,
   CollectionConfigSingleRowOption,
   NonSingleResult,
   SingleResult,
   UtilsRecord,
-} from "../types.js"
-import type { Context, GetResult } from "./builder/types.js"
+} from '../types.js'
+import type { Context, GetResult } from './builder/types.js'
 
 type CollectionConfigForContext<
   TContext extends Context,
@@ -63,7 +63,7 @@ export function liveQueryCollectionOptions<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 >(
-  config: LiveQueryCollectionConfig<TContext, TResult>
+  config: LiveQueryCollectionConfig<TContext, TResult>,
 ): CollectionConfigForContext<TContext, TResult> & {
   utils: LiveQueryCollectionUtils
 } {
@@ -116,7 +116,7 @@ export function createLiveQueryCollection<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
 >(
-  query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
+  query: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
 ): CollectionForContext<TContext, TResult> & {
   utils: LiveQueryCollectionUtils
 }
@@ -127,7 +127,7 @@ export function createLiveQueryCollection<
   TResult extends object = GetResult<TContext>,
   TUtils extends UtilsRecord = {},
 >(
-  config: LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils }
+  config: LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils },
 ): CollectionForContext<TContext, TResult> & {
   utils: LiveQueryCollectionUtils & TUtils
 }
@@ -140,7 +140,7 @@ export function createLiveQueryCollection<
 >(
   configOrQuery:
     | (LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils })
-    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
+    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>),
 ): CollectionForContext<TContext, TResult> & {
   utils: LiveQueryCollectionUtils & TUtils
 } {
@@ -149,7 +149,7 @@ export function createLiveQueryCollection<
     // Simple query function case
     const config: LiveQueryCollectionConfig<TContext, TResult> = {
       query: configOrQuery as (
-        q: InitialQueryBuilder
+        q: InitialQueryBuilder,
       ) => QueryBuilder<TContext>,
     }
     const options = liveQueryCollectionOptions<TContext, TResult>(config)
@@ -185,7 +185,7 @@ function bridgeToCreateCollection<
   TResult extends object,
   TUtils extends UtilsRecord = {},
 >(
-  options: CollectionConfig<TResult> & { utils: TUtils }
+  options: CollectionConfig<TResult> & { utils: TUtils },
 ): Collection<TResult, string | number, TUtils> {
   const collection = createCollection(options as any) as unknown as Collection<
     TResult,

@@ -1,22 +1,22 @@
-import { describe, expectTypeOf, it } from "vitest"
-import { z } from "zod"
+import { describe, expectTypeOf, it } from 'vitest'
+import { z } from 'zod'
 import {
   and,
   createCollection,
   createLiveQueryCollection,
   eq,
   gt,
-} from "@tanstack/db"
-import { electricCollectionOptions } from "../src/electric"
+} from '@tanstack/db'
+import { electricCollectionOptions } from '../src/electric'
 import type {
   ElectricCollectionConfig,
   ElectricCollectionUtils,
-} from "../src/electric"
+} from '../src/electric'
 import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   UpdateMutationFnParams,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 describe(`Electric collection type resolution tests`, () => {
   // Define test types
@@ -175,21 +175,21 @@ describe(`Electric collection type resolution tests`, () => {
       onInsert: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ txid: 1 })
       },
       onUpdate: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ txid: 1 })
       },
       onDelete: (params) => {
         // Verify that the mutation value has the correct type
         expectTypeOf(
-          params.transaction.mutations[0].original
+          params.transaction.mutations[0].original,
         ).toEqualTypeOf<ExplicitType>()
         return Promise.resolve({ txid: 1 })
       },
@@ -229,12 +229,12 @@ describe(`Electric collection type resolution tests`, () => {
       onDelete: (params) => {
         // Direct index access should be correctly typed
         expectTypeOf(
-          params.transaction.mutations[0].original
+          params.transaction.mutations[0].original,
         ).toEqualTypeOf<TodoType>()
 
         // Non-null assertion on second element should be correctly typed
         expectTypeOf(
-          params.transaction.mutations[1]!.original
+          params.transaction.mutations[1]!.original,
         ).toEqualTypeOf<TodoType>()
 
         // When mapping over mutations, each mutation.original should be correctly typed
@@ -248,7 +248,7 @@ describe(`Electric collection type resolution tests`, () => {
       onInsert: (params) => {
         // Direct index access should be correctly typed
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<TodoType>()
 
         // When mapping over mutations, each mutation.modified should be correctly typed
@@ -262,10 +262,10 @@ describe(`Electric collection type resolution tests`, () => {
       onUpdate: (params) => {
         // Direct index access should be correctly typed
         expectTypeOf(
-          params.transaction.mutations[0].original
+          params.transaction.mutations[0].original,
         ).toEqualTypeOf<TodoType>()
         expectTypeOf(
-          params.transaction.mutations[0].modified
+          params.transaction.mutations[0].modified,
         ).toEqualTypeOf<TodoType>()
 
         // When mapping over mutations, each mutation should be correctly typed

@@ -1,5 +1,60 @@
 # @tanstack/vue-db
 
+## 0.0.92
+
+### Patch Changes
+
+- Updated dependencies [[`41308b8`](https://github.com/TanStack/db/commit/41308b8ee914aa467e22842cd454f06d1a60032e)]:
+  - @tanstack/db@0.5.16
+
+## 0.0.91
+
+### Patch Changes
+
+- Updated dependencies [[`32ec4d8`](https://github.com/TanStack/db/commit/32ec4d8478cca96f76f3a49efc259c95b85baa40)]:
+  - @tanstack/db@0.5.15
+
+## 0.0.90
+
+### Patch Changes
+
+- Updated dependencies [[`26ed0aa`](https://github.com/TanStack/db/commit/26ed0aad2def60e652508a99b2e980e73f70148e)]:
+  - @tanstack/db@0.5.14
+
+## 0.0.89
+
+### Patch Changes
+
+- Updated dependencies [[`8ed7725`](https://github.com/TanStack/db/commit/8ed7725514a6a501482a391162f7792aa8b371e5), [`01452bf`](https://github.com/TanStack/db/commit/01452bfd0d00da8bd52941a4954af73749473651)]:
+  - @tanstack/db@0.5.13
+
+## 0.0.88
+
+### Patch Changes
+
+- Updated dependencies [[`b3b1940`](https://github.com/TanStack/db/commit/b3b194000d8efcc2c6cc45a663029dadc26f13f0), [`09da081`](https://github.com/TanStack/db/commit/09da081b420fc915d7f0dc566c6cdbbc78582435), [`86ad40c`](https://github.com/TanStack/db/commit/86ad40c6bc37b2f5d4ad24d06f72168ca4b96161)]:
+  - @tanstack/db@0.5.12
+
+## 0.0.87
+
+### Patch Changes
+
+- Fixed `isReady` to return `true` for disabled queries in `useLiveQuery`/`injectLiveQuery` across all framework packages. When a query function returns `null` or `undefined` (disabling the query), there's no async operation to wait for, so the hook should be considered "ready" immediately. ([#886](https://github.com/TanStack/db/pull/886))
+
+  Additionally, all frameworks now have proper TypeScript overloads that explicitly support returning `undefined | null` from query functions, making the disabled query pattern type-safe.
+
+  This fixes the common pattern where users conditionally enable queries and don't want to show loading states when the query is disabled.
+
+- Updated dependencies [[`c4b9399`](https://github.com/TanStack/db/commit/c4b93997432743d974749683059bf68a082d3e5b), [`a1a484e`](https://github.com/TanStack/db/commit/a1a484ec4d2331d702ab9c4b7e5b02622c76b3dd)]:
+  - @tanstack/db@0.5.11
+
+## 0.0.86
+
+### Patch Changes
+
+- Updated dependencies [[`1d19d22`](https://github.com/TanStack/db/commit/1d19d2219cbbaef6483845df1c3b078077e4e3bd), [`b3e4e80`](https://github.com/TanStack/db/commit/b3e4e80c4b73d96c15391ac25efb518c7ae7ccbb)]:
+  - @tanstack/db@0.5.10
+
 ## 0.0.85
 
 ### Patch Changes

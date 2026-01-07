@@ -1,7 +1,7 @@
-import { withSpan } from "../telemetry/tracer"
-import { TransactionSerializer } from "./TransactionSerializer"
-import type { OfflineTransaction, StorageAdapter } from "../types"
-import type { Collection } from "@tanstack/db"
+import { withSpan } from '../telemetry/tracer'
+import { TransactionSerializer } from './TransactionSerializer'
+import type { OfflineTransaction, StorageAdapter } from '../types'
+import type { Collection } from '@tanstack/db'
 
 export class OutboxManager {
   private storage: StorageAdapter
@@ -11,7 +11,7 @@ export class OutboxManager {
   constructor(
     storage: StorageAdapter,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    collections: Record<string, Collection<any, any, any, any, any>>
+    collections: Record<string, Collection<any, any, any, any, any>>,
   ) {
     this.storage = storage
     this.serializer = new TransactionSerializer(collections)
@@ -25,20 +25,20 @@ export class OutboxManager {
     return withSpan(
       `outbox.add`,
       {
-        "transaction.id": transaction.id,
-        "transaction.mutationFnName": transaction.mutationFnName,
-        "transaction.keyCount": transaction.keys.length,
+        'transaction.id': transaction.id,
+        'transaction.mutationFnName': transaction.mutationFnName,
+        'transaction.keyCount': transaction.keys.length,
       },
       async () => {
         const key = this.getStorageKey(transaction.id)
         const serialized = this.serializer.serialize(transaction)
         await this.storage.set(key, serialized)
-      }
+      },
     )
   }
 
   async get(id: string): Promise<OfflineTransaction | null> {
-    return withSpan(`outbox.get`, { "transaction.id": id }, async (span) => {
+    return withSpan(`outbox.get`, { 'transaction.id': id }, async (span) => {
       const key = this.getStorageKey(id)
       const data = await this.storage.get(key)
 
@@ -63,7 +63,7 @@ export class OutboxManager {
     return withSpan(`outbox.getAll`, {}, async (span) => {
       const keys = await this.storage.keys()
       const transactionKeys = keys.filter((key) =>
-        key.startsWith(this.keyPrefix)
+        key.startsWith(this.keyPrefix),
       )
 
       span.setAttribute(`transactionCount`, transactionKeys.length)
@@ -79,14 +79,14 @@ export class OutboxManager {
           } catch (error) {
             console.warn(
               `Failed to deserialize transaction from key ${key}:`,
-              error
+              error,
             )
           }
         }
       }
 
       return transactions.sort(
-        (a, b) => a.createdAt.getTime() - b.createdAt.getTime()
+        (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
       )
     })
   }
@@ -96,15 +96,15 @@ export class OutboxManager {
     const keySet = new Set(keys)
 
     return allTransactions.filter((transaction) =>
-      transaction.keys.some((key) => keySet.has(key))
+      transaction.keys.some((key) => keySet.has(key)),
     )
   }
 
   async update(
     id: string,
-    updates: Partial<OfflineTransaction>
+    updates: Partial<OfflineTransaction>,
   ): Promise<void> {
-    return withSpan(`outbox.update`, { "transaction.id": id }, async () => {
+    return withSpan(`outbox.update`, { 'transaction.id': id }, async () => {
       const existing = await this.get(id)
       if (!existing) {
         throw new Error(`Transaction ${id} not found`)
@@ -116,7 +116,7 @@ export class OutboxManager {
   }
 
   async remove(id: string): Promise<void> {
-    return withSpan(`outbox.remove`, { "transaction.id": id }, async () => {
+    return withSpan(`outbox.remove`, { 'transaction.id': id }, async () => {
       const key = this.getStorageKey(id)
       await this.storage.delete(key)
     })

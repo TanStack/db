@@ -87,7 +87,7 @@ Collections can be populated in many ways, including:
 
 - fetching data, for example [from API endpoints using TanStack Query](https://tanstack.com/query/latest)
 - syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/)
-- storing local data, for example [using localStorage for user preferences and settings](../collections/local-storage-collection.md) or [in-memory client data or UI state](../collections/local-only-collection.md)
+- storing local data, for example [using localStorage for user preferences and settings](./collections/local-storage-collection.md) or [in-memory client data or UI state](./collections/local-only-collection.md)
 - from live collection queries, creating [derived collections as materialised views](#using-live-queries)
 
 Once you have your data in collections, you can query across them using live queries in your components.
@@ -118,7 +118,7 @@ const productsCollection = createCollection(
 
 TanStack DB automatically collapses duplicate requests, performs delta loading when expanding queries, optimizes joins into minimal batched requests, and respects your TanStack Query cache policies. You often end up with _fewer_ network requests than custom view-specific APIs.
 
-See the [Query Collection documentation](../collections/query-collection.md#queryfn-and-predicate-push-down) for full predicate mapping details.
+See the [Query Collection documentation](./collections/query-collection.md#queryfn-and-predicate-push-down) for full predicate mapping details.
 
 ### Using live queries
 
@@ -135,7 +135,7 @@ Live queries support joins across collections. This allows you to:
 
 Every query returns another collection which can _also_ be queried.
 
-For more details on live queries, see the [Live Queries](../guides/live-queries.md) documentation.
+For more details on live queries, see the [Live Queries](./guides/live-queries.md) documentation.
 
 ### Making optimistic mutations
 
@@ -162,7 +162,7 @@ The collection maintains optimistic state separately from synced data. When live
 
 The optimistic state is held until the handler resolves, at which point the data is persisted to the server and synced back. If the handler throws an error, the optimistic state is rolled back.
 
-For more complex mutations, you can create custom actions with `createOptimisticAction` or custom transactions with `createTransaction`. See the [Mutations guide](../guides/mutations.md) for details.
+For more complex mutations, you can create custom actions with `createOptimisticAction` or custom transactions with `createTransaction`. See the [Mutations guide](./guides/mutations.md) for details.
 
 ### Uni-directional data flow
 
@@ -186,23 +186,23 @@ TanStack DB provides several built-in collection types for different data source
 
 **Fetch Collections**
 
-- **[QueryCollection](../collections/query-collection.md)** &mdash; Load data into collections using TanStack Query for REST APIs and data fetching.
+- **[QueryCollection](./collections/query-collection.md)** &mdash; Load data into collections using TanStack Query for REST APIs and data fetching.
 
 **Sync Collections**
 
-- **[ElectricCollection](../collections/electric-collection.md)** &mdash; Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
+- **[ElectricCollection](./collections/electric-collection.md)** &mdash; Sync data into collections from Postgres using ElectricSQL's real-time sync engine.
 
-- **[TrailBaseCollection](../collections/trailbase-collection.md)** &mdash; Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
+- **[TrailBaseCollection](./collections/trailbase-collection.md)** &mdash; Sync data into collections using TrailBase's self-hosted backend with real-time subscriptions.
 
-- **[RxDBCollection](../collections/rxdb-collection.md)** &mdash; Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
+- **[RxDBCollection](./collections/rxdb-collection.md)** &mdash; Integrate with RxDB for offline-first local persistence with powerful replication and sync capabilities.
 
-- **[PowerSyncCollection](../collections/powersync-collection.md)** &mdash; Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
+- **[PowerSyncCollection](./collections/powersync-collection.md)** &mdash; Sync with PowerSync's SQLite-based database for offline-first persistence with real-time synchronization with PostgreSQL, MongoDB, and MySQL backends.
 
 **Local Collections**
 
-- **[LocalStorageCollection](../collections/local-storage-collection.md)** &mdash; Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
+- **[LocalStorageCollection](./collections/local-storage-collection.md)** &mdash; Store small amounts of local-only state that persists across sessions and syncs across browser tabs.
 
-- **[LocalOnlyCollection](../collections/local-only-collection.md)** &mdash; Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.
+- **[LocalOnlyCollection](./collections/local-only-collection.md)** &mdash; Manage in-memory client data or UI state that doesn't need persistence or cross-tab sync.
 
 #### Collection Schemas
 
@@ -256,7 +256,7 @@ The collection will use the schema for its type inference. If you provide a sche
 
 You can create your own collection types by implementing the `Collection` interface found in [`../packages/db/src/collection/index.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts).
 
-See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference. Also see the [Collection Options Creator guide](../guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
 
 ### Live queries
 
@@ -337,7 +337,7 @@ const App = () => (
 )
 ```
 
-See the [React Suspense section in Live Queries](../guides/live-queries#using-with-react-suspense) for detailed usage patterns and when to use `useLiveSuspenseQuery` vs `useLiveQuery`.
+See the [React Suspense section in Live Queries](./guides/live-queries#using-with-react-suspense) for detailed usage patterns and when to use `useLiveSuspenseQuery` vs `useLiveQuery`.
 
 #### `queryBuilder`
 
@@ -362,13 +362,13 @@ Note also that:
 1. the query results [are themselves a collection](#derived-collections)
 2. the `useLiveQuery` automatically starts and stops live query subscriptions when you mount and unmount your components; if you're creating queries manually, you need to manually manage the subscription lifecycle yourself
 
-See the [Live Queries](../guides/live-queries.md) documentation for more details.
+See the [Live Queries](./guides/live-queries.md) documentation for more details.
 
 ### Transactional mutators
 
 For more complex mutations beyond simple CRUD operations, TanStack DB provides `createOptimisticAction` and `createTransaction` for creating custom mutations with full control over the mutation lifecycle.
 
-See the [Mutations guide](../guides/mutations.md) for comprehensive documentation on:
+See the [Mutations guide](./guides/mutations.md) for comprehensive documentation on:
 
 - Creating custom actions with `createOptimisticAction`
 - Manual transactions with `createTransaction`
