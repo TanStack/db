@@ -520,7 +520,8 @@ function processFrom(
       // when the optimizer has restructured the query.
       const isUserDefinedSubquery = queryMapping.has(from.query)
       const subqueryFromAlias = from.query.from.alias
-      const isOptimizerCreated = !isUserDefinedSubquery && from.alias === subqueryFromAlias
+      const isOptimizerCreated =
+        !isUserDefinedSubquery && from.alias === subqueryFromAlias
 
       if (!isOptimizerCreated) {
         for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {

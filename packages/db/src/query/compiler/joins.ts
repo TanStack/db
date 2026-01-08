@@ -485,7 +485,8 @@ function processJoinSource(
       // extracted from the original raw query, so pulling up would be redundant.
       const isUserDefinedSubquery = queryMapping.has(from.query)
       const fromInnerAlias = from.query.from.alias
-      const isOptimizerCreated = !isUserDefinedSubquery && from.alias === fromInnerAlias
+      const isOptimizerCreated =
+        !isUserDefinedSubquery && from.alias === fromInnerAlias
 
       if (!isOptimizerCreated) {
         for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
