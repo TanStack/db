@@ -14,4 +14,5 @@ export type {
   ThrottleStrategy,
   ThrottleStrategyOptions,
   StrategyOptions,
+  MutationExecuteOptions,
 } from './types'

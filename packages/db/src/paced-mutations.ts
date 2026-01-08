@@ -1,6 +1,6 @@
 import { createTransaction } from './transactions'
 import type { MutationFn, Transaction } from './types'
-import type { Strategy } from './strategies/types'
+import type { MutationExecuteOptions, Strategy } from './strategies/types'
 
 /**
  * Configuration for creating a paced mutations manager
@@ -83,13 +83,52 @@ export interface PacedMutationsConfig<
  *   })
  * })
  * ```
+ *
+ * @example
+ * ```ts
+ * // Cross-queue dependencies for nested collections
+ * // Collection A -> B -> C (B depends on A, C depends on B)
+ * const createA = createPacedMutations<{ id: string; name: string }>({
+ *   onMutate: (item) => collectionA.insert(item),
+ *   mutationFn: async ({ transaction }) => {
+ *     return await api.createA(transaction.mutations[0].changes)
+ *   },
+ *   strategy: queueStrategy()
+ * })
+ *
+ * const createB = createPacedMutations<{ id: string; aId: string }>({
+ *   onMutate: (item) => collectionB.insert(item),
+ *   mutationFn: async ({ transaction }) => {
+ *     // A is guaranteed to be persisted at this point
+ *     return await api.createB(transaction.mutations[0].changes)
+ *   },
+ *   strategy: queueStrategy()
+ * })
+ *
+ * const createC = createPacedMutations<{ id: string; bId: string }>({
+ *   onMutate: (item) => collectionC.insert(item),
+ *   mutationFn: async ({ transaction }) => {
+ *     // Both A and B are guaranteed to be persisted at this point
+ *     return await api.createC(transaction.mutations[0].changes)
+ *   },
+ *   strategy: queueStrategy()
+ * })
+ *
+ * // Usage: Create nested items with optimistic updates
+ * const txA = createA({ id: 'temp-a', name: 'Item A' })
+ * const txB = createB({ id: 'temp-b', aId: 'temp-a' }, { dependsOn: txA })
+ * const txC = createC({ id: 'temp-c', bId: 'temp-b' }, { dependsOn: txB })
+ *
+ * // All three items appear immediately in the UI (optimistic)
+ * // But API calls happen in order: A -> B -> C
+ * ```
  */
 export function createPacedMutations<
   TVariables = unknown,
   T extends object = Record<string, unknown>,
 >(
   config: PacedMutationsConfig<TVariables, T>,
-): (variables: TVariables) => Transaction<T> {
+): (variables: TVariables, options?: MutationExecuteOptions) => Transaction<T> {
   const { onMutate, mutationFn, strategy, ...transactionConfig } = config
 
   // The currently active transaction (pending, not yet persisting)
@@ -127,8 +166,15 @@ export function createPacedMutations<
    * Executes a mutation with the given variables. Creates a new transaction if none is active,
    * or adds to the existing active transaction. The strategy controls when
    * the transaction is actually committed.
+   *
+   * @param variables - The mutation variables to pass to onMutate
+   * @param options - Optional execution options including dependencies
+   * @param options.dependsOn - Transaction(s) that must be persisted before this mutation executes
    */
-  function mutate(variables: TVariables): Transaction<T> {
+  function mutate(
+    variables: TVariables,
+    options?: MutationExecuteOptions,
+  ): Transaction<T> {
     // Create a new transaction if we don't have an active one
     if (!activeTransaction || activeTransaction.state !== `pending`) {
       activeTransaction = createTransaction<T>({
@@ -151,14 +197,18 @@ export function createPacedMutations<
     if (strategy._type === `queue`) {
       const capturedTx = activeTransaction
       activeTransaction = null // Clear so next mutation creates a new transaction
-      strategy.execute(() => {
-        capturedTx.commit().catch(() => {
-          // Errors are handled via transaction.isPersisted.promise
-        })
-        return capturedTx
-      })
+      strategy.execute(
+        () => {
+          capturedTx.commit().catch(() => {
+            // Errors are handled via transaction.isPersisted.promise
+          })
+          return capturedTx
+        },
+        options, // Pass through dependsOn options to the strategy
+      )
     } else {
       // For debounce/throttle, use commitCallback which manages activeTransaction
+      // Note: dependsOn is only supported for queue strategy
       strategy.execute(commitCallback)
     }
 

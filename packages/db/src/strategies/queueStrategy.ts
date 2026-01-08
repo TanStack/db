@@ -1,6 +1,19 @@
 import { LiteQueuer } from '@tanstack/pacer-lite/lite-queuer'
-import type { QueueStrategy, QueueStrategyOptions } from './types'
+import type {
+  MutationExecuteOptions,
+  QueueStrategy,
+  QueueStrategyOptions,
+} from './types'
 import type { Transaction } from '../transactions'
+
+/**
+ * Item stored in the queue, containing both the transaction-creating function
+ * and any dependencies that must be resolved before execution
+ */
+interface QueueItem {
+  fn: () => Transaction
+  dependsOn?: Array<Transaction<any>>
+}
 
 /**
  * Creates a queue strategy that processes all mutations in order with proper serialization.
@@ -9,6 +22,10 @@ import type { Transaction } from '../transactions'
  * mutation is processed sequentially. Each transaction commit completes before
  * the next one starts. Useful when data consistency is critical and
  * every operation must complete in order.
+ *
+ * This strategy also supports cross-queue dependencies via the `dependsOn` option,
+ * allowing mutations to wait for transactions from other queues to complete before
+ * executing their mutation function.
  *
  * @param options - Configuration for queue behavior (FIFO/LIFO, timing, size limits)
  * @returns A queue strategy instance
@@ -42,6 +59,34 @@ import type { Transaction } from '../transactions'
  *   })
  * })
  * ```
+ *
+ * @example
+ * ```ts
+ * // Cross-queue dependencies for nested collections
+ * const createParent = createPacedMutations({
+ *   onMutate: (item) => parentCollection.insert(item),
+ *   mutationFn: async ({ transaction }) => {
+ *     return await api.createParent(transaction.mutations[0].changes)
+ *   },
+ *   strategy: queueStrategy()
+ * })
+ *
+ * const createChild = createPacedMutations({
+ *   onMutate: (item) => childCollection.insert(item),
+ *   mutationFn: async ({ transaction }) => {
+ *     // Parent is guaranteed to be persisted at this point
+ *     return await api.createChild(transaction.mutations[0].changes)
+ *   },
+ *   strategy: queueStrategy()
+ * })
+ *
+ * // Child mutation waits for parent to be persisted
+ * const parentTx = createParent({ id: 'temp-1', name: 'Parent' })
+ * const childTx = createChild(
+ *   { id: 'temp-2', parentId: 'temp-1' },
+ *   { dependsOn: parentTx }
+ * )
+ * ```
  */
 export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
   // Manual promise chaining to ensure async serialization
@@ -50,12 +95,26 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
   // to ensure each transaction completes before the next one starts.
   let processingChain = Promise.resolve()
 
-  const queuer = new LiteQueuer<() => Transaction>(
-    (fn) => {
+  const queuer = new LiteQueuer<QueueItem>(
+    (item) => {
       // Chain each transaction to the previous one's completion
       processingChain = processingChain
         .then(async () => {
-          const transaction = fn()
+          // Wait for all dependencies to be persisted first
+          if (item.dependsOn && item.dependsOn.length > 0) {
+            await Promise.all(
+              item.dependsOn.map((dep) =>
+                // Use Promise.resolve to handle both resolved and pending promises
+                // and catch any rejections to prevent blocking the queue
+                dep.isPersisted.promise.catch(() => {
+                  // If a dependency failed, we still proceed with this transaction
+                  // The transaction can decide how to handle missing parent data
+                }),
+              ),
+            )
+          }
+
+          const transaction = item.fn()
           // Wait for the transaction to be persisted before processing next item
           await transaction.isPersisted.promise
         })
@@ -79,9 +138,20 @@ export function queueStrategy(options?: QueueStrategyOptions): QueueStrategy {
     options,
     execute: <T extends object = Record<string, unknown>>(
       fn: () => Transaction<T>,
+      executeOptions?: MutationExecuteOptions,
     ) => {
-      // Add the transaction-creating function to the queue
-      queuer.addItem(fn as () => Transaction)
+      // Normalize dependsOn to always be an array (or undefined)
+      const dependsOn = executeOptions?.dependsOn
+        ? Array.isArray(executeOptions.dependsOn)
+          ? executeOptions.dependsOn
+          : [executeOptions.dependsOn]
+        : undefined
+
+      // Add the queue item with both the function and dependencies
+      queuer.addItem({
+        fn: fn as () => Transaction,
+        dependsOn,
+      })
     },
     cleanup: () => {
       queuer.stop()

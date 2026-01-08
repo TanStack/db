@@ -526,6 +526,329 @@ describe(`createPacedMutations`, () => {
     })
   })
 
+  describe(`cross-queue dependencies`, () => {
+    it(`should wait for dependsOn transaction before executing mutationFn`, async () => {
+      const executionOrder: Array<string> = []
+
+      const collectionA = await createReadyCollection<{ id: string; name: string }>({
+        id: `collection-a`,
+        getKey: (item) => item.id,
+      })
+
+      const collectionB = await createReadyCollection<{ id: string; aId: string }>({
+        id: `collection-b`,
+        getKey: (item) => item.id,
+      })
+
+      const createA = createPacedMutations<{ id: string; name: string }>({
+        onMutate: (item) => {
+          collectionA.insert(item)
+        },
+        mutationFn: async ({ transaction }) => {
+          // Simulate network delay
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          executionOrder.push(`A:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      const createB = createPacedMutations<{ id: string; aId: string }>({
+        onMutate: (item) => {
+          collectionB.insert(item)
+        },
+        mutationFn: async ({ transaction }) => {
+          executionOrder.push(`B:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      // Create A first, then B with dependency on A
+      const txA = createA({ id: `a1`, name: `Parent` })
+      const txB = createB({ id: `b1`, aId: `a1` }, { dependsOn: txA })
+
+      // Both should show optimistically immediately
+      expect(collectionA.get(`a1`)).toMatchObject({ id: `a1`, name: `Parent` })
+      expect(collectionB.get(`b1`)).toMatchObject({ id: `b1`, aId: `a1` })
+
+      // Wait for both to complete
+      await Promise.all([
+        txA.isPersisted.promise,
+        txB.isPersisted.promise,
+      ])
+
+      // A should have executed before B
+      expect(executionOrder).toEqual([`A:a1`, `B:b1`])
+    })
+
+    it(`should support multiple dependencies`, async () => {
+      const executionOrder: Array<string> = []
+
+      const collectionA = await createReadyCollection<{ id: string }>({
+        id: `collection-a`,
+        getKey: (item) => item.id,
+      })
+
+      const collectionB = await createReadyCollection<{ id: string }>({
+        id: `collection-b`,
+        getKey: (item) => item.id,
+      })
+
+      const collectionC = await createReadyCollection<{ id: string; aId: string; bId: string }>({
+        id: `collection-c`,
+        getKey: (item) => item.id,
+      })
+
+      const createA = createPacedMutations<{ id: string }>({
+        onMutate: (item) => collectionA.insert(item),
+        mutationFn: async ({ transaction }) => {
+          await new Promise((resolve) => setTimeout(resolve, 30))
+          executionOrder.push(`A:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      const createB = createPacedMutations<{ id: string }>({
+        onMutate: (item) => collectionB.insert(item),
+        mutationFn: async ({ transaction }) => {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          executionOrder.push(`B:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      const createC = createPacedMutations<{ id: string; aId: string; bId: string }>({
+        onMutate: (item) => collectionC.insert(item),
+        mutationFn: async ({ transaction }) => {
+          executionOrder.push(`C:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      // Create A and B, then C depending on both
+      const txA = createA({ id: `a1` })
+      const txB = createB({ id: `b1` })
+      const txC = createC(
+        { id: `c1`, aId: `a1`, bId: `b1` },
+        { dependsOn: [txA, txB] },
+      )
+
+      await Promise.all([
+        txA.isPersisted.promise,
+        txB.isPersisted.promise,
+        txC.isPersisted.promise,
+      ])
+
+      // C should be last
+      expect(executionOrder[executionOrder.length - 1]).toBe(`C:c1`)
+      // Both A and B should have executed before C
+      expect(executionOrder.indexOf(`A:a1`)).toBeLessThan(executionOrder.indexOf(`C:c1`))
+      expect(executionOrder.indexOf(`B:b1`)).toBeLessThan(executionOrder.indexOf(`C:c1`))
+    })
+
+    it(`should support chained dependencies (A -> B -> C)`, async () => {
+      const executionOrder: Array<string> = []
+
+      const collectionA = await createReadyCollection<{ id: string }>({
+        id: `collection-a`,
+        getKey: (item) => item.id,
+      })
+
+      const collectionB = await createReadyCollection<{ id: string; aId: string }>({
+        id: `collection-b`,
+        getKey: (item) => item.id,
+      })
+
+      const collectionC = await createReadyCollection<{ id: string; bId: string }>({
+        id: `collection-c`,
+        getKey: (item) => item.id,
+      })
+
+      const createA = createPacedMutations<{ id: string }>({
+        onMutate: (item) => collectionA.insert(item),
+        mutationFn: async ({ transaction }) => {
+          await new Promise((resolve) => setTimeout(resolve, 30))
+          executionOrder.push(`A:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      const createB = createPacedMutations<{ id: string; aId: string }>({
+        onMutate: (item) => collectionB.insert(item),
+        mutationFn: async ({ transaction }) => {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          executionOrder.push(`B:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      const createC = createPacedMutations<{ id: string; bId: string }>({
+        onMutate: (item) => collectionC.insert(item),
+        mutationFn: async ({ transaction }) => {
+          executionOrder.push(`C:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      // Create chained dependencies: A -> B -> C
+      const txA = createA({ id: `a1` })
+      const txB = createB({ id: `b1`, aId: `a1` }, { dependsOn: txA })
+      const txC = createC({ id: `c1`, bId: `b1` }, { dependsOn: txB })
+
+      // All should show optimistically immediately
+      expect(collectionA.get(`a1`)).toBeDefined()
+      expect(collectionB.get(`b1`)).toBeDefined()
+      expect(collectionC.get(`c1`)).toBeDefined()
+
+      await Promise.all([
+        txA.isPersisted.promise,
+        txB.isPersisted.promise,
+        txC.isPersisted.promise,
+      ])
+
+      // Should execute in order A -> B -> C
+      expect(executionOrder).toEqual([`A:a1`, `B:b1`, `C:c1`])
+    })
+
+    it(`should continue if dependency fails`, async () => {
+      const executionOrder: Array<string> = []
+
+      const collectionA = await createReadyCollection<{ id: string }>({
+        id: `collection-a`,
+        getKey: (item) => item.id,
+      })
+
+      const collectionB = await createReadyCollection<{ id: string; aId: string }>({
+        id: `collection-b`,
+        getKey: (item) => item.id,
+      })
+
+      const createA = createPacedMutations<{ id: string }>({
+        onMutate: (item) => collectionA.insert(item),
+        mutationFn: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          executionOrder.push(`A:failed`)
+          throw new Error(`A failed`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      const createB = createPacedMutations<{ id: string; aId: string }>({
+        onMutate: (item) => collectionB.insert(item),
+        mutationFn: async ({ transaction }) => {
+          executionOrder.push(`B:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      const txA = createA({ id: `a1` })
+      const txB = createB({ id: `b1`, aId: `a1` }, { dependsOn: txA })
+
+      await Promise.allSettled([
+        txA.isPersisted.promise,
+        txB.isPersisted.promise,
+      ])
+
+      // A should fail, B should still execute
+      expect(txA.state).toBe(`failed`)
+      expect(txB.state).toBe(`completed`)
+
+      // B should still execute after A fails
+      expect(executionOrder).toContain(`B:b1`)
+    })
+
+    it(`should allow independent items to process in parallel`, async () => {
+      const startTimes: Record<string, number> = {}
+      const endTimes: Record<string, number> = {}
+
+      const collectionA = await createReadyCollection<{ id: string }>({
+        id: `collection-a`,
+        getKey: (item) => item.id,
+      })
+
+      const collectionB = await createReadyCollection<{ id: string }>({
+        id: `collection-b`,
+        getKey: (item) => item.id,
+      })
+
+      const createA = createPacedMutations<{ id: string }>({
+        onMutate: (item) => collectionA.insert(item),
+        mutationFn: async ({ transaction }) => {
+          const id = transaction.mutations[0].changes.id as string
+          startTimes[id] = Date.now()
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          endTimes[id] = Date.now()
+        },
+        strategy: queueStrategy(),
+      })
+
+      const createB = createPacedMutations<{ id: string }>({
+        onMutate: (item) => collectionB.insert(item),
+        mutationFn: async ({ transaction }) => {
+          const id = transaction.mutations[0].changes.id as string
+          startTimes[id] = Date.now()
+          await new Promise((resolve) => setTimeout(resolve, 50))
+          endTimes[id] = Date.now()
+        },
+        strategy: queueStrategy(),
+      })
+
+      // Create two independent items - should process in parallel (different queues)
+      const txA = createA({ id: `a1` })
+      const txB = createB({ id: `b1` }) // No dependsOn, different queue
+
+      await Promise.all([
+        txA.isPersisted.promise,
+        txB.isPersisted.promise,
+      ])
+
+      // B should start before A finishes (parallel execution)
+      // Allow some tolerance for timing
+      expect(startTimes[`b1`]!).toBeLessThan(endTimes[`a1`]!)
+    })
+
+    it(`should work with already-completed dependencies`, async () => {
+      const executionOrder: Array<string> = []
+
+      const collectionA = await createReadyCollection<{ id: string }>({
+        id: `collection-a`,
+        getKey: (item) => item.id,
+      })
+
+      const collectionB = await createReadyCollection<{ id: string; aId: string }>({
+        id: `collection-b`,
+        getKey: (item) => item.id,
+      })
+
+      const createA = createPacedMutations<{ id: string }>({
+        onMutate: (item) => collectionA.insert(item),
+        mutationFn: async ({ transaction }) => {
+          executionOrder.push(`A:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      const createB = createPacedMutations<{ id: string; aId: string }>({
+        onMutate: (item) => collectionB.insert(item),
+        mutationFn: async ({ transaction }) => {
+          executionOrder.push(`B:${transaction.mutations[0].changes.id}`)
+        },
+        strategy: queueStrategy(),
+      })
+
+      // Create A and wait for it to complete
+      const txA = createA({ id: `a1` })
+      await txA.isPersisted.promise
+
+      // Now create B with dependency on already-completed A
+      const txB = createB({ id: `b1`, aId: `a1` }, { dependsOn: txA })
+      await txB.isPersisted.promise
+
+      expect(executionOrder).toEqual([`A:a1`, `B:b1`])
+      expect(txA.state).toBe(`completed`)
+      expect(txB.state).toBe(`completed`)
+    })
+  })
+
   describe(`transaction batching`, () => {
     it(`should merge mutations on the same key`, async () => {
       const mutationFn = vi.fn(async () => {})

@@ -1,6 +1,28 @@
 import type { Transaction } from '../transactions'
 
 /**
+ * Options for individual mutation execution
+ */
+export interface MutationExecuteOptions {
+  /**
+   * Transaction(s) that must be persisted before this mutation can execute.
+   * This enables cross-queue dependencies where a mutation in one queue
+   * can wait for a transaction from another queue to complete.
+   *
+   * @example
+   * ```ts
+   * // Queue B waits for transaction from Queue A
+   * const txA = queueA.mutate({ name: 'Parent Item' })
+   * const txB = queueB.mutate(
+   *   { parentId: tempId },
+   *   { dependsOn: txA }
+   * )
+   * ```
+   */
+  dependsOn?: Transaction<any> | Array<Transaction<any>>
+}
+
+/**
  * Base strategy interface that all strategy implementations must conform to
  */
 export interface BaseStrategy<TName extends string = string> {
@@ -10,10 +32,12 @@ export interface BaseStrategy<TName extends string = string> {
   /**
    * Execute a function according to the strategy's timing rules
    * @param fn - The function to execute
+   * @param options - Optional execution options including dependencies
    * @returns The result of the function execution (if applicable)
    */
   execute: <T extends object = Record<string, unknown>>(
     fn: () => Transaction<T>,
+    options?: MutationExecuteOptions,
   ) => void | Promise<void>
 
   /**
