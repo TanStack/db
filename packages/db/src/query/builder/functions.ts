@@ -1,5 +1,5 @@
 // Re-export all operators from their individual modules
-// Each module auto-registers its evaluator when imported
+// Each operator is a function that creates IR nodes with embedded evaluator factories
 export { eq } from './operators/eq.js'
 export { gt } from './operators/gt.js'
 export { gte } from './operators/gte.js'
@@ -24,7 +24,6 @@ export { isNull } from './operators/isNull.js'
 export { isUndefined } from './operators/isUndefined.js'
 
 // Re-export all aggregates from their individual modules
-// Each module auto-registers its config when imported
 export { count } from './aggregates/count.js'
 export { avg } from './aggregates/avg.js'
 export { sum } from './aggregates/sum.js'

@@ -1866,6 +1866,95 @@ concat(
 avg(add(user.salary, coalesce(user.bonus, 0)))
 ```
 
+### Custom Operators
+
+You can define your own operators using the `defineOperator` function. This is useful when you need specialized comparison logic or domain-specific operations.
+
+```ts
+import { defineOperator, isUnknown } from '@tanstack/db'
+
+// Define a custom "between" operator
+const between = defineOperator<boolean, [value: number, min: number, max: number]>({
+  name: 'between',
+  compile: ([valueArg, minArg, maxArg]) => (data) => {
+    const value = valueArg(data)
+    const min = minArg(data)
+    const max = maxArg(data)
+    
+    if (isUnknown(value)) return null
+    return value >= min && value <= max
+  }
+})
+
+// Use in a query
+const adultUsers = createLiveQueryCollection((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => between(user.age, 18, 65))
+)
+```
+
+You can also use the built-in factory helpers to create operators more concisely:
+
+```ts
+import { defineOperator, comparison, transform, numeric } from '@tanstack/db'
+
+// Using the comparison helper (handles null/undefined automatically)
+const notEquals = defineOperator<boolean, [a: unknown, b: unknown]>({
+  name: 'notEquals',
+  compile: comparison((a, b) => a !== b)
+})
+
+// Using the transform helper for unary operations
+const double = defineOperator<number, [value: number]>({
+  name: 'double',
+  compile: transform((v) => v * 2)
+})
+
+// Using the numeric helper for binary math operations
+const modulo = defineOperator<number, [a: number, b: number]>({
+  name: 'modulo',
+  compile: numeric((a, b) => b !== 0 ? a % b : null)
+})
+```
+
+### Custom Aggregates
+
+Similarly, you can define custom aggregate functions using `defineAggregate`:
+
+```ts
+import { defineAggregate } from '@tanstack/db'
+
+// Define a "product" aggregate that multiplies all values
+const product = defineAggregate<number>({
+  name: 'product',
+  factory: (valueExtractor) => ({
+    preMap: valueExtractor,
+    reduce: (values) => {
+      let result = 1
+      for (const [value, multiplicity] of values) {
+        for (let i = 0; i < multiplicity; i++) {
+          result *= value
+        }
+      }
+      return result
+    }
+  }),
+  valueTransform: 'numeric'
+})
+
+// Use in a query with groupBy
+const categoryProducts = createLiveQueryCollection((q) =>
+  q
+    .from({ item: itemsCollection })
+    .groupBy(({ item }) => item.category)
+    .select(({ item }) => ({
+      category: item.category,
+      priceProduct: product(item.price)
+    }))
+)
+```
+
 ## Functional Variants
 
 The functional variant API provides an alternative to the standard API, offering more flexibility for complex transformations. With functional variants, the callback functions contain actual code that gets executed to perform the operation, giving you the full power of JavaScript at your disposal.

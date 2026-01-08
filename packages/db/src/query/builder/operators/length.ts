@@ -1,33 +1,14 @@
 import { Func } from '../../ir.js'
 import { toExpression } from '../ref-proxy.js'
-import type { CompiledExpression } from '../../ir.js'
+import { transform } from './factories.js'
+import type { EvaluatorFactory } from '../../ir.js'
 import type { ExpressionLike, NumericFunctionReturnType } from './types.js'
 
-// ============================================================
-// EVALUATOR
-// ============================================================
-
-function lengthEvaluatorFactory(
-  compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean,
-): CompiledExpression {
-  const arg = compiledArgs[0]!
-
-  return (data: any) => {
-    const value = arg(data)
-    if (typeof value === `string`) {
-      return value.length
-    }
-    if (Array.isArray(value)) {
-      return value.length
-    }
-    return 0
-  }
-}
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
+const lengthFactory = /* #__PURE__*/ transform<unknown, number>((v) => {
+  if (typeof v === `string`) return v.length
+  if (Array.isArray(v)) return v.length
+  return 0
+}) as EvaluatorFactory
 
 export function length<T extends ExpressionLike>(
   arg: T,
@@ -35,6 +16,6 @@ export function length<T extends ExpressionLike>(
   return new Func(
     `length`,
     [toExpression(arg)],
-    lengthEvaluatorFactory,
+    lengthFactory,
   ) as NumericFunctionReturnType<T>
 }

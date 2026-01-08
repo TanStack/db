@@ -1,39 +1,24 @@
 import { Func } from '../../ir.js'
 import { toExpression } from '../ref-proxy.js'
-import type { BasicExpression, CompiledExpression } from '../../ir.js'
-
-// ============================================================
-// TYPES
-// ============================================================
-
-type StringRef =
-  | BasicExpression<string>
-  | BasicExpression<string | null>
-  | BasicExpression<string | undefined>
-type StringLike = StringRef | string | null | undefined | any
-
-// ============================================================
-// EVALUATOR
-// ============================================================
-
-function isUnknown(value: any): boolean {
-  return value === null || value === undefined
-}
+import { pattern } from './factories.js'
+import type { BasicExpression, EvaluatorFactory } from '../../ir.js'
+import type { ExpressionLike, StringLike } from './types.js'
 
 /**
- * Evaluates LIKE patterns
+ * Evaluates SQL LIKE patterns.
+ * Exported for use by ilike.
  */
-function evaluateLike(
-  value: any,
-  pattern: any,
-  caseInsensitive: boolean,
+export function evaluateLike(
+  value: unknown,
+  patternStr: unknown,
+  caseInsensitive: boolean = false,
 ): boolean {
-  if (typeof value !== `string` || typeof pattern !== `string`) {
+  if (typeof value !== `string` || typeof patternStr !== `string`) {
     return false
   }
 
   const searchValue = caseInsensitive ? value.toLowerCase() : value
-  const searchPattern = caseInsensitive ? pattern.toLowerCase() : pattern
+  const searchPattern = caseInsensitive ? patternStr.toLowerCase() : patternStr
 
   // Convert SQL LIKE pattern to regex
   // First escape all regex special chars except % and _
@@ -47,39 +32,22 @@ function evaluateLike(
   return regex.test(searchValue)
 }
 
-function likeEvaluatorFactory(
-  compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean,
-): CompiledExpression {
-  const valueEvaluator = compiledArgs[0]!
-  const patternEvaluator = compiledArgs[1]!
-
-  return (data: any) => {
-    const value = valueEvaluator(data)
-    const pattern = patternEvaluator(data)
-    // In 3-valued logic, if value or pattern is null/undefined, return UNKNOWN
-    if (isUnknown(value) || isUnknown(pattern)) {
-      return null
-    }
-    return evaluateLike(value, pattern, false)
-  }
-}
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
+const likeFactory = /* #__PURE__*/ pattern((value, patternStr) =>
+  evaluateLike(value, patternStr, false),
+) as EvaluatorFactory
 
 export function like(
   left: StringLike,
   right: StringLike,
 ): BasicExpression<boolean>
-export function like(left: any, right: any): BasicExpression<boolean> {
+export function like(
+  left: ExpressionLike,
+  right: ExpressionLike,
+): BasicExpression<boolean>
+export function like(left: unknown, right: unknown): BasicExpression<boolean> {
   return new Func(
     `like`,
     [toExpression(left), toExpression(right)],
-    likeEvaluatorFactory,
+    likeFactory,
   )
 }
-
-// Export for use by ilike
-export { evaluateLike }

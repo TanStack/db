@@ -1,54 +1,14 @@
 import { Func } from '../../ir.js'
 import { toExpression } from '../ref-proxy.js'
-import type { BasicExpression, CompiledExpression } from '../../ir.js'
+import { booleanOp } from './factories.js'
+import type { BasicExpression } from '../../ir.js'
+import type { ExpressionLike } from './types.js'
 
-// ============================================================
-// TYPES
-// ============================================================
-
-// Helper type for any expression-like value
-type ExpressionLike = BasicExpression | any
-
-// ============================================================
-// EVALUATOR
-// ============================================================
-
-function isUnknown(value: any): boolean {
-  return value === null || value === undefined
-}
-
-function orEvaluatorFactory(
-  compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean,
-): CompiledExpression {
-  return (data: any) => {
-    // 3-valued logic for OR:
-    // - true OR anything = true (short-circuit)
-    // - null OR anything (except true) = null
-    // - false OR false = false
-    let hasUnknown = false
-    for (const compiledArg of compiledArgs) {
-      const result = compiledArg(data)
-      if (result === true) {
-        return true
-      }
-      if (isUnknown(result)) {
-        hasUnknown = true
-      }
-    }
-    // If we got here, no operand was true
-    // If any operand was null, return null (UNKNOWN)
-    if (hasUnknown) {
-      return null
-    }
-
-    return false
-  }
-}
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
+// OR: short-circuits on true, returns false if all are false
+const orFactory = /* #__PURE__*/ booleanOp({
+  shortCircuit: true,
+  default: false,
+})
 
 // Overloads for or() - support 2 or more arguments, or an array
 export function or(
@@ -71,7 +31,7 @@ export function or(
     return new Func(
       `or`,
       leftOrArgs.map((arg) => toExpression(arg)),
-      orEvaluatorFactory,
+      orFactory,
     )
   }
   // Handle variadic overload
@@ -79,6 +39,6 @@ export function or(
   return new Func(
     `or`,
     allArgs.map((arg) => toExpression(arg)),
-    orEvaluatorFactory,
+    orFactory,
   )
 }

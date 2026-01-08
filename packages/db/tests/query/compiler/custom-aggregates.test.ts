@@ -5,6 +5,7 @@ import {
   avg,
   count,
   createLiveQueryCollection,
+  defineAggregate,
   sum,
 } from '../../../src/query/index.js'
 import { toExpression } from '../../../src/query/builder/ref-proxy.js'
@@ -214,6 +215,214 @@ describe(`Custom Aggregates`, () => {
       expect(result.size).toBe(1)
       // 10 * 20 * 15 * 25 = 75000
       expect(result.toArray[0]?.totalProduct).toBe(75000)
+    })
+  })
+})
+
+// ============================================================
+// defineAggregate public API tests
+// ============================================================
+
+describe(`defineAggregate public API`, () => {
+  describe(`typed custom aggregates`, () => {
+    it(`product aggregate with type annotation`, () => {
+      const typedProduct = defineAggregate<number>({
+        name: `product`,
+        factory: (valueExtractor) => ({
+          preMap: valueExtractor,
+          reduce: (values: Array<[number, number]>) => {
+            let result = 1
+            for (const [value, multiplicity] of values) {
+              for (let i = 0; i < multiplicity; i++) {
+                result *= value
+              }
+            }
+            return result
+          },
+        }),
+        valueTransform: `numeric`,
+      })
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .groupBy(({ items }) => items.category)
+            .select(({ items }) => ({
+              category: items.category,
+              priceProduct: typedProduct(items.price),
+            })),
+      })
+
+      expect(result.size).toBe(2)
+      // Category A: 10 * 20 = 200
+      expect(result.get(`A`)?.priceProduct).toBe(200)
+      // Category B: 15 * 25 = 375
+      expect(result.get(`B`)?.priceProduct).toBe(375)
+    })
+
+    it(`range aggregate (max - min) with postMap`, () => {
+      const range = defineAggregate<number>({
+        name: `range`,
+        factory: (valueExtractor) => ({
+          preMap: (data: any) => {
+            const value = valueExtractor(data)
+            return { min: value, max: value }
+          },
+          reduce: (values: Array<[{ min: number; max: number }, number]>) => {
+            let min = Infinity
+            let max = -Infinity
+            for (const [{ min: vMin, max: vMax }, multiplicity] of values) {
+              if (multiplicity > 0) {
+                if (vMin < min) min = vMin
+                if (vMax > max) max = vMax
+              }
+            }
+            return { min, max }
+          },
+          postMap: (acc: { min: number; max: number }) => acc.max - acc.min,
+        }),
+        valueTransform: `raw`,
+      })
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .groupBy(({ items }) => items.category)
+            .select(({ items }) => ({
+              category: items.category,
+              priceRange: range(items.price),
+            })),
+      })
+
+      expect(result.size).toBe(2)
+      // Category A: max(10, 20) - min(10, 20) = 20 - 10 = 10
+      expect(result.get(`A`)?.priceRange).toBe(10)
+      // Category B: max(15, 25) - min(15, 25) = 25 - 15 = 10
+      expect(result.get(`B`)?.priceRange).toBe(10)
+    })
+
+    it(`variance aggregate with complex reduce logic`, () => {
+      const typedVariance = defineAggregate<number>({
+        name: `variance`,
+        factory: (valueExtractor: ValueExtractor) => ({
+          preMap: (data: any) => {
+            const value = valueExtractor(data)
+            return { sum: value, sumSq: value * value, n: 1 }
+          },
+          reduce: (
+            values: Array<[{ sum: number; sumSq: number; n: number }, number]>,
+          ) => {
+            let totalSum = 0
+            let totalSumSq = 0
+            let totalN = 0
+            for (const [{ sum: s, sumSq, n }, multiplicity] of values) {
+              totalSum += s * multiplicity
+              totalSumSq += sumSq * multiplicity
+              totalN += n * multiplicity
+            }
+            return { sum: totalSum, sumSq: totalSumSq, n: totalN }
+          },
+          postMap: (acc: { sum: number; sumSq: number; n: number }) => {
+            if (acc.n === 0) return 0
+            const mean = acc.sum / acc.n
+            return acc.sumSq / acc.n - mean * mean
+          },
+        }),
+        valueTransform: `raw`,
+      })
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .groupBy(({ items }) => items.category)
+            .select(({ items }) => ({
+              category: items.category,
+              priceVariance: typedVariance(items.price),
+            })),
+      })
+
+      expect(result.size).toBe(2)
+
+      // Category A: prices 10, 20 -> mean = 15, variance = ((10-15)² + (20-15)²) / 2 = 25
+      expect(result.get(`A`)?.priceVariance).toBe(25)
+
+      // Category B: prices 15, 25 -> mean = 20, variance = ((15-20)² + (25-20)²) / 2 = 25
+      expect(result.get(`B`)?.priceVariance).toBe(25)
+    })
+  })
+
+  describe(`defineAggregate works with built-in aggregates`, () => {
+    it(`custom aggregate alongside built-in aggregates`, () => {
+      const median = defineAggregate<number | null>({
+        name: `median`,
+        factory: (valueExtractor) => ({
+          preMap: (data: any) => [valueExtractor(data)],
+          reduce: (values: Array<[Array<number>, number]>) => {
+            const allValues: Array<number> = []
+            for (const [valueArray, multiplicity] of values) {
+              for (const value of valueArray) {
+                for (let i = 0; i < multiplicity; i++) {
+                  allValues.push(value)
+                }
+              }
+            }
+            return allValues
+          },
+          postMap: (allValues: Array<number>) => {
+            if (allValues.length === 0) return null
+            const sorted = [...allValues].sort((a, b) => a - b)
+            const mid = Math.floor(sorted.length / 2)
+            if (sorted.length % 2 === 0) {
+              return (sorted[mid - 1]! + sorted[mid]!) / 2
+            }
+            return sorted[mid]!
+          },
+        }),
+        valueTransform: `raw`,
+      })
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .groupBy(({ items }) => items.category)
+            .select(({ items }) => ({
+              category: items.category,
+              avgPrice: avg(items.price),
+              sumPrice: sum(items.price),
+              itemCount: count(items.id),
+              medianPrice: median(items.price),
+            })),
+      })
+
+      expect(result.size).toBe(2)
+
+      const categoryA = result.get(`A`)
+      expect(categoryA?.avgPrice).toBe(15) // (10 + 20) / 2
+      expect(categoryA?.sumPrice).toBe(30) // 10 + 20
+      expect(categoryA?.itemCount).toBe(2)
+      expect(categoryA?.medianPrice).toBe(15) // (10 + 20) / 2
+
+      const categoryB = result.get(`B`)
+      expect(categoryB?.avgPrice).toBe(20) // (15 + 25) / 2
+      expect(categoryB?.sumPrice).toBe(40) // 15 + 25
+      expect(categoryB?.itemCount).toBe(2)
+      expect(categoryB?.medianPrice).toBe(20) // (15 + 25) / 2
     })
   })
 })

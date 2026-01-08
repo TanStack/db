@@ -26,7 +26,7 @@ import {
   upper,
 } from '../../../src/query/builder/functions.js'
 import type { RefLeaf } from '../../../src/query/builder/types.js'
-import type { Aggregate, BasicExpression } from '../../../src/query/ir.js'
+import type { Aggregate, BasicExpression, Func } from '../../../src/query/ir.js'
 
 // Sample data types for comprehensive callback type testing
 type User = {
@@ -243,9 +243,7 @@ describe(`Query Builder Callback Types`, () => {
         expectTypeOf(
           or(eq(user.active, false), lt(user.age, 18)),
         ).toEqualTypeOf<BasicExpression<boolean>>()
-        expectTypeOf(not(eq(user.active, false))).toEqualTypeOf<
-          BasicExpression<boolean>
-        >()
+        expectTypeOf(not(eq(user.active, false))).toEqualTypeOf<Func<boolean>>()
 
         return and(
           eq(user.active, true),

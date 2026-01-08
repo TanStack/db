@@ -1,45 +1,10 @@
-import { Func } from '../../ir.js'
-import { toExpression } from '../ref-proxy.js'
-import type { BasicExpression, CompiledExpression } from '../../ir.js'
+import { defineOperator } from './define.js'
+import { isUnknown, transform } from './factories.js'
 
-// ============================================================
-// TYPES
-// ============================================================
-
-// Helper type for any expression-like value
-type ExpressionLike = BasicExpression | any
-
-// ============================================================
-// EVALUATOR
-// ============================================================
-
-function isUnknown(value: any): boolean {
-  return value === null || value === undefined
-}
-
-function notEvaluatorFactory(
-  compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean,
-): CompiledExpression {
-  const arg = compiledArgs[0]!
-
-  return (data: any) => {
-    // 3-valued logic for NOT:
-    // - NOT null = null
-    // - NOT true = false
-    // - NOT false = true
-    const result = arg(data)
-    if (isUnknown(result)) {
-      return null
-    }
-    return !result
-  }
-}
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
-export function not(value: ExpressionLike): BasicExpression<boolean> {
-  return new Func(`not`, [toExpression(value)], notEvaluatorFactory)
-}
+// NOT: returns null for unknown, negates boolean values
+// Note: Runtime returns null for unknown values (3-valued logic),
+// but typed as boolean for backward compatibility
+export const not = /* #__PURE__*/ defineOperator<boolean, [value: unknown]>({
+  name: `not`,
+  compile: transform((v) => (isUnknown(v) ? null : !v)),
+})

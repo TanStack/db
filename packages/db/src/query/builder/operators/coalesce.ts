@@ -1,23 +1,11 @@
 import { Func } from '../../ir.js'
 import { toExpression } from '../ref-proxy.js'
-import type { BasicExpression, CompiledExpression } from '../../ir.js'
+import type { BasicExpression, EvaluatorFactory } from '../../ir.js'
+import type { ExpressionLike } from './types.js'
 
-// ============================================================
-// TYPES
-// ============================================================
-
-// Helper type for any expression-like value
-type ExpressionLike = BasicExpression | any
-
-// ============================================================
-// EVALUATOR
-// ============================================================
-
-function coalesceEvaluatorFactory(
-  compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean,
-): CompiledExpression {
-  return (data: any) => {
+// COALESCE returns the first non-null/undefined value
+const coalesceFactory: EvaluatorFactory = (compiledArgs) => {
+  return (data: unknown) => {
     for (const evaluator of compiledArgs) {
       const value = evaluator(data)
       if (value !== null && value !== undefined) {
@@ -28,14 +16,10 @@ function coalesceEvaluatorFactory(
   }
 }
 
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
 export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
   return new Func(
     `coalesce`,
     args.map((arg) => toExpression(arg)),
-    coalesceEvaluatorFactory,
+    coalesceFactory,
   )
 }

@@ -1,5 +1,5 @@
 // Re-export all operators
-// Importing from here will auto-register all evaluators
+// Each operator is a function that creates Func IR nodes with embedded evaluators
 
 // Comparison operators
 export { eq } from './eq.js'
@@ -36,3 +36,25 @@ export { divide } from './divide.js'
 // Null checking functions
 export { isNull } from './isNull.js'
 export { isUndefined } from './isUndefined.js'
+
+// Factory generators for custom operators
+export {
+  isUnknown,
+  comparison,
+  booleanOp,
+  transform,
+  numeric,
+  pattern,
+} from './factories.js'
+
+// Public API for defining custom operators
+export { defineOperator, defineAggregate } from './define.js'
+export type {
+  OperatorConfig,
+  AggregateDefinition,
+  ExpressionArg,
+  ExpressionArgs,
+  TypedCompiledExpression,
+  CompiledArgsFor,
+  TypedEvaluatorFactory,
+} from './define.js'

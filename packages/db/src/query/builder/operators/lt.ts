@@ -1,76 +1,22 @@
 import { Func } from '../../ir.js'
 import { toExpression } from '../ref-proxy.js'
-import type {
-  Aggregate,
-  BasicExpression,
-  CompiledExpression,
-} from '../../ir.js'
-import type { RefProxy } from '../ref-proxy.js'
-import type { RefLeaf } from '../types.js'
+import { comparison } from './factories.js'
+import type { Aggregate, BasicExpression, EvaluatorFactory } from '../../ir.js'
+import type { ComparisonOperand } from './types.js'
 
-// ============================================================
-// TYPES
-// ============================================================
-
-type ComparisonOperand<T> =
-  | RefProxy<T>
-  | RefLeaf<T>
-  | T
-  | BasicExpression<T>
-  | undefined
-  | null
-
-type ComparisonOperandPrimitive<T extends string | number> =
-  | T
-  | BasicExpression<T>
-  | undefined
-  | null
-
-// ============================================================
-// EVALUATOR
-// ============================================================
-
-function isUnknown(value: any): boolean {
-  return value === null || value === undefined
-}
-
-function ltEvaluatorFactory(
-  compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean,
-): CompiledExpression {
-  const argA = compiledArgs[0]!
-  const argB = compiledArgs[1]!
-
-  return (data: any) => {
-    const a = argA(data)
-    const b = argB(data)
-
-    // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
-    if (isUnknown(a) || isUnknown(b)) {
-      return null
-    }
-
-    return a < b
-  }
-}
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
+// Factory using the comparison helper - cast to EvaluatorFactory for Func constructor
+const ltFactory = /* #__PURE__*/ comparison<number>(
+  (a, b) => a < b,
+) as EvaluatorFactory
 
 export function lt<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
-export function lt<T extends string | number>(
-  left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>,
+export function lt<T>(
+  left: Aggregate<T>,
+  right: unknown,
 ): BasicExpression<boolean>
-export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
-export function lt(left: any, right: any): BasicExpression<boolean> {
-  return new Func(
-    `lt`,
-    [toExpression(left), toExpression(right)],
-    ltEvaluatorFactory,
-  )
+export function lt(left: unknown, right: unknown): BasicExpression<boolean> {
+  return new Func(`lt`, [toExpression(left), toExpression(right)], ltFactory)
 }

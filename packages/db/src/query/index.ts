@@ -12,7 +12,7 @@ export {
   type InferResultType,
 } from './builder/index.js'
 
-// Expression functions exports - now from operator modules for tree-shaking
+// Expression functions exports - operators and aggregates
 export {
   // Comparison operators
   eq,
@@ -42,9 +42,26 @@ export {
   subtract,
   multiply,
   divide,
+  // Factory generators for custom operators
+  isUnknown,
+  comparison,
+  booleanOp,
+  transform,
+  numeric,
+  pattern,
+  // Public API for defining custom operators and aggregates
+  defineOperator,
+  defineAggregate,
+  type OperatorConfig,
+  type AggregateDefinition,
+  type ExpressionArg,
+  type ExpressionArgs,
+  type TypedCompiledExpression,
+  type CompiledArgsFor,
+  type TypedEvaluatorFactory,
 } from './builder/operators/index.js'
 
-// Aggregates - now from aggregate modules for tree-shaking
+// Aggregates
 export {
   count,
   avg,
@@ -57,8 +74,6 @@ export {
 } from './builder/aggregates/index.js'
 
 // Types for custom operators and aggregates
-// Custom operators: create a Func with your own factory as the 3rd argument
-// Custom aggregates: create an Aggregate with your own config as the 3rd argument
 export {
   Func,
   Aggregate,

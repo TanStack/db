@@ -1,30 +1,15 @@
 import { Func } from '../../ir.js'
 import { toExpression } from '../ref-proxy.js'
-import type { BasicExpression, CompiledExpression } from '../../ir.js'
+import { isUnknown } from './factories.js'
+import type { BasicExpression, EvaluatorFactory } from '../../ir.js'
+import type { ExpressionLike } from './types.js'
 
-// ============================================================
-// TYPES
-// ============================================================
-
-// Helper type for any expression-like value
-type ExpressionLike = BasicExpression | any
-
-// ============================================================
-// EVALUATOR
-// ============================================================
-
-function isUnknown(value: any): boolean {
-  return value === null || value === undefined
-}
-
-function inEvaluatorFactory(
-  compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean,
-): CompiledExpression {
+// IN requires a custom factory because it handles arrays specially
+const inFactory: EvaluatorFactory = (compiledArgs) => {
   const valueEvaluator = compiledArgs[0]!
   const arrayEvaluator = compiledArgs[1]!
 
-  return (data: any) => {
+  return (data: unknown) => {
     const value = valueEvaluator(data)
     const array = arrayEvaluator(data)
     // In 3-valued logic, if the value is null/undefined, return UNKNOWN
@@ -38,17 +23,9 @@ function inEvaluatorFactory(
   }
 }
 
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
 export function inArray(
   value: ExpressionLike,
   array: ExpressionLike,
 ): BasicExpression<boolean> {
-  return new Func(
-    `in`,
-    [toExpression(value), toExpression(array)],
-    inEvaluatorFactory,
-  )
+  return new Func(`in`, [toExpression(value), toExpression(array)], inFactory)
 }
