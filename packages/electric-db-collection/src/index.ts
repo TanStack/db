@@ -4,6 +4,7 @@ export {
   isControlMessage,
   type ElectricCollectionConfig,
   type ElectricCollectionUtils,
+  type ElectricCollectionUtilsWithPersistence,
   type Txid,
   type AwaitTxIdFn,
 } from './electric'
