@@ -243,9 +243,7 @@ describe(`Query Builder Callback Types`, () => {
         expectTypeOf(
           or(eq(user.active, false), lt(user.age, 18)),
         ).toEqualTypeOf<BasicExpression<boolean>>()
-        expectTypeOf(not(eq(user.active, false))).toEqualTypeOf<
-          Func<boolean>
-        >()
+        expectTypeOf(not(eq(user.active, false))).toEqualTypeOf<Func<boolean>>()
 
         return and(
           eq(user.active, true),

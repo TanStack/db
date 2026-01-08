@@ -27,9 +27,5 @@ export function inArray(
   value: ExpressionLike,
   array: ExpressionLike,
 ): BasicExpression<boolean> {
-  return new Func(
-    `in`,
-    [toExpression(value), toExpression(array)],
-    inFactory,
-  )
+  return new Func(`in`, [toExpression(value), toExpression(array)], inFactory)
 }

@@ -5,7 +5,10 @@ import type { BasicExpression } from '../../ir.js'
 import type { ExpressionLike } from './types.js'
 
 // AND: short-circuits on false, returns true if all are true
-const andFactory = /* #__PURE__*/ booleanOp({ shortCircuit: false, default: true })
+const andFactory = /* #__PURE__*/ booleanOp({
+  shortCircuit: false,
+  default: true,
+})
 
 // Overloads for and() - support 2 or more arguments, or an array
 export function and(

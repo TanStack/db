@@ -45,5 +45,9 @@ export function like(
   right: ExpressionLike,
 ): BasicExpression<boolean>
 export function like(left: unknown, right: unknown): BasicExpression<boolean> {
-  return new Func(`like`, [toExpression(left), toExpression(right)], likeFactory)
+  return new Func(
+    `like`,
+    [toExpression(left), toExpression(right)],
+    likeFactory,
+  )
 }

@@ -28,7 +28,10 @@ export function eq<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
-export function eq<T>(left: Aggregate<T>, right: unknown): BasicExpression<boolean>
+export function eq<T>(
+  left: Aggregate<T>,
+  right: unknown,
+): BasicExpression<boolean>
 export function eq(left: unknown, right: unknown): BasicExpression<boolean> {
   return new Func(`eq`, [toExpression(left), toExpression(right)], eqFactory)
 }

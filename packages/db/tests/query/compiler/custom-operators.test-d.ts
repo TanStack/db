@@ -1,12 +1,7 @@
 import { describe, expectTypeOf, test } from 'vitest'
 import { createCollection } from '../../../src/collection/index.js'
 import {
-  
-  
-  
   Func,
-  
-  
   add,
   comparison,
   createLiveQueryCollection,
@@ -15,12 +10,21 @@ import {
   gt,
   isUnknown,
   numeric,
-  transform
+  transform,
 } from '../../../src/query/index.js'
 import { PropRef, Value } from '../../../src/query/ir.js'
 import { mockSyncCollectionOptions } from '../../utils.js'
-import type {CompiledArgsFor, ExpressionArg, ExpressionArgs, TypedCompiledExpression, TypedEvaluatorFactory} from '../../../src/query/index.js';
-import type { CompiledExpression, EvaluatorFactory } from '../../../src/query/ir.js'
+import type {
+  CompiledArgsFor,
+  ExpressionArg,
+  ExpressionArgs,
+  TypedCompiledExpression,
+  TypedEvaluatorFactory,
+} from '../../../src/query/index.js'
+import type {
+  CompiledExpression,
+  EvaluatorFactory,
+} from '../../../src/query/ir.js'
 import type { RefLeaf } from '../../../src/query/builder/types.js'
 
 // Sample data type for tests
@@ -56,11 +60,13 @@ describe(`Custom Operator Types`, () => {
         [value: number, min: number, max: number]
       >({
         name: `between`,
-        compile: ([valueArg, minArg, maxArg]) => (data) => {
-          const value = valueArg(data)
-          if (isUnknown(value)) return null
-          return value >= minArg(data) && value <= maxArg(data)
-        },
+        compile:
+          ([valueArg, minArg, maxArg]) =>
+          (data) => {
+            const value = valueArg(data)
+            if (isUnknown(value)) return null
+            return value >= minArg(data) && value <= maxArg(data)
+          },
       })
 
       // The returned function should return Func<boolean>
@@ -90,11 +96,13 @@ describe(`Custom Operator Types`, () => {
     test(`defineOperator with union return type`, () => {
       const maybe = defineOperator<boolean | null, [value: unknown]>({
         name: `maybe`,
-        compile: ([arg]) => (data) => {
-          const value = arg(data)
-          if (isUnknown(value)) return null
-          return Boolean(value)
-        },
+        compile:
+          ([arg]) =>
+          (data) => {
+            const value = arg(data)
+            if (isUnknown(value)) return null
+            return Boolean(value)
+          },
       })
 
       expectTypeOf(maybe).returns.toEqualTypeOf<Func<boolean | null>>()
@@ -103,7 +111,10 @@ describe(`Custom Operator Types`, () => {
     test(`defineOperator without generic defaults to unknown`, () => {
       const generic = defineOperator({
         name: `generic`,
-        compile: ([arg]) => (data) => arg!(data),
+        compile:
+          ([arg]) =>
+          (data) =>
+            arg!(data),
       })
 
       expectTypeOf(generic).returns.toEqualTypeOf<Func<unknown>>()
@@ -115,10 +126,12 @@ describe(`Custom Operator Types`, () => {
       // Define with explicit argument types
       const between = defineOperator<boolean, [number, number, number]>({
         name: `between`,
-        compile: ([valueArg, minArg, maxArg]) => (data) => {
-          const value = valueArg(data)
-          return value >= minArg(data) && value <= maxArg(data)
-        },
+        compile:
+          ([valueArg, minArg, maxArg]) =>
+          (data) => {
+            const value = valueArg(data)
+            return value >= minArg(data) && value <= maxArg(data)
+          },
       })
 
       // Should accept literal numbers
@@ -126,22 +139,20 @@ describe(`Custom Operator Types`, () => {
       expectTypeOf(result).toEqualTypeOf<Func<boolean>>()
 
       // Should also accept RefLeaf<number> (from query context)
-      const refResult = between(
-        {} as RefLeaf<number>,
-        1,
-        {} as RefLeaf<number>,
-      )
+      const refResult = between({} as RefLeaf<number>, 1, {} as RefLeaf<number>)
       expectTypeOf(refResult).toEqualTypeOf<Func<boolean>>()
     })
 
     test(`typed operator with string arguments`, () => {
       const startsWith = defineOperator<boolean, [string, string]>({
         name: `startsWith`,
-        compile: ([strArg, prefixArg]) => (data) => {
-          const str = strArg(data)
-          const prefix = prefixArg(data)
-          return typeof str === `string` && str.startsWith(prefix)
-        },
+        compile:
+          ([strArg, prefixArg]) =>
+          (data) => {
+            const str = strArg(data)
+            const prefix = prefixArg(data)
+            return typeof str === `string` && str.startsWith(prefix)
+          },
       })
 
       // Should accept string literals
@@ -181,10 +192,12 @@ describe(`Custom Operator Types`, () => {
         [value: number, min: number, max: number]
       >({
         name: `between`,
-        compile: ([valueArg, minArg, maxArg]) => (data) => {
-          const value = valueArg(data)
-          return value >= minArg(data) && value <= maxArg(data)
-        },
+        compile:
+          ([valueArg, minArg, maxArg]) =>
+          (data) => {
+            const value = valueArg(data)
+            return value >= minArg(data) && value <= maxArg(data)
+          },
       })
 
       // Should accept literal numbers
@@ -197,11 +210,13 @@ describe(`Custom Operator Types`, () => {
       const startsWith = defineOperator<boolean, [str: string, prefix: string]>(
         {
           name: `startsWith`,
-          compile: ([strArg, prefixArg]) => (data) => {
-            const str = strArg(data)
-            const prefix = prefixArg(data)
-            return str.startsWith(prefix)
-          },
+          compile:
+            ([strArg, prefixArg]) =>
+            (data) => {
+              const str = strArg(data)
+              const prefix = prefixArg(data)
+              return str.startsWith(prefix)
+            },
         },
       )
 
@@ -226,7 +241,10 @@ describe(`Custom Operator Types`, () => {
       // Fully typed with TArgs
       const isPositive = defineOperator<boolean, [value: number]>({
         name: `isPositive`,
-        compile: ([arg]) => (data) => arg(data) > 0,
+        compile:
+          ([arg]) =>
+          (data) =>
+            arg(data) > 0,
       })
 
       // Should accept PropRef nodes
@@ -237,7 +255,10 @@ describe(`Custom Operator Types`, () => {
     test(`operator accepts other Func expressions as arguments`, () => {
       const isTrue = defineOperator<boolean>({
         name: `isTrue`,
-        compile: ([arg]) => (data) => arg!(data) === true,
+        compile:
+          ([arg]) =>
+          (data) =>
+            arg!(data) === true,
       })
 
       // Should accept other Func expressions (nested operators)
@@ -252,10 +273,12 @@ describe(`Custom Operator Types`, () => {
         [value: number, min: number, max: number]
       >({
         name: `between`,
-        compile: ([valueArg, minArg, maxArg]) => (data) => {
-          const value = valueArg(data)
-          return value >= minArg(data) && value <= maxArg(data)
-        },
+        compile:
+          ([valueArg, minArg, maxArg]) =>
+          (data) => {
+            const value = valueArg(data)
+            return value >= minArg(data) && value <= maxArg(data)
+          },
       })
 
       // Should accept mix of PropRef, literal, and Value
@@ -383,7 +406,9 @@ describe(`Custom Operator Types`, () => {
         return a > b
       })
 
-      expectTypeOf(factory).toMatchTypeOf<TypedEvaluatorFactory<[number, number]>>()
+      expectTypeOf(factory).toMatchTypeOf<
+        TypedEvaluatorFactory<[number, number]>
+      >()
     })
 
     test(`transform helper returns TypedEvaluatorFactory`, () => {
@@ -410,7 +435,9 @@ describe(`Custom Operator Types`, () => {
         return a + b
       })
 
-      expectTypeOf(factory).toMatchTypeOf<TypedEvaluatorFactory<[number, number]>>()
+      expectTypeOf(factory).toMatchTypeOf<
+        TypedEvaluatorFactory<[number, number]>
+      >()
     })
 
     test(`factories work with defineOperator and typed args`, () => {
@@ -466,10 +493,12 @@ describe(`Custom Operator Types`, () => {
         [value: number, min: number, max: number]
       >({
         name: `between`,
-        compile: ([valueArg, minArg, maxArg]) => (data) => {
-          const value = valueArg(data)
-          return value >= minArg(data) && value <= maxArg(data)
-        },
+        compile:
+          ([valueArg, minArg, maxArg]) =>
+          (data) => {
+            const value = valueArg(data)
+            return value >= minArg(data) && value <= maxArg(data)
+          },
       })
 
       const result = createLiveQueryCollection({
@@ -568,7 +597,10 @@ describe(`Custom Operator Types`, () => {
       // Fully typed with TArgs
       const isPositive = defineOperator<boolean, [value: number]>({
         name: `isPositive`,
-        compile: ([arg]) => (data) => arg(data) > 0,
+        compile:
+          ([arg]) =>
+          (data) =>
+            arg(data) > 0,
       })
 
       const result = createLiveQueryCollection({

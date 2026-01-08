@@ -2,21 +2,21 @@ import { describe, expectTypeOf, test } from 'vitest'
 import { createCollection } from '../../../src/collection/index.js'
 import {
   Aggregate,
-  
   avg,
   count,
   createLiveQueryCollection,
   defineAggregate,
-  sum
+  sum,
 } from '../../../src/query/index.js'
 import { PropRef, Value } from '../../../src/query/ir.js'
 import { toExpression } from '../../../src/query/builder/ref-proxy.js'
 import { mockSyncCollectionOptions } from '../../utils.js'
-import type {AggregateConfig,
+import type {
+  AggregateConfig,
   AggregateFactory,
   ExpressionArg,
-  ValueExtractor
-} from '../../../src/query/index.js';
+  ValueExtractor,
+} from '../../../src/query/index.js'
 import type { RefLeaf } from '../../../src/query/builder/types.js'
 
 // Sample data type for tests

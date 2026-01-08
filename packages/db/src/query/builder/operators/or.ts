@@ -5,7 +5,10 @@ import type { BasicExpression } from '../../ir.js'
 import type { ExpressionLike } from './types.js'
 
 // OR: short-circuits on true, returns false if all are false
-const orFactory = /* #__PURE__*/ booleanOp({ shortCircuit: true, default: false })
+const orFactory = /* #__PURE__*/ booleanOp({
+  shortCircuit: true,
+  default: false,
+})
 
 // Overloads for or() - support 2 or more arguments, or an array
 export function or(

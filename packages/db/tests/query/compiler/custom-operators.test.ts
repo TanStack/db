@@ -300,14 +300,16 @@ describe(`defineOperator public API`, () => {
         [value: number, min: number, max: number]
       >({
         name: `between`,
-        compile: ([valueArg, minArg, maxArg]) => (data) => {
-          const value = valueArg(data)
-          const min = minArg(data)
-          const max = maxArg(data)
+        compile:
+          ([valueArg, minArg, maxArg]) =>
+          (data) => {
+            const value = valueArg(data)
+            const min = minArg(data)
+            const max = maxArg(data)
 
-          if (isUnknown(value)) return null
-          return value >= min && value <= max
-        },
+            if (isUnknown(value)) return null
+            return value >= min && value <= max
+          },
       })
 
       const collection = createTestCollection()
@@ -338,16 +340,18 @@ describe(`defineOperator public API`, () => {
       const startsWith = defineOperator<boolean, [str: string, prefix: string]>(
         {
           name: `startsWith`,
-          compile: ([strArg, prefixArg]) => (data) => {
-            const str = strArg(data)
-            const prefix = prefixArg(data)
+          compile:
+            ([strArg, prefixArg]) =>
+            (data) => {
+              const str = strArg(data)
+              const prefix = prefixArg(data)
 
-            if (isUnknown(str) || isUnknown(prefix)) return null
-            if (typeof str !== `string` || typeof prefix !== `string`)
-              return false
+              if (isUnknown(str) || isUnknown(prefix)) return null
+              if (typeof str !== `string` || typeof prefix !== `string`)
+                return false
 
-            return str.startsWith(prefix)
-          },
+              return str.startsWith(prefix)
+            },
         },
       )
 
@@ -408,12 +412,10 @@ describe(`defineOperator public API`, () => {
       const result = createLiveQueryCollection({
         startSync: true,
         query: (q) =>
-          q
-            .from({ items: collection })
-            .select(({ items }) => ({
-              id: items.id,
-              doubledValue: double(items.value),
-            })),
+          q.from({ items: collection }).select(({ items }) => ({
+            id: items.id,
+            doubledValue: double(items.value),
+          })),
       })
 
       expect(result.get(1)?.doubledValue).toBe(20) // 10 * 2
@@ -432,13 +434,11 @@ describe(`defineOperator public API`, () => {
       const result = createLiveQueryCollection({
         startSync: true,
         query: (q) =>
-          q
-            .from({ items: collection })
-            .select(({ items }) => ({
-              id: items.id,
-              value: items.value,
-              mod3: modulo(items.value, 3),
-            })),
+          q.from({ items: collection }).select(({ items }) => ({
+            id: items.id,
+            value: items.value,
+            mod3: modulo(items.value, 3),
+          })),
       })
 
       expect(result.get(1)?.mod3).toBe(1) // 10 % 3 = 1
@@ -454,10 +454,12 @@ describe(`defineOperator public API`, () => {
         [value: number, min: number, max: number]
       >({
         name: `between`,
-        compile: ([valueArg, minArg, maxArg]) => (data) => {
-          const value = valueArg(data)
-          return value >= minArg(data) && value <= maxArg(data)
-        },
+        compile:
+          ([valueArg, minArg, maxArg]) =>
+          (data) => {
+            const value = valueArg(data)
+            return value >= minArg(data) && value <= maxArg(data)
+          },
       })
 
       const collection = createTestCollection()

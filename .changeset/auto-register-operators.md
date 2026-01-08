@@ -18,13 +18,18 @@ Each operator and aggregate now bundles its builder function and evaluator facto
 import { defineOperator, isUnknown } from '@tanstack/db'
 
 // Define a custom "between" operator
-const between = defineOperator<boolean, [value: number, min: number, max: number]>({
+const between = defineOperator<
+  boolean,
+  [value: number, min: number, max: number]
+>({
   name: 'between',
-  compile: ([valueArg, minArg, maxArg]) => (data) => {
-    const value = valueArg(data)
-    if (isUnknown(value)) return null
-    return value >= minArg(data) && value <= maxArg(data)
-  }
+  compile:
+    ([valueArg, minArg, maxArg]) =>
+    (data) => {
+      const value = valueArg(data)
+      if (isUnknown(value)) return null
+      return value >= minArg(data) && value <= maxArg(data)
+    },
 })
 
 // Use in a query
@@ -39,19 +44,19 @@ import { defineOperator, comparison, transform, numeric } from '@tanstack/db'
 // Binary comparison with automatic null handling
 const notEquals = defineOperator<boolean, [a: unknown, b: unknown]>({
   name: 'notEquals',
-  compile: comparison((a, b) => a !== b)
+  compile: comparison((a, b) => a !== b),
 })
 
 // Unary transformation
 const double = defineOperator<number, [value: number]>({
   name: 'double',
-  compile: transform((v) => v * 2)
+  compile: transform((v) => v * 2),
 })
 
 // Binary numeric operation
 const modulo = defineOperator<number, [a: number, b: number]>({
   name: 'modulo',
-  compile: numeric((a, b) => b !== 0 ? a % b : null)
+  compile: numeric((a, b) => (b !== 0 ? a % b : null)),
 })
 ```
 
@@ -70,8 +75,8 @@ const product = defineAggregate<number>({
         for (let i = 0; i < multiplicity; i++) result *= value
       }
       return result
-    }
+    },
   }),
-  valueTransform: 'numeric'
+  valueTransform: 'numeric',
 })
 ```

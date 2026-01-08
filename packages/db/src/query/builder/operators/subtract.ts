@@ -4,7 +4,9 @@ import { numeric } from './factories.js'
 import type { EvaluatorFactory } from '../../ir.js'
 import type { BinaryNumericReturnType, ExpressionLike } from './types.js'
 
-const subtractFactory = /* #__PURE__*/ numeric((a, b) => a - b) as EvaluatorFactory
+const subtractFactory = /* #__PURE__*/ numeric(
+  (a, b) => a - b,
+) as EvaluatorFactory
 
 export function subtract<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
