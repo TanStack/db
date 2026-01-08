@@ -15,9 +15,10 @@ so `trackLoadPromise` was never called on the live query collection.
 
 Changes:
 
-1. **Core fix - deferred snapshot triggering**: Split subscription creation from snapshot
-   triggering using a new `deferSnapshot` option. This ensures the status listener is
-   registered BEFORE any async work starts, so we never miss status transitions.
+1. **Core fix - `onStatusChange` option**: Added `onStatusChange` callback option to
+   `subscribeChanges()`. The listener is registered BEFORE any snapshot is requested,
+   guaranteeing no status transitions are missed. This replaces the error-prone pattern
+   of manually deferring snapshots and registering listeners in the correct order.
 
 2. **Ready state gating**: `updateLiveQueryStatus()` now checks `isLoadingSubset` on the
    live query collection before marking it ready, and listens for `loadingSubset:change`

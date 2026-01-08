@@ -781,12 +781,11 @@ export interface SubscribeChangesOptions {
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /**
-   * When true, defers the snapshot request so the caller can register status
-   * listeners before any async work starts. The caller must call
-   * subscription.requestSnapshot() manually.
+   * Listener for subscription status changes.
+   * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
    * @internal
    */
-  deferSnapshot?: boolean
+  onStatusChange?: (event: SubscriptionStatusChangeEvent) => void
 }
 
 export interface SubscribeChangesSnapshotOptions extends Omit<

@@ -107,17 +107,19 @@ export class CollectionChangesManager<
       },
     })
 
-    // When deferSnapshot is true, the caller will manually trigger the snapshot request
-    // after registering status listeners. This prevents race conditions where the
-    // loadSubset promise resolves before the listener is registered.
-    if (!options.deferSnapshot) {
-      if (options.includeInitialState) {
-        subscription.requestSnapshot({ trackLoadSubsetPromise: false })
-      } else if (options.includeInitialState === false) {
-        // When explicitly set to false (not just undefined), mark all state as "seen"
-        // so that all future changes (including deletes) pass through unfiltered.
-        subscription.markAllStateAsSeen()
-      }
+    // Register status listener BEFORE requesting snapshot to avoid race condition.
+    // This ensures the listener catches all status transitions, even if the
+    // loadSubset promise resolves synchronously or very quickly.
+    if (options.onStatusChange) {
+      subscription.on(`status:change`, options.onStatusChange)
+    }
+
+    if (options.includeInitialState) {
+      subscription.requestSnapshot({ trackLoadSubsetPromise: false })
+    } else if (options.includeInitialState === false) {
+      // When explicitly set to false (not just undefined), mark all state as "seen"
+      // so that all future changes (including deletes) pass through unfiltered.
+      subscription.markAllStateAsSeen()
     }
 
     // Add to batched listeners
