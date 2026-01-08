@@ -1,5 +1,5 @@
 // Re-export all aggregates
-// Importing from here will auto-register all aggregate evaluators
+// Each aggregate is a function that creates Aggregate IR nodes with embedded configs
 
 export { sum } from './sum.js'
 export { count } from './count.js'

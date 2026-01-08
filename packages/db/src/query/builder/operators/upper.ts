@@ -1,27 +1,12 @@
 import { Func } from '../../ir.js'
 import { toExpression } from '../ref-proxy.js'
-import type { CompiledExpression } from '../../ir.js'
+import { transform } from './factories.js'
+import type { EvaluatorFactory } from '../../ir.js'
 import type { ExpressionLike, StringFunctionReturnType } from './types.js'
 
-// ============================================================
-// EVALUATOR
-// ============================================================
-
-function upperEvaluatorFactory(
-  compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean,
-): CompiledExpression {
-  const arg = compiledArgs[0]!
-
-  return (data: any) => {
-    const value = arg(data)
-    return typeof value === `string` ? value.toUpperCase() : value
-  }
-}
-
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
+const upperFactory = /* #__PURE__*/ transform<unknown, unknown>((v) =>
+  typeof v === `string` ? v.toUpperCase() : v,
+) as EvaluatorFactory
 
 export function upper<T extends ExpressionLike>(
   arg: T,
@@ -29,6 +14,6 @@ export function upper<T extends ExpressionLike>(
   return new Func(
     `upper`,
     [toExpression(arg)],
-    upperEvaluatorFactory,
+    upperFactory,
   ) as StringFunctionReturnType<T>
 }

@@ -8,61 +8,70 @@ Each operator and aggregate now bundles its builder function and evaluator facto
 
 - **True tree-shaking**: Only operators/aggregates you import are included in your bundle
 - **No global registry**: No side-effect imports needed; each node is self-contained
-- **Custom operators**: Create custom operators by building `Func` nodes with a factory
-- **Custom aggregates**: Create custom aggregates by building `Aggregate` nodes with a config
+- **Custom operators**: Use `defineOperator()` to create custom operators
+- **Custom aggregates**: Use `defineAggregate()` to create custom aggregates
+- **Factory helpers**: Use `comparison()`, `transform()`, `numeric()`, `booleanOp()`, and `pattern()` to easily create operator evaluators
 
 **Custom Operator Example:**
 
 ```typescript
-import {
-  Func,
-  type EvaluatorFactory,
-  type CompiledExpression,
-} from '@tanstack/db'
-import { toExpression } from '@tanstack/db/query'
+import { defineOperator, isUnknown } from '@tanstack/db'
 
-const betweenFactory: EvaluatorFactory = (compiledArgs, _isSingleRow) => {
-  const [valueEval, minEval, maxEval] = compiledArgs
-  return (data) => {
-    const value = valueEval!(data)
-    return value >= minEval!(data) && value <= maxEval!(data)
+// Define a custom "between" operator
+const between = defineOperator<boolean, [value: number, min: number, max: number]>({
+  name: 'between',
+  compile: ([valueArg, minArg, maxArg]) => (data) => {
+    const value = valueArg(data)
+    if (isUnknown(value)) return null
+    return value >= minArg(data) && value <= maxArg(data)
   }
-}
+})
 
-function between(value: any, min: any, max: any) {
-  return new Func(
-    'between',
-    [toExpression(value), toExpression(min), toExpression(max)],
-    betweenFactory,
-  )
-}
+// Use in a query
+query.where(({ user }) => between(user.age, 18, 65))
+```
+
+**Using Factory Helpers:**
+
+```typescript
+import { defineOperator, comparison, transform, numeric } from '@tanstack/db'
+
+// Binary comparison with automatic null handling
+const notEquals = defineOperator<boolean, [a: unknown, b: unknown]>({
+  name: 'notEquals',
+  compile: comparison((a, b) => a !== b)
+})
+
+// Unary transformation
+const double = defineOperator<number, [value: number]>({
+  name: 'double',
+  compile: transform((v) => v * 2)
+})
+
+// Binary numeric operation
+const modulo = defineOperator<number, [a: number, b: number]>({
+  name: 'modulo',
+  compile: numeric((a, b) => b !== 0 ? a % b : null)
+})
 ```
 
 **Custom Aggregate Example:**
 
 ```typescript
-import {
-  Aggregate,
-  type AggregateConfig,
-  type ValueExtractor,
-} from '@tanstack/db'
-import { toExpression } from '@tanstack/db/query'
+import { defineAggregate } from '@tanstack/db'
 
-const productConfig: AggregateConfig = {
-  factory: (valueExtractor: ValueExtractor) => ({
+const product = defineAggregate<number>({
+  name: 'product',
+  factory: (valueExtractor) => ({
     preMap: valueExtractor,
     reduce: (values) => {
-      let product = 1
+      let result = 1
       for (const [value, multiplicity] of values) {
-        for (let i = 0; i < multiplicity; i++) product *= value
+        for (let i = 0; i < multiplicity; i++) result *= value
       }
-      return product
-    },
+      return result
+    }
   }),
-  valueTransform: 'numeric',
-}
-
-function product<T>(arg: T): Aggregate<number> {
-  return new Aggregate('product', [toExpression(arg)], productConfig)
-}
+  valueTransform: 'numeric'
+})
 ```

@@ -1,48 +1,17 @@
 import { Func } from '../../ir.js'
 import { toExpression } from '../ref-proxy.js'
 import { areValuesEqual, normalizeValue } from '../../../utils/comparison.js'
-import type {
-  Aggregate,
-  BasicExpression,
-  CompiledExpression,
-} from '../../ir.js'
-import type { RefProxy } from '../ref-proxy.js'
-import type { RefLeaf } from '../types.js'
+import { isUnknown } from './factories.js'
+import type { Aggregate, BasicExpression, EvaluatorFactory } from '../../ir.js'
+import type { ComparisonOperand } from './types.js'
 
-// ============================================================
-// TYPES
-// ============================================================
-
-type ComparisonOperand<T> =
-  | RefProxy<T>
-  | RefLeaf<T>
-  | T
-  | BasicExpression<T>
-  | undefined
-  | null
-
-type ComparisonOperandPrimitive<T extends string | number | boolean> =
-  | T
-  | BasicExpression<T>
-  | undefined
-  | null
-
-// ============================================================
-// EVALUATOR FACTORY
-// ============================================================
-
-function isUnknown(value: any): boolean {
-  return value === null || value === undefined
-}
-
-function eqEvaluatorFactory(
-  compiledArgs: Array<CompiledExpression>,
-  _isSingleRow: boolean,
-): CompiledExpression {
+// EQ needs a custom factory because it uses value normalization for proper
+// comparison of Dates, BigInts, etc.
+const eqFactory: EvaluatorFactory = (compiledArgs) => {
   const argA = compiledArgs[0]!
   const argB = compiledArgs[1]!
 
-  return (data: any) => {
+  return (data: unknown) => {
     const a = normalizeValue(argA(data))
     const b = normalizeValue(argB(data))
 
@@ -55,23 +24,11 @@ function eqEvaluatorFactory(
   }
 }
 
-// ============================================================
-// BUILDER FUNCTION
-// ============================================================
-
 export function eq<T>(
   left: ComparisonOperand<T>,
   right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
-export function eq<T extends string | number | boolean>(
-  left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>,
-): BasicExpression<boolean>
-export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
-export function eq(left: any, right: any): BasicExpression<boolean> {
-  return new Func(
-    `eq`,
-    [toExpression(left), toExpression(right)],
-    eqEvaluatorFactory,
-  )
+export function eq<T>(left: Aggregate<T>, right: unknown): BasicExpression<boolean>
+export function eq(left: unknown, right: unknown): BasicExpression<boolean> {
+  return new Func(`eq`, [toExpression(left), toExpression(right)], eqFactory)
 }

@@ -3,11 +3,51 @@ import { compileExpression } from '../../../src/query/compiler/evaluators.js'
 import { Func, PropRef, Value } from '../../../src/query/ir.js'
 import { toExpression } from '../../../src/query/builder/ref-proxy.js'
 import { and } from '../../../src/query/builder/operators/index.js'
+import { createCollection } from '../../../src/collection/index.js'
+import {
+  comparison,
+  createLiveQueryCollection,
+  defineOperator,
+  isUnknown,
+  numeric,
+  transform,
+} from '../../../src/query/index.js'
+import { mockSyncCollectionOptions } from '../../utils.js'
 import type {
   BasicExpression,
   CompiledExpression,
   EvaluatorFactory,
 } from '../../../src/query/ir.js'
+
+// ============================================================
+// Test data for e2e tests
+// ============================================================
+
+interface TestItem {
+  id: number
+  name: string
+  value: number
+  category: string
+  active: boolean
+}
+
+const sampleItems: Array<TestItem> = [
+  { id: 1, name: `Alpha`, value: 10, category: `A`, active: true },
+  { id: 2, name: `Beta`, value: 25, category: `A`, active: false },
+  { id: 3, name: `Gamma`, value: 15, category: `B`, active: true },
+  { id: 4, name: `Delta`, value: 30, category: `B`, active: true },
+  { id: 5, name: `Epsilon`, value: 5, category: `A`, active: false },
+]
+
+function createTestCollection() {
+  return createCollection<TestItem>(
+    mockSyncCollectionOptions({
+      id: `test-custom-operators`,
+      getKey: (item) => item.id,
+      initialData: sampleItems,
+    }),
+  )
+}
 
 describe(`custom operators`, () => {
   // Define factory for the "between" operator
@@ -243,6 +283,204 @@ describe(`custom operators`, () => {
       expect(compiled({ users: { age: 30 } })).toBe(true)
       expect(compiled({ users: { age: 10 } })).toBe(false)
       expect(compiled({ users: { age: 70 } })).toBe(false)
+    })
+  })
+})
+
+// ============================================================
+// defineOperator public API tests
+// ============================================================
+
+describe(`defineOperator public API`, () => {
+  describe(`typed custom operators`, () => {
+    it(`between operator with type annotation`, () => {
+      // Define a "between" operator using the public API with typed args
+      const between = defineOperator<
+        boolean,
+        [value: number, min: number, max: number]
+      >({
+        name: `between`,
+        compile: ([valueArg, minArg, maxArg]) => (data) => {
+          const value = valueArg(data)
+          const min = minArg(data)
+          const max = maxArg(data)
+
+          if (isUnknown(value)) return null
+          return value >= min && value <= max
+        },
+      })
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .where(({ items }) => between(items.value, 10, 20))
+            .select(({ items }) => ({
+              id: items.id,
+              name: items.name,
+              value: items.value,
+            })),
+      })
+
+      // Should include items with value between 10 and 20 (inclusive)
+      expect(result.size).toBe(2)
+      expect(result.toArray.map((r) => r.name).sort()).toEqual([
+        `Alpha`,
+        `Gamma`,
+      ])
+    })
+
+    it(`startsWith operator in a where clause`, () => {
+      // Define a "startsWith" operator with typed args
+      const startsWith = defineOperator<boolean, [str: string, prefix: string]>(
+        {
+          name: `startsWith`,
+          compile: ([strArg, prefixArg]) => (data) => {
+            const str = strArg(data)
+            const prefix = prefixArg(data)
+
+            if (isUnknown(str) || isUnknown(prefix)) return null
+            if (typeof str !== `string` || typeof prefix !== `string`)
+              return false
+
+            return str.startsWith(prefix)
+          },
+        },
+      )
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .where(({ items }) => startsWith(items.name, `A`))
+            .select(({ items }) => ({
+              id: items.id,
+              name: items.name,
+            })),
+      })
+
+      expect(result.size).toBe(1)
+      expect(result.get(1)?.name).toBe(`Alpha`)
+    })
+  })
+
+  describe(`factory helpers with defineOperator`, () => {
+    it(`notEquals using comparison helper`, () => {
+      // Define using the comparison helper with typed args
+      const notEquals = defineOperator<boolean, [a: unknown, b: unknown]>({
+        name: `notEquals`,
+        compile: comparison((a, b) => a !== b),
+      })
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .where(({ items }) => notEquals(items.category, `A`))
+            .select(({ items }) => ({
+              id: items.id,
+              category: items.category,
+            })),
+      })
+
+      expect(result.size).toBe(2)
+      expect(result.toArray.every((r) => r.category === `B`)).toBe(true)
+    })
+
+    it(`double using transform helper`, () => {
+      // Define using the transform helper with typed args
+      const double = defineOperator<number, [value: number]>({
+        name: `double`,
+        compile: transform((v) => v * 2),
+      })
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .select(({ items }) => ({
+              id: items.id,
+              doubledValue: double(items.value),
+            })),
+      })
+
+      expect(result.get(1)?.doubledValue).toBe(20) // 10 * 2
+      expect(result.get(4)?.doubledValue).toBe(60) // 30 * 2
+    })
+
+    it(`modulo using numeric helper`, () => {
+      // Define using the numeric helper with typed args
+      const modulo = defineOperator<number, [a: number, b: number]>({
+        name: `modulo`,
+        compile: numeric((a, b) => (b !== 0 ? a % b : null)),
+      })
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .select(({ items }) => ({
+              id: items.id,
+              value: items.value,
+              mod3: modulo(items.value, 3),
+            })),
+      })
+
+      expect(result.get(1)?.mod3).toBe(1) // 10 % 3 = 1
+      expect(result.get(2)?.mod3).toBe(1) // 25 % 3 = 1
+      expect(result.get(3)?.mod3).toBe(0) // 15 % 3 = 0
+    })
+  })
+
+  describe(`custom operators in complex queries`, () => {
+    it(`custom operator combined with built-in operators`, () => {
+      const between = defineOperator<
+        boolean,
+        [value: number, min: number, max: number]
+      >({
+        name: `between`,
+        compile: ([valueArg, minArg, maxArg]) => (data) => {
+          const value = valueArg(data)
+          return value >= minArg(data) && value <= maxArg(data)
+        },
+      })
+
+      const collection = createTestCollection()
+
+      const result = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ items: collection })
+            .where(({ items }) => between(items.value, 10, 25))
+            .where(({ items }) => items.active)
+            .select(({ items }) => ({
+              id: items.id,
+              name: items.name,
+            })),
+      })
+
+      // Value between 10-25 AND active
+      expect(result.size).toBe(2)
+      expect(result.toArray.map((r) => r.name).sort()).toEqual([
+        `Alpha`,
+        `Gamma`,
+      ])
     })
   })
 })
