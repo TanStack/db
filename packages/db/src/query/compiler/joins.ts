@@ -476,8 +476,21 @@ function processJoinSource(
 
       // Pull up source WHERE clauses from subquery to parent scope.
       // This enables loadSubset to receive the correct where clauses for subquery collections.
-      for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
-        sourceWhereClauses.set(alias, whereClause)
+      //
+      // IMPORTANT: Skip pull-up for optimizer-created subqueries. These are detected when:
+      // 1. The outer alias (from.alias) matches the inner alias (from.query.from.alias)
+      // 2. The subquery was found in queryMapping (it's a user-defined subquery, not optimizer-created)
+      //
+      // For optimizer-created subqueries, the parent already has the sourceWhereClauses
+      // extracted from the original raw query, so pulling up would be redundant.
+      const isUserDefinedSubquery = queryMapping.has(from.query)
+      const fromInnerAlias = from.query.from.alias
+      const isOptimizerCreated = !isUserDefinedSubquery && from.alias === fromInnerAlias
+
+      if (!isOptimizerCreated) {
+        for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause)
+        }
       }
 
       // Create a flattened remapping from outer alias to innermost alias.
