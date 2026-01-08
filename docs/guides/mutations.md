@@ -1144,30 +1144,7 @@ function FileUploader() {
 - Failed mutations surface their error via `transaction.isPersisted.promise` (which will reject)
 - **Subsequent mutations continue processing** - a single failure does not block the queue
 - Each mutation is independent; there is no all-or-nothing transaction semantics across multiple mutations
-
-To add retry logic to queued mutations, implement it in your `mutationFn`:
-
-```tsx
-const mutate = usePacedMutations<File>({
-  onMutate: (file) => {
-    uploadCollection.insert({ id: crypto.randomUUID(), file, status: 'pending' })
-  },
-  mutationFn: async ({ transaction }) => {
-    const mutation = transaction.mutations[0]
-    // Retry up to 3 times with backoff
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        await api.files.upload(mutation.modified)
-        return // Success
-      } catch (error) {
-        if (attempt === 2) throw error // Final attempt, propagate error
-        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
-      }
-    }
-  },
-  strategy: queueStrategy({ wait: 500 }),
-})
-```
+- To implement retry logic, see [Retry Behavior](#retry-behavior)
 
 ### Choosing a Strategy
 
