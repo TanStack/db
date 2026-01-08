@@ -1145,6 +1145,30 @@ function FileUploader() {
 - **Subsequent mutations continue processing** - a single failure does not block the queue
 - Each mutation is independent; there is no all-or-nothing transaction semantics across multiple mutations
 
+To add retry logic to queued mutations, implement it in your `mutationFn`:
+
+```tsx
+const mutate = usePacedMutations<File>({
+  onMutate: (file) => {
+    uploadCollection.insert({ id: crypto.randomUUID(), file, status: 'pending' })
+  },
+  mutationFn: async ({ transaction }) => {
+    const mutation = transaction.mutations[0]
+    // Retry up to 3 times with backoff
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await api.files.upload(mutation.modified)
+        return // Success
+      } catch (error) {
+        if (attempt === 2) throw error // Final attempt, propagate error
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+      }
+    }
+  },
+  strategy: queueStrategy({ wait: 500 }),
+})
+```
+
 ### Choosing a Strategy
 
 Use this guide to pick the right strategy for your use case:
@@ -1458,6 +1482,45 @@ The normal flow is: `pending` → `persisting` → `completed`
 If an error occurs: `pending` → `persisting` → `failed`
 
 Failed transactions automatically rollback their optimistic state.
+
+### Retry Behavior
+
+**Important:** TanStack DB does not automatically retry failed mutations. If a mutation fails (network error, server error, etc.), the transaction transitions to `failed` state and the optimistic state is rolled back. This is by design—automatic retry logic varies significantly based on your use case (idempotency requirements, error types, backoff strategies, etc.).
+
+To implement retry logic, wrap your API calls in your `mutationFn`:
+
+```typescript
+// Simple retry helper
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  delay = 1000
+): Promise<T> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      if (attempt === maxRetries - 1) throw error
+      await new Promise(resolve => setTimeout(resolve, delay * (attempt + 1)))
+    }
+  }
+  throw new Error('Unreachable')
+}
+
+// Use in your collection
+const todoCollection = createCollection({
+  id: "todos",
+  onUpdate: async ({ transaction }) => {
+    const mutation = transaction.mutations[0]
+    // Retry up to 3 times with exponential backoff
+    await withRetry(() =>
+      api.todos.update(mutation.original.id, mutation.changes)
+    )
+  },
+})
+```
+
+For more sophisticated retry strategies, consider using a library like [p-retry](https://github.com/sindresorhus/p-retry) which supports exponential backoff, custom retry conditions, and abort signals.
 
 ## Handling Temporary IDs
 
