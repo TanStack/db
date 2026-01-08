@@ -5,7 +5,10 @@ import {
 } from '../compiler/expressions.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
-import type { ChangeMessage, SubscriptionStatusChangeEvent } from '../../types.js'
+import type {
+  ChangeMessage,
+  SubscriptionStatusChangeEvent,
+} from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
 import type { BasicExpression } from '../ir.js'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
