@@ -1093,7 +1093,7 @@ function VolumeSlider() {
 
 ### Queue Strategy
 
-The queue strategy creates a separate transaction for each mutation and processes them sequentially in order. Unlike debounce/throttle, **every mutation is guaranteed to persist**, making it ideal for workflows where you can't lose any operations.
+The queue strategy creates a separate transaction for each mutation and processes them sequentially in order. Unlike debounce/throttle which may drop intermediate mutations, **every mutation is guaranteed to be attempted**, making it ideal for workflows where you can't skip any operations.
 
 ```tsx
 import { usePacedMutations, queueStrategy } from "@tanstack/react-db"
@@ -1136,8 +1136,14 @@ function FileUploader() {
 - Each mutation becomes its own transaction
 - Processes sequentially in order (FIFO by default)
 - Can configure to LIFO by setting `getItemsFrom: 'back'`
-- All mutations guaranteed to persist
+- All mutations guaranteed to be attempted (unlike debounce/throttle which may skip intermediate mutations)
 - Waits for each transaction to complete before starting the next
+
+**Error handling**:
+- If a mutation fails, **it is not automatically retried** - the transaction transitions to "failed" state
+- Failed mutations surface their error via `transaction.isPersisted.promise` (which will reject)
+- **Subsequent mutations continue processing** - a single failure does not block the queue
+- Each mutation is independent; there is no all-or-nothing transaction semantics across multiple mutations
 
 ### Choosing a Strategy
 

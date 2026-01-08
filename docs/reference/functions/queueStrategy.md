@@ -14,9 +14,15 @@ Defined in: [packages/db/src/strategies/queueStrategy.ts:46](https://github.com/
 Creates a queue strategy that processes all mutations in order with proper serialization.
 
 Unlike other strategies that may drop executions, queue ensures every
-mutation is processed sequentially. Each transaction commit completes before
+mutation is attempted sequentially. Each transaction commit completes before
 the next one starts. Useful when data consistency is critical and
-every operation must complete in order.
+every operation must be attempted in order.
+
+**Error handling behavior:**
+- If a mutation fails, it is NOT automatically retried - the transaction transitions to "failed" state
+- Failed mutations surface their error via `transaction.isPersisted.promise` (which will reject)
+- Subsequent mutations continue processing - a single failure does not block the queue
+- Each mutation is independent; there is no all-or-nothing transaction semantics
 
 ## Parameters
 
