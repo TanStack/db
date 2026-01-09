@@ -45,6 +45,10 @@
         {
           "label": "Creating Collection Options Creators",
           "to": "guides/collection-options-creator"
+        },
+        {
+          "label": "Testing",
+          "to": "guides/testing"
         }
       ]
     },
