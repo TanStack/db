@@ -5,7 +5,7 @@ title: SubscribeChangesSnapshotOptions
 
 # Interface: SubscribeChangesSnapshotOptions\<T\>
 
-Defined in: [packages/db/src/types.ts:803](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L803)
+Defined in: [packages/db/src/types.ts:809](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L809)
 
 ## Extends
 
@@ -25,7 +25,38 @@ Defined in: [packages/db/src/types.ts:803](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:807](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L807)
+Defined in: [packages/db/src/types.ts:813](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L813)
+
+***
+
+### onStatusChange()?
+
+```ts
+optional onStatusChange: (event) => void;
+```
+
+Defined in: [packages/db/src/types.ts:806](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L806)
+
+**`Internal`**
+
+Listener for subscription status changes.
+Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
+
+#### Parameters
+
+##### event
+
+[`SubscriptionStatusChangeEvent`](SubscriptionStatusChangeEvent.md)
+
+#### Returns
+
+`void`
+
+#### Inherited from
+
+```ts
+Omit.onStatusChange
+```
 
 ***
 
@@ -35,7 +66,7 @@ Defined in: [packages/db/src/types.ts:807](https://github.com/TanStack/db/blob/m
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:806](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L806)
+Defined in: [packages/db/src/types.ts:812](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L812)
 
 ***
 
