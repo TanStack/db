@@ -29,6 +29,31 @@ Whether to include the current state as initial changes
 
 ***
 
+### onStatusChange()?
+
+```ts
+optional onStatusChange: (event) => void;
+```
+
+Defined in: [packages/db/src/types.ts:806](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L806)
+
+**`Internal`**
+
+Listener for subscription status changes.
+Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
+
+#### Parameters
+
+##### event
+
+[`SubscriptionStatusChangeEvent`](SubscriptionStatusChangeEvent.md)
+
+#### Returns
+
+`void`
+
+***
+
 ### where()?
 
 ```ts
