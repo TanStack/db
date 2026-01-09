@@ -127,6 +127,13 @@ export class CollectionChangesManager<
       },
     })
 
+    // Register status listener BEFORE requesting snapshot to avoid race condition.
+    // This ensures the listener catches all status transitions, even if the
+    // loadSubset promise resolves synchronously or very quickly.
+    if (options.onStatusChange) {
+      subscription.on(`status:change`, options.onStatusChange)
+    }
+
     if (options.includeInitialState) {
       subscription.requestSnapshot({ trackLoadSubsetPromise: false })
     } else if (options.includeInitialState === false) {

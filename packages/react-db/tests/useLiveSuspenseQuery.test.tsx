@@ -602,4 +602,84 @@ describe(`useLiveSuspenseQuery`, () => {
       name: `John Doe`,
     })
   })
+
+  it(`should not re-suspend after hasBeenReady when isLoadingSubset changes`, async () => {
+    // This test verifies that after the initial ready state is reached,
+    // subsequent isLoadingSubset changes don't cause re-suspension
+    // (stale-while-revalidate behavior, matching TanStack Query)
+
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `test-persons-suspense-on-demand`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+
+    let suspenseCount = 0
+
+    const SuspenseTracker = ({ children }: { children: ReactNode }) => {
+      return (
+        <Suspense
+          fallback={
+            <div>
+              {(() => {
+                suspenseCount++
+                return `Loading...`
+              })()}
+            </div>
+          }
+        >
+          {children}
+        </Suspense>
+      )
+    }
+
+    const { result } = renderHook(
+      () => {
+        return useLiveSuspenseQuery((q) => q.from({ persons: collection }))
+      },
+      {
+        wrapper: SuspenseTracker,
+      },
+    )
+
+    // Wait for initial load
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(3)
+    })
+
+    const initialSuspenseCount = suspenseCount
+
+    // Now simulate on-demand loading by tracking a load promise on the live query collection
+    // This mimics what happens when a new subset query is made in on-demand mode
+    let resolveLoadPromise: () => void
+    const loadPromise = new Promise<void>((resolve) => {
+      resolveLoadPromise = resolve
+    })
+
+    // Track the load promise on the LIVE QUERY collection - this sets isLoadingSubset = true
+    result.current.collection._sync.trackLoadPromise(loadPromise)
+
+    // Verify isLoadingSubset is now true on the live query collection
+    expect(result.current.collection.isLoadingSubset).toBe(true)
+
+    // The collection is still ready, but isLoadingSubset is true
+    expect(result.current.collection.status).toBe(`ready`)
+
+    // Resolve the load promise to simulate data loading complete
+    resolveLoadPromise!()
+
+    // Wait for the loadingSubset:change event to propagate
+    await waitFor(() => {
+      expect(result.current.collection.isLoadingSubset).toBe(false)
+    })
+
+    // After hasBeenReadyRef is set, subsequent isLoadingSubset changes
+    // should NOT cause re-suspension (stale-while-revalidate behavior)
+    expect(suspenseCount).toBe(initialSuspenseCount)
+
+    // Data should still be available
+    expect(result.current.data).toHaveLength(3)
+  })
 })

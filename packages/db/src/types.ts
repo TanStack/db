@@ -798,6 +798,12 @@ export interface SubscribeChangesOptions<
   where?: (row: SingleRowRefProxy<T>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
+  /**
+   * Listener for subscription status changes.
+   * Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
+   * @internal
+   */
+  onStatusChange?: (event: SubscriptionStatusChangeEvent) => void
 }
 
 export interface SubscribeChangesSnapshotOptions<
