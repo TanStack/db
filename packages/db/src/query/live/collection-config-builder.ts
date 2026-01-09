@@ -1121,4 +1121,3 @@ function extractCollectionAliases(query: QueryIR): Map<string, Set<string>> {
 
   return aliasesById
 }
-

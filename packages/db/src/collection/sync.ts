@@ -134,7 +134,8 @@ export class CollectionSyncManager<
                 !isTruncateTransaction
               ) {
                 const existingValue = this.state.syncedData.get(key)
-                const valuesEqual = existingValue !== undefined &&
+                const valuesEqual =
+                  existingValue !== undefined &&
                   deepEquals(existingValue, messageWithOptionalKey.value)
                 if (valuesEqual) {
                   // The "insert" is an echo of a value we already have locally.
