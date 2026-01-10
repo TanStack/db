@@ -2102,4 +2102,166 @@ describe(`localStorage collection`, () => {
       subscription.unsubscribe()
     })
   })
+
+  describe(`writeUpsert utility`, () => {
+    it(`should insert a single item when it doesn't exist`, () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      const todo: Todo = {
+        id: `upsert-1`,
+        title: `Upsert Insert`,
+        completed: false,
+        createdAt: new Date(),
+      }
+
+      collection.utils.writeUpsert(todo)
+
+      expect(collection.has(`upsert-1`)).toBe(true)
+      expect(collection.get(`upsert-1`)?.title).toBe(`Upsert Insert`)
+
+      const storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`s:upsert-1`].data.title).toBe(`Upsert Insert`)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should update a single item when it exists`, () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      const initialTodo: Todo = {
+        id: `upsert-2`,
+        title: `Initial`,
+        completed: false,
+        createdAt: new Date(),
+      }
+
+      collection.utils.writeUpsert(initialTodo)
+
+      const updatedTodo: Todo = {
+        id: `upsert-2`,
+        title: `Updated`,
+        completed: true,
+        createdAt: new Date(),
+      }
+
+      collection.utils.writeUpsert(updatedTodo)
+
+      expect(collection.has(`upsert-2`)).toBe(true)
+      expect(collection.get(`upsert-2`)?.title).toBe(`Updated`)
+      expect(collection.get(`upsert-2`)?.completed).toBe(true)
+
+      const storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`s:upsert-2`].data.title).toBe(`Updated`)
+      expect(parsed[`s:upsert-2`].data.completed).toBe(true)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should merge data when updating existing item`, () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      const initialTodo: Todo = {
+        id: `upsert-3`,
+        title: `Initial Title`,
+        completed: false,
+        createdAt: new Date(`2024-01-01`),
+      }
+
+      collection.utils.writeUpsert(initialTodo)
+
+      const partialUpdate = {
+        id: `upsert-3`,
+        completed: true,
+      } as Partial<Todo>
+
+      collection.utils.writeUpsert(partialUpdate)
+
+      const item = collection.get(`upsert-3`)
+      expect(item?.title).toBe(`Initial Title`)
+      expect(item?.completed).toBe(true)
+      expect(item?.createdAt).toEqual(new Date(`2024-01-01`))
+
+      const storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`s:upsert-3`].data.title).toBe(`Initial Title`)
+      expect(parsed[`s:upsert-3`].data.completed).toBe(true)
+
+      subscription.unsubscribe()
+    })
+
+    it(`should upsert multiple items from an array`, () => {
+      const collection = createCollection(
+        localStorageCollectionOptions<Todo>({
+          storageKey: `todos`,
+          storage: mockStorage,
+          storageEventApi: mockStorageEventApi,
+          getKey: (todo) => todo.id,
+        }),
+      )
+
+      const subscription = collection.subscribeChanges(() => {})
+
+      const todos: Array<Todo> = [
+        {
+          id: `multi-1`,
+          title: `First`,
+          completed: false,
+          createdAt: new Date(),
+        },
+        {
+          id: `multi-2`,
+          title: `Second`,
+          completed: false,
+          createdAt: new Date(),
+        },
+      ]
+
+      collection.utils.writeUpsert(todos)
+
+      expect(collection.has(`multi-1`)).toBe(true)
+      expect(collection.has(`multi-2`)).toBe(true)
+      expect(collection.get(`multi-1`)?.title).toBe(`First`)
+      expect(collection.get(`multi-2`)?.title).toBe(`Second`)
+
+      const storedData = mockStorage.getItem(`todos`)
+      expect(storedData).toBeDefined()
+      const parsed = JSON.parse(storedData!)
+      expect(parsed[`s:multi-1`].data.title).toBe(`First`)
+      expect(parsed[`s:multi-2`].data.title).toBe(`Second`)
+
+      subscription.unsubscribe()
+    })
+  })
 })
