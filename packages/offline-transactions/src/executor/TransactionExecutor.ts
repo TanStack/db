@@ -223,6 +223,9 @@ export class TransactionExecutor {
       filteredTransactions = this.config.beforeRetry(transactions)
     }
 
+    // Clear scheduler before reloading to ensure filtered-out transactions are removed
+    this.scheduler.clear()
+
     for (const transaction of filteredTransactions) {
       this.scheduler.schedule(transaction)
     }
