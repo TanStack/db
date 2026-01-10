@@ -3,6 +3,7 @@ import { D2 } from '../../src/d2.js'
 import { MultiSet } from '../../src/multiset.js'
 import {
   avg,
+  collect,
   count,
   groupBy,
   max,
@@ -660,6 +661,79 @@ describe(`Operators`, () => {
       ]
 
       expect(latestMessage.getInner()).toEqual(expectedResult)
+    })
+
+    test(`with collect aggregate`, () => {
+      const graph = new D2()
+      const input = graph.newInput<{
+        category: string
+        item: string
+      }>()
+      let latestMessage: any = null
+
+      input.pipe(
+        groupBy((data) => ({ category: data.category }), {
+          items: collect((data) => data.item),
+        }),
+        output((message) => {
+          latestMessage = message
+        }),
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        new MultiSet([
+          [{ category: `A`, item: `apple` }, 1],
+          [{ category: `A`, item: `avocado` }, 1],
+          [{ category: `B`, item: `banana` }, 1],
+        ]),
+      )
+      graph.run()
+
+      expect(latestMessage).not.toBeNull()
+
+      const result = latestMessage.getInner()
+      expect(result).toHaveLength(2)
+
+      const categoryA = result.find(
+        ([key]: any) => key[0] === `{"category":"A"}`,
+      )
+      expect(categoryA).toBeDefined()
+      expect(categoryA[0][1].items).toEqual([`apple`, `avocado`])
+
+      const categoryB = result.find(
+        ([key]: any) => key[0] === `{"category":"B"}`,
+      )
+      expect(categoryB).toBeDefined()
+      expect(categoryB[0][1].items).toEqual([`banana`])
+
+      // Add another item to category A
+      input.sendData(new MultiSet([[{ category: `A`, item: `apricot` }, 1]]))
+      graph.run()
+
+      const updatedResult = latestMessage.getInner()
+      // IVM returns deltas: -1 for old state, +1 for new state
+      const updatedCategoryA = updatedResult.find(
+        ([[key], weight]: any) => key === `{"category":"A"}` && weight === 1,
+      )
+      expect(updatedCategoryA).toBeDefined()
+      expect(updatedCategoryA[0][1].items).toEqual([
+        `apple`,
+        `avocado`,
+        `apricot`,
+      ])
+
+      // Remove an item from category A
+      input.sendData(new MultiSet([[{ category: `A`, item: `apple` }, -1]]))
+      graph.run()
+
+      const afterRemoval = latestMessage.getInner()
+      const categoryAAfterRemoval = afterRemoval.find(
+        ([[key], weight]: any) => key === `{"category":"A"}` && weight === 1,
+      )
+      expect(categoryAAfterRemoval).toBeDefined()
+      expect(categoryAAfterRemoval[0][1].items).toEqual([`avocado`, `apricot`])
     })
 
     test(`complete group removal with sum aggregate`, () => {

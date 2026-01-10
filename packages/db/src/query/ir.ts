@@ -6,6 +6,37 @@ import type { CompareOptions } from './builder/types'
 import type { Collection, CollectionImpl } from '../collection/index.js'
 import type { NamespacedRow } from '../types'
 
+/**
+ * Type for a compiled expression evaluator
+ */
+export type CompiledExpression = (data: any) => any
+
+/**
+ * Factory function that creates an evaluator from compiled arguments
+ */
+export type EvaluatorFactory = (
+  compiledArgs: Array<CompiledExpression>,
+  isSingleRow: boolean,
+) => CompiledExpression
+
+/**
+ * Value extractor for aggregate functions
+ */
+export type ValueExtractor = (entry: [string, NamespacedRow]) => any
+
+/**
+ * Factory function that creates an aggregate from a value extractor
+ */
+export type AggregateFactory = (valueExtractor: ValueExtractor) => any
+
+/**
+ * Configuration for an aggregate function
+ */
+export interface AggregateConfig {
+  factory: AggregateFactory
+  valueTransform: `numeric` | `numericOrDate` | `raw`
+}
+
 export interface QueryIR {
   from: From
   select?: Select
@@ -112,6 +143,7 @@ export class Func<T = any> extends BaseExpression<T> {
   constructor(
     public name: string, // such as eq, gt, lt, upper, lower, etc.
     public args: Array<BasicExpression>,
+    public factory?: EvaluatorFactory, // optional: the evaluator factory for this function
   ) {
     super()
   }
@@ -127,6 +159,7 @@ export class Aggregate<T = any> extends BaseExpression<T> {
   constructor(
     public name: string, // such as count, avg, sum, min, max, etc.
     public args: Array<BasicExpression>,
+    public config?: AggregateConfig, // optional: the aggregate configuration
   ) {
     super()
   }

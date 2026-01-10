@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import { processArgument } from '../../../src/query/compiler/select.js'
-import { Aggregate, Func, PropRef, Value } from '../../../src/query/ir.js'
+import { Aggregate, PropRef, Value } from '../../../src/query/ir.js'
+import {
+  add,
+  and,
+  concat,
+  gt,
+  length,
+  upper,
+} from '../../../src/query/builder/operators/index.js'
 
 describe(`select compiler`, () => {
   // Note: Most of the select compilation logic is tested through the full integration
@@ -25,7 +33,7 @@ describe(`select compiler`, () => {
     })
 
     it(`processes function expressions correctly`, () => {
-      const arg = new Func(`upper`, [new Value(`hello`)])
+      const arg = upper(new Value(`hello`))
       const namespacedRow = {}
 
       const result = processArgument(arg, namespacedRow)
@@ -69,7 +77,7 @@ describe(`select compiler`, () => {
     })
 
     it(`processes function expressions with references`, () => {
-      const arg = new Func(`length`, [new PropRef([`users`, `name`])])
+      const arg = length(new PropRef([`users`, `name`]))
       const namespacedRow = { users: { name: `Alice` } }
 
       const result = processArgument(arg, namespacedRow)
@@ -77,11 +85,11 @@ describe(`select compiler`, () => {
     })
 
     it(`processes function expressions with multiple arguments`, () => {
-      const arg = new Func(`concat`, [
+      const arg = concat(
         new PropRef([`users`, `firstName`]),
         new Value(` `),
         new PropRef([`users`, `lastName`]),
-      ])
+      )
       const namespacedRow = {
         users: {
           firstName: `John`,
@@ -126,7 +134,7 @@ describe(`select compiler`, () => {
     })
 
     it(`processes boolean function expressions`, () => {
-      const arg = new Func(`and`, [new Value(true), new Value(false)])
+      const arg = and(new Value(true), new Value(false))
       const namespacedRow = {}
 
       const result = processArgument(arg, namespacedRow)
@@ -134,7 +142,7 @@ describe(`select compiler`, () => {
     })
 
     it(`processes comparison function expressions`, () => {
-      const arg = new Func(`gt`, [new PropRef([`users`, `age`]), new Value(18)])
+      const arg = gt(new PropRef([`users`, `age`]), new Value(18))
       const namespacedRow = { users: { age: 25 } }
 
       const result = processArgument(arg, namespacedRow)
@@ -142,10 +150,10 @@ describe(`select compiler`, () => {
     })
 
     it(`processes mathematical function expressions`, () => {
-      const arg = new Func(`add`, [
+      const arg = add(
         new PropRef([`order`, `subtotal`]),
         new PropRef([`order`, `tax`]),
-      ])
+      )
       const namespacedRow = {
         order: {
           subtotal: 100,
@@ -192,8 +200,8 @@ describe(`select compiler`, () => {
       const nonAggregateExpressions = [
         new PropRef([`users`, `name`]),
         new Value(42),
-        new Func(`upper`, [new Value(`hello`)]),
-        new Func(`length`, [new PropRef([`users`, `name`])]),
+        upper(new Value(`hello`)),
+        length(new PropRef([`users`, `name`])),
       ]
 
       const namespacedRow = { users: { name: `John` } }

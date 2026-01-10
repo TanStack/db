@@ -366,6 +366,32 @@ export function mode<T>(
   }
 }
 
+/**
+ * Creates a collect aggregate function that gathers all values into an array
+ * Similar to SQL's array_agg or GROUP_CONCAT
+ * @param valueExtractor Function to extract a value from each data entry
+ */
+export function collect<T, V = T>(
+  valueExtractor: (value: T) => V = (v) => v as unknown as V,
+): AggregateFunction<T, Array<V>, Array<V>> {
+  return {
+    preMap: (data: T) => [valueExtractor(data)],
+    reduce: (values: Array<[Array<V>, number]>) => {
+      const allValues: Array<V> = []
+      for (const [valueArray, multiplicity] of values) {
+        for (const value of valueArray) {
+          // Add each value 'multiplicity' times for correct IVM semantics
+          for (let i = 0; i < multiplicity; i++) {
+            allValues.push(value)
+          }
+        }
+      }
+      return allValues
+    },
+    // No postMap - return the array directly
+  }
+}
+
 export const groupByOperators = {
   sum,
   count,
@@ -374,4 +400,5 @@ export const groupByOperators = {
   max,
   median,
   mode,
+  collect,
 }

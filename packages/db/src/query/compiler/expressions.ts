@@ -48,7 +48,8 @@ export function normalizeExpressionPaths(
       )
       args.push(convertedArg)
     }
-    return new Func(whereClause.name, args)
+    // Preserve the factory from the original Func
+    return new Func(whereClause.name, args, whereClause.factory)
   }
 }
 

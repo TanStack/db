@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { currentStateAsChanges } from '../src/collection/change-events.js'
-import { Func, PropRef, Value } from '../src/query/ir.js'
+import { PropRef, Value } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
+import { eq, gt } from '../src/query/builder/operators/index.js'
 
 interface TestUser {
   id: string
@@ -90,7 +91,7 @@ describe(`currentStateAsChanges`, () => {
         )
 
         const result = currentStateAsChanges(collection, {
-          where: new Func(`eq`, [new PropRef([`status`]), new Value(`active`)]),
+          where: eq(new PropRef([`status`]), new Value(`active`)),
         })
 
         expect(result).toHaveLength(3)
@@ -107,7 +108,7 @@ describe(`currentStateAsChanges`, () => {
         )
 
         const result = currentStateAsChanges(collection, {
-          where: new Func(`gt`, [new PropRef([`age`]), new Value(25)]),
+          where: gt(new PropRef([`age`]), new Value(25)),
         })
 
         expect(result).toHaveLength(3)
@@ -225,7 +226,7 @@ describe(`currentStateAsChanges`, () => {
         )
 
         const result = currentStateAsChanges(collection, {
-          where: new Func(`eq`, [new PropRef([`status`]), new Value(`active`)]),
+          where: eq(new PropRef([`status`]), new Value(`active`)),
           orderBy: [
             {
               expression: new PropRef([`score`]),
@@ -248,7 +249,7 @@ describe(`currentStateAsChanges`, () => {
         )
 
         const result = currentStateAsChanges(collection, {
-          where: new Func(`gt`, [new PropRef([`age`]), new Value(25)]),
+          where: gt(new PropRef([`age`]), new Value(25)),
           orderBy: [
             {
               expression: new PropRef([`age`]),
@@ -271,7 +272,7 @@ describe(`currentStateAsChanges`, () => {
         )
 
         const result = currentStateAsChanges(collection, {
-          where: new Func(`eq`, [new PropRef([`status`]), new Value(`active`)]),
+          where: eq(new PropRef([`status`]), new Value(`active`)),
           orderBy: [
             {
               expression: new PropRef([`score`]),
@@ -314,10 +315,7 @@ describe(`currentStateAsChanges`, () => {
 
         expect(() => {
           currentStateAsChanges(collection, {
-            where: new Func(`eq`, [
-              new PropRef([`status`]),
-              new Value(`active`),
-            ]),
+            where: eq(new PropRef([`status`]), new Value(`active`)),
             limit: 3,
           })
         }).toThrow(`limit cannot be used without orderBy`)

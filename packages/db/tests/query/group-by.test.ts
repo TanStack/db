@@ -5,6 +5,7 @@ import { mockSyncCollectionOptions } from '../utils.js'
 import {
   and,
   avg,
+  collect,
   count,
   eq,
   gt,
@@ -12,7 +13,9 @@ import {
   isUndefined,
   lt,
   max,
+  maxStr,
   min,
+  minStr,
   not,
   or,
   sum,
@@ -1378,6 +1381,265 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Gold tier should remain unchanged
         const goldTier = results.find((r) => r.tier === `gold`)
         expect(goldTier?.order_count).toBe(initialGoldCount)
+      })
+    })
+
+    describe(`collect aggregate`, () => {
+      let ordersCollection: ReturnType<typeof createOrdersCollection>
+
+      beforeEach(() => {
+        ordersCollection = createOrdersCollection(autoIndex)
+      })
+
+      test(`collects values into an array`, () => {
+        const statusOrders = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.status)
+              .select(({ orders }) => ({
+                status: orders.status,
+                order_ids: collect(orders.id),
+                amounts: collect(orders.amount),
+              })),
+        })
+
+        const completed = statusOrders.get(`completed`)
+        expect(completed).toBeDefined()
+        expect(completed?.order_ids).toHaveLength(4)
+        expect(completed?.order_ids).toContain(1)
+        expect(completed?.order_ids).toContain(2)
+        expect(completed?.order_ids).toContain(4)
+        expect(completed?.order_ids).toContain(7)
+        expect(completed?.amounts).toEqual(
+          expect.arrayContaining([100, 200, 300, 400]),
+        )
+
+        const pending = statusOrders.get(`pending`)
+        expect(pending?.order_ids).toHaveLength(2)
+        expect(pending?.order_ids).toContain(3)
+        expect(pending?.order_ids).toContain(5)
+      })
+
+      test(`updates collected array on insert and delete`, () => {
+        const categoryOrders = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.product_category)
+              .select(({ orders }) => ({
+                product_category: orders.product_category,
+                order_ids: collect(orders.id),
+              })),
+        })
+
+        const initialBooks = categoryOrders.get(`books`)
+        expect(initialBooks?.order_ids).toHaveLength(3)
+
+        // Insert new order
+        const newOrder: Order = {
+          id: 100,
+          customer_id: 1,
+          amount: 50,
+          status: `pending`,
+          date: new Date(`2023-04-01`),
+          product_category: `books`,
+          quantity: 1,
+          discount: 0,
+          sales_rep_id: 1,
+        }
+
+        ordersCollection.utils.begin()
+        ordersCollection.utils.write({ type: `insert`, value: newOrder })
+        ordersCollection.utils.commit()
+
+        const afterInsert = categoryOrders.get(`books`)
+        expect(afterInsert?.order_ids).toHaveLength(4)
+        expect(afterInsert?.order_ids).toContain(100)
+
+        // Delete the new order
+        ordersCollection.utils.begin()
+        ordersCollection.utils.write({ type: `delete`, value: newOrder })
+        ordersCollection.utils.commit()
+
+        const afterDelete = categoryOrders.get(`books`)
+        expect(afterDelete?.order_ids).toHaveLength(3)
+        expect(afterDelete?.order_ids).not.toContain(100)
+      })
+    })
+
+    describe(`minStr and maxStr aggregates`, () => {
+      type Event = {
+        id: number
+        userId: number
+        timestamp: string
+        name: string
+      }
+
+      const sampleEvents: Array<Event> = [
+        { id: 1, userId: 1, timestamp: `2023-01-15T10:00:00Z`, name: `login` },
+        { id: 2, userId: 1, timestamp: `2023-01-15T11:30:00Z`, name: `click` },
+        { id: 3, userId: 1, timestamp: `2023-01-15T09:00:00Z`, name: `load` },
+        { id: 4, userId: 2, timestamp: `2023-02-01T14:00:00Z`, name: `login` },
+        { id: 5, userId: 2, timestamp: `2023-01-20T08:00:00Z`, name: `click` },
+      ]
+
+      function createEventsCollection() {
+        return createCollection(
+          mockSyncCollectionOptions<Event>({
+            id: `test-events`,
+            getKey: (event) => event.id,
+            initialData: sampleEvents,
+            autoIndex,
+          }),
+        )
+      }
+
+      test(`minStr and maxStr preserve string comparison`, () => {
+        const eventsCollection = createEventsCollection()
+
+        const userEventTimes = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ events: eventsCollection })
+              .groupBy(({ events }) => events.userId)
+              .select(({ events }) => ({
+                userId: events.userId,
+                firstEvent: minStr(events.timestamp),
+                lastEvent: maxStr(events.timestamp),
+              })),
+        })
+
+        // User 1: timestamps 09:00, 10:00, 11:30
+        const user1 = userEventTimes.get(1)
+        expect(user1?.firstEvent).toBe(`2023-01-15T09:00:00Z`)
+        expect(user1?.lastEvent).toBe(`2023-01-15T11:30:00Z`)
+
+        // User 2: timestamps 2023-01-20 and 2023-02-01
+        const user2 = userEventTimes.get(2)
+        expect(user2?.firstEvent).toBe(`2023-01-20T08:00:00Z`)
+        expect(user2?.lastEvent).toBe(`2023-02-01T14:00:00Z`)
+      })
+
+      test(`minStr and maxStr work with non-date strings`, () => {
+        const eventsCollection = createEventsCollection()
+
+        const userEventNames = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ events: eventsCollection })
+              .groupBy(({ events }) => events.userId)
+              .select(({ events }) => ({
+                userId: events.userId,
+                firstName: minStr(events.name),
+                lastName: maxStr(events.name),
+              })),
+        })
+
+        // User 1: names click, load, login -> alphabetically: click, load, login
+        const user1 = userEventNames.get(1)
+        expect(user1?.firstName).toBe(`click`)
+        expect(user1?.lastName).toBe(`login`)
+
+        // User 2: names click, login
+        const user2 = userEventNames.get(2)
+        expect(user2?.firstName).toBe(`click`)
+        expect(user2?.lastName).toBe(`login`)
+      })
+
+      test(`min coerces strings to numbers, minStr does not`, () => {
+        type Item = {
+          id: number
+          group: string
+          code: string
+        }
+
+        const items: Array<Item> = [
+          { id: 1, group: `A`, code: `100` },
+          { id: 2, group: `A`, code: `20` },
+          { id: 3, group: `A`, code: `3` },
+        ]
+
+        const itemsCollection = createCollection(
+          mockSyncCollectionOptions<Item>({
+            id: `test-items`,
+            getKey: (item) => item.id,
+            initialData: items,
+            autoIndex,
+          }),
+        )
+
+        const comparison = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ items: itemsCollection })
+              .groupBy(({ items }) => items.group)
+              .select(({ items }) => ({
+                group: items.group,
+                minNumeric: min(items.code),
+                minString: minStr(items.code),
+                maxNumeric: max(items.code),
+                maxString: maxStr(items.code),
+              })),
+        })
+
+        const groupA = comparison.get(`A`)
+
+        // min/max coerce to numbers: 3 < 20 < 100
+        expect(groupA?.minNumeric).toBe(3)
+        expect(groupA?.maxNumeric).toBe(100)
+
+        // minStr/maxStr use string comparison: "100" < "20" < "3"
+        expect(groupA?.minString).toBe(`100`)
+        expect(groupA?.maxString).toBe(`3`)
+      })
+
+      test(`minStr and maxStr handle live updates`, () => {
+        const eventsCollection = createEventsCollection()
+
+        const userEventTimes = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ events: eventsCollection })
+              .groupBy(({ events }) => events.userId)
+              .select(({ events }) => ({
+                userId: events.userId,
+                firstEvent: minStr(events.timestamp),
+                lastEvent: maxStr(events.timestamp),
+              })),
+        })
+
+        const initialUser1 = userEventTimes.get(1)
+        expect(initialUser1?.firstEvent).toBe(`2023-01-15T09:00:00Z`)
+
+        // Add earlier event
+        const earlierEvent: Event = {
+          id: 10,
+          userId: 1,
+          timestamp: `2023-01-01T00:00:00Z`,
+          name: `earlier`,
+        }
+
+        eventsCollection.utils.begin()
+        eventsCollection.utils.write({ type: `insert`, value: earlierEvent })
+        eventsCollection.utils.commit()
+
+        const afterInsert = userEventTimes.get(1)
+        expect(afterInsert?.firstEvent).toBe(`2023-01-01T00:00:00Z`)
+
+        // Remove the earlier event
+        eventsCollection.utils.begin()
+        eventsCollection.utils.write({ type: `delete`, value: earlierEvent })
+        eventsCollection.utils.commit()
+
+        const afterDelete = userEventTimes.get(1)
+        expect(afterDelete?.firstEvent).toBe(`2023-01-15T09:00:00Z`)
       })
     })
   })
