@@ -8,7 +8,6 @@ import { HydrationScript } from 'solid-js/web'
 import appCss from '../styles.css?url'
 import type { ParentProps } from 'solid-js'
 
-
 export const Route = createRootRoute({
   head: () => ({
     meta: [

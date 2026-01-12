@@ -1,5 +1,5 @@
 ---
-"@tanstack/solid-db": minor
+'@tanstack/solid-db': minor
 ---
 
 Update solid-db to enable suspense support.
@@ -13,7 +13,7 @@ return (
   <>
     {/* Status and other getters don't trigger Suspense */}
     <div>Status {todosQuery.status}</div>
-    <div>Loading {todosQuery.isLoading ? "yes" : "no"}</div>
+    <div>Loading {todosQuery.isLoading ? 'yes' : 'no'}</div>
 
     <Suspense fallback={<div>Loading...</div>}>
       <For each={todosQuery()}>
@@ -40,10 +40,10 @@ return (
   <>
     {/* Status and other getters don't trigger Suspense */}
     <div>Status {todos.status}</div>
-    <div>Loading {todos.isLoading ? "yes" : "no"}</div>
-    <div>Ready {todos.isReady ? "yes" : "no"}</div>
-    <div>Idle {todos.isIdle ? "yes" : "no"}</div>
-    <div>Error {todos.isError ? "yes" : "no"}</div>
+    <div>Loading {todos.isLoading ? 'yes' : 'no'}</div>
+    <div>Ready {todos.isReady ? 'yes' : 'no'}</div>
+    <div>Idle {todos.isIdle ? 'yes' : 'no'}</div>
+    <div>Error {todos.isError ? 'yes' : 'no'}</div>
   </>
 )
 ```
