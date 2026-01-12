@@ -428,9 +428,12 @@ export class BasicIndex<
   }
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
-    return [...this.sortedValues]
-      .reverse()
-      .map((value) => [value, this.valueMap.get(value) ?? new Set()])
+    const result: Array<[any, Set<TKey>]> = []
+    for (let i = this.sortedValues.length - 1; i >= 0; i--) {
+      const value = this.sortedValues[i]
+      result.push([value, this.valueMap.get(value) ?? new Set()])
+    }
+    return result
   }
 
   get valueMapData(): Map<any, Set<TKey>> {
