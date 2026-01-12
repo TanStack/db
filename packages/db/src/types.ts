@@ -1,10 +1,10 @@
-import type { IStreamBuilder } from "@tanstack/db-ivm"
-import type { Collection } from "./collection/index.js"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { Transaction } from "./transactions"
-import type { BasicExpression, OrderBy } from "./query/ir.js"
-import type { EventEmitter } from "./event-emitter.js"
-import type { IndexConstructor } from "./indexes/base-index.js"
+import type { IStreamBuilder } from '@tanstack/db-ivm'
+import type { Collection } from './collection/index.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { Transaction } from './transactions'
+import type { BasicExpression, OrderBy } from './query/ir.js'
+import type { EventEmitter } from './event-emitter.js'
+import type { IndexConstructor } from './indexes/base-index.js'
 import type { SingleRowRefProxy } from './query/builder/ref-proxy.js'
 
 /**
