@@ -708,28 +708,7 @@ export class CollectionConfigBuilder<
 
         // Accumulate changes from this output callback into the pending changes map.
         // Changes for the same key are merged (inserts/deletes are added together).
-        for (const [[key, tupleData], multiplicity] of messages as Array<
-          [[unknown, [TResult, string | undefined]], number]
-        >) {
-          const [value, orderByIndex] = tupleData
-          const existing = pendingChanges.get(key) || {
-            deletes: 0,
-            inserts: 0,
-            value,
-            orderByIndex,
-          }
-          if (multiplicity < 0) {
-            existing.deletes += Math.abs(multiplicity)
-          } else if (multiplicity > 0) {
-            existing.inserts += multiplicity
-            // Update value to the latest version for this key
-            existing.value = value
-            if (orderByIndex !== undefined) {
-              existing.orderByIndex = orderByIndex
-            }
-          }
-          pendingChanges.set(key, existing)
-        }
+        messages.reduce(accumulateChanges<TResult>, pendingChanges)
       }),
     )
 
@@ -1120,4 +1099,35 @@ function extractCollectionAliases(query: QueryIR): Map<string, Set<string>> {
   traverse(query)
 
   return aliasesById
+}
+
+function accumulateChanges<T>(
+  acc: Map<unknown, Changes<T>>,
+  [[key, tupleData], multiplicity]: [
+    [unknown, [any, string | undefined]],
+    number,
+  ],
+) {
+  // All queries now consistently return [value, orderByIndex] format
+  // where orderByIndex is undefined for queries without ORDER BY
+  const [value, orderByIndex] = tupleData as [T, string | undefined]
+
+  const changes = acc.get(key) || {
+    deletes: 0,
+    inserts: 0,
+    value,
+    orderByIndex,
+  }
+  if (multiplicity < 0) {
+    changes.deletes += Math.abs(multiplicity)
+  } else if (multiplicity > 0) {
+    changes.inserts += multiplicity
+    // Update value to the latest version for this key
+    changes.value = value
+    if (orderByIndex !== undefined) {
+      changes.orderByIndex = orderByIndex
+    }
+  }
+  acc.set(key, changes)
+  return acc
 }
