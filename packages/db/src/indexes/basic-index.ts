@@ -240,7 +240,7 @@ export class BasicIndex<
    */
   equalityLookup(value: any): Set<TKey> {
     const normalizedValue = normalizeValue(value)
-    return this.valueMap.get(normalizedValue) ?? new Set() 
+    return this.valueMap.get(normalizedValue) ?? new Set()
   }
 
   /**
