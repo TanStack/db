@@ -22,9 +22,11 @@ export type SyncState = {
   graph?: D2
   inputs?: Record<string, RootStreamBuilder<unknown>>
   pipeline?: ResultStream
+  flushPendingChanges?: () => void
 }
 
-export type FullSyncState = Required<SyncState>
+export type FullSyncState = Required<Omit<SyncState, `flushPendingChanges`>> &
+  Pick<SyncState, `flushPendingChanges`>
 
 /**
  * Configuration interface for live query collection options
