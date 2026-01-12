@@ -356,17 +356,22 @@ function getAggregateFunction(aggExpr: Aggregate) {
     return typeof value === `number` ? value : value != null ? Number(value) : 0
   }
 
-  // Create a value extractor function for the expression to aggregate
-  const valueExtractorWithDate = ([, namespacedRow]: [
+  // Create a value extractor function for min/max that preserves comparable types
+  const valueExtractorForMinMax = ([, namespacedRow]: [
     string,
     NamespacedRow,
   ]) => {
     const value = compiledExpr(namespacedRow)
-    return typeof value === `number` || value instanceof Date
-      ? value
-      : value != null
-        ? Number(value)
-        : 0
+    // Preserve strings, numbers, Dates, and bigints for comparison
+    if (
+      typeof value === `number` ||
+      typeof value === `string` ||
+      typeof value === `bigint` ||
+      value instanceof Date
+    ) {
+      return value
+    }
+    return value != null ? Number(value) : 0
   }
 
   // Create a raw value extractor function for the expression to aggregate
@@ -383,9 +388,9 @@ function getAggregateFunction(aggExpr: Aggregate) {
     case `avg`:
       return avg(valueExtractor)
     case `min`:
-      return min(valueExtractorWithDate)
+      return min(valueExtractorForMinMax)
     case `max`:
-      return max(valueExtractorWithDate)
+      return max(valueExtractorForMinMax)
     default:
       throw new UnsupportedAggregateFunctionError(aggExpr.name)
   }
