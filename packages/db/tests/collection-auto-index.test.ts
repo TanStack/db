@@ -12,7 +12,7 @@ import {
 import { createSingleRowRefProxy } from '../src/query/builder/ref-proxy'
 import { createLiveQueryCollection } from '../src'
 import { PropRef } from '../src/query/ir'
-import { BTreeIndex } from '../src/indexes/btree-index'
+import { WriteOptimizedIndex } from '../src/indexes/write-optimized-index.js'
 import {
   createIndexUsageTracker,
   expectIndexUsage,
@@ -168,7 +168,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -218,7 +218,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -266,7 +266,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -318,7 +318,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -359,7 +359,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -393,7 +393,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -439,7 +439,7 @@ describe(`Collection Auto-Indexing`, () => {
     const leftCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -460,7 +460,7 @@ describe(`Collection Auto-Indexing`, () => {
     const rightCollection = createCollection<TestItem2, string>({
       getKey: (item) => item.id2,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -553,7 +553,7 @@ describe(`Collection Auto-Indexing`, () => {
     const leftCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -574,7 +574,7 @@ describe(`Collection Auto-Indexing`, () => {
     const rightCollection = createCollection<TestItem2, string>({
       getKey: (item) => item.id2,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -674,7 +674,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -713,7 +713,7 @@ describe(`Collection Auto-Indexing`, () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
@@ -810,7 +810,7 @@ describe(`Collection Auto-Indexing`, () => {
     const collection = createCollection<NestedTestItem, string>({
       getKey: (item) => item.id,
       autoIndex: `eager`,
-      defaultIndexType: BTreeIndex,
+      defaultIndexType: WriteOptimizedIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {

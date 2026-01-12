@@ -1,7 +1,7 @@
 import { defaultComparator, normalizeValue } from '../utils/comparison.js'
 import {
-  findInsertPositionInArray,
   deleteInSortedArray,
+  findInsertPositionInArray,
 } from '../utils/array-utils.js'
 import { BaseIndex } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
@@ -19,24 +19,24 @@ export interface RangeQueryOptions {
 }
 
 /**
- * Options for Basic index
+ * Options for Read Optimized index
  */
-export interface BasicIndexOptions {
+export interface ReadOptimizedIndexOptions {
   compareFn?: (a: any, b: any) => number
   compareOptions?: CompareOptions
 }
 
 /**
- * Basic index using Map + sorted Array.
+ * Read Optimized index using Map + sorted Array.
  *
  * - Map for O(1) equality lookups
  * - Sorted Array for O(log n) range queries via binary search
  * - O(n) updates to maintain sort order
  *
- * Simpler and smaller than BTreeIndex, good for read-heavy workloads.
- * Use BTreeIndex for write-heavy workloads with large collections.
+ * Simpler and smaller than WriteOptimizedIndex, good for read-heavy workloads.
+ * Use WriteOptimizedIndex for write-heavy workloads with large collections.
  */
-export class BasicIndex<
+export class ReadOptimizedIndex<
   TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
   public readonly supportedOperations = new Set<IndexOperation>([
@@ -70,7 +70,7 @@ export class BasicIndex<
     }
   }
 
-  protected initialize(_options?: BasicIndexOptions): void {}
+  protected initialize(_options?: ReadOptimizedIndexOptions): void {}
 
   /**
    * Adds a value to the index

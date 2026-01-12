@@ -1,5 +1,5 @@
 import { expect } from 'vitest'
-import { BTreeIndex } from '../src/indexes/btree-index'
+import { WriteOptimizedIndex } from '../src/indexes/write-optimized-index'
 import type {
   CollectionConfig,
   MutationFnParams,
@@ -268,7 +268,7 @@ export function mockSyncCollectionOptions<
     // When autoIndex is 'eager', we need a defaultIndexType
     defaultIndexType:
       config.defaultIndexType ??
-      (config.autoIndex === `eager` ? BTreeIndex : undefined),
+      (config.autoIndex === `eager` ? WriteOptimizedIndex : undefined),
   }
 
   return options
@@ -355,7 +355,7 @@ export function mockSyncCollectionOptionsNoInitialState<
     // When autoIndex is 'eager', we need a defaultIndexType
     defaultIndexType:
       config.defaultIndexType ??
-      (config.autoIndex === `eager` ? BTreeIndex : undefined),
+      (config.autoIndex === `eager` ? WriteOptimizedIndex : undefined),
   }
 
   return options

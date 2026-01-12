@@ -25,15 +25,15 @@
  */
 
 // BasicIndex - Map + sorted Array, good balance of features and size
-export { BasicIndex } from './indexes/basic-index.js'
+export { ReadOptimizedIndex as BasicIndex } from './indexes/read-optimized-index.js'
 export type {
-  BasicIndexOptions,
+  ReadOptimizedIndexOptions as BasicIndexOptions,
   RangeQueryOptions,
-} from './indexes/basic-index.js'
+} from './indexes/read-optimized-index.js'
 
 // BTreeIndex - full-featured with efficient sorted iteration (for ORDER BY optimization)
-export { BTreeIndex } from './indexes/btree-index.js'
-export type { RangeQueryOptions as BTreeRangeQueryOptions } from './indexes/btree-index.js'
+export { WriteOptimizedIndex as BTreeIndex } from './indexes/write-optimized-index.js'
+export type { RangeQueryOptions as BTreeRangeQueryOptions } from './indexes/write-optimized-index.js'
 
 // Re-export base index types
 export { BaseIndex } from './indexes/base-index.js'
