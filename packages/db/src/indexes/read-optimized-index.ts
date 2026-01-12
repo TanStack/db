@@ -308,9 +308,20 @@ export class ReadOptimizedIndex<
    * Performs a reversed range query
    */
   rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
-    // For BasicIndex, reversed is the same result set, just different iteration order
-    // which doesn't matter for Set
-    return this.rangeQuery(options)
+    const { from, to, fromInclusive = true, toInclusive = true } = options
+    
+    // Swap from/to and fromInclusive/toInclusive to handle reversed ranges
+    // If to is undefined, we want to start from the end (max value)
+    // If from is undefined, we want to end at the beginning (min value)
+    const swappedFrom = to ?? (this.sortedValues.length > 0 ? this.sortedValues[this.sortedValues.length - 1] : undefined)
+    const swappedTo = from ?? (this.sortedValues.length > 0 ? this.sortedValues[0] : undefined)
+    
+    return this.rangeQuery({
+      from: swappedFrom,
+      to: swappedTo,
+      fromInclusive: toInclusive,
+      toInclusive: fromInclusive,
+    })
   }
 
   /**
