@@ -132,10 +132,10 @@ importers:
         specifier: ^20.3.15
         version: 20.3.15(@angular/common@19.2.17(@angular/core@19.2.18(rxjs@7.8.2)(zone.js@0.16.0))(rxjs@7.8.2))(@angular/core@19.2.18(rxjs@7.8.2)(zone.js@0.16.0))(@angular/platform-browser@19.2.17(@angular/common@19.2.17(@angular/core@19.2.18(rxjs@7.8.2)(zone.js@0.16.0))(rxjs@7.8.2))(@angular/core@19.2.18(rxjs@7.8.2)(zone.js@0.16.0)))(rxjs@7.8.2)
       '@tanstack/angular-db':
-        specifier: ^0.1.44
+        specifier: ^0.1.45
         version: link:../../../packages/angular-db
       '@tanstack/db':
-        specifier: ^0.5.18
+        specifier: ^0.5.19
         version: link:../../../packages/db
       rxjs:
         specifier: ^7.8.2
@@ -193,13 +193,13 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/offline-transactions':
-        specifier: ^1.0.8
+        specifier: ^1.0.9
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.0.14
+        specifier: ^1.0.15
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.62
+        specifier: ^0.1.63
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.16
@@ -260,10 +260,10 @@ importers:
   examples/react/paced-mutations-demo:
     dependencies:
       '@tanstack/db':
-        specifier: ^0.5.18
+        specifier: ^0.5.19
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^0.1.62
+        specifier: ^0.1.63
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -300,10 +300,10 @@ importers:
         specifier: ^5.90.16
         version: 5.90.16
       '@tanstack/query-db-collection':
-        specifier: ^1.0.14
+        specifier: ^1.0.15
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.62
+        specifier: ^0.1.63
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.144.0
@@ -433,16 +433,16 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.2.22
+        specifier: ^0.2.23
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.16
         version: 5.90.16
       '@tanstack/query-db-collection':
-        specifier: ^1.0.14
+        specifier: ^1.0.15
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.62
+        specifier: ^0.1.63
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.144.0
@@ -451,7 +451,7 @@ importers:
         specifier: ^1.145.5
         version: 1.145.5(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.10)(vite@7.3.1(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.1(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: ^0.1.62
+        specifier: ^0.1.63
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.5
@@ -554,16 +554,16 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.2.22
+        specifier: ^0.2.23
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.16
         version: 5.90.16
       '@tanstack/query-db-collection':
-        specifier: ^1.0.14
+        specifier: ^1.0.15
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
-        specifier: ^0.1.61
+        specifier: ^0.1.62
         version: link:../../../packages/solid-db
       '@tanstack/solid-router':
         specifier: ^1.144.0
@@ -572,7 +572,7 @@ importers:
         specifier: ^1.145.5
         version: 1.145.5(@tanstack/react-router@1.144.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(solid-js@1.9.10)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.10)(vite@7.3.1(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.1(@types/node@24.7.0)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: ^0.1.62
+        specifier: ^0.1.63
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.5
@@ -582,7 +582,7 @@ importers:
         version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.13)
       express:
         specifier: ^4.22.1
         version: 4.22.1
@@ -13314,11 +13314,6 @@ snapshots:
       kysely: 0.28.8
       pg: 8.16.3
       postgres: 3.4.7
-
-  drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7))(zod@3.25.76):
-    dependencies:
-      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7)
-      zod: 3.25.76
 
   drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.16.0)(gel@2.1.1)(kysely@0.28.8)(pg@8.16.3)(postgres@3.4.7))(zod@4.1.13):
     dependencies:
