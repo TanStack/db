@@ -149,6 +149,7 @@ export class CollectionSyncManager<
                   throw new DuplicateKeySyncError(key, this.id, {
                     hasCustomGetKey: internal?.hasCustomGetKey ?? false,
                     hasJoins: internal?.hasJoins ?? false,
+                    hasDistinct: internal?.hasDistinct ?? false,
                   })
                 }
               }
