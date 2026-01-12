@@ -3,6 +3,7 @@ import { untrack } from 'svelte'
 // eslint-disable-next-line import/no-duplicates -- See https://github.com/un-ts/eslint-plugin-import-x/issues/308
 import { SvelteMap } from 'svelte/reactivity'
 import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
+import { getHydrationContext, useHydratedQuery } from './hydration.svelte'
 import type {
   ChangeMessage,
   Collection,
@@ -286,6 +287,20 @@ export function useLiveQuery(
   configOrQueryOrCollection: any,
   deps: Array<() => unknown> = [],
 ): UseLiveQueryReturn<any> | UseLiveQueryReturnWithCollection<any, any, any> {
+  // Extract query ID from config object (not from collections or functions)
+  // Only config objects support id for SSR hydration matching
+  const queryId =
+    typeof configOrQueryOrCollection === `object` &&
+    configOrQueryOrCollection !== null &&
+    `id` in configOrQueryOrCollection &&
+    typeof configOrQueryOrCollection.subscribeChanges !== `function` // Not a collection
+      ? configOrQueryOrCollection.id
+      : undefined
+
+  // Get hydration context and hydrated data
+  const hydrationState = getHydrationContext()
+  const hydratedData = queryId ? useHydratedQuery(queryId) : undefined
+
   const collection = $derived.by(() => {
     // First check if the original parameter might be a getter
     // by seeing if toValue returns something different than the original
@@ -336,6 +351,17 @@ export function useLiveQuery(
         startSync: true,
       })
     } else {
+      // Config object case - check if query returns null/undefined
+      const queryFn = unwrappedParam.query
+      if (typeof queryFn === `function`) {
+        const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+        const result = queryFn(queryBuilder)
+        if (result === undefined || result === null) {
+          // Disabled query - return null
+          return null
+        }
+      }
+
       return createLiveQueryCollection({
         ...unwrappedParam,
         startSync: true,
@@ -454,11 +480,70 @@ export function useLiveQuery(
     }
   })
 
+  // Check if we should use hydrated data
+  // Use hydrated data if:
+  // 1. We have hydrated data
+  // 2. The collection is empty (no data loaded yet)
+  const shouldUseHydratedData = () =>
+    hydratedData !== undefined && internalData.length === 0
+
+  // Dev-mode hint: warn if hydrationState exists (SSR setup) but query has id and no matching data
+  // This catches the case where HydrationBoundary is present but this specific query wasn't prefetched
+  if (
+    process.env.NODE_ENV !== `production` &&
+    hydrationState && // Only warn if we're in an SSR environment with HydrationBoundary
+    queryId &&
+    hydratedData === undefined
+  ) {
+    console.warn(
+      `TanStack DB: no hydrated data found for id "${queryId}" — did you prefetch this query on the server with prefetchLiveQuery()?`,
+    )
+  }
+
   return {
     get state() {
+      // If using hydrated data, convert to Map
+      if (shouldUseHydratedData()) {
+        const currentCollection = collection
+        const config = currentCollection?.config as
+          | CollectionConfigSingleRowOption<any, any, any>
+          | undefined
+        const hydrated = Array.isArray(hydratedData)
+          ? hydratedData
+          : [hydratedData]
+        return new Map(
+          hydrated.map((item, index) => {
+            // Try to use getKey if available, otherwise use index
+            const key =
+              config && typeof config.getKey === `function`
+                ? config.getKey(item)
+                : index
+            return [key, item]
+          }),
+        )
+      }
       return state
     },
     get data() {
+      // If using hydrated data, return it directly
+      if (shouldUseHydratedData()) {
+        const currentCollection = collection
+        if (currentCollection) {
+          const config =
+            currentCollection.config as CollectionConfigSingleRowOption<
+              any,
+              any,
+              any
+            >
+          if (config.singleResult) {
+            return Array.isArray(hydratedData) ? hydratedData[0] : hydratedData
+          }
+        }
+        // Ensure array when singleResult is false
+        return Array.isArray(hydratedData) ? hydratedData : [hydratedData]
+      }
+
+      // Normal case: use collection data
       const currentCollection = collection
       if (currentCollection) {
         const config =
@@ -483,7 +568,10 @@ export function useLiveQuery(
       return status === `loading`
     },
     get isReady() {
-      return status === `ready` || status === `disabled`
+      // Consider hydrated data as "ready enough" for UI
+      return (
+        status === `ready` || status === `disabled` || shouldUseHydratedData()
+      )
     },
     get isIdle() {
       return status === `idle`
