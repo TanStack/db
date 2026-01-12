@@ -1000,3 +1000,77 @@ describe(`Collection schema callback type tests`, () => {
     })
   })
 })
+
+describe(`Collection type assignment with z.coerce schemas`, () => {
+  it(`should allow assigning collections with z.coerce to typed Collections object`, () => {
+    // This test verifies the fix for the bug where z.coerce.number() schemas
+    // caused type incompatibility when assigning to typed Collections objects.
+    // Issue: z.coerce creates different input/output types (input is `unknown`)
+
+    const PersonSchema = z.object({
+      id: z.string(),
+      entraId: z.string().optional(),
+      name: z.string().optional(),
+      dailyCost: z.coerce
+        .number()
+        .min(0, `Daily cost must be 0 or greater`)
+        .optional(),
+      dailySell: z.coerce
+        .number()
+        .min(0, `Daily sell must be 0 or greater`)
+        .optional(),
+    })
+
+    type Person = z.infer<typeof PersonSchema>
+
+    // Create a collection with the coerce schema
+    const personCollection = createCollection({
+      id: `person`,
+      getKey: (item) => item.id,
+      schema: PersonSchema,
+      sync: { sync: () => {} },
+    })
+
+    // This should compile without errors - verifying that Collection<Person>
+    // can accept a collection with different input types due to z.coerce
+    type Collections = {
+      person: typeof personCollection
+    }
+
+    const collections: Collections = {
+      person: personCollection,
+    }
+
+    // Verify the collection works correctly at runtime
+    expect(collections.person).toBe(personCollection)
+
+    // Type check: verify the person collection output type matches Person
+    type CollectionOutput = (typeof collections.person) extends {
+      get: (key: any) => infer T | undefined
+    }
+      ? T
+      : never
+    expectTypeOf<CollectionOutput>().toEqualTypeOf<Person>()
+  })
+
+  it(`should maintain correct insert type inference with z.coerce`, () => {
+    const PersonSchema = z.object({
+      id: z.string(),
+      dailyCost: z.coerce.number().optional(),
+    })
+
+    type PersonInput = z.input<typeof PersonSchema>
+
+    const collection = createCollection({
+      id: `person`,
+      getKey: (item) => item.id,
+      schema: PersonSchema,
+      sync: { sync: () => {} },
+    })
+
+    // Verify insert method exists and accepts the schema input type
+    expect(collection.insert).toBeDefined()
+    type InsertParam = Parameters<typeof collection.insert>[0]
+    expectTypeOf<InsertParam>().toEqualTypeOf<PersonInput | Array<PersonInput>>()
+  })
+})

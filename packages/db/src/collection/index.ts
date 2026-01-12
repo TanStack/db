@@ -43,14 +43,17 @@ import type { IndexProxy } from '../indexes/lazy-index.js'
  * @template T - The type of items in the collection
  * @template TKey - The type of the key for the collection
  * @template TUtils - The utilities record type
- * @template TInsertInput - The type for insert operations (can be different from T for schemas with defaults)
+ * @template TInsertInput - The type for insert operations (can be different from T for schemas with defaults).
+ *   Defaults to `any` to allow assignment compatibility when using schemas with coercion (e.g. z.coerce.number())
+ *   where the input type differs from the output type.
  */
 export interface Collection<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
   TSchema extends StandardSchemaV1 = StandardSchemaV1,
-  TInsertInput extends object = T,
+   
+  TInsertInput extends object = any,
 > extends CollectionImpl<T, TKey, TUtils, TSchema, TInsertInput> {
   readonly utils: TUtils
   readonly singleResult?: true
