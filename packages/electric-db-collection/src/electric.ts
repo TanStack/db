@@ -838,9 +838,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     if (result && `txid` in result) {
       // Warn about deprecated return value pattern
       console.warn(
-        "[TanStack DB] DEPRECATED: Returning { txid } from mutation handlers is deprecated and will be removed in v1.0. " +
-          "Use `await collection.utils.awaitTxId(txid)` instead of returning { txid }. " +
-          "See migration guide: https://tanstack.com/db/latest/docs/collections/electric-collection#persistence-handlers--synchronization"
+        '[TanStack DB] DEPRECATED: Returning { txid } from mutation handlers is deprecated and will be removed in v1.0. ' +
+          'Use `await collection.utils.awaitTxId(txid)` instead of returning { txid }. ' +
+          'See migration guide: https://tanstack.com/db/latest/docs/collections/electric-collection#persistence-handlers--synchronization',
       )
 
       const timeout = result.timeout

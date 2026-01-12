@@ -1,7 +1,7 @@
 ---
-"@tanstack/db": major
-"@tanstack/electric-db-collection": major
-"@tanstack/query-db-collection": major
+'@tanstack/db': major
+'@tanstack/electric-db-collection': major
+'@tanstack/query-db-collection': major
 ---
 
 **BREAKING (TypeScript only)**: Deprecate returning values from mutation handlers (`onInsert`, `onUpdate`, `onDelete`).

@@ -1254,13 +1254,13 @@ export function queryCollectionOptions(
         // Warn about deprecated return value pattern
         if (
           handlerResult &&
-          typeof handlerResult === "object" &&
+          typeof handlerResult === 'object' &&
           Object.keys(handlerResult).length > 0
         ) {
           console.warn(
-            "[TanStack DB] DEPRECATED: Returning values from mutation handlers is deprecated and will be removed in v1.0. " +
-              "Use `await collection.utils.refetch()` instead of returning { refetch }. " +
-              "See migration guide: https://tanstack.com/db/latest/docs/guides/mutations#collection-specific-handler-patterns"
+            '[TanStack DB] DEPRECATED: Returning values from mutation handlers is deprecated and will be removed in v1.0. ' +
+              'Use `await collection.utils.refetch()` instead of returning { refetch }. ' +
+              'See migration guide: https://tanstack.com/db/latest/docs/guides/mutations#collection-specific-handler-patterns',
           )
         }
 
@@ -1282,13 +1282,13 @@ export function queryCollectionOptions(
         // Warn about deprecated return value pattern
         if (
           handlerResult &&
-          typeof handlerResult === "object" &&
+          typeof handlerResult === 'object' &&
           Object.keys(handlerResult).length > 0
         ) {
           console.warn(
-            "[TanStack DB] DEPRECATED: Returning values from mutation handlers is deprecated and will be removed in v1.0. " +
-              "Use `await collection.utils.refetch()` instead of returning { refetch }. " +
-              "See migration guide: https://tanstack.com/db/latest/docs/guides/mutations#collection-specific-handler-patterns"
+            '[TanStack DB] DEPRECATED: Returning values from mutation handlers is deprecated and will be removed in v1.0. ' +
+              'Use `await collection.utils.refetch()` instead of returning { refetch }. ' +
+              'See migration guide: https://tanstack.com/db/latest/docs/guides/mutations#collection-specific-handler-patterns',
           )
         }
 
@@ -1310,13 +1310,13 @@ export function queryCollectionOptions(
         // Warn about deprecated return value pattern
         if (
           handlerResult &&
-          typeof handlerResult === "object" &&
+          typeof handlerResult === 'object' &&
           Object.keys(handlerResult).length > 0
         ) {
           console.warn(
-            "[TanStack DB] DEPRECATED: Returning values from mutation handlers is deprecated and will be removed in v1.0. " +
-              "Use `await collection.utils.refetch()` instead of returning { refetch }. " +
-              "See migration guide: https://tanstack.com/db/latest/docs/guides/mutations#collection-specific-handler-patterns"
+            '[TanStack DB] DEPRECATED: Returning values from mutation handlers is deprecated and will be removed in v1.0. ' +
+              'Use `await collection.utils.refetch()` instead of returning { refetch }. ' +
+              'See migration guide: https://tanstack.com/db/latest/docs/guides/mutations#collection-specific-handler-patterns',
           )
         }
 
