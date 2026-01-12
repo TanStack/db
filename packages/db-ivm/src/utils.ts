@@ -192,3 +192,20 @@ export function compareKeys(a: string | number, b: string | number): number {
   // Different types: strings come before numbers
   return typeof a === `string` ? -1 : 1
 }
+
+/**
+ * Serializes a value for use as a key, handling BigInt and Date values that JSON.stringify cannot handle.
+ * Uses JSON.stringify with a replacer function to convert BigInt values to strings and Date values to ISO strings.
+ * This is used for creating string keys in groupBy operations.
+ */
+export function serializeValue(value: unknown): string {
+  return JSON.stringify(value, (_, val) => {
+    if (typeof val === 'bigint') {
+      return val.toString()
+    }
+    if (val instanceof Date) {
+      return val.toISOString()
+    }
+    return val
+  })
+}
