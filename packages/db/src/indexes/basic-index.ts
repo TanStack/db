@@ -1,4 +1,8 @@
 import { defaultComparator, normalizeValue } from '../utils/comparison.js'
+import {
+  findInsertPositionInArray,
+  deleteInSortedArray,
+} from '../utils/array-utils.js'
 import { BaseIndex } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
@@ -69,24 +73,6 @@ export class BasicIndex<
   protected initialize(_options?: BasicIndexOptions): void {}
 
   /**
-   * Binary search to find insertion point in sorted array
-   */
-  private findInsertionIndex(value: any): number {
-    let low = 0
-    let high = this.sortedValues.length
-
-    while (low < high) {
-      const mid = (low + high) >>> 1
-      if (this.compareFn(this.sortedValues[mid], value) < 0) {
-        low = mid + 1
-      } else {
-        high = mid
-      }
-    }
-    return low
-  }
-
-  /**
    * Adds a value to the index
    */
   add(key: TKey, item: any): void {
@@ -109,7 +95,11 @@ export class BasicIndex<
       this.valueMap.set(normalizedValue, new Set([key]))
 
       // Insert into sorted position
-      const insertIdx = this.findInsertionIndex(normalizedValue)
+      const insertIdx = findInsertPositionInArray(
+        this.sortedValues,
+        normalizedValue,
+        this.compareFn,
+      )
       this.sortedValues.splice(insertIdx, 0, normalizedValue)
     }
 
@@ -141,14 +131,7 @@ export class BasicIndex<
       if (keySet.size === 0) {
         // No more keys for this value, remove from map and sorted array
         this.valueMap.delete(normalizedValue)
-
-        const idx = this.findInsertionIndex(normalizedValue)
-        if (
-          idx < this.sortedValues.length &&
-          this.compareFn(this.sortedValues[idx], normalizedValue) === 0
-        ) {
-          this.sortedValues.splice(idx, 1)
-        }
+        deleteInSortedArray(this.sortedValues, normalizedValue, this.compareFn)
       }
     }
 
@@ -277,7 +260,11 @@ export class BasicIndex<
     // Find start index
     let startIdx = 0
     if (normalizedFrom !== undefined) {
-      startIdx = this.findInsertionIndex(normalizedFrom)
+      startIdx = findInsertPositionInArray(
+        this.sortedValues,
+        normalizedFrom,
+        this.compareFn,
+      )
       // If not inclusive and we found exact match, skip it
       if (
         !fromInclusive &&
@@ -291,7 +278,11 @@ export class BasicIndex<
     // Find end index
     let endIdx = this.sortedValues.length
     if (normalizedTo !== undefined) {
-      endIdx = this.findInsertionIndex(normalizedTo)
+      endIdx = findInsertPositionInArray(
+        this.sortedValues,
+        normalizedTo,
+        this.compareFn,
+      )
       // If inclusive and we found the value, include it
       if (
         toInclusive &&
@@ -331,7 +322,11 @@ export class BasicIndex<
     let startIdx = 0
     if (from !== undefined) {
       const normalizedFrom = normalizeValue(from)
-      startIdx = this.findInsertionIndex(normalizedFrom)
+      startIdx = findInsertPositionInArray(
+        this.sortedValues,
+        normalizedFrom,
+        this.compareFn,
+      )
       // Skip past the 'from' value (exclusive)
       while (
         startIdx < this.sortedValues.length &&
@@ -373,7 +368,12 @@ export class BasicIndex<
     let startIdx = this.sortedValues.length - 1
     if (from !== undefined) {
       const normalizedFrom = normalizeValue(from)
-      startIdx = this.findInsertionIndex(normalizedFrom) - 1
+      startIdx =
+        findInsertPositionInArray(
+          this.sortedValues,
+          normalizedFrom,
+          this.compareFn,
+        ) - 1
       // Skip past the 'from' value (exclusive)
       while (
         startIdx >= 0 &&
