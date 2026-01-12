@@ -353,7 +353,10 @@ function getAggregateFunction(aggExpr: Aggregate) {
   const valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
     const value = compiledExpr(namespacedRow)
     // Ensure we return a number for numeric aggregate functions
-    return typeof value === `number` ? value : value != null ? Number(value) : 0
+    if (typeof value === `number`) {
+      return value
+    }
+    return value != null ? Number(value) : 0
   }
 
   // Create a value extractor function for min/max that preserves comparable types
@@ -399,20 +402,15 @@ function getAggregateFunction(aggExpr: Aggregate) {
 /**
  * Transforms expressions to replace aggregate functions with references to computed values.
  *
- * This function is used in both ORDER BY and HAVING clauses to transform expressions that reference:
- * 1. Aggregate functions (e.g., `max()`, `count()`) - replaces with references to computed aggregates in SELECT
- * 2. SELECT field references via $selected namespace (e.g., `$selected.latestActivity`) - validates and passes through unchanged
+ * For aggregate expressions, finds matching aggregates in the SELECT clause and replaces them
+ * with PropRef([resultAlias, alias]) to reference the computed aggregate value.
  *
- * For aggregate expressions, it finds matching aggregates in the SELECT clause and replaces them with
- * PropRef([resultAlias, alias]) to reference the computed aggregate value.
- *
- * For ref expressions using the $selected namespace, it validates that the field exists in the SELECT clause
- * and passes them through unchanged (since $selected is already the correct namespace). All other ref expressions
- * are passed through unchanged (treating them as table column references).
+ * Ref expressions (table columns and $selected fields) and value expressions are passed through unchanged.
+ * Function expressions are recursively transformed.
  *
  * @param havingExpr - The expression to transform (can be aggregate, ref, func, or val)
  * @param selectClause - The SELECT clause containing aliases and aggregate definitions
- * @param resultAlias - The namespace alias for SELECT results (default: '$selected', used for aggregate references)
+ * @param resultAlias - The namespace alias for SELECT results (default: '$selected')
  * @returns A transformed BasicExpression that references computed values instead of raw expressions
  */
 export function replaceAggregatesByRefs(
@@ -444,41 +442,11 @@ export function replaceAggregatesByRefs(
       return new Func(funcExpr.name, transformedArgs)
     }
 
-    case `ref`: {
-      const refExpr = havingExpr
-      const path = refExpr.path
-
-      if (path.length === 0) {
-        // Empty path - pass through
-        return havingExpr as BasicExpression
-      }
-
-      // Check if this is a $selected reference
-      if (path.length > 0 && path[0] === `$selected`) {
-        // Extract the field path after $selected
-        const fieldPath = path.slice(1)
-
-        if (fieldPath.length === 0) {
-          // Just $selected without a field - pass through unchanged
-          return havingExpr as BasicExpression
-        }
-
-        // Verify the field exists in SELECT clause
-        const alias = fieldPath.join(`.`)
-        if (alias in selectClause) {
-          // Pass through unchanged - $selected is already the correct namespace
-          return havingExpr as BasicExpression
-        }
-
-        // Field doesn't exist in SELECT - this is an error, but we'll pass through for now
-        // (Could throw an error here in the future)
-        return havingExpr as BasicExpression
-      }
-
-      // Not a $selected reference - this is a table column reference, pass through unchanged
-      // SELECT fields should only be accessed via $selected namespace
+    case `ref`:
+      // Ref expressions are passed through unchanged - they reference either:
+      // - $selected fields (which are already in the correct namespace)
+      // - Table column references (which remain valid)
       return havingExpr as BasicExpression
-    }
 
     case `val`:
       // Return as-is
