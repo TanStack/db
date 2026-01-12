@@ -62,5 +62,5 @@ collection.createIndex((row) => row.date, { indexType: BTreeIndex })
 **Bundle Size Impact:**
 
 - No indexing: ~30% smaller bundle
-- BasicIndex: ~5 KB (~1.3 KB gzipped)
-- BTreeIndex: ~33 KB (~7.8 KB gzipped)
+- ReadOptimizedIndex: ~5 KB (~1.3 KB gzipped)
+- WriteOptimizedIndex: ~33 KB (~7.8 KB gzipped)
