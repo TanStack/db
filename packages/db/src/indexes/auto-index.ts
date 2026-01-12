@@ -18,7 +18,7 @@ function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   if (!collection.config.defaultIndexType) {
     if (isDevModeEnabled()) {
       console.warn(
-        `[TanStack DB] Auto-indexing is enabled but no defaultIndexType is set. ` +
+        `[TanStack DB] Auto-indexing is disabled because no defaultIndexType is set. ` +
           `Set defaultIndexType on the collection:\n` +
           `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
           `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
