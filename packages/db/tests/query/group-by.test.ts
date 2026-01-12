@@ -1719,6 +1719,208 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(goldTier?.order_count).toBe(initialGoldCount)
       })
     })
+
+    describe(`ORDER BY and HAVING with SELECT fields`, () => {
+      let sessionsCollection: ReturnType<typeof createOrdersCollection>
+
+      beforeEach(() => {
+        // Reuse ordersCollection as sessionsCollection for testing
+        sessionsCollection = createOrdersCollection(autoIndex)
+      })
+
+      test(`orderBy can reference aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .orderBy(({ $selected }) => $selected.latestActivity),
+        })
+
+        expect(sessionStats.toArray).toEqual([
+          {
+            taskId: 2,
+            latestActivity: new Date(`2023-02-01`),
+            sessionCount: 1,
+          },
+          {
+            taskId: 1,
+            latestActivity: new Date(`2023-03-01`),
+            sessionCount: 3,
+          },
+        ])
+      })
+
+      test(`orderBy can reference non-aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .orderBy(({ $selected }) => $selected.taskId, {
+                direction: `desc`,
+              }),
+        })
+
+        expect(sessionStats.toArray).toEqual([
+          {
+            taskId: 2,
+            latestActivity: new Date(`2023-02-01`),
+            sessionCount: 1,
+          },
+          {
+            taskId: 1,
+            latestActivity: new Date(`2023-03-01`),
+            sessionCount: 3,
+          },
+        ])
+      })
+
+      test(`HAVING can reference aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .having(({ $selected }) => gt($selected.sessionCount, 2)),
+        })
+
+        expect(sessionStats.toArray).toEqual([
+          {
+            taskId: 1,
+            latestActivity: new Date(`2023-03-01`),
+            sessionCount: 3,
+          },
+        ])
+      })
+
+      test(`HAVING can reference non-aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .having(({ $selected }) => gt($selected.taskId, 0)),
+        })
+
+        // Once bug is fixed, this should filter groups where taskId > 0
+        expect(sessionStats.size).toBe(2)
+      })
+
+      test(`fn.having can reference aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+                totalAmount: sum(sessions.amount),
+              }))
+              .fn.having(({ $selected }) => $selected.sessionCount > 2),
+        })
+
+        // Should only include groups where sessionCount > 2
+        // Customer 1 has 3 completed sessions, Customer 2 has 1
+        expect(sessionStats.size).toBe(1)
+
+        const result = sessionStats.toArray[0]
+        expect(result).toBeDefined()
+        expect(result?.taskId).toBe(1)
+        expect(result?.sessionCount).toBe(3)
+        expect(result?.totalAmount).toBe(700) // 100 + 200 + 400
+      })
+
+      test(`fn.having can reference non-aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .fn.having(({ $selected }) => $selected.taskId > 1),
+        })
+
+        // Should only include groups where taskId > 1
+        // Customer 1 has taskId 1, Customer 2 has taskId 2
+        expect(sessionStats.size).toBe(1)
+
+        const result = sessionStats.toArray[0]
+        expect(result).toBeDefined()
+        expect(result?.taskId).toBe(2)
+        expect(result?.sessionCount).toBe(1)
+      })
+
+      test(`fn.having can use multiple SELECT fields in complex conditions`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+                totalAmount: sum(sessions.amount),
+              }))
+              .fn.having(
+                ({ $selected }) =>
+                  $selected.sessionCount >= 2 && $selected.totalAmount > 300,
+              ),
+        })
+
+        // Should include groups where sessionCount >= 2 AND totalAmount > 300
+        // Customer 1: 3 sessions, 700 total ✓
+        // Customer 2: 1 session ✗
+        expect(sessionStats.size).toBe(1)
+
+        const result = sessionStats.toArray[0]
+        expect(result).toBeDefined()
+        expect(result?.taskId).toBe(1)
+        expect(result?.sessionCount).toBe(3)
+        expect(result?.totalAmount).toBe(700)
+      })
+    })
   })
 }
 

@@ -91,7 +91,11 @@ A QueryBuilder with functional having filter applied
 query
   .from({ posts: postsCollection })
   .groupBy(({posts}) => posts.userId)
-  .fn.having(row => row.count > 5)
+  .select(({posts}) => ({
+    userId: posts.userId,
+    postCount: count(posts.id),
+  }))
+  .fn.having(({ $selected }) => $selected.postCount > 5)
 ```
 
 ###### select()
@@ -428,6 +432,17 @@ query
   .groupBy(({orders}) => orders.customerId)
   .having(({orders}) => gt(avg(orders.total), 100))
 
+// Filter using SELECT fields via $selected
+query
+  .from({ orders: ordersCollection })
+  .groupBy(({orders}) => orders.customerId)
+  .select(({orders}) => ({
+    customerId: orders.customerId,
+    totalSpent: sum(orders.amount),
+    orderCount: count(orders.id),
+  }))
+  .having(({ $selected }) => gt($selected.totalSpent, 1000))
+
 // Multiple having calls are ANDed together
 query
   .from({ orders: ordersCollection })
@@ -718,6 +733,17 @@ query
 query
   .from({ users: usersCollection })
   .orderBy(({users}) => users.createdAt, 'desc')
+
+// Sort by SELECT fields via $selected
+query
+  .from({ posts: postsCollection })
+  .groupBy(({posts}) => posts.userId)
+  .select(({posts}) => ({
+    userId: posts.userId,
+    postCount: count(posts.id),
+    latestPost: max(posts.createdAt),
+  }))
+  .orderBy(({ $selected }) => $selected.postCount, 'desc')
 
 // Multiple sorts (chain orderBy calls)
 query

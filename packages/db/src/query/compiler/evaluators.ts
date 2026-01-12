@@ -95,11 +95,47 @@ function compileExpressionInternal(
  * Compiles a reference expression into an optimized evaluator
  */
 function compileRef(ref: PropRef): CompiledExpression {
-  const [tableAlias, ...propertyPath] = ref.path
+  const [namespace, ...propertyPath] = ref.path
 
-  if (!tableAlias) {
+  if (!namespace) {
     throw new EmptyReferencePathError()
   }
+
+  // Handle $selected namespace - references SELECT result fields
+  if (namespace === `$selected`) {
+    // Access $selected directly
+    if (propertyPath.length === 0) {
+      // Just $selected - return entire $selected object
+      return (namespacedRow) => (namespacedRow as any).$selected
+    } else if (propertyPath.length === 1) {
+      // Single property access - most common case
+      const prop = propertyPath[0]!
+      return (namespacedRow) => {
+        const selectResults = (namespacedRow as any).$selected
+        return selectResults?.[prop]
+      }
+    } else {
+      // Multiple property navigation (nested SELECT fields)
+      return (namespacedRow) => {
+        const selectResults = (namespacedRow as any).$selected
+        if (selectResults === undefined) {
+          return undefined
+        }
+
+        let value: any = selectResults
+        for (const prop of propertyPath) {
+          if (value == null) {
+            return value
+          }
+          value = value[prop]
+        }
+        return value
+      }
+    }
+  }
+
+  // Handle table alias namespace (existing logic)
+  const tableAlias = namespace
 
   // Pre-compile the property path navigation
   if (propertyPath.length === 0) {
