@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.15
+
+### Patch Changes
+
+- Adds a GroupedTopKWithFractionalIndexOperator that maintains separate topK windows for each group. ([#993](https://github.com/TanStack/db/pull/993))
+
 ## 0.1.14
 
 ### Patch Changes
