@@ -1877,18 +1877,18 @@ describe(`Query Collections`, () => {
 
       function TestComponent() {
         const query = useLiveQuery((q) =>
-          q
-            .from({ persons: collection })
-            .select(({ persons }) => ({
-              id: persons.id,
-              name: persons.name,
-            })),
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
         )
 
         return (
           <ul data-testid="list">
             <For each={query()}>
-              {(person) => <li data-testid={`person-${person.id}`}>{person.name}</li>}
+              {(person) => (
+                <li data-testid={`person-${person.id}`}>{person.name}</li>
+              )}
             </For>
           </ul>
         )
@@ -1928,12 +1928,10 @@ describe(`Query Collections`, () => {
 
       function TestComponent() {
         const query = useLiveQuery((q) =>
-          q
-            .from({ persons: collection })
-            .select(({ persons }) => ({
-              id: persons.id,
-              name: persons.name,
-            })),
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
         )
 
         return (
