@@ -1478,11 +1478,14 @@ function createElectricSync<T extends Row<unknown>>(
                 newSnapshots.push(parseSnapshotMessage(bufferedMsg))
               } else if (isMoveOutMessage(bufferedMsg)) {
                 // Process buffered move-out messages during atomic swap
+                // Note: We pass `true` because a transaction was already started
+                // at the beginning of the atomic swap (line 1454).
+                // This prevents processMoveOutEvent from calling begin() again.
                 processMoveOutEvent(
                   bufferedMsg.headers.patterns,
                   begin,
                   write,
-                  transactionStarted,
+                  true, // Transaction is already started in atomic swap
                 )
               }
             }
@@ -1501,8 +1504,12 @@ function createElectricSync<T extends Row<unknown>>(
             // Normal mode or on-demand: commit transaction if one was started
             // Both up-to-date and subset-end trigger a commit
             if (transactionStarted) {
-              commit()
+              // Reset transactionStarted before commit to prevent issues if commit throws.
+              // If commit throws, we don't want transactionStarted to remain true,
+              // as that would cause subsequent batches to skip begin() and try to use
+              // an already-committed or non-existent transaction.
               transactionStarted = false
+              commit()
             }
           }
           wrappedMarkReady(isBufferingInitialSync())
