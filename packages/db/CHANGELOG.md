@@ -1,5 +1,104 @@
 # @tanstack/db
 
+## 0.5.19
+
+### Patch Changes
+
+- Fix `isReady()` returning `true` while `toArray()` returns empty results. The status now correctly waits until data has been processed through the graph before marking ready. ([#1114](https://github.com/TanStack/db/pull/1114))
+
+  Also fix duplicate key errors when live queries use joins with custom `getKey` functions. D2's incremental join can produce multiple outputs for the same key during a single graph run; this change batches all outputs into a single transaction to prevent conflicts.
+
+- Introduce $selected namespace for accessing fields from SELECT clause inside ORDER BY and HAVING clauses. ([#1094](https://github.com/TanStack/db/pull/1094))
+
+- Updated dependencies [[`2456adb`](https://github.com/TanStack/db/commit/2456adbdb78b01d3f7323b3a0405b25f578df956)]:
+  - @tanstack/db-ivm@0.1.15
+
+## 0.5.18
+
+### Patch Changes
+
+- fix(db): prevent live query from being marked ready before subset data is loaded ([#1081](https://github.com/TanStack/db/pull/1081))
+
+  In on-demand sync mode, the live query collection was being marked as `ready` before
+  the subset data finished loading. This caused `useLiveQuery` to return `isReady=true`
+  with empty data, and `useLiveSuspenseQuery` to release suspense prematurely.
+
+  The root cause was a race condition: the `status:change` listener in `CollectionSubscriber`
+  was registered _after_ the snapshot was triggered. If `loadSubset` resolved quickly
+  (or synchronously), the `loadingSubset` status transition would be missed entirely,
+  so `trackLoadPromise` was never called on the live query collection.
+
+  Changes:
+  1. **Core fix - `onStatusChange` option**: Added `onStatusChange` callback option to
+     `subscribeChanges()`. The listener is registered BEFORE any snapshot is requested,
+     guaranteeing no status transitions are missed. This replaces the error-prone pattern
+     of manually deferring snapshots and registering listeners in the correct order.
+  2. **Ready state gating**: `updateLiveQueryStatus()` now checks `isLoadingSubset` on the
+     live query collection before marking it ready, and listens for `loadingSubset:change`
+     to trigger the ready check when subset loading completes.
+
+## 0.5.17
+
+### Patch Changes
+
+- Export `QueryResult` helper type for easily extracting query result types (similar to Zod's `z.infer`). ([#1096](https://github.com/TanStack/db/pull/1096))
+
+  ```typescript
+  import { Query, QueryResult } from '@tanstack/db'
+
+  const myQuery = new Query()
+    .from({ users })
+    .select(({ users }) => ({ name: users.name }))
+
+  // Extract the result type - clean and simple!
+  type MyQueryResult = QueryResult<typeof myQuery>
+  ```
+
+  Also exports `ExtractContext` for advanced use cases where you need the full context type.
+
+- Add validation for where() and having() expressions to catch JavaScript operator usage ([#1082](https://github.com/TanStack/db/pull/1082))
+
+  When users accidentally use JavaScript's comparison operators (`===`, `!==`, `<`, `>`, etc.) in `where()` or `having()` callbacks instead of query builder functions (`eq`, `gt`, etc.), the query builder now throws a helpful `InvalidWhereExpressionError` with clear guidance.
+
+  Previously, this mistake would result in a confusing "Unknown expression type: undefined" error at query compilation time. Now users get immediate feedback with an example of the correct syntax:
+
+  ```
+  ❌ .where(({ user }) => user.id === 'abc')
+  ✅ .where(({ user }) => eq(user.id, 'abc'))
+  ```
+
+- Fix asymmetric behavior in `deepEquals` when comparing different special types (Date, RegExp, Map, Set, TypedArray, Temporal, Array). Previously, comparing values like `deepEquals(Date, Temporal.Duration)` could return a different result than `deepEquals(Temporal.Duration, Date)`. Now both directions correctly return `false` for mismatched types, ensuring `deepEquals` is a proper equivalence relation. ([#1018](https://github.com/TanStack/db/pull/1018))
+
+- Add `where` callback option to `subscribeChanges` for ergonomic filtering ([#943](https://github.com/TanStack/db/pull/943))
+
+  Instead of manually constructing IR with `PropRef`:
+
+  ```ts
+  import { eq, PropRef } from '@tanstack/db'
+  collection.subscribeChanges(callback, {
+    whereExpression: eq(new PropRef(['status']), 'active'),
+  })
+  ```
+
+  You can now use a callback with query builder functions:
+
+  ```ts
+  import { eq } from '@tanstack/db'
+  collection.subscribeChanges(callback, {
+    where: (row) => eq(row.status, 'active'),
+  })
+  ```
+
+## 0.5.16
+
+### Patch Changes
+
+- Fix useLiveInfiniteQuery not updating when deleting an item from a partial page with DESC order. ([#970](https://github.com/TanStack/db/pull/970))
+
+  The bug occurred when using `useLiveInfiniteQuery` with `orderBy(..., 'desc')` and having fewer items than the `pageSize`. Deleting an item would not update the live result - the deleted item would remain visible until another change occurred.
+
+  The root cause was in `requestLimitedSnapshot` where `biggestObservedValue` was incorrectly set to the full row object instead of the indexed value (e.g., the salary field used for ordering). This caused the BTree comparison to fail, resulting in the same data being loaded multiple times with each item having a multiplicity > 1. When an item was deleted, its multiplicity would decrement but not reach 0, so it remained visible.
+
 ## 0.5.15
 
 ### Patch Changes

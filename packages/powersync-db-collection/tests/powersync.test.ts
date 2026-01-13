@@ -23,11 +23,16 @@ const APP_SCHEMA = new Schema({
     name: column.text,
     active: column.integer, // Will be mapped to Boolean
   }),
-  documents: new Table({
-    name: column.text,
-    author: column.text,
-    created_at: column.text, // Will be mapped to Date
-  }),
+  documents: new Table(
+    {
+      name: column.text,
+      author: column.text,
+      created_at: column.text, // Will be mapped to Date
+    },
+    {
+      trackMetadata: true,
+    },
+  ),
 })
 
 describe(`PowerSync Integration`, () => {
@@ -322,6 +327,59 @@ describe(`PowerSync Integration`, () => {
           .every((crudEntry) => crudEntry.transactionId == lastTransactionId),
       ).true
     })
+
+    /**
+     * Metadata provided by the collection operation should be persisted to the database if supported by the SQLite table.
+     */
+    it(`should persist collection operation metadata`, async () => {
+      const db = await createDatabase()
+
+      const collection = createDocumentsCollection(db)
+      await collection.stateWhenReady()
+
+      const metadata = {
+        text: `some text`,
+        number: 123,
+        boolean: true,
+      }
+      const id = randomUUID()
+      await collection.insert(
+        {
+          id,
+          name: `new`,
+          author: `somebody`,
+        },
+        {
+          metadata,
+        },
+      ).isPersisted.promise
+
+      // Now do an update
+      await collection.update(
+        id,
+        { metadata: metadata },
+        (d) => (d.name = `updatedNew`),
+      ).isPersisted.promise
+
+      await collection.delete(id, { metadata }).isPersisted.promise
+
+      // There should be a crud entries for this
+      const crudBatch = await db.getCrudBatch(100)
+      expect(crudBatch).toBeDefined()
+      const crudEntries = crudBatch!.crud
+
+      // The metadata should be available in the CRUD entries for upload
+      const stringifiedMetadata = JSON.stringify(metadata)
+      expect(crudEntries.length).toBe(3)
+      expect(crudEntries[0]!.metadata).toEqual(stringifiedMetadata)
+      expect(crudEntries[1]!.metadata).toEqual(stringifiedMetadata)
+      expect(crudEntries[2]!.metadata).toEqual(stringifiedMetadata)
+
+      // Verify the item is deleted from SQLite
+      const documents = await db.getAll(`
+        SELECT * FROM documents`)
+      expect(documents.length).toBe(0)
+    })
   })
 
   describe(`General use`, () => {
@@ -337,6 +395,7 @@ describe(`PowerSync Integration`, () => {
       vi.spyOn(options.utils, `getMeta`).mockImplementation(() => ({
         tableName: `fakeTable`,
         trackedTableName: `error`,
+        metadataIsTracked: true,
         serializeValue: () => ({}) as any,
       }))
       // Create two collections for the same table

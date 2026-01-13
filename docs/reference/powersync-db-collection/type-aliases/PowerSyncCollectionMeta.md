@@ -21,6 +21,18 @@ Metadata for the PowerSync Collection.
 
 ## Properties
 
+### metadataIsTracked
+
+```ts
+metadataIsTracked: boolean;
+```
+
+Defined in: [definitions.ts:253](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L253)
+
+Whether the PowerSync table tracks metadata.
+
+***
+
 ### serializeValue()
 
 ```ts

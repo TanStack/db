@@ -19,6 +19,7 @@ Defined in: [packages/db/src/errors.ts:345](https://github.com/TanStack/db/blob/
 - [`InvalidSourceTypeError`](InvalidSourceTypeError.md)
 - [`JoinConditionMustBeEqualityError`](JoinConditionMustBeEqualityError.md)
 - [`QueryMustHaveFromClauseError`](QueryMustHaveFromClauseError.md)
+- [`InvalidWhereExpressionError`](InvalidWhereExpressionError.md)
 
 ## Constructors
 

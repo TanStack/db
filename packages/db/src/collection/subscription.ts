@@ -1,7 +1,8 @@
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
 import { and, eq, gte, lt } from '../query/builder/functions.js'
-import { Value } from '../query/ir.js'
+import { PropRef, Value } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
+import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor } from '../utils/cursor.js'
 import {
   createFilterFunctionFromExpression,
@@ -494,6 +495,13 @@ export class CollectionSubscription
     const valuesNeeded = () => Math.max(limit - changes.length, 0)
     const collectionExhausted = () => keys.length === 0
 
+    // Create a value extractor for the orderBy field to properly track the biggest indexed value
+    const orderByExpression = orderBy[0]!.expression
+    const valueExtractor =
+      orderByExpression.type === `ref`
+        ? compileExpression(new PropRef(orderByExpression.path), true)
+        : null
+
     while (valuesNeeded() > 0 && !collectionExhausted()) {
       const insertedKeys = new Set<string | number>() // Track keys we add to `changes` in this iteration
 
@@ -504,7 +512,9 @@ export class CollectionSubscription
           key,
           value,
         })
-        biggestObservedValue = value
+        // Extract the indexed value (e.g., salary) from the row, not the full row
+        // This is needed for index.take() to work correctly with the BTree comparator
+        biggestObservedValue = valueExtractor ? valueExtractor(value) : value
         insertedKeys.add(key) // Track this key
       }
 

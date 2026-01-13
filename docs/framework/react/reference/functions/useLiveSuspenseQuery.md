@@ -11,7 +11,7 @@ title: useLiveSuspenseQuery
 function useLiveSuspenseQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:76](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L76)
+Defined in: [useLiveSuspenseQuery.ts:109](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L109)
 
 Create a live query with React Suspense support
 
@@ -127,13 +127,47 @@ function App() {
 }
 ```
 
+### Remarks
+
+**Important:** This hook does NOT support disabled queries (returning undefined/null).
+Following TanStack Query's useSuspenseQuery design, the query callback must always
+return a valid query, collection, or config object.
+
+❌ **This will cause a type error:**
+```ts
+useLiveSuspenseQuery(
+  (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+)
+```
+
+✅ **Use conditional rendering instead:**
+```ts
+function Profile({ userId }: { userId: string }) {
+  const { data } = useLiveSuspenseQuery(
+    (q) => q.from({ users }).where(({ users }) => eq(users.id, userId))
+  )
+  return <div>{data.name}</div>
+}
+
+// In parent component:
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+✅ **Or use useLiveQuery for conditional queries:**
+```ts
+const { data, isEnabled } = useLiveQuery(
+  (q) => userId ? q.from({ users }) : undefined,  // ✅ Supported!
+  [userId]
+)
+```
+
 ## Call Signature
 
 ```ts
 function useLiveSuspenseQuery<TContext>(config, deps?): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:86](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L86)
+Defined in: [useLiveSuspenseQuery.ts:119](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L119)
 
 Create a live query with React Suspense support
 
@@ -247,13 +281,47 @@ function App() {
 }
 ```
 
+### Remarks
+
+**Important:** This hook does NOT support disabled queries (returning undefined/null).
+Following TanStack Query's useSuspenseQuery design, the query callback must always
+return a valid query, collection, or config object.
+
+❌ **This will cause a type error:**
+```ts
+useLiveSuspenseQuery(
+  (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+)
+```
+
+✅ **Use conditional rendering instead:**
+```ts
+function Profile({ userId }: { userId: string }) {
+  const { data } = useLiveSuspenseQuery(
+    (q) => q.from({ users }).where(({ users }) => eq(users.id, userId))
+  )
+  return <div>{data.name}</div>
+}
+
+// In parent component:
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+✅ **Or use useLiveQuery for conditional queries:**
+```ts
+const { data, isEnabled } = useLiveQuery(
+  (q) => userId ? q.from({ users }) : undefined,  // ✅ Supported!
+  [userId]
+)
+```
+
 ## Call Signature
 
 ```ts
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:96](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L96)
+Defined in: [useLiveSuspenseQuery.ts:129](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L129)
 
 Create a live query with React Suspense support
 
@@ -368,13 +436,47 @@ function App() {
 }
 ```
 
+### Remarks
+
+**Important:** This hook does NOT support disabled queries (returning undefined/null).
+Following TanStack Query's useSuspenseQuery design, the query callback must always
+return a valid query, collection, or config object.
+
+❌ **This will cause a type error:**
+```ts
+useLiveSuspenseQuery(
+  (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+)
+```
+
+✅ **Use conditional rendering instead:**
+```ts
+function Profile({ userId }: { userId: string }) {
+  const { data } = useLiveSuspenseQuery(
+    (q) => q.from({ users }).where(({ users }) => eq(users.id, userId))
+  )
+  return <div>{data.name}</div>
+}
+
+// In parent component:
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+✅ **Or use useLiveQuery for conditional queries:**
+```ts
+const { data, isEnabled } = useLiveQuery(
+  (q) => userId ? q.from({ users }) : undefined,  // ✅ Supported!
+  [userId]
+)
+```
+
 ## Call Signature
 
 ```ts
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: [useLiveSuspenseQuery.ts:109](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L109)
+Defined in: [useLiveSuspenseQuery.ts:142](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L142)
 
 Create a live query with React Suspense support
 
@@ -487,4 +589,38 @@ function App() {
     </ErrorBoundary>
   )
 }
+```
+
+### Remarks
+
+**Important:** This hook does NOT support disabled queries (returning undefined/null).
+Following TanStack Query's useSuspenseQuery design, the query callback must always
+return a valid query, collection, or config object.
+
+❌ **This will cause a type error:**
+```ts
+useLiveSuspenseQuery(
+  (q) => userId ? q.from({ users }) : undefined  // ❌ Error!
+)
+```
+
+✅ **Use conditional rendering instead:**
+```ts
+function Profile({ userId }: { userId: string }) {
+  const { data } = useLiveSuspenseQuery(
+    (q) => q.from({ users }).where(({ users }) => eq(users.id, userId))
+  )
+  return <div>{data.name}</div>
+}
+
+// In parent component:
+{userId ? <Profile userId={userId} /> : <div>No user</div>}
+```
+
+✅ **Or use useLiveQuery for conditional queries:**
+```ts
+const { data, isEnabled } = useLiveQuery(
+  (q) => userId ? q.from({ users }) : undefined,  // ✅ Supported!
+  [userId]
+)
 ```

@@ -5,7 +5,7 @@ title: UnsupportedFromTypeError
 
 # Class: UnsupportedFromTypeError
 
-Defined in: [packages/db/src/errors.ts:457](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L457)
+Defined in: [packages/db/src/errors.ts:470](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L470)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:457](https://github.com/TanStack/db/blob/
 new UnsupportedFromTypeError(type): UnsupportedFromTypeError;
 ```
 
-Defined in: [packages/db/src/errors.ts:458](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L458)
+Defined in: [packages/db/src/errors.ts:471](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L471)
 
 #### Parameters
 

@@ -132,7 +132,6 @@ export const trailBaseTodoCollection = createCollection(
   trailBaseCollectionOptions<SelectTodo, Todo>({
     id: `todos`,
     getKey: (item) => item.id,
-    schema: selectTodoSchema,
     recordApi: trailBaseClient.records(`todos`),
     // Re-using the example's drizzle-schema requires remapping the items.
     parse: {
@@ -233,7 +232,6 @@ export const trailBaseConfigCollection = createCollection(
   trailBaseCollectionOptions<SelectConfig, Config>({
     id: `config`,
     getKey: (item) => item.id,
-    schema: selectConfigSchema,
     recordApi: trailBaseClient.records(`config`),
     // Re-using the example's drizzle-schema requires remapping the items.
     parse: {
