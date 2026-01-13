@@ -7,11 +7,11 @@ import type {
 import type { Collection, PendingMutation } from '@tanstack/db'
 
 export class TransactionSerializer {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   private collections: Record<string, Collection<any, any, any, any, any>>
   private collectionIdToKey: Map<string, string>
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   constructor(
     collections: Record<string, Collection<any, any, any, any, any>>,
   ) {
@@ -76,6 +76,7 @@ export class TransactionSerializer {
       type: mutation.type,
       modified: this.serializeValue(mutation.modified),
       original: this.serializeValue(mutation.original),
+      changes: this.serializeValue(mutation.changes),
       collectionId: registryKey, // Store registry key instead of collection.id
     }
   }
@@ -93,11 +94,11 @@ export class TransactionSerializer {
       type: data.type as any,
       modified: this.deserializeValue(data.modified),
       original: this.deserializeValue(data.original),
+      changes: this.deserializeValue(data.changes),
       collection,
       // These fields would need to be reconstructed by the executor
       mutationId: ``, // Will be regenerated
       key: null, // Will be extracted from the data
-      changes: {}, // Will be recalculated
       metadata: undefined,
       syncMetadata: {},
       optimistic: true,

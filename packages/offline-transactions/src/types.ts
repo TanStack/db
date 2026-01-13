@@ -21,6 +21,7 @@ export interface SerializedMutation {
   type: string
   modified: any
   original: any
+  changes: any
   collectionId: string
 }
 
@@ -88,7 +89,7 @@ export interface StorageDiagnostic {
 }
 
 export interface OfflineConfig {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   collections: Record<string, Collection<any, any, any, any, any>>
   mutationFns: Record<string, OfflineMutationFn>
   storage?: StorageAdapter
