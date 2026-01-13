@@ -25,6 +25,12 @@ interface PendingSyncedTransaction<
     upserts: Map<TKey, T>
     deletes: Set<TKey>
   }
+  /**
+   * When true, this transaction should be processed immediately even if there
+   * are persisting user transactions. Used by manual write operations (writeInsert,
+   * writeUpdate, writeDelete, writeUpsert) which need synchronous updates to syncedData.
+   */
+  immediate?: boolean
 }
 
 export class CollectionStateManager<
@@ -437,12 +443,16 @@ export class CollectionStateManager<
       committedSyncedTransactions,
       uncommittedSyncedTransactions,
       hasTruncateSync,
+      hasImmediateSync,
     } = this.pendingSyncedTransactions.reduce(
       (acc, t) => {
         if (t.committed) {
           acc.committedSyncedTransactions.push(t)
           if (t.truncate === true) {
             acc.hasTruncateSync = true
+          }
+          if (t.immediate === true) {
+            acc.hasImmediateSync = true
           }
         } else {
           acc.uncommittedSyncedTransactions.push(t)
@@ -457,10 +467,15 @@ export class CollectionStateManager<
           PendingSyncedTransaction<TOutput, TKey>
         >,
         hasTruncateSync: false,
+        hasImmediateSync: false,
       },
     )
 
-    if (!hasPersistingTransaction || hasTruncateSync) {
+    // Process committed transactions if:
+    // 1. No persisting user transaction (normal sync flow), OR
+    // 2. There's a truncate operation (must be processed immediately), OR
+    // 3. There's an immediate transaction (manual writes must be processed synchronously)
+    if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 

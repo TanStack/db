@@ -2286,6 +2286,102 @@ describe(`QueryCollection`, () => {
       expect(todo?.id).not.toBe(clientId)
     })
 
+    it(`should update syncedData immediately when writeUpsert is called after async API in onUpdate handler`, async () => {
+      // Reproduces bug where syncedData shows stale values when writeUpsert is called
+      // AFTER an async API call in a mutation handler. The async await causes the
+      // transaction to be added to state.transactions before writeUpsert runs,
+      // which means commitPendingTransactions() sees hasPersistingTransaction=true
+      // and would skip processing the sync transaction without the immediate flag.
+      const queryKey = [`writeUpsert-after-api-test`]
+
+      type Brand = {
+        id: string
+        brandName: string
+      }
+
+      const serverBrands: Array<Brand> = [{ id: `123`, brandName: `A` }]
+
+      const queryFn = vi.fn().mockImplementation(async () => {
+        return [...serverBrands]
+      })
+
+      // Track syncedData state immediately after writeUpsert
+      let syncedDataAfterWriteUpsert: Brand | undefined
+      let hasPersistingTransactionDuringWrite = false
+
+      const collection = createCollection(
+        queryCollectionOptions<Brand>({
+          id: `writeUpsert-after-api-test`,
+          queryKey,
+          queryFn,
+          queryClient,
+          getKey: (item: Brand) => item.id,
+          startSync: true,
+          onUpdate: async ({ transaction }) => {
+            const updates = transaction.mutations.map((m) => m.modified)
+
+            // Simulate async API call - THIS IS KEY!
+            // After this await, the transaction will be in state.transactions
+            await new Promise((resolve) => setTimeout(resolve, 10))
+
+            // Check if there's now a persisting transaction
+            for (const tx of collection._state.transactions.values()) {
+              if (tx.state === `persisting`) {
+                hasPersistingTransactionDuringWrite = true
+                break
+              }
+            }
+
+            // Update server state
+            for (const update of updates) {
+              const idx = serverBrands.findIndex((b) => b.id === update.id)
+              if (idx !== -1) {
+                serverBrands[idx] = { ...serverBrands[idx], ...update }
+              }
+            }
+
+            // Write the server response back to syncedData
+            // Without the immediate flag, this would be blocked by the persisting transaction
+            collection.utils.writeBatch(() => {
+              for (const update of updates) {
+                collection.utils.writeUpsert(update)
+              }
+            })
+
+            // Check syncedData IMMEDIATELY after writeUpsert
+            syncedDataAfterWriteUpsert = collection._state.syncedData.get(`123`)
+
+            return { refetch: false }
+          },
+        }),
+      )
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Verify initial state
+      expect(collection._state.syncedData.get(`123`)?.brandName).toBe(`A`)
+
+      // Update brandName from A to B
+      collection.update(`123`, (draft) => {
+        draft.brandName = `B`
+      })
+
+      // Wait for mutation to complete
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Verify we had a persisting transaction during the write
+      expect(hasPersistingTransactionDuringWrite).toBe(true)
+
+      // The CRITICAL assertion: syncedData should have been updated IMMEDIATELY after writeUpsert
+      // Without the fix, this would fail because commitPendingTransactions() would skip
+      // processing due to hasPersistingTransaction being true
+      expect(syncedDataAfterWriteUpsert).toBeDefined()
+      expect(syncedDataAfterWriteUpsert?.brandName).toBe(`B`)
+    })
+
     it(`should not rollback object field updates after server response with refetch: false`, async () => {
       const queryKey = [`object-field-update-test`]
 
