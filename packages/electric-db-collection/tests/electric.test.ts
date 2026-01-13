@@ -4015,9 +4015,7 @@ describe(`Electric Integration`, () => {
       const txidPromise = testCollection.utils.awaitTxId(999, 5000)
 
       // Trigger must-refetch before the txid arrives
-      testSubscriber([
-        { headers: { control: `must-refetch` } },
-      ])
+      testSubscriber([{ headers: { control: `must-refetch` } }])
 
       // The promise should reject with SyncInterruptedByRefetchError
       await expect(txidPromise).rejects.toThrow(
@@ -4056,9 +4054,7 @@ describe(`Electric Integration`, () => {
       >
 
       // Get to ready state
-      testSubscriber([
-        { headers: { control: `up-to-date` } },
-      ])
+      testSubscriber([{ headers: { control: `up-to-date` } }])
 
       // Start multiple awaits for different txids
       const promise1 = testCollection.utils.awaitTxId(100, 5000)
@@ -4066,14 +4062,18 @@ describe(`Electric Integration`, () => {
       const promise3 = testCollection.utils.awaitTxId(300, 5000)
 
       // Trigger must-refetch
-      testSubscriber([
-        { headers: { control: `must-refetch` } },
-      ])
+      testSubscriber([{ headers: { control: `must-refetch` } }])
 
       // ALL promises should reject
-      await expect(promise1).rejects.toThrow(`Sync interrupted by 409 must-refetch`)
-      await expect(promise2).rejects.toThrow(`Sync interrupted by 409 must-refetch`)
-      await expect(promise3).rejects.toThrow(`Sync interrupted by 409 must-refetch`)
+      await expect(promise1).rejects.toThrow(
+        `Sync interrupted by 409 must-refetch`,
+      )
+      await expect(promise2).rejects.toThrow(
+        `Sync interrupted by 409 must-refetch`,
+      )
+      await expect(promise3).rejects.toThrow(
+        `Sync interrupted by 409 must-refetch`,
+      )
     })
 
     it(`should not reject already-resolved awaitTxId on must-refetch`, async () => {
@@ -4124,12 +4124,12 @@ describe(`Electric Integration`, () => {
       const pendingPromise = testCollection.utils.awaitTxId(999, 5000)
 
       // Trigger must-refetch
-      testSubscriber([
-        { headers: { control: `must-refetch` } },
-      ])
+      testSubscriber([{ headers: { control: `must-refetch` } }])
 
       // Only the pending promise should reject
-      await expect(pendingPromise).rejects.toThrow(`Sync interrupted by 409 must-refetch`)
+      await expect(pendingPromise).rejects.toThrow(
+        `Sync interrupted by 409 must-refetch`,
+      )
       // The resolved promise already completed successfully, no error
     })
   })

@@ -1150,28 +1150,29 @@ describe(`Collection truncate operations`, () => {
         | undefined
       let loadSubsetCallCount = 0
 
-      const collection = createCollection<{ id: number; value: string }, number>(
-        {
-          id: `cycle-detection-test`,
-          getKey: (item) => item.id,
-          startSync: true,
-          syncMode: `on-demand`,
-          sync: {
-            sync: (cfg) => {
-              syncOps = cfg
-              cfg.markReady()
+      const collection = createCollection<
+        { id: number; value: string },
+        number
+      >({
+        id: `cycle-detection-test`,
+        getKey: (item) => item.id,
+        startSync: true,
+        syncMode: `on-demand`,
+        sync: {
+          sync: (cfg) => {
+            syncOps = cfg
+            cfg.markReady()
 
-              return {
-                loadSubset: () => {
-                  loadSubsetCallCount++
-                  // Simulate async loadSubset
-                  return Promise.resolve()
-                },
-              }
-            },
+            return {
+              loadSubset: () => {
+                loadSubsetCallCount++
+                // Simulate async loadSubset
+                return Promise.resolve()
+              },
+            }
           },
         },
-      )
+      })
 
       await collection.stateWhenReady()
 
@@ -1219,22 +1220,23 @@ describe(`Collection truncate operations`, () => {
         | undefined
       let truncateEventCount = 0
 
-      const collection = createCollection<{ id: number; value: string }, number>(
-        {
-          id: `cycle-reset-test`,
-          getKey: (item) => item.id,
-          startSync: true,
-          sync: {
-            sync: (cfg) => {
-              syncOps = cfg
-              cfg.begin()
-              cfg.write({ type: `insert`, value: { id: 1, value: `initial` } })
-              cfg.commit()
-              cfg.markReady()
-            },
+      const collection = createCollection<
+        { id: number; value: string },
+        number
+      >({
+        id: `cycle-reset-test`,
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: (cfg) => {
+            syncOps = cfg
+            cfg.begin()
+            cfg.write({ type: `insert`, value: { id: 1, value: `initial` } })
+            cfg.commit()
+            cfg.markReady()
           },
         },
-      )
+      })
 
       await collection.stateWhenReady()
 
