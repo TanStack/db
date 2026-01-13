@@ -35,3 +35,14 @@ export class StreamAbortedError extends ElectricDBCollectionError {
     this.name = `StreamAbortedError`
   }
 }
+
+export class SyncInterruptedByRefetchError extends ElectricDBCollectionError {
+  constructor(txId: number, collectionId?: string) {
+    super(
+      `Sync interrupted by 409 must-refetch while waiting for txId: ${txId}. ` +
+        `The shape stream was reset and this transaction may need to be retried.`,
+      collectionId,
+    )
+    this.name = `SyncInterruptedByRefetchError`
+  }
+}

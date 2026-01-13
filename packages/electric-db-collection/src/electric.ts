@@ -10,6 +10,7 @@ import { DeduplicatedLoadSubset, and } from '@tanstack/db'
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
+  SyncInterruptedByRefetchError,
   TimeoutWaitingForMatchError,
   TimeoutWaitingForTxIdError,
 } from './errors'
@@ -552,6 +553,42 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   // This allows awaitMatch to resolve immediately for messages from committed batches
   const batchCommitted = new Store<boolean>(false)
 
+  // Track pending awaitTxId calls so they can be rejected on 409 must-refetch
+  // This prevents awaitTxId from hanging indefinitely when the shape stream restarts
+  const pendingAwaitTxIds = new Store<
+    Map<
+      string,
+      {
+        txId: number
+        resolve: (value: boolean) => void
+        reject: (error: Error) => void
+        timeoutId: ReturnType<typeof setTimeout>
+        unsubscribeTxids: () => void
+        unsubscribeSnapshots: () => void
+      }
+    >
+  >(new Map())
+
+  /**
+   * Reject all pending awaitTxId calls when 409 must-refetch occurs.
+   * This prevents hanging promises when the shape stream restarts and the
+   * awaited txid will never arrive on the new stream.
+   */
+  const rejectPendingAwaitTxIds = () => {
+    if (pendingAwaitTxIds.state.size > 0) {
+      debug(
+        `${config.id ? `[${config.id}] ` : ``}Rejecting ${pendingAwaitTxIds.state.size} pending awaitTxId calls due to 409 must-refetch`,
+      )
+      pendingAwaitTxIds.state.forEach((pending) => {
+        clearTimeout(pending.timeoutId)
+        pending.unsubscribeTxids()
+        pending.unsubscribeSnapshots()
+        pending.reject(new SyncInterruptedByRefetchError(pending.txId, config.id))
+      })
+      pendingAwaitTxIds.setState(() => new Map())
+    }
+  }
+
   /**
    * Helper function to remove multiple matches from the pendingMatches store
    */
@@ -592,6 +629,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     batchCommitted,
     removePendingMatches,
     resolveMatchedPendingMatches,
+    rejectPendingAwaitTxIds,
     collectionId: config.id,
     testHooks: config[ELECTRIC_TEST_HOOKS],
   })
@@ -625,7 +663,19 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     if (hasSnapshot) return true
 
     return new Promise((resolve, reject) => {
+      const awaitId = Math.random().toString(36)
+
+      // Helper to cleanup pending tracking and subscriptions
+      const cleanup = () => {
+        pendingAwaitTxIds.setState((current) => {
+          const newPending = new Map(current)
+          newPending.delete(awaitId)
+          return newPending
+        })
+      }
+
       const timeoutId = setTimeout(() => {
+        cleanup()
         unsubscribeSeenTxids()
         unsubscribeSeenSnapshots()
         reject(new TimeoutWaitingForTxIdError(txId, config.id))
@@ -637,6 +687,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
             `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o`,
             txId,
           )
+          cleanup()
           clearTimeout(timeoutId)
           unsubscribeSeenTxids()
           unsubscribeSeenSnapshots()
@@ -654,11 +705,26 @@ export function electricCollectionOptions<T extends Row<unknown>>(
             txId,
             visibleSnapshot,
           )
+          cleanup()
           clearTimeout(timeoutId)
           unsubscribeSeenSnapshots()
           unsubscribeSeenTxids()
           resolve(true)
         }
+      })
+
+      // Register this pending awaitTxId so it can be rejected on 409 must-refetch
+      pendingAwaitTxIds.setState((current) => {
+        const newPending = new Map(current)
+        newPending.set(awaitId, {
+          txId,
+          resolve,
+          reject,
+          timeoutId,
+          unsubscribeTxids: unsubscribeSeenTxids,
+          unsubscribeSnapshots: unsubscribeSeenSnapshots,
+        })
+        return newPending
       })
     })
   }
@@ -875,6 +941,7 @@ function createElectricSync<T extends Row<unknown>>(
     batchCommitted: Store<boolean>
     removePendingMatches: (matchIds: Array<string>) => void
     resolveMatchedPendingMatches: () => void
+    rejectPendingAwaitTxIds: () => void
     collectionId?: string
     testHooks?: ElectricTestHooks
   },
@@ -888,6 +955,7 @@ function createElectricSync<T extends Row<unknown>>(
     batchCommitted,
     removePendingMatches,
     resolveMatchedPendingMatches,
+    rejectPendingAwaitTxIds,
     collectionId,
     testHooks,
   } = options
@@ -1411,6 +1479,10 @@ function createElectricSync<T extends Row<unknown>>(
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
             )
+
+            // Reject any pending awaitTxId calls since the shape stream is restarting
+            // and the awaited txids will likely never arrive on the new stream
+            rejectPendingAwaitTxIds()
 
             // Start a transaction and truncate the collection
             if (!transactionStarted) {

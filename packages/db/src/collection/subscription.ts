@@ -95,6 +95,13 @@ export class CollectionSubscription
   private truncateBuffer: Array<Array<ChangeMessage<any, any>>> = []
   private pendingTruncateRefetches: Set<Promise<void>> = new Set()
 
+  // Truncate cycle detection to prevent infinite 409 must-refetch loops
+  // When subqueries trigger rapid 409s, we detect the cycle and break it
+  private lastTruncateTime = 0
+  private truncateCycleCount = 0
+  private static readonly TRUNCATE_CYCLE_WINDOW_MS = 2000
+  private static readonly MAX_TRUNCATES_PER_WINDOW = 5
+
   public get status(): SubscriptionStatus {
     return this._status
   }
@@ -142,8 +149,39 @@ export class CollectionSubscription
    *
    * To prevent a flash of missing content, we buffer all changes (deletes from truncate
    * and inserts from refetch) until all loadSubset promises resolve, then emit them together.
+   *
+   * Includes cycle detection to prevent infinite 409 must-refetch loops that can occur
+   * when subqueries trigger rapid successive 409s, causing app freezing.
    */
   private handleTruncate() {
+    // Cycle detection: track rapid truncates to detect 409 must-refetch loops
+    const now = Date.now()
+    if (now - this.lastTruncateTime < CollectionSubscription.TRUNCATE_CYCLE_WINDOW_MS) {
+      this.truncateCycleCount++
+      if (this.truncateCycleCount > CollectionSubscription.MAX_TRUNCATES_PER_WINDOW) {
+        // Detected rapid 409 cycle - break it to prevent app freeze
+        console.warn(
+          `[TanStack DB] Detected rapid 409 must-refetch cycle (${this.truncateCycleCount} truncates in ${CollectionSubscription.TRUNCATE_CYCLE_WINDOW_MS}ms). ` +
+          `Breaking cycle to prevent app freeze. This may indicate a subquery that continuously triggers 409 responses. ` +
+          `Consider reviewing your subquery configuration or disabling tagged_subqueries.`
+        )
+        // Reset state but don't re-request subsets to break the cycle
+        this.snapshotSent = false
+        this.loadedInitialState = false
+        this.limitedSnapshotRowCount = 0
+        this.lastSentKey = undefined
+        this.loadedSubsets = []
+        this.isBufferingForTruncate = false
+        this.truncateBuffer = []
+        this.pendingTruncateRefetches.clear()
+        return
+      }
+    } else {
+      // Outside the cycle window - reset counter
+      this.truncateCycleCount = 1
+    }
+    this.lastTruncateTime = now
+
     // Copy the loaded subsets before clearing (we'll re-request them)
     const subsetsToReload = [...this.loadedSubsets]
 
