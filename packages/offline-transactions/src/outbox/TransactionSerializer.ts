@@ -30,7 +30,7 @@ export class TransactionSerializer {
       ),
     }
     // Convert the whole object to JSON, handling dates
-    return JSON.stringify(serialized, (key, value) => {
+    return JSON.stringify(serialized, (_key, value) => {
       if (value instanceof Date) {
         return value.toISOString()
       }
@@ -41,7 +41,7 @@ export class TransactionSerializer {
   deserialize(data: string): OfflineTransaction {
     const parsed: SerializedOfflineTransaction = JSON.parse(
       data,
-      (key, value) => {
+      (_key, value) => {
         // Parse ISO date strings back to Date objects
         if (
           typeof value === `string` &&
@@ -92,7 +92,9 @@ export class TransactionSerializer {
       type: data.type as any,
       modified: this.deserializeValue(data.modified),
       original: this.deserializeValue(data.original),
-      changes: this.deserializeValue(data.changes),
+      changes: data.changes !== undefined
+        ? this.deserializeValue(data.changes)
+        : {},
       collection,
       // These fields would need to be reconstructed by the executor
       mutationId: ``, // Will be regenerated
@@ -117,7 +119,7 @@ export class TransactionSerializer {
     if (typeof value === `object`) {
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
-        if (value.hasOwnProperty(key)) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
           result[key] = this.serializeValue(value[key])
         }
       }
@@ -139,7 +141,7 @@ export class TransactionSerializer {
     if (typeof value === `object`) {
       const result: any = Array.isArray(value) ? [] : {}
       for (const key in value) {
-        if (value.hasOwnProperty(key)) {
+        if (Object.prototype.hasOwnProperty.call(value, key)) {
           result[key] = this.deserializeValue(value[key])
         }
       }
