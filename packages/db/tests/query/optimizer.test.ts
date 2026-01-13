@@ -1856,4 +1856,205 @@ describe(`Query Optimizer`, () => {
       }
     })
   })
+
+  describe(`Join Info Extraction`, () => {
+    test(`should return empty map for queries without joins`, () => {
+      const query: QueryIR = {
+        from: new CollectionRef(mockCollection, `u`),
+        where: [createEq(createPropRef(`u`, `status`), createValue(`active`))],
+      }
+
+      const { joinInfoBySource } = optimizeQuery(query)
+
+      expect(joinInfoBySource.size).toBe(0)
+    })
+
+    test(`should extract join info for simple inner join`, () => {
+      const usersCollection = { id: `users-collection` } as any
+      const postsCollection = { id: `posts-collection` } as any
+
+      const query: QueryIR = {
+        from: new CollectionRef(usersCollection, `user`),
+        join: [
+          {
+            from: new CollectionRef(postsCollection, `post`),
+            type: `inner`,
+            left: createPropRef(`user`, `id`),
+            right: createPropRef(`post`, `user_id`),
+          },
+        ],
+      }
+
+      const { joinInfoBySource } = optimizeQuery(query)
+
+      // Join info should be keyed by main source alias
+      expect(joinInfoBySource.has(`user`)).toBe(true)
+      const userJoins = joinInfoBySource.get(`user`)!
+      expect(userJoins).toHaveLength(1)
+
+      const joinInfo = userJoins[0]!
+      expect(joinInfo.collectionId).toBe(`posts-collection`)
+      expect(joinInfo.alias).toBe(`post`)
+      expect(joinInfo.type).toBe(`inner`)
+      expect(joinInfo.localKey).toEqual(createPropRef(`user`, `id`))
+      expect(joinInfo.foreignKey).toEqual(createPropRef(`post`, `user_id`))
+      expect(joinInfo.where).toBeUndefined()
+      expect(joinInfo.orderBy).toBeUndefined()
+    })
+
+    test(`should include WHERE clause for joined collection in join info`, () => {
+      const tasksCollection = { id: `tasks-collection` } as any
+      const accountsCollection = { id: `accounts-collection` } as any
+
+      const query: QueryIR = {
+        from: new CollectionRef(tasksCollection, `task`),
+        join: [
+          {
+            from: new CollectionRef(accountsCollection, `account`),
+            type: `inner`,
+            left: createPropRef(`task`, `account_id`),
+            right: createPropRef(`account`, `id`),
+          },
+        ],
+        where: [
+          // Filter on task (main collection)
+          createEq(createPropRef(`task`, `status`), createValue(`active`)),
+          // Filter on account (joined collection)
+          createEq(createPropRef(`account`, `name`), createValue(`Acme Corp`)),
+        ],
+      }
+
+      const { joinInfoBySource, sourceWhereClauses } = optimizeQuery(query)
+
+      // sourceWhereClauses should have the account filter
+      expect(sourceWhereClauses.has(`account`)).toBe(true)
+      expect(sourceWhereClauses.get(`account`)).toEqual(
+        createEq(createPropRef(`account`, `name`), createValue(`Acme Corp`)),
+      )
+
+      // joinInfoBySource should include the account filter in the join info
+      expect(joinInfoBySource.has(`task`)).toBe(true)
+      const taskJoins = joinInfoBySource.get(`task`)!
+      expect(taskJoins).toHaveLength(1)
+
+      const joinInfo = taskJoins[0]!
+      expect(joinInfo.where).toEqual(
+        createEq(createPropRef(`account`, `name`), createValue(`Acme Corp`)),
+      )
+    })
+
+    test(`should include orderBy for joined collection in join info`, () => {
+      const tasksCollection = { id: `tasks-collection` } as any
+      const accountsCollection = { id: `accounts-collection` } as any
+
+      const query: QueryIR = {
+        from: new CollectionRef(tasksCollection, `task`),
+        join: [
+          {
+            from: new CollectionRef(accountsCollection, `account`),
+            type: `inner`,
+            left: createPropRef(`task`, `account_id`),
+            right: createPropRef(`account`, `id`),
+          },
+        ],
+        orderBy: [
+          {
+            expression: createPropRef(`account`, `name`),
+            compareOptions: { direction: `asc` },
+          },
+          {
+            expression: createPropRef(`task`, `created_at`),
+            compareOptions: { direction: `desc` },
+          },
+        ],
+      }
+
+      const { joinInfoBySource } = optimizeQuery(query)
+
+      expect(joinInfoBySource.has(`task`)).toBe(true)
+      const taskJoins = joinInfoBySource.get(`task`)!
+      const joinInfo = taskJoins[0]!
+
+      // Only the account orderBy should be in the join info
+      expect(joinInfo.orderBy).toHaveLength(1)
+      expect(joinInfo.orderBy![0]!.expression).toEqual(
+        createPropRef(`account`, `name`),
+      )
+    })
+
+    test(`should handle multiple joins`, () => {
+      const ordersCollection = { id: `orders-collection` } as any
+      const customersCollection = { id: `customers-collection` } as any
+      const productsCollection = { id: `products-collection` } as any
+
+      const query: QueryIR = {
+        from: new CollectionRef(ordersCollection, `order`),
+        join: [
+          {
+            from: new CollectionRef(customersCollection, `customer`),
+            type: `inner`,
+            left: createPropRef(`order`, `customer_id`),
+            right: createPropRef(`customer`, `id`),
+          },
+          {
+            from: new CollectionRef(productsCollection, `product`),
+            type: `left`,
+            left: createPropRef(`order`, `product_id`),
+            right: createPropRef(`product`, `id`),
+          },
+        ],
+        where: [
+          createEq(createPropRef(`customer`, `tier`), createValue(`premium`)),
+        ],
+      }
+
+      const { joinInfoBySource } = optimizeQuery(query)
+
+      expect(joinInfoBySource.has(`order`)).toBe(true)
+      const orderJoins = joinInfoBySource.get(`order`)!
+      expect(orderJoins).toHaveLength(2)
+
+      // First join: customer
+      const customerJoin = orderJoins.find((j) => j.alias === `customer`)!
+      expect(customerJoin.collectionId).toBe(`customers-collection`)
+      expect(customerJoin.type).toBe(`inner`)
+      expect(customerJoin.where).toEqual(
+        createEq(createPropRef(`customer`, `tier`), createValue(`premium`)),
+      )
+
+      // Second join: product
+      const productJoin = orderJoins.find((j) => j.alias === `product`)!
+      expect(productJoin.collectionId).toBe(`products-collection`)
+      expect(productJoin.type).toBe(`left`)
+      expect(productJoin.where).toBeUndefined()
+    })
+
+    test(`should handle join with swapped key expressions`, () => {
+      const usersCollection = { id: `users-collection` } as any
+      const postsCollection = { id: `posts-collection` } as any
+
+      // Join with right side referencing main, left side referencing joined
+      const query: QueryIR = {
+        from: new CollectionRef(usersCollection, `user`),
+        join: [
+          {
+            from: new CollectionRef(postsCollection, `post`),
+            type: `inner`,
+            // Swapped: left is post (joined), right is user (main)
+            left: createPropRef(`post`, `user_id`),
+            right: createPropRef(`user`, `id`),
+          },
+        ],
+      }
+
+      const { joinInfoBySource } = optimizeQuery(query)
+
+      const userJoins = joinInfoBySource.get(`user`)!
+      const joinInfo = userJoins[0]!
+
+      // The extractor should correctly identify which is local vs foreign
+      expect(joinInfo.localKey).toEqual(createPropRef(`user`, `id`))
+      expect(joinInfo.foreignKey).toEqual(createPropRef(`post`, `user_id`))
+    })
+  })
 })

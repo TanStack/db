@@ -1,249 +1,156 @@
 # Investigation: Passing Join Information to queryFn in On-Demand Mode
 
+**Status: IMPLEMENTED**
+
 ## Problem Statement
 
-When using `queryCollection` in on-demand mode with joins and pagination, the pagination is applied **before** join filters are evaluated, leading to inconsistent page sizes or empty results.
+When using `queryCollection` in on-demand mode with joins and pagination, the pagination was applied **before** join filters were evaluated, leading to inconsistent page sizes or empty results.
 
 **User's scenario:**
 - `tasksCollection` (queryCollection, on-demand) with `limit: 10`
 - Joined with `accountsCollection`
 - Filter on `account.name = 'example'`
 
-**What happens:**
-1. `tasksCollection.queryFn` receives `{ limit: 10, where: <task filters only> }`
-2. Backend returns 10 tasks
+**What was happening:**
+1. `tasksCollection.queryFn` received `{ limit: 10, where: <task filters only> }`
+2. Backend returned 10 tasks
 3. Client-side join with `accountsCollection`
 4. Account filter applied client-side
 5. Result: Only 6 tasks match (page size inconsistent)
 
-## Root Cause
+## Solution Implemented
 
-### Current `LoadSubsetOptions` Structure
+We extended `LoadSubsetOptions` to include join information, allowing the sync layer to construct server-side join queries that filter before pagination.
+
+### New `JoinInfo` Type
 
 ```typescript
-// packages/db/src/types.ts:285-312
-export type LoadSubsetOptions = {
-  where?: BasicExpression<boolean>    // Filters for THIS collection only
-  orderBy?: OrderBy                   // OrderBy for THIS collection only
-  limit?: number
-  cursor?: CursorExpressions
-  offset?: number
-  subscription?: Subscription
+// packages/db/src/types.ts
+export type JoinInfo = {
+  /** The ID of the collection being joined */
+  collectionId: string
+  /** The alias used for the joined collection in the query */
+  alias: string
+  /** The type of join to perform */
+  type: `inner` | `left` | `right` | `full` | `cross`
+  /** The join key expression from the main collection (e.g., task.account_id) */
+  localKey: BasicExpression
+  /** The join key expression from the joined collection (e.g., account.id) */
+  foreignKey: BasicExpression
+  /** Filters that apply to the joined collection */
+  where?: BasicExpression<boolean>
+  /** OrderBy expressions that reference the joined collection */
+  orderBy?: OrderBy
 }
 ```
 
-**Key limitation:** No fields for join information, cross-collection filters, or cross-collection ordering.
-
-### How Filters Are Currently Partitioned
-
-The optimizer (`packages/db/src/query/optimizer.ts`) already partitions WHERE clauses:
-
-```typescript
-interface GroupedWhereClauses {
-  singleSource: Map<string, BasicExpression<boolean>>  // Per-collection filters
-  multiSource?: BasicExpression<boolean>               // Cross-collection filters (e.g., joins)
-}
-```
-
-- **Single-source clauses** (e.g., `eq(task.status, 'active')`) → passed to that collection's subscription
-- **Multi-source clauses** (e.g., `eq(task.account_id, account.id)`) → applied in the D2 pipeline after join
-
-The problem: When `tasksCollection` calls `loadSubset`, it has no knowledge of:
-1. The join with `accountsCollection`
-2. Filters that apply to `accountsCollection` (e.g., `eq(account.name, 'example')`)
-3. That results will be filtered after the join
-
-### Code Flow
-
-```
-CollectionSubscriber.subscribe()
-  ↓
-getWhereClauseForAlias() → only returns single-source filters for THIS alias
-  ↓
-subscribeToOrderedChanges()
-  ↓
-requestLimitedSnapshot({ limit: 10, where: <task filters only> })
-  ↓
-loadSubset({ limit: 10, where: <task filters only> })  // No join info!
-  ↓
-queryFn receives: { limit: 10, where: <task filters only> }
-```
-
-**Key files:**
-- `packages/db/src/collection/subscription.ts:587-595` - constructs LoadSubsetOptions
-- `packages/db/src/query/live/collection-subscriber.ts:380-387` - getWhereClauseForAlias
-- `packages/db/src/query/optimizer.ts:228-258` - extractSourceWhereClauses
-
-## Proposed Solution
-
-### Extend `LoadSubsetOptions` with Join Information
+### Extended `LoadSubsetOptions`
 
 ```typescript
 export type LoadSubsetOptions = {
-  // Existing fields
   where?: BasicExpression<boolean>
   orderBy?: OrderBy
   limit?: number
   cursor?: CursorExpressions
   offset?: number
   subscription?: Subscription
-
   // NEW: Join information for server-side query construction
   joins?: Array<JoinInfo>
 }
-
-export type JoinInfo = {
-  /** The collection being joined */
-  collectionId: string
-
-  /** Join type */
-  type: 'inner' | 'left' | 'right' | 'full' | 'cross'
-
-  /** Join key from this collection (e.g., task.account_id) */
-  localKey: BasicExpression
-
-  /** Join key from joined collection (e.g., account.id) */
-  foreignKey: BasicExpression
-
-  /** Filters that apply to the joined collection */
-  where?: BasicExpression<boolean>
-
-  /** OrderBy expressions from the joined collection (if ordering by joined fields) */
-  orderBy?: OrderBy
-}
 ```
 
-### Implementation Changes Required
+## Implementation Details
 
-#### 1. Extract Join Info During Query Compilation
+### 1. Join Info Extraction (`packages/db/src/query/optimizer.ts`)
 
-In `packages/db/src/query/compiler/index.ts`, when processing joins:
+Added `extractJoinInfo()` function that:
+- Analyzes query IR to extract join clause information
+- Associates filters from `sourceWhereClauses` with their respective joins
+- Associates orderBy expressions with their respective joins
+- Returns a map of main source alias → Array<JoinInfo>
 
-```typescript
-// After processJoins(), collect join info for each collection
-const joinInfoByCollection = new Map<string, JoinInfo[]>()
+### 2. Compilation Pipeline (`packages/db/src/query/compiler/index.ts`)
 
-for (const joinClause of query.join) {
-  const mainCollectionId = getCollectionId(query.from)
-  const joinedCollectionId = getCollectionId(joinClause.from)
+- `CompilationResult` now includes `joinInfoBySource`
+- `compileQuery()` passes through join info from optimizer
 
-  // Get filters that apply to the joined collection
-  const joinedFilters = sourceWhereClauses.get(joinedAlias)
+### 3. Live Query Builder (`packages/db/src/query/live/collection-config-builder.ts`)
 
-  const joinInfo: JoinInfo = {
-    collectionId: joinedCollectionId,
-    type: joinClause.type,
-    localKey: joinClause.left,   // e.g., task.account_id
-    foreignKey: joinClause.right, // e.g., account.id
-    where: joinedFilters,
-  }
+- Added `joinInfoBySourceCache` to store join info
+- Populated during compilation
 
-  // Store for the main collection
-  if (!joinInfoByCollection.has(mainCollectionId)) {
-    joinInfoByCollection.set(mainCollectionId, [])
-  }
-  joinInfoByCollection.get(mainCollectionId)!.push(joinInfo)
-}
-```
+### 4. Collection Subscriber (`packages/db/src/query/live/collection-subscriber.ts`)
 
-#### 2. Pass Join Info to CollectionSubscriber
+- Added `getJoinInfoForAlias()` method
+- Passes join info when creating subscriptions
 
-In `packages/db/src/query/live/collection-config-builder.ts`:
+### 5. Collection Subscription (`packages/db/src/collection/subscription.ts`)
 
-```typescript
-// Store join info alongside sourceWhereClauses
-this.joinInfoCache = compilation.joinInfoByCollection
-```
+- `CollectionSubscriptionOptions` now accepts `joinInfo`
+- `requestLimitedSnapshot()` includes `joins` in `LoadSubsetOptions`
 
-#### 3. Include Join Info in loadSubset Call
+### 6. Serialization (`packages/query-db-collection/src/serialization.ts`)
 
-In `packages/db/src/collection/subscription.ts:587-595`:
+- `serializeLoadSubsetOptions()` now serializes join info for query key generation
 
-```typescript
-const loadOptions: LoadSubsetOptions = {
-  where,
-  limit,
-  orderBy,
-  cursor: cursorExpressions,
-  offset: offset ?? currentOffset,
-  subscription: this,
-  // NEW: Include join info if available
-  joins: this.joinInfo,
-}
-```
+## Usage in queryFn
 
-#### 4. Update queryCollection to Use Join Info
-
-In `packages/query-db-collection/src/query.ts`, the `queryFn` would receive join info via `context.meta.loadSubsetOptions.joins` and can construct a proper server-side query:
+Now `queryFn` can access join information:
 
 ```typescript
 queryFn: async (context) => {
   const opts = context.meta.loadSubsetOptions
 
   if (opts.joins?.length) {
-    // Construct a query that joins server-side
-    // e.g., for Drizzle:
-    // db.select().from(tasks)
-    //   .innerJoin(accounts, eq(tasks.accountId, accounts.id))
-    //   .where(and(taskFilters, accountFilters))
-    //   .orderBy(...)
-    //   .limit(opts.limit)
-  } else {
-    // Simple query without joins
+    // Construct a query with server-side joins
+    // Example with Drizzle:
+    let query = db.select().from(tasks)
+
+    for (const join of opts.joins) {
+      // Add join based on join.type, join.localKey, join.foreignKey
+      query = query.innerJoin(
+        accounts,
+        eq(tasks.accountId, accounts.id)
+      )
+
+      // Apply joined collection's filter
+      if (join.where) {
+        query = query.where(/* translate join.where to Drizzle */)
+      }
+    }
+
+    // Apply main collection's filter
+    if (opts.where) {
+      query = query.where(/* translate opts.where to Drizzle */)
+    }
+
+    return query.limit(opts.limit).offset(opts.offset)
   }
+
+  // Simple query without joins (existing behavior)
+  return db.select().from(tasks)
+    .where(/* opts.where */)
+    .limit(opts.limit)
 }
 ```
 
-## Alternative Approaches
+## Files Changed
 
-### 1. Deoptimize Joins with Pagination
+- `packages/db/src/types.ts` - Added `JoinInfo` type, extended `LoadSubsetOptions` and `SubscribeChangesOptions`
+- `packages/db/src/query/optimizer.ts` - Added `extractJoinInfo()`, updated `OptimizationResult`
+- `packages/db/src/query/compiler/index.ts` - Added `joinInfoBySource` to `CompilationResult`
+- `packages/db/src/query/live/collection-config-builder.ts` - Added `joinInfoBySourceCache`
+- `packages/db/src/query/live/collection-subscriber.ts` - Added `getJoinInfoForAlias()`
+- `packages/db/src/collection/subscription.ts` - Pass join info in `loadSubset` calls
+- `packages/query-db-collection/src/serialization.ts` - Serialize joins in query keys
+- `packages/db/tests/query/optimizer.test.ts` - Added tests for join info extraction
 
-When the main collection has `limit/offset` AND there are joins with filters, load the entire lazy collection state instead of using lazy loading. This ensures all data is available client-side before filtering.
+## Test Coverage
 
-**Pros:** Simpler implementation, no changes to LoadSubsetOptions
-**Cons:** Poor performance for large collections, defeats purpose of on-demand mode
-
-### 2. Iterative Loading
-
-When the result set is smaller than `limit` after join filtering, automatically request more data.
-
-**Pros:** Works with existing API
-**Cons:** Multiple round trips, poor UX (results "growing"), hard to implement correctly
-
-### 3. Estimated Overfetch
-
-Pass an overfetch factor based on estimated join selectivity.
-
-**Pros:** Simple
-**Cons:** Unreliable, wastes bandwidth, still may not return enough results
-
-## Recommendation
-
-Implement **Option 1: Extend LoadSubsetOptions with Join Information**
-
-This is the most robust solution because:
-
-1. **Server-side efficiency** - The server can perform the join and filter before pagination, returning exactly `limit` matching results
-2. **Works with existing backends** - SQL databases, ORMs like Drizzle/Prisma, and GraphQL all support server-side joins
-3. **Preserves on-demand semantics** - Only loads data that's actually needed
-4. **Future-proof** - Can be extended for more complex scenarios (nested joins, aggregates)
-
-## Implementation Effort
-
-- **Types:** Add `JoinInfo` type and extend `LoadSubsetOptions` (~20 lines)
-- **Compiler:** Extract join info during compilation (~50 lines)
-- **Subscription:** Pass join info to loadSubset (~30 lines)
-- **queryCollection:** Document how to use join info in queryFn (docs)
-- **Tests:** Add tests for join info extraction and passing (~100 lines)
-
-Estimated: ~200 lines of core implementation + tests + documentation
-
-## Questions for Discussion
-
-1. Should `JoinInfo.where` include only single-source filters for the joined collection, or all filters that touch it?
-
-2. How should multi-level joins be represented? (e.g., tasks → accounts → organizations)
-
-3. Should there be a way to opt-out of join info passing for simple use cases?
-
-4. How should this interact with subqueries? (e.g., `.from({ user: subquery })`)
+Added tests in `packages/db/tests/query/optimizer.test.ts`:
+- Empty map for queries without joins
+- Basic inner join extraction
+- WHERE clause inclusion for joined collections
+- OrderBy inclusion for joined collections
+- Multiple joins handling
+- Swapped key expression handling

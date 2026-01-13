@@ -282,6 +282,48 @@ export type CursorExpressions = {
   lastKey?: string | number
 }
 
+/**
+ * Information about a join that should be performed server-side.
+ * This allows the sync layer to construct queries that join and filter
+ * before pagination, ensuring consistent page sizes.
+ */
+export type JoinInfo = {
+  /** The ID of the collection being joined */
+  collectionId: string
+
+  /** The alias used for the joined collection in the query */
+  alias: string
+
+  /** The type of join to perform */
+  type: `inner` | `left` | `right` | `full` | `cross`
+
+  /**
+   * The join key expression from the main collection.
+   * For example, in `eq(task.account_id, account.id)`, this would be `task.account_id`.
+   */
+  localKey: BasicExpression
+
+  /**
+   * The join key expression from the joined collection.
+   * For example, in `eq(task.account_id, account.id)`, this would be `account.id`.
+   */
+  foreignKey: BasicExpression
+
+  /**
+   * Filters that apply to the joined collection.
+   * These should be applied as part of the join condition or WHERE clause
+   * on the server side.
+   */
+  where?: BasicExpression<boolean>
+
+  /**
+   * OrderBy expressions that reference the joined collection.
+   * If the query orders by a field from the joined collection,
+   * this information is needed for the server-side query.
+   */
+  orderBy?: OrderBy
+}
+
 export type LoadSubsetOptions = {
   /** The where expression to filter the data (does NOT include cursor expressions) */
   where?: BasicExpression<boolean>
@@ -309,6 +351,16 @@ export type LoadSubsetOptions = {
    * @optional Available when called from CollectionSubscription, may be undefined for direct calls
    */
   subscription?: Subscription
+  /**
+   * Information about joins that should be performed server-side.
+   * When present, the sync layer can construct queries that join and filter
+   * before applying pagination, ensuring consistent page sizes.
+   *
+   * This is particularly important for on-demand mode where pagination
+   * would otherwise be applied before join filters, leading to
+   * inconsistent result counts.
+   */
+  joins?: Array<JoinInfo>
 }
 
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
@@ -804,6 +856,13 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   onStatusChange?: (event: SubscriptionStatusChangeEvent) => void
+  /**
+   * Join information for server-side query construction.
+   * When present, this is included in loadSubset calls so the sync layer
+   * can perform joins before pagination.
+   * @internal
+   */
+  joinInfo?: Array<JoinInfo>
 }
 
 export interface SubscribeChangesSnapshotOptions<

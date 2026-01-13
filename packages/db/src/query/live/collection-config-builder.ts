@@ -19,6 +19,7 @@ import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
 import type {
   CollectionConfigSingleRowOption,
+  JoinInfo,
   KeyedStream,
   ResultStream,
   StringCollationConfig,
@@ -134,6 +135,11 @@ export class CollectionConfigBuilder<
   private pipelineCache: ResultStream | undefined
   public sourceWhereClausesCache:
     | Map<string, BasicExpression<boolean>>
+    | undefined
+
+  // Map of source aliases to their join info for server-side query construction
+  public joinInfoBySourceCache:
+    | Map<string, Array<JoinInfo>>
     | undefined
 
   // Map of source alias to subscription
@@ -617,6 +623,7 @@ export class CollectionConfigBuilder<
       this.inputsCache = undefined
       this.pipelineCache = undefined
       this.sourceWhereClausesCache = undefined
+      this.joinInfoBySourceCache = undefined
 
       // Reset lazy source alias state
       this.lazySources.clear()
@@ -664,6 +671,7 @@ export class CollectionConfigBuilder<
 
     this.pipelineCache = compilation.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
+    this.joinInfoBySourceCache = compilation.joinInfoBySource
     this.compiledAliasToCollectionId = compilation.aliasToCollectionId
 
     // Defensive check: verify all compiled aliases have corresponding inputs
