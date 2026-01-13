@@ -70,7 +70,7 @@ import type {
  *       <div>Loading...</div>
  *     </Match>
  *     <Match when={todosQuery.isError}>
- *       <div>Error: {todosQuery.status()}</div>
+ *       <div>Error: {todosQuery.status}</div>
  *     </Match>
  *     <Match when={todosQuery.isReady}>
  *       <For each={todosQuery()}>
@@ -326,7 +326,12 @@ export function useLiveQuery(
         return []
       }
       setStatus(currentCollection.status)
-      await currentCollection.toArrayWhenReady()
+      try {
+        await currentCollection.toArrayWhenReady()
+      } catch (error) {
+        setStatus(`error`)
+        throw error
+      }
       // Initialize state with current collection data
       batch(() => {
         state.clear()
@@ -354,7 +359,6 @@ export function useLiveQuery(
       return
     }
     const subscription = currentCollection.subscribeChanges(
-      // Changes is fine grained, so does not work great with an array
       (changes: Array<ChangeMessage<any>>) => {
         // Apply each change individually to the reactive state
         batch(() => {
@@ -377,6 +381,7 @@ export function useLiveQuery(
         })
       },
       {
+        // Include initial state to ensure immediate population for pre-created collections
         includeInitialState: true,
       },
     )

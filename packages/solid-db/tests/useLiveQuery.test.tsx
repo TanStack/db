@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderHook, waitFor } from '@solidjs/testing-library'
+import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
   Query,
   count,
@@ -9,7 +9,13 @@ import {
   eq,
   gt,
 } from '@tanstack/db'
-import { createComputed, createRoot, createSignal } from 'solid-js'
+import {
+  For,
+  Suspense,
+  createComputed,
+  createRoot,
+  createSignal,
+} from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { Accessor } from 'solid-js'
@@ -1856,6 +1862,101 @@ describe(`Query Collections`, () => {
 
         dispose()
       })
+    })
+  })
+
+  describe(`Suspense Integration`, () => {
+    it(`should work with Suspense boundaries`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-suspense`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      function TestComponent() {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        )
+
+        return (
+          <ul data-testid="list">
+            <For each={query()}>
+              {(person) => <li data-testid={`person-${person.id}`}>{person.name}</li>}
+            </For>
+          </ul>
+        )
+      }
+
+      const { findByTestId } = render(() => (
+        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+          <TestComponent />
+        </Suspense>
+      ))
+
+      // Should eventually show the list with data
+      await waitFor(async () => {
+        const list = await findByTestId(`list`)
+        expect(list).toBeTruthy()
+      })
+
+      // Verify data is rendered
+      const person1 = await findByTestId(`person-1`)
+      expect(person1.textContent).toBe(`John Doe`)
+
+      const person2 = await findByTestId(`person-2`)
+      expect(person2.textContent).toBe(`Jane Doe`)
+
+      const person3 = await findByTestId(`person-3`)
+      expect(person3.textContent).toBe(`John Smith`)
+    })
+
+    it(`should show fallback during loading and data after ready`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-suspense-fallback`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      function TestComponent() {
+        const query = useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        )
+
+        return (
+          <div data-testid="content">
+            <span data-testid="count">{query().length}</span>
+          </div>
+        )
+      }
+
+      const { findByTestId } = render(() => (
+        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+          <TestComponent />
+        </Suspense>
+      ))
+
+      // Should eventually resolve and show data
+      await waitFor(async () => {
+        const content = await findByTestId(`content`)
+        expect(content).toBeTruthy()
+      })
+
+      const count = await findByTestId(`count`)
+      expect(count.textContent).toBe(`3`)
     })
   })
 })
