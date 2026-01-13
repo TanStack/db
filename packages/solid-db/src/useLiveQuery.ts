@@ -28,7 +28,7 @@ import type {
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
- * @returns Accessor that returns data with Suspense support, with state and status infomation as properties
+ * @returns Accessor that returns data with Suspense support, with state and status information as properties
  * @example
  * // Basic query with object syntax
  * const todosQuery = useLiveQuery((q) =>
@@ -119,25 +119,25 @@ export function useLiveQuery<TContext extends Context>(
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
 ): Accessor<Array<GetResult<TContext>>> & {
-  state: ReactiveMap<string | number, GetResult<TContext>>
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
   data: Array<GetResult<TContext>>
-  collection: Accessor<Collection<
-    GetResult<TContext>,
-    string | number,
-    {}
-  > | null>
-  status: Accessor<CollectionStatus | `disabled`>
-  isLoading: Accessor<boolean>
-  isReady: Accessor<boolean>
-  isIdle: Accessor<boolean>
-  isError: Accessor<boolean>
-  isCleanedUp: Accessor<boolean>
+  state: ReactiveMap<string | number, GetResult<TContext>>
+  collection: Collection<GetResult<TContext>, string | number, {}> | null
+  status: CollectionStatus | `disabled`
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @returns Accessor that returns data with Suspense support, with state and status infomation as properties
+ * @returns Accessor that returns data with Suspense support, with state and status information as properties
  * @example
  * // Basic config object usage
  * const todosQuery = useLiveQuery(() => ({
@@ -196,7 +196,7 @@ export function useLiveQuery<TContext extends Context>(
 /**
  * Subscribe to an existing live query collection
  * @param liveQueryCollection - Pre-created live query collection to subscribe to
- * @returns Accessor that returns data with Suspense support, with state and status infomation as properties
+ * @returns Accessor that returns data with Suspense support, with state and status information as properties
  * @example
  * // Using pre-created live query collection
  * const myLiveQuery = createLiveQueryCollection((q) =>
