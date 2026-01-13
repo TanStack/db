@@ -1,5 +1,12 @@
 # @tanstack/offline-transactions
 
+## 1.0.10
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
 ## 1.0.9
 
 ### Patch Changes
