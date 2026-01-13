@@ -211,7 +211,7 @@ export function avg<T>(
   }
 }
 
-type CanMinMax = number | Date | bigint
+type CanMinMax = number | Date | bigint | string
 
 /**
  * Creates a min aggregate function that computes the minimum value in a group
