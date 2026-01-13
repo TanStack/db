@@ -37,9 +37,16 @@ export class TransactionSerializer {
     // using the { __type: 'Date' } marker system
     const parsed: SerializedOfflineTransaction = JSON.parse(data)
 
+    const createdAt = new Date(parsed.createdAt)
+    if (isNaN(createdAt.getTime())) {
+      throw new Error(
+        `Failed to deserialize transaction: invalid createdAt value "${parsed.createdAt}"`,
+      )
+    }
+
     return {
       ...parsed,
-      createdAt: new Date(parsed.createdAt),
+      createdAt,
       mutations: parsed.mutations.map((mutationData) =>
         this.deserializeMutation(mutationData),
       ),
@@ -117,7 +124,16 @@ export class TransactionSerializer {
     }
 
     if (typeof value === `object` && value.__type === `Date`) {
-      return new Date(value.value)
+      if (value.value === undefined || value.value === null) {
+        throw new Error(`Corrupted Date marker: missing value field`)
+      }
+      const date = new Date(value.value)
+      if (isNaN(date.getTime())) {
+        throw new Error(
+          `Failed to deserialize Date marker: invalid date value "${value.value}"`,
+        )
+      }
+      return date
     }
 
     if (typeof value === `object`) {
