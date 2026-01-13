@@ -24,13 +24,12 @@ export class TransactionSerializer {
   serialize(transaction: OfflineTransaction): string {
     const serialized: SerializedOfflineTransaction = {
       ...transaction,
-      createdAt: transaction.createdAt,
       mutations: transaction.mutations.map((mutation) =>
         this.serializeMutation(mutation),
       ),
     }
     // Convert the whole object to JSON, handling dates
-    return JSON.stringify(serialized, (key, value) => {
+    return JSON.stringify(serialized, (_key, value) => {
       if (value instanceof Date) {
         return value.toISOString()
       }
