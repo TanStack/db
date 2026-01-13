@@ -92,9 +92,8 @@ export class TransactionSerializer {
       type: data.type as any,
       modified: this.deserializeValue(data.modified),
       original: this.deserializeValue(data.original),
-      changes: data.changes !== undefined
-        ? this.deserializeValue(data.changes)
-        : {},
+      changes:
+        data.changes !== undefined ? this.deserializeValue(data.changes) : {},
       collection,
       // These fields would need to be reconstructed by the executor
       mutationId: ``, // Will be regenerated
