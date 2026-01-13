@@ -7,11 +7,11 @@ import type {
 import type { Collection, PendingMutation } from '@tanstack/db'
 
 export class TransactionSerializer {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   private collections: Record<string, Collection<any, any, any, any, any>>
   private collectionIdToKey: Map<string, string>
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   constructor(
     collections: Record<string, Collection<any, any, any, any, any>>,
   ) {
@@ -41,22 +41,14 @@ export class TransactionSerializer {
   }
 
   deserialize(data: string): OfflineTransaction {
-    const parsed: SerializedOfflineTransaction = JSON.parse(
-      data,
-      (key, value) => {
-        // Parse ISO date strings back to Date objects
-        if (
-          typeof value === `string` &&
-          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)
-        ) {
-          return new Date(value)
-        }
-        return value
-      },
-    )
+    // Parse without a reviver - let deserializeValue handle dates in mutation data
+    // using the { __type: 'Date' } marker system
+    const parsed: SerializedOfflineTransaction = JSON.parse(data)
 
     return {
       ...parsed,
+      // Only convert the top-level createdAt field back to a Date
+      createdAt: new Date(parsed.createdAt as unknown as string),
       mutations: parsed.mutations.map((mutationData) =>
         this.deserializeMutation(mutationData),
       ),
