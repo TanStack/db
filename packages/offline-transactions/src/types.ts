@@ -60,7 +60,7 @@ export interface SerializedOfflineTransaction {
   mutations: Array<SerializedMutation>
   keys: Array<string>
   idempotencyKey: string
-  createdAt: Date
+  createdAt: string
   retryCount: number
   nextAttemptAt: number
   lastError?: SerializedError
@@ -88,7 +88,7 @@ export interface StorageDiagnostic {
 }
 
 export interface OfflineConfig {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   collections: Record<string, Collection<any, any, any, any, any>>
   mutationFns: Record<string, OfflineMutationFn>
   storage?: StorageAdapter
