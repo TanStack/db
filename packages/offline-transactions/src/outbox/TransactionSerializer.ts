@@ -7,11 +7,9 @@ import type {
 import type { Collection, PendingMutation } from '@tanstack/db'
 
 export class TransactionSerializer {
-   
   private collections: Record<string, Collection<any, any, any, any, any>>
   private collectionIdToKey: Map<string, string>
 
-   
   constructor(
     collections: Record<string, Collection<any, any, any, any, any>>,
   ) {

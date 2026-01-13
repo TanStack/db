@@ -89,7 +89,6 @@ export interface StorageDiagnostic {
 }
 
 export interface OfflineConfig {
-   
   collections: Record<string, Collection<any, any, any, any, any>>
   mutationFns: Record<string, OfflineMutationFn>
   storage?: StorageAdapter
