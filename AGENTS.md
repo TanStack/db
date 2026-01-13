@@ -348,24 +348,46 @@ const dependentBuilders = [] // Accurately describes dependents
 
 ## Testing Requirements
 
-### Always Add Tests for Bugs
+### Test-First Approach for Bug Fixes
 
-**Key Principle:** If you're fixing a bug, add a unit test that reproduces the bug before fixing it. This ensures:
+**Critical Principle:** When fixing a bug, you MUST write a reproduction test FIRST, before implementing any fix. This is mandatory, not optional.
 
-- The bug is actually fixed
+**Workflow:**
+
+1. **Write a failing test** that reproduces the bug
+2. **Verify the test fails** with the current code
+3. **Implement the fix**
+4. **Verify the test passes** with the fix
+
+This ensures:
+
+- The bug is actually fixed (the test proves it)
 - The bug doesn't regress in the future
 - The fix is validated
+- We understand the root cause before implementing a solution
 
 **Example:**
 
 ```typescript
 // Found a bug with fetchSnapshot resolving after up-to-date message
-// Should add a test:
+// FIRST: Write a test that fails without the fix
 test('ignores snapshot that resolves after up-to-date message', async () => {
-  // Reproduce the corner case
-  // Verify it's handled correctly
+  // Setup: Create conditions that trigger the bug
+  // Action: Trigger the problematic sequence
+  // Assert: Verify correct behavior
 })
+
+// THEN: Run the test - it should FAIL
+// THEN: Implement the fix
+// THEN: Run the test again - it should PASS
 ```
+
+**Why Test-First?**
+
+- It forces you to understand the bug before fixing it
+- It prevents "fixes" that don't actually address the root cause
+- It provides documentation of what the bug was
+- It ensures the fix is correct and complete
 
 ### Test Corner Cases
 

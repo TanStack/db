@@ -1130,4 +1130,154 @@ describe(`Collection truncate operations`, () => {
 
     subscription.unsubscribe()
   })
+
+  describe(`409 must-refetch cycle detection`, () => {
+    // These tests reproduce the app freezing bugs reported by:
+    // - Melvin Hagberg: Desktop Electron app freezing with infinite useLiveQuery re-renders
+    // - makisuo: awaitTxId blocking forever with 409 errors and frozen browser
+    //
+    // Root cause: 409 must-refetch → truncate() → handleTruncate() → loadSubset()
+    // If loadSubset triggers another 409, it creates an infinite loop that blocks the main thread
+
+    it(`should detect and break rapid 409 must-refetch cycles to prevent app freezing`, async () => {
+      // This reproduces the infinite loop scenario where rapid truncates cause app freeze
+      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+      let syncOps:
+        | Parameters<
+            SyncConfig<{ id: number; value: string }, number>[`sync`]
+          >[0]
+        | undefined
+      let loadSubsetCallCount = 0
+
+      const collection = createCollection<{ id: number; value: string }, number>(
+        {
+          id: `cycle-detection-test`,
+          getKey: (item) => item.id,
+          startSync: true,
+          syncMode: `on-demand`,
+          sync: {
+            sync: (cfg) => {
+              syncOps = cfg
+              cfg.markReady()
+
+              return {
+                loadSubset: () => {
+                  loadSubsetCallCount++
+                  // Simulate async loadSubset
+                  return Promise.resolve()
+                },
+              }
+            },
+          },
+        },
+      )
+
+      await collection.stateWhenReady()
+
+      // Subscribe to trigger loadSubset tracking
+      const subscription = collection.subscribeChanges(() => {}, {
+        includeInitialState: true,
+      })
+
+      // Wait for initial loadSubset
+      await vi.waitFor(() => expect(loadSubsetCallCount).toBe(1))
+      loadSubsetCallCount = 0
+
+      // Simulate rapid 409 must-refetch cycles (more than the threshold of 5)
+      for (let i = 0; i < 10; i++) {
+        syncOps!.begin()
+        syncOps!.truncate()
+        syncOps!.commit()
+        // Don't advance time - simulate rapid back-to-back truncates
+      }
+
+      // Wait for any pending microtasks
+      await vi.advanceTimersByTimeAsync(10)
+
+      // Verify cycle was detected and warning was logged
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`Detected rapid 409 must-refetch cycle`),
+      )
+
+      // Verify that loadSubset calls were limited (cycle was broken)
+      // Without the fix, this would be 10 (one per truncate)
+      // With the fix, it should stop after MAX_TRUNCATES_PER_WINDOW (5)
+      expect(loadSubsetCallCount).toBeLessThanOrEqual(5)
+
+      warnSpy.mockRestore()
+      subscription.unsubscribe()
+    })
+
+    it(`should reset truncate cycle counter after window expires`, async () => {
+      const warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+
+      let syncOps:
+        | Parameters<
+            SyncConfig<{ id: number; value: string }, number>[`sync`]
+          >[0]
+        | undefined
+      let truncateEventCount = 0
+
+      const collection = createCollection<{ id: number; value: string }, number>(
+        {
+          id: `cycle-reset-test`,
+          getKey: (item) => item.id,
+          startSync: true,
+          sync: {
+            sync: (cfg) => {
+              syncOps = cfg
+              cfg.begin()
+              cfg.write({ type: `insert`, value: { id: 1, value: `initial` } })
+              cfg.commit()
+              cfg.markReady()
+            },
+          },
+        },
+      )
+
+      await collection.stateWhenReady()
+
+      // Track truncate events directly
+      collection.on(`truncate`, () => {
+        truncateEventCount++
+      })
+
+      // Do 3 truncates (below threshold of 5) - these happen synchronously
+      for (let i = 0; i < 3; i++) {
+        syncOps!.begin()
+        syncOps!.truncate()
+        syncOps!.commit()
+      }
+
+      await vi.advanceTimersByTimeAsync(10)
+
+      // Should not have triggered warning yet (3 < 5 threshold)
+      expect(warnSpy).not.toHaveBeenCalled()
+      expect(truncateEventCount).toBe(3)
+
+      // Wait for the cycle window to expire (2000ms + buffer)
+      await vi.advanceTimersByTimeAsync(2500)
+
+      // Reset counter
+      truncateEventCount = 0
+
+      // Do 3 more truncates - counter should have reset since window expired
+      for (let i = 0; i < 3; i++) {
+        syncOps!.begin()
+        syncOps!.truncate()
+        syncOps!.commit()
+      }
+
+      await vi.advanceTimersByTimeAsync(10)
+
+      // Should still not have triggered warning (counter reset after window)
+      expect(warnSpy).not.toHaveBeenCalled()
+
+      // All truncate events should have been processed
+      expect(truncateEventCount).toBe(3)
+
+      warnSpy.mockRestore()
+    })
+  })
 })
