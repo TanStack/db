@@ -1960,11 +1960,11 @@ describe(`Query Optimizer`, () => {
         orderBy: [
           {
             expression: createPropRef(`account`, `name`),
-            compareOptions: { direction: `asc` },
+            compareOptions: { direction: `asc`, nulls: `last` },
           },
           {
             expression: createPropRef(`task`, `created_at`),
-            compareOptions: { direction: `desc` },
+            compareOptions: { direction: `desc`, nulls: `last` },
           },
         ],
       }
