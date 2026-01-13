@@ -7,11 +7,13 @@
 When using `queryCollection` in on-demand mode with joins and pagination, the pagination was applied **before** join filters were evaluated, leading to inconsistent page sizes or empty results.
 
 **User's scenario:**
+
 - `tasksCollection` (queryCollection, on-demand) with `limit: 10`
 - Joined with `accountsCollection`
 - Filter on `account.name = 'example'`
 
 **What was happening:**
+
 1. `tasksCollection.queryFn` received `{ limit: 10, where: <task filters only> }`
 2. Backend returned 10 tasks
 3. Client-side join with `accountsCollection`
@@ -64,6 +66,7 @@ export type LoadSubsetOptions = {
 ### 1. Join Info Extraction (`packages/db/src/query/optimizer.ts`)
 
 Added `extractJoinInfo()` function that:
+
 - Analyzes query IR to extract join clause information
 - Associates filters from `sourceWhereClauses` with their respective joins
 - Associates orderBy expressions with their respective joins
@@ -108,10 +111,7 @@ queryFn: async (context) => {
 
     for (const join of opts.joins) {
       // Add join based on join.type, join.localKey, join.foreignKey
-      query = query.innerJoin(
-        accounts,
-        eq(tasks.accountId, accounts.id)
-      )
+      query = query.innerJoin(accounts, eq(tasks.accountId, accounts.id))
 
       // Apply joined collection's filter
       if (join.where) {
@@ -128,9 +128,7 @@ queryFn: async (context) => {
   }
 
   // Simple query without joins (existing behavior)
-  return db.select().from(tasks)
-    .where(/* opts.where */)
-    .limit(opts.limit)
+  return db.select().from(tasks).where(/* opts.where */).limit(opts.limit)
 }
 ```
 
@@ -148,6 +146,7 @@ queryFn: async (context) => {
 ## Test Coverage
 
 Added tests in `packages/db/tests/query/optimizer.test.ts`:
+
 - Empty map for queries without joins
 - Basic inner join extraction
 - WHERE clause inclusion for joined collections

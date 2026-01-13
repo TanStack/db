@@ -138,9 +138,7 @@ export class CollectionConfigBuilder<
     | undefined
 
   // Map of source aliases to their join info for server-side query construction
-  public joinInfoBySourceCache:
-    | Map<string, Array<JoinInfo>>
-    | undefined
+  public joinInfoBySourceCache: Map<string, Array<JoinInfo>> | undefined
 
   // Map of source alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}

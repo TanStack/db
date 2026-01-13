@@ -114,8 +114,11 @@ export function compileQuery(
   validateQueryStructure(rawQuery)
 
   // Optimize the query before compilation
-  const { optimizedQuery: query, sourceWhereClauses, joinInfoBySource } =
-    optimizeQuery(rawQuery)
+  const {
+    optimizedQuery: query,
+    sourceWhereClauses,
+    joinInfoBySource,
+  } = optimizeQuery(rawQuery)
 
   // Create mapping from optimized query to original for caching
   queryMapping.set(query, rawQuery)
