@@ -156,14 +156,20 @@ export class CollectionSubscription
   private handleTruncate() {
     // Cycle detection: track rapid truncates to detect 409 must-refetch loops
     const now = Date.now()
-    if (now - this.lastTruncateTime < CollectionSubscription.TRUNCATE_CYCLE_WINDOW_MS) {
+    if (
+      now - this.lastTruncateTime <
+      CollectionSubscription.TRUNCATE_CYCLE_WINDOW_MS
+    ) {
       this.truncateCycleCount++
-      if (this.truncateCycleCount > CollectionSubscription.MAX_TRUNCATES_PER_WINDOW) {
+      if (
+        this.truncateCycleCount >
+        CollectionSubscription.MAX_TRUNCATES_PER_WINDOW
+      ) {
         // Detected rapid 409 cycle - break it to prevent app freeze
         console.warn(
           `[TanStack DB] Detected rapid 409 must-refetch cycle (${this.truncateCycleCount} truncates in ${CollectionSubscription.TRUNCATE_CYCLE_WINDOW_MS}ms). ` +
-          `Breaking cycle to prevent app freeze. This may indicate a subquery that continuously triggers 409 responses. ` +
-          `Consider reviewing your subquery configuration or disabling tagged_subqueries.`
+            `Breaking cycle to prevent app freeze. This may indicate a subquery that continuously triggers 409 responses. ` +
+            `Consider reviewing your subquery configuration or disabling tagged_subqueries.`,
         )
         // Reset state but don't re-request subsets to break the cycle
         this.snapshotSent = false

@@ -12,12 +12,14 @@ Two similar bug reports describe app/browser freezing related to TanStack DB wit
 ## Bug Report 1: Melvin Hagberg - Desktop Electron App Freezing
 
 ### Symptoms
+
 - Infinite loop with `useLiveQuery` causing spamming re-renders
 - CPU above 100%, app freezing
 - Clearing ElectricSQL cache resolved the issue
 - Large data: 14k emails, 140k recipients, 20k calendar events, 84k participants
 
 ### Key Quote
+
 > "In the app, it seems like there is an infinite loop happening with the useLiveQuery where they are spammingly re-rendered, causing the app to freeze"
 
 ---
@@ -25,6 +27,7 @@ Two similar bug reports describe app/browser freezing related to TanStack DB wit
 ## Bug Report 2: makisuo - awaitTxId Blocking Forever
 
 ### Symptoms
+
 - `awaitTxId` never resolves
 - Collections throwing 409 errors
 - Browser window completely frozen/locked up
@@ -32,6 +35,7 @@ Two similar bug reports describe app/browser freezing related to TanStack DB wit
 - Mutation creates channel + channel member, causing updates to 4 different shapes
 
 ### Key Quote
+
 > "awaitTxId seems to block the entire thread making the browser window frozen. Must have something to do with tagged queries/subqueries since all of those mutations would cause a change in those subqueries."
 
 ---
@@ -56,11 +60,16 @@ Both bugs stem from the same fundamental issue:
    - Clears buffered messages
 
 2. **Collection emits truncate event** (`packages/db/src/collection/state.ts:534`):
+
    ```typescript
-   this._events.emit('truncate', { type: 'truncate', collection: this.collection })
+   this._events.emit('truncate', {
+     type: 'truncate',
+     collection: this.collection,
+   })
    ```
 
 3. **Subscription handles truncate** (`packages/db/src/collection/subscription.ts:146-219`):
+
    ```typescript
    private handleTruncate() {
      const subsetsToReload = [...this.loadedSubsets]
@@ -80,6 +89,7 @@ Both bugs stem from the same fundamental issue:
 ### Why This Causes Freezing
 
 Each cycle iteration:
+
 1. Fires `truncate` event
 2. Triggers `status:change` events
 3. Causes `useLiveQuery` to bump version and call `onStoreChange()` (`packages/react-db/src/useLiveQuery.ts:424`)
@@ -91,6 +101,7 @@ With thousands of items and rapid 409 cycles, the main thread becomes completely
 ### Why awaitTxId Appears to "Block"
 
 The `awaitTxId` function itself is async, but:
+
 1. When 409 occurs, the shape stream restarts from a different offset
 2. The original txid may never arrive on the new stream
 3. While waiting, the 409 cascade blocks the main thread
@@ -100,14 +111,14 @@ The `awaitTxId` function itself is async, but:
 
 ## Key Code Locations
 
-| File | Lines | Description |
-|------|-------|-------------|
-| `packages/electric-db-collection/src/electric.ts` | 1410-1437 | 409 must-refetch handling |
-| `packages/db/src/collection/subscription.ts` | 146-219 | `handleTruncate()` implementation |
-| `packages/db/src/collection/subscription.ts` | 185-211 | Subset re-request loop (no cycle guard) |
-| `packages/react-db/src/useLiveQuery.ts` | 422-431 | Change subscription triggers re-render |
-| `packages/db/src/collection/state.ts` | 424-808 | Synchronous commit processing |
-| `packages/db/src/query/live/collection-config-builder.ts` | 336-344 | Graph processing loop |
+| File                                                      | Lines     | Description                             |
+| --------------------------------------------------------- | --------- | --------------------------------------- |
+| `packages/electric-db-collection/src/electric.ts`         | 1410-1437 | 409 must-refetch handling               |
+| `packages/db/src/collection/subscription.ts`              | 146-219   | `handleTruncate()` implementation       |
+| `packages/db/src/collection/subscription.ts`              | 185-211   | Subset re-request loop (no cycle guard) |
+| `packages/react-db/src/useLiveQuery.ts`                   | 422-431   | Change subscription triggers re-render  |
+| `packages/db/src/collection/state.ts`                     | 424-808   | Synchronous commit processing           |
+| `packages/db/src/query/live/collection-config-builder.ts` | 336-344   | Graph processing loop                   |
 
 ---
 

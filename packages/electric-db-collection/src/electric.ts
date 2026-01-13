@@ -583,7 +583,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
         clearTimeout(pending.timeoutId)
         pending.unsubscribeTxids()
         pending.unsubscribeSnapshots()
-        pending.reject(new SyncInterruptedByRefetchError(pending.txId, config.id))
+        pending.reject(
+          new SyncInterruptedByRefetchError(pending.txId, config.id),
+        )
       })
       pendingAwaitTxIds.setState(() => new Map())
     }
