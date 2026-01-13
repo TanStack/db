@@ -348,6 +348,9 @@ export function useLiveQuery(
   createEffect(() => {
     const currentCollection = collection()
     if (!currentCollection) {
+      setStatus(`disabled` as const)
+      state.clear()
+      setData([])
       return
     }
     const subscription = currentCollection.subscribeChanges(
@@ -416,7 +419,7 @@ export function useLiveQuery(
     },
     isReady: {
       get() {
-        return status() === `ready`
+        return status() === `ready` || status() === `disabled`
       },
     },
     isIdle: {

@@ -286,7 +286,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons.name,
+            name: persons?.name,
           })),
       )
     })
@@ -651,7 +651,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons.name,
+            name: persons?.name,
           })),
       )
 
@@ -1225,7 +1225,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              name: persons.name,
+              name: persons?.name,
             })),
         )
       })
@@ -1623,7 +1623,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              userName: persons.name,
+              userName: persons?.name,
             })),
         )
       })
@@ -1782,10 +1782,10 @@ describe(`Query Collections`, () => {
         // When callback returns undefined, should return disabled state
         expect(rendered.result.state.size).toBe(0)
         expect(rendered.result.data).toEqual([])
-        expect(rendered.result.collection()).toBeNull()
-        expect(rendered.result.status()).toBe(`disabled`)
-        expect(rendered.result.isLoading()).toBe(false)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.collection).toBeNull()
+        expect(rendered.result.status).toBe(`disabled`)
+        expect(rendered.result.isLoading).toBe(false)
+        expect(rendered.result.isReady).toBe(true)
 
         // Enable the query
         setEnabled(true)
@@ -1795,14 +1795,14 @@ describe(`Query Collections`, () => {
           expect(rendered.result.state.size).toBe(1) // Only John Smith (age 35)
         })
         expect(rendered.result.data).toHaveLength(1)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.isReady).toBe(true)
 
         // Disable the query again
         setEnabled(false)
         await new Promise((resolve) => setTimeout(resolve, 10))
 
-        expect(rendered.result.status()).toBe(`disabled`)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.status).toBe(`disabled`)
+        expect(rendered.result.isReady).toBe(true)
 
         dispose()
       })
@@ -1839,10 +1839,10 @@ describe(`Query Collections`, () => {
         // When callback returns null, should return disabled state
         expect(rendered.result.state.size).toBe(0)
         expect(rendered.result.data).toEqual([])
-        expect(rendered.result.collection()).toBeNull()
-        expect(rendered.result.status()).toBe(`disabled`)
-        expect(rendered.result.isLoading()).toBe(false)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.collection).toBeNull()
+        expect(rendered.result.status).toBe(`disabled`)
+        expect(rendered.result.isLoading).toBe(false)
+        expect(rendered.result.isReady).toBe(true)
 
         // Enable the query
         setEnabled(true)
@@ -1852,7 +1852,7 @@ describe(`Query Collections`, () => {
           expect(rendered.result.state.size).toBe(1)
         })
         expect(rendered.result.data).toHaveLength(1)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.isReady).toBe(true)
 
         dispose()
       })
