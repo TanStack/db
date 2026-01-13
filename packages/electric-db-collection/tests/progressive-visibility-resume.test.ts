@@ -529,7 +529,9 @@ describe(`Progressive mode visibility resume bug (Issue #1122)`, () => {
     ])
 
     // Committed sync transactions are kept when there's a persisting transaction
-    expect(testCollection._state.pendingSyncedTransactions.length).toBeGreaterThanOrEqual(1)
+    expect(
+      testCollection._state.pendingSyncedTransactions.length,
+    ).toBeGreaterThanOrEqual(1)
 
     // Phase 4: More sync messages arrive (simulating visibility resume)
     // This should NOT throw SyncTransactionAlreadyCommittedError
@@ -720,7 +722,9 @@ describe(`Progressive mode visibility resume bug (Issue #1122)`, () => {
     // Actually, there should be no transactions at all after successful commit
     expect(testCollection._state.pendingSyncedTransactions.length).toBe(0)
     expect(
-      testCollection._state.pendingSyncedTransactions.every((t) => !t.committed),
+      testCollection._state.pendingSyncedTransactions.every(
+        (t) => !t.committed,
+      ),
     ).toBe(true)
 
     // Now simulate multiple visibility resumes

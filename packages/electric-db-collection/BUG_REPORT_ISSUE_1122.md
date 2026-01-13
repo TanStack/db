@@ -28,14 +28,14 @@ In the atomic swap path (progressive mode's initial sync completion), there was 
 
 ```typescript
 // Atomic swap starts
-begin()  // Creates transaction tx1, but transactionStarted is NOT set to true
+begin() // Creates transaction tx1, but transactionStarted is NOT set to true
 
 // Later, for buffered move-out messages:
 processMoveOutEvent(
   bufferedMsg.headers.patterns,
   begin,
   write,
-  transactionStarted,  // This is false!
+  transactionStarted, // This is false!
 )
 ```
 
@@ -48,7 +48,7 @@ In the normal commit path, `transactionStarted` was reset to `false` AFTER `comm
 ```typescript
 if (transactionStarted) {
   commit()
-  transactionStarted = false  // If commit() throws, this never executes!
+  transactionStarted = false // If commit() throws, this never executes!
 }
 ```
 
@@ -114,6 +114,7 @@ if (!hasPersistingTransaction || hasTruncateSync) {
 ```
 
 This means committed sync transactions are only processed when:
+
 - There's no persisting transaction, OR
 - There's a truncate in the sync
 
@@ -152,10 +153,12 @@ The following test scenarios were added in `progressive-visibility-resume.test.t
 ## Conclusion
 
 The bug was caused by a combination of:
+
 1. Improper `transactionStarted` state management during atomic swap
 2. Risk of `transactionStarted` remaining stale if `commit()` throws
 
 The fix ensures:
+
 1. No duplicate `begin()` calls during atomic swap
 2. `transactionStarted` is always reset before `commit()` to prevent stale state
 
