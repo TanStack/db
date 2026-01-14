@@ -2759,6 +2759,44 @@ describe(`QueryCollection`, () => {
 
       await collection.cleanup()
     })
+
+    it(`should return array of QueryObserverResult`, async () => {
+      const queryKey = [`refetch-return-value-test`]
+      const mockData = [{ id: `1`, val: Math.random() * 100 }]
+      const queryFn = vi.fn().mockResolvedValue(mockData)
+
+      const collection = createCollection(
+        queryCollectionOptions({
+          id: `refetch-return-value-test`,
+          queryClient,
+          queryKey,
+          queryFn,
+          getKey,
+          startSync: true,
+        }),
+      )
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      queryFn.mockClear()
+
+      const result = await collection.utils.refetch()
+
+      expect(queryFn).toHaveBeenCalledTimes(1)
+
+      expect(result).not.toBeUndefined()
+      expect(Array.isArray(result)).toBe(true)
+      const resultArray = result as unknown as Array<any>
+      expect(resultArray.length).toBeGreaterThan(0)
+      for (const r of resultArray) {
+        expect(r).toHaveProperty(`status`)
+        expect(r).toHaveProperty(`data`)
+      }
+
+      await collection.cleanup()
+    })
   })
 
   describe(`Error Handling`, () => {

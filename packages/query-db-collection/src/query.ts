@@ -1133,7 +1133,7 @@ export function queryCollectionOptions(
       })
     })
 
-    await Promise.all(refetchPromises)
+    return Promise.all(refetchPromises)
   }
 
   /**
