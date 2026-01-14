@@ -1,7 +1,7 @@
 import type { CompareOptions } from '../query/builder/types'
 import type { OrderByDirection } from '../query/ir'
 import type { IndexInterface, IndexOperation, IndexStats } from './base-index'
-import type { RangeQueryOptions } from './btree-index'
+import type { RangeQueryOptions } from './write-optimized-index'
 
 export class ReverseIndex<
   TKey extends string | number,

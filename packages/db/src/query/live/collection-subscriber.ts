@@ -347,34 +347,46 @@ export class CollectionSubscriber<
     if (!orderByInfo) {
       return
     }
-    const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
-    const biggestSentRow = this.biggest
-
-    // Extract all orderBy column values from the biggest sent row
-    // For single-column: returns single value, for multi-column: returns array
-    const extractedValues = biggestSentRow
-      ? valueExtractorForRawRow(biggestSentRow)
-      : undefined
-
-    // Normalize to array format for minValues
-    const minValues =
-      extractedValues !== undefined
-        ? Array.isArray(extractedValues)
-          ? extractedValues
-          : [extractedValues]
-        : undefined
+    const { orderBy, offset } = orderByInfo
 
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
-    // Take the `n` items after the biggest sent value
-    // Pass the current window offset to ensure proper deduplication
-    subscription.requestLimitedSnapshot({
-      orderBy: normalizedOrderBy,
-      limit: n,
-      minValues,
-      offset,
-    })
+    // If we have an index, use the optimized limited snapshot with cursor-based pagination
+    if (subscription.hasOrderByIndex()) {
+      const { valueExtractorForRawRow } = orderByInfo
+      const biggestSentRow = this.biggest
+
+      // Extract all orderBy column values from the biggest sent row
+      // For single-column: returns single value, for multi-column: returns array
+      const extractedValues = biggestSentRow
+        ? valueExtractorForRawRow(biggestSentRow)
+        : undefined
+
+      // Normalize to array format for minValues
+      const minValues =
+        extractedValues !== undefined
+          ? Array.isArray(extractedValues)
+            ? extractedValues
+            : [extractedValues]
+          : undefined
+
+      // Take the `n` items after the biggest sent value
+      // Pass the current window offset to ensure proper deduplication
+      subscription.requestLimitedSnapshot({
+        orderBy: normalizedOrderBy,
+        limit: n,
+        minValues,
+        offset,
+      })
+    } else {
+      // No index available - use requestSnapshot with the total limit needed
+      // This requests the sync layer to load more data with the expanded window
+      subscription.requestSnapshot({
+        orderBy: normalizedOrderBy,
+        limit: offset + orderByInfo.limit,
+      })
+    }
   }
 
   private getWhereClauseForAlias(): BasicExpression<boolean> | undefined {

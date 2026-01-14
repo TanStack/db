@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { SortedMap } from '../src/SortedMap'
-import { BTreeIndex } from '../src/indexes/btree-index'
+import { WriteOptimizedIndex } from '../src/indexes/write-optimized-index'
 import { createCollection } from '../src/collection/index.js'
 import { PropRef } from '../src/query/ir'
 import { mockSyncCollectionOptions } from './utils'
@@ -110,7 +110,7 @@ describe(`Deterministic Ordering`, () => {
 
   describe(`BTreeIndex`, () => {
     it(`should return keys in deterministic order when indexed values are equal`, () => {
-      const index = new BTreeIndex<string>(
+      const index = new WriteOptimizedIndex<string>(
         1,
         new PropRef([`priority`]),
         `priority_index`,
@@ -127,7 +127,7 @@ describe(`Deterministic Ordering`, () => {
     })
 
     it(`should return keys in deterministic order with mixed equal and different values`, () => {
-      const index = new BTreeIndex<string>(
+      const index = new WriteOptimizedIndex<string>(
         1,
         new PropRef([`priority`]),
         `priority_index`,
@@ -145,7 +145,7 @@ describe(`Deterministic Ordering`, () => {
     })
 
     it(`should return keys in deterministic order with numeric keys`, () => {
-      const index = new BTreeIndex<number>(
+      const index = new WriteOptimizedIndex<number>(
         1,
         new PropRef([`priority`]),
         `priority_index`,
@@ -160,7 +160,7 @@ describe(`Deterministic Ordering`, () => {
     })
 
     it(`should return keys in deterministic order for takeReversed`, () => {
-      const index = new BTreeIndex<string>(
+      const index = new WriteOptimizedIndex<string>(
         1,
         new PropRef([`priority`]),
         `priority_index`,
@@ -176,7 +176,7 @@ describe(`Deterministic Ordering`, () => {
     })
 
     it(`should maintain deterministic order after remove and re-add`, () => {
-      const index = new BTreeIndex<string>(
+      const index = new WriteOptimizedIndex<string>(
         1,
         new PropRef([`priority`]),
         `priority_index`,
@@ -194,7 +194,7 @@ describe(`Deterministic Ordering`, () => {
     })
 
     it(`should return keys in deterministic order with take from cursor across different values`, () => {
-      const index = new BTreeIndex<string>(
+      const index = new WriteOptimizedIndex<string>(
         1,
         new PropRef([`priority`]),
         `priority_index`,

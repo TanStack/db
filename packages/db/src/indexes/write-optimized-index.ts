@@ -9,7 +9,7 @@ import type { IndexOperation } from './base-index.js'
 /**
  * Options for Ordered index
  */
-export interface BTreeIndexOptions {
+export interface WriteOptimizedIndexOptions {
   compareFn?: (a: any, b: any) => number
   compareOptions?: CompareOptions
 }
@@ -28,7 +28,7 @@ export interface RangeQueryOptions {
  * B+Tree index for sorted data with range queries
  * This maintains items in sorted order and provides efficient range operations
  */
-export class BTreeIndex<
+export class WriteOptimizedIndex<
   TKey extends string | number = string | number,
 > extends BaseIndex<TKey> {
   public readonly supportedOperations = new Set<IndexOperation>([
@@ -62,7 +62,7 @@ export class BTreeIndex<
     this.orderedEntries = new BTree(this.compareFn)
   }
 
-  protected initialize(_options?: BTreeIndexOptions): void {}
+  protected initialize(_options?: WriteOptimizedIndexOptions): void {}
 
   /**
    * Adds a value to the index

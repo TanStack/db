@@ -1,7 +1,7 @@
 import { compileSingleRowExpression } from '../query/compiler/evaluators.js'
 import { comparisonFunctions } from '../query/builder/functions.js'
 import { DEFAULT_COMPARE_OPTIONS, deepEquals } from '../utils.js'
-import type { RangeQueryOptions } from './btree-index.js'
+import type { RangeQueryOptions } from './write-optimized-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression, OrderByDirection } from '../query/ir.js'
 
@@ -205,10 +205,3 @@ export type IndexConstructor<TKey extends string | number = string | number> =
     name?: string,
     options?: any,
   ) => BaseIndex<TKey>
-
-/**
- * Index resolver can be either a class constructor or async loader
- */
-export type IndexResolver<TKey extends string | number = string | number> =
-  | IndexConstructor<TKey>
-  | (() => Promise<IndexConstructor<TKey>>)

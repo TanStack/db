@@ -15,6 +15,7 @@ import {
   mockSyncCollectionOptionsNoInitialState,
 } from '../utils.js'
 import { createDeferred } from '../../src/deferred'
+import { WriteOptimizedIndex } from '../../src/indexes/write-optimized-index.js'
 import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
 
 // Sample user type for tests
@@ -1950,6 +1951,8 @@ describe(`createLiveQueryCollection`, () => {
           getKey: (item) => item.id,
           syncMode: `on-demand`,
           startSync: true,
+          autoIndex: `eager`, // Enable auto-indexing for orderBy optimization
+          defaultIndexType: WriteOptimizedIndex,
           sync: {
             sync: ({ markReady, begin, write, commit }) => {
               // Provide minimal initial data
