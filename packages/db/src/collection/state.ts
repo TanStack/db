@@ -475,6 +475,12 @@ export class CollectionStateManager<
     // 1. No persisting user transaction (normal sync flow), OR
     // 2. There's a truncate operation (must be processed immediately), OR
     // 3. There's an immediate transaction (manual writes must be processed synchronously)
+    //
+    // Note: When hasImmediateSync or hasTruncateSync is true, we process ALL committed
+    // sync transactions (not just the immediate/truncate ones). This is intentional for
+    // ordering correctness: if we only processed the immediate transaction, earlier
+    // non-immediate transactions would be applied later and could overwrite newer state.
+    // Processing all committed transactions together preserves causal ordering.
     if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
