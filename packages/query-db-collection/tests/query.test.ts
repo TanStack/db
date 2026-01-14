@@ -2325,12 +2325,9 @@ describe(`QueryCollection`, () => {
             await new Promise((resolve) => setTimeout(resolve, 10))
 
             // Check if there's now a persisting transaction
-            for (const tx of collection._state.transactions.values()) {
-              if (tx.state === `persisting`) {
-                hasPersistingTransactionDuringWrite = true
-                break
-              }
-            }
+            hasPersistingTransactionDuringWrite = Array.from(
+              collection._state.transactions.values(),
+            ).some((tx) => tx.state === `persisting`)
 
             // Update server state
             for (const update of updates) {
