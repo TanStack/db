@@ -1,5 +1,12 @@
 # @tanstack/electric-db-collection
 
+## 0.2.24
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
 ## 0.2.23
 
 ### Patch Changes
