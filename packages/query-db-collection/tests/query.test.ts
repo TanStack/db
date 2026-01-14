@@ -2788,9 +2788,8 @@ describe(`QueryCollection`, () => {
 
       expect(result).not.toBeUndefined()
       expect(Array.isArray(result)).toBe(true)
-      const resultArray = result as unknown as Array<any>
-      expect(resultArray.length).toBeGreaterThan(0)
-      for (const r of resultArray) {
+      expect(result.length).toBeGreaterThan(0)
+      for (const r of result) {
         expect(r).toHaveProperty(`status`)
         expect(r).toHaveProperty(`data`)
       }
