@@ -13,7 +13,7 @@ import {
   TimeoutWaitingForMatchError,
   TimeoutWaitingForTxIdError,
 } from './errors'
-import {  compileSQL } from './sql-compiler'
+import { compileSQL } from './sql-compiler'
 import {
   addTagToIndex,
   findRowsMatchingPattern,
@@ -22,7 +22,7 @@ import {
   removeTagFromIndex,
   tagMatchesPattern,
 } from './tag-index'
-import type {ColumnEncoder} from './sql-compiler';
+import type { ColumnEncoder } from './sql-compiler'
 import type {
   MoveOutPattern,
   MoveTag,
@@ -437,7 +437,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           orderBy,
           // No limit - get all ties
         }
-        const whereCurrentParams = compileSQL<T>(whereCurrentOpts, compileOptions)
+        const whereCurrentParams = compileSQL<T>(
+          whereCurrentOpts,
+          compileOptions,
+        )
         promises.push(stream.requestSnapshot(whereCurrentParams))
 
         debug(

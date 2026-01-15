@@ -277,7 +277,8 @@ export function useLiveQuery(
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
       // Passing the collection directly doesn't provide any predicates, so no data loads
-      const syncMode = (unwrappedParam as { config?: { syncMode?: string } }).config?.syncMode
+      const syncMode = (unwrappedParam as { config?: { syncMode?: string } })
+        .config?.syncMode
       if (syncMode === `on-demand`) {
         console.warn(
           `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
