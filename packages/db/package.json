@@ -46,7 +46,7 @@
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/pacer-lite": "^0.2.0"
+    "@tanstack/pacer-lite": "^0.2.1"
   },
   "peerDependencies": {
     "typescript": ">=4.7"
