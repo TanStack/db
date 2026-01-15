@@ -40,6 +40,16 @@
         "default": "./dist/cjs/index.cjs"
       }
     },
+    "./react-native": {
+      "import": {
+        "types": "./dist/esm/react-native/index.d.ts",
+        "default": "./dist/esm/react-native/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/react-native/index.d.cts",
+        "default": "./dist/cjs/react-native/index.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,
@@ -50,9 +60,23 @@
   "dependencies": {
     "@tanstack/db": "workspace:*"
   },
+  "peerDependencies": {
+    "@react-native-community/netinfo": ">=11.0.0",
+    "react-native": ">=0.70.0"
+  },
+  "peerDependenciesMeta": {
+    "@react-native-community/netinfo": {
+      "optional": true
+    },
+    "react-native": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@react-native-community/netinfo": "^11.4.1",
     "@types/node": "^24.6.2",
     "eslint": "^9.39.2",
+    "react-native": "^0.83.1",
     "typescript": "^5.9.2",
     "vitest": "^3.2.4"
   }
