@@ -1,0 +1,44 @@
+diff --git a/src/client.ts b/src/client.ts
+index 725e16ea4226bc439d953f82f96338c4f28867a6..2ce978524d08527b116edf48a4708989b129713f 100644
+--- a/src/client.ts
++++ b/src/client.ts
+@@ -1061,10 +1061,10 @@ export class ShapeStream<T extends Row<unknown> = Row>
+           this.#staleCacheBuster = undefined
+           this.#staleCacheRetryCount = 0
+         }
+-      } else if (this.#shapeHandle === undefined) {
+-        // We received a stale response from cache and don't have a handle yet.
+-        // Instead of accepting the stale handle, throw an error to trigger a retry
+-        // with a random cache buster to bypass the CDN cache.
++      } else {
++        // We received a stale response from cache with an expired handle.
++        // Always retry with a cache-buster regardless of whether we already have a handle,
++        // since accepting stale data could corrupt the shape state.
+         this.#staleCacheRetryCount++
+         // Cancel the response body to release the connection before retrying
+         await response.body?.cancel()
+@@ -1084,7 +1084,8 @@ export class ShapeStream<T extends Row<unknown> = Row>
+         console.warn(
+           `[Electric] Received stale cached response with expired shape handle. ` +
+             `This should not happen and indicates a proxy/CDN caching misconfiguration. ` +
+-            `The response contained handle "${shapeHandle}" which was previously marked as expired. ` +
++            `The response contained handle "${shapeHandle}" which was previously marked as expired` +
++            `${this.#shapeHandle ? ` (current handle: "${this.#shapeHandle}")` : ``}. ` +
+             `Check that your proxy includes all query parameters (especially 'handle' and 'offset') in its cache key. ` +
+             `For more information visit the troubleshooting guide: https://electric-sql.com/docs/guides/troubleshooting ` +
+             `Retrying with a random cache buster to bypass the stale cache (attempt ${this.#staleCacheRetryCount}/${this.#maxStaleCacheRetries}).`
+@@ -1096,14 +1097,6 @@ export class ShapeStream<T extends Row<unknown> = Row>
+             `This indicates a proxy/CDN caching misconfiguration. ` +
+             `Check that your proxy includes all query parameters (especially 'handle' and 'offset') in its cache key.`
+         )
+-      } else {
+-        console.warn(
+-          `[Electric] Received stale cached response with expired shape handle. ` +
+-            `This should not happen and indicates a proxy/CDN caching misconfiguration. ` +
+-            `The response contained handle "${shapeHandle}" which was previously marked as expired. ` +
+-            `Check that your proxy includes all query parameters (especially 'handle' and 'offset') in its cache key. ` +
+-            `Ignoring the stale handle and continuing with handle "${this.#shapeHandle}".`
+-        )
+       }
+     }
+ 

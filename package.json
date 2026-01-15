@@ -7,6 +7,11 @@
   },
   "packageManager": "pnpm@10.27.0",
   "type": "module",
+  "pnpm": {
+    "patchedDependencies": {
+      "@electric-sql/client@1.4.1": "patches/@electric-sql__client@1.4.1.patch"
+    }
+  },
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
     "build:minified": "pnpm --filter \"./packages/**\" build:minified",

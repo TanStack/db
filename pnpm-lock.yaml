@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@electric-sql/client@1.4.1':
+    hash: 497a195a0da3ed20db0effaa32f1f9f86844d038cf5da659446c62cb1ed8d3b4
+    path: patches/@electric-sql__client@1.4.1.patch
+
 importers:
 
   .:
@@ -775,8 +780,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: ^1.3.1
-        version: 1.3.1
+        specifier: ^1.4.1
+        version: 1.4.1(patch_hash=497a195a0da3ed20db0effaa32f1f9f86844d038cf5da659446c62cb1ed8d3b4)
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
@@ -1493,6 +1498,9 @@ packages:
 
   '@electric-sql/client@1.3.1':
     resolution: {integrity: sha512-Tr7jY60acKfxuODOzGcJYzEXtTJyiE8l237hMpCPHjflr+qSGYVZ0NkOnFgAE2xIPFgP1zn05nQb3+mkUu8qUQ==}
+
+  '@electric-sql/client@1.4.1':
+    resolution: {integrity: sha512-gY/I2qOPj5he0tRX4CWVZ7fSU16ihqs5oHyySSFOdxC0mBoTecMm+tjF6FFJq/VySJblFJlCOA7OjdAG2WtCXA==}
 
   '@emnapi/core@1.7.1':
     resolution: {integrity: sha512-o1uhUASyo921r2XtHYOHy7gdkGLge8ghBEQHMWmyJFoXlpU58kIrhhN3w26lpQb6dspetweapMn2CSNwQ8I4wg==}
@@ -9487,6 +9495,12 @@ snapshots:
   '@drizzle-team/brocli@0.10.2': {}
 
   '@electric-sql/client@1.3.1':
+    dependencies:
+      '@microsoft/fetch-event-source': 2.0.1
+    optionalDependencies:
+      '@rollup/rollup-darwin-arm64': 4.52.5
+
+  '@electric-sql/client@1.4.1(patch_hash=497a195a0da3ed20db0effaa32f1f9f86844d038cf5da659446c62cb1ed8d3b4)':
     dependencies:
       '@microsoft/fetch-event-source': 2.0.1
     optionalDependencies:
