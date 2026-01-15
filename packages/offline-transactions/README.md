@@ -13,11 +13,30 @@ Offline-first transaction capabilities for TanStack DB that provides durable per
 
 ## Installation
 
+### Web
+
 ```bash
 npm install @tanstack/offline-transactions
 ```
 
+### React Native / Expo
+
+```bash
+npm install @tanstack/offline-transactions @react-native-community/netinfo
+```
+
+The React Native implementation requires the `@react-native-community/netinfo` peer dependency for network connectivity detection.
+
+## Platform Support
+
+This package provides platform-specific implementations for web and React Native environments:
+
+- **Web**: Uses browser APIs (`window.online/offline` events, `document.visibilitychange`)
+- **React Native**: Uses React Native primitives (`@react-native-community/netinfo` for network status, `AppState` for foreground/background detection)
+
 ## Quick Start
+
+### Web
 
 ```typescript
 import { startOfflineExecutor } from '@tanstack/offline-transactions'
@@ -54,6 +73,49 @@ offlineTx.mutate(() => {
 // Execute with automatic offline support
 await offlineTx.commit()
 ```
+
+### React Native / Expo
+
+```typescript
+import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
+
+// Setup offline executor (same API as web)
+const offline = startOfflineExecutor({
+  collections: { todos: todoCollection },
+  mutationFns: {
+    syncTodos: async ({ transaction, idempotencyKey }) => {
+      await api.saveBatch(transaction.mutations, { idempotencyKey })
+    },
+  },
+  onLeadershipChange: (isLeader) => {
+    if (!isLeader) {
+      console.warn('Running in online-only mode (another tab is the leader)')
+    }
+  },
+})
+
+// API usage is identical to web
+const offlineTx = offline.createOfflineTransaction({
+  mutationFnName: 'syncTodos',
+  autoCommit: false,
+})
+
+offlineTx.mutate(() => {
+  todoCollection.insert({
+    id: crypto.randomUUID(),
+    text: 'Buy milk',
+    completed: false,
+  })
+})
+
+await offlineTx.commit()
+```
+
+The only difference between web and React Native usage is the import path:
+- **Web**: `import { ... } from '@tanstack/offline-transactions'`
+- **React Native**: `import { ... } from '@tanstack/offline-transactions/react-native'`
+
+All other APIs remain the same across platforms.
 
 ## Core Concepts
 
@@ -207,12 +269,21 @@ tx.mutate(() => todoCollection.insert({ id: '1', text: 'Buy milk' }))
 await tx.commit() // Works offline!
 ```
 
-## Browser Support
+## Platform Support
+
+### Web Browsers
 
 - **IndexedDB**: Modern browsers (primary storage)
 - **localStorage**: Fallback for limited environments
 - **Web Locks API**: Chrome 69+, Firefox 96+ (preferred leader election)
 - **BroadcastChannel**: All modern browsers (fallback leader election)
+
+### React Native
+
+- **React Native**: 0.60+ (tested with latest versions)
+- **Expo**: SDK 40+ (tested with latest versions)
+- **Required peer dependency**: `@react-native-community/netinfo` for network connectivity detection
+- **Storage**: Uses AsyncStorage or custom storage adapters
 
 ## License
 
