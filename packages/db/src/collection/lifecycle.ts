@@ -180,8 +180,10 @@ export class CollectionLifecycleManager<
 
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
 
-    // If gcTime is 0, GC is disabled
-    if (gcTime === 0) {
+    // If gcTime is 0 or Infinity (or any non-finite value), GC is disabled.
+    // Note: setTimeout with Infinity coerces to 0 via ToInt32, causing immediate GC,
+    // so we must explicitly check for non-finite values here.
+    if (gcTime === 0 || !Number.isFinite(gcTime)) {
       return
     }
 
