@@ -12,19 +12,23 @@ import { createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
+  SingleResult,
 } from '@tanstack/db'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
- * @property data - Reactive array of query results in order
+ * @property data - Reactive array of query results in order, or single result for findOne queries
  * @property collection - The underlying query collection instance
  * @property status - Current query status
  * @property isLoading - True while initial query data is loading
@@ -33,10 +37,10 @@ import type { ComputedRef, MaybeRefOrGetter } from 'vue'
  * @property isError - True when query encountered an error
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<T extends object> {
-  state: ComputedRef<Map<string | number, T>>
-  data: ComputedRef<Array<T>>
-  collection: ComputedRef<Collection<T, string | number, {}>>
+export interface UseLiveQueryReturn<TContext extends Context> {
+  state: ComputedRef<Map<string | number, GetResult<TContext>>>
+  data: ComputedRef<InferResultType<TContext>>
+  collection: ComputedRef<Collection<GetResult<TContext>, string | number, {}>>
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
@@ -53,6 +57,22 @@ export interface UseLiveQueryReturnWithCollection<
   state: ComputedRef<Map<TKey, T>>
   data: ComputedRef<Array<T>>
   collection: ComputedRef<Collection<T, TKey, TUtils>>
+  status: ComputedRef<CollectionStatus>
+  isLoading: ComputedRef<boolean>
+  isReady: ComputedRef<boolean>
+  isIdle: ComputedRef<boolean>
+  isError: ComputedRef<boolean>
+  isCleanedUp: ComputedRef<boolean>
+}
+
+export interface UseLiveQueryReturnWithSingleResultCollection<
+  T extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+> {
+  state: ComputedRef<Map<TKey, T>>
+  data: ComputedRef<T | undefined>
+  collection: ComputedRef<Collection<T, TKey, TUtils> & SingleResult>
   status: ComputedRef<CollectionStatus>
   isLoading: ComputedRef<boolean>
   isReady: ComputedRef<boolean>
@@ -114,7 +134,7 @@ export interface UseLiveQueryReturnWithCollection<
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   deps?: Array<MaybeRefOrGetter<unknown>>,
-): UseLiveQueryReturn<GetResult<TContext>>
+): UseLiveQueryReturn<TContext>
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -122,7 +142,7 @@ export function useLiveQuery<TContext extends Context>(
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
   deps?: Array<MaybeRefOrGetter<unknown>>,
-): UseLiveQueryReturn<GetResult<TContext>>
+): UseLiveQueryReturn<TContext>
 
 /**
  * Create a live query using configuration object
@@ -160,7 +180,7 @@ export function useLiveQuery<TContext extends Context>(
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
   deps?: Array<MaybeRefOrGetter<unknown>>,
-): UseLiveQueryReturn<GetResult<TContext>>
+): UseLiveQueryReturn<TContext>
 
 /**
  * Subscribe to an existing query collection (can be reactive)
@@ -201,14 +221,27 @@ export function useLiveQuery<TContext extends Context>(
  * //   <Item v-for="item in data" :key="item.id" v-bind="item" />
  * // </div>
  */
-// Overload 3: Accept pre-created live query collection (can be reactive)
+// Overload 3: Accept pre-created live query collection (can be reactive) - non-single result
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: MaybeRefOrGetter<Collection<TResult, TKey, TUtils>>,
+  liveQueryCollection: MaybeRefOrGetter<
+    Collection<TResult, TKey, TUtils> & NonSingleResult
+  >,
 ): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
+
+// Overload 4: Accept pre-created live query collection with singleResult: true
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: MaybeRefOrGetter<
+    Collection<TResult, TKey, TUtils> & SingleResult
+  >,
+): UseLiveQueryReturnWithSingleResultCollection<TResult, TKey, TUtils>
 
 // Implementation
 export function useLiveQuery(
@@ -294,7 +327,16 @@ export function useLiveQuery(
   const internalData = reactive<Array<any>>([])
 
   // Computed wrapper for the data to match expected return type
-  const data = computed(() => internalData)
+  // Returns single item for singleResult collections, array otherwise
+  const data = computed(() => {
+    const currentCollection = collection.value
+    if (!currentCollection) {
+      return internalData
+    }
+    const config: CollectionConfigSingleRowOption<any, any, any> =
+      currentCollection.config
+    return config.singleResult ? internalData[0] : internalData
+  })
 
   // Track collection status reactively
   const status = ref(
