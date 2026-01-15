@@ -50,6 +50,28 @@ export function serializeLoadSubsetOptions(
     result.offset = options.offset
   }
 
+  // Include joins for server-side query construction
+  if (options.joins?.length) {
+    result.joins = options.joins.map((join) => ({
+      collectionId: join.collectionId,
+      alias: join.alias,
+      type: join.type,
+      localKey: serializeExpression(join.localKey),
+      foreignKey: serializeExpression(join.foreignKey),
+      where: join.where ? serializeExpression(join.where) : undefined,
+      orderBy: join.orderBy?.map((clause) => ({
+        expression: serializeExpression(clause.expression),
+        direction: clause.compareOptions.direction,
+        nulls: clause.compareOptions.nulls,
+        stringSort: clause.compareOptions.stringSort,
+        ...(clause.compareOptions.stringSort === `locale` && {
+          locale: clause.compareOptions.locale,
+          localeOptions: clause.compareOptions.localeOptions,
+        }),
+      })),
+    }))
+  }
+
   return Object.keys(result).length === 0 ? undefined : JSON.stringify(result)
 }
 

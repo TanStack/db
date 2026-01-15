@@ -12,6 +12,7 @@ import type { BasicExpression, OrderBy } from '../query/ir.js'
 import type { IndexInterface } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
+  JoinInfo,
   LoadSubsetOptions,
   Subscription,
   SubscriptionEvents,
@@ -45,6 +46,12 @@ type CollectionSubscriptionOptions = {
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
+  /**
+   * Join information for server-side query construction.
+   * When present, this is included in loadSubset calls so the sync layer
+   * can perform joins before pagination.
+   */
+  joinInfo?: Array<JoinInfo>
 }
 
 export class CollectionSubscription
@@ -591,6 +598,8 @@ export class CollectionSubscription
       cursor: cursorExpressions, // Cursor expressions passed separately
       offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
       subscription: this,
+      // Include join info for server-side query construction
+      joins: this.options.joinInfo,
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 

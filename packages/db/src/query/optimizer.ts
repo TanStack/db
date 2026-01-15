@@ -131,7 +131,15 @@ import {
   getWhereExpression,
   isResidualWhere,
 } from './ir.js'
-import type { BasicExpression, From, QueryIR, Select, Where } from './ir.js'
+import type {
+  BasicExpression,
+  From,
+  OrderBy,
+  QueryIR,
+  Select,
+  Where,
+} from './ir.js'
+import type { JoinInfo } from '../types.js'
 
 /**
  * Represents a WHERE clause after source analysis
@@ -163,6 +171,11 @@ export interface OptimizationResult {
   optimizedQuery: QueryIR
   /** Map of source aliases to their extracted WHERE clauses for index optimization */
   sourceWhereClauses: Map<string, BasicExpression<boolean>>
+  /**
+   * Map of main source aliases to their join information for server-side query construction.
+   * This enables the sync layer to perform joins before pagination, ensuring consistent page sizes.
+   */
+  joinInfoBySource: Map<string, Array<JoinInfo>>
 }
 
 /**
@@ -192,6 +205,10 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
   // First, extract source WHERE clauses before optimization
   const sourceWhereClauses = extractSourceWhereClauses(query)
 
+  // Extract join info for server-side query construction
+  // This must be done on the original query before optimization
+  const joinInfoBySource = extractJoinInfo(query, sourceWhereClauses)
+
   // Apply multi-level predicate pushdown with iterative convergence
   let optimized = query
   let previousOptimized: QueryIR | undefined
@@ -214,6 +231,7 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
   return {
     optimizedQuery: cleaned,
     sourceWhereClauses,
+    joinInfoBySource,
   }
 }
 
@@ -255,6 +273,145 @@ function extractSourceWhereClauses(
   }
 
   return sourceWhereClauses
+}
+
+/**
+ * Extracts join information from a query for server-side query construction.
+ * This allows the sync layer to perform joins before pagination,
+ * ensuring consistent page sizes when filtering by joined collection properties.
+ *
+ * @param query - The original QueryIR to analyze
+ * @param sourceWhereClauses - Pre-computed WHERE clauses by source alias
+ * @returns Map of main source alias to array of JoinInfo for that source's joins
+ */
+export function extractJoinInfo(
+  query: QueryIR,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
+): Map<string, Array<JoinInfo>> {
+  const joinInfoBySource = new Map<string, Array<JoinInfo>>()
+
+  // No joins means no join info to extract
+  if (!query.join || query.join.length === 0) {
+    return joinInfoBySource
+  }
+
+  const mainAlias = query.from.alias
+
+  // Extract orderBy expressions that reference each alias
+  const orderByByAlias = extractOrderByByAlias(query.orderBy)
+
+  for (const joinClause of query.join) {
+    const joinedFrom = joinClause.from
+    const joinedAlias = joinedFrom.alias
+
+    // Get the collection ID - for queryRef, we need to traverse to find the innermost collection
+    let collectionId: string
+    if (joinedFrom.type === `collectionRef`) {
+      collectionId = joinedFrom.collection.id
+    } else {
+      // For subqueries, get the innermost collection ID
+      collectionId = getInnermostCollectionId(joinedFrom.query)
+    }
+
+    // Determine which expression belongs to which side of the join
+    const { localKey, foreignKey } = analyzeJoinKeys(
+      joinClause.left,
+      joinClause.right,
+      mainAlias,
+      joinedAlias,
+    )
+
+    // Map join type to JoinInfo type (handle 'outer' as 'full')
+    const joinType = joinClause.type === `outer` ? `full` : joinClause.type
+
+    const joinInfo: JoinInfo = {
+      collectionId,
+      alias: joinedAlias,
+      type: joinType,
+      localKey,
+      foreignKey,
+      // Include any WHERE clause that applies to the joined collection
+      where: sourceWhereClauses.get(joinedAlias),
+      // Include any orderBy that references the joined collection
+      orderBy: orderByByAlias.get(joinedAlias),
+    }
+
+    // Store join info keyed by the main source alias
+    if (!joinInfoBySource.has(mainAlias)) {
+      joinInfoBySource.set(mainAlias, [])
+    }
+    joinInfoBySource.get(mainAlias)!.push(joinInfo)
+  }
+
+  return joinInfoBySource
+}
+
+/**
+ * Extracts orderBy expressions grouped by the alias they reference.
+ */
+function extractOrderByByAlias(
+  orderBy: OrderBy | undefined,
+): Map<string, OrderBy> {
+  const result = new Map<string, OrderBy>()
+
+  if (!orderBy || orderBy.length === 0) {
+    return result
+  }
+
+  for (const clause of orderBy) {
+    const alias = getExpressionAlias(clause.expression)
+    if (alias) {
+      if (!result.has(alias)) {
+        result.set(alias, [])
+      }
+      result.get(alias)!.push(clause)
+    }
+  }
+
+  return result
+}
+
+/**
+ * Gets the alias (first path element) from an expression if it's a PropRef.
+ */
+function getExpressionAlias(expr: BasicExpression): string | undefined {
+  if (expr.type === `ref` && expr.path.length > 0) {
+    return expr.path[0]
+  }
+  return undefined
+}
+
+/**
+ * Analyzes join key expressions to determine which is local (main) and which is foreign (joined).
+ */
+function analyzeJoinKeys(
+  left: BasicExpression,
+  right: BasicExpression,
+  mainAlias: string,
+  joinedAlias: string,
+): { localKey: BasicExpression; foreignKey: BasicExpression } {
+  const leftAlias = getExpressionAlias(left)
+  const rightAlias = getExpressionAlias(right)
+
+  // If left references the joined alias, swap them
+  if (leftAlias === joinedAlias || rightAlias === mainAlias) {
+    return { localKey: right, foreignKey: left }
+  }
+
+  // Default: left is local, right is foreign
+  return { localKey: left, foreignKey: right }
+}
+
+/**
+ * Gets the collection ID from the innermost FROM clause of a query.
+ * Used for subqueries to find the actual collection being queried.
+ */
+function getInnermostCollectionId(query: QueryIR): string {
+  if (query.from.type === `collectionRef`) {
+    return query.from.collection.id
+  }
+  // Recurse into subquery
+  return getInnermostCollectionId(query.from.query)
 }
 
 /**
