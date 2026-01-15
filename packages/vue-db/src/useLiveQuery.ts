@@ -221,7 +221,7 @@ export function useLiveQuery<TContext extends Context>(
  * //   <Item v-for="item in data" :key="item.id" v-bind="item" />
  * // </div>
  */
-// Overload 3a: Accept pre-created live query collection (can be reactive) - non-single result
+// Overload 3: Accept pre-created live query collection (can be reactive) - non-single result
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
@@ -232,7 +232,7 @@ export function useLiveQuery<
   >,
 ): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
 
-// Overload 3b: Accept pre-created live query collection with singleResult: true
+// Overload 4: Accept pre-created live query collection with singleResult: true
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
