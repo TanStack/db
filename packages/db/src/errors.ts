@@ -172,12 +172,28 @@ export class DuplicateKeySyncError extends CollectionOperationError {
   constructor(
     key: string | number,
     collectionId: string,
-    options?: { hasCustomGetKey?: boolean; hasJoins?: boolean },
+    options?: {
+      hasCustomGetKey?: boolean
+      hasJoins?: boolean
+      hasDistinct?: boolean
+    },
   ) {
     const baseMessage = `Cannot insert document with key "${key}" from sync because it already exists in the collection "${collectionId}"`
 
-    // Provide enhanced guidance when custom getKey is used with joins
-    if (options?.hasCustomGetKey && options.hasJoins) {
+    // Provide enhanced guidance when custom getKey is used with distinct
+    if (options?.hasCustomGetKey && options.hasDistinct) {
+      super(
+        `${baseMessage}. ` +
+          `This collection uses a custom getKey with .distinct(). ` +
+          `The .distinct() operator deduplicates by the ENTIRE selected object (standard SQL behavior), ` +
+          `but your custom getKey extracts only a subset of fields. This causes multiple distinct rows ` +
+          `(with different values in non-key fields) to receive the same key. ` +
+          `To fix this, either: (1) ensure your SELECT only includes fields that uniquely identify each row, ` +
+          `(2) use .groupBy() with min()/max() aggregates to select one value per group, or ` +
+          `(3) remove the custom getKey to use the default key behavior.`,
+      )
+    } else if (options?.hasCustomGetKey && options.hasJoins) {
+      // Provide enhanced guidance when custom getKey is used with joins
       super(
         `${baseMessage}. ` +
           `This collection uses a custom getKey with joined queries. ` +
