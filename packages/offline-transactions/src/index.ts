@@ -33,7 +33,10 @@ export { WebLocksLeader } from './coordination/WebLocksLeader'
 export { BroadcastChannelLeader } from './coordination/BroadcastChannelLeader'
 
 // Connectivity
-export { DefaultOnlineDetector } from './connectivity/OnlineDetector'
+export {
+  WebOnlineDetector,
+  DefaultOnlineDetector,
+} from './connectivity/OnlineDetector'
 
 // API components
 export { OfflineTransaction as OfflineTransactionAPI } from './api/OfflineTransaction'

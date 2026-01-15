@@ -13,7 +13,7 @@ import { WebLocksLeader } from './coordination/WebLocksLeader'
 import { BroadcastChannelLeader } from './coordination/BroadcastChannelLeader'
 
 // Connectivity
-import { DefaultOnlineDetector } from './connectivity/OnlineDetector'
+import { WebOnlineDetector } from './connectivity/OnlineDetector'
 
 // API
 import { OfflineTransaction as OfflineTransactionAPI } from './api/OfflineTransaction'
@@ -30,6 +30,7 @@ import type {
   OfflineConfig,
   OfflineMode,
   OfflineTransaction,
+  OnlineDetector,
   StorageAdapter,
   StorageDiagnostic,
 } from './types'
@@ -44,7 +45,7 @@ export class OfflineExecutor {
   private scheduler: KeyScheduler
   private executor: TransactionExecutor | null
   private leaderElection: LeaderElection | null
-  private onlineDetector: DefaultOnlineDetector
+  private onlineDetector: OnlineDetector
   private isLeaderState = false
   private unsubscribeOnline: (() => void) | null = null
   private unsubscribeLeadership: (() => void) | null = null
@@ -71,7 +72,7 @@ export class OfflineExecutor {
   constructor(config: OfflineConfig) {
     this.config = config
     this.scheduler = new KeyScheduler()
-    this.onlineDetector = new DefaultOnlineDetector()
+    this.onlineDetector = config.onlineDetector ?? new WebOnlineDetector()
 
     // Initialize as pending - will be set by async initialization
     this.storage = null
@@ -491,7 +492,7 @@ export class OfflineExecutor {
     return this.executor.getRunningCount()
   }
 
-  getOnlineDetector(): DefaultOnlineDetector {
+  getOnlineDetector(): OnlineDetector {
     return this.onlineDetector
   }
 
