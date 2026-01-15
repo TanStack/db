@@ -61,7 +61,7 @@ export const todoApi = {
 
   async update(
     id: string,
-    data: { text?: string; completed?: boolean }
+    data: { text?: string; completed?: boolean },
   ): Promise<Todo | null> {
     const response = await fetch(`${BASE_URL}/api/todos/${id}`, {
       method: 'PUT',

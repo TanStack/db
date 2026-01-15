@@ -21,7 +21,9 @@ export function TodoList() {
   const [error, setError] = useState<string | null>(null)
   const [isOnline, setIsOnline] = useState(true)
   const [pendingCount, setPendingCount] = useState(0)
-  const [offline, setOffline] = useState<ReturnType<typeof createOfflineExecutor> | null>(null)
+  const [offline, setOffline] = useState<ReturnType<
+    typeof createOfflineExecutor
+  > | null>(null)
   const [initError, setInitError] = useState<string | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
 
@@ -51,21 +53,25 @@ export function TodoList() {
   const queryResult = useLiveQuery((q) =>
     q
       .from({ todo: todoCollection })
-      .orderBy(({ todo }) => todo.createdAt, `desc`)
+      .orderBy(({ todo }) => todo.createdAt, `desc`),
   )
   const todoList = queryResult.data ?? []
   const isLoading = queryResult.isLoading
 
   useEffect(() => {
-    console.log(`[TodoList] Query state:`, { todoCount: todoList.length, isLoading })
+    console.log(`[TodoList] Query state:`, {
+      todoCount: todoList.length,
+      isLoading,
+    })
   }, [todoList.length, isLoading])
 
   // Monitor network status
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener((state) => {
-      const connected = state.isConnected === true && state.isInternetReachable !== false
+      const connected =
+        state.isConnected === true && state.isInternetReachable !== false
       setIsOnline(connected)
-      
+
       if (connected && offline) {
         offline.notifyOnline()
       }
@@ -151,18 +157,43 @@ export function TodoList() {
 
       {/* Debug info */}
       <Text style={{ fontSize: 12, color: `#666`, marginBottom: 8 }}>
-        Init: {isInitialized ? `yes` : `no`} | Offline: {offline ? `yes` : `no`} | Loading: {isLoading ? `yes` : `no`} | Todos: {todoList.length}
+        Init: {isInitialized ? `yes` : `no`} | Offline: {offline ? `yes` : `no`}{' '}
+        | Loading: {isLoading ? `yes` : `no`} | Todos: {todoList.length}
       </Text>
 
       {/* Status indicators */}
       <View style={styles.statusRow}>
-        <View style={[styles.statusBadge, isOnline ? styles.online : styles.offline]}>
-          <View style={[styles.statusDot, isOnline ? styles.onlineDot : styles.offlineDot]} />
-          <Text style={styles.statusText}>{isOnline ? `Online` : `Offline`}</Text>
+        <View
+          style={[
+            styles.statusBadge,
+            isOnline ? styles.online : styles.offline,
+          ]}
+        >
+          <View
+            style={[
+              styles.statusDot,
+              isOnline ? styles.onlineDot : styles.offlineDot,
+            ]}
+          />
+          <Text style={styles.statusText}>
+            {isOnline ? `Online` : `Offline`}
+          </Text>
         </View>
 
-        <View style={[styles.statusBadge, offline?.isOfflineEnabled ? styles.enabled : styles.disabled]}>
-          <View style={[styles.statusDot, offline?.isOfflineEnabled ? styles.enabledDot : styles.disabledDot]} />
+        <View
+          style={[
+            styles.statusBadge,
+            offline?.isOfflineEnabled ? styles.enabled : styles.disabled,
+          ]}
+        >
+          <View
+            style={[
+              styles.statusDot,
+              offline?.isOfflineEnabled
+                ? styles.enabledDot
+                : styles.disabledDot,
+            ]}
+          />
           <Text style={styles.statusText}>
             {offline?.isOfflineEnabled ? `Offline Mode` : `Online Only`}
           </Text>
@@ -194,7 +225,10 @@ export function TodoList() {
           editable={!isLoading}
         />
         <TouchableOpacity
-          style={[styles.addButton, (!newTodoText.trim() || isLoading) && styles.addButtonDisabled]}
+          style={[
+            styles.addButton,
+            (!newTodoText.trim() || isLoading) && styles.addButtonDisabled,
+          ]}
           onPress={handleAddTodo}
           disabled={!newTodoText.trim() || isLoading}
         >
@@ -211,7 +245,9 @@ export function TodoList() {
       ) : todoList.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No todos yet. Add one above!</Text>
-          <Text style={styles.emptySubtext}>Try going offline to test offline mode</Text>
+          <Text style={styles.emptySubtext}>
+            Try going offline to test offline mode
+          </Text>
         </View>
       ) : (
         <FlatList
@@ -221,13 +257,21 @@ export function TodoList() {
           renderItem={({ item: todo }) => (
             <View style={styles.todoItem}>
               <TouchableOpacity
-                style={[styles.checkbox, todo.completed && styles.checkboxChecked]}
+                style={[
+                  styles.checkbox,
+                  todo.completed && styles.checkboxChecked,
+                ]}
                 onPress={() => handleToggleTodo(todo.id)}
               >
                 {todo.completed && <Text style={styles.checkmark}>✓</Text>}
               </TouchableOpacity>
               <View style={styles.todoContent}>
-                <Text style={[styles.todoText, todo.completed && styles.todoTextCompleted]}>
+                <Text
+                  style={[
+                    styles.todoText,
+                    todo.completed && styles.todoTextCompleted,
+                  ]}
+                >
                   {todo.text}
                 </Text>
                 <Text style={styles.todoDate}>
@@ -248,10 +292,16 @@ export function TodoList() {
       {/* Instructions */}
       <View style={styles.instructions}>
         <Text style={styles.instructionsTitle}>Try this:</Text>
-        <Text style={styles.instructionsText}>1. Add some todos while online</Text>
+        <Text style={styles.instructionsText}>
+          1. Add some todos while online
+        </Text>
         <Text style={styles.instructionsText}>2. Enable airplane mode</Text>
-        <Text style={styles.instructionsText}>3. Add more todos (queued locally)</Text>
-        <Text style={styles.instructionsText}>4. Disable airplane mode to sync</Text>
+        <Text style={styles.instructionsText}>
+          3. Add more todos (queued locally)
+        </Text>
+        <Text style={styles.instructionsText}>
+          4. Disable airplane mode to sync
+        </Text>
       </View>
     </View>
   )

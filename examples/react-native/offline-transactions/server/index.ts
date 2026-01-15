@@ -48,7 +48,7 @@ app.get('/api/todos', async (_req, res) => {
   console.log('GET /api/todos')
   await delay(200)
   const todos = Array.from(todosStore.values()).sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   )
   res.json(todos)
 })
@@ -57,7 +57,7 @@ app.get('/api/todos', async (_req, res) => {
 app.post('/api/todos', async (req, res) => {
   console.log('POST /api/todos', req.body)
   await delay(200)
-  
+
   const { text, completed } = req.body
   if (!text || text.trim() === '') {
     return res.status(400).json({ error: 'Todo text is required' })

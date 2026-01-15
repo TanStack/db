@@ -17,10 +17,13 @@ config.resolver.unstable_enableSymlinks = true
 const localNodeModules = path.resolve(projectRoot, 'node_modules')
 config.resolver.extraNodeModules = new Proxy(
   {
-    'react': path.resolve(localNodeModules, 'react'),
+    react: path.resolve(localNodeModules, 'react'),
     'react-native': path.resolve(localNodeModules, 'react-native'),
     'react/jsx-runtime': path.resolve(localNodeModules, 'react/jsx-runtime'),
-    'react/jsx-dev-runtime': path.resolve(localNodeModules, 'react/jsx-dev-runtime'),
+    'react/jsx-dev-runtime': path.resolve(
+      localNodeModules,
+      'react/jsx-dev-runtime',
+    ),
   },
   {
     get: (target, name) => {
@@ -30,13 +33,17 @@ config.resolver.extraNodeModules = new Proxy(
       // Fall back to normal resolution for other modules
       return path.resolve(localNodeModules, name)
     },
-  }
+  },
 )
 
 // Block react-native 0.83 from root node_modules
 config.resolver.blockList = [
-  new RegExp(`${monorepoRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/node_modules/\\.pnpm/react-native@0\\.83.*`),
-  new RegExp(`${monorepoRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/node_modules/\\.pnpm/react@(?!19\\.0\\.0).*`),
+  new RegExp(
+    `${monorepoRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/node_modules/\\.pnpm/react-native@0\\.83.*`,
+  ),
+  new RegExp(
+    `${monorepoRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/node_modules/\\.pnpm/react@(?!19\\.0\\.0).*`,
+  ),
 ]
 
 // Let Metro know where to resolve packages from (local first, then root)
