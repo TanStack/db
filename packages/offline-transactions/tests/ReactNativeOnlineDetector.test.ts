@@ -39,7 +39,10 @@ vi.mock(`react-native`, () => {
 // Mock the @react-native-community/netinfo module
 vi.mock(`@react-native-community/netinfo`, () => {
   const listeners: Array<
-    (state: { isConnected: boolean; isInternetReachable: boolean | null }) => void
+    (state: {
+      isConnected: boolean
+      isInternetReachable: boolean | null
+    }) => void
   > = []
   return {
     default: {
@@ -86,7 +89,9 @@ describe(`ReactNativeOnlineDetector`, () => {
       const detector = new ReactNativeOnlineDetector()
 
       expect(NetInfo.addEventListener).toHaveBeenCalledTimes(1)
-      expect(NetInfo.addEventListener).toHaveBeenCalledWith(expect.any(Function))
+      expect(NetInfo.addEventListener).toHaveBeenCalledWith(
+        expect.any(Function),
+      )
 
       detector.dispose()
     })
@@ -292,7 +297,9 @@ describe(`ReactNativeOnlineDetector`, () => {
   describe(`error handling`, () => {
     it(`should catch and warn on listener errors without stopping other listeners`, () => {
       const detector = new ReactNativeOnlineDetector()
-      const consoleWarnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      const consoleWarnSpy = vi
+        .spyOn(console, `warn`)
+        .mockImplementation(() => {})
       const errorCallback = vi.fn(() => {
         throw new Error(`Test error`)
       })
