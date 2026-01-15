@@ -13,7 +13,7 @@ import {
   TimeoutWaitingForMatchError,
   TimeoutWaitingForTxIdError,
 } from './errors'
-import { compileSQL } from './sql-compiler'
+import {  compileSQL } from './sql-compiler'
 import {
   addTagToIndex,
   findRowsMatchingPattern,
@@ -22,6 +22,7 @@ import {
   removeTagFromIndex,
   tagMatchesPattern,
 } from './tag-index'
+import type {ColumnEncoder} from './sql-compiler';
 import type {
   MoveOutPattern,
   MoveTag,
@@ -347,6 +348,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   write,
   commit,
   collectionId,
+  encodeColumnName,
 }: {
   stream: ShapeStream<T>
   syncMode: ElectricSyncMode
@@ -359,17 +361,24 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }) => void
   commit: () => void
   collectionId?: string
+  /**
+   * Optional function to encode column names (e.g., camelCase to snake_case).
+   * This is typically the `encode` function from shapeOptions.columnMapper.
+   */
+  encodeColumnName?: ColumnEncoder
 }): DeduplicatedLoadSubset | null {
   // Eager mode doesn't need subset loading
   if (syncMode === `eager`) {
     return null
   }
 
+  const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
+
   const loadSubset = async (opts: LoadSubsetOptions) => {
     // In progressive mode, use fetchSnapshot during snapshot phase
     if (isBufferingInitialSync()) {
       // Progressive mode snapshot phase: fetch and apply immediately
-      const snapshotParams = compileSQL<T>(opts)
+      const snapshotParams = compileSQL<T>(opts, compileOptions)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
 
@@ -428,7 +437,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           orderBy,
           // No limit - get all ties
         }
-        const whereCurrentParams = compileSQL<T>(whereCurrentOpts)
+        const whereCurrentParams = compileSQL<T>(whereCurrentOpts, compileOptions)
         promises.push(stream.requestSnapshot(whereCurrentParams))
 
         debug(
@@ -442,7 +451,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           orderBy,
           limit,
         }
-        const whereFromParams = compileSQL<T>(whereFromOpts)
+        const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
         promises.push(stream.requestSnapshot(whereFromParams))
 
         debug(
@@ -453,7 +462,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         await Promise.all(promises)
       } else {
         // No cursor - standard single request
-        const snapshotParams = compileSQL<T>(opts)
+        const snapshotParams = compileSQL<T>(opts, compileOptions)
         await stream.requestSnapshot(snapshotParams)
       }
     }
@@ -1296,6 +1305,9 @@ function createElectricSync<T extends Row<unknown>>(
         write,
         commit,
         collectionId,
+        // Pass the columnMapper's encode function to transform column names
+        // (e.g., camelCase to snake_case) when compiling SQL for subset queries
+        encodeColumnName: shapeOptions.columnMapper?.encode,
       })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {

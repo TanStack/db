@@ -308,5 +308,120 @@ describe(`sql-compiler`, () => {
         expect(result.limit).toBe(10)
       })
     })
+
+    describe(`column name encoding (camelCase to snake_case)`, () => {
+      // Helper to simulate snakeCamelMapper's encode function
+      const camelToSnake = (str: string): string =>
+        str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+
+      it(`should encode column names in where clause when encoder is provided`, () => {
+        const result = compileSQL(
+          {
+            where: func(`eq`, [ref(`programTemplateId`), val(`uuid-123`)]),
+          },
+          { encodeColumnName: camelToSnake },
+        )
+        expect(result.where).toBe(`"program_template_id" = $1`)
+        expect(result.params).toEqual({ '1': `uuid-123` })
+      })
+
+      it(`should encode column names in compound where clauses`, () => {
+        const result = compileSQL(
+          {
+            where: func(`and`, [
+              func(`eq`, [ref(`programTemplateId`), val(`uuid-123`)]),
+              func(`gt`, [ref(`createdAt`), val(`2024-01-01`)]),
+            ]),
+          },
+          { encodeColumnName: camelToSnake },
+        )
+        expect(result.where).toBe(
+          `"program_template_id" = $1 AND "created_at" > $2`,
+        )
+        expect(result.params).toEqual({ '1': `uuid-123`, '2': `2024-01-01` })
+      })
+
+      it(`should encode column names in orderBy clause`, () => {
+        const result = compileSQL(
+          {
+            orderBy: [
+              {
+                expression: ref(`createdAt`),
+                compareOptions: { direction: `desc`, nulls: `last` },
+              },
+            ],
+          },
+          { encodeColumnName: camelToSnake },
+        )
+        expect(result.orderBy).toBe(`"created_at" DESC NULLS LAST`)
+      })
+
+      it(`should encode column names in isNull expressions`, () => {
+        const result = compileSQL(
+          {
+            where: func(`isNull`, [ref(`deletedAt`)]),
+          },
+          { encodeColumnName: camelToSnake },
+        )
+        expect(result.where).toBe(`"deleted_at" IS NULL`)
+      })
+
+      it(`should encode column names in NOT isNull expressions`, () => {
+        const result = compileSQL(
+          {
+            where: func(`not`, [func(`isNull`, [ref(`archivedAt`)])]),
+          },
+          { encodeColumnName: camelToSnake },
+        )
+        expect(result.where).toBe(`"archived_at" IS NOT NULL`)
+      })
+
+      it(`should not transform column names when no encoder is provided`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [ref(`programTemplateId`), val(`uuid-123`)]),
+        })
+        // Without encoder, camelCase name is preserved
+        expect(result.where).toBe(`"programTemplateId" = $1`)
+      })
+
+      it(`should handle complex nested expressions with encoding`, () => {
+        const result = compileSQL(
+          {
+            where: func(`and`, [
+              func(`eq`, [ref(`userId`), val(`user-1`)]),
+              func(`or`, [
+                func(`eq`, [ref(`accountType`), val(`premium`)]),
+                func(`gte`, [ref(`totalSpend`), val(1000)]),
+              ]),
+            ]),
+          },
+          { encodeColumnName: camelToSnake },
+        )
+        expect(result.where).toBe(
+          `"user_id" = $1 AND "account_type" = $2 OR "total_spend" >= $3`,
+        )
+      })
+
+      it(`should encode column names in LIKE expressions`, () => {
+        const result = compileSQL(
+          {
+            where: func(`ilike`, [ref(`firstName`), val(`%john%`)]),
+          },
+          { encodeColumnName: camelToSnake },
+        )
+        expect(result.where).toBe(`"first_name" ILIKE $1`)
+      })
+
+      it(`should work with already snake_case names (identity transform)`, () => {
+        const result = compileSQL(
+          {
+            where: func(`eq`, [ref(`user_id`), val(`123`)]),
+          },
+          { encodeColumnName: camelToSnake },
+        )
+        // snake_case input remains snake_case
+        expect(result.where).toBe(`"user_id" = $1`)
+      })
+    })
   })
 })
