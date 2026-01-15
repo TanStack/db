@@ -12,10 +12,10 @@
     "@tanstack/offline-transactions": "^1.0.10",
     "@tanstack/query-db-collection": "^1.0.16",
     "@tanstack/react-db": "^0.1.64",
-    "@tanstack/react-query": "^5.90.16",
-    "@tanstack/react-router": "^1.144.0",
-    "@tanstack/react-router-devtools": "^1.144.0",
-    "@tanstack/react-start": "^1.145.5",
+    "@tanstack/react-query": "^5.90.17",
+    "@tanstack/react-router": "^1.150.0",
+    "@tanstack/react-router-devtools": "^1.150.0",
+    "@tanstack/react-start": "^1.150.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "tailwind-merge": "^2.6.0",
@@ -24,13 +24,13 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^24.6.2",
-    "@types/react": "^19.2.7",
+    "@types/react": "^19.2.8",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
     "chokidar": "^4.0.3",
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.2",
-    "vite": "^7.3.0",
+    "vite": "^7.3.1",
     "vite-tsconfig-paths": "^5.1.4"
   }
 }
