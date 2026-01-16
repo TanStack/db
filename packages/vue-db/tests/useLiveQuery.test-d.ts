@@ -132,6 +132,8 @@ describe(`useLiveQuery type assertions`, () => {
     )
 
     // Regular queries should return an array
-    expectTypeOf(data.value).toEqualTypeOf<Array<{ id: string; name: string }>>()
+    expectTypeOf(data.value).toEqualTypeOf<
+      Array<{ id: string; name: string }>
+    >()
   })
 })

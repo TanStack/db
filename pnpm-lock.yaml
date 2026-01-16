@@ -1020,6 +1020,9 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      uuid:
+        specifier: ^13.0.0
+        version: 13.0.0
 
   packages/vue-db:
     dependencies:
