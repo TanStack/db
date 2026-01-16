@@ -68,6 +68,28 @@ describe(`sql-compiler`, () => {
         expect(result.where).toBe(`"rating" <= $1`)
         expect(result.params).toEqual({ '1': `5` })
       })
+
+      it(`should compile eq with empty string value`, () => {
+        // Empty strings are valid query values and should NOT be treated as null
+        const result = compileSQL({
+          where: func(`eq`, [ref(`status`), val(``)]),
+        })
+        expect(result.where).toBe(`"status" = $1`)
+        // Empty string should be included in params, not filtered out
+        expect(result.params).toEqual({ '1': `` })
+      })
+
+      it(`should compile eq with empty string in AND clause`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`eq`, [ref(`projectId`), val(`uuid-123`)]),
+            func(`eq`, [ref(`status`), val(``)]),
+          ]),
+        })
+        expect(result.where).toBe(`"projectId" = $1 AND "status" = $2`)
+        // Both params should be present, including the empty string
+        expect(result.params).toEqual({ '1': `uuid-123`, '2': `` })
+      })
     })
 
     describe(`compound where clauses`, () => {
