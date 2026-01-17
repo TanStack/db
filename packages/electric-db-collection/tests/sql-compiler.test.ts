@@ -68,6 +68,54 @@ describe(`sql-compiler`, () => {
         expect(result.where).toBe(`"rating" <= $1`)
         expect(result.params).toEqual({ '1': `5` })
       })
+
+      // Regression test for https://github.com/TanStack/db/issues/1147
+      it(`should compile eq with empty string value`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [ref(`status`), val(``)]),
+        })
+        expect(result.where).toBe(`"status" = $1`)
+        expect(result.params).toEqual({ '1': `` })
+      })
+
+      it(`should compile eq with empty string in AND clause`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`eq`, [ref(`projectId`), val(`uuid-123`)]),
+            func(`eq`, [ref(`status`), val(``)]),
+          ]),
+        })
+        expect(result.where).toBe(`"projectId" = $1 AND "status" = $2`)
+        expect(result.params).toEqual({ '1': `uuid-123`, '2': `` })
+      })
+
+      it(`should handle multiple empty strings with correct param indices`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`eq`, [ref(`field1`), val(``)]),
+            func(`eq`, [ref(`field2`), val(``)]),
+          ]),
+        })
+        expect(result.where).toBe(`"field1" = $1 AND "field2" = $2`)
+        // Both empty strings should be present with correct indices
+        expect(result.params).toEqual({ '1': ``, '2': `` })
+      })
+
+      it(`should compile like with empty string pattern`, () => {
+        const result = compileSQL({
+          where: func(`like`, [ref(`description`), val(``)]),
+        })
+        expect(result.where).toBe(`"description" LIKE $1`)
+        expect(result.params).toEqual({ '1': `` })
+      })
+
+      it(`should compile ilike with empty string pattern`, () => {
+        const result = compileSQL({
+          where: func(`ilike`, [ref(`title`), val(``)]),
+        })
+        expect(result.where).toBe(`"title" ILIKE $1`)
+        expect(result.params).toEqual({ '1': `` })
+      })
     })
 
     describe(`compound where clauses`, () => {
