@@ -378,6 +378,23 @@ export class InvalidSourceTypeError extends QueryBuilderError {
   }
 }
 
+export class UnionKeyConflictError extends TanStackDBError {
+  constructor(
+    unionId: string,
+    key: string | number,
+    existingCollectionId: string,
+    incomingCollectionId: string,
+  ) {
+    super(
+      `Union "${unionId}" cannot merge key "${String(
+        key,
+      )}" from collection "${incomingCollectionId}" because it already exists in "${existingCollectionId}". ` +
+        `Ensure union sources have unique keys or handle duplicates before unioning.`,
+    )
+    this.name = `UnionKeyConflictError`
+  }
+}
+
 export class JoinConditionMustBeEqualityError extends QueryBuilderError {
   constructor() {
     super(`Join condition must be an equality expression`)
