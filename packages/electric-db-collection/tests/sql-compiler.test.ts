@@ -90,6 +90,31 @@ describe(`sql-compiler`, () => {
         // Both params should be present, including the empty string
         expect(result.params).toEqual({ '1': `uuid-123`, '2': `` })
       })
+
+      // Regression test for https://github.com/TanStack/db/issues/1147
+      it(`should include empty string param for host_id query (issue #1147)`, () => {
+        // This was the exact reproduction case from the bug report:
+        // useLiveQuery((q) => q.from({ sessions }).where(({ sessions }) => eq(sessions.host_id, '')))
+        const result = compileSQL({
+          where: func(`eq`, [ref(`host_id`), val(``)]),
+        })
+        // Before fix: params was {} with $1 placeholder - broken query
+        // After fix: params correctly includes the empty string
+        expect(result.where).toBe(`"host_id" = $1`)
+        expect(result.params).toEqual({ '1': `` })
+      })
+
+      it(`should handle multiple empty strings with correct param indices`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`eq`, [ref(`field1`), val(``)]),
+            func(`eq`, [ref(`field2`), val(``)]),
+          ]),
+        })
+        expect(result.where).toBe(`"field1" = $1 AND "field2" = $2`)
+        // Both empty strings should be present with correct indices
+        expect(result.params).toEqual({ '1': ``, '2': `` })
+      })
     })
 
     describe(`compound where clauses`, () => {
