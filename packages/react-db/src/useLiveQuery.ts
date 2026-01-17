@@ -350,6 +350,21 @@ export function useLiveQuery(
 
   if (needsNewCollection) {
     if (isCollection) {
+      // Warn when passing a collection directly with on-demand sync mode
+      // In on-demand mode, data is only loaded when queries with predicates request it
+      // Passing the collection directly doesn't provide any predicates, so no data loads
+      const syncMode = (
+        configOrQueryOrCollection as { config?: { syncMode?: string } }
+      ).config?.syncMode
+      if (syncMode === `on-demand`) {
+        console.warn(
+          `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
+            `will not load any data. In on-demand mode, data is only loaded when queries with predicates request it.\n\n` +
+            `Instead, use a query builder function:\n` +
+            `  const { data } = useLiveQuery((q) => q.from({ c: myCollection }).select(({ c }) => c))\n\n` +
+            `Or switch to syncMode "eager" if you want all data to sync automatically.`,
+        )
+      }
       // It's already a collection, ensure sync is started for React hooks
       configOrQueryOrCollection.startSyncImmediate()
       collectionRef.current = configOrQueryOrCollection

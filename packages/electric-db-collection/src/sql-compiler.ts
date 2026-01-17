@@ -6,8 +6,30 @@ export type CompiledSqlRecord = Omit<SubsetParams, `params`> & {
   params?: Array<unknown>
 }
 
-export function compileSQL<T>(options: LoadSubsetOptions): SubsetParams {
+/**
+ * Optional function to encode column names (e.g., camelCase to snake_case)
+ * This is typically the `encode` function from a columnMapper
+ */
+export type ColumnEncoder = (columnName: string) => string
+
+/**
+ * Options for SQL compilation
+ */
+export interface CompileSQLOptions {
+  /**
+   * Optional function to encode column names before quoting.
+   * Used to transform property names (e.g., camelCase) to database column names (e.g., snake_case).
+   * This should be the `encode` function from shapeOptions.columnMapper.
+   */
+  encodeColumnName?: ColumnEncoder
+}
+
+export function compileSQL<T>(
+  options: LoadSubsetOptions,
+  compileOptions?: CompileSQLOptions,
+): SubsetParams {
   const { where, orderBy, limit } = options
+  const encodeColumnName = compileOptions?.encodeColumnName
 
   const params: Array<T> = []
   const compiledSQL: CompiledSqlRecord = { params }
@@ -15,11 +37,11 @@ export function compileSQL<T>(options: LoadSubsetOptions): SubsetParams {
   if (where) {
     // TODO: this only works when the where expression's PropRefs directly reference a column of the collection
     //       doesn't work if it goes through aliases because then we need to know the entire query to be able to follow the reference until the base collection (cf. followRef function)
-    compiledSQL.where = compileBasicExpression(where, params)
+    compiledSQL.where = compileBasicExpression(where, params, encodeColumnName)
   }
 
   if (orderBy) {
-    compiledSQL.orderBy = compileOrderBy(orderBy, params)
+    compiledSQL.orderBy = compileOrderBy(orderBy, params, encodeColumnName)
   }
 
   if (limit) {
@@ -58,21 +80,28 @@ export function compileSQL<T>(options: LoadSubsetOptions): SubsetParams {
  * Quote PostgreSQL identifiers to handle mixed case column names correctly.
  * Electric/Postgres requires quotes for case-sensitive identifiers.
  * @param name - The identifier to quote
+ * @param encodeColumnName - Optional function to encode the column name before quoting (e.g., camelCase to snake_case)
  * @returns The quoted identifier
  */
-function quoteIdentifier(name: string): string {
-  return `"${name}"`
+function quoteIdentifier(
+  name: string,
+  encodeColumnName?: ColumnEncoder,
+): string {
+  const columnName = encodeColumnName ? encodeColumnName(name) : name
+  return `"${columnName}"`
 }
 
 /**
  * Compiles the expression to a SQL string and mutates the params array with the values.
  * @param exp - The expression to compile
  * @param params - The params array
+ * @param encodeColumnName - Optional function to encode column names (e.g., camelCase to snake_case)
  * @returns The compiled SQL string
  */
 function compileBasicExpression(
   exp: IR.BasicExpression<unknown>,
   params: Array<unknown>,
+  encodeColumnName?: ColumnEncoder,
 ): string {
   switch (exp.type) {
     case `val`:
@@ -85,17 +114,21 @@ function compileBasicExpression(
           `Compiler can't handle nested properties: ${exp.path.join(`.`)}`,
         )
       }
-      return quoteIdentifier(exp.path[0]!)
+      return quoteIdentifier(exp.path[0]!, encodeColumnName)
     case `func`:
-      return compileFunction(exp, params)
+      return compileFunction(exp, params, encodeColumnName)
     default:
       throw new Error(`Unknown expression type`)
   }
 }
 
-function compileOrderBy(orderBy: IR.OrderBy, params: Array<unknown>): string {
+function compileOrderBy(
+  orderBy: IR.OrderBy,
+  params: Array<unknown>,
+  encodeColumnName?: ColumnEncoder,
+): string {
   const compiledOrderByClauses = orderBy.map((clause: IR.OrderByClause) =>
-    compileOrderByClause(clause, params),
+    compileOrderByClause(clause, params, encodeColumnName),
   )
   return compiledOrderByClauses.join(`,`)
 }
@@ -103,11 +136,12 @@ function compileOrderBy(orderBy: IR.OrderBy, params: Array<unknown>): string {
 function compileOrderByClause(
   clause: IR.OrderByClause,
   params: Array<unknown>,
+  encodeColumnName?: ColumnEncoder,
 ): string {
   // FIXME: We should handle stringSort and locale.
   //        Correctly supporting them is tricky as it depends on Postgres' collation
   const { expression, compareOptions } = clause
-  let sql = compileBasicExpression(expression, params)
+  let sql = compileBasicExpression(expression, params, encodeColumnName)
 
   if (compareOptions.direction === `desc`) {
     sql = `${sql} DESC`
@@ -134,6 +168,7 @@ function isNullValue(exp: IR.BasicExpression<unknown>): boolean {
 function compileFunction(
   exp: IR.Func<unknown>,
   params: Array<unknown> = [],
+  encodeColumnName?: ColumnEncoder,
 ): string {
   const { name, args } = exp
 
@@ -160,7 +195,7 @@ function compileFunction(
   }
 
   const compiledArgs = args.map((arg: IR.BasicExpression) =>
-    compileBasicExpression(arg, params),
+    compileBasicExpression(arg, params, encodeColumnName),
   )
 
   // Special case for IS NULL / IS NOT NULL - these are postfix operators
@@ -181,7 +216,11 @@ function compileFunction(
     if (arg && arg.type === `func`) {
       const funcArg = arg
       if (funcArg.name === `isNull` || funcArg.name === `isUndefined`) {
-        const innerArg = compileBasicExpression(funcArg.args[0]!, params)
+        const innerArg = compileBasicExpression(
+          funcArg.args[0]!,
+          params,
+          encodeColumnName,
+        )
         return `${innerArg} IS NOT NULL`
       }
     }
@@ -270,7 +309,11 @@ function compileFunction(
         params.pop() // remove LHS (boolean)
 
         // Recompile RHS to get fresh param
-        const rhsCompiled = compileBasicExpression(rhsArg!, params)
+        const rhsCompiled = compileBasicExpression(
+          rhsArg!,
+          params,
+          encodeColumnName,
+        )
 
         // Transform: flip the comparison (val op col → col flipped_op val)
         if (name === `lt`) {
