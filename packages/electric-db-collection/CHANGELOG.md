@@ -1,5 +1,11 @@
 # @tanstack/electric-db-collection
 
+## 0.2.25
+
+### Patch Changes
+
+- Fix empty string values being incorrectly omitted from SQL query params. Queries like `eq(column, '')` now correctly include the empty string parameter instead of producing a malformed query with a missing `$1` value. ([#1146](https://github.com/TanStack/db/pull/1146))
+
 ## 0.2.24
 
 ### Patch Changes
