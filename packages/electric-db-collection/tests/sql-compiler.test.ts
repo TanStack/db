@@ -115,6 +115,22 @@ describe(`sql-compiler`, () => {
         // Both empty strings should be present with correct indices
         expect(result.params).toEqual({ '1': ``, '2': `` })
       })
+
+      it(`should compile like with empty string pattern`, () => {
+        const result = compileSQL({
+          where: func(`like`, [ref(`description`), val(``)]),
+        })
+        expect(result.where).toBe(`"description" LIKE $1`)
+        expect(result.params).toEqual({ '1': `` })
+      })
+
+      it(`should compile ilike with empty string pattern`, () => {
+        const result = compileSQL({
+          where: func(`ilike`, [ref(`title`), val(``)]),
+        })
+        expect(result.where).toBe(`"title" ILIKE $1`)
+        expect(result.params).toEqual({ '1': `` })
+      })
     })
 
     describe(`compound where clauses`, () => {
