@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 Add `subtract`, `multiply`, and `divide` math functions for computed columns
@@ -14,9 +14,10 @@ const ranked = createLiveQueryCollection((q) =>
   q
     .from({ r: recipesCollection })
     .orderBy(
-      ({ r }) => subtract(multiply(r.rating, r.timesMade), divide(r.ageInMs, 86400000)),
-      'desc'
-    )
+      ({ r }) =>
+        subtract(multiply(r.rating, r.timesMade), divide(r.ageInMs, 86400000)),
+      'desc',
+    ),
 )
 ```
 
