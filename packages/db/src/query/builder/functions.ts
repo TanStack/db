@@ -302,6 +302,36 @@ export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   ]) as BinaryNumericReturnType<T1, T2>
 }
 
+export function subtract<T1 extends ExpressionLike, T2 extends ExpressionLike>(
+  left: T1,
+  right: T2,
+): BinaryNumericReturnType<T1, T2> {
+  return new Func(`subtract`, [
+    toExpression(left),
+    toExpression(right),
+  ]) as BinaryNumericReturnType<T1, T2>
+}
+
+export function multiply<T1 extends ExpressionLike, T2 extends ExpressionLike>(
+  left: T1,
+  right: T2,
+): BinaryNumericReturnType<T1, T2> {
+  return new Func(`multiply`, [
+    toExpression(left),
+    toExpression(right),
+  ]) as BinaryNumericReturnType<T1, T2>
+}
+
+export function divide<T1 extends ExpressionLike, T2 extends ExpressionLike>(
+  left: T1,
+  right: T2,
+): BinaryNumericReturnType<T1, T2> {
+  return new Func(`divide`, [
+    toExpression(left),
+    toExpression(right),
+  ]) as BinaryNumericReturnType<T1, T2>
+}
+
 // Aggregates
 
 export function count(arg: ExpressionLike): Aggregate<number> {
@@ -365,6 +395,9 @@ export const operators = [
   `concat`,
   // Numeric functions
   `add`,
+  `subtract`,
+  `multiply`,
+  `divide`,
   // Utility functions
   `coalesce`,
   // Aggregate functions

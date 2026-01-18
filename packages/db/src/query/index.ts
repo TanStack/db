@@ -37,6 +37,9 @@ export {
   concat,
   coalesce,
   add,
+  subtract,
+  multiply,
+  divide,
   // Aggregates
   count,
   avg,
