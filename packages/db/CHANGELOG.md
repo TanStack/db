@@ -1,5 +1,12 @@
 # @tanstack/db
 
+## 0.5.20
+
+### Patch Changes
+
+- Updated dependencies [[`f5b504e`](https://github.com/TanStack/db/commit/f5b504e6d105034d23cb2ae27782e8cba0094cbe)]:
+  - @tanstack/db-ivm@0.1.16
+
 ## 0.5.19
 
 ### Patch Changes

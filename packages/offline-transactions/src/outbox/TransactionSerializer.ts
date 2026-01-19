@@ -24,37 +24,29 @@ export class TransactionSerializer {
   serialize(transaction: OfflineTransaction): string {
     const serialized: SerializedOfflineTransaction = {
       ...transaction,
-      createdAt: transaction.createdAt,
+      createdAt: transaction.createdAt.toISOString(),
       mutations: transaction.mutations.map((mutation) =>
         this.serializeMutation(mutation),
       ),
     }
-    // Convert the whole object to JSON, handling dates
-    return JSON.stringify(serialized, (_key, value) => {
-      if (value instanceof Date) {
-        return value.toISOString()
-      }
-      return value
-    })
+    return JSON.stringify(serialized)
   }
 
   deserialize(data: string): OfflineTransaction {
-    const parsed: SerializedOfflineTransaction = JSON.parse(
-      data,
-      (_key, value) => {
-        // Parse ISO date strings back to Date objects
-        if (
-          typeof value === `string` &&
-          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(value)
-        ) {
-          return new Date(value)
-        }
-        return value
-      },
-    )
+    // Parse without a reviver - let deserializeValue handle dates in mutation data
+    // using the { __type: 'Date' } marker system
+    const parsed: SerializedOfflineTransaction = JSON.parse(data)
+
+    const createdAt = new Date(parsed.createdAt)
+    if (isNaN(createdAt.getTime())) {
+      throw new Error(
+        `Failed to deserialize transaction: invalid createdAt value "${parsed.createdAt}"`,
+      )
+    }
 
     return {
       ...parsed,
+      createdAt,
       mutations: parsed.mutations.map((mutationData) =>
         this.deserializeMutation(mutationData),
       ),
@@ -92,8 +84,7 @@ export class TransactionSerializer {
       type: data.type as any,
       modified: this.deserializeValue(data.modified),
       original: this.deserializeValue(data.original),
-      changes:
-        data.changes !== undefined ? this.deserializeValue(data.changes) : {},
+      changes: this.deserializeValue(data.changes) ?? {},
       collection,
       // These fields would need to be reconstructed by the executor
       mutationId: ``, // Will be regenerated
@@ -134,7 +125,16 @@ export class TransactionSerializer {
     }
 
     if (typeof value === `object` && value.__type === `Date`) {
-      return new Date(value.value)
+      if (value.value === undefined || value.value === null) {
+        throw new Error(`Corrupted Date marker: missing value field`)
+      }
+      const date = new Date(value.value)
+      if (isNaN(date.getTime())) {
+        throw new Error(
+          `Failed to deserialize Date marker: invalid date value "${value.value}"`,
+        )
+      }
+      return date
     }
 
     if (typeof value === `object`) {

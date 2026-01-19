@@ -1,5 +1,18 @@
 # @tanstack/query-db-collection
 
+## 1.0.17
+
+### Patch Changes
+
+- Fix refetch such that it returns the query observer results instead of undefined. ([#1132](https://github.com/TanStack/db/pull/1132))
+
+## 1.0.16
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
 ## 1.0.15
 
 ### Patch Changes
