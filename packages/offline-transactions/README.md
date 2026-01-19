@@ -39,16 +39,19 @@ This package provides platform-specific implementations for web and React Native
 Using offline transactions on web and React Native/Expo is identical except for the import. Choose the appropriate import based on your target platform:
 
 **Web:**
+
 ```typescript
 import { startOfflineExecutor } from '@tanstack/offline-transactions'
 ```
 
 **React Native / Expo:**
+
 ```typescript
 import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
 ```
 
 **Usage (same for both platforms):**
+
 ```typescript
 // Setup offline executor
 const offline = startOfflineExecutor({
