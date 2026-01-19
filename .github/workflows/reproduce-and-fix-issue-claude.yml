@@ -7,8 +7,10 @@ on:
 jobs:
   claude_auto_issue_fix:
     # Only run when a maintainer comments with /reproduce on an issue
+    # Exclude Claude's own comments to prevent recursive triggers
     if: |
       github.event.issue != null &&
+      github.actor != 'claude[bot]' &&
       contains(github.event.comment.body, '/reproduce') &&
       (github.event.comment.user.login == 'kevin-dp' || github.event.comment.user.login == 'KyleAMathews' || github.event.comment.user.login == 'samwillis')
     runs-on: ubuntu-latest
@@ -22,6 +24,7 @@ jobs:
       pull-requests: write
       issues: write
       id-token: write
+      actions: read
 
     steps:
       - name: Checkout code
@@ -33,6 +36,9 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --model claude-opus-4-5
+            --allowedTools Bash,Edit,Read,Write
           prompt: |
             You are an autonomous coding agent running in CI for this repository.
             This workflow runs when a maintainer requests issue analysis by commenting "/reproduce" on an issue.
