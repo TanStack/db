@@ -448,10 +448,10 @@ export class CollectionStateManager<
       (acc, t) => {
         if (t.committed) {
           acc.committedSyncedTransactions.push(t)
-          if (t.truncate === true) {
+          if (t.truncate) {
             acc.hasTruncateSync = true
           }
-          if (t.immediate === true) {
+          if (t.immediate) {
             acc.hasImmediateSync = true
           }
         } else {
