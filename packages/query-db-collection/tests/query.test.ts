@@ -5059,8 +5059,7 @@ describe(`QueryCollection`, () => {
       const collection = createCollection(options)
 
       const query1 = createLiveQueryCollection({
-        query: (q) =>
-          q.from({ item: collection }).select(({ item }) => item),
+        query: (q) => q.from({ item: collection }).select(({ item }) => item),
       })
 
       await query1.preload()
@@ -5079,8 +5078,7 @@ describe(`QueryCollection`, () => {
       await flushPromises()
 
       const query2 = createLiveQueryCollection({
-        query: (q) =>
-          q.from({ item: collection }).select(({ item }) => item),
+        query: (q) => q.from({ item: collection }).select(({ item }) => item),
       })
 
       await query2.preload()
