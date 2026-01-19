@@ -4850,10 +4850,10 @@ describe(`QueryCollection`, () => {
     })
   })
 
-  describe(`On-demand collection directWrite cache update (issue #1152)`, () => {
+  describe(`On-demand collection directWrite cache update`, () => {
     it(`should update query cache for all active query keys when using writeUpdate with computed queryKey`, async () => {
-      // Issue #1152: writeUpdate on on-demand collections with computed query keys
-      // updates the wrong cache key, causing data loss on remount
+      // Ensures writeUpdate on on-demand collections with computed query keys
+      // updates all active cache keys to prevent data loss on remount
 
       const items: Array<CategorisedItem> = [
         { id: `1`, name: `Item 1`, category: `A` },
@@ -4946,7 +4946,7 @@ describe(`QueryCollection`, () => {
     })
 
     it(`should update query cache for static queryKey with where clause in on-demand mode`, async () => {
-      // Issue #1152 scenario 1: static queryKey + on-demand mode + where clause
+      // Scenario: static queryKey + on-demand mode + where clause
       // The where clause causes a computed query key to be generated
 
       const items: Array<CategorisedItem> = [
@@ -5025,7 +5025,7 @@ describe(`QueryCollection`, () => {
     })
 
     it(`should update query cache for function queryKey that returns constant value in on-demand mode`, async () => {
-      // Issue #1152 scenario 2: function queryKey that returns same value
+      // Scenario: function queryKey that returns same value
       // This creates an undefined entry in the cache
 
       const items: Array<TestItem> = [
