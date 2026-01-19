@@ -1,5 +1,25 @@
 # @tanstack/db
 
+## 0.5.20
+
+### Patch Changes
+
+- Updated dependencies [[`f5b504e`](https://github.com/TanStack/db/commit/f5b504e6d105034d23cb2ae27782e8cba0094cbe)]:
+  - @tanstack/db-ivm@0.1.16
+
+## 0.5.19
+
+### Patch Changes
+
+- Fix `isReady()` returning `true` while `toArray()` returns empty results. The status now correctly waits until data has been processed through the graph before marking ready. ([#1114](https://github.com/TanStack/db/pull/1114))
+
+  Also fix duplicate key errors when live queries use joins with custom `getKey` functions. D2's incremental join can produce multiple outputs for the same key during a single graph run; this change batches all outputs into a single transaction to prevent conflicts.
+
+- Introduce $selected namespace for accessing fields from SELECT clause inside ORDER BY and HAVING clauses. ([#1094](https://github.com/TanStack/db/pull/1094))
+
+- Updated dependencies [[`2456adb`](https://github.com/TanStack/db/commit/2456adbdb78b01d3f7323b3a0405b25f578df956)]:
+  - @tanstack/db-ivm@0.1.15
+
 ## 0.5.18
 
 ### Patch Changes

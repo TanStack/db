@@ -2296,10 +2296,11 @@ describe(`createLiveQueryCollection`, () => {
           .limit(10),
       )
 
-      // Trigger sync which will call loadSubset
-      await liveQueryCollection.preload()
+      // Start preload (don't await yet - it won't resolve until loadSubset completes)
+      const preloadPromise = liveQueryCollection.preload()
       await flushPromises()
 
+      // Verify loadSubset was called with the correct options
       expect(capturedOptions.length).toBeGreaterThan(0)
 
       // Find the call that has orderBy (the limited snapshot request)
@@ -2311,8 +2312,10 @@ describe(`createLiveQueryCollection`, () => {
       expect(callWithOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
       expect(callWithOrderBy?.limit).toBe(10)
 
+      // Resolve the loadSubset promise so preload can complete
       resolveLoadSubset!()
       await flushPromises()
+      await preloadPromise
     })
 
     it(`passes multiple orderBy columns to loadSubset when using limit`, async () => {
@@ -2353,10 +2356,11 @@ describe(`createLiveQueryCollection`, () => {
           .limit(10),
       )
 
-      // Trigger sync which will call loadSubset
-      await liveQueryCollection.preload()
+      // Start preload (don't await yet - it won't resolve until loadSubset completes)
+      const preloadPromise = liveQueryCollection.preload()
       await flushPromises()
 
+      // Verify loadSubset was called with the correct options
       expect(capturedOptions.length).toBeGreaterThan(0)
 
       // Find the call that has orderBy with multiple columns
@@ -2372,8 +2376,10 @@ describe(`createLiveQueryCollection`, () => {
       expect(callWithMultiOrderBy?.orderBy?.[1]?.expression.type).toBe(`ref`)
       expect(callWithMultiOrderBy?.limit).toBe(10)
 
+      // Resolve the loadSubset promise so preload can complete
       resolveLoadSubset!()
       await flushPromises()
+      await preloadPromise
     })
   })
 })
