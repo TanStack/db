@@ -1,5 +1,18 @@
 # @tanstack/offline-transactions
 
+## 1.0.11
+
+### Patch Changes
+
+- Fix date field corruption after app restart. String values matching ISO date format were incorrectly converted to Date objects during deserialization, corrupting user data. Now only explicit Date markers are converted, preserving string values intact. ([#1127](https://github.com/TanStack/db/pull/1127))
+
+- Fix mutation.changes field being lost during offline transaction serialization. Previously, the changes field was not included in serialized mutations, causing it to be empty ({}) after app restart. This led to sync functions receiving incomplete data when using mutation.changes for partial updates. ([#1124](https://github.com/TanStack/db/pull/1124))
+
+- Introduce specialized OnlineDetector for React Native ([#1137](https://github.com/TanStack/db/pull/1137))
+
+- Updated dependencies [[`6745ed0`](https://github.com/TanStack/db/commit/6745ed003dc25cfd6fa0f7e60f708205a6069ff2), [`1b22e40`](https://github.com/TanStack/db/commit/1b22e40c56323cfa5e7f759272fed53320aa32f7), [`7a2cacd`](https://github.com/TanStack/db/commit/7a2cacd7a426530cb77844a8c2680f6b06e9ce2f), [`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db@0.5.21
+
 ## 1.0.10
 
 ### Patch Changes
