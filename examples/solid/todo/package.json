@@ -3,9 +3,9 @@
   "private": true,
   "version": "0.0.34",
   "dependencies": {
-    "@tanstack/electric-db-collection": "^0.2.24",
+    "@tanstack/electric-db-collection": "^0.2.25",
     "@tanstack/query-core": "^5.90.16",
-    "@tanstack/query-db-collection": "^1.0.16",
+    "@tanstack/query-db-collection": "^1.0.17",
     "@tanstack/solid-db": "^0.2.0",
     "@tanstack/solid-router": "^1.144.0",
     "@tanstack/solid-start": "^1.145.5",

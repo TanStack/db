@@ -275,8 +275,8 @@ importers:
         specifier: ^1.0.10
         version: 1.0.10(typescript@5.9.3)
       '@tanstack/query-db-collection':
-        specifier: ^1.0.16
-        version: 1.0.16(@tanstack/query-core@5.90.16)(typescript@5.9.3)
+        specifier: ^1.0.17
+        version: 1.0.17(@tanstack/query-core@5.90.16)(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.64
         version: 0.1.64(react@19.2.3)(typescript@5.9.3)
@@ -379,8 +379,8 @@ importers:
         specifier: ^5.90.16
         version: 5.90.16
       '@tanstack/query-db-collection':
-        specifier: ^1.0.16
-        version: 1.0.16(@tanstack/query-core@5.90.16)(typescript@5.9.3)
+        specifier: ^1.0.17
+        version: 1.0.17(@tanstack/query-core@5.90.16)(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.64
         version: 0.1.64(react@19.2.3)(typescript@5.9.3)
@@ -512,14 +512,14 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.2.24
-        version: 0.2.24(typescript@5.9.3)
+        specifier: ^0.2.25
+        version: 0.2.25(typescript@5.9.3)
       '@tanstack/query-core':
         specifier: ^5.90.16
         version: 5.90.16
       '@tanstack/query-db-collection':
-        specifier: ^1.0.16
-        version: 1.0.16(@tanstack/query-core@5.90.16)(typescript@5.9.3)
+        specifier: ^1.0.17
+        version: 1.0.17(@tanstack/query-core@5.90.16)(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.64
         version: 0.1.64(react@19.2.3)(typescript@5.9.3)
@@ -633,14 +633,14 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.2.24
-        version: 0.2.24(typescript@5.9.3)
+        specifier: ^0.2.25
+        version: 0.2.25(typescript@5.9.3)
       '@tanstack/query-core':
         specifier: ^5.90.16
         version: 5.90.16
       '@tanstack/query-db-collection':
-        specifier: ^1.0.16
-        version: 1.0.16(@tanstack/query-core@5.90.16)(typescript@5.9.3)
+        specifier: ^1.0.17
+        version: 1.0.17(@tanstack/query-core@5.90.16)(typescript@5.9.3)
       '@tanstack/solid-db':
         specifier: ^0.2.0
         version: 0.2.0(solid-js@1.9.10)(typescript@5.9.3)
@@ -4591,8 +4591,8 @@ packages:
     peerDependencies:
       typescript: '>=4.7'
 
-  '@tanstack/electric-db-collection@0.2.24':
-    resolution: {integrity: sha512-Zp758uXGAMW4D45WMAf38tilun8F5iI06G75sCT7nkqZI4gyi4t/j44FaslLjiFQrZ4VspY5YFuBGk9Iy+Ph0w==}
+  '@tanstack/electric-db-collection@0.2.25':
+    resolution: {integrity: sha512-eqR+vYUbLlWlOgZnxTe3NxP1GY0MCE3q7DR6l/XMhzzjcM70j99O+aQWybwv067uhTehjssrk6GeGZHIDjXjYw==}
 
   '@tanstack/eslint-config@0.3.3':
     resolution: {integrity: sha512-8VFyAaIFV9onJcfc5yVj5WWl6DmN3W4m+t0Mb+nZrQmqHy+kDndw5O5Xv2BHVWRRPTqnhlJYh6wHWGh0R81ZzQ==}
@@ -4622,8 +4622,8 @@ packages:
   '@tanstack/query-core@5.90.16':
     resolution: {integrity: sha512-MvtWckSVufs/ja463/K4PyJeqT+HMlJWtw6PrCpywznd2NSgO3m4KwO9RqbFqGg6iDE8vVMFWMeQI4Io3eEYww==}
 
-  '@tanstack/query-db-collection@1.0.16':
-    resolution: {integrity: sha512-9LSmsojCmQr7UoKD8M4eoV6oZ0vV66A22BFAysw/D1jsJV28w255lnrE+CzrOF0trALWk2F/yW8Np+s6u7Jbtg==}
+  '@tanstack/query-db-collection@1.0.17':
+    resolution: {integrity: sha512-5+1aVI1/+0KJH+r46RWgj2pSHjXtf3MWJ3m04xhsakEuazqZ+xBKdTdmtnMqIdmpZbrXkT96WuXpSqI65hyEPg==}
     peerDependencies:
       '@tanstack/query-core': ^5.0.0
       typescript: '>=4.7'
@@ -14086,7 +14086,7 @@ snapshots:
   '@react-native/codegen@0.83.1(@babel/core@7.28.5)':
     dependencies:
       '@babel/core': 7.28.5
-      '@babel/parser': 7.28.5
+      '@babel/parser': 7.28.6
       glob: 7.2.3
       hermes-parser: 0.32.0
       invariant: 2.2.4
@@ -14810,7 +14810,7 @@ snapshots:
       '@tanstack/pacer-lite': 0.2.0
       typescript: 5.9.3
 
-  '@tanstack/electric-db-collection@0.2.24(typescript@5.9.3)':
+  '@tanstack/electric-db-collection@0.2.25(typescript@5.9.3)':
     dependencies:
       '@electric-sql/client': 1.3.1
       '@standard-schema/spec': 1.1.0
@@ -14874,7 +14874,7 @@ snapshots:
 
   '@tanstack/query-core@5.90.16': {}
 
-  '@tanstack/query-db-collection@1.0.16(@tanstack/query-core@5.90.16)(typescript@5.9.3)':
+  '@tanstack/query-db-collection@1.0.17(@tanstack/query-core@5.90.16)(typescript@5.9.3)':
     dependencies:
       '@standard-schema/spec': 1.1.0
       '@tanstack/db': 0.5.20(typescript@5.9.3)
@@ -16278,8 +16278,8 @@ snapshots:
 
   babel-plugin-jest-hoist@29.6.3:
     dependencies:
-      '@babel/template': 7.27.2
-      '@babel/types': 7.28.5
+      '@babel/template': 7.28.6
+      '@babel/types': 7.28.6
       '@types/babel__core': 7.20.5
       '@types/babel__traverse': 7.28.0
 
@@ -18751,7 +18751,7 @@ snapshots:
 
   jest-message-util@29.7.0:
     dependencies:
-      '@babel/code-frame': 7.27.1
+      '@babel/code-frame': 7.28.6
       '@jest/types': 29.6.3
       '@types/stack-utils': 2.0.3
       chalk: 4.1.2
@@ -19484,9 +19484,9 @@ snapshots:
 
   metro-source-map@0.83.3:
     dependencies:
-      '@babel/traverse': 7.28.5
+      '@babel/traverse': 7.28.6
       '@babel/traverse--for-generate-function-map': '@babel/traverse@7.28.6'
-      '@babel/types': 7.28.5
+      '@babel/types': 7.28.6
       flow-enums-runtime: 0.0.6
       invariant: 2.2.4
       metro-symbolicate: 0.83.3
@@ -19533,9 +19533,9 @@ snapshots:
   metro-transform-plugins@0.83.3:
     dependencies:
       '@babel/core': 7.28.5
-      '@babel/generator': 7.28.5
-      '@babel/template': 7.27.2
-      '@babel/traverse': 7.28.5
+      '@babel/generator': 7.28.6
+      '@babel/template': 7.28.6
+      '@babel/traverse': 7.28.6
       flow-enums-runtime: 0.0.6
       nullthrows: 1.1.1
     transitivePeerDependencies:
@@ -19564,9 +19564,9 @@ snapshots:
   metro-transform-worker@0.83.3:
     dependencies:
       '@babel/core': 7.28.5
-      '@babel/generator': 7.28.5
-      '@babel/parser': 7.28.5
-      '@babel/types': 7.28.5
+      '@babel/generator': 7.28.6
+      '@babel/parser': 7.28.6
+      '@babel/types': 7.28.6
       flow-enums-runtime: 0.0.6
       metro: 0.83.3
       metro-babel-transformer: 0.83.3
@@ -19630,13 +19630,13 @@ snapshots:
 
   metro@0.83.3:
     dependencies:
-      '@babel/code-frame': 7.27.1
+      '@babel/code-frame': 7.28.6
       '@babel/core': 7.28.5
-      '@babel/generator': 7.28.5
-      '@babel/parser': 7.28.5
-      '@babel/template': 7.27.2
-      '@babel/traverse': 7.28.5
-      '@babel/types': 7.28.5
+      '@babel/generator': 7.28.6
+      '@babel/parser': 7.28.6
+      '@babel/template': 7.28.6
+      '@babel/traverse': 7.28.6
+      '@babel/types': 7.28.6
       accepts: 1.3.8
       chalk: 4.1.2
       ci-info: 2.0.0

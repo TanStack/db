@@ -1,5 +1,11 @@
 # @tanstack/vue-db
 
+## 0.0.97
+
+### Patch Changes
+
+- Fix type of findOne queries in Vue such that they type to a singular result instead of an array of results. ([#1134](https://github.com/TanStack/db/pull/1134))
+
 ## 0.0.96
 
 ### Patch Changes

@@ -38,9 +38,9 @@ export function compileSQL<T>(options: LoadSubsetOptions): SubsetParams {
   const paramsRecord = params.reduce(
     (acc, param, index) => {
       const serialized = serialize(param)
-      // Only include non-empty values in params
-      // Empty strings from null/undefined should be omitted
-      if (serialized !== ``) {
+      // Empty strings are valid query values (e.g., WHERE column = '')
+      // Only omit null/undefined values from params
+      if (param != null) {
         acc[`${index + 1}`] = serialized
       }
       return acc
