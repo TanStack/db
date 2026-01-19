@@ -1093,7 +1093,7 @@ function VolumeSlider() {
 
 ### Queue Strategy
 
-The queue strategy creates a separate transaction for each mutation and processes them sequentially in order. Unlike debounce/throttle, **every mutation is guaranteed to persist**, making it ideal for workflows where you can't lose any operations.
+The queue strategy creates a separate transaction for each mutation and processes them sequentially in order. Unlike debounce/throttle which may drop intermediate mutations, **every mutation is guaranteed to be attempted**, making it ideal for workflows where you can't skip any operations.
 
 ```tsx
 import { usePacedMutations, queueStrategy } from "@tanstack/react-db"
@@ -1136,8 +1136,15 @@ function FileUploader() {
 - Each mutation becomes its own transaction
 - Processes sequentially in order (FIFO by default)
 - Can configure to LIFO by setting `getItemsFrom: 'back'`
-- All mutations guaranteed to persist
+- All mutations guaranteed to be attempted (unlike debounce/throttle which may skip intermediate mutations)
 - Waits for each transaction to complete before starting the next
+
+**Error handling**:
+- If a mutation fails, **it is not automatically retried** - the transaction transitions to "failed" state
+- Failed mutations surface their error via `transaction.isPersisted.promise` (which will reject)
+- **Subsequent mutations continue processing** - a single failure does not block the queue
+- Each mutation is independent; there is no all-or-nothing transaction semantics across multiple mutations
+- To implement retry logic, see [Retry Behavior](#retry-behavior)
 
 ### Choosing a Strategy
 
@@ -1452,6 +1459,45 @@ The normal flow is: `pending` → `persisting` → `completed`
 If an error occurs: `pending` → `persisting` → `failed`
 
 Failed transactions automatically rollback their optimistic state.
+
+### Retry Behavior
+
+**Important:** TanStack DB does not automatically retry failed mutations. If a mutation fails (network error, server error, etc.), the transaction transitions to `failed` state and the optimistic state is rolled back. This is by design. Automatic retry logic varies significantly based on your use case (idempotency requirements, error types, backoff strategies, etc.).
+
+To implement retry logic, wrap your API calls in your `mutationFn`:
+
+```typescript
+// Simple retry helper
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = 3,
+  delay = 1000
+): Promise<T> {
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      if (attempt === maxRetries - 1) throw error
+      await new Promise(resolve => setTimeout(resolve, delay * (attempt + 1)))
+    }
+  }
+  throw new Error('Unreachable')
+}
+
+// Use in your collection
+const todoCollection = createCollection({
+  id: "todos",
+  onUpdate: async ({ transaction }) => {
+    const mutation = transaction.mutations[0]
+    // Retry up to 3 times with increasing delay
+    await withRetry(() =>
+      api.todos.update(mutation.original.id, mutation.changes)
+    )
+  },
+})
+```
+
+For more sophisticated retry strategies, consider using a library like [p-retry](https://github.com/sindresorhus/p-retry) which supports exponential backoff, custom retry conditions, and abort signals.
 
 ## Handling Temporary IDs
 
