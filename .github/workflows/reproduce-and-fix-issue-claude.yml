@@ -12,7 +12,6 @@ jobs:
       contains(github.event.comment.body, '/reproduce') &&
       (github.event.comment.user.login == 'kevin-dp' || github.event.comment.user.login == 'KyleAMathews' || github.event.comment.user.login == 'samwillis')
     runs-on: ubuntu-latest
-
     # Prevent multiple runs for the same issue
     concurrency:
       group: claude-auto-issue-${{ github.repository }}-${{ github.event.issue.number }}
