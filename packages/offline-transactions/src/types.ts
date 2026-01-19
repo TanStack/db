@@ -21,6 +21,7 @@ export interface SerializedMutation {
   type: string
   modified: any
   original: any
+  changes: any
   collectionId: string
 }
 
