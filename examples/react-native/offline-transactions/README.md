@@ -2,6 +2,11 @@
 
 This example demonstrates offline-first transactions using TanStack DB on React Native / Expo.
 
+<video width="400" controls>
+  <source src="https://github.com/user-attachments/assets/c73450c6-27e1-49a7-9174-413177f5e37e" type="video/mp4">
+  Your browser does not support the video tag.
+</video>
+
 ## Features
 
 - Offline transaction queuing with AsyncStorage
@@ -38,7 +43,7 @@ cd examples/react-native/offline-transactions
 pnpm install
 
 # Start the backend server (in one terminal)
-pnpm server
+npx tsx server/index.ts
 
 # Start the Expo dev server (in another terminal)
 pnpm start
