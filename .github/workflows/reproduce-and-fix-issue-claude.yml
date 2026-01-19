@@ -61,15 +61,19 @@ jobs:
 
             === Hard rules (non-negotiable) ===
             - Never claim reproduction unless a test fails due to a concrete behavioral assertion.
-            - Never use “does not throw / does not crash” as the primary assertion unless:
+            - Never use "does not throw / does not crash" as the primary assertion unless:
               (a) the issue explicitly says throwing is the bug, AND
-              (b) the correct behavior is explicitly “should not throw”.
-            - Never “fix” by skipping, swallowing, or ignoring the problematic case
+              (b) the correct behavior is explicitly "should not throw".
+            - Never "fix" by skipping, swallowing, or ignoring the problematic case
               (e.g. guard clauses / try-catch that hides the error) unless the issue explicitly says that is correct.
               Any conditional handling must still implement the intended behavior.
             - Do not weaken tests to make them pass. Do not remove assertions. Do not skip tests. Do not mark flaky.
             - Keep changes minimal and scoped. No refactors. No drive-by formatting.
             - If expected behavior is unclear or not testable, STOP and request the minimum missing info.
+            - NEVER add issue references (e.g. "issue #1152", "#1152", "Issue 1152") in the codebase itself.
+              This includes test names, code comments, variable names, or any other code artifacts.
+              Issue references are ONLY allowed in: branch names, commit messages, PR titles, PR bodies, and GitHub comments.
+              Test names and code comments should be purely descriptive of current behavior, no description of old behavior and do not reference where the bug was reported.
 
             === Step 0: Determine actionability ===
             From the issue, extract:
@@ -82,11 +86,13 @@ jobs:
 
             === Step 1: Reproduction test (behavioral oracle) ===
             Create a minimal unit/integration test that asserts the expected behavior:
-            - Test name must describe intended behavior (NOT “reproduces issue #…”)
+            - Test name must describe the intended behavior only (e.g. "updates cache entry when using computed query key").
+              Do NOT include issue numbers or references in test names (BAD: "fixes issue #1152", "issue 1152 regression").
             - Assert concrete outcomes: returned values, state transitions, emitted events, persisted data, etc.
-            - Add at least one “anti-noop” assertion that would fail if the code simply “does nothing”
+            - Add at least one "anti-noop" assertion that would fail if the code simply "does nothing"
               (e.g. verify a state change, returned value, side effect).
             - If the issue involves an error, prefer asserting correct error type/message or correct recovery/result.
+            - Do NOT add comments in the test code referencing the issue number.
 
             === Step 2: Prove it reproduces on base ===
             Run tests on base:
@@ -110,6 +116,9 @@ jobs:
             - Fix must not be a no-op.
             - If you add guards/conditionals, justify why it's correct behavior (not hiding bug),
               and ensure intended work still occurs.
+            - Code comments should explain the "why" of the fix, NOT reference the issue number.
+              BAD: "Issue #1152: Fixed cache lookup"
+              GOOD: "Use the actual query key for cache lookup, not just the base key"
 
             Commit fix and open stacked PR:
             - Commit message: fix: <short behavior> (issue #${{ github.event.issue.number }})
