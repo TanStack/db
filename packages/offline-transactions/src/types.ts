@@ -88,7 +88,6 @@ export interface StorageDiagnostic {
 }
 
 export interface OfflineConfig {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   collections: Record<string, Collection<any, any, any, any, any>>
   mutationFns: Record<string, OfflineMutationFn>
   storage?: StorageAdapter
@@ -101,6 +100,12 @@ export interface OfflineConfig {
   onLeadershipChange?: (isLeader: boolean) => void
   onStorageFailure?: (diagnostic: StorageDiagnostic) => void
   leaderElection?: LeaderElection
+  /**
+   * Custom online detector implementation.
+   * Defaults to WebOnlineDetector for browser environments.
+   * Use ReactNativeOnlineDetector from '@tanstack/offline-transactions/react-native' for RN/Expo.
+   */
+  onlineDetector?: OnlineDetector
 }
 
 export interface StorageAdapter {
@@ -126,6 +131,7 @@ export interface LeaderElection {
 export interface OnlineDetector {
   subscribe: (callback: () => void) => () => void
   notifyOnline: () => void
+  dispose: () => void
 }
 
 export interface CreateOfflineTransactionOptions {
