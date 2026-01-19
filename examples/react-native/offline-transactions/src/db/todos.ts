@@ -3,9 +3,9 @@ import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
 import { z } from 'zod'
 import { queryClient } from '../utils/queryClient'
-import {  todoApi } from '../utils/api'
+import { todoApi } from '../utils/api'
 import { AsyncStorageAdapter } from './AsyncStorageAdapter'
-import type {Todo} from '../utils/api';
+import type { Todo } from '../utils/api'
 import type { PendingMutation } from '@tanstack/db'
 
 // Define schema
@@ -31,7 +31,7 @@ export const todoCollection = createCollection(
     schema: todoSchema,
     // Poll every 3 seconds to sync changes from other devices
     refetchInterval: 3000,
-  })
+  }),
 )
 
 // Sync function to push mutations to the "backend"
@@ -109,7 +109,9 @@ export function createOfflineExecutor() {
 }
 
 // Helper functions to create offline actions
-export function createTodoActions(offline: ReturnType<typeof createOfflineExecutor> | null) {
+export function createTodoActions(
+  offline: ReturnType<typeof createOfflineExecutor> | null,
+) {
   if (!offline) {
     return {
       addTodo: null,

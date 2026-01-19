@@ -80,9 +80,9 @@ The backend server runs on port 3001 and is shared by all emulators/devices. Thi
 
 ## Key Differences from Web
 
-| Web | React Native |
-|-----|-------------|
-| IndexedDB / localStorage | AsyncStorage |
-| `window.addEventListener('online')` | NetInfo.addEventListener |
-| `document.visibilitychange` | AppState.addEventListener |
+| Web                                          | React Native                                              |
+| -------------------------------------------- | --------------------------------------------------------- |
+| IndexedDB / localStorage                     | AsyncStorage                                              |
+| `window.addEventListener('online')`          | NetInfo.addEventListener                                  |
+| `document.visibilitychange`                  | AppState.addEventListener                                 |
 | Import from `@tanstack/offline-transactions` | Import from `@tanstack/offline-transactions/react-native` |
