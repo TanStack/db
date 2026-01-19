@@ -1462,7 +1462,7 @@ Failed transactions automatically rollback their optimistic state.
 
 ### Retry Behavior
 
-**Important:** TanStack DB does not automatically retry failed mutations. If a mutation fails (network error, server error, etc.), the transaction transitions to `failed` state and the optimistic state is rolled back. This is by design—automatic retry logic varies significantly based on your use case (idempotency requirements, error types, backoff strategies, etc.).
+**Important:** TanStack DB does not automatically retry failed mutations. If a mutation fails (network error, server error, etc.), the transaction transitions to `failed` state and the optimistic state is rolled back. This is by design. Automatic retry logic varies significantly based on your use case (idempotency requirements, error types, backoff strategies, etc.).
 
 To implement retry logic, wrap your API calls in your `mutationFn`:
 
@@ -1489,7 +1489,7 @@ const todoCollection = createCollection({
   id: "todos",
   onUpdate: async ({ transaction }) => {
     const mutation = transaction.mutations[0]
-    // Retry up to 3 times with exponential backoff
+    // Retry up to 3 times with increasing delay
     await withRetry(() =>
       api.todos.update(mutation.original.id, mutation.changes)
     )
