@@ -157,6 +157,12 @@ export function createPacedMutations<
         })
         return capturedTx
       })
+    } else if (strategy._type === `dependencyQueue`) {
+      // For dependency queue strategy, pass the transaction directly so it can
+      // extract globalKeys and manage dependencies before committing
+      const capturedTx = activeTransaction
+      activeTransaction = null // Clear so next mutation creates a new transaction
+      strategy.executeWithTx(capturedTx)
     } else {
       // For debounce/throttle, use commitCallback which manages activeTransaction
       strategy.execute(commitCallback)

@@ -108,6 +108,33 @@ export interface BatchStrategy extends BaseStrategy<`batch`> {
 }
 
 /**
+ * Options for dependency queue strategy
+ * Processes mutations in parallel when they affect different records,
+ * but serializes mutations that share dependencies
+ */
+export interface DependencyQueueStrategyOptions {
+  /** Optional wait time before processing (milliseconds) */
+  wait?: number
+  /**
+   * Optional function to extract additional dependency keys beyond globalKey.
+   * Use this to declare semantic dependencies (e.g., "list depends on its items").
+   */
+  getDependencies?: (tx: Transaction) => Array<string>
+}
+
+/**
+ * Dependency queue strategy that enables parallel execution of independent mutations
+ * while serializing mutations that share record dependencies (via globalKey)
+ */
+export interface DependencyQueueStrategy extends BaseStrategy<`dependencyQueue`> {
+  options?: DependencyQueueStrategyOptions
+  /**
+   * Execute with direct transaction access for dependency analysis
+   */
+  executeWithTx: <T extends object>(tx: Transaction<T>) => void
+}
+
+/**
  * Union type of all available strategies
  */
 export type Strategy =
@@ -115,6 +142,7 @@ export type Strategy =
   | QueueStrategy
   | ThrottleStrategy
   | BatchStrategy
+  | DependencyQueueStrategy
 
 /**
  * Extract the options type from a strategy
@@ -127,4 +155,6 @@ export type StrategyOptions<T extends Strategy> = T extends DebounceStrategy
       ? ThrottleStrategyOptions
       : T extends BatchStrategy
         ? BatchStrategyOptions
-        : never
+        : T extends DependencyQueueStrategy
+          ? DependencyQueueStrategyOptions
+          : never

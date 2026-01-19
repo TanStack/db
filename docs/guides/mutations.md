@@ -1002,6 +1002,7 @@ The fundamental difference between strategies is how they handle transactions:
 | **`debounceStrategy`** | Wait for inactivity before persisting. Only final state is saved. | Auto-save forms, search-as-you-type |
 | **`throttleStrategy`** | Ensure minimum spacing between executions. Mutations between executions are merged. | Sliders, progress updates, analytics |
 | **`queueStrategy`** | Each mutation becomes a separate transaction, processed sequentially in order (FIFO by default, configurable to LIFO). All mutations guaranteed to persist. | Sequential workflows, file uploads, rate-limited APIs |
+| **`dependencyQueueStrategy`** | Parallel execution for independent records, serialized for same-record mutations. Based on `globalKey` tracking. | Multi-item editors, reordering operations, complex forms with independent fields |
 
 ### Debounce Strategy
 
@@ -1139,6 +1140,83 @@ function FileUploader() {
 - All mutations guaranteed to persist
 - Waits for each transaction to complete before starting the next
 
+### Dependency Queue Strategy
+
+The dependency queue strategy provides the best of both worlds: parallel execution for mutations on different records, while maintaining serialization for mutations on the same record. This is ideal for complex UIs where users might be editing multiple independent items simultaneously.
+
+```tsx
+import { usePacedMutations, dependencyQueueStrategy } from "@tanstack/react-db"
+
+function MultiItemEditor() {
+  const mutate = usePacedMutations<{ id: string; title: string }>({
+    onMutate: ({ id, title }) => {
+      // Apply optimistic update immediately
+      itemCollection.update(id, (draft) => {
+        draft.title = title
+      })
+    },
+    mutationFn: async ({ transaction }) => {
+      await api.items.update(transaction.mutations)
+    },
+    // Parallel for different items, serial for same item
+    strategy: dependencyQueueStrategy(),
+  })
+
+  const handleTitleChange = (id: string, title: string) => {
+    mutate({ id, title })
+  }
+
+  return (
+    <div>
+      {items.map((item) => (
+        <input
+          key={item.id}
+          value={item.title}
+          onChange={(e) => handleTitleChange(item.id, e.target.value)}
+        />
+      ))}
+    </div>
+  )
+}
+```
+
+In this example:
+- Editing `item-1` and `item-2` simultaneously fires both mutations in parallel
+- Editing `item-1` twice in quick succession serializes those mutations (second waits for first)
+
+**Key characteristics**:
+- Mutations on different records run in parallel
+- Mutations on the same record are serialized in order
+- Uses `globalKey` (`KEY::{collectionId}/{itemKey}`) for dependency tracking
+- Supports custom dependency declarations for semantic relationships
+
+#### Custom Dependencies
+
+For complex scenarios where you need to express dependencies beyond the automatic `globalKey` tracking, use the `getDependencies` option:
+
+```tsx
+const mutate = usePacedMutations<{ listId: string; changes: Partial<List> }>({
+  onMutate: ({ listId, changes }) => {
+    listCollection.update(listId, (draft) => {
+      Object.assign(draft, changes)
+    })
+  },
+  mutationFn: async ({ transaction }) => {
+    await api.lists.update(transaction.mutations)
+  },
+  strategy: dependencyQueueStrategy({
+    getDependencies: (tx) => {
+      // List mutations should wait for any item mutations in that list
+      return tx.mutations
+        .filter((m) => m.collection.id === 'lists')
+        .map((m) => `list-items:${m.key}`)
+    },
+  }),
+})
+```
+
+This allows you to express semantic dependencies like "updating a list should wait for all its items to finish updating."
+
 ### Choosing a Strategy
 
 Use this guide to pick the right strategy for your use case:
@@ -1161,6 +1239,13 @@ Use this guide to pick the right strategy for your use case:
 - You're working with a rate-limited API
 - You need sequential processing with delays
 - Examples: file uploads, batch operations, audit trails, multi-step wizards
+
+**Use `dependencyQueueStrategy` when:**
+- You want parallel execution for independent records
+- Same-record mutations need to be serialized
+- You're building multi-item editors or list UIs
+- Users might edit multiple items simultaneously
+- Examples: kanban boards, multi-item forms, reorder operations, batch editing
 
 ### Using in React
 
