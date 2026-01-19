@@ -73,7 +73,7 @@
     }
   },
   "devDependencies": {
-    "@react-native-community/netinfo": "^11.4.1",
+    "@react-native-community/netinfo": "11.4.1",
     "@types/node": "^24.6.2",
     "eslint": "^9.39.2",
     "react-native": "^0.83.1",

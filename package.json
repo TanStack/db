@@ -7,6 +7,11 @@
   },
   "packageManager": "pnpm@10.27.0",
   "type": "module",
+  "pnpm": {
+    "overrides": {
+      "metro": "0.82.5"
+    }
+  },
   "scripts": {
     "build": "pnpm --filter \"./packages/**\" build",
     "build:minified": "pnpm --filter \"./packages/**\" build:minified",
