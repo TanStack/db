@@ -1,11 +1,16 @@
 name: Claude Auto Issue Fix
 
 on:
-  issues:
-    types: [opened]
+  issue_comment:
+    types: [created]
 
 jobs:
   claude_auto_issue_fix:
+    # Only run when a maintainer comments with /reproduce on an issue
+    if: |
+      github.event.issue != null &&
+      contains(github.event.comment.body, '/reproduce') &&
+      (github.event.comment.user.login == 'kevin-dp' || github.event.comment.user.login == 'KyleAMathews' || github.event.comment.user.login == 'samwillis')
     runs-on: ubuntu-latest
 
     # Prevent multiple runs for the same issue
@@ -31,7 +36,7 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           prompt: |
             You are an autonomous coding agent running in CI for this repository.
-            This workflow runs automatically whenever a new GitHub issue is opened.
+            This workflow runs when a maintainer requests issue analysis by commenting "/reproduce" on an issue.
 
             === Context ===
             REPO: ${{ github.repository }}
@@ -113,10 +118,16 @@ jobs:
             - Do NOT force a “fix” that silences symptoms.
 
             === Quality checklist (must satisfy before marking fixed) ===
-            - [ ] Expected behavior asserted (not “no throw” unless truly correct)
+            - [ ] Expected behavior asserted (not "no throw" unless truly correct)
             - [ ] Test fails on base for the right reason
             - [ ] Fix makes test pass without weakening assertions
-            - [ ] Fix is not “skip/swallow/ignore”
+            - [ ] Fix is not "skip/swallow/ignore"
             - [ ] Changes minimal and scoped
+
+            === Final comment ===
+            After completing your work, always post a comment on the original issue summarizing what you did:
+            - If you opened PRs: link to the repro PR and fix PR (if created)
+            - Briefly describe what the test asserts and what the fix does
+            - If you couldn't complete the task: explain what you found and what's blocking progress
 
             Proceed now.
