@@ -1,0 +1,77 @@
+name: Claude PR Review
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  claude_pr_review:
+    # Only run when a maintainer comments with /review on a PR
+    # Exclude Claude's own comments to prevent recursive triggers
+    if: |
+      github.event.issue.pull_request != null &&
+      github.actor != 'claude[bot]' &&
+      contains(github.event.comment.body, '/review') &&
+      (github.event.comment.user.login == 'kevin-dp' || github.event.comment.user.login == 'KyleAMathews' || github.event.comment.user.login == 'samwillis')
+    runs-on: ubuntu-latest
+    # Prevent multiple concurrent reviews for the same PR
+    concurrency:
+      group: claude-pr-review-${{ github.repository }}-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Get PR branch
+        id: pr-info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_DATA=$(gh pr view ${{ github.event.issue.number }} --json headRefName,baseRefName)
+          echo "head_ref=$(echo $PR_DATA | jq -r '.headRefName')" >> $GITHUB_OUTPUT
+          echo "base_ref=$(echo $PR_DATA | jq -r '.baseRefName')" >> $GITHUB_OUTPUT
+
+      - name: Checkout PR branch
+        run: git checkout ${{ steps.pr-info.outputs.head_ref }}
+
+      - name: Run Claude Code (PR review)
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: |
+            --model claude-opus-4-5
+          prompt: |
+            You are an autonomous PR review agent running in CI for this repository.
+
+            === Context ===
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.issue.number }}
+            PR TITLE: ${{ github.event.issue.title }}
+            PR URL: ${{ github.event.issue.html_url }}
+            BASE BRANCH: ${{ steps.pr-info.outputs.base_ref }}
+            HEAD BRANCH: ${{ steps.pr-info.outputs.head_ref }}
+
+            COMMENT (may specify review aspects like "/review tests" or "/review errors code"):
+            ${{ github.event.comment.body }}
+
+            === Task ===
+            Run the /pr-review-toolkit:review-pr skill to perform a comprehensive multi-agent code review.
+
+            Parse any review aspects from the comment (e.g., "tests", "errors", "code", "types", "comments", "simplify", "all").
+            Pass these as arguments to the skill. Default to "all" if none specified.
+
+            After the review completes, post the findings as a comment on PR #${{ github.event.issue.number }} using `gh pr comment`.
+
+            This is a read-only review. Do NOT make any edits or commits.
+
+            Proceed now.

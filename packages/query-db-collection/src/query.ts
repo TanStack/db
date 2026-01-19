@@ -142,7 +142,7 @@ export interface QueryCollectionConfig<
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
-}) => Promise<QueryObserverResult<any, any> | void>
+}) => Promise<Array<QueryObserverResult<any, any> | void>>
 
 /**
  * Utility methods available on Query Collections for direct writes and manual operations.
@@ -1133,7 +1133,7 @@ export function queryCollectionOptions(
       })
     })
 
-    await Promise.all(refetchPromises)
+    return Promise.all(refetchPromises)
   }
 
   /**

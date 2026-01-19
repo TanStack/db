@@ -380,7 +380,12 @@ export interface SyncConfig<
 > {
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
-    begin: () => void
+    /**
+     * Begin a new sync transaction.
+     * @param options.immediate - When true, the transaction will be processed immediately
+     *   even if there are persisting user transactions. Used by manual write operations.
+     */
+    begin: (options?: { immediate?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     commit: () => void
     markReady: () => void
