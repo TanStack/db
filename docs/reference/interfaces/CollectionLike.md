@@ -5,7 +5,7 @@ title: CollectionLike
 
 # Interface: CollectionLike\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:12](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L12)
+Defined in: [packages/db/src/types.ts:13](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L13)
 
 Interface for a collection-like object that provides the necessary methods
 for the change events system to work

@@ -9,6 +9,7 @@ title: "@tanstack/vue-db"
 
 - [UseLiveQueryReturn](interfaces/UseLiveQueryReturn.md)
 - [UseLiveQueryReturnWithCollection](interfaces/UseLiveQueryReturnWithCollection.md)
+- [UseLiveQueryReturnWithSingleResultCollection](interfaces/UseLiveQueryReturnWithSingleResultCollection.md)
 
 ## Functions
 

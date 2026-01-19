@@ -1108,10 +1108,19 @@ having(
 ```
 
 **Parameters:**
-- `condition` - A callback function that receives the aggregated row object and returns a boolean expression
+- `condition` - A callback function that receives table references (and `$selected` if the query contains a `select()` clause) and returns a boolean expression
 
 ```ts
+// Using aggregate functions directly
 const highValueCustomers = createLiveQueryCollection((q) =>
+  q
+    .from({ order: ordersCollection })
+    .groupBy(({ order }) => order.customerId)
+    .having(({ order }) => gt(sum(order.amount), 1000))
+)
+
+// Using SELECT fields via $selected (recommended when select() is used)
+const highValueCustomersWithSelect = createLiveQueryCollection((q) =>
   q
     .from({ order: ordersCollection })
     .groupBy(({ order }) => order.customerId)
@@ -1120,7 +1129,7 @@ const highValueCustomers = createLiveQueryCollection((q) =>
       totalSpent: sum(order.amount),
       orderCount: count(order.id),
     }))
-    .having(({ order }) => gt(sum(order.amount), 1000))
+    .having(({ $selected }) => gt($selected.totalSpent, 1000))
 )
 ```
 
@@ -1385,6 +1394,26 @@ const sortedUsers = createLiveQueryCollection((q) =>
       name: user.name,
       departmentId: user.departmentId,
     }))
+)
+```
+
+### Ordering by SELECT Fields
+
+When you use `select()` with aggregates or computed values, you can order by those fields using the `$selected` namespace:
+
+```ts
+const topCustomers = createLiveQueryCollection((q) =>
+  q
+    .from({ order: ordersCollection })
+    .groupBy(({ order }) => order.customerId)
+    .select(({ order }) => ({
+      customerId: order.customerId,
+      totalSpent: sum(order.amount),
+      orderCount: count(order.id),
+      latestOrder: max(order.createdAt),
+    }))
+    .orderBy(({ $selected }) => $selected.totalSpent, 'desc')
+    .limit(10)
 )
 ```
 
@@ -1922,8 +1951,8 @@ const highValueCustomers = createLiveQueryCollection((q) =>
       totalSpent: sum(order.amount),
       orderCount: count(order.id),
     }))
-    .fn.having((row) => {
-      return row.totalSpent > 1000 && row.orderCount >= 3
+    .fn.having(({ $selected }) => {
+      return $selected.totalSpent > 1000 && $selected.orderCount >= 3
     })
 )
 ```

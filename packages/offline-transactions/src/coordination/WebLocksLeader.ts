@@ -35,6 +35,12 @@ export class WebLocksLeader extends BaseLeaderElection {
         return false
       }
 
+      // Set state immediately to prevent duplicate notifications
+      // when the async lock acquisition calls notifyLeadershipChange(true).
+      // The guard in notifyLeadershipChange checks `isLeaderState !== isLeader`,
+      // so setting this to true here prevents the callback from firing again.
+      this.isLeaderState = true
+
       // Lock is available, now acquire it for real and hold it
       navigator.locks.request(
         this.lockName,

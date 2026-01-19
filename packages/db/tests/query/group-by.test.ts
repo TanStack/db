@@ -1111,6 +1111,345 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(customer1?.min_quantity).toBe(1)
         expect(customer1?.max_quantity).toBe(2)
       })
+
+      test(`group by BigInt column should not throw JSON.stringify error`, () => {
+        // Define a type with BigInt field (simulating a Postgres bigint column)
+        type District = {
+          id: number
+          district_id: bigint
+          name: string
+          status: string
+        }
+
+        // Use BigInt values beyond MAX_SAFE_INTEGER to test BigInt serialization
+        const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER + 1)
+
+        const sampleDistricts: Array<District> = [
+          {
+            id: 1,
+            district_id: MAX_SAFE_BIGINT,
+            name: 'District A',
+            status: 'active',
+          },
+          {
+            id: 2,
+            district_id: MAX_SAFE_BIGINT + 1n,
+            name: 'District B',
+            status: 'active',
+          },
+          {
+            id: 3,
+            district_id: MAX_SAFE_BIGINT, // Same as first
+            name: 'District C',
+            status: 'inactive',
+          },
+          {
+            id: 4,
+            district_id: MAX_SAFE_BIGINT + 2n,
+            name: 'District D',
+            status: 'active',
+          },
+        ]
+
+        const districtsCollection = createCollection(
+          mockSyncCollectionOptions<District>({
+            id: `test-districts`,
+            getKey: (district) => district.id,
+            initialData: sampleDistricts,
+            autoIndex,
+          }),
+        )
+
+        // This should not throw "Do not know how to serialize a BigInt" error
+        const districtSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ districts: districtsCollection })
+              .groupBy(({ districts }) => districts.district_id)
+              .select(({ districts }) => ({
+                district_id: districts.district_id,
+                count: count(districts.id),
+              })),
+        })
+
+        // Should have 3 groups (two districts share the same district_id)
+        expect(districtSummary.size).toBe(3)
+
+        // Check the group with MAX_SAFE_BIGINT
+        const group1 = Array.from(districtSummary.values()).find(
+          (d) => d.district_id === MAX_SAFE_BIGINT,
+        )
+        expect(group1).toBeDefined()
+        expect(group1?.count).toBe(2) // Districts 1 and 3
+
+        // Check the group with MAX_SAFE_BIGINT + 1n
+        const group2 = Array.from(districtSummary.values()).find(
+          (d) => d.district_id === MAX_SAFE_BIGINT + 1n,
+        )
+        expect(group2).toBeDefined()
+        expect(group2?.count).toBe(1) // District 2
+
+        // Check the group with MAX_SAFE_BIGINT + 2n
+        const group3 = Array.from(districtSummary.values()).find(
+          (d) => d.district_id === MAX_SAFE_BIGINT + 2n,
+        )
+        expect(group3).toBeDefined()
+        expect(group3?.count).toBe(1) // District 4
+      })
+
+      test(`group by Date column should serialize correctly`, () => {
+        type Event = {
+          id: number
+          event_date: Date
+          name: string
+          category: string
+        }
+
+        const date1 = new Date('2023-01-15T10:00:00Z')
+        const date2 = new Date('2023-01-20T14:30:00Z')
+        const date3 = new Date('2023-01-15T10:00:00Z') // Same as date1
+
+        const sampleEvents: Array<Event> = [
+          {
+            id: 1,
+            event_date: date1,
+            name: 'Event A',
+            category: 'conference',
+          },
+          {
+            id: 2,
+            event_date: date2,
+            name: 'Event B',
+            category: 'workshop',
+          },
+          {
+            id: 3,
+            event_date: date3, // Same date as Event A
+            name: 'Event C',
+            category: 'conference',
+          },
+          {
+            id: 4,
+            event_date: new Date('2023-02-01T09:00:00Z'),
+            name: 'Event D',
+            category: 'workshop',
+          },
+        ]
+
+        const eventsCollection = createCollection(
+          mockSyncCollectionOptions<Event>({
+            id: `test-events`,
+            getKey: (event) => event.id,
+            initialData: sampleEvents,
+            autoIndex,
+          }),
+        )
+
+        // Group by Date - should serialize dates to ISO strings for keys
+        const eventSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ events: eventsCollection })
+              .groupBy(({ events }) => events.event_date)
+              .select(({ events }) => ({
+                event_date: events.event_date,
+                count: count(events.id),
+              })),
+        })
+
+        // Should have 3 groups (two events share the same date)
+        expect(eventSummary.size).toBe(3)
+
+        // Check the group with date1 (which equals date3)
+        const group1 = Array.from(eventSummary.values()).find(
+          (e) => e.event_date.getTime() === date1.getTime(),
+        )
+        expect(group1).toBeDefined()
+        expect(group1?.count).toBe(2) // Events 1 and 3
+
+        // Check the group with date2
+        const group2 = Array.from(eventSummary.values()).find(
+          (e) => e.event_date.getTime() === date2.getTime(),
+        )
+        expect(group2).toBeDefined()
+        expect(group2?.count).toBe(1) // Event 2
+
+        // Check the group with the February date
+        const group3 = Array.from(eventSummary.values()).find(
+          (e) =>
+            e.event_date.getTime() ===
+            new Date('2023-02-01T09:00:00Z').getTime(),
+        )
+        expect(group3).toBeDefined()
+        expect(group3?.count).toBe(1) // Event 4
+      })
+
+      test(`group by multiple columns including Date should not throw error`, () => {
+        type LogEntry = {
+          id: number
+          timestamp: Date
+          level: string
+          service: string
+        }
+
+        const timestamp1 = new Date('2023-01-15T10:00:00Z')
+        const timestamp2 = new Date('2023-01-15T10:00:00Z') // Same as timestamp1
+
+        const sampleLogs: Array<LogEntry> = [
+          {
+            id: 1,
+            timestamp: timestamp1,
+            level: 'error',
+            service: 'api',
+          },
+          {
+            id: 2,
+            timestamp: timestamp1,
+            level: 'info',
+            service: 'api',
+          },
+          {
+            id: 3,
+            timestamp: timestamp2,
+            level: 'error',
+            service: 'worker',
+          },
+          {
+            id: 4,
+            timestamp: new Date('2023-01-20T14:30:00Z'),
+            level: 'warning',
+            service: 'api',
+          },
+        ]
+
+        const logsCollection = createCollection(
+          mockSyncCollectionOptions<LogEntry>({
+            id: `test-logs`,
+            getKey: (log) => log.id,
+            initialData: sampleLogs,
+            autoIndex,
+          }),
+        )
+
+        // Group by both Date and string - should not throw
+        const logSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ logs: logsCollection })
+              .groupBy(({ logs }) => [logs.timestamp, logs.level])
+              .select(({ logs }) => ({
+                timestamp: logs.timestamp,
+                level: logs.level,
+                count: count(logs.id),
+              })),
+        })
+
+        expect(logSummary.size).toBe(3) // Three distinct combinations
+
+        // Find the group with timestamp1 and 'error'
+        const group1 = Array.from(logSummary.values()).find(
+          (l) =>
+            l.timestamp.getTime() === timestamp1.getTime() &&
+            l.level === 'error',
+        )
+        expect(group1).toBeDefined()
+        expect(group1?.count).toBe(2) // Logs 1 and 3 (same timestamp, same level)
+
+        // Find the group with timestamp1 and 'info'
+        const group2 = Array.from(logSummary.values()).find(
+          (l) =>
+            l.timestamp.getTime() === timestamp1.getTime() &&
+            l.level === 'info',
+        )
+        expect(group2).toBeDefined()
+        expect(group2?.count).toBe(1) // Log 2
+
+        // Find the group with the different timestamp and 'warning'
+        const group3 = Array.from(logSummary.values()).find(
+          (l) =>
+            l.timestamp.getTime() ===
+              new Date('2023-01-20T14:30:00Z').getTime() &&
+            l.level === 'warning',
+        )
+        expect(group3).toBeDefined()
+        expect(group3?.count).toBe(1) // Log 4
+      })
+
+      test(`group by multiple columns including BigInt should not throw error`, () => {
+        type School = {
+          id: number
+          district_id: bigint
+          name: string
+          status: string
+        }
+
+        // Use BigInt values beyond MAX_SAFE_INTEGER to test BigInt serialization
+        const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER + 1)
+
+        const sampleSchools: Array<School> = [
+          {
+            id: 1,
+            district_id: MAX_SAFE_BIGINT,
+            name: 'School A',
+            status: 'active',
+          },
+          {
+            id: 2,
+            district_id: MAX_SAFE_BIGINT,
+            name: 'School B',
+            status: 'active',
+          },
+          {
+            id: 3,
+            district_id: MAX_SAFE_BIGINT + 1n,
+            name: 'School C',
+            status: 'inactive',
+          },
+        ]
+
+        const schoolsCollection = createCollection(
+          mockSyncCollectionOptions<School>({
+            id: `test-schools`,
+            getKey: (school) => school.id,
+            initialData: sampleSchools,
+            autoIndex,
+          }),
+        )
+
+        // Group by both BigInt and string - should not throw
+        const schoolSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ schools: schoolsCollection })
+              .groupBy(({ schools }) => [schools.district_id, schools.status])
+              .select(({ schools }) => ({
+                district_id: schools.district_id,
+                status: schools.status,
+                count: count(schools.id),
+              })),
+        })
+
+        expect(schoolSummary.size).toBe(2) // Two distinct combinations
+
+        // Find the group with MAX_SAFE_BIGINT and 'active'
+        const group1 = Array.from(schoolSummary.values()).find(
+          (s) => s.district_id === MAX_SAFE_BIGINT && s.status === 'active',
+        )
+        expect(group1).toBeDefined()
+        expect(group1?.count).toBe(2) // Schools 1 and 2
+
+        // Find the group with MAX_SAFE_BIGINT + 1n and 'inactive'
+        const group2 = Array.from(schoolSummary.values()).find(
+          (s) =>
+            s.district_id === MAX_SAFE_BIGINT + 1n && s.status === 'inactive',
+        )
+        expect(group2).toBeDefined()
+        expect(group2?.count).toBe(1) // School 3
+      })
     })
 
     describe(`Nested Object GroupBy`, () => {
@@ -1640,6 +1979,208 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         const afterDelete = userEventTimes.get(1)
         expect(afterDelete?.firstEvent).toBe(`2023-01-15T09:00:00Z`)
+      })
+    })
+
+    describe(`ORDER BY and HAVING with SELECT fields`, () => {
+      let sessionsCollection: ReturnType<typeof createOrdersCollection>
+
+      beforeEach(() => {
+        // Reuse ordersCollection as sessionsCollection for testing
+        sessionsCollection = createOrdersCollection(autoIndex)
+      })
+
+      test(`orderBy can reference aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .orderBy(({ $selected }) => $selected.latestActivity),
+        })
+
+        expect(sessionStats.toArray).toEqual([
+          {
+            taskId: 2,
+            latestActivity: new Date(`2023-02-01`),
+            sessionCount: 1,
+          },
+          {
+            taskId: 1,
+            latestActivity: new Date(`2023-03-01`),
+            sessionCount: 3,
+          },
+        ])
+      })
+
+      test(`orderBy can reference non-aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .orderBy(({ $selected }) => $selected.taskId, {
+                direction: `desc`,
+              }),
+        })
+
+        expect(sessionStats.toArray).toEqual([
+          {
+            taskId: 2,
+            latestActivity: new Date(`2023-02-01`),
+            sessionCount: 1,
+          },
+          {
+            taskId: 1,
+            latestActivity: new Date(`2023-03-01`),
+            sessionCount: 3,
+          },
+        ])
+      })
+
+      test(`HAVING can reference aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .having(({ $selected }) => gt($selected.sessionCount, 2)),
+        })
+
+        expect(sessionStats.toArray).toEqual([
+          {
+            taskId: 1,
+            latestActivity: new Date(`2023-03-01`),
+            sessionCount: 3,
+          },
+        ])
+      })
+
+      test(`HAVING can reference non-aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .having(({ $selected }) => gt($selected.taskId, 0)),
+        })
+
+        // Once bug is fixed, this should filter groups where taskId > 0
+        expect(sessionStats.size).toBe(2)
+      })
+
+      test(`fn.having can reference aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+                totalAmount: sum(sessions.amount),
+              }))
+              .fn.having(({ $selected }) => $selected.sessionCount > 2),
+        })
+
+        // Should only include groups where sessionCount > 2
+        // Customer 1 has 3 completed sessions, Customer 2 has 1
+        expect(sessionStats.size).toBe(1)
+
+        const result = sessionStats.toArray[0]
+        expect(result).toBeDefined()
+        expect(result?.taskId).toBe(1)
+        expect(result?.sessionCount).toBe(3)
+        expect(result?.totalAmount).toBe(700) // 100 + 200 + 400
+      })
+
+      test(`fn.having can reference non-aggregate field from SELECT`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+              }))
+              .fn.having(({ $selected }) => $selected.taskId > 1),
+        })
+
+        // Should only include groups where taskId > 1
+        // Customer 1 has taskId 1, Customer 2 has taskId 2
+        expect(sessionStats.size).toBe(1)
+
+        const result = sessionStats.toArray[0]
+        expect(result).toBeDefined()
+        expect(result?.taskId).toBe(2)
+        expect(result?.sessionCount).toBe(1)
+      })
+
+      test(`fn.having can use multiple SELECT fields in complex conditions`, () => {
+        const sessionStats = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ sessions: sessionsCollection })
+              .where(({ sessions }) => eq(sessions.status, `completed`))
+              .groupBy(({ sessions }) => sessions.customer_id)
+              .select(({ sessions }) => ({
+                taskId: sessions.customer_id,
+                latestActivity: max(sessions.date),
+                sessionCount: count(sessions.id),
+                totalAmount: sum(sessions.amount),
+              }))
+              .fn.having(
+                ({ $selected }) =>
+                  $selected.sessionCount >= 2 && $selected.totalAmount > 300,
+              ),
+        })
+
+        // Should include groups where sessionCount >= 2 AND totalAmount > 300
+        // Customer 1: 3 sessions, 700 total ✓
+        // Customer 2: 1 session ✗
+        expect(sessionStats.size).toBe(1)
+
+        const result = sessionStats.toArray[0]
+        expect(result).toBeDefined()
+        expect(result?.taskId).toBe(1)
+        expect(result?.sessionCount).toBe(3)
+        expect(result?.totalAmount).toBe(700)
       })
     })
   })

@@ -310,7 +310,7 @@ Get all entries (virtual derived state)
 cleanup(): Promise<void>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:920](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L920)
+Defined in: [packages/db/src/collection/index.ts:923](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L923)
 
 Clean up the collection by stopping sync and clearing data
 This can be called manually or automatically by garbage collection
@@ -753,7 +753,7 @@ Create a new array with the results of calling a function for each entry in the 
 off<T>(event, callback): void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:899](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L899)
+Defined in: [packages/db/src/collection/index.ts:902](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L902)
 
 Unsubscribe from a collection event
 
@@ -794,7 +794,7 @@ Unsubscribe from a collection event
 on<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:879](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L879)
+Defined in: [packages/db/src/collection/index.ts:882](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L882)
 
 Subscribe to a collection event
 
@@ -841,7 +841,7 @@ Subscribe to a collection event
 once<T>(event, callback): () => void;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:889](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L889)
+Defined in: [packages/db/src/collection/index.ts:892](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L892)
 
 Subscribe to a collection event once
 
@@ -975,7 +975,7 @@ Promise that resolves to a Map containing all items in the collection
 subscribeChanges(callback, options): CollectionSubscription;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:869](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L869)
+Defined in: [packages/db/src/collection/index.ts:872](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L872)
 
 Subscribe to changes in the collection
 
@@ -989,7 +989,7 @@ Function called when items change
 
 ##### options
 
-[`SubscribeChangesOptions`](../interfaces/SubscribeChangesOptions.md) = `{}`
+[`SubscribeChangesOptions`](../interfaces/SubscribeChangesOptions.md)\<`TOutput`\> = `{}`
 
 Subscription options including includeInitialState and where filter
 
@@ -1020,22 +1020,25 @@ const subscription = collection.subscribeChanges((changes) => {
 ```
 
 ```ts
-// Subscribe only to changes matching a condition
+// Subscribe only to changes matching a condition using where callback
+import { eq } from "@tanstack/db"
+
 const subscription = collection.subscribeChanges((changes) => {
   updateUI(changes)
 }, {
   includeInitialState: true,
-  where: (row) => row.status === 'active'
+  where: (row) => eq(row.status, "active")
 })
 ```
 
 ```ts
-// Subscribe using a pre-compiled expression
+// Using multiple conditions with and()
+import { and, eq, gt } from "@tanstack/db"
+
 const subscription = collection.subscribeChanges((changes) => {
   updateUI(changes)
 }, {
-  includeInitialState: true,
-  whereExpression: eq(row.status, 'active')
+  where: (row) => and(eq(row.status, "active"), gt(row.priority, 5))
 })
 ```
 
@@ -1407,7 +1410,7 @@ Get all values (virtual derived state)
 waitFor<T>(event, timeout?): Promise<AllCollectionEvents[T]>;
 ```
 
-Defined in: [packages/db/src/collection/index.ts:909](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L909)
+Defined in: [packages/db/src/collection/index.ts:912](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L912)
 
 Wait for a collection event
 

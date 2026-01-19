@@ -1,6 +1,6 @@
 import {
   batch,
-  createComputed,
+  createEffect,
   createMemo,
   createResource,
   createSignal,
@@ -28,7 +28,7 @@ import type {
 /**
  * Create a live query using a query function
  * @param queryFn - Query function that defines what data to fetch
- * @returns Object with reactive data, state, and status information
+ * @returns Accessor that returns data with Suspense support, with state and status information as properties
  * @example
  * // Basic query with object syntax
  * const todosQuery = useLiveQuery((q) =>
@@ -66,33 +66,51 @@ import type {
  *
  * return (
  *   <Switch>
- *     <Match when={todosQuery.isLoading()}>
+ *     <Match when={todosQuery.isLoading}>
  *       <div>Loading...</div>
  *     </Match>
- *     <Match when={todosQuery.isError()}>
- *       <div>Error: {todosQuery.status()}</div>
+ *     <Match when={todosQuery.isError}>
+ *       <div>Error: {todosQuery.status}</div>
  *     </Match>
- *     <Match when={todosQuery.isReady()}>
- *       <For each={todosQuery.data()}>
+ *     <Match when={todosQuery.isReady}>
+ *       <For each={todosQuery()}>
  *         {(todo) => <li key={todo.id}>{todo.text}</li>}
  *       </For>
  *     </Match>
  *   </Switch>
  * )
+ *
+ * @example
+ * // Use Suspense boundaries
+ * const todosQuery = useLiveQuery((q) =>
+ *   q.from({ todos: todoCollection })
+ * )
+ *
+ * return (
+ *   <Suspense fallback={<div>Loading...</div>}>
+ *     <For each={todosQuery()}>
+ *       {(todo) => <li key={todo.id}>{todo.text}</li>}
+ *     </For>
+ *   </Suspense>
+ * )
  */
 // Overload 1: Accept query function that always returns QueryBuilder
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-): {
-  state: ReactiveMap<string | number, GetResult<TContext>>
+): Accessor<Array<GetResult<TContext>>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
   data: Array<GetResult<TContext>>
-  collection: Accessor<Collection<GetResult<TContext>, string | number, {}>>
-  status: Accessor<CollectionStatus>
-  isLoading: Accessor<boolean>
-  isReady: Accessor<boolean>
-  isIdle: Accessor<boolean>
-  isError: Accessor<boolean>
-  isCleanedUp: Accessor<boolean>
+  state: ReactiveMap<string | number, GetResult<TContext>>
+  collection: Collection<GetResult<TContext>, string | number, {}>
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 // Overload 1b: Accept query function that can return undefined/null
@@ -100,26 +118,26 @@ export function useLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): {
-  state: ReactiveMap<string | number, GetResult<TContext>>
+): Accessor<Array<GetResult<TContext>>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
   data: Array<GetResult<TContext>>
-  collection: Accessor<Collection<
-    GetResult<TContext>,
-    string | number,
-    {}
-  > | null>
-  status: Accessor<CollectionStatus | `disabled`>
-  isLoading: Accessor<boolean>
-  isReady: Accessor<boolean>
-  isIdle: Accessor<boolean>
-  isError: Accessor<boolean>
-  isCleanedUp: Accessor<boolean>
+  state: ReactiveMap<string | number, GetResult<TContext>>
+  collection: Collection<GetResult<TContext>, string | number, {}> | null
+  status: CollectionStatus | `disabled`
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 /**
  * Create a live query using configuration object
  * @param config - Configuration object with query and options
- * @returns Object with reactive data, state, and status information
+ * @returns Accessor that returns data with Suspense support, with state and status information as properties
  * @example
  * // Basic config object usage
  * const todosQuery = useLiveQuery(() => ({
@@ -143,14 +161,14 @@ export function useLiveQuery<TContext extends Context>(
  * }))
  *
  * return (
- *   <Switch fallback={<div>{itemsQuery.data.length} items loaded</div>}>
- *     <Match when={itemsQuery.isLoading()}>
+ *   <Switch fallback={<div>{itemsQuery().length} items loaded</div>}>
+ *     <Match when={itemsQuery.isLoading}>
  *       <div>Loading...</div>
  *     </Match>
- *     <Match when={itemsQuery.isError()}>
+ *     <Match when={itemsQuery.isError}>
  *       <div>Something went wrong</div>
  *     </Match>
- *     <Match when={!itemsQuery.isReady()}>
+ *     <Match when={!itemsQuery.isReady}>
  *       <div>Preparing...</div>
  *     </Match>
  *   </Switch>
@@ -159,22 +177,26 @@ export function useLiveQuery<TContext extends Context>(
 // Overload 2: Accept config object
 export function useLiveQuery<TContext extends Context>(
   config: Accessor<LiveQueryCollectionConfig<TContext>>,
-): {
-  state: ReactiveMap<string | number, GetResult<TContext>>
+): Accessor<Array<GetResult<TContext>>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
   data: Array<GetResult<TContext>>
-  collection: Accessor<Collection<GetResult<TContext>, string | number, {}>>
-  status: Accessor<CollectionStatus>
-  isLoading: Accessor<boolean>
-  isReady: Accessor<boolean>
-  isIdle: Accessor<boolean>
-  isError: Accessor<boolean>
-  isCleanedUp: Accessor<boolean>
+  state: ReactiveMap<string | number, GetResult<TContext>>
+  collection: Collection<GetResult<TContext>, string | number, {}>
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 /**
  * Subscribe to an existing live query collection
  * @param liveQueryCollection - Pre-created live query collection to subscribe to
- * @returns Object with reactive data, state, and status information
+ * @returns Accessor that returns data with Suspense support, with state and status information as properties
  * @example
  * // Using pre-created live query collection
  * const myLiveQuery = createLiveQueryCollection((q) =>
@@ -188,7 +210,7 @@ export function useLiveQuery<TContext extends Context>(
  *
  * // Use collection for mutations
  * const handleToggle = (id) => {
- *   existingQuery.collection().update(id, draft => { draft.completed = !draft.completed })
+ *   existingQuery.collection.update(id, draft => { draft.completed = !draft.completed })
  * }
  *
  * @example
@@ -196,11 +218,11 @@ export function useLiveQuery<TContext extends Context>(
  * const sharedQuery = useLiveQuery(() => sharedCollection)
  *
  * return (
- *  <Switch fallback={<div><For each={sharedQuery.data()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
- *    <Match when={sharedQuery.isLoading()}>
+ *  <Switch fallback={<div><For each={sharedQuery()}>{(item) => <Item key={item.id} {...item} />}</For></div>}>
+ *    <Match when={sharedQuery.isLoading}>
  *      <div>Loading...</div>
  *    </Match>
- *    <Match when={sharedQuery.isError()}>
+ *    <Match when={sharedQuery.isError}>
  *      <div>Error loading data</div>
  *    </Match>
  *  </Switch>
@@ -213,16 +235,20 @@ export function useLiveQuery<
   TUtils extends Record<string, any>,
 >(
   liveQueryCollection: Accessor<Collection<TResult, TKey, TUtils>>,
-): {
-  state: ReactiveMap<TKey, TResult>
+): Accessor<Array<TResult>> & {
+  /**
+   * @deprecated use function result instead
+   * query.data -> query()
+   */
   data: Array<TResult>
-  collection: Accessor<Collection<TResult, TKey, TUtils>>
-  status: Accessor<CollectionStatus>
-  isLoading: Accessor<boolean>
-  isReady: Accessor<boolean>
-  isIdle: Accessor<boolean>
-  isError: Accessor<boolean>
-  isCleanedUp: Accessor<boolean>
+  state: ReactiveMap<TKey, TResult>
+  collection: Collection<TResult, TKey, TUtils>
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
 }
 
 // Implementation - use function overloads to infer the actual collection type
@@ -293,91 +319,129 @@ export function useLiveQuery(
     )
   }
 
-  // Track current unsubscribe function
-  let currentUnsubscribe: (() => void) | null = null
-
-  createComputed(
-    () => {
-      const currentCollection = collection()
-
-      // Handle null collection (disabled query)
+  const [getDataResource] = createResource(
+    () => ({ currentCollection: collection() }),
+    async ({ currentCollection }) => {
       if (!currentCollection) {
-        setStatus(`disabled` as const)
-        state.clear()
-        setData([])
-        if (currentUnsubscribe) {
-          currentUnsubscribe()
-          currentUnsubscribe = null
-        }
-        return
+        return []
       }
-
-      // Update status ref whenever the effect runs
       setStatus(currentCollection.status)
-
-      // Initialize state with current collection data
-      state.clear()
-      for (const [key, value] of currentCollection.entries()) {
-        state.set(key, value)
+      try {
+        await currentCollection.toArrayWhenReady()
+      } catch (error) {
+        setStatus(`error`)
+        throw error
       }
+      // Initialize state with current collection data
+      batch(() => {
+        state.clear()
+        for (const [key, value] of currentCollection.entries()) {
+          state.set(key, value)
+        }
+        syncDataFromCollection(currentCollection)
+        setStatus(currentCollection.status)
+      })
+      return data
+    },
+    {
+      name: `TanstackDBData`,
+      deferStream: false,
+      initialValue: data,
+    },
+  )
 
-      // Subscribe to collection changes with granular updates
-      const subscription = currentCollection.subscribeChanges(
-        (changes: Array<ChangeMessage<any>>) => {
-          // Apply each change individually to the reactive state
-          batch(() => {
-            for (const change of changes) {
-              switch (change.type) {
-                case `insert`:
-                case `update`:
-                  state.set(change.key, change.value)
-                  break
-                case `delete`:
-                  state.delete(change.key)
-                  break
-              }
+  createEffect(() => {
+    const currentCollection = collection()
+    if (!currentCollection) {
+      setStatus(`disabled` as const)
+      state.clear()
+      setData([])
+      return
+    }
+    const subscription = currentCollection.subscribeChanges(
+      (changes: Array<ChangeMessage<any>>) => {
+        // Apply each change individually to the reactive state
+        batch(() => {
+          for (const change of changes) {
+            switch (change.type) {
+              case `insert`:
+              case `update`:
+                state.set(change.key, change.value)
+                break
+              case `delete`:
+                state.delete(change.key)
+                break
             }
-          })
+          }
 
-          // Update the data array to maintain sorted order
           syncDataFromCollection(currentCollection)
 
           // Update status ref on every change
           setStatus(currentCollection.status)
-        },
-        {
-          includeInitialState: true,
-        },
-      )
+        })
+      },
+      {
+        // Include initial state to ensure immediate population for pre-created collections
+        includeInitialState: true,
+      },
+    )
 
-      currentUnsubscribe = subscription.unsubscribe.bind(subscription)
+    onCleanup(() => {
+      subscription.unsubscribe()
+    })
+  })
 
-      // Preload collection data if not already started
-      if (currentCollection.status === `idle`) {
-        createResource(() => currentCollection.preload())
-      }
-
-      // Cleanup when computed is invalidated
-      onCleanup(() => {
-        if (currentUnsubscribe) {
-          currentUnsubscribe()
-          currentUnsubscribe = null
-        }
-      })
-    },
-    undefined,
-    { name: `TanstackDBSyncComputed` },
-  )
-
-  return {
-    state,
-    data,
-    collection,
-    status,
-    isLoading: () => status() === `loading`,
-    isReady: () => status() === `ready` || status() === `disabled`,
-    isIdle: () => status() === `idle`,
-    isError: () => status() === `error`,
-    isCleanedUp: () => status() === `cleaned-up`,
+  // We have to remove getters from the resource function so we wrap it
+  function getData() {
+    return getDataResource()
   }
+
+  Object.defineProperties(getData, {
+    data: {
+      get() {
+        return getData()
+      },
+    },
+    status: {
+      get() {
+        return status()
+      },
+    },
+    collection: {
+      get() {
+        return collection()
+      },
+    },
+    state: {
+      get() {
+        return state
+      },
+    },
+    isLoading: {
+      get() {
+        return status() === `loading`
+      },
+    },
+    isReady: {
+      get() {
+        return status() === `ready` || status() === `disabled`
+      },
+    },
+    isIdle: {
+      get() {
+        return status() === `idle`
+      },
+    },
+    isError: {
+      get() {
+        return status() === `error`
+      },
+    },
+    isCleanedUp: {
+      get() {
+        return status() === `cleaned-up`
+      },
+    },
+  })
+  return getData
 }

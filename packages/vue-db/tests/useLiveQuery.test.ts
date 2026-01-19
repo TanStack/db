@@ -301,7 +301,7 @@ describe(`Query Collections`, () => {
         .select(({ issues, persons }) => ({
           id: issues.id,
           title: issues.title,
-          name: persons.name,
+          name: persons?.name,
         })),
     )
 
@@ -590,7 +590,7 @@ describe(`Query Collections`, () => {
         .select(({ issues, persons }) => ({
           id: issues.id,
           title: issues.title,
-          name: persons.name,
+          name: persons?.name,
         })),
     )
 
@@ -1162,7 +1162,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons.name,
+            name: persons?.name,
           })),
       )
 
@@ -1689,7 +1689,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            userName: persons.name,
+            userName: persons?.name,
           })),
       )
 

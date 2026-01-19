@@ -366,7 +366,7 @@ describe(`Functional Variants Query`, () => {
               department_id: user.department_id,
               employee_count: count(user.id),
             }))
-            .fn.having((row) => (row as any).result.employee_count > 1),
+            .fn.having((row) => (row as any).$selected.employee_count > 1),
       })
 
       const results = liveCollection.toArray

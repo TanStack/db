@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderHook, waitFor } from '@solidjs/testing-library'
+import { render, renderHook, waitFor } from '@solidjs/testing-library'
 import {
   Query,
   count,
@@ -9,7 +9,13 @@ import {
   eq,
   gt,
 } from '@tanstack/db'
-import { createComputed, createRoot, createSignal } from 'solid-js'
+import {
+  For,
+  Suspense,
+  createComputed,
+  createRoot,
+  createSignal,
+} from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
 import type { Accessor } from 'solid-js'
@@ -105,9 +111,9 @@ describe(`Query Collections`, () => {
     await waitFor(() => {
       expect(rendered.result.state.size).toBe(1) // Only John Smith (age 35)
     })
-    expect(rendered.result.data).toHaveLength(1)
+    expect(rendered.result()).toHaveLength(1)
 
-    const johnSmith = rendered.result.data[0]
+    const johnSmith = rendered.result()[0]
     expect(johnSmith).toMatchObject({
       id: `3`,
       name: `John Smith`,
@@ -146,8 +152,8 @@ describe(`Query Collections`, () => {
       name: `John Smith`,
     })
 
-    expect(rendered.result.data.length).toBe(1)
-    expect(rendered.result.data[0]).toMatchObject({
+    expect(rendered.result().length).toBe(1)
+    expect(rendered.result()[0]).toMatchObject({
       id: `3`,
       name: `John Smith`,
     })
@@ -179,8 +185,8 @@ describe(`Query Collections`, () => {
       name: `Kyle Doe`,
     })
 
-    expect(rendered.result.data.length).toBe(2)
-    expect(rendered.result.data).toEqual(
+    expect(rendered.result().length).toBe(2)
+    expect(rendered.result()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: `3`,
@@ -216,8 +222,8 @@ describe(`Query Collections`, () => {
       name: `Kyle Doe 2`,
     })
 
-    expect(rendered.result.data.length).toBe(2)
-    expect(rendered.result.data).toEqual(
+    expect(rendered.result().length).toBe(2)
+    expect(rendered.result()).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: `3`,
@@ -250,8 +256,8 @@ describe(`Query Collections`, () => {
     })
     expect(rendered.result.state.get(`4`)).toBeUndefined()
 
-    expect(rendered.result.data.length).toBe(1)
-    expect(rendered.result.data[0]).toMatchObject({
+    expect(rendered.result().length).toBe(1)
+    expect(rendered.result()[0]).toMatchObject({
       id: `3`,
       name: `John Smith`,
     })
@@ -286,7 +292,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons.name,
+            name: persons?.name,
           })),
       )
     })
@@ -373,11 +379,11 @@ describe(`Query Collections`, () => {
     })
     issueCollection.utils.commit()
 
-    await new Promise((resolve) => setTimeout(resolve, 10))
-
-    // After deletion, issue 3 should no longer have a joined result
-    expect(result.state.get(`[3,1]`)).toBeUndefined()
-    expect(result.state.size).toBe(3)
+    await waitFor(() => {
+      // After deletion, issue 3 should no longer have a joined result
+      expect(result.state.get(`[3,1]`)).toBeUndefined()
+      expect(result.state.size).toBe(3)
+    })
   })
 
   it(`should recompile query when parameters change and change results`, async () => {
@@ -548,7 +554,7 @@ describe(`Query Collections`, () => {
     const groupedLiveQuery = renderHook(() => {
       return useLiveQuery((q) =>
         q
-          .from({ queryResult: rendered.result.collection() })
+          .from({ queryResult: rendered.result.collection })
           .groupBy(({ queryResult }) => queryResult.team)
           .select(({ queryResult }) => ({
             team: queryResult.team,
@@ -651,7 +657,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons.name,
+            name: persons?.name,
           })),
       )
 
@@ -798,9 +804,9 @@ describe(`Query Collections`, () => {
     await waitFor(() => {
       expect(result.state.size).toBe(1) // Only John Smith (age 35)
     })
-    expect(result.data).toHaveLength(1)
+    expect(result()).toHaveLength(1)
 
-    const johnSmith = result.data[0]
+    const johnSmith = result()[0]
     expect(johnSmith).toMatchObject({
       id: `3`,
       name: `John Smith`,
@@ -808,7 +814,7 @@ describe(`Query Collections`, () => {
     })
 
     // Verify that the returned collection is the same instance
-    expect(result.collection()).toBe(liveQueryCollection)
+    expect(result.collection).toBe(liveQueryCollection)
   })
 
   it(`should switch to a different pre-created live query collection when changed`, async () => {
@@ -887,7 +893,7 @@ describe(`Query Collections`, () => {
         id: `3`,
         name: `John Smith`,
       })
-      expect(rendered.result.collection()).toBe(liveQueryCollection1)
+      expect(rendered.result.collection).toBe(liveQueryCollection1)
 
       // Switch to the second collection
       setCollection(liveQueryCollection2)
@@ -904,7 +910,7 @@ describe(`Query Collections`, () => {
         id: `5`,
         name: `Bob Dylan`,
       })
-      expect(rendered.result.collection()).toBe(liveQueryCollection2)
+      expect(rendered.result.collection).toBe(liveQueryCollection2)
 
       // Verify we no longer have data from the first collection
       expect(rendered.result.state.get(`3`)).toBeUndefined()
@@ -940,9 +946,9 @@ describe(`Query Collections`, () => {
     await waitFor(() => {
       expect(result.state.size).toBe(1) // Only John Smith (age 35)
     })
-    expect(result.data).toHaveLength(1)
+    expect(result()).toHaveLength(1)
 
-    const johnSmith = result.data[0]
+    const johnSmith = result()[0]
     expect(johnSmith).toMatchObject({
       id: `3`,
       name: `John Smith`,
@@ -988,7 +994,7 @@ describe(`Query Collections`, () => {
       })
 
       // Initially isLoading should be true
-      expect(rendered.result.isLoading()).toBe(true)
+      expect(rendered.result.isLoading).toBe(true)
 
       // Start sync manually
       collection.preload()
@@ -1011,7 +1017,7 @@ describe(`Query Collections`, () => {
 
       // Wait for collection to become ready
       await waitFor(() => {
-        expect(rendered.result.isLoading()).toBe(false)
+        expect(rendered.result.isLoading).toBe(false)
       })
       // Note: Data may not appear immediately due to live query evaluation timing
       // The main test is that isLoading transitions from true to false
@@ -1047,7 +1053,7 @@ describe(`Query Collections`, () => {
       })
 
       // For pre-created collections that are already syncing, isLoading should be true
-      expect(rendered.result.isLoading()).toBe(false)
+      expect(rendered.result.isLoading).toBe(false)
       expect(rendered.result.state.size).toBe(1)
     })
 
@@ -1086,7 +1092,7 @@ describe(`Query Collections`, () => {
       })
 
       // Initially should be true
-      expect(rendered.result.isLoading()).toBe(true)
+      expect(rendered.result.isLoading).toBe(true)
 
       // Start sync manually
       collection.preload()
@@ -1110,14 +1116,14 @@ describe(`Query Collections`, () => {
 
       await new Promise((resolve) => setTimeout(resolve, 100))
 
-      expect(rendered.result.isLoading()).toBe(false)
-      expect(rendered.result.isReady()).toBe(true)
+      expect(rendered.result.isLoading).toBe(false)
+      expect(rendered.result.isReady).toBe(true)
 
       // Wait for collection to become ready
       await waitFor(() => {
-        expect(rendered.result.isLoading()).toBe(false)
+        expect(rendered.result.isLoading).toBe(false)
       })
-      expect(rendered.result.status()).toBe(`ready`)
+      expect(rendered.result.status).toBe(`ready`)
     })
 
     it(`should maintain isReady state during live updates`, async () => {
@@ -1143,10 +1149,10 @@ describe(`Query Collections`, () => {
 
       // Wait for initial load
       await waitFor(() => {
-        expect(result.isLoading()).toBe(false)
+        expect(result.isLoading).toBe(false)
       })
 
-      const initialIsReady = result.isReady()
+      const initialIsReady = result.isReady
 
       // Perform live updates
       collection.utils.begin()
@@ -1169,8 +1175,8 @@ describe(`Query Collections`, () => {
       })
 
       // isReady should remain true during live updates
-      expect(result.isReady()).toBe(true)
-      expect(result.isReady()).toBe(initialIsReady)
+      expect(result.isReady).toBe(true)
+      expect(result.isReady).toBe(initialIsReady)
     })
 
     it(`should handle isLoading with complex queries including joins`, async () => {
@@ -1225,13 +1231,13 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              name: persons.name,
+              name: persons?.name,
             })),
         )
       })
 
       // Initially should be true
-      expect(result.isLoading()).toBe(true)
+      expect(result.isLoading).toBe(true)
 
       // Start sync for both collections
       personCollection.preload()
@@ -1267,7 +1273,7 @@ describe(`Query Collections`, () => {
 
       // Wait for both collections to sync
       await waitFor(() => {
-        expect(result.isReady()).toBe(true)
+        expect(result.isReady).toBe(true)
       })
       // Note: Joined data may not appear immediately due to live query evaluation timing
       // The main test is that isLoading transitions from false to true
@@ -1314,7 +1320,7 @@ describe(`Query Collections`, () => {
         )
 
         // Initially should be false
-        expect(result.isLoading()).toBe(true)
+        expect(result.isLoading).toBe(true)
 
         // Start sync manually
         collection.preload()
@@ -1345,7 +1351,7 @@ describe(`Query Collections`, () => {
 
         // Wait for initial load
         await waitFor(() => {
-          expect(result.isLoading()).toBe(false)
+          expect(result.isLoading).toBe(false)
         })
 
         // Change parameters
@@ -1353,7 +1359,7 @@ describe(`Query Collections`, () => {
 
         // isReady should remain true even when parameters change
         await waitFor(() => {
-          expect(result.isReady()).toBe(true)
+          expect(result.isReady).toBe(true)
         })
         // Note: Data size may not change immediately due to live query evaluation timing
         // The main test is that isReady remains true when parameters change
@@ -1400,9 +1406,9 @@ describe(`Query Collections`, () => {
       })
 
       // Initially isLoading should be true
-      expect(result.isLoading()).toBe(true)
+      expect(result.isLoading).toBe(true)
       expect(result.state.size).toBe(0)
-      expect(result.data).toEqual([])
+      expect(result()).toEqual([])
 
       // Start sync manually
       collection.preload()
@@ -1410,7 +1416,7 @@ describe(`Query Collections`, () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       // Still loading
-      expect(result.isLoading()).toBe(true)
+      expect(result.isLoading).toBe(true)
 
       // Add first batch of data (but don't mark ready yet)
       syncBegin!()
@@ -1431,9 +1437,9 @@ describe(`Query Collections`, () => {
       await waitFor(() => {
         expect(result.state.size).toBe(1)
       })
-      expect(result.isLoading()).toBe(true) // Still loading
-      expect(result.data).toHaveLength(1)
-      expect(result.data[0]).toMatchObject({
+      expect(result.isLoading).toBe(true) // Still loading
+      expect(result()).toHaveLength(1)
+      expect(result()[0]).toMatchObject({
         id: `1`,
         name: `John Smith`,
       })
@@ -1457,18 +1463,18 @@ describe(`Query Collections`, () => {
       await waitFor(() => {
         expect(result.state.size).toBe(2)
       })
-      expect(result.isLoading()).toBe(true) // Still loading
-      expect(result.data).toHaveLength(2)
+      expect(result.isLoading).toBe(true) // Still loading
+      expect(result()).toHaveLength(2)
 
       // Now mark as ready
       syncMarkReady!()
 
       // Should now be ready
       await waitFor(() => {
-        expect(result.isLoading()).toBe(false)
+        expect(result.isLoading).toBe(false)
       })
       expect(result.state.size).toBe(2)
-      expect(result.data).toHaveLength(2)
+      expect(result()).toHaveLength(2)
     })
 
     it(`should show filtered results during sync with isLoading true`, async () => {
@@ -1512,7 +1518,7 @@ describe(`Query Collections`, () => {
 
       await new Promise((resolve) => setTimeout(resolve, 10))
 
-      expect(result.isLoading()).toBe(true)
+      expect(result.isLoading).toBe(true)
 
       // Add items from different teams
       syncBegin!()
@@ -1555,15 +1561,15 @@ describe(`Query Collections`, () => {
       await waitFor(() => {
         expect(result.state.size).toBe(2)
       })
-      expect(result.isLoading()).toBe(true)
-      expect(result.data).toHaveLength(2)
-      expect(result.data.every((p) => p.team === `team1`)).toBe(true)
+      expect(result.isLoading).toBe(true)
+      expect(result()).toHaveLength(2)
+      expect(result().every((p) => p.team === `team1`)).toBe(true)
 
       // Mark ready
       syncMarkReady!()
 
       await waitFor(() => {
-        expect(result.isLoading()).toBe(false)
+        expect(result.isLoading).toBe(false)
       })
       expect(result.state.size).toBe(2)
     })
@@ -1623,7 +1629,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              userName: persons.name,
+              userName: persons?.name,
             })),
         )
       })
@@ -1634,7 +1640,7 @@ describe(`Query Collections`, () => {
 
       await new Promise((resolve) => setTimeout(resolve, 10))
 
-      expect(result.isLoading()).toBe(true)
+      expect(result.isLoading).toBe(true)
 
       // Add a person first
       userSyncBegin!()
@@ -1653,7 +1659,7 @@ describe(`Query Collections`, () => {
 
       await new Promise((resolve) => setTimeout(resolve, 10))
 
-      expect(result.isLoading()).toBe(true)
+      expect(result.isLoading).toBe(true)
       expect(result.state.size).toBe(0) // No joins yet
 
       // Add an issue for that person
@@ -1673,9 +1679,9 @@ describe(`Query Collections`, () => {
       await waitFor(() => {
         expect(result.state.size).toBe(1)
       })
-      expect(result.isLoading()).toBe(true)
-      expect(result.data).toHaveLength(1)
-      expect(result.data[0]).toMatchObject({
+      expect(result.isLoading).toBe(true)
+      expect(result()).toHaveLength(1)
+      expect(result()[0]).toMatchObject({
         id: `1`,
         title: `First Issue`,
         userName: `John Doe`,
@@ -1686,7 +1692,7 @@ describe(`Query Collections`, () => {
       issueSyncMarkReady!()
 
       await waitFor(() => {
-        expect(result.isLoading()).toBe(false)
+        expect(result.isLoading).toBe(false)
       })
       expect(result.state.size).toBe(1)
     })
@@ -1722,10 +1728,10 @@ describe(`Query Collections`, () => {
       })
 
       // Initially isLoading should be true
-      expect(result.isLoading()).toBe(true)
-      expect(result.isReady()).toBe(false)
+      expect(result.isLoading).toBe(true)
+      expect(result.isReady).toBe(false)
       expect(result.state.size).toBe(0)
-      expect(result.data).toEqual([])
+      expect(result()).toEqual([])
 
       // Start sync manually
       collection.preload()
@@ -1733,20 +1739,20 @@ describe(`Query Collections`, () => {
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       // Still loading
-      expect(result.isLoading()).toBe(true)
-      expect(result.isReady()).toBe(false)
+      expect(result.isLoading).toBe(true)
+      expect(result.isReady).toBe(false)
 
       // Mark ready without any data commits
       syncMarkReady!()
 
       // Should now be ready, even with no data
       await waitFor(() => {
-        expect(result.isReady()).toBe(true)
+        expect(result.isReady).toBe(true)
       })
-      expect(result.isLoading()).toBe(false)
+      expect(result.isLoading).toBe(false)
       expect(result.state.size).toBe(0) // Still no data
-      expect(result.data).toEqual([]) // Empty array
-      expect(result.status()).toBe(`ready`)
+      expect(result()).toEqual([]) // Empty array
+      expect(result.status).toBe(`ready`)
     })
   })
 
@@ -1782,10 +1788,10 @@ describe(`Query Collections`, () => {
         // When callback returns undefined, should return disabled state
         expect(rendered.result.state.size).toBe(0)
         expect(rendered.result.data).toEqual([])
-        expect(rendered.result.collection()).toBeNull()
-        expect(rendered.result.status()).toBe(`disabled`)
-        expect(rendered.result.isLoading()).toBe(false)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.collection).toBeNull()
+        expect(rendered.result.status).toBe(`disabled`)
+        expect(rendered.result.isLoading).toBe(false)
+        expect(rendered.result.isReady).toBe(true)
 
         // Enable the query
         setEnabled(true)
@@ -1795,14 +1801,14 @@ describe(`Query Collections`, () => {
           expect(rendered.result.state.size).toBe(1) // Only John Smith (age 35)
         })
         expect(rendered.result.data).toHaveLength(1)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.isReady).toBe(true)
 
         // Disable the query again
         setEnabled(false)
         await new Promise((resolve) => setTimeout(resolve, 10))
 
-        expect(rendered.result.status()).toBe(`disabled`)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.status).toBe(`disabled`)
+        expect(rendered.result.isReady).toBe(true)
 
         dispose()
       })
@@ -1839,10 +1845,10 @@ describe(`Query Collections`, () => {
         // When callback returns null, should return disabled state
         expect(rendered.result.state.size).toBe(0)
         expect(rendered.result.data).toEqual([])
-        expect(rendered.result.collection()).toBeNull()
-        expect(rendered.result.status()).toBe(`disabled`)
-        expect(rendered.result.isLoading()).toBe(false)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.collection).toBeNull()
+        expect(rendered.result.status).toBe(`disabled`)
+        expect(rendered.result.isLoading).toBe(false)
+        expect(rendered.result.isReady).toBe(true)
 
         // Enable the query
         setEnabled(true)
@@ -1852,10 +1858,103 @@ describe(`Query Collections`, () => {
           expect(rendered.result.state.size).toBe(1)
         })
         expect(rendered.result.data).toHaveLength(1)
-        expect(rendered.result.isReady()).toBe(true)
+        expect(rendered.result.isReady).toBe(true)
 
         dispose()
       })
+    })
+  })
+
+  describe(`Suspense Integration`, () => {
+    it(`should work with Suspense boundaries`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-suspense`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      function TestComponent() {
+        const query = useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+        )
+
+        return (
+          <ul data-testid="list">
+            <For each={query()}>
+              {(person) => (
+                <li data-testid={`person-${person.id}`}>{person.name}</li>
+              )}
+            </For>
+          </ul>
+        )
+      }
+
+      const { findByTestId } = render(() => (
+        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+          <TestComponent />
+        </Suspense>
+      ))
+
+      // Should eventually show the list with data
+      await waitFor(async () => {
+        const list = await findByTestId(`list`)
+        expect(list).toBeTruthy()
+      })
+
+      // Verify data is rendered
+      const person1 = await findByTestId(`person-1`)
+      expect(person1.textContent).toBe(`John Doe`)
+
+      const person2 = await findByTestId(`person-2`)
+      expect(person2.textContent).toBe(`Jane Doe`)
+
+      const person3 = await findByTestId(`person-3`)
+      expect(person3.textContent).toBe(`John Smith`)
+    })
+
+    it(`should show fallback during loading and data after ready`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-suspense-fallback`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      function TestComponent() {
+        const query = useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+        )
+
+        return (
+          <div data-testid="content">
+            <span data-testid="count">{query().length}</span>
+          </div>
+        )
+      }
+
+      const { findByTestId } = render(() => (
+        <Suspense fallback={<div data-testid="loading">Loading...</div>}>
+          <TestComponent />
+        </Suspense>
+      ))
+
+      // Should eventually resolve and show data
+      await waitFor(async () => {
+        const content = await findByTestId(`content`)
+        expect(content).toBeTruthy()
+      })
+
+      const count = await findByTestId(`count`)
+      expect(count.textContent).toBe(`3`)
     })
   })
 })
