@@ -36,11 +36,20 @@ This package provides platform-specific implementations for web and React Native
 
 ## Quick Start
 
-### Web
+Using offline transactions on web and React Native/Expo is identical except for the import. Choose the appropriate import based on your target platform:
 
+**Web:**
 ```typescript
 import { startOfflineExecutor } from '@tanstack/offline-transactions'
+```
 
+**React Native / Expo:**
+```typescript
+import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
+```
+
+**Usage (same for both platforms):**
+```typescript
 // Setup offline executor
 const offline = startOfflineExecutor({
   collections: { todos: todoCollection },
@@ -73,49 +82,6 @@ offlineTx.mutate(() => {
 // Execute with automatic offline support
 await offlineTx.commit()
 ```
-
-### React Native / Expo
-
-```typescript
-import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
-
-// Setup offline executor (same API as web)
-const offline = startOfflineExecutor({
-  collections: { todos: todoCollection },
-  mutationFns: {
-    syncTodos: async ({ transaction, idempotencyKey }) => {
-      await api.saveBatch(transaction.mutations, { idempotencyKey })
-    },
-  },
-  onLeadershipChange: (isLeader) => {
-    if (!isLeader) {
-      console.warn('Running in online-only mode (another tab is the leader)')
-    }
-  },
-})
-
-// API usage is identical to web
-const offlineTx = offline.createOfflineTransaction({
-  mutationFnName: 'syncTodos',
-  autoCommit: false,
-})
-
-offlineTx.mutate(() => {
-  todoCollection.insert({
-    id: crypto.randomUUID(),
-    text: 'Buy milk',
-    completed: false,
-  })
-})
-
-await offlineTx.commit()
-```
-
-The only difference between web and React Native usage is the import path:
-- **Web**: `import { ... } from '@tanstack/offline-transactions'`
-- **React Native**: `import { ... } from '@tanstack/offline-transactions/react-native'`
-
-All other APIs remain the same across platforms.
 
 ## Core Concepts
 
