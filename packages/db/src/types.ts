@@ -322,6 +322,27 @@ export type SyncConfigRes = {
   loadSubset?: LoadSubsetFn
   unloadSubset?: UnloadSubsetFn
 }
+
+/**
+ * Context passed to the onSyncWhilePersisting callback.
+ * Provides information about pending sync operations and persisting transactions
+ * to help decide whether to allow synced data to be applied immediately.
+ */
+export interface SyncWhilePersistingContext<
+  TKey extends string | number = string | number,
+> {
+  /** Keys of items in pending sync operations waiting to be applied */
+  pendingSyncKeys: Set<TKey>
+  /** Keys of items being modified by currently persisting optimistic transactions */
+  persistingKeys: Set<TKey>
+  /** Keys that appear in both pending sync and persisting transactions (potential conflicts) */
+  conflictingKeys: Set<TKey>
+  /** Number of optimistic transactions currently in the persisting state */
+  persistingTransactionCount: number
+  /** Whether this includes a truncate operation (truncates always proceed regardless) */
+  isTruncate: boolean
+}
+
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -349,6 +370,32 @@ export interface SyncConfig<
    * - `full`: Updates contain the entire row.
    */
   rowUpdateMode?: `partial` | `full`
+
+  /**
+   * Callback invoked when synced data arrives while optimistic transactions are persisting.
+   * Return true to allow the sync to proceed, false to defer until transactions complete.
+   *
+   * If not provided, synced data is deferred while any optimistic transaction is persisting
+   * (the safe default). Use this callback to selectively allow non-conflicting syncs.
+   *
+   * Note: Truncate operations always proceed regardless of this callback.
+   *
+   * @param context - Information about pending sync and persisting transactions
+   * @returns true to allow sync, false to defer
+   *
+   * @example
+   * // Always allow sync while persisting (most permissive)
+   * onSyncWhilePersisting: () => true
+   *
+   * @example
+   * // Allow only if there are no conflicting keys
+   * onSyncWhilePersisting: ({ conflictingKeys }) => conflictingKeys.size === 0
+   *
+   * @example
+   * // Allow small syncs only
+   * onSyncWhilePersisting: ({ pendingSyncKeys }) => pendingSyncKeys.size < 10
+   */
+  onSyncWhilePersisting?: (context: SyncWhilePersistingContext<TKey>) => boolean
 }
 
 export interface ChangeMessage<

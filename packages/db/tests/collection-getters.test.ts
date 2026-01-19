@@ -7,8 +7,8 @@ import type { SyncConfig } from '../src/types'
 type Item = { id: string; name: string }
 
 describe(`Collection getters`, () => {
-  let collection: CollectionImpl<Item>
-  let mockSync: SyncConfig<Item>
+  let collection: CollectionImpl<Item, string>
+  let mockSync: SyncConfig<Item, string>
 
   beforeEach(() => {
     mockSync = {
