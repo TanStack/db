@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db-ivm",
-  "version": "0.1.14",
+  "version": "0.1.16",
   "description": "Incremental View Maintenance for TanStack DB based on Differential Dataflow",
   "author": "Sam Willis",
   "license": "MIT",

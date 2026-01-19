@@ -11,6 +11,7 @@ import {
 import {
   InvalidSourceError,
   InvalidSourceTypeError,
+  InvalidWhereExpressionError,
   JoinConditionMustBeEqualityError,
   OnlyOneSourceAllowedError,
   QueryMustHaveFromClauseError,
@@ -19,6 +20,7 @@ import {
 import {
   checkCallbackForJsOperators,
   createRefProxy,
+  createRefProxyWithSelected,
   toExpression,
 } from './ref-proxy.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
@@ -33,6 +35,8 @@ import type {
 import type {
   CompareOptions,
   Context,
+  GetResult,
+  FunctionalHavingRow,
   GroupByCallback,
   JoinOnCallback,
   MergeContextForJoinCallback,
@@ -368,6 +372,13 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const expression = callback(refProxy)
 
+    // Validate that the callback returned a valid expression
+    // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
+    // which return boolean primitives instead of expression objects
+    if (!isExpressionLike(expression)) {
+      throw new InvalidWhereExpressionError(getValueTypeName(expression))
+    }
+
     const existingWhere = this.query.where || []
 
     return new BaseQueryBuilder({
@@ -409,8 +420,20 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     checkCallbackForJsOperators(callback)
 
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    // Add $selected namespace if SELECT clause exists
+    const refProxy = (
+      this.query.select
+        ? createRefProxyWithSelected(aliases)
+        : createRefProxy(aliases)
+    ) as RefsForContext<TContext>
     const expression = callback(refProxy)
+
+    // Validate that the callback returned a valid expression
+    // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
+    // which return boolean primitives instead of expression objects
+    if (!isExpressionLike(expression)) {
+      throw new InvalidWhereExpressionError(getValueTypeName(expression))
+    }
 
     const existingHaving = this.query.having || []
 
@@ -503,7 +526,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     options: OrderByDirection | OrderByOptions = `asc`,
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    // Add $selected namespace if SELECT clause exists
+    const refProxy = (
+      this.query.select
+        ? createRefProxyWithSelected(aliases)
+        : createRefProxy(aliases)
+    ) as RefsForContext<TContext>
     const result = callback(refProxy)
 
     const opts: CompareOptions =
@@ -768,7 +796,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
        * Filter grouped rows using a function that operates on each aggregated row
        * Warning: This cannot be optimized by the query compiler
        *
-       * @param callback - A function that receives an aggregated row and returns a boolean
+       * @param callback - A function that receives an aggregated row (with $selected when select() was called) and returns a boolean
        * @returns A QueryBuilder with functional having filter applied
        *
        * @example
@@ -777,11 +805,12 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
        * query
        *   .from({ posts: postsCollection })
        *   .groupBy(({posts}) => posts.userId)
-       *   .fn.having(row => row.count > 5)
+       *   .select(({posts}) => ({ userId: posts.userId, count: count(posts.id) }))
+       *   .fn.having(({ $selected }) => $selected.count > 5)
        * ```
        */
       having(
-        callback: (row: TContext[`schema`]) => any,
+        callback: (row: FunctionalHavingRow<TContext>) => any,
       ): QueryBuilder<TContext> {
         return new BaseQueryBuilder({
           ...builder.query,
@@ -800,6 +829,14 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     }
     return this.query as QueryIR
   }
+}
+
+// Helper to get a descriptive type name for error messages
+function getValueTypeName(value: unknown): string {
+  if (value === null) return `null`
+  if (value === undefined) return `undefined`
+  if (typeof value === `object`) return `object`
+  return typeof value
 }
 
 // Helper to ensure we have a BasicExpression/Aggregate for a value
@@ -876,6 +913,9 @@ export type ExtractContext<T> =
     : T extends QueryBuilder<infer TContext>
       ? TContext
       : never
+
+// Helper type to extract the result type from a QueryBuilder (similar to Zod's z.infer)
+export type QueryResult<T> = GetResult<ExtractContext<T>>
 
 // Export the types from types.ts for convenience
 export type {

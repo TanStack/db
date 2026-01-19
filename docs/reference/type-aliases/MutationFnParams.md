@@ -9,7 +9,7 @@ title: MutationFnParams
 type MutationFnParams<T> = object;
 ```
 
-Defined in: [packages/db/src/types.ts:122](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L122)
+Defined in: [packages/db/src/types.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L123)
 
 Configuration options for creating a new transaction
 
@@ -27,4 +27,4 @@ Configuration options for creating a new transaction
 transaction: TransactionWithMutations<T>;
 ```
 
-Defined in: [packages/db/src/types.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L123)
+Defined in: [packages/db/src/types.ts:124](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L124)

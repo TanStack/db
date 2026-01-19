@@ -1,5 +1,55 @@
 # @tanstack/svelte-db
 
+## 0.1.63
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
+## 0.1.62
+
+### Patch Changes
+
+- Updated dependencies [[`29033b8`](https://github.com/TanStack/db/commit/29033b8f55b0ba5721371ad761037ec813440aa7), [`888ad6a`](https://github.com/TanStack/db/commit/888ad6afe5932b0467320c04fbd4583469cb9c47)]:
+  - @tanstack/db@0.5.19
+
+## 0.1.61
+
+### Patch Changes
+
+- Updated dependencies [[`c1247e8`](https://github.com/TanStack/db/commit/c1247e816950314da6d201613481577834c1d97a)]:
+  - @tanstack/db@0.5.18
+
+## 0.1.60
+
+### Patch Changes
+
+- Add `findOne()` / `SingleResult` support to `useLiveQuery` hook. ([#1001](https://github.com/TanStack/db/pull/1001))
+
+  When using `.findOne()` in a query, the `data` property is now correctly typed as `T | undefined` instead of `Array<T>`, matching the React implementation.
+
+  **Example:**
+
+  ```ts
+  const query = useLiveQuery((q) =>
+    q
+      .from({ users: usersCollection })
+      .where(({ users }) => eq(users.id, userId))
+      .findOne(),
+  )
+
+  // query.data is now typed as User | undefined (not User[])
+  ```
+
+  This works with all query patterns:
+  - Query functions: `useLiveQuery((q) => q.from(...).findOne())`
+  - Config objects: `useLiveQuery({ query: (q) => q.from(...).findOne() })`
+  - Pre-created collections with `SingleResult`
+
+- Updated dependencies [[`f795a67`](https://github.com/TanStack/db/commit/f795a674f21659ef46ff370d4f3b9903a596bcaf), [`d542667`](https://github.com/TanStack/db/commit/d542667a3440415d8e6cbb449b20abd3cbd6855c), [`6503c09`](https://github.com/TanStack/db/commit/6503c091a259208331f471dca29abf086e881147), [`b1cc4a7`](https://github.com/TanStack/db/commit/b1cc4a7e018ffb6804ae7f1c99e9c6eb4bb22812)]:
+  - @tanstack/db@0.5.17
+
 ## 0.1.59
 
 ### Patch Changes

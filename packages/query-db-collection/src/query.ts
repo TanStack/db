@@ -142,7 +142,7 @@ export interface QueryCollectionConfig<
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
-}) => Promise<QueryObserverResult<any, any> | void>
+}) => Promise<Array<QueryObserverResult<any, any> | void>>
 
 /**
  * Utility methods available on Query Collections for direct writes and manual operations.
@@ -692,13 +692,16 @@ export function queryCollectionOptions(
           // Query is still loading, wait for the first result
           return new Promise<void>((resolve, reject) => {
             const unsubscribe = observer.subscribe((result) => {
-              if (result.isSuccess) {
-                unsubscribe()
-                resolve()
-              } else if (result.isError) {
-                unsubscribe()
-                reject(result.error)
-              }
+              // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
+              queueMicrotask(() => {
+                if (result.isSuccess) {
+                  unsubscribe()
+                  resolve()
+                } else if (result.isError) {
+                  unsubscribe()
+                  reject(result.error)
+                }
+              })
             })
           })
         }
@@ -745,13 +748,16 @@ export function queryCollectionOptions(
       // Create a promise that resolves when the query result is first available
       const readyPromise = new Promise<void>((resolve, reject) => {
         const unsubscribe = localObserver.subscribe((result) => {
-          if (result.isSuccess) {
-            unsubscribe()
-            resolve()
-          } else if (result.isError) {
-            unsubscribe()
-            reject(result.error)
-          }
+          // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
+          queueMicrotask(() => {
+            if (result.isSuccess) {
+              unsubscribe()
+              resolve()
+            } else if (result.isError) {
+              unsubscribe()
+              reject(result.error)
+            }
+          })
         })
       })
 
@@ -1127,7 +1133,7 @@ export function queryCollectionOptions(
       })
     })
 
-    await Promise.all(refetchPromises)
+    return Promise.all(refetchPromises)
   }
 
   /**

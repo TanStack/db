@@ -9,6 +9,6 @@ title: DEFAULT_BATCH_SIZE
 const DEFAULT_BATCH_SIZE: 1000 = 1000;
 ```
 
-Defined in: [definitions.ts:274](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L274)
+Defined in: [definitions.ts:279](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L279)
 
 Default value for [PowerSyncCollectionConfig#syncBatchSize](../type-aliases/BasePowerSyncCollectionConfig.md).

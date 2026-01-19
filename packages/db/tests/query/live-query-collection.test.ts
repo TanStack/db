@@ -1075,6 +1075,153 @@ describe(`createLiveQueryCollection`, () => {
   })
 
   describe(`isLoadingSubset integration`, () => {
+    it(`should not mark live query ready while isLoadingSubset is true`, async () => {
+      // This test demonstrates the bug where live query is marked ready
+      // before isLoadingSubset becomes false, causing "ready" status with no data
+
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      // Track whether loadSubset was called
+      let loadSubsetCalled = false
+
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `source-delayed-subset`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Mark source ready immediately with some initial data
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 10 } })
+            write({ type: `insert`, value: { id: 2, value: 20 } })
+            write({ type: `insert`, value: { id: 3, value: 30 } })
+            commit()
+            markReady()
+
+            return {
+              loadSubset: () => {
+                loadSubsetCalled = true
+                // Return a promise that we control to delay the subset loading
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query with orderBy + limit that triggers lazy loading
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .orderBy(({ item }) => item.value, `asc`)
+            .limit(2),
+        startSync: true,
+      })
+
+      // Wait a bit for the subscription to start and trigger loadSubset
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Source should be ready
+      expect(sourceCollection.isReady()).toBe(true)
+
+      // loadSubset should have been called (verifying our test setup is correct)
+      expect(loadSubsetCalled).toBe(true)
+
+      // Live query should have isLoadingSubset = true
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // KEY ASSERTION: Live query should NOT be ready while isLoadingSubset is true
+      // This is the bug we're fixing - without the fix, status would be 'ready' here
+      expect(liveQuery.status).not.toBe(`ready`)
+
+      // Status should be 'loading', which means useLiveQuery would return isLoading=true
+      expect(liveQuery.status).toBe(`loading`)
+
+      // Now resolve the loadSubset promise
+      resolveLoadSubset!()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now isLoadingSubset should be false
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
+      // Now the live query should be ready
+      expect(liveQuery.status).toBe(`ready`)
+    })
+
+    it(`should handle synchronously resolving loadSubset without race condition`, async () => {
+      // This test specifically targets the race condition where loadSubset resolves
+      // synchronously (or extremely fast). The fix must ensure we don't miss the
+      // transient loadingSubset -> ready transition even in this case.
+
+      // Track whether loadSubset was called
+      let loadSubsetCalled = false
+
+      const sourceCollection = createCollection<{ id: number; value: number }>({
+        id: `source-sync-subset`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady, begin, write, commit }) => {
+            // Mark source ready immediately with some initial data
+            begin()
+            write({ type: `insert`, value: { id: 1, value: 10 } })
+            write({ type: `insert`, value: { id: 2, value: 20 } })
+            write({ type: `insert`, value: { id: 3, value: 30 } })
+            commit()
+            markReady()
+
+            return {
+              loadSubset: () => {
+                loadSubsetCalled = true
+                // Return an IMMEDIATELY resolving promise - this is the tricky case
+                // where the status transition could be missed if listener registration
+                // happens after snapshot triggering
+                return Promise.resolve()
+              },
+            }
+          },
+        },
+      })
+
+      // Create a live query with orderBy + limit that triggers lazy loading
+      const liveQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: sourceCollection })
+            .orderBy(({ item }) => item.value, `asc`)
+            .limit(2),
+        startSync: true,
+      })
+
+      // Wait for everything to settle
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Source should be ready
+      expect(sourceCollection.isReady()).toBe(true)
+
+      // loadSubset should have been called
+      expect(loadSubsetCalled).toBe(true)
+
+      // KEY ASSERTION: Even with sync resolution, isLoadingSubset should now be false
+      // (the promise resolved immediately)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
+      // And the live query should be ready (not stuck in loading)
+      expect(liveQuery.status).toBe(`ready`)
+
+      // Verify we have data (not empty due to race condition)
+      expect(liveQuery.size).toBeGreaterThan(0)
+    })
+
     it(`live query result collection has isLoadingSubset property`, async () => {
       const sourceCollection = createCollection<{ id: string; value: string }>({
         id: `source`,
@@ -1117,11 +1264,15 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
 
-    it(`source collection isLoadingSubset is independent`, async () => {
-      let resolveLoadSubset: () => void
-      const loadSubsetPromise = new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
+    it(`source collection isLoadingSubset is independent from direct calls`, async () => {
+      // Create a pending promise for tracking direct loadSubset calls (not the initial subscription load)
+      let resolveDirectLoadSubset: () => void
+      const directLoadSubsetPromise = new Promise<void>((resolve) => {
+        resolveDirectLoadSubset = resolve
       })
+
+      // Track how many times loadSubset is called
+      let loadSubsetCallCount = 0
 
       const sourceCollection = createCollection<{ id: string; value: number }>({
         id: `source`,
@@ -1134,7 +1285,15 @@ describe(`createLiveQueryCollection`, () => {
             commit()
             markReady()
             return {
-              loadSubset: () => loadSubsetPromise,
+              loadSubset: () => {
+                loadSubsetCallCount++
+                // First call is from the subscription's initial load - complete synchronously
+                // Subsequent calls (direct calls) use the pending promise
+                if (loadSubsetCallCount === 1) {
+                  return true // synchronous completion
+                }
+                return directLoadSubsetPromise
+              },
             }
           },
         },
@@ -1147,18 +1306,74 @@ describe(`createLiveQueryCollection`, () => {
 
       await liveQuery.preload()
 
+      // After preload, both should have isLoadingSubset = false
+      expect(sourceCollection.isLoadingSubset).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+
       // Calling loadSubset directly on source collection sets its own isLoadingSubset
       sourceCollection._sync.loadSubset({})
       expect(sourceCollection.isLoadingSubset).toBe(true)
 
       // But live query isLoadingSubset tracks subscription-driven loads, not direct loadSubset calls
-      // so it remains false unless subscriptions trigger loads via predicate pushdown
+      // so it remains false when loadSubset is called directly on the source collection
       expect(liveQuery.isLoadingSubset).toBe(false)
 
-      resolveLoadSubset!()
+      resolveDirectLoadSubset!()
       await new Promise((resolve) => setTimeout(resolve, 10))
 
       expect(sourceCollection.isLoadingSubset).toBe(false)
+      expect(liveQuery.isLoadingSubset).toBe(false)
+    })
+
+    it(`status listener is registered before triggering snapshot to prevent race condition`, async () => {
+      // This test verifies the fix for the race condition where the subscription
+      // status could transition to 'loadingSubset' and back to 'ready' before
+      // the status listener was registered, causing the live query to miss
+      // tracking the loadSubset promise.
+      //
+      // The fix ensures the status listener is registered BEFORE calling
+      // triggerSnapshot() (which calls requestSnapshot/requestLimitedSnapshot).
+
+      // Track the order of events
+      const events: Array<string> = []
+
+      // Create a source collection where loadSubset synchronously calls the tracking
+      const sourceCollection = createCollection<{ id: number; name: string }>({
+        id: `race-condition-source`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {
+              loadSubset: () => {
+                events.push(`loadSubset called`)
+                // Return a synchronously resolved promise to simulate the race condition
+                return Promise.resolve().then(() => {
+                  events.push(`loadSubset resolved`)
+                })
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      // Wait for the live query to be ready
+      await liveQuery.preload()
+
+      // Verify the events occurred
+      expect(events).toContain(`loadSubset called`)
+      expect(events).toContain(`loadSubset resolved`)
+
+      // The key assertion: the live query should be ready after preload
+      // This proves that even with a synchronously-resolved promise,
+      // the code path works correctly
+      expect(liveQuery.status).toBe(`ready`)
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
   })
@@ -2078,10 +2293,11 @@ describe(`createLiveQueryCollection`, () => {
           .limit(10),
       )
 
-      // Trigger sync which will call loadSubset
-      await liveQueryCollection.preload()
+      // Start preload (don't await yet - it won't resolve until loadSubset completes)
+      const preloadPromise = liveQueryCollection.preload()
       await flushPromises()
 
+      // Verify loadSubset was called with the correct options
       expect(capturedOptions.length).toBeGreaterThan(0)
 
       // Find the call that has orderBy (the limited snapshot request)
@@ -2093,8 +2309,10 @@ describe(`createLiveQueryCollection`, () => {
       expect(callWithOrderBy?.orderBy?.[0]?.expression.type).toBe(`ref`)
       expect(callWithOrderBy?.limit).toBe(10)
 
+      // Resolve the loadSubset promise so preload can complete
       resolveLoadSubset!()
       await flushPromises()
+      await preloadPromise
     })
 
     it(`passes multiple orderBy columns to loadSubset when using limit`, async () => {
@@ -2135,10 +2353,11 @@ describe(`createLiveQueryCollection`, () => {
           .limit(10),
       )
 
-      // Trigger sync which will call loadSubset
-      await liveQueryCollection.preload()
+      // Start preload (don't await yet - it won't resolve until loadSubset completes)
+      const preloadPromise = liveQueryCollection.preload()
       await flushPromises()
 
+      // Verify loadSubset was called with the correct options
       expect(capturedOptions.length).toBeGreaterThan(0)
 
       // Find the call that has orderBy with multiple columns
@@ -2154,8 +2373,10 @@ describe(`createLiveQueryCollection`, () => {
       expect(callWithMultiOrderBy?.orderBy?.[1]?.expression.type).toBe(`ref`)
       expect(callWithMultiOrderBy?.limit).toBe(10)
 
+      // Resolve the loadSubset promise so preload can complete
       resolveLoadSubset!()
       await flushPromises()
+      await preloadPromise
     })
   })
 })

@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import mitt from 'mitt'
 import { createCollection } from '../src/collection/index.js'
 import { createTransaction } from '../src/transactions'
-import { eq } from '../src/query/builder/functions'
+import { and, eq, gt } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
 import type {
   ChangeMessage,
@@ -1915,5 +1915,170 @@ describe(`Collection.subscribeChanges`, () => {
 
     expect(collection.status).toBe(`ready`)
     expect(collection.size).toBe(2)
+  })
+
+  it(`should support where callback for filtering changes`, () => {
+    const callback = vi.fn()
+
+    // Create collection with items that have a status field
+    const collection = createCollection<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>({
+      id: `where-callback-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Start with some initial data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `item1`, status: `inactive` },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `item2`, status: `active` },
+          })
+          commit()
+        },
+      },
+    })
+
+    const mutationFn: MutationFn = async () => {}
+
+    // Subscribe to changes with a where callback for active items only
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+      where: (row) => eq(row.status, `active`),
+    })
+
+    // Should only receive the active item in initial state
+    expect(callback).toHaveBeenCalledTimes(1)
+    const initialChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(initialChanges).toHaveLength(1)
+    expect(initialChanges[0]!.key).toBe(2)
+    expect(initialChanges[0]!.type).toBe(`insert`)
+
+    // Reset mock
+    callback.mockReset()
+
+    // Update an inactive item to active (should emit insert)
+    const tx1 = createTransaction({ mutationFn })
+    tx1.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.status = `active`
+      }),
+    )
+
+    // Should emit an insert event for the newly active item
+    expect(callback).toHaveBeenCalledTimes(1)
+    const insertChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(insertChanges).toHaveLength(1)
+    expect(insertChanges[0]!.type).toBe(`insert`)
+    expect(insertChanges[0]!.key).toBe(1)
+    expect(insertChanges[0]!.value.status).toBe(`active`)
+
+    // Reset mock
+    callback.mockReset()
+
+    // Update an active item to inactive (should emit delete)
+    const tx2 = createTransaction({ mutationFn })
+    tx2.mutate(() =>
+      collection.update(2, (draft) => {
+        draft.status = `inactive`
+      }),
+    )
+
+    // Should emit a delete event for the newly inactive item
+    expect(callback).toHaveBeenCalledTimes(1)
+    const deleteChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(deleteChanges).toHaveLength(1)
+    expect(deleteChanges[0]!.type).toBe(`delete`)
+    expect(deleteChanges[0]!.key).toBe(2)
+
+    // Clean up
+    subscription.unsubscribe()
+  })
+
+  it(`should support where callback with multiple conditions`, () => {
+    const callback = vi.fn()
+
+    // Create collection with items
+    const collection = createCollection<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+      priority: number
+    }>({
+      id: `where-callback-and-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `item1`, status: `active`, priority: 3 },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `item2`, status: `active`, priority: 8 },
+          })
+          write({
+            type: `insert`,
+            value: { id: 3, value: `item3`, status: `inactive`, priority: 10 },
+          })
+          commit()
+        },
+      },
+    })
+
+    // Subscribe with where callback using and() for multiple conditions
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+      where: (row) => and(eq(row.status, `active`), gt(row.priority, 5)),
+    })
+
+    // Should only receive item2 (active AND priority > 5)
+    expect(callback).toHaveBeenCalledTimes(1)
+    const initialChanges = callback.mock.calls[0]![0] as ChangesPayload<any>
+    expect(initialChanges).toHaveLength(1)
+    expect(initialChanges[0]!.key).toBe(2)
+    expect(initialChanges[0]!.value).toEqual({
+      id: 2,
+      value: `item2`,
+      status: `active`,
+      priority: 8,
+    })
+
+    // Clean up
+    subscription.unsubscribe()
+  })
+
+  it(`should throw if both where and whereExpression are provided`, () => {
+    const collection = createCollection<{ id: number; status: string }>({
+      id: `where-both-error-test`,
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+
+    expect(() => {
+      collection.subscribeChanges(() => {}, {
+        where: (row) => eq(row.status, `active`),
+        whereExpression: eq(new PropRef([`status`]), `active`),
+      })
+    }).toThrow(`Cannot specify both 'where' and 'whereExpression' options`)
   })
 })
