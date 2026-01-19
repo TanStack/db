@@ -1201,10 +1201,6 @@ export function queryCollectionOptions(
    * Updates the query cache with new items for ALL active query keys.
    * This is critical for on-demand mode where multiple query keys may exist
    * (each with different predicates).
-   *
-   * Previously this only updated the base query key, causing direct writes
-   * to go to the wrong cache entry when using computed/function query keys
-   * or static keys with predicates in on-demand mode.
    */
   const updateCacheData = (items: Array<any>): void => {
     // Get all active query keys from the hashToQueryKey map
