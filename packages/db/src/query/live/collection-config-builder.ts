@@ -227,6 +227,7 @@ export class CollectionConfigBuilder<
           getBuilder: () => this,
           hasCustomGetKey: !!this.config.getKey,
           hasJoins: this.hasJoins(this.query),
+          hasDistinct: !!this.query.distinct,
         },
       },
     }

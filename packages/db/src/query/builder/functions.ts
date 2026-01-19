@@ -53,10 +53,10 @@ type ExtractType<T> =
 // Helper type to determine aggregate return type based on input nullability
 type AggregateReturnType<T> =
   ExtractType<T> extends infer U
-    ? U extends number | undefined | null | Date | bigint
+    ? U extends number | undefined | null | Date | bigint | string
       ? Aggregate<U>
-      : Aggregate<number | undefined | null | Date | bigint>
-    : Aggregate<number | undefined | null | Date | bigint>
+      : Aggregate<number | undefined | null | Date | bigint | string>
+    : Aggregate<number | undefined | null | Date | bigint | string>
 
 // Helper type to determine string function return type based on input nullability
 type StringFunctionReturnType<T> =
