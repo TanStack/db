@@ -2,13 +2,13 @@
 '@tanstack/db': patch
 ---
 
-Add detection and error messages for JavaScript operators in query callbacks
+Add development warnings for JavaScript operators in query callbacks
 
-This adds helpful error messages when users mistakenly use JavaScript operators (`||`, `&&`, `??`, `?:`) in query callbacks. These operators are evaluated at query construction time rather than execution time, causing silent unexpected behavior.
+Warns developers when they mistakenly use JavaScript operators (`||`, `&&`, `??`, `?:`) in query callbacks. These operators are evaluated at query construction time rather than execution time, causing silent unexpected behavior.
 
 Changes:
 
-- Add `JavaScriptOperatorInQueryError` with helpful suggestions for alternatives
-- Add `Symbol.toPrimitive` trap to `RefProxy` to catch primitive coercion attempts
-- Add `checkCallbackForJsOperators()` to detect operators in callback source code
+- Add `Symbol.toPrimitive` trap to RefProxy to catch primitive coercion (throws error)
+- Add `checkCallbackForJsOperators()` to detect operators in callback source code (warns in dev only)
 - Integrate checks into `select()`, `where()`, and `having()` methods
+- Detection is disabled in production mode for zero runtime overhead
