@@ -269,6 +269,13 @@ export class TransactionExecutor {
           mutationFn: async () => {},
         })
 
+        // Prevent unhandled promise rejection when cleanup calls rollback()
+        // We don't care about this promise - it's just for holding mutations
+        restorationTx.isPersisted.promise.catch(() => {
+          // Intentionally ignored - restoration transactions are cleaned up
+          // via cleanupRestorationTransaction, not through normal commit flow
+        })
+
         restorationTx.applyMutations(offlineTx.mutations)
 
         // Register with each affected collection's state manager
