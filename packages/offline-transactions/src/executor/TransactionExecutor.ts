@@ -1,3 +1,4 @@
+import { createTransaction } from '@tanstack/db'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
@@ -227,6 +228,10 @@ export class TransactionExecutor {
       this.scheduler.schedule(transaction)
     }
 
+    // Restore optimistic state for loaded transactions
+    // This ensures the UI shows the optimistic data while transactions are pending
+    this.restoreOptimisticState(filteredTransactions)
+
     // Reset retry delays for all loaded transactions so they can run immediately
     this.resetRetryDelays()
 
@@ -239,6 +244,56 @@ export class TransactionExecutor {
 
     if (removedTransactions.length > 0) {
       await this.outbox.removeMany(removedTransactions.map((tx) => tx.id))
+    }
+  }
+
+  /**
+   * Restore optimistic state from loaded transactions
+   * Creates internal transactions to hold the mutations so the collection's
+   * state manager can show optimistic data while waiting for sync
+   */
+  private restoreOptimisticState(transactions: Array<OfflineTransaction>): void {
+    for (const offlineTx of transactions) {
+      if (offlineTx.mutations.length === 0) continue
+
+      // Create a restoration transaction that will never commit
+      // Its only purpose is to hold the mutations for optimistic state display
+      const restorationTx = createTransaction({
+        id: offlineTx.id,
+        autoCommit: false,
+        mutationFn: async () => {
+          // This mutation function should never be called
+          // The real mutation is handled by the offline executor
+        },
+      })
+
+      // Apply mutations to the restoration transaction
+      restorationTx.applyMutations(offlineTx.mutations)
+
+      // Register with each affected collection's state manager
+      const touchedCollections = new Set<string>()
+      for (const mutation of offlineTx.mutations) {
+        const collectionId = mutation.collection.id
+        if (!touchedCollections.has(collectionId)) {
+          touchedCollections.add(collectionId)
+
+          // Register the transaction with the collection's state manager
+          mutation.collection._state.transactions.set(
+            restorationTx.id,
+            restorationTx,
+          )
+
+          // Recompute optimistic state to show the restored data
+          mutation.collection._state.recomputeOptimisticState(true)
+        }
+      }
+
+      // Store the restoration transaction so we can clean it up when the
+      // offline transaction completes
+      this.offlineExecutor.registerRestorationTransaction(
+        offlineTx.id,
+        restorationTx,
+      )
     }
   }
 

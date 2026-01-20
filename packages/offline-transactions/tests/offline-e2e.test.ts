@@ -467,15 +467,12 @@ describe(`offline executor end-to-end`, () => {
     env.executor.dispose()
   })
 
-  it(`should restore optimistic state to collection on startup (BUG: currently does not)`, async () => {
-    // This test reproduces the bug where optimistic state is NOT restored
-    // to the collection when the page is refreshed while offline.
+  it(`should restore optimistic state to collection on startup`, async () => {
+    // This test verifies that optimistic state IS restored to the collection
+    // when the page is refreshed while offline (e.g., with pending transactions).
     //
-    // The user expects: After page refresh, the collection should still show
-    // the optimistic data from pending transactions.
-    //
-    // What actually happens: The collection is empty until the transaction
-    // succeeds and syncs.
+    // After page refresh, the collection should still show the optimistic data
+    // from pending transactions, providing a seamless offline UX.
 
     const storage = new FakeStorageAdapter()
 
@@ -557,15 +554,9 @@ describe(`offline executor end-to-end`, () => {
 
     await secondEnv.waitForLeader()
 
-    // BUG: At this point, we should have restored the optimistic state
-    // to the collection, but we haven't.
-    //
-    // The transaction is loaded from storage, but the optimistic mutations
-    // are NOT applied to the collection.
-    //
-    // Expected behavior: collection should have the optimistic item
-    // Actual behavior: collection is empty (BUG)
-
+    // At this point, the optimistic state should be restored to the collection
+    // The transaction is loaded from storage, and the optimistic mutations
+    // are applied to the collection immediately
     const restoredItem = secondEnv.collection.get(`optimistic-item`)
 
     // The optimistic state should be restored from persisted transactions

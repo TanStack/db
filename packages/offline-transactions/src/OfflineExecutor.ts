@@ -69,6 +69,9 @@ export class OfflineExecutor {
     }
   > = new Map()
 
+  // Track restoration transactions for cleanup when offline transactions complete
+  private restorationTransactions: Map<string, Transaction> = new Map()
+
   constructor(config: OfflineConfig) {
     this.config = config
     this.scheduler = new KeyScheduler()
@@ -298,8 +301,14 @@ export class OfflineExecutor {
     }
 
     try {
+      // Load pending transactions and restore optimistic state
       await this.executor.loadPendingTransactions()
-      await this.executor.executeAll()
+
+      // Start execution in the background - don't await to avoid blocking initialization
+      // The transactions will execute and complete asynchronously
+      this.executor.executeAll().catch((error) => {
+        console.warn(`Failed to execute transactions:`, error)
+      })
     } catch (error) {
       console.warn(`Failed to load and replay transactions:`, error)
     }
@@ -307,6 +316,14 @@ export class OfflineExecutor {
 
   get isOfflineEnabled(): boolean {
     return this.mode === `offline` && this.isLeaderState
+  }
+
+  /**
+   * Wait for the executor to fully initialize.
+   * This ensures that pending transactions are loaded and optimistic state is restored.
+   */
+  async waitForInit(): Promise<void> {
+    return this.initPromise
   }
 
   createOfflineTransaction(
@@ -441,6 +458,9 @@ export class OfflineExecutor {
       deferred.resolve(result)
       this.pendingTransactionPromises.delete(transactionId)
     }
+
+    // Clean up the restoration transaction - the sync will provide authoritative data
+    this.cleanupRestorationTransaction(transactionId)
   }
 
   // Method for TransactionExecutor to signal failure
@@ -450,6 +470,48 @@ export class OfflineExecutor {
       deferred.reject(error)
       this.pendingTransactionPromises.delete(transactionId)
     }
+
+    // Clean up the restoration transaction and rollback optimistic state
+    this.cleanupRestorationTransaction(transactionId, true)
+  }
+
+  // Method for TransactionExecutor to register restoration transactions
+  registerRestorationTransaction(
+    offlineTransactionId: string,
+    restorationTransaction: Transaction,
+  ): void {
+    this.restorationTransactions.set(offlineTransactionId, restorationTransaction)
+  }
+
+  // Clean up restoration transaction when offline transaction completes or fails
+  private cleanupRestorationTransaction(
+    transactionId: string,
+    shouldRollback: boolean = false,
+  ): void {
+    const restorationTx = this.restorationTransactions.get(transactionId)
+    if (!restorationTx) return
+
+    if (shouldRollback) {
+      // Rollback the restoration transaction to remove optimistic state
+      restorationTx.rollback()
+    } else {
+      // Mark as completed so recomputeOptimisticState removes it from consideration
+      // The actual data will come from the sync
+      restorationTx.setState(`completed`)
+
+      // Manually remove from each collection's transaction map and recompute
+      const touchedCollections = new Set<string>()
+      for (const mutation of restorationTx.mutations) {
+        const collectionId = mutation.collection.id
+        if (!touchedCollections.has(collectionId)) {
+          touchedCollections.add(collectionId)
+          mutation.collection._state.transactions.delete(restorationTx.id)
+          mutation.collection._state.recomputeOptimisticState(false)
+        }
+      }
+    }
+
+    this.restorationTransactions.delete(transactionId)
   }
 
   async removeFromOutbox(id: string): Promise<void> {
