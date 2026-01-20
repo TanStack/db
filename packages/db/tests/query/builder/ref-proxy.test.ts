@@ -236,21 +236,21 @@ describe(`ref-proxy`, () => {
       const callback = ({ users }: any) => ({ data: users.data || [] })
       checkCallbackForJsOperators(callback)
       expect(warnSpy).toHaveBeenCalledTimes(1)
-      expect(warnSpy.mock.calls[0][0]).toContain(`||`)
+      expect(warnSpy.mock.calls[0]![0]).toContain(`||`)
     })
 
     it(`warns for && operator`, () => {
       const callback = ({ users }: any) => users.active && users.name
       checkCallbackForJsOperators(callback)
       expect(warnSpy).toHaveBeenCalledTimes(1)
-      expect(warnSpy.mock.calls[0][0]).toContain(`&&`)
+      expect(warnSpy.mock.calls[0]![0]).toContain(`&&`)
     })
 
     it(`warns for ?? operator`, () => {
       const callback = ({ users }: any) => ({ name: users.name ?? `default` })
       checkCallbackForJsOperators(callback)
       expect(warnSpy).toHaveBeenCalledTimes(1)
-      expect(warnSpy.mock.calls[0][0]).toContain(`??`)
+      expect(warnSpy.mock.calls[0]![0]).toContain(`??`)
     })
 
     it(`warns for ternary operator`, () => {
@@ -259,7 +259,7 @@ describe(`ref-proxy`, () => {
       })
       checkCallbackForJsOperators(callback)
       expect(warnSpy).toHaveBeenCalledTimes(1)
-      expect(warnSpy.mock.calls[0][0]).toContain(`?:`)
+      expect(warnSpy.mock.calls[0]![0]).toContain(`?:`)
     })
 
     it(`does not warn for valid query callbacks`, () => {
