@@ -825,6 +825,68 @@ export class CollectionStateManager<
       if (!this.hasReceivedFirstCommit) {
         this.hasReceivedFirstCommit = true
       }
+    } else if (committedSyncedTransactions.length > 0) {
+      // When there's a persisting transaction, we can't update syncedData yet, but we
+      // should still notify subscribers about the new synced data. This ensures that
+      // derived collections (live queries) see the synced data immediately.
+      //
+      // We emit events for the committed sync operations without modifying syncedData.
+      // The syncedData will be updated when the persisting transaction completes.
+      const events: Array<ChangeMessage<TOutput, TKey>> = []
+
+      for (const transaction of committedSyncedTransactions) {
+        for (const operation of transaction.operations) {
+          const key = operation.key as TKey
+          // Only emit events for keys that aren't affected by the pending optimistic mutation
+          // This ensures we don't double-emit or conflict with optimistic state
+          if (
+            !this.optimisticUpserts.has(key) &&
+            !this.optimisticDeletes.has(key)
+          ) {
+            // For inserts, check if the key already exists in syncedData to determine event type
+            if (operation.type === `insert`) {
+              if (this.syncedData.has(key)) {
+                // Key exists, this is effectively an update
+                events.push({
+                  type: `update`,
+                  key,
+                  value: operation.value,
+                  previousValue: this.syncedData.get(key),
+                })
+              } else {
+                // New key, emit insert
+                events.push({
+                  type: `insert`,
+                  key,
+                  value: operation.value,
+                })
+              }
+            } else if (operation.type === `update`) {
+              events.push({
+                type: `update`,
+                key,
+                value: operation.value,
+                previousValue: this.syncedData.get(key),
+              })
+            } else {
+              // operation.type === 'delete'
+              const previousValue = this.syncedData.get(key)
+              if (previousValue !== undefined) {
+                events.push({
+                  type: `delete`,
+                  key,
+                  value: previousValue,
+                })
+              }
+            }
+          }
+        }
+      }
+
+      // Emit events to subscribers so derived collections see the synced data
+      if (events.length > 0) {
+        this.changes.emitEvents(events, false)
+      }
     }
   }
 
