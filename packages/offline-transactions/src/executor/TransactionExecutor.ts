@@ -252,7 +252,9 @@ export class TransactionExecutor {
    * Creates internal transactions to hold the mutations so the collection's
    * state manager can show optimistic data while waiting for sync
    */
-  private restoreOptimisticState(transactions: Array<OfflineTransaction>): void {
+  private restoreOptimisticState(
+    transactions: Array<OfflineTransaction>,
+  ): void {
     for (const offlineTx of transactions) {
       if (offlineTx.mutations.length === 0) continue
 

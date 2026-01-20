@@ -480,7 +480,10 @@ export class OfflineExecutor {
     offlineTransactionId: string,
     restorationTransaction: Transaction,
   ): void {
-    this.restorationTransactions.set(offlineTransactionId, restorationTransaction)
+    this.restorationTransactions.set(
+      offlineTransactionId,
+      restorationTransaction,
+    )
   }
 
   // Clean up restoration transaction when offline transaction completes or fails
