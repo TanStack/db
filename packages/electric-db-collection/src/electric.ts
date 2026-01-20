@@ -6,7 +6,7 @@ import {
 } from '@electric-sql/client'
 import { Store } from '@tanstack/store'
 import DebugModule from 'debug'
-import { DeduplicatedLoadSubset, and } from '@tanstack/db'
+import { DeduplicatedLoadSubset, and, warnOnce } from '@tanstack/db'
 import {
   ExpectedNumberInAwaitTxIdError,
   StreamAbortedError,
@@ -837,7 +837,8 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     // Only wait if result contains txid
     if (result && `txid` in result) {
       // Warn about deprecated return value pattern
-      console.warn(
+      warnOnce(
+        'electric-collection-txid-return',
         '[TanStack DB] DEPRECATED: Returning { txid } from mutation handlers is deprecated and will be removed in v1.0. ' +
           'Use `await collection.utils.awaitTxId(txid)` instead of returning { txid }. ' +
           'See migration guide: https://tanstack.com/db/latest/docs/collections/electric-collection#persistence-handlers--synchronization',

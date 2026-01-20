@@ -199,7 +199,7 @@ const productsCollection = createCollection(
 
 ## Persistence Handlers
 
-You can define handlers that are called when mutations occur. These handlers persist changes to your backend and trigger refetches when needed:
+You can define handlers that are called when mutations occur. These handlers persist changes to your backend:
 
 ```typescript
 const todosCollection = createCollection(
@@ -209,61 +209,79 @@ const todosCollection = createCollection(
     queryClient,
     getKey: (item) => item.id,
 
-    onInsert: async ({ transaction, collection }) => {
+    onInsert: async ({ transaction }) => {
       const newItems = transaction.mutations.map((m) => m.modified)
       await api.createTodos(newItems)
-      // Trigger refetch to sync server state
-      await collection.utils.refetch()
+      // Auto-refetch happens after handler completes (pre-1.0 behavior)
     },
 
-    onUpdate: async ({ transaction, collection }) => {
+    onUpdate: async ({ transaction }) => {
       const updates = transaction.mutations.map((m) => ({
         id: m.key,
         changes: m.changes,
       }))
       await api.updateTodos(updates)
-      // Refetch after persisting changes
-      await collection.utils.refetch()
     },
 
-    onDelete: async ({ transaction, collection }) => {
+    onDelete: async ({ transaction }) => {
       const ids = transaction.mutations.map((m) => m.key)
       await api.deleteTodos(ids)
-      await collection.utils.refetch()
     },
   })
 )
 ```
 
+> **Note**: QueryCollection currently auto-refetches after handlers complete. See [Controlling Refetch Behavior](#controlling-refetch-behavior) for details on this transitional behavior.
+
 ### Controlling Refetch Behavior
 
-After persisting mutations to your backend, call `collection.utils.refetch()` to sync the server state back to your collection. This ensures the local state matches the server state after server-side processing.
+> **⚠️ Transitional API**: QueryCollection currently auto-refetches after handlers complete. This behavior is deprecated and will be removed in v1.0. See the migration notes below.
 
-```typescript
-onInsert: async ({ transaction, collection }) => {
-  await api.createTodos(transaction.mutations.map((m) => m.modified))
+#### Current Behavior (Pre-1.0)
 
-  // Trigger refetch to sync server state
-  await collection.utils.refetch()
-}
-```
-
-You can skip the refetch when:
-
-- You're confident the server state exactly matches what you sent (no server-side processing)
-- You're handling state updates through other mechanisms (like WebSockets or direct writes)
-- You want to optimize for fewer network requests
-
-**When to skip refetch:**
+By default, QueryCollection automatically refetches after each handler completes. To **skip** auto-refetch, return `{ refetch: false }`:
 
 ```typescript
 onInsert: async ({ transaction }) => {
   await api.createTodos(transaction.mutations.map((m) => m.modified))
 
-  // Skip refetch - only do this if server doesn't modify the data
-  // The optimistic state will remain as-is
+  // Skip auto-refetch - use this when server doesn't modify the data
+  return { refetch: false }
 }
 ```
+
+If you don't return `{ refetch: false }`, auto-refetch happens automatically.
+
+#### v1.0 Behavior (Future)
+
+In v1.0, auto-refetch will be **removed**. Handlers will need to explicitly call `collection.utils.refetch()` when refetching is needed:
+
+```typescript
+onInsert: async ({ transaction, collection }) => {
+  await api.createTodos(transaction.mutations.map((m) => m.modified))
+
+  // Explicitly trigger refetch when you need server state
+  await collection.utils.refetch()
+}
+```
+
+To skip refetch in v1.0, simply don't call `refetch()`:
+
+```typescript
+onInsert: async ({ transaction }) => {
+  await api.createTodos(transaction.mutations.map((m) => m.modified))
+
+  // No refetch call = no refetch (v1.0 behavior)
+}
+```
+
+#### When to Skip Refetch
+
+Skip refetching when:
+
+- You're confident the server state exactly matches what you sent (no server-side processing)
+- You're handling state updates through other mechanisms (like WebSockets or direct writes)
+- You want to optimize for fewer network requests
 
 ## Utility Methods
 

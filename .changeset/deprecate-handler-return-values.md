@@ -4,47 +4,47 @@
 '@tanstack/query-db-collection': minor
 ---
 
-**BREAKING (TypeScript only)**: Deprecate returning values from mutation handlers (`onInsert`, `onUpdate`, `onDelete`).
+**Deprecation**: Mutation handler return values and QueryCollection auto-refetch behavior.
 
 **What's changed:**
 
 - Handler types now default to `Promise<void>` instead of `Promise<any>`, indicating the new expected pattern
-- Old return patterns (`return { refetch }`, `return { txid }`) still work at runtime with deprecation warnings
-- **Deprecation warnings** are now logged when handlers return values
-- Old patterns will be fully removed in v1.0
+- **Deprecation warnings** are logged when deprecated patterns are used
 
-**New pattern (explicit sync coordination):**
+**QueryCollection changes:**
 
-- **Query Collections**: Call `await collection.utils.refetch()` to sync server state
-- **Electric Collections**: Call `await collection.utils.awaitTxId(txid)` or `await collection.utils.awaitMatch(fn)` to wait for synchronization
-- **Other Collections**: Use appropriate sync utilities for your collection type
+- Auto-refetch after handlers is **deprecated** and will be removed in v1.0
+- To skip auto-refetch now, return `{ refetch: false }` from your handler
+- In v1.0: call `await collection.utils.refetch()` explicitly when needed, or omit to skip
 
-This change makes the API more explicit and consistent across all collection types. All handlers should coordinate sync explicitly within the handler function using `await`, rather than relying on magic return values.
+**ElectricCollection changes:**
 
-Migration guide:
+- Returning `{ txid }` is deprecated - use `await collection.utils.awaitTxId(txid)` instead
+
+**Migration guide:**
 
 ```typescript
-// Before (Query Collection)
+// QueryCollection - skip refetch (current)
 onInsert: async ({ transaction }) => {
   await api.create(transaction.mutations[0].modified)
-  // Implicitly refetches
+  return { refetch: false } // Opt out of auto-refetch
 }
 
-// After (Query Collection)
+// QueryCollection - with refetch (v1.0 pattern)
 onInsert: async ({ transaction, collection }) => {
   await api.create(transaction.mutations[0].modified)
-  await collection.utils.refetch()
+  await collection.utils.refetch() // Explicit refetch
 }
 
-// Before (Electric Collection)
+// ElectricCollection - before
 onInsert: async ({ transaction }) => {
   const result = await api.create(transaction.mutations[0].modified)
-  return { txid: result.txid }
+  return { txid: result.txid } // Deprecated
 }
 
-// After (Electric Collection)
+// ElectricCollection - after
 onInsert: async ({ transaction, collection }) => {
   const result = await api.create(transaction.mutations[0].modified)
-  await collection.utils.awaitTxId(result.txid)
+  await collection.utils.awaitTxId(result.txid) // Explicit
 }
 ```
