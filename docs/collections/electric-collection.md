@@ -312,7 +312,7 @@ Wait for a specific transaction ID to be synchronized:
 // Wait for specific txid
 await todosCollection.utils.awaitTxId(12345)
 
-// With custom timeout (default is 30 seconds)
+// With custom timeout (default is 15 seconds)
 await todosCollection.utils.awaitTxId(12345, 10000)
 ```
 
