@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   checkCallbackForJsOperators,
   createRefProxy,
@@ -218,91 +218,100 @@ describe(`ref-proxy`, () => {
   })
 
   describe(`checkCallbackForJsOperators`, () => {
-    it(`throws error for || operator`, () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>
+    const originalEnv = process.env.NODE_ENV
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      // Ensure we're in dev mode for tests
+      process.env.NODE_ENV = `development`
+    })
+
+    afterEach(() => {
+      warnSpy.mockRestore()
+      process.env.NODE_ENV = originalEnv
+    })
+
+    it(`warns for || operator`, () => {
       const callback = ({ users }: any) => ({ data: users.data || [] })
-      expect(() => checkCallbackForJsOperators(callback)).toThrow(
-        JavaScriptOperatorInQueryError,
-      )
-      expect(() => checkCallbackForJsOperators(callback)).toThrow(`||`)
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0][0]).toContain(`||`)
     })
 
-    it(`throws error for && operator`, () => {
+    it(`warns for && operator`, () => {
       const callback = ({ users }: any) => users.active && users.name
-      expect(() => checkCallbackForJsOperators(callback)).toThrow(
-        JavaScriptOperatorInQueryError,
-      )
-      expect(() => checkCallbackForJsOperators(callback)).toThrow(`&&`)
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0][0]).toContain(`&&`)
     })
 
-    it(`throws error for ?? operator`, () => {
+    it(`warns for ?? operator`, () => {
       const callback = ({ users }: any) => ({ name: users.name ?? `default` })
-      expect(() => checkCallbackForJsOperators(callback)).toThrow(
-        JavaScriptOperatorInQueryError,
-      )
-      expect(() => checkCallbackForJsOperators(callback)).toThrow(`??`)
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0][0]).toContain(`??`)
     })
 
-    it(`throws error for ternary operator`, () => {
+    it(`warns for ternary operator`, () => {
       const callback = ({ users }: any) => ({
         status: users.active ? `active` : `inactive`,
       })
-      expect(() => checkCallbackForJsOperators(callback)).toThrow(
-        JavaScriptOperatorInQueryError,
-      )
-      expect(() => checkCallbackForJsOperators(callback)).toThrow(`?:`)
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0][0]).toContain(`?:`)
     })
 
-    it(`does not throw for valid query callbacks`, () => {
+    it(`does not warn for valid query callbacks`, () => {
       // Simple property access
-      expect(() =>
-        checkCallbackForJsOperators(({ users }: any) => users.name),
-      ).not.toThrow()
+      checkCallbackForJsOperators(({ users }: any) => users.name)
+      expect(warnSpy).not.toHaveBeenCalled()
 
       // Object with property access
-      expect(() =>
-        checkCallbackForJsOperators(({ users }: any) => ({
-          id: users.id,
-          name: users.name,
-        })),
-      ).not.toThrow()
+      checkCallbackForJsOperators(({ users }: any) => ({
+        id: users.id,
+        name: users.name,
+      }))
+      expect(warnSpy).not.toHaveBeenCalled()
 
       // Optional chaining is allowed
-      expect(() =>
-        checkCallbackForJsOperators(({ users }: any) => users.profile?.bio),
-      ).not.toThrow()
+      checkCallbackForJsOperators(({ users }: any) => users.profile?.bio)
+      expect(warnSpy).not.toHaveBeenCalled()
     })
 
-    it(`does not throw for operators in string literals`, () => {
-      // || in a string literal should not trigger error
-      expect(() =>
-        checkCallbackForJsOperators(() => ({ message: `a || b is valid` })),
-      ).not.toThrow()
+    it(`does not warn for operators in string literals`, () => {
+      // || in a string literal should not trigger warning
+      checkCallbackForJsOperators(() => ({ message: `a || b is valid` }))
+      expect(warnSpy).not.toHaveBeenCalled()
 
-      // && in a string literal should not trigger error
-      expect(() =>
-        checkCallbackForJsOperators(() => ({ message: `a && b is valid` })),
-      ).not.toThrow()
+      // && in a string literal should not trigger warning
+      checkCallbackForJsOperators(() => ({ message: `a && b is valid` }))
+      expect(warnSpy).not.toHaveBeenCalled()
 
-      // ?: in a string literal should not trigger error
-      expect(() =>
-        checkCallbackForJsOperators(() => ({ message: `a ? b : c is valid` })),
-      ).not.toThrow()
+      // ?: in a string literal should not trigger warning
+      checkCallbackForJsOperators(() => ({ message: `a ? b : c is valid` }))
+      expect(warnSpy).not.toHaveBeenCalled()
     })
 
-    it(`does not throw for optional chaining`, () => {
+    it(`does not warn for optional chaining`, () => {
       // Optional chaining should not be confused with ternary
-      expect(() =>
-        checkCallbackForJsOperators(({ users }: any) => users?.name),
-      ).not.toThrow()
+      checkCallbackForJsOperators(({ users }: any) => users?.name)
+      expect(warnSpy).not.toHaveBeenCalled()
     })
 
-    it(`throws for operators in regex literals (known limitation)`, () => {
+    it(`warns for operators in regex literals (known limitation)`, () => {
       // This is a known limitation - regex literals containing operators
       // will trigger false positives. Document the behavior.
       const callbackWithRegexOr = () => ({ pattern: /a||b/ })
-      expect(() => checkCallbackForJsOperators(callbackWithRegexOr)).toThrow(
-        JavaScriptOperatorInQueryError,
-      )
+      checkCallbackForJsOperators(callbackWithRegexOr)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it(`does not warn in production mode`, () => {
+      process.env.NODE_ENV = `production`
+      const callback = ({ users }: any) => ({ data: users.data || [] })
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).not.toHaveBeenCalled()
     })
   })
 
