@@ -15,6 +15,7 @@ import {
   mockSyncCollectionOptionsNoInitialState,
 } from '../utils.js'
 import { createDeferred } from '../../src/deferred'
+import { createOptimisticAction } from '../../src/optimistic-action.js'
 import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
 
 // Sample user type for tests
@@ -1070,6 +1071,111 @@ describe(`createLiveQueryCollection`, () => {
           .find((todo: any) => todo?.id === `1`)
 
         expect(liveTodo?.completed).toBe(true)
+      })
+    })
+
+    describe(`synced data visibility during pending optimistic mutations`, () => {
+      it(`shows synced data in derived collection while optimistic action mutation is pending`, async () => {
+        // This test verifies that synced data from the source collection appears
+        // in the derived live query collection even when there is a pending
+        // optimistic mutation on that derived collection.
+        //
+        // Uses createOptimisticAction with a controlled mutationFn to ensure
+        // the optimistic mutation stays pending while we sync new data.
+
+        type Item = { id: string; value: string }
+
+        let syncBegin!: () => void
+        let syncWrite!: (
+          change: Omit<ChangeMessage<Item, string | number>, `key`>,
+        ) => void
+        let syncCommit!: () => void
+        let syncMarkReady!: () => void
+
+        // Create source collection with controllable sync
+        const source = createCollection<Item>({
+          id: `source-for-optimistic-action`,
+          getKey: (item) => item.id,
+          startSync: true,
+          sync: {
+            sync: ({ begin, write, commit, markReady }) => {
+              syncBegin = begin
+              syncWrite = write
+              syncCommit = commit
+              syncMarkReady = markReady
+            },
+          },
+        })
+
+        // Mark source ready (no initial data)
+        syncMarkReady()
+
+        // Create derived collection (simple passthrough)
+        const derived = createLiveQueryCollection((q) =>
+          q.from({ item: source }),
+        )
+
+        await derived.preload()
+
+        // Verify derived collection is initially empty
+        expect(derived.size).toBe(0)
+
+        // Create a deferred promise to control when the optimistic mutation resolves
+        let resolveOptimistic!: () => void
+        const optimisticPromise = new Promise<void>((resolve) => {
+          resolveOptimistic = resolve
+        })
+
+        // Use createOptimisticAction to insert an item with a pending mutation
+        const optimisticInsert = createOptimisticAction<Item>({
+          onMutate: (item) => {
+            source.insert(item)
+          },
+          mutationFn: async () => {
+            // Keep the mutation pending until we explicitly resolve
+            await optimisticPromise
+          },
+        })
+
+        // Execute the optimistic action - mutation will be PENDING
+        const transaction = optimisticInsert({
+          id: `optimistic-1`,
+          value: `optimistic`,
+        })
+
+        // Wait for the optimistic insert to be visible
+        await new Promise((resolve) => setTimeout(resolve, 10))
+
+        // The optimistic item should be visible in the derived collection
+        expect(derived.size).toBe(1)
+        expect(derived.has(`optimistic-1`)).toBe(true)
+
+        // Verify the transaction is still pending
+        expect(transaction.state).toBe(`persisting`)
+
+        // Sync a NEW item into the source collection while the optimistic mutation is pending
+        syncBegin()
+        syncWrite({
+          type: `insert`,
+          value: { id: `synced-1`, value: `synced` },
+        })
+        syncCommit()
+
+        // Wait for the sync to propagate to the derived collection
+        await new Promise((resolve) => setTimeout(resolve, 10))
+
+        // KEY ASSERTIONS: Both items should be visible while the mutation is pending
+        // Synced data should appear in derived collections regardless of pending optimistic state
+        expect(derived.has(`optimistic-1`)).toBe(true)
+        expect(derived.has(`synced-1`)).toBe(true)
+        expect(derived.size).toBe(2)
+
+        // Now resolve the optimistic mutation
+        resolveOptimistic()
+        await transaction.isPersisted.promise
+
+        // After resolution, the synced item should still be visible
+        expect(derived.has(`synced-1`)).toBe(true)
       })
     })
   })
