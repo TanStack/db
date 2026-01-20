@@ -486,35 +486,37 @@ export class OfflineExecutor {
     )
   }
 
-  // Clean up restoration transaction when offline transaction completes or fails
   private cleanupRestorationTransaction(
     transactionId: string,
-    shouldRollback: boolean = false,
+    shouldRollback = false,
   ): void {
     const restorationTx = this.restorationTransactions.get(transactionId)
-    if (!restorationTx) return
-
-    if (shouldRollback) {
-      // Rollback the restoration transaction to remove optimistic state
-      restorationTx.rollback()
-    } else {
-      // Mark as completed so recomputeOptimisticState removes it from consideration
-      // The actual data will come from the sync
-      restorationTx.setState(`completed`)
-
-      // Manually remove from each collection's transaction map and recompute
-      const touchedCollections = new Set<string>()
-      for (const mutation of restorationTx.mutations) {
-        const collectionId = mutation.collection.id
-        if (!touchedCollections.has(collectionId)) {
-          touchedCollections.add(collectionId)
-          mutation.collection._state.transactions.delete(restorationTx.id)
-          mutation.collection._state.recomputeOptimisticState(false)
-        }
-      }
+    if (!restorationTx) {
+      return
     }
 
     this.restorationTransactions.delete(transactionId)
+
+    if (shouldRollback) {
+      restorationTx.rollback()
+      return
+    }
+
+    // Mark as completed so recomputeOptimisticState removes it from consideration.
+    // The actual data will come from the sync.
+    restorationTx.setState(`completed`)
+
+    // Remove from each collection's transaction map and recompute
+    const touchedCollections = new Set<string>()
+    for (const mutation of restorationTx.mutations) {
+      const collectionId = mutation.collection.id
+      if (touchedCollections.has(collectionId)) {
+        continue
+      }
+      touchedCollections.add(collectionId)
+      mutation.collection._state.transactions.delete(restorationTx.id)
+      mutation.collection._state.recomputeOptimisticState(false)
+    }
   }
 
   async removeFromOutbox(id: string): Promise<void> {

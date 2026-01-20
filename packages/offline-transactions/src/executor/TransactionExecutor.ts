@@ -248,50 +248,44 @@ export class TransactionExecutor {
   }
 
   /**
-   * Restore optimistic state from loaded transactions
+   * Restore optimistic state from loaded transactions.
    * Creates internal transactions to hold the mutations so the collection's
-   * state manager can show optimistic data while waiting for sync
+   * state manager can show optimistic data while waiting for sync.
    */
   private restoreOptimisticState(
     transactions: Array<OfflineTransaction>,
   ): void {
     for (const offlineTx of transactions) {
-      if (offlineTx.mutations.length === 0) continue
+      if (offlineTx.mutations.length === 0) {
+        continue
+      }
 
-      // Create a restoration transaction that will never commit
-      // Its only purpose is to hold the mutations for optimistic state display
+      // Create a restoration transaction that holds mutations for optimistic state display.
+      // It will never commit - the real mutation is handled by the offline executor.
       const restorationTx = createTransaction({
         id: offlineTx.id,
         autoCommit: false,
-        mutationFn: async () => {
-          // This mutation function should never be called
-          // The real mutation is handled by the offline executor
-        },
+        mutationFn: async () => {},
       })
 
-      // Apply mutations to the restoration transaction
       restorationTx.applyMutations(offlineTx.mutations)
 
       // Register with each affected collection's state manager
       const touchedCollections = new Set<string>()
       for (const mutation of offlineTx.mutations) {
         const collectionId = mutation.collection.id
-        if (!touchedCollections.has(collectionId)) {
-          touchedCollections.add(collectionId)
-
-          // Register the transaction with the collection's state manager
-          mutation.collection._state.transactions.set(
-            restorationTx.id,
-            restorationTx,
-          )
-
-          // Recompute optimistic state to show the restored data
-          mutation.collection._state.recomputeOptimisticState(true)
+        if (touchedCollections.has(collectionId)) {
+          continue
         }
+        touchedCollections.add(collectionId)
+
+        mutation.collection._state.transactions.set(
+          restorationTx.id,
+          restorationTx,
+        )
+        mutation.collection._state.recomputeOptimisticState(true)
       }
 
-      // Store the restoration transaction so we can clean it up when the
-      // offline transaction completes
       this.offlineExecutor.registerRestorationTransaction(
         offlineTx.id,
         restorationTx,
