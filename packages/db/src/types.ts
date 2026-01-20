@@ -577,9 +577,6 @@ export interface BaseCollectionConfig<
   syncMode?: SyncMode
   /**
    * Optional asynchronous handler function called before an insert operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise that should resolve to void
-   * @deprecated Returning values from this handler is deprecated. Use collection utilities to refetch/sync.
    *
    * @example
    * // Basic insert handler
@@ -627,13 +624,17 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onInsert?: InsertMutationFn<T, TKey, TUtils, TReturn>
+  onInsert?:
+    | InsertMutationFn<T, TKey, TUtils, void>
+    | (
+        /**
+         * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
+         */
+        InsertMutationFn<T, TKey, TUtils, TReturn>
+      )
 
   /**
    * Optional asynchronous handler function called before an update operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise that should resolve to void
-   * @deprecated Returning values from this handler is deprecated. Use collection utilities to refetch/sync.
    *
    * @example
    * // Basic update handler
@@ -685,12 +686,16 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onUpdate?: UpdateMutationFn<T, TKey, TUtils, TReturn>
+  onUpdate?:
+    | UpdateMutationFn<T, TKey, TUtils, void>
+    | (
+        /**
+         * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
+         */
+        UpdateMutationFn<T, TKey, TUtils, TReturn>
+      )
   /**
    * Optional asynchronous handler function called before a delete operation
-   * @param params Object containing transaction and collection information
-   * @returns Promise that should resolve to void
-   * @deprecated Returning values from this handler is deprecated. Use collection utilities to refetch/sync.
    *
    * @example
    * // Basic delete handler
@@ -741,7 +746,14 @@ export interface BaseCollectionConfig<
    *   }
    * }
    */
-  onDelete?: DeleteMutationFn<T, TKey, TUtils, TReturn>
+  onDelete?:
+    | DeleteMutationFn<T, TKey, TUtils, void>
+    | (
+        /**
+         * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
+         */
+        DeleteMutationFn<T, TKey, TUtils, TReturn>
+      )
 
   /**
    * Specifies how to compare data in the collection.
