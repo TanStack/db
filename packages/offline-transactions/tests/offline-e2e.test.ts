@@ -582,4 +582,85 @@ describe(`offline executor end-to-end`, () => {
 
     secondEnv.executor.dispose()
   })
+
+  it(`should rollback restored optimistic state on permanent failure after page refresh`, async () => {
+    // This test verifies that optimistic state restored from persisted transactions
+    // is properly rolled back when the transaction fails permanently (NonRetriableError).
+    //
+    // Scenario: User creates transaction offline, refreshes page, transaction fails permanently
+    // Expected: Optimistic state should be visible initially, then removed after failure
+
+    const storage = new FakeStorageAdapter()
+
+    // First environment: Create a transaction that gets stuck (simulating offline)
+    const mutationPromise = () => new Promise<void>(() => {})
+
+    const firstEnv = createTestOfflineEnvironment({
+      storage,
+      mutationFn: async () => {
+        await mutationPromise()
+        throw new Error(`Should not reach here in first env`)
+      },
+    })
+
+    await firstEnv.waitForLeader()
+
+    const offlineTx = firstEnv.executor.createOfflineTransaction({
+      mutationFnName: firstEnv.mutationFnName,
+      autoCommit: false,
+    })
+
+    // Apply optimistic update
+    offlineTx.mutate(() => {
+      firstEnv.collection.insert({
+        id: `ghost-item`,
+        value: `will-fail`,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+
+    // Verify the optimistic update is visible
+    expect(firstEnv.collection.get(`ghost-item`)?.value).toBe(`will-fail`)
+
+    // Start commit - it will persist to outbox
+    offlineTx.commit()
+
+    // Wait for the transaction to be persisted
+    await waitUntil(async () => {
+      const pendingEntries = await firstEnv.executor.peekOutbox()
+      return pendingEntries.length === 1
+    }, 5000)
+
+    // Dispose first environment (simulating page refresh)
+    firstEnv.executor.dispose()
+
+    // Create a new environment where the mutation fails permanently
+    const secondEnv = createTestOfflineEnvironment({
+      storage,
+      mutationFn: () => {
+        throw new NonRetriableError(`Server rejected mutation permanently`)
+      },
+    })
+
+    await secondEnv.waitForLeader()
+
+    // Optimistic state should be restored immediately after initialization
+    expect(secondEnv.collection.get(`ghost-item`)?.value).toBe(`will-fail`)
+
+    // Wait for the transaction to fail and be removed from outbox
+    await waitUntil(async () => {
+      const entries = await secondEnv.executor.peekOutbox()
+      return entries.length === 0
+    }, 5000)
+
+    // After permanent failure, the optimistic state should be rolled back
+    // The item should no longer exist in the collection
+    expect(secondEnv.collection.get(`ghost-item`)).toBeUndefined()
+
+    // And it should not exist on the server either
+    expect(secondEnv.serverState.get(`ghost-item`)).toBeUndefined()
+
+    secondEnv.executor.dispose()
+  })
 })

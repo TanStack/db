@@ -509,6 +509,11 @@ export class OfflineExecutor {
     // Remove from each collection's transaction map and recompute
     const touchedCollections = new Set<string>()
     for (const mutation of restorationTx.mutations) {
+      // Defensive check for corrupted deserialized data
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (!mutation.collection) {
+        continue
+      }
       const collectionId = mutation.collection.id
       if (touchedCollections.has(collectionId)) {
         continue
