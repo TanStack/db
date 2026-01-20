@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.5.22
+
+### Patch Changes
+
+- Fix `gcTime: Infinity` causing immediate garbage collection instead of disabling GC. JavaScript's `setTimeout` coerces `Infinity` to `0` via ToInt32, so we now explicitly check for non-finite values. ([#1135](https://github.com/TanStack/db/pull/1135))
+
 ## 0.5.21
 
 ### Patch Changes
