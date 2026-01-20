@@ -351,73 +351,15 @@ export function val<T>(value: T): BasicExpression<T> {
 }
 
 /**
- * Patterns that indicate JavaScript operators being used in query callbacks.
- * These operators cannot be translated to query operations and will silently
- * produce incorrect results.
- */
-const JS_OPERATOR_PATTERNS: Array<{
-  pattern: RegExp
-  operator: string
-  description: string
-}> = [
-  {
-    pattern: /\|\|/,
-    operator: `||`,
-    description: `logical OR`,
-  },
-  {
-    pattern: /&&/,
-    operator: `&&`,
-    description: `logical AND`,
-  },
-  {
-    pattern: /\?\?/,
-    operator: `??`,
-    description: `nullish coalescing`,
-  },
-  {
-    // Matches ? followed by : with something in between,
-    // but not ?. (optional chaining) or ?? (nullish coalescing)
-    pattern: /\?[^.?][^:]*:/,
-    operator: `?:`,
-    description: `ternary`,
-  },
-]
-
-function getHintForOperator(operator: string): string {
-  switch (operator) {
-    case `||`:
-    case `??`:
-      return `Use coalesce() instead: coalesce(value, defaultValue)`
-    case `&&`:
-      return `Use and() for logical conditions`
-    case `?:`:
-      return `Use cond() for conditional expressions: cond(condition, trueValue, falseValue)`
-    default:
-      return `Use the appropriate query function instead`
-  }
-}
-
-/**
- * Removes string literals and comments from source code to avoid false positives
- * when checking for JavaScript operators.
- */
-function stripStringsAndComments(source: string): string {
-  return source
-    .replace(/`(?:[^`\\]|\\.)*`/g, `""`) // template literals
-    .replace(/"(?:[^"\\]|\\.)*"/g, `""`) // double-quoted strings
-    .replace(/'(?:[^'\\]|\\.)*'/g, `""`) // single-quoted strings
-    .replace(/\/\/[^\n]*/g, ``) // single-line comments
-    .replace(/\/\*[\s\S]*?\*\//g, ``) // multi-line comments
-}
-
-/**
  * Checks a callback function's source code for JavaScript operators that
  * cannot be translated to query operations.
  *
  * Only runs in development mode (NODE_ENV !== 'production') and logs a warning
  * instead of throwing, since regex-based detection can have false positives
  * (e.g., operators inside regex literals).
+ *
+ * All detection logic is inside the dev check so bundlers can eliminate it
+ * entirely from production builds.
  *
  * @param callback - The callback function to check
  *
@@ -431,31 +373,59 @@ function stripStringsAndComments(source: string): string {
 export function checkCallbackForJsOperators<
   T extends (...args: Array<any>) => any,
 >(callback: T): void {
-  // Only run in development mode
-  if (process.env.NODE_ENV === `production`) {
-    return
-  }
+  if (process.env.NODE_ENV !== `production`) {
+    // Patterns that indicate JavaScript operators being used in query callbacks
+    const JS_OPERATOR_PATTERNS = [
+      { pattern: /\|\|/, operator: `||`, description: `logical OR` },
+      { pattern: /&&/, operator: `&&`, description: `logical AND` },
+      { pattern: /\?\?/, operator: `??`, description: `nullish coalescing` },
+      {
+        // Matches ? followed by : with something in between,
+        // but not ?. (optional chaining) or ?? (nullish coalescing)
+        pattern: /\?[^.?][^:]*:/,
+        operator: `?:`,
+        description: `ternary`,
+      },
+    ]
 
-  const source = callback.toString()
+    const getHintForOperator = (operator: string): string => {
+      switch (operator) {
+        case `||`:
+        case `??`:
+          return `Use coalesce() instead: coalesce(value, defaultValue)`
+        case `&&`:
+          return `Use and() for logical conditions`
+        case `?:`:
+          return `Use cond() for conditional expressions: cond(condition, trueValue, falseValue)`
+        default:
+          return `Use the appropriate query function instead`
+      }
+    }
 
-  // Strip strings and comments to avoid false positives
-  const cleanedSource = stripStringsAndComments(source)
+    // Strip string literals and comments to avoid false positives
+    const cleanedSource = callback
+      .toString()
+      .replace(/`(?:[^`\\]|\\.)*`/g, `""`) // template literals
+      .replace(/"(?:[^"\\]|\\.)*"/g, `""`) // double-quoted strings
+      .replace(/'(?:[^'\\]|\\.)*'/g, `""`) // single-quoted strings
+      .replace(/\/\/[^\n]*/g, ``) // single-line comments
+      .replace(/\/\*[\s\S]*?\*\//g, ``) // multi-line comments
 
-  for (const { pattern, operator, description } of JS_OPERATOR_PATTERNS) {
-    if (pattern.test(cleanedSource)) {
-      const hint = getHintForOperator(operator)
-      console.warn(
-        `[TanStack DB] JavaScript operator "${operator}" detected in query callback.\n\n` +
-          `Found JavaScript ${description} operator (${operator}) in query callback.\n` +
-          `This operator is evaluated at query construction time, not at query execution time,\n` +
-          `which means it will not behave as expected.\n\n` +
-          `${hint}\n\n` +
-          `Example of incorrect usage:\n` +
-          `  .select(({users}) => ({ data: users.data || [] }))\n\n` +
-          `Correct usage:\n` +
-          `  .select(({users}) => ({ data: coalesce(users.data, []) }))`,
-      )
-      return // Only warn once per callback
+    for (const { pattern, operator, description } of JS_OPERATOR_PATTERNS) {
+      if (pattern.test(cleanedSource)) {
+        console.warn(
+          `[TanStack DB] JavaScript operator "${operator}" detected in query callback.\n\n` +
+            `Found JavaScript ${description} operator (${operator}) in query callback.\n` +
+            `This operator is evaluated at query construction time, not at query execution time,\n` +
+            `which means it will not behave as expected.\n\n` +
+            `${getHintForOperator(operator)}\n\n` +
+            `Example of incorrect usage:\n` +
+            `  .select(({users}) => ({ data: users.data || [] }))\n\n` +
+            `Correct usage:\n` +
+            `  .select(({users}) => ({ data: coalesce(users.data, []) }))`,
+        )
+        return // Only warn once per callback
+      }
     }
   }
 }
