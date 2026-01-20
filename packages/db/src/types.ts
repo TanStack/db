@@ -626,12 +626,10 @@ export interface BaseCollectionConfig<
    */
   onInsert?:
     | InsertMutationFn<T, TKey, TUtils, void>
-    | (
-        /**
-         * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
-         */
-        InsertMutationFn<T, TKey, TUtils, TReturn>
-      )
+    /**
+     * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
+     */
+    | InsertMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -688,12 +686,10 @@ export interface BaseCollectionConfig<
    */
   onUpdate?:
     | UpdateMutationFn<T, TKey, TUtils, void>
-    | (
-        /**
-         * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
-         */
-        UpdateMutationFn<T, TKey, TUtils, TReturn>
-      )
+    /**
+     * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
+     */
+    | UpdateMutationFn<T, TKey, TUtils, TReturn>
   /**
    * Optional asynchronous handler function called before a delete operation
    *
@@ -748,12 +744,10 @@ export interface BaseCollectionConfig<
    */
   onDelete?:
     | DeleteMutationFn<T, TKey, TUtils, void>
-    | (
-        /**
-         * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
-         */
-        DeleteMutationFn<T, TKey, TUtils, TReturn>
-      )
+    /**
+     * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
+     */
+    | DeleteMutationFn<T, TKey, TUtils, TReturn>
 
   /**
    * Specifies how to compare data in the collection.
