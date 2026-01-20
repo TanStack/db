@@ -1,5 +1,14 @@
 # @tanstack/query-db-collection
 
+## 1.0.19
+
+### Patch Changes
+
+- Fix updating all active query caches on directWrite for on-demand collections.Previously directWrite operations (e.g. writeUpdate/writeInsert) only updated the cache at the base query key for on-demand collections, leading to stale data when components remounted. This change ensures all active query cache keys are updated so data persists correctly. ([#1155](https://github.com/TanStack/db/pull/1155))
+
+- Updated dependencies [[`f9b741e`](https://github.com/TanStack/db/commit/f9b741e9fb636be1c9f1502b7e28fe691bae2480)]:
+  - @tanstack/db@0.5.22
+
 ## 1.0.18
 
 ### Patch Changes
