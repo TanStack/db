@@ -466,4 +466,129 @@ describe(`offline executor end-to-end`, () => {
 
     env.executor.dispose()
   })
+
+  it(`should restore optimistic state to collection on startup (BUG: currently does not)`, async () => {
+    // This test reproduces the bug where optimistic state is NOT restored
+    // to the collection when the page is refreshed while offline.
+    //
+    // The user expects: After page refresh, the collection should still show
+    // the optimistic data from pending transactions.
+    //
+    // What actually happens: The collection is empty until the transaction
+    // succeeds and syncs.
+
+    const storage = new FakeStorageAdapter()
+
+    // Create a promise that never resolves - simulates offline/stuck mutation
+    const mutationPromise = () => new Promise<void>(() => {})
+
+    // First environment: Create a transaction that gets stuck (simulating offline)
+    const firstEnv = createTestOfflineEnvironment({
+      storage,
+      mutationFn: async () => {
+        // This mutation will hang forever, simulating offline state
+        await mutationPromise()
+        throw new Error(`Should not reach here in first env`)
+      },
+    })
+
+    await firstEnv.waitForLeader()
+
+    const offlineTx = firstEnv.executor.createOfflineTransaction({
+      mutationFnName: firstEnv.mutationFnName,
+      autoCommit: false,
+    })
+
+    // Apply optimistic update
+    offlineTx.mutate(() => {
+      firstEnv.collection.insert({
+        id: `optimistic-item`,
+        value: `should-persist`,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+
+    // Verify the optimistic update is visible in the collection
+    expect(firstEnv.collection.get(`optimistic-item`)?.value).toBe(
+      `should-persist`,
+    )
+
+    // Start commit - it will persist to outbox and start (but not complete) execution
+    offlineTx.commit()
+
+    // Wait for the transaction to be persisted to outbox
+    await waitUntil(async () => {
+      const pendingEntries = await firstEnv.executor.peekOutbox()
+      return pendingEntries.length === 1
+    }, 5000)
+
+    // Verify it's in the outbox
+    const outboxEntries = await firstEnv.executor.peekOutbox()
+    expect(outboxEntries.length).toBe(1)
+    expect(outboxEntries[0].id).toBe(offlineTx.id)
+
+    // Verify the mutation data is properly serialized
+    expect(outboxEntries[0].mutations.length).toBe(1)
+    expect(outboxEntries[0].mutations[0].type).toBe(`insert`)
+
+    // Dispose first environment (simulating page refresh)
+    firstEnv.executor.dispose()
+
+    // Create a new environment with a deferred mutation to control timing
+    let secondEnvResolveMutation: (() => void) | null = null
+    const secondEnvMutationPromise = () =>
+      new Promise<void>((resolve) => {
+        secondEnvResolveMutation = resolve
+      })
+
+    const secondEnv = createTestOfflineEnvironment({
+      storage,
+      mutationFn: async (params) => {
+        // Wait for explicit resolution
+        await secondEnvMutationPromise()
+        const mutations = params.transaction.mutations as Array<
+          PendingMutation<TestItem>
+        >
+        secondEnv.applyMutations(mutations)
+        return { ok: true, mutations }
+      },
+    })
+
+    await secondEnv.waitForLeader()
+
+    // BUG: At this point, we should have restored the optimistic state
+    // to the collection, but we haven't.
+    //
+    // The transaction is loaded from storage, but the optimistic mutations
+    // are NOT applied to the collection.
+    //
+    // Expected behavior: collection should have the optimistic item
+    // Actual behavior: collection is empty (BUG)
+
+    const restoredItem = secondEnv.collection.get(`optimistic-item`)
+
+    // The optimistic state should be restored from persisted transactions
+    expect(restoredItem?.value).toBe(`should-persist`)
+
+    // Verify the transaction IS still in the outbox (data was persisted correctly)
+    const secondEnvOutbox = await secondEnv.executor.peekOutbox()
+    expect(secondEnvOutbox.length).toBe(1)
+    expect(secondEnvOutbox[0].mutations[0].type).toBe(`insert`)
+
+    // Now complete the mutation to verify the data eventually syncs
+    secondEnvResolveMutation!()
+
+    await waitUntil(async () => {
+      const entries = await secondEnv.executor.peekOutbox()
+      return entries.length === 0
+    })
+
+    // After sync completes, the item appears (but this is too late for offline UX)
+    expect(secondEnv.serverState.get(`optimistic-item`)?.value).toBe(
+      `should-persist`,
+    )
+
+    secondEnv.executor.dispose()
+  })
 })
