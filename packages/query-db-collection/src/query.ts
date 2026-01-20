@@ -1273,7 +1273,7 @@ export function queryCollectionOptions(
             '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
               'This behavior will be removed in v1.0. To prepare: ' +
               '(1) Add `await collection.utils.refetch()` to your handler if you need refetching, or ' +
-              '(2) Return `{ refetch: false }` to opt out now if you don\'t need it. ' +
+              "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
               'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
           )
           await refetch()
@@ -1307,7 +1307,7 @@ export function queryCollectionOptions(
             '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
               'This behavior will be removed in v1.0. To prepare: ' +
               '(1) Add `await collection.utils.refetch()` to your handler if you need refetching, or ' +
-              '(2) Return `{ refetch: false }` to opt out now if you don\'t need it. ' +
+              "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
               'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
           )
           await refetch()
@@ -1341,7 +1341,7 @@ export function queryCollectionOptions(
             '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
               'This behavior will be removed in v1.0. To prepare: ' +
               '(1) Add `await collection.utils.refetch()` to your handler if you need refetching, or ' +
-              '(2) Return `{ refetch: false }` to opt out now if you don\'t need it. ' +
+              "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
               'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
           )
           await refetch()
