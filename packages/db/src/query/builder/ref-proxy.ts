@@ -8,17 +8,24 @@ import type { RefLeaf } from './types.js'
  * JavaScript tries to coerce a RefProxy to a primitive value.
  * This catches misuse like string concatenation, arithmetic, etc.
  */
+function getOperatorTypeFromHint(hint: string): string {
+  switch (hint) {
+    case `number`:
+      return `arithmetic`
+    case `string`:
+      return `string concatenation`
+    default:
+      return `comparison`
+  }
+}
+
 function createToPrimitiveHandler(
   path: Array<string>,
 ): (hint: string) => never {
   return (hint: string) => {
     const pathStr = path.length > 0 ? path.join(`.`) : `<root>`
     throw new JavaScriptOperatorInQueryError(
-      hint === `number`
-        ? `arithmetic`
-        : hint === `string`
-          ? `string concatenation`
-          : `comparison`,
+      getOperatorTypeFromHint(hint),
       `Attempted to use "${pathStr}" in a JavaScript ${hint} context.\n` +
         `Query references can only be used with query functions, not JavaScript operators.`,
     )
@@ -377,22 +384,31 @@ const JS_OPERATOR_PATTERNS: Array<{
   },
 ]
 
+function getHintForOperator(operator: string): string {
+  switch (operator) {
+    case `||`:
+    case `??`:
+      return `Use coalesce() instead: coalesce(value, defaultValue)`
+    case `&&`:
+      return `Use and() for logical conditions`
+    case `?:`:
+      return `Use cond() for conditional expressions: cond(condition, trueValue, falseValue)`
+    default:
+      return `Use the appropriate query function instead`
+  }
+}
+
 /**
  * Removes string literals and comments from source code to avoid false positives
  * when checking for JavaScript operators.
  */
 function stripStringsAndComments(source: string): string {
-  // Remove template literals (backtick strings)
-  let result = source.replace(/`(?:[^`\\]|\\.)*`/g, `""`)
-  // Remove double-quoted strings
-  result = result.replace(/"(?:[^"\\]|\\.)*"/g, `""`)
-  // Remove single-quoted strings
-  result = result.replace(/'(?:[^'\\]|\\.)*'/g, `""`)
-  // Remove single-line comments
-  result = result.replace(/\/\/[^\n]*/g, ``)
-  // Remove multi-line comments
-  result = result.replace(/\/\*[\s\S]*?\*\//g, ``)
-  return result
+  return source
+    .replace(/`(?:[^`\\]|\\.)*`/g, `""`) // template literals
+    .replace(/"(?:[^"\\]|\\.)*"/g, `""`) // double-quoted strings
+    .replace(/'(?:[^'\\]|\\.)*'/g, `""`) // single-quoted strings
+    .replace(/\/\/[^\n]*/g, ``) // single-line comments
+    .replace(/\/\*[\s\S]*?\*\//g, ``) // multi-line comments
 }
 
 /**
@@ -427,15 +443,7 @@ export function checkCallbackForJsOperators<
 
   for (const { pattern, operator, description } of JS_OPERATOR_PATTERNS) {
     if (pattern.test(cleanedSource)) {
-      const hint =
-        operator === `||` || operator === `??`
-          ? `Use coalesce() instead: coalesce(value, defaultValue)`
-          : operator === `&&`
-            ? `Use and() for logical conditions`
-            : operator === `?:`
-              ? `Use cond() for conditional expressions: cond(condition, trueValue, falseValue)`
-              : `Use the appropriate query function instead`
-
+      const hint = getHintForOperator(operator)
       console.warn(
         `[TanStack DB] JavaScript operator "${operator}" detected in query callback.\n\n` +
           `Found JavaScript ${description} operator (${operator}) in query callback.\n` +
