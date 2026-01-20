@@ -1,8 +1,326 @@
-# Full-Text Search Index Research for TanStack DB
+# Full-Text Search in TanStack DB
 
-## Context
+TanStack DB provides a generic full-text search interface that lets you bring your own search library. This approach means:
 
-Based on [PR #950](https://github.com/TanStack/db/pull/950), TanStack DB is moving toward opt-in, tree-shakeable indexing. This document researches JavaScript full-text search options that could integrate with this architecture.
+- **No vendor lock-in** - Use whichever search library fits your needs
+- **Tree-shakeable** - Only the adapter code is included in your bundle
+- **Consistent API** - Same interface regardless of which library you use
+
+## Quick Start
+
+```typescript
+import MiniSearch from 'minisearch'
+import { createMiniSearchAdapter } from '@tanstack/db/fulltext'
+
+// Create a search adapter
+const search = createMiniSearchAdapter(MiniSearch, {
+  fields: ['title', 'content', 'tags']
+})
+
+// Add documents
+search.add('doc1', { title: 'Hello World', content: 'Getting started guide', tags: ['intro'] })
+search.add('doc2', { title: 'Advanced Topics', content: 'Deep dive into features', tags: ['advanced'] })
+
+// Search
+const results = search.search('hello')
+// => [{ key: 'doc1', score: 1.5, highlights: { title: ['hello'] } }]
+```
+
+## Available Adapters
+
+| Library | Bundle Size | Fuzzy | Stemming | Autocomplete | Best For |
+|---------|-------------|-------|----------|--------------|----------|
+| [Orama](#orama) | ~2KB | ✅ | ✅ (30 langs) | ✅ | Smallest bundle, full features |
+| [MiniSearch](#minisearch) | ~7KB | ✅ | ❌ (addon) | ✅ | Simple class-based API |
+| [FlexSearch](#flexsearch) | 4.5-16KB | ✅ | ✅ | ❌ | Maximum performance |
+
+---
+
+## Orama
+
+[Orama](https://github.com/oramasearch/orama) is a fast, batteries-included full-text search engine with the smallest bundle size (~2KB).
+
+### Installation
+
+```bash
+npm install @orama/orama
+```
+
+### Usage
+
+```typescript
+import { create, insert, remove, search } from '@orama/orama'
+import { createOramaAdapter } from '@tanstack/db/fulltext'
+
+const searchAdapter = createOramaAdapter(
+  { create, insert, remove, search },
+  {
+    fields: ['title', 'content'],
+    // Orama-specific options
+    language: 'english',
+    tolerance: 1, // typo tolerance (0-3)
+  }
+)
+
+// Add documents
+searchAdapter.add('1', { title: 'TypeScript Guide', content: 'Learn TypeScript...' })
+
+// Search with fuzzy matching
+const results = searchAdapter.search('typscript', { fuzzy: true })
+```
+
+### Lazy Loading (for smaller initial bundle)
+
+```typescript
+import { createOramaAdapterFactory } from '@tanstack/db/fulltext'
+
+const createSearch = createOramaAdapterFactory(() => import('@orama/orama'))
+
+// Later, when needed:
+const searchAdapter = await createSearch({ fields: ['title', 'content'] })
+```
+
+---
+
+## MiniSearch
+
+[MiniSearch](https://github.com/lucaong/minisearch) is a tiny but powerful in-memory full-text search engine with great autocomplete support.
+
+### Installation
+
+```bash
+npm install minisearch
+```
+
+### Usage
+
+```typescript
+import MiniSearch from 'minisearch'
+import { createMiniSearchAdapter } from '@tanstack/db/fulltext'
+
+const searchAdapter = createMiniSearchAdapter(MiniSearch, {
+  fields: ['title', 'content'],
+  storeFields: ['title'], // fields to return in results
+  // MiniSearch-specific options
+  searchOptions: {
+    boost: { title: 2 }, // title matches are 2x more important
+    fuzzy: 0.2,
+    prefix: true,
+  }
+})
+
+// Add documents
+searchAdapter.add('1', { title: 'React Hooks', content: 'useState, useEffect...' })
+
+// Search
+const results = searchAdapter.search('react')
+
+// Autocomplete
+const suggestions = searchAdapter.suggest?.('rea')
+// => ['react']
+```
+
+### Lazy Loading
+
+```typescript
+import { createMiniSearchAdapterFactory } from '@tanstack/db/fulltext'
+
+const createSearch = createMiniSearchAdapterFactory(
+  () => import('minisearch').then(m => m.default)
+)
+
+const searchAdapter = await createSearch({ fields: ['title', 'content'] })
+```
+
+---
+
+## FlexSearch
+
+[FlexSearch](https://github.com/nextapps-de/flexsearch) is a high-performance full-text search library optimized for speed.
+
+### Installation
+
+```bash
+npm install flexsearch
+```
+
+### Usage
+
+```typescript
+import { Document } from 'flexsearch'
+import { createFlexSearchAdapter } from '@tanstack/db/fulltext'
+
+const searchAdapter = createFlexSearchAdapter(Document, {
+  fields: ['title', 'content'],
+  // FlexSearch-specific options
+  preset: 'performance', // 'memory' | 'performance' | 'match' | 'score' | 'default'
+  context: true, // enable contextual search
+})
+
+// Add documents
+searchAdapter.add('1', { title: 'Node.js', content: 'Server-side JavaScript...' })
+
+// Search
+const results = searchAdapter.search('javascript')
+```
+
+### Lazy Loading
+
+```typescript
+import { createFlexSearchAdapterFactory } from '@tanstack/db/fulltext'
+
+const createSearch = createFlexSearchAdapterFactory(
+  () => import('flexsearch').then(m => m.Document)
+)
+
+const searchAdapter = await createSearch({
+  fields: ['title', 'content'],
+  preset: 'performance'
+})
+```
+
+---
+
+## API Reference
+
+### FullTextSearchAdapter Interface
+
+All adapters implement this interface:
+
+```typescript
+interface FullTextSearchAdapter<T, TKey> {
+  // Document operations
+  add(key: TKey, document: T): void
+  remove(key: TKey): void
+  update(key: TKey, document: T): void
+  build(entries: Iterable<[TKey, T]>): void
+  clear(): void
+
+  // Search
+  search(query: string, options?: SearchOptions): SearchResult<TKey>[]
+
+  // Autocomplete (optional - MiniSearch only)
+  suggest?(prefix: string, options?: SuggestOptions): string[]
+
+  // Metadata
+  readonly size: number
+
+  // Cleanup
+  dispose?(): void
+}
+```
+
+### SearchOptions
+
+```typescript
+interface SearchOptions {
+  limit?: number          // Max results (default: 10)
+  offset?: number         // Skip first N results (pagination)
+  fields?: string[]       // Search only these fields
+  fuzzy?: number | boolean // Enable typo tolerance
+  prefix?: boolean        // Enable prefix matching
+  boost?: Record<string, number> // Field importance weights
+  filter?: (key: any) => boolean // Post-search filter
+}
+```
+
+### SearchResult
+
+```typescript
+interface SearchResult<TKey> {
+  key: TKey              // Document key/id
+  score: number          // Relevance score (higher = better)
+  highlights?: Record<string, string> // Matched terms by field
+}
+```
+
+---
+
+## Choosing a Library
+
+### Use Orama if you want:
+- Smallest possible bundle size (~2KB)
+- Built-in stemming in 30 languages
+- Vector search capabilities (hybrid search)
+- Used by tanstack.com
+
+### Use MiniSearch if you want:
+- Simple, class-based API
+- Great autocomplete support
+- Easy to understand and debug
+- MIT license
+
+### Use FlexSearch if you want:
+- Maximum search performance
+- Web Worker support
+- Memory/speed tradeoff presets
+- Persistent index serialization
+
+---
+
+## Building a Custom Adapter
+
+You can create an adapter for any search library by implementing the `FullTextSearchAdapter` interface:
+
+```typescript
+import type { FullTextSearchAdapter, SearchResult } from '@tanstack/db/fulltext'
+
+function createMySearchAdapter<T>(config: { fields: string[] }): FullTextSearchAdapter<T, string> {
+  const docs = new Map<string, T>()
+
+  return {
+    add(key, document) {
+      docs.set(key, document)
+    },
+
+    remove(key) {
+      docs.delete(key)
+    },
+
+    update(key, document) {
+      docs.set(key, document)
+    },
+
+    build(entries) {
+      docs.clear()
+      for (const [key, doc] of entries) {
+        docs.set(key, doc)
+      }
+    },
+
+    clear() {
+      docs.clear()
+    },
+
+    search(query, options = {}): SearchResult<string>[] {
+      const results: SearchResult<string>[] = []
+      const term = query.toLowerCase()
+
+      for (const [key, doc] of docs) {
+        for (const field of config.fields) {
+          const value = (doc as any)[field]
+          if (value?.toLowerCase().includes(term)) {
+            results.push({ key, score: 1 })
+            break
+          }
+        }
+      }
+
+      return results.slice(0, options.limit ?? 10)
+    },
+
+    get size() {
+      return docs.size
+    }
+  }
+}
+```
+
+---
+
+## Research Notes
+
+The sections below contain the original research that led to this implementation.
 
 ## Requirements for TanStack DB Integration
 

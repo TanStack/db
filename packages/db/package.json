@@ -36,6 +36,16 @@
         "default": "./dist/cjs/index.cjs"
       }
     },
+    "./fulltext": {
+      "import": {
+        "types": "./dist/esm/fulltext/index.d.ts",
+        "default": "./dist/esm/fulltext/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/fulltext/index.d.cts",
+        "default": "./dist/cjs/fulltext/index.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,
