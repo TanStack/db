@@ -68,3 +68,12 @@ export {
   createFlexSearchAdapterFactory,
   type FlexSearchAdapterConfig,
 } from './adapters/index.js'
+
+// SearchIndex - reactive search attached to collections
+export {
+  SearchIndex,
+  createSearchIndex,
+  type LiveSearch,
+  type LiveSearchOptions,
+  type LiveSearchResult,
+} from './search-index.js'
