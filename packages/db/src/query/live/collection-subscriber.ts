@@ -228,11 +228,19 @@ export class CollectionSubscriber<
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
+      // Check for ORIGINAL inserts before splitting updates.
+      // splitUpdates converts updates to delete+insert pairs for D2, but those
+      // fake inserts shouldn't reset localIndexExhausted. Only genuine new inserts
+      // (new data from the sync layer) should reset it.
+      const changesArray = Array.isArray(changes) ? changes : [...changes]
+      const hasOriginalInserts = changesArray.some((c) => c.type === `insert`)
+
       // Split live updates into a delete of the old value and an insert of the new value
-      const splittedChanges = splitUpdates(changes)
+      const splittedChanges = splitUpdates(changesArray)
       this.sendChangesToPipelineWithTracking(
         splittedChanges,
         subscriptionHolder.current!,
+        hasOriginalInserts,
       )
     }
 
@@ -333,6 +341,7 @@ export class CollectionSubscriber<
   private sendChangesToPipelineWithTracking(
     changes: Iterable<ChangeMessage<any, string | number>>,
     subscription: CollectionSubscription,
+    hasOriginalInserts?: boolean,
   ) {
     const orderByInfo = this.getOrderByInfo()
     if (!orderByInfo) {
@@ -340,12 +349,13 @@ export class CollectionSubscriber<
       return
     }
 
-    // Reset localIndexExhausted when new data arrives from the sync layer.
+    // Reset localIndexExhausted when genuinely new data arrives from the sync layer.
     // This allows loadMoreIfNeeded to try loading again since there's new data.
-    // We only reset on inserts since updates/deletes don't add new data to load.
+    // We only reset on ORIGINAL inserts - not fake inserts from splitUpdates.
+    // splitUpdates converts updates to delete+insert for D2, but those shouldn't
+    // reset the flag since they don't represent new data that could fill the TopK.
     const changesArray = Array.isArray(changes) ? changes : [...changes]
-    const hasInserts = changesArray.some((c) => c.type === `insert`)
-    if (hasInserts) {
+    if (hasOriginalInserts) {
       this.localIndexExhausted = false
     }
 

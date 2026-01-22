@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection, gt } from '../src/query/index.js'
+import { CollectionSubscription } from '../src/collection/subscription.js'
 import { mockSyncCollectionOptions } from './utils.js'
 
 /**
@@ -371,13 +372,103 @@ describe(`Infinite loop prevention`, () => {
     expect(results.map((r) => r.value)).toEqual([101, 90, 80])
   })
 
-  // NOTE: The actual Electric infinite loop is difficult to reproduce in unit tests because
-  // Electric's loadSubset is async (uses `await stream.fetchSnapshot`), so it can't
-  // synchronously inject data during the maybeRunGraph loop. The exact conditions that
-  // cause the infinite loop in production involve timing-dependent interactions between
-  // async data arrival and graph execution that are hard to simulate deterministically.
-  //
-  // The localIndexExhausted fix prevents unnecessary repeated load attempts regardless
-  // of whether the trigger is sync or async. The tests above verify the flag's behavior
-  // correctly: it prevents repeated loads when exhausted, and resets when new inserts arrive.
+  it(`should limit requestLimitedSnapshot calls when index is exhausted`, async () => {
+    // This test verifies that the localIndexExhausted optimization actually limits
+    // how many times we try to load from an exhausted index.
+    //
+    // We patch CollectionSubscription.prototype.requestLimitedSnapshot to count calls,
+    // then send multiple updates and verify the call count stays low (not unbounded).
+
+    // Patch prototype before creating anything
+    let requestLimitedSnapshotCallCount = 0
+    const originalRequestLimitedSnapshot =
+      CollectionSubscription.prototype.requestLimitedSnapshot
+
+    CollectionSubscription.prototype.requestLimitedSnapshot = function (
+      ...args: Array<any>
+    ) {
+      requestLimitedSnapshotCallCount++
+      return originalRequestLimitedSnapshot.apply(this, args as any)
+    }
+
+    try {
+      const initialData: Array<TestItem> = [
+        { id: 1, value: 100, category: `A` }, // Only this matches WHERE > 95
+        { id: 2, value: 50, category: `A` },
+        { id: 3, value: 40, category: `A` },
+      ]
+
+      const { utils, ...options } = mockSyncCollectionOptions({
+        id: `limited-snapshot-calls-test`,
+        getKey: (item: TestItem) => item.id,
+        initialData,
+      })
+
+      const sourceCollection = createCollection(options)
+      await sourceCollection.preload()
+
+      // Query: WHERE value > 95, ORDER BY value DESC, LIMIT 5
+      // Only 1 item matches (value=100), but we want 5
+      const liveQueryCollection = createLiveQueryCollection((q) =>
+        q
+          .from({ items: sourceCollection })
+          .where(({ items }) => gt(items.value, 95))
+          .orderBy(({ items }) => items.value, `desc`)
+          .limit(5)
+          .select(({ items }) => ({
+            id: items.id,
+            value: items.value,
+          })),
+      )
+
+      await liveQueryCollection.preload()
+
+      // Record how many calls happened during initial load
+      const initialLoadCalls = requestLimitedSnapshotCallCount
+
+      // Should have 1 item initially
+      let results = Array.from(liveQueryCollection.values())
+      expect(results).toHaveLength(1)
+      expect(results[0]!.value).toBe(100)
+
+      // Send 20 updates that match the WHERE clause
+      // Without the fix, each update would trigger loadMoreIfNeeded which would
+      // call requestLimitedSnapshot. With the fix, localIndexExhausted prevents
+      // repeated calls.
+      for (let i = 0; i < 20; i++) {
+        utils.begin()
+        utils.write({
+          type: `update`,
+          value: { id: 1, value: 100 + i, category: `A` },
+        })
+        utils.commit()
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+
+      // Wait for all processing to complete
+      await new Promise((resolve) => setTimeout(resolve, 100))
+
+      // Calculate calls after the updates
+      const callsAfterUpdates =
+        requestLimitedSnapshotCallCount - initialLoadCalls
+
+      // With the fix, requestLimitedSnapshot should be called very few times
+      // after the initial load (ideally 0 since index was already exhausted)
+      // Without the fix, it would be called ~20 times (once per update)
+      expect(callsAfterUpdates).toBeLessThan(5)
+
+      // Results should show the latest value
+      results = Array.from(liveQueryCollection.values())
+      expect(results).toHaveLength(1)
+      expect(results[0]!.value).toBeGreaterThanOrEqual(100)
+    } finally {
+      // Restore original method
+      CollectionSubscription.prototype.requestLimitedSnapshot =
+        originalRequestLimitedSnapshot
+    }
+  })
+
+  // NOTE: The actual Electric infinite loop involves async timing that's hard to reproduce
+  // in unit tests. The test above verifies the optimization limits repeated calls,
+  // which is the core behavior the localIndexExhausted flag provides.
 })
