@@ -84,6 +84,17 @@ export interface QueryCollectionConfig<
   // Query-specific options
   /** Whether the query should automatically run (default: true) */
   enabled?: boolean
+  /**
+   * How long to keep polling after the tab is backgrounded before pausing sync.
+   * This helps avoid the "stale data on tab resume" problem by continuing to poll
+   * for a while after the tab loses focus.
+   *
+   * Set to 0 to pause immediately when backgrounded (legacy behavior).
+   * Set to Infinity to never pause based on visibility.
+   *
+   * @default 300000 (5 minutes)
+   */
+  backgroundPollingDelayMs?: number
   refetchInterval?: QueryObserverOptions<
     Array<T>,
     TError,
@@ -534,6 +545,7 @@ export function queryCollectionOptions(
     select,
     queryClient,
     enabled,
+    backgroundPollingDelayMs = 5 * 60 * 1000, // Default: 5 minutes
     refetchInterval,
     retry,
     retryDelay,
@@ -883,6 +895,78 @@ export function queryCollectionOptions(
       unsubscribes.clear()
     }
 
+    // Track whether we've paused due to visibility (not subscriber count)
+    let isPausedForVisibility = false
+    let backgroundTimerId: ReturnType<typeof setTimeout> | null = null
+
+    /**
+     * Handle visibility change events with a configurable delay before pausing.
+     *
+     * When the tab is backgrounded:
+     * - Start a timer to pause polling after backgroundPollingDelayMs
+     * - This allows short tab switches to not interrupt sync
+     *
+     * When the tab becomes visible:
+     * - Cancel any pending pause timer
+     * - If we paused due to visibility, resume immediately
+     * - This ensures users see fresh data when returning to the app
+     */
+    const handleVisibilityChange = (): void => {
+      if (typeof document === `undefined`) {
+        return
+      }
+
+      if (document.visibilityState === `hidden`) {
+        // Tab is being backgrounded
+        // If delay is 0, pause immediately (legacy behavior)
+        // If delay is Infinity, never pause based on visibility
+        if (backgroundPollingDelayMs === Infinity) {
+          return
+        }
+
+        if (backgroundPollingDelayMs === 0) {
+          // Immediate pause
+          if (collection.subscriberCount > 0 && !isPausedForVisibility) {
+            isPausedForVisibility = true
+            unsubscribeFromQueries()
+          }
+          return
+        }
+
+        // Start a timer to pause after the delay
+        if (backgroundTimerId === null && collection.subscriberCount > 0) {
+          backgroundTimerId = setTimeout(() => {
+            backgroundTimerId = null
+            if (
+              document.visibilityState === `hidden` &&
+              collection.subscriberCount > 0
+            ) {
+              isPausedForVisibility = true
+              unsubscribeFromQueries()
+            }
+          }, backgroundPollingDelayMs)
+        }
+      } else {
+        // Tab is becoming visible again (visibilityState === 'visible')
+        // Cancel any pending pause timer
+        if (backgroundTimerId !== null) {
+          clearTimeout(backgroundTimerId)
+          backgroundTimerId = null
+        }
+
+        // If we paused due to visibility, resume now
+        if (isPausedForVisibility && collection.subscriberCount > 0) {
+          isPausedForVisibility = false
+          subscribeToQueries()
+        }
+      }
+    }
+
+    // Set up visibility change listener
+    if (typeof document !== `undefined`) {
+      document.addEventListener(`visibilitychange`, handleVisibilityChange)
+    }
+
     // Mark that sync has started
     syncStarted = true
 
@@ -891,8 +975,17 @@ export function queryCollectionOptions(
       `subscribers:change`,
       ({ subscriberCount }) => {
         if (subscriberCount > 0) {
-          subscribeToQueries()
+          // Only subscribe if we're not paused for visibility
+          if (!isPausedForVisibility) {
+            subscribeToQueries()
+          }
         } else if (subscriberCount === 0) {
+          // Clear any pending visibility timer since there are no subscribers anyway
+          if (backgroundTimerId !== null) {
+            clearTimeout(backgroundTimerId)
+            backgroundTimerId = null
+          }
+          isPausedForVisibility = false
           unsubscribeFromQueries()
         }
       },
@@ -1026,6 +1119,18 @@ export function queryCollectionOptions(
       })
 
     const cleanup = async () => {
+      // Remove visibility change listener
+      if (typeof document !== `undefined`) {
+        document.removeEventListener(`visibilitychange`, handleVisibilityChange)
+      }
+
+      // Clear any pending background timer
+      if (backgroundTimerId !== null) {
+        clearTimeout(backgroundTimerId)
+        backgroundTimerId = null
+      }
+      isPausedForVisibility = false
+
       unsubscribeFromCollectionEvents()
       unsubscribeFromQueries()
 

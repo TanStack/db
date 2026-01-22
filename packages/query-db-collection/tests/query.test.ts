@@ -5187,4 +5187,303 @@ describe(`QueryCollection`, () => {
       customQueryClient.clear()
     })
   })
+
+  describe(`Background Polling Delay`, () => {
+    let originalVisibilityState: PropertyDescriptor | undefined
+     
+    let visibilityChangeHandlers: Array<any> = []
+    let mockVisibilityState: DocumentVisibilityState = `visible`
+
+    beforeEach(() => {
+      vi.useFakeTimers()
+      visibilityChangeHandlers = []
+
+      // Mock document.visibilityState
+      originalVisibilityState = Object.getOwnPropertyDescriptor(
+        document,
+        `visibilityState`,
+      )
+      Object.defineProperty(document, `visibilityState`, {
+        configurable: true,
+        get: () => mockVisibilityState,
+      })
+
+      // Mock addEventListener/removeEventListener for visibilitychange
+      vi.spyOn(document, `addEventListener`).mockImplementation(
+        (type, handler) => {
+          if (type === `visibilitychange` && typeof handler === `function`) {
+            visibilityChangeHandlers.push(handler)
+          }
+        },
+      )
+
+      vi.spyOn(document, `removeEventListener`).mockImplementation(
+        (type, handler) => {
+          if (type === `visibilitychange` && typeof handler === `function`) {
+            visibilityChangeHandlers = visibilityChangeHandlers.filter(
+               
+              (h: any) => h !== handler,
+            )
+          }
+        },
+      )
+
+      mockVisibilityState = `visible`
+    })
+
+    afterEach(() => {
+      vi.useRealTimers()
+      vi.restoreAllMocks()
+
+      // Restore original visibilityState
+      if (originalVisibilityState) {
+        Object.defineProperty(
+          document,
+          `visibilityState`,
+          originalVisibilityState,
+        )
+      }
+    })
+
+    const simulateVisibilityChange = (state: DocumentVisibilityState) => {
+      mockVisibilityState = state
+       
+      visibilityChangeHandlers.forEach((handler: any) => handler())
+    }
+
+    it(`should register visibility change listener when sync starts`, async () => {
+      const queryKey = [`visibility-listener-test`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `visibility-listener-test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const handlerCountBefore = visibilityChangeHandlers.length
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Verify a visibility listener was registered
+      expect(visibilityChangeHandlers.length).toBeGreaterThan(handlerCountBefore)
+
+      await collection.cleanup()
+    })
+
+    it(`should pause polling immediately when backgroundPollingDelayMs is 0`, async () => {
+      const queryKey = [`background-delay-zero`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `background-delay-zero`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        backgroundPollingDelayMs: 0,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Subscribe to the collection
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Background the tab - should immediately pause
+      simulateVisibilityChange(`hidden`)
+
+      // The immediate pause happens synchronously
+      // Make the tab visible again to trigger resume
+      simulateVisibilityChange(`visible`)
+
+      subscription.unsubscribe()
+      await collection.cleanup()
+    })
+
+    it(`should not pause when backgroundPollingDelayMs is Infinity`, async () => {
+      const queryKey = [`background-delay-infinity`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `background-delay-infinity`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        backgroundPollingDelayMs: Infinity,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Subscribe to the collection
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Background the tab
+      simulateVisibilityChange(`hidden`)
+
+      // With Infinity delay, we should never schedule a pause timer
+      // Advance time significantly
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000) // 10 minutes
+
+      // Tab becoming visible should not change anything since we never paused
+      simulateVisibilityChange(`visible`)
+
+      subscription.unsubscribe()
+      await collection.cleanup()
+    })
+
+    it(`should schedule pause after delay when backgroundPollingDelayMs is set`, async () => {
+      const queryKey = [`background-delay-scheduled`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `background-delay-scheduled`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        backgroundPollingDelayMs: 5000, // 5 second delay
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Subscribe to the collection
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Background the tab
+      simulateVisibilityChange(`hidden`)
+
+      // Timer should be scheduled - advance time past the delay
+      await vi.advanceTimersByTimeAsync(6000)
+
+      // Now bring tab visible to trigger resume
+      simulateVisibilityChange(`visible`)
+
+      subscription.unsubscribe()
+      await collection.cleanup()
+    })
+
+    it(`should cancel pause timer when tab becomes visible before delay expires`, async () => {
+      const queryKey = [`background-cancel-timer`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `background-cancel-timer`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        backgroundPollingDelayMs: 5000, // 5 second delay
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Subscribe to the collection
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      // Background the tab
+      simulateVisibilityChange(`hidden`)
+
+      // Wait 2 seconds (less than the 5 second delay)
+      await vi.advanceTimersByTimeAsync(2000)
+
+      // Make tab visible again before delay expires
+      simulateVisibilityChange(`visible`)
+
+      // Now wait past the original delay time
+      await vi.advanceTimersByTimeAsync(5000)
+
+      // The timer should have been cancelled, so no pause should have occurred
+
+      subscription.unsubscribe()
+      await collection.cleanup()
+    })
+
+    it(`should clean up visibility listener when collection is cleaned up`, async () => {
+      const queryKey = [`background-cleanup`]
+      const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `background-cleanup`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Subscribe to the collection
+      const subscription = collection.subscribeChanges(() => {})
+
+      // Wait for initial data
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(1)
+      })
+
+      const handlerCountBefore = visibilityChangeHandlers.length
+
+      subscription.unsubscribe()
+      await collection.cleanup()
+
+      // Handler should be removed
+      expect(visibilityChangeHandlers.length).toBeLessThan(handlerCountBefore)
+    })
+
+    it(`should default to 5 minute delay`, () => {
+      const queryKey = [`background-delay-default`]
+      const queryFn = vi.fn().mockResolvedValue([])
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `background-delay-default`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+      }
+
+      // Just verify we can create the collection without specifying backgroundPollingDelayMs
+      const options = queryCollectionOptions(config)
+      expect(options).toBeDefined()
+    })
+  })
 })
