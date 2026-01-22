@@ -16,8 +16,21 @@ export class ExpectedNumberInAwaitTxIdError extends ElectricDBCollectionError {
 }
 
 export class TimeoutWaitingForTxIdError extends ElectricDBCollectionError {
-  constructor(txId: number, collectionId?: string) {
-    super(`Timeout waiting for txId: ${txId}`, collectionId)
+  constructor(
+    txId: number,
+    collectionId?: string,
+    receivedTxids?: Array<number>,
+  ) {
+    const receivedInfo =
+      receivedTxids === undefined
+        ? ``
+        : receivedTxids.length === 0
+          ? `\nNo txids were received during the timeout period.`
+          : `\nTxids received during timeout: [${receivedTxids.join(`, `)}]`
+
+    const hint = `\n\nThis often happens when pg_current_xact_id() is called outside the transaction that performs the mutation. Make sure to call it INSIDE the same transaction. See: https://electric-sql.com/docs/api/tanstack/troubleshooting#awaittxid-stalls`
+
+    super(`Timeout waiting for txId: ${txId}${receivedInfo}${hint}`, collectionId)
     this.name = `TimeoutWaitingForTxIdError`
   }
 }
