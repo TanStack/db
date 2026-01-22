@@ -346,18 +346,25 @@ export class CollectionConfigBuilder<
         let iterations = 0
 
         while (syncState.graph.pendingWork()) {
-          iterations++
-          if (iterations > MAX_GRAPH_ITERATIONS) {
-            console.error(
-              `[TanStack DB] Graph execution exceeded ${MAX_GRAPH_ITERATIONS} iterations. ` +
-                `This may indicate an infinite loop caused by data loading triggering ` +
-                `continuous graph updates. Breaking out of the loop to prevent app freeze. ` +
-                `Query ID: ${this.id}`,
+          if (++iterations > MAX_GRAPH_ITERATIONS) {
+            this.transitionToError(
+              `Graph execution exceeded ${MAX_GRAPH_ITERATIONS} iterations. ` +
+                `This likely indicates an infinite loop caused by data loading ` +
+                `triggering continuous graph updates.`,
             )
-            break
+            return
           }
 
-          syncState.graph.run()
+          try {
+            syncState.graph.run()
+          } catch (error) {
+            // D2 graph throws when it exceeds its internal iteration limit
+            // Transition to error state so callers can detect incomplete data
+            this.transitionToError(
+              error instanceof Error ? error.message : String(error),
+            )
+            return
+          }
           // Flush accumulated changes after each graph step to commit them as one transaction.
           // This ensures intermediate join states (like null on one side) don't cause
           // duplicate key errors when the full join result arrives in the same step.

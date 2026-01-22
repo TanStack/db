@@ -64,14 +64,11 @@ export class D2 implements ID2 {
     let iterations = 0
 
     while (this.pendingWork()) {
-      iterations++
-      if (iterations > MAX_RUN_ITERATIONS) {
-        console.error(
-          `[D2 Graph] Execution exceeded ${MAX_RUN_ITERATIONS} iterations. ` +
-            `This may indicate an infinite loop in the dataflow graph. ` +
-            `Breaking out to prevent app freeze.`,
+      if (++iterations > MAX_RUN_ITERATIONS) {
+        throw new Error(
+          `D2 graph execution exceeded ${MAX_RUN_ITERATIONS} iterations. ` +
+            `This may indicate an infinite loop in the dataflow graph.`,
         )
-        break
       }
       this.step()
     }

@@ -410,13 +410,15 @@ export class CollectionSubscription
    * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
    *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
    * Note 2: it does not send keys that have already been sent before.
+   *
+   * @returns true if local data was found and sent, false if the local index was exhausted
    */
   requestLimitedSnapshot({
     orderBy,
     limit,
     minValues,
     offset,
-  }: RequestLimitedSnapshotOptions) {
+  }: RequestLimitedSnapshotOptions): boolean {
     if (!limit) throw new Error(`limit is required`)
 
     if (!this.orderByIndex) {
@@ -508,15 +510,16 @@ export class CollectionSubscription
     // for any legitimate use case.
     const MAX_SNAPSHOT_ITERATIONS = 10000
     let snapshotIterations = 0
+    let hitIterationLimit = false
 
     while (valuesNeeded() > 0 && !collectionExhausted()) {
-      snapshotIterations++
-      if (snapshotIterations > MAX_SNAPSHOT_ITERATIONS) {
+      if (++snapshotIterations > MAX_SNAPSHOT_ITERATIONS) {
         console.error(
           `[TanStack DB] requestLimitedSnapshot exceeded ${MAX_SNAPSHOT_ITERATIONS} iterations. ` +
             `This may indicate an infinite loop in index iteration or filtering. ` +
             `Breaking out to prevent app freeze. Collection: ${this.collection.id}`,
         )
+        hitIterationLimit = true
         break
       }
 
@@ -611,6 +614,14 @@ export class CollectionSubscription
     // Track this loadSubset call
     this.loadedSubsets.push(loadOptions)
     this.trackLoadSubsetPromise(syncResult)
+
+    // Return whether local data was found and iteration completed normally.
+    // Return false if:
+    // - No local data was found (index exhausted)
+    // - Iteration limit was hit (abnormal exit)
+    // Either case signals that the caller should stop trying to load more.
+    // The async loadSubset may still return data later.
+    return changes.length > 0 && !hitIterationLimit
   }
 
   // TODO: also add similar test but that checks that it can also load it from the collection's loadSubset function

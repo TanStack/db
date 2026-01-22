@@ -37,6 +37,12 @@ export class CollectionSubscriber<
   // can potentially send the same item to D2 multiple times.
   private sentToD2Keys = new Set<string | number>()
 
+  // Track when the local index has been exhausted for the current cursor position.
+  // When true, loadMoreIfNeeded will not try to load more data until new data arrives.
+  // This prevents infinite loops when the TopK can't be filled because WHERE filters
+  // out all available data.
+  private localIndexExhausted = false
+
   constructor(
     private alias: string,
     private collectionId: string,
@@ -301,11 +307,25 @@ export class CollectionSubscriber<
       return true
     }
 
+    // If we've already exhausted the local index, don't try to load more.
+    // This prevents infinite loops when the TopK can't be filled because
+    // the WHERE clause filters out all available local data.
+    // The flag is reset when new data arrives from the sync layer.
+    if (this.localIndexExhausted) {
+      return true
+    }
+
     // `dataNeeded` probes the orderBy operator to see if it needs more data
     // if it needs more data, it returns the number of items it needs
     const n = dataNeeded()
     if (n > 0) {
-      this.loadNextItems(n, subscription)
+      const foundLocalData = this.loadNextItems(n, subscription)
+      if (!foundLocalData) {
+        // No local data found - mark the index as exhausted so we don't
+        // keep trying in subsequent graph iterations. The sync layer's
+        // loadSubset has been called and may return data asynchronously.
+        this.localIndexExhausted = true
+      }
     }
     return true
   }
@@ -320,7 +340,19 @@ export class CollectionSubscriber<
       return
     }
 
-    const trackedChanges = this.trackSentValues(changes, orderByInfo.comparator)
+    // Reset localIndexExhausted when new data arrives from the sync layer.
+    // This allows loadMoreIfNeeded to try loading again since there's new data.
+    // We only reset on inserts since updates/deletes don't add new data to load.
+    const changesArray = Array.isArray(changes) ? changes : [...changes]
+    const hasInserts = changesArray.some((c) => c.type === `insert`)
+    if (hasInserts) {
+      this.localIndexExhausted = false
+    }
+
+    const trackedChanges = this.trackSentValues(
+      changesArray,
+      orderByInfo.comparator,
+    )
 
     // Cache the loadMoreIfNeeded callback on the subscription using a symbol property.
     // This ensures we pass the same function instance to the scheduler each time,
@@ -342,10 +374,14 @@ export class CollectionSubscriber<
 
   // Loads the next `n` items from the collection
   // starting from the biggest item it has sent
-  private loadNextItems(n: number, subscription: CollectionSubscription) {
+  // Returns true if local data was found, false if the local index is exhausted
+  private loadNextItems(
+    n: number,
+    subscription: CollectionSubscription,
+  ): boolean {
     const orderByInfo = this.getOrderByInfo()
     if (!orderByInfo) {
-      return
+      return false
     }
     const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
     const biggestSentRow = this.biggest
@@ -369,7 +405,8 @@ export class CollectionSubscriber<
 
     // Take the `n` items after the biggest sent value
     // Pass the current window offset to ensure proper deduplication
-    subscription.requestLimitedSnapshot({
+    // Returns true if local data was found
+    return subscription.requestLimitedSnapshot({
       orderBy: normalizedOrderBy,
       limit: n,
       minValues,
