@@ -20,7 +20,7 @@ The `@tanstack/rxdb-db-collection` package allows you to create collections that
 - Leverage RxDB's [replication plugins](https://rxdb.info/replication.html) to sync with CouchDB, MongoDB, Supabase, REST APIs, GraphQL, WebRTC (P2P) and more.
 
 
-## 1. Installation
+### 1. Installation
 
 Install the RxDB collection packages along with your preferred framework integration.
 
@@ -35,8 +35,8 @@ npm install @tanstack/rxdb-db-collection rxdb @tanstack/react-db
 import { createRxDatabase, addRxPlugin } from 'rxdb/plugins/core'
 
 /**
- * Here we use the localstorage based storage for RxDB.
- * RxDB has a wide range of storages based on Dexie.js, IndexedDB, SQLite and more.
+ * Here we use the localStorage based storage for RxDB.
+ * RxDB has a wide range of storages based on Dexie.js, IndexedDB, SQLite, and more.
  */
 import { getRxStorageLocalstorage } from 'rxdb/plugins/storage-localstorage'
 
@@ -93,7 +93,7 @@ import { rxdbCollectionOptions } from '@tanstack/rxdb-db-collection'
 
 const todosCollection = createCollection(
   rxdbCollectionOptions({
-    rxCollection: myDatabase.todos,
+    rxCollection: db.todos,
     startSync: true, // start ingesting RxDB data immediately
   })
 )
@@ -118,7 +118,7 @@ The `rxdbCollectionOptions` function accepts the following options:
 ### Optional
 
 - `id`: Unique identifier for the collection
-- `schema`: Schema for validating items. RxDB already has schema validation but having additional validation on the TanStack DB side can help to unify error handling between different tanstack collections.
+- `schema`: Schema for validating items. RxDB already has schema validation but having additional validation on the TanStack DB side can help to unify error handling between different TanStack collections.
 - `startSync`: Whether to start syncing immediately (default: true)
 - `onInsert, onUpdate, onDelete`: Override default persistence handlers. By default, TanStack DB writes are persisted to RxDB using bulkUpsert, patch, and bulkRemove.
 - `syncBatchSize`: The maximum number of documents fetched per batch during the initial sync from RxDB into TanStack DB (default: 1000). Larger values reduce round trips but use more memory; smaller values are lighter but may increase query calls. Note that this only affects the initial sync. Ongoing live updates are streamed one by one via RxDB's change feed.
@@ -138,7 +138,7 @@ This separation of concerns means you configure replication entirely in RxDB, an
 
 ### Do I still need RxDB schema indexes if I only query TanStack DB?
 
-Usually not for TanStack DB queries themselves. TanStack DB queries run entirely in memory, so RxDB schema indexes do not affect the performance of TanStack DB's live queries. However, RxDB indexes may still be important if:
+Usually not, at least for TanStack DB queries themselves. TanStack DB queries run entirely in memory, so RxDB schema indexes do not affect the performance of TanStack DB's live queries. However, RxDB indexes may still be important if:
 - You run queries directly against RxDB (e.g. `rxCollection.find(...)`).
 - Your replication setup uses filtered queries or selectors.
 - You rely on RxDB to selectively load subsets of data instead of hydrating everything into memory.
