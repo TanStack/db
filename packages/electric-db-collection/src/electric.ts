@@ -349,6 +349,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   commit,
   collectionId,
   encodeColumnName,
+  signal,
 }: {
   stream: ShapeStream<T>
   syncMode: ElectricSyncMode
@@ -366,6 +367,11 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
    * This is typically the `encode` function from shapeOptions.columnMapper.
    */
   encodeColumnName?: ColumnEncoder
+  /**
+   * Abort signal to check if the stream has been aborted during cleanup.
+   * When aborted, errors from requestSnapshot are silently ignored.
+   */
+  signal: AbortSignal
 }): DeduplicatedLoadSubset | null {
   // Eager mode doesn't need subset loading
   if (syncMode === `eager`) {
@@ -410,6 +416,16 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           )
         }
       } catch (error) {
+        // If the stream has been aborted (during cleanup), ignore the error.
+        // This prevents unhandled promise rejections when the collection is
+        // cleaned up while fetchSnapshot calls are still in-flight.
+        if (signal.aborted) {
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Ignoring fetchSnapshot error during cleanup: %o`,
+            error,
+          )
+          return
+        }
         debug(
           `${collectionId ? `[${collectionId}] ` : ``}Error fetching snapshot: %o`,
           error,
@@ -426,47 +442,64 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       // 2. whereFrom (rows > cursor, with limit)
       const { cursor, where, orderBy, limit } = opts
 
-      if (cursor) {
-        // Make parallel requests for cursor-based pagination
-        const promises: Array<Promise<unknown>> = []
+      try {
+        if (cursor) {
+          // Make parallel requests for cursor-based pagination
+          const promises: Array<Promise<unknown>> = []
 
-        // Request 1: All rows matching whereCurrent (ties at boundary, no limit)
-        // Combine main where with cursor.whereCurrent
-        const whereCurrentOpts: LoadSubsetOptions = {
-          where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
-          orderBy,
-          // No limit - get all ties
+          // Request 1: All rows matching whereCurrent (ties at boundary, no limit)
+          // Combine main where with cursor.whereCurrent
+          const whereCurrentOpts: LoadSubsetOptions = {
+            where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
+            orderBy,
+            // No limit - get all ties
+          }
+          const whereCurrentParams = compileSQL<T>(
+            whereCurrentOpts,
+            compileOptions,
+          )
+          promises.push(stream.requestSnapshot(whereCurrentParams))
+
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereCurrent snapshot (all ties)`,
+          )
+
+          // Request 2: Rows matching whereFrom (rows > cursor, with limit)
+          // Combine main where with cursor.whereFrom
+          const whereFromOpts: LoadSubsetOptions = {
+            where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
+            orderBy,
+            limit,
+          }
+          const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
+          promises.push(stream.requestSnapshot(whereFromParams))
+
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
+          )
+
+          // Wait for both requests to complete
+          await Promise.all(promises)
+        } else {
+          // No cursor - standard single request
+          const snapshotParams = compileSQL<T>(opts, compileOptions)
+          await stream.requestSnapshot(snapshotParams)
         }
-        const whereCurrentParams = compileSQL<T>(
-          whereCurrentOpts,
-          compileOptions,
-        )
-        promises.push(stream.requestSnapshot(whereCurrentParams))
-
-        debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereCurrent snapshot (all ties)`,
-        )
-
-        // Request 2: Rows matching whereFrom (rows > cursor, with limit)
-        // Combine main where with cursor.whereFrom
-        const whereFromOpts: LoadSubsetOptions = {
-          where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
-          orderBy,
-          limit,
+      } catch (error) {
+        // If the stream has been aborted (during cleanup), ignore the error.
+        // This prevents unhandled promise rejections when the collection is
+        // cleaned up while requestSnapshot calls are still in-flight.
+        // The 409 "must-refetch" errors are expected during cleanup and
+        // don't indicate a real problem.
+        if (signal.aborted) {
+          debug(
+            `${collectionId ? `[${collectionId}] ` : ``}Ignoring requestSnapshot error during cleanup: %o`,
+            error,
+          )
+          return
         }
-        const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
-        promises.push(stream.requestSnapshot(whereFromParams))
-
-        debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
-        )
-
-        // Wait for both requests to complete
-        await Promise.all(promises)
-      } else {
-        // No cursor - standard single request
-        const snapshotParams = compileSQL<T>(opts, compileOptions)
-        await stream.requestSnapshot(snapshotParams)
+        // Re-throw non-abort errors
+        throw error
       }
     }
   }
@@ -1311,6 +1344,8 @@ function createElectricSync<T extends Row<unknown>>(
         // Pass the columnMapper's encode function to transform column names
         // (e.g., camelCase to snake_case) when compiling SQL for subset queries
         encodeColumnName: shapeOptions.columnMapper?.encode,
+        // Pass abort signal so requestSnapshot errors can be ignored during cleanup
+        signal: abortController.signal,
       })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {

@@ -2842,6 +2842,7 @@ describe(`Electric Integration`, () => {
         }),
       )
     })
+
   })
 
   // Tests for overlapping subset queries with duplicate keys
@@ -3961,4 +3962,5 @@ describe(`Electric Integration`, () => {
       vi.useRealTimers()
     })
   })
+
 })
