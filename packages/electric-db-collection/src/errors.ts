@@ -21,13 +21,7 @@ export class TimeoutWaitingForTxIdError extends ElectricDBCollectionError {
     collectionId?: string,
     receivedTxids?: Array<number>,
   ) {
-    const receivedInfo =
-      receivedTxids === undefined
-        ? ``
-        : receivedTxids.length === 0
-          ? `\nNo txids were received during the timeout period.`
-          : `\nTxids received during timeout: [${receivedTxids.join(`, `)}]`
-
+    const receivedInfo = formatReceivedTxidsInfo(receivedTxids)
     const hint = `\n\nThis often happens when pg_current_xact_id() is called outside the transaction that performs the mutation. Make sure to call it INSIDE the same transaction. See: https://tanstack.com/db/latest/docs/collections/electric-collection#common-issue-awaittxid-stalls-or-times-out`
 
     super(
@@ -36,6 +30,16 @@ export class TimeoutWaitingForTxIdError extends ElectricDBCollectionError {
     )
     this.name = `TimeoutWaitingForTxIdError`
   }
+}
+
+function formatReceivedTxidsInfo(receivedTxids?: Array<number>): string {
+  if (receivedTxids === undefined) {
+    return ``
+  }
+  if (receivedTxids.length === 0) {
+    return `\nNo txids were received during the timeout period.`
+  }
+  return `\nTxids received during timeout: [${receivedTxids.join(`, `)}]`
 }
 
 export class TimeoutWaitingForMatchError extends ElectricDBCollectionError {
