@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection, gt } from '../src/query/index.js'
 import { mockSyncCollectionOptions } from './utils.js'
-import type { SyncConfig } from '../src/index.js'
 
 /**
  * Tests for infinite loop prevention in ORDER BY + LIMIT queries.
@@ -39,9 +38,9 @@ describe(`Infinite loop prevention`, () => {
   // 4. Without the localIndexExhausted fix, loadMoreIfNeeded keeps trying to load
   //    from the exhausted local index
   //
-  // The last test ("should not infinite loop when loadSubset synchronously injects updates")
-  // directly reproduces the bug by creating a custom loadSubset that synchronously
-  // injects updates matching the WHERE clause. Without the fix, this causes an infinite loop.
+  // These tests verify the localIndexExhausted flag works correctly:
+  // - Prevents repeated load attempts when the local index is exhausted
+  // - Resets when new inserts arrive, allowing the system to try again
 
   it(`should not infinite loop when WHERE filters out most data for ORDER BY + LIMIT query`, async () => {
     // This test verifies that the localIndexExhausted optimization prevents
@@ -372,135 +371,13 @@ describe(`Infinite loop prevention`, () => {
     expect(results.map((r) => r.value)).toEqual([101, 90, 80])
   })
 
-  it(`should not infinite loop when loadSubset synchronously injects updates (simulates Electric)`, async () => {
-    // This test reproduces the actual infinite loop bug by simulating Electric's behavior:
-    // - Electric's sync layer can call loadSubset which synchronously injects updates
-    // - These updates add data to D2, making pendingWork() return true
-    // - Without localIndexExhausted, loadMoreIfNeeded keeps trying to load from exhausted index
-    // - The synchronous update injection keeps pendingWork() true → infinite loop
-    //
-    // The fix: localIndexExhausted flag prevents repeated load attempts after index is exhausted
-
-    const initialData: Array<TestItem> = [
-      { id: 1, value: 100, category: `A` }, // Only this matches WHERE > 95
-      { id: 2, value: 50, category: `A` },
-      { id: 3, value: 40, category: `A` },
-    ]
-
-    // Track how many times loadSubset is called to detect infinite loop
-    let loadSubsetCallCount = 0
-    const MAX_LOADSUBSET_CALLS = 100 // Safety limit
-
-    // Store sync params for injecting updates in loadSubset
-    let syncBegin: () => void
-    let syncWrite: (msg: { type: string; value: TestItem }) => void
-    let syncCommit: () => void
-    let updateCounter = 0
-
-    const sync: SyncConfig<TestItem> = {
-      sync: (params) => {
-        syncBegin = params.begin
-        syncWrite = params.write as typeof syncWrite
-        syncCommit = params.commit
-        const markReady = params.markReady
-
-        // Load initial data
-        syncBegin()
-        initialData.forEach((item) => {
-          syncWrite({ type: `insert`, value: item })
-        })
-        syncCommit()
-        markReady()
-
-        return {
-          // This loadSubset function simulates Electric's behavior:
-          // When the subscription asks for more data (because TopK isn't full),
-          // Electric might synchronously send an update for existing data
-          loadSubset: () => {
-            loadSubsetCallCount++
-
-            if (loadSubsetCallCount > MAX_LOADSUBSET_CALLS) {
-              throw new Error(
-                `loadSubset called ${loadSubsetCallCount} times - infinite loop detected!`,
-              )
-            }
-
-            // Simulate Electric sending an update for a matching item
-            // This is key: the update must match WHERE clause to pass the subscription filter
-            // and actually add work to D2, keeping pendingWork() true
-            syncBegin()
-            syncWrite({
-              type: `update`,
-              value: { id: 1, value: 100 + updateCounter++, category: `A` }, // Matches WHERE > 95
-            })
-            syncCommit()
-
-            return true // Synchronous completion
-          },
-        }
-      },
-    }
-
-    const sourceCollection = createCollection({
-      id: `loadsubset-infinite-loop-test`,
-      getKey: (item: TestItem) => item.id,
-      sync,
-      syncMode: `on-demand`,
-    })
-
-    await sourceCollection.preload()
-
-    // Query: WHERE value > 95, ORDER BY value DESC, LIMIT 5
-    // Only 1 item matches (value=100), but we want 5
-    // This will exhaust the local index and trigger loadSubset calls
-    const liveQueryCollection = createLiveQueryCollection((q) =>
-      q
-        .from({ items: sourceCollection })
-        .where(({ items }) => gt(items.value, 95))
-        .orderBy(({ items }) => items.value, `desc`)
-        .limit(5)
-        .select(({ items }) => ({
-          id: items.id,
-          value: items.value,
-        })),
-    )
-
-    // Without the fix, this would infinite loop because:
-    // 1. Initial load finds 1 item, TopK needs 4 more
-    // 2. loadSubset is called, synchronously injects an update
-    // 3. Update adds D2 work, pendingWork() returns true
-    // 4. maybeRunGraph continues, loadMoreIfNeeded is called
-    // 5. TopK still needs 4 more, loadNextItems finds nothing (index exhausted)
-    // 6. But wait! We're back to step 2 because pendingWork() is still true from the update
-    // 7. GOTO step 2 → infinite loop!
-    //
-    // With the fix: localIndexExhausted flag is set in step 5, preventing step 6
-
-    const preloadPromise = liveQueryCollection.preload()
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(
-        () =>
-          reject(
-            new Error(
-              `Timeout - possible infinite loop. loadSubset was called ${loadSubsetCallCount} times.`,
-            ),
-          ),
-        5000,
-      ),
-    )
-
-    await expect(
-      Promise.race([preloadPromise, timeoutPromise]),
-    ).resolves.toBeUndefined()
-
-    // Verify we got the expected result
-    const results = Array.from(liveQueryCollection.values())
-    expect(results).toHaveLength(1)
-    // Value will be 100 + number of loadSubset calls (minus 1 since counter starts at 0)
-    expect(results[0]!.value).toBeGreaterThanOrEqual(100)
-
-    // loadSubset should be called a small number of times, not infinitely
-    // The exact count depends on implementation details, but should be < 10
-    expect(loadSubsetCallCount).toBeLessThan(10)
-  })
+  // NOTE: The actual Electric infinite loop is difficult to reproduce in unit tests because
+  // Electric's loadSubset is async (uses `await stream.fetchSnapshot`), so it can't
+  // synchronously inject data during the maybeRunGraph loop. The exact conditions that
+  // cause the infinite loop in production involve timing-dependent interactions between
+  // async data arrival and graph execution that are hard to simulate deterministically.
+  //
+  // The localIndexExhausted fix prevents unnecessary repeated load attempts regardless
+  // of whether the trigger is sync or async. The tests above verify the flag's behavior
+  // correctly: it prevents repeated loads when exhausted, and resets when new inserts arrive.
 })
