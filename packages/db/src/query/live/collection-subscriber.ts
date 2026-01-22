@@ -228,10 +228,22 @@ export class CollectionSubscriber<
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
-      // Check for ORIGINAL inserts before splitting updates.
-      // splitUpdates converts updates to delete+insert pairs for D2, but those
-      // fake inserts shouldn't reset localIndexExhausted. Only genuine new inserts
-      // (new data from the sync layer) should reset it.
+      // Check for inserts before splitting updates, to determine if we should
+      // reset localIndexExhausted. We reset on inserts because:
+      //
+      // 1. splitUpdates (below) converts updates to delete+insert pairs for D2,
+      //    but those "fake" inserts shouldn't reset the flag - they don't represent
+      //    new rows that could fill the TopK.
+      //
+      // 2. "Reset only on inserts" is correct because updates to existing rows
+      //    don't add new rows to scan in the local index. The updated row is
+      //    already being processed in the current graph run.
+      //
+      // 3. Edge case: "update makes row match WHERE" is handled correctly because
+      //    the subscription's filterAndFlipChanges converts "update for unseen key"
+      //    to "insert" before we receive it here. So if a row that was previously
+      //    filtered out by WHERE now matches after an update, it arrives as an
+      //    insert and correctly resets the flag.
       const changesArray = Array.isArray(changes) ? changes : [...changes]
       const hasOriginalInserts = changesArray.some((c) => c.type === `insert`)
 
