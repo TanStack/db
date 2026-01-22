@@ -57,7 +57,22 @@ export class D2 implements ID2 {
   }
 
   run(): void {
+    // Safety limit to prevent infinite loops in case of circular data flow
+    // or other bugs that cause operators to perpetually produce output.
+    // For legitimate pipelines, data should flow through in finite steps.
+    const MAX_RUN_ITERATIONS = 100000
+    let iterations = 0
+
     while (this.pendingWork()) {
+      iterations++
+      if (iterations > MAX_RUN_ITERATIONS) {
+        console.error(
+          `[D2 Graph] Execution exceeded ${MAX_RUN_ITERATIONS} iterations. ` +
+            `This may indicate an infinite loop in the dataflow graph. ` +
+            `Breaking out to prevent app freeze.`,
+        )
+        break
+      }
       this.step()
     }
   }

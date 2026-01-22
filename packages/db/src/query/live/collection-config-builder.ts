@@ -336,7 +336,27 @@ export class CollectionConfigBuilder<
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
+        // Safety limit to prevent infinite loops when data loading and graph processing
+        // create a feedback cycle. This can happen when:
+        // 1. OrderBy/limit queries filter out most data, causing dataNeeded() > 0
+        // 2. Loading more data triggers updates that get filtered out
+        // 3. The cycle continues indefinitely
+        // 10000 iterations is generous for legitimate use cases but prevents hangs.
+        const MAX_GRAPH_ITERATIONS = 10000
+        let iterations = 0
+
         while (syncState.graph.pendingWork()) {
+          iterations++
+          if (iterations > MAX_GRAPH_ITERATIONS) {
+            console.error(
+              `[TanStack DB] Graph execution exceeded ${MAX_GRAPH_ITERATIONS} iterations. ` +
+                `This may indicate an infinite loop caused by data loading triggering ` +
+                `continuous graph updates. Breaking out of the loop to prevent app freeze. ` +
+                `Query ID: ${this.id}`,
+            )
+            break
+          }
+
           syncState.graph.run()
           // Flush accumulated changes after each graph step to commit them as one transaction.
           // This ensures intermediate join states (like null on one side) don't cause

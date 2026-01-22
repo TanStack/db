@@ -502,8 +502,23 @@ export class CollectionSubscription
         ? compileExpression(new PropRef(orderByExpression.path), true)
         : null
 
+    // Safety limit to prevent infinite loops if the index iteration or filtering
+    // logic has issues. The loop should naturally terminate when the index is
+    // exhausted, but this provides a backstop. 10000 iterations is generous
+    // for any legitimate use case.
+    const MAX_SNAPSHOT_ITERATIONS = 10000
+    let snapshotIterations = 0
+
     while (valuesNeeded() > 0 && !collectionExhausted()) {
-      const insertedKeys = new Set<string | number>() // Track keys we add to `changes` in this iteration
+      snapshotIterations++
+      if (snapshotIterations > MAX_SNAPSHOT_ITERATIONS) {
+        console.error(
+          `[TanStack DB] requestLimitedSnapshot exceeded ${MAX_SNAPSHOT_ITERATIONS} iterations. ` +
+            `This may indicate an infinite loop in index iteration or filtering. ` +
+            `Breaking out to prevent app freeze. Collection: ${this.collection.id}`,
+        )
+        break
+      }
 
       for (const key of keys) {
         const value = this.collection.get(key)!
@@ -515,7 +530,6 @@ export class CollectionSubscription
         // Extract the indexed value (e.g., salary) from the row, not the full row
         // This is needed for index.take() to work correctly with the BTree comparator
         biggestObservedValue = valueExtractor ? valueExtractor(value) : value
-        insertedKeys.add(key) // Track this key
       }
 
       keys = index.take(valuesNeeded(), biggestObservedValue, filterFn)
