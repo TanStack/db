@@ -13,7 +13,7 @@ import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
 import type { CollectionSubscription } from './subscription'
 import type { AllCollectionEvents, CollectionEventHandler } from './events.js'
-import type { BaseIndex, IndexResolver } from '../indexes/base-index.js'
+import type { BaseIndex, IndexConstructor } from '../indexes/base-index.js'
 import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
@@ -35,8 +35,6 @@ import type {
 } from '../types'
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { BTreeIndex } from '../indexes/btree-index.js'
-import type { IndexProxy } from '../indexes/lazy-index.js'
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -322,7 +320,7 @@ export class CollectionImpl<
     // Set default values for optional config properties
     this.config = {
       ...config,
-      autoIndex: config.autoIndex ?? `eager`,
+      autoIndex: config.autoIndex ?? `off`,
     }
 
     this._changes = new CollectionChangesManager()
@@ -347,6 +345,7 @@ export class CollectionImpl<
     this._indexes.setDeps({
       state: this._state,
       lifecycle: this._lifecycle,
+      defaultIndexType: config.defaultIndexType,
     })
     this._lifecycle.setDeps({
       changes: this._changes,
@@ -524,38 +523,27 @@ export class CollectionImpl<
    * Indexes significantly improve query performance by allowing constant time lookups
    * and logarithmic time range queries instead of full scans.
    *
-   * @template TResolver - The type of the index resolver (constructor or async loader)
    * @param indexCallback - Function that extracts the indexed value from each item
    * @param config - Configuration including index type and type-specific options
-   * @returns An index proxy that provides access to the index when ready
+   * @returns The created index
    *
    * @example
-   * // Create a default B+ tree index
-   * const ageIndex = collection.createIndex((row) => row.age)
+   * ```ts
+   * import { BasicIndex } from '@tanstack/db/indexing'
    *
-   * // Create a ordered index with custom options
+   * // Create an index with explicit type
    * const ageIndex = collection.createIndex((row) => row.age, {
-   *   indexType: BTreeIndex,
-   *   options: {
-   *     compareFn: customComparator,
-   *     compareOptions: { direction: 'asc', nulls: 'first', stringSort: 'lexical' }
-   *   },
-   *   name: 'age_btree'
+   *   indexType: BasicIndex
    * })
    *
-   * // Create an async-loaded index
-   * const textIndex = collection.createIndex((row) => row.content, {
-   *   indexType: async () => {
-   *     const { FullTextIndex } = await import('./indexes/fulltext.js')
-   *     return FullTextIndex
-   *   },
-   *   options: { language: 'en' }
-   * })
+   * // Create an index with collection's default type
+   * const nameIndex = collection.createIndex((row) => row.name)
+   * ```
    */
-  public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
+  public createIndex<TIndexType extends IndexConstructor<TKey>>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
-    config: IndexOptions<TResolver> = {},
-  ): IndexProxy<TKey> {
+    config: IndexOptions<TIndexType> = {},
+  ): BaseIndex<TKey> {
     return this._indexes.createIndex(indexCallback, config)
   }
 

@@ -14,6 +14,7 @@ import {
   or,
 } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
+import { WriteOptimizedIndex } from '../src/indexes/write-optimized-index.js'
 import { expectIndexUsage, withIndexTracking } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
@@ -87,6 +88,7 @@ describe(`Collection Indexes`, () => {
     collection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
       startSync: true,
+      defaultIndexType: WriteOptimizedIndex,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           // Provide initial data through sync
@@ -1320,6 +1322,7 @@ describe(`Collection Indexes`, () => {
       const specialCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
         startSync: true,
+        defaultIndexType: WriteOptimizedIndex,
         sync: {
           sync: ({ begin, write, commit }) => {
             begin()
@@ -1381,6 +1384,7 @@ describe(`Collection Indexes`, () => {
     it(`should handle index creation on empty collection`, () => {
       const emptyCollection = createCollection<TestItem, string>({
         getKey: (item) => item.id,
+        defaultIndexType: WriteOptimizedIndex,
         sync: { sync: () => {} },
       })
 

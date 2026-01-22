@@ -1,11 +1,9 @@
-import { IndexProxy, LazyIndexWrapper } from '../indexes/lazy-index'
 import {
   createSingleRowRefProxy,
   toExpression,
 } from '../query/builder/ref-proxy'
-import { BTreeIndex } from '../indexes/btree-index'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
-import type { BaseIndex, IndexResolver } from '../indexes/base-index'
+import type { BaseIndex, IndexConstructor } from '../indexes/base-index'
 import type { ChangeMessage } from '../types'
 import type { IndexOptions } from '../indexes/index-options'
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
@@ -20,10 +18,9 @@ export class CollectionIndexesManager<
 > {
   private lifecycle!: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
   private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
+  private defaultIndexType: IndexConstructor<TKey> | undefined
 
-  public lazyIndexes = new Map<number, LazyIndexWrapper<TKey>>()
-  public resolvedIndexes = new Map<number, BaseIndex<TKey>>()
-  public isIndexesResolved = false
+  public indexes = new Map<number, BaseIndex<TKey>>()
   public indexCounter = 0
 
   constructor() {}
@@ -31,18 +28,30 @@ export class CollectionIndexesManager<
   setDeps(deps: {
     state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
     lifecycle: CollectionLifecycleManager<TOutput, TKey, TSchema, TInput>
+    defaultIndexType?: IndexConstructor<TKey>
   }) {
     this.state = deps.state
     this.lifecycle = deps.lifecycle
+    this.defaultIndexType = deps.defaultIndexType
   }
 
   /**
    * Creates an index on a collection for faster queries.
+   *
+   * @example
+   * ```ts
+   * // With explicit index type (recommended for tree-shaking)
+   * import { BasicIndex } from '@tanstack/db/indexing'
+   * collection.createIndex((row) => row.userId, { indexType: BasicIndex })
+   *
+   * // With collection's default index type
+   * collection.createIndex((row) => row.userId)
+   * ```
    */
-  public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
+  public createIndex<TIndexType extends IndexConstructor<TKey>>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
-    config: IndexOptions<TResolver> = {},
-  ): IndexProxy<TKey> {
+    config: IndexOptions<TIndexType> = {},
+  ): BaseIndex<TKey> {
     this.lifecycle.validateCollectionUsable(`createIndex`)
 
     const indexId = ++this.indexCounter
@@ -50,97 +59,38 @@ export class CollectionIndexesManager<
     const indexExpression = indexCallback(singleRowRefProxy)
     const expression = toExpression(indexExpression)
 
-    // Default to BTreeIndex if no type specified
-    const resolver = config.indexType ?? (BTreeIndex as unknown as TResolver)
+    // Use provided index type, or fall back to collection's default
+    const IndexType = config.indexType ?? this.defaultIndexType
+    if (!IndexType) {
+      throw new Error(
+        `No index type specified and no defaultIndexType set on collection. ` +
+          `Either pass indexType in config, or set defaultIndexType on the collection:\n` +
+          `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
+          `  createCollection({ defaultIndexType: BasicIndex, ... })`,
+      )
+    }
 
-    // Create lazy wrapper
-    const lazyIndex = new LazyIndexWrapper<TKey>(
+    // Create index synchronously
+    const index = new IndexType(
       indexId,
       expression,
       config.name,
-      resolver,
       config.options,
-      this.state.entries(),
     )
 
-    this.lazyIndexes.set(indexId, lazyIndex)
+    // Build with current data
+    index.build(this.state.entries())
 
-    // For BTreeIndex, resolve immediately and synchronously
-    if ((resolver as unknown) === BTreeIndex) {
-      try {
-        const resolvedIndex = lazyIndex.getResolved()
-        this.resolvedIndexes.set(indexId, resolvedIndex)
-      } catch (error) {
-        console.warn(`Failed to resolve BTreeIndex:`, error)
-      }
-    } else if (typeof resolver === `function` && resolver.prototype) {
-      // Other synchronous constructors - resolve immediately
-      try {
-        const resolvedIndex = lazyIndex.getResolved()
-        this.resolvedIndexes.set(indexId, resolvedIndex)
-      } catch {
-        // Fallback to async resolution
-        this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
-          console.warn(`Failed to resolve single index:`, error)
-        })
-      }
-    } else if (this.isIndexesResolved) {
-      // Async loader but indexes are already resolved - resolve this one
-      this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
-        console.warn(`Failed to resolve single index:`, error)
-      })
-    }
+    this.indexes.set(indexId, index)
 
-    return new IndexProxy(indexId, lazyIndex)
-  }
-
-  /**
-   * Resolve all lazy indexes (called when collection first syncs)
-   */
-  public async resolveAllIndexes(): Promise<void> {
-    if (this.isIndexesResolved) return
-
-    const resolutionPromises = Array.from(this.lazyIndexes.entries()).map(
-      async ([indexId, lazyIndex]) => {
-        const resolvedIndex = await lazyIndex.resolve()
-
-        // Build index with current data
-        resolvedIndex.build(this.state.entries())
-
-        this.resolvedIndexes.set(indexId, resolvedIndex)
-        return { indexId, resolvedIndex }
-      },
-    )
-
-    await Promise.all(resolutionPromises)
-    this.isIndexesResolved = true
-  }
-
-  /**
-   * Resolve a single index immediately
-   */
-  private async resolveSingleIndex(
-    indexId: number,
-    lazyIndex: LazyIndexWrapper<TKey>,
-  ): Promise<BaseIndex<TKey>> {
-    const resolvedIndex = await lazyIndex.resolve()
-    resolvedIndex.build(this.state.entries())
-    this.resolvedIndexes.set(indexId, resolvedIndex)
-    return resolvedIndex
-  }
-
-  /**
-   * Get resolved indexes for query optimization
-   */
-  get indexes(): Map<number, BaseIndex<TKey>> {
-    return this.resolvedIndexes
+    return index
   }
 
   /**
    * Updates all indexes when the collection changes
    */
   public updateIndexes(changes: Array<ChangeMessage<TOutput, TKey>>): void {
-    for (const index of this.resolvedIndexes.values()) {
+    for (const index of this.indexes.values()) {
       for (const change of changes) {
         switch (change.type) {
           case `insert`:
@@ -162,11 +112,9 @@ export class CollectionIndexesManager<
   }
 
   /**
-   * Clean up the collection by stopping sync and clearing data
-   * This can be called manually or automatically by garbage collection
+   * Clean up indexes
    */
   public cleanup(): void {
-    this.lazyIndexes.clear()
-    this.resolvedIndexes.clear()
+    this.indexes.clear()
   }
 }

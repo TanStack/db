@@ -251,6 +251,13 @@ export class CollectionSubscription
   }
 
   /**
+   * Check if an orderBy index has been set for this subscription
+   */
+  hasOrderByIndex(): boolean {
+    return this.orderByIndex !== undefined
+  }
+
+  /**
    * Set subscription status and emit events if changed
    */
   private setStatus(newStatus: SubscriptionStatus) {

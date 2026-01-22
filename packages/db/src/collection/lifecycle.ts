@@ -106,17 +106,6 @@ export class CollectionLifecycleManager<
     const previousStatus = this.status
     this.status = newStatus
 
-    // Resolve indexes when collection becomes ready
-    if (newStatus === `ready` && !this.indexes.isIndexesResolved) {
-      // Resolve indexes asynchronously without blocking
-      this.indexes.resolveAllIndexes().catch((error) => {
-        console.warn(
-          `${this.config.id ? `[${this.config.id}] ` : ``}Failed to resolve indexes:`,
-          error,
-        )
-      })
-    }
-
     // Emit event
     this.events.emitStatusChange(newStatus, previousStatus)
   }

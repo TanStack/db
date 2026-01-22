@@ -3,6 +3,7 @@ import { createCollection } from '../src/collection/index.js'
 import { currentStateAsChanges } from '../src/collection/change-events.js'
 import { Func, PropRef, Value } from '../src/query/ir.js'
 import { DEFAULT_COMPARE_OPTIONS } from '../src/utils.js'
+import { WriteOptimizedIndex } from '../src/indexes/write-optimized-index.js'
 
 interface TestUser {
   id: string
@@ -39,6 +40,7 @@ describe(`currentStateAsChanges`, () => {
       id: `test-collection-${autoIndex}`,
       getKey: (user) => user.id,
       autoIndex,
+      defaultIndexType: autoIndex === `eager` ? WriteOptimizedIndex : undefined,
       sync: {
         sync: mockSync,
       },

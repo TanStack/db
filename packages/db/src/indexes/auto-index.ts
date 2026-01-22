@@ -1,5 +1,5 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils'
-import { BTreeIndex } from './btree-index'
+import { checkCollectionSizeForIndex, isDevModeEnabled } from './index-registry'
 import type { CompareOptions } from '../query/builder/types'
 import type { BasicExpression } from '../query/ir'
 import type { CollectionImpl } from '../collection/index.js'
@@ -11,6 +11,19 @@ export interface AutoIndexConfig {
 function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   // Only proceed if auto-indexing is enabled
   if (collection.config.autoIndex !== `eager`) {
+    return false
+  }
+
+  // Check if defaultIndexType is set on the collection
+  if (!collection.config.defaultIndexType) {
+    if (isDevModeEnabled()) {
+      console.warn(
+        `[TanStack DB] Auto-indexing is disabled because no defaultIndexType is set. ` +
+          `Set defaultIndexType on the collection:\n` +
+          `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
+          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
+      )
+    }
     return false
   }
 
@@ -46,9 +59,18 @@ export function ensureIndexForField<
     return // Index already exists
   }
 
+  // Dev mode: check if collection size warrants an index suggestion
+  if (isDevModeEnabled()) {
+    checkCollectionSizeForIndex(
+      collection.id || `unknown`,
+      collection.size,
+      fieldPath,
+    )
+  }
+
   // Create a new index for this field using the collection's createIndex method
+  // The collection will use its defaultIndexType
   try {
-    // Use the proxy-based approach to create the proper accessor for nested paths
     collection.createIndex(
       (row) => {
         // Navigate through the field path
@@ -60,7 +82,6 @@ export function ensureIndexForField<
       },
       {
         name: `auto:${fieldPath.join(`.`)}`,
-        indexType: BTreeIndex,
         options: compareFn ? { compareFn, compareOptions: compareOpts } : {},
       },
     )
