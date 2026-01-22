@@ -30,7 +30,10 @@ export class TimeoutWaitingForTxIdError extends ElectricDBCollectionError {
 
     const hint = `\n\nThis often happens when pg_current_xact_id() is called outside the transaction that performs the mutation. Make sure to call it INSIDE the same transaction. See: https://tanstack.com/db/latest/docs/collections/electric-collection#common-issue-awaittxid-stalls-or-times-out`
 
-    super(`Timeout waiting for txId: ${txId}${receivedInfo}${hint}`, collectionId)
+    super(
+      `Timeout waiting for txId: ${txId}${receivedInfo}${hint}`,
+      collectionId,
+    )
     this.name = `TimeoutWaitingForTxIdError`
   }
 }
