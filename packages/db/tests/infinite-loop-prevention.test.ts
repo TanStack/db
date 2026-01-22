@@ -256,7 +256,8 @@ describe(`Infinite loop prevention`, () => {
     const preloadPromise = liveQueryCollection.preload()
     const timeoutPromise = new Promise((_, reject) =>
       setTimeout(
-        () => reject(new Error(`Timeout during preload - possible infinite loop`)),
+        () =>
+          reject(new Error(`Timeout during preload - possible infinite loop`)),
         5000,
       ),
     )
@@ -296,7 +297,8 @@ describe(`Infinite loop prevention`, () => {
 
     const updateTimeoutPromise = new Promise((_, reject) =>
       setTimeout(
-        () => reject(new Error(`Timeout during updates - possible infinite loop`)),
+        () =>
+          reject(new Error(`Timeout during updates - possible infinite loop`)),
         5000,
       ),
     )
@@ -318,9 +320,7 @@ describe(`Infinite loop prevention`, () => {
     const { utils, ...options } = mockSyncCollectionOptions({
       id: `reset-exhausted-flag-test`,
       getKey: (item: TestItem) => item.id,
-      initialData: [
-        { id: 1, value: 100, category: `A` },
-      ],
+      initialData: [{ id: 1, value: 100, category: `A` }],
     })
 
     const sourceCollection = createCollection(options)
