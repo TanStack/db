@@ -5,13 +5,15 @@ import {
   createTransaction,
 } from '@tanstack/db'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
-import type { Collection,
+import type {
+  Collection,
   IR,
   InsertMutationFnParams,
   MutationFnParams,
   PendingMutation,
   Transaction,
-  TransactionWithMutations } from '@tanstack/db'
+  TransactionWithMutations,
+} from '@tanstack/db'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { Message, Row } from '@electric-sql/client'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
