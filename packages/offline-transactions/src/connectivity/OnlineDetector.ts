@@ -1,6 +1,12 @@
 import type { OnlineDetector } from '../types'
 
-export class DefaultOnlineDetector implements OnlineDetector {
+/**
+ * Web-based online detector that uses browser APIs.
+ * Listens for:
+ * - `window.online` event for network connectivity changes
+ * - `document.visibilitychange` event for tab/window focus changes
+ */
+export class WebOnlineDetector implements OnlineDetector {
   private listeners: Set<() => void> = new Set()
   private isListening = false
 
@@ -89,3 +95,8 @@ export class DefaultOnlineDetector implements OnlineDetector {
     this.listeners.clear()
   }
 }
+
+/**
+ * @deprecated Use `WebOnlineDetector` instead. This alias is kept for backwards compatibility.
+ */
+export const DefaultOnlineDetector = WebOnlineDetector

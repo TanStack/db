@@ -849,26 +849,29 @@ export class CollectionImpl<
    * }, { includeInitialState: true })
    *
    * @example
-   * // Subscribe only to changes matching a condition
+   * // Subscribe only to changes matching a condition using where callback
+   * import { eq } from "@tanstack/db"
+   *
    * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
    *   includeInitialState: true,
-   *   where: (row) => row.status === 'active'
+   *   where: (row) => eq(row.status, "active")
    * })
    *
    * @example
-   * // Subscribe using a pre-compiled expression
+   * // Using multiple conditions with and()
+   * import { and, eq, gt } from "@tanstack/db"
+   *
    * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
-   *   includeInitialState: true,
-   *   whereExpression: eq(row.status, 'active')
+   *   where: (row) => and(eq(row.status, "active"), gt(row.priority, 5))
    * })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions = {},
+    options: SubscribeChangesOptions<TOutput> = {},
   ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
   }

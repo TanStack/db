@@ -5,7 +5,10 @@ import {
 } from '../compiler/expressions.js'
 import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
-import type { ChangeMessage } from '../../types.js'
+import type {
+  ChangeMessage,
+  SubscriptionStatusChangeEvent,
+} from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
 import type { BasicExpression } from '../ir.js'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
@@ -53,26 +56,10 @@ export class CollectionSubscriber<
   }
 
   private subscribeToChanges(whereExpression?: BasicExpression<boolean>) {
-    let subscription: CollectionSubscription
     const orderByInfo = this.getOrderByInfo()
-    if (orderByInfo) {
-      subscription = this.subscribeToOrderedChanges(
-        whereExpression,
-        orderByInfo,
-      )
-    } else {
-      // If the source alias is lazy then we should not include the initial state
-      const includeInitialState = !this.collectionConfigBuilder.isLazyAlias(
-        this.alias,
-      )
 
-      subscription = this.subscribeToMatchingChanges(
-        whereExpression,
-        includeInitialState,
-      )
-    }
-
-    const trackLoadPromise = () => {
+    // Track load promises using subscription from the event (avoids circular dependency)
+    const trackLoadPromise = (subscription: CollectionSubscription) => {
       // Guard against duplicate transitions
       if (!this.subscriptionLoadingPromises.has(subscription)) {
         let resolve: () => void
@@ -89,16 +76,12 @@ export class CollectionSubscriber<
       }
     }
 
-    // It can be that we are not yet subscribed when the first `loadSubset` call happens (i.e. the initial query).
-    // So we also check the status here and if it's `loadingSubset` then we track the load promise
-    if (subscription.status === `loadingSubset`) {
-      trackLoadPromise()
-    }
-
-    // Subscribe to subscription status changes to propagate loading state
-    const statusUnsubscribe = subscription.on(`status:change`, (event) => {
+    // Status change handler - passed to subscribeChanges so it's registered
+    // BEFORE any snapshot is requested, preventing race conditions
+    const onStatusChange = (event: SubscriptionStatusChangeEvent) => {
+      const subscription = event.subscription as CollectionSubscription
       if (event.status === `loadingSubset`) {
-        trackLoadPromise()
+        trackLoadPromise(subscription)
       } else {
         // status is 'ready'
         const deferred = this.subscriptionLoadingPromises.get(subscription)
@@ -108,7 +91,34 @@ export class CollectionSubscriber<
           deferred.resolve()
         }
       }
-    })
+    }
+
+    // Create subscription with onStatusChange - listener is registered before any async work
+    let subscription: CollectionSubscription
+    if (orderByInfo) {
+      subscription = this.subscribeToOrderedChanges(
+        whereExpression,
+        orderByInfo,
+        onStatusChange,
+      )
+    } else {
+      // If the source alias is lazy then we should not include the initial state
+      const includeInitialState = !this.collectionConfigBuilder.isLazyAlias(
+        this.alias,
+      )
+
+      subscription = this.subscribeToMatchingChanges(
+        whereExpression,
+        includeInitialState,
+        onStatusChange,
+      )
+    }
+
+    // Check current status after subscribing - if status is 'loadingSubset', track it.
+    // The onStatusChange listener will catch the transition to 'ready'.
+    if (subscription.status === `loadingSubset`) {
+      trackLoadPromise(subscription)
+    }
 
     const unsubscribe = () => {
       // If subscription has a pending promise, resolve it before unsubscribing
@@ -119,7 +129,6 @@ export class CollectionSubscriber<
         deferred.resolve()
       }
 
-      statusUnsubscribe()
       subscription.unsubscribe()
     }
     // currentSyncState is always defined when subscribe() is called
@@ -179,22 +188,22 @@ export class CollectionSubscriber<
 
   private subscribeToMatchingChanges(
     whereExpression: BasicExpression<boolean> | undefined,
-    includeInitialState: boolean = false,
-  ) {
+    includeInitialState: boolean,
+    onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
+  ): CollectionSubscription {
     const sendChanges = (
       changes: Array<ChangeMessage<any, string | number>>,
     ) => {
       this.sendChangesToPipeline(changes)
     }
 
-    // Only pass includeInitialState when true. When it's false, we leave it
-    // undefined so that user subscriptions with explicit `includeInitialState: false`
-    // can be distinguished from internal lazy-loading subscriptions.
-    // If we pass `false`, changes.ts would call markAllStateAsSeen() which
-    // disables filtering - but internal subscriptions still need filtering.
+    // Create subscription with onStatusChange - listener is registered before snapshot
+    // Note: For non-ordered queries (no limit/offset), we use trackLoadSubsetPromise: false
+    // which is the default behavior in subscribeChanges
     const subscription = this.collection.subscribeChanges(sendChanges, {
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
+      onStatusChange,
     })
 
     return subscription
@@ -203,22 +212,31 @@ export class CollectionSubscriber<
   private subscribeToOrderedChanges(
     whereExpression: BasicExpression<boolean> | undefined,
     orderByInfo: OrderByOptimizationInfo,
-  ) {
+    onStatusChange: (event: SubscriptionStatusChangeEvent) => void,
+  ): CollectionSubscription {
     const { orderBy, offset, limit, index } = orderByInfo
+
+    // Use a holder to forward-reference subscription in the callback
+    const subscriptionHolder: { current?: CollectionSubscription } = {}
 
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
       // Split live updates into a delete of the old value and an insert of the new value
       const splittedChanges = splitUpdates(changes)
-      this.sendChangesToPipelineWithTracking(splittedChanges, subscription)
+      this.sendChangesToPipelineWithTracking(
+        splittedChanges,
+        subscriptionHolder.current!,
+      )
     }
 
-    // Subscribe to changes and only send changes that are smaller than the biggest value we've sent so far
-    // values that are bigger don't need to be sent because they can't affect the topK
+    // Subscribe to changes with onStatusChange - listener is registered before any snapshot
+    // values bigger than what we've sent don't need to be sent because they can't affect the topK
     const subscription = this.collection.subscribeChanges(sendChangesInRange, {
       whereExpression,
+      onStatusChange,
     })
+    subscriptionHolder.current = subscription
 
     // Listen for truncate events to reset cursor tracking state and sentToD2Keys
     // This ensures that after a must-refetch/truncate, we don't use stale cursor data
@@ -236,6 +254,7 @@ export class CollectionSubscriber<
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
+    // Trigger the snapshot request - onStatusChange listener is already registered
     if (index) {
       // We have an index on the first orderBy column - use lazy loading optimization
       // This works for both single-column and multi-column orderBy:

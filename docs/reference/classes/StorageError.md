@@ -5,7 +5,7 @@ title: StorageError
 
 # Class: StorageError
 
-Defined in: [packages/db/src/errors.ts:580](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L580)
+Defined in: [packages/db/src/errors.ts:593](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L593)
 
 ## Extends
 
@@ -24,7 +24,7 @@ Defined in: [packages/db/src/errors.ts:580](https://github.com/TanStack/db/blob/
 new StorageError(message): StorageError;
 ```
 
-Defined in: [packages/db/src/errors.ts:581](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L581)
+Defined in: [packages/db/src/errors.ts:594](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L594)
 
 #### Parameters
 

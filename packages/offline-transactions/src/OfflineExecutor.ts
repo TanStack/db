@@ -13,7 +13,7 @@ import { WebLocksLeader } from './coordination/WebLocksLeader'
 import { BroadcastChannelLeader } from './coordination/BroadcastChannelLeader'
 
 // Connectivity
-import { DefaultOnlineDetector } from './connectivity/OnlineDetector'
+import { WebOnlineDetector } from './connectivity/OnlineDetector'
 
 // API
 import { OfflineTransaction as OfflineTransactionAPI } from './api/OfflineTransaction'
@@ -69,14 +69,13 @@ export class OfflineExecutor {
     }
   > = new Map()
 
+  // Track restoration transactions for cleanup when offline transactions complete
+  private restorationTransactions: Map<string, Transaction> = new Map()
+
   constructor(config: OfflineConfig) {
     this.config = config
     this.scheduler = new KeyScheduler()
-
-    // Initialize onlineDetector based on config
-    // undefined = use DefaultOnlineDetector (default)
-    // custom = user-provided detector
-    this.onlineDetector = config.onlineDetector ?? new DefaultOnlineDetector()
+    this.onlineDetector = config.onlineDetector ?? new WebOnlineDetector()
 
     // Initialize as pending - will be set by async initialization
     this.storage = null
@@ -270,11 +269,17 @@ export class OfflineExecutor {
 
         // Request leadership first
         const isLeader = await this.leaderElection.requestLeadership()
+        this.isLeaderState = isLeader
         span.setAttribute(`isLeader`, isLeader)
 
         // Set up event listeners after leadership is established
         // This prevents the callback from being called multiple times
         this.setupEventListeners()
+
+        // Notify initial leadership state
+        if (this.config.onLeadershipChange) {
+          this.config.onLeadershipChange(isLeader)
+        }
 
         if (isLeader) {
           await this.loadAndReplayTransactions()
@@ -297,8 +302,14 @@ export class OfflineExecutor {
     }
 
     try {
+      // Load pending transactions and restore optimistic state
       await this.executor.loadPendingTransactions()
-      await this.executor.executeAll()
+
+      // Start execution in the background - don't await to avoid blocking initialization
+      // The transactions will execute and complete asynchronously
+      this.executor.executeAll().catch((error) => {
+        console.warn(`Failed to execute transactions:`, error)
+      })
     } catch (error) {
       console.warn(`Failed to load and replay transactions:`, error)
     }
@@ -306,6 +317,14 @@ export class OfflineExecutor {
 
   get isOfflineEnabled(): boolean {
     return this.mode === `offline` && this.isLeaderState
+  }
+
+  /**
+   * Wait for the executor to fully initialize.
+   * This ensures that pending transactions are loaded and optimistic state is restored.
+   */
+  async waitForInit(): Promise<void> {
+    return this.initPromise
   }
 
   createOfflineTransaction(
@@ -440,6 +459,9 @@ export class OfflineExecutor {
       deferred.resolve(result)
       this.pendingTransactionPromises.delete(transactionId)
     }
+
+    // Clean up the restoration transaction - the sync will provide authoritative data
+    this.cleanupRestorationTransaction(transactionId)
   }
 
   // Method for TransactionExecutor to signal failure
@@ -448,6 +470,58 @@ export class OfflineExecutor {
     if (deferred) {
       deferred.reject(error)
       this.pendingTransactionPromises.delete(transactionId)
+    }
+
+    // Clean up the restoration transaction and rollback optimistic state
+    this.cleanupRestorationTransaction(transactionId, true)
+  }
+
+  // Method for TransactionExecutor to register restoration transactions
+  registerRestorationTransaction(
+    offlineTransactionId: string,
+    restorationTransaction: Transaction,
+  ): void {
+    this.restorationTransactions.set(
+      offlineTransactionId,
+      restorationTransaction,
+    )
+  }
+
+  private cleanupRestorationTransaction(
+    transactionId: string,
+    shouldRollback = false,
+  ): void {
+    const restorationTx = this.restorationTransactions.get(transactionId)
+    if (!restorationTx) {
+      return
+    }
+
+    this.restorationTransactions.delete(transactionId)
+
+    if (shouldRollback) {
+      restorationTx.rollback()
+      return
+    }
+
+    // Mark as completed so recomputeOptimisticState removes it from consideration.
+    // The actual data will come from the sync.
+    restorationTx.setState(`completed`)
+
+    // Remove from each collection's transaction map and recompute
+    const touchedCollections = new Set<string>()
+    for (const mutation of restorationTx.mutations) {
+      // Defensive check for corrupted deserialized data
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+      if (!mutation.collection) {
+        continue
+      }
+      const collectionId = mutation.collection.id
+      if (touchedCollections.has(collectionId)) {
+        continue
+      }
+      touchedCollections.add(collectionId)
+      mutation.collection._state.transactions.delete(restorationTx.id)
+      mutation.collection._state.recomputeOptimisticState(false)
     }
   }
 

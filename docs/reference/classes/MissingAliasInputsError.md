@@ -5,7 +5,7 @@ title: MissingAliasInputsError
 
 # Class: MissingAliasInputsError
 
-Defined in: [packages/db/src/errors.ts:693](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L693)
+Defined in: [packages/db/src/errors.ts:706](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L706)
 
 Internal error when the compiler returns aliases that don't have corresponding input streams.
 This should never happen since all aliases come from user declarations.
@@ -22,7 +22,7 @@ This should never happen since all aliases come from user declarations.
 new MissingAliasInputsError(missingAliases): MissingAliasInputsError;
 ```
 
-Defined in: [packages/db/src/errors.ts:694](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L694)
+Defined in: [packages/db/src/errors.ts:707](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L707)
 
 #### Parameters
 

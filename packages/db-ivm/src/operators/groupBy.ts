@@ -1,3 +1,4 @@
+import { serializeValue } from '../utils.js'
 import { map } from './map.js'
 import { reduce } from './reduce.js'
 import type { IStreamBuilder, KeyValue } from '../types.js'
@@ -67,7 +68,7 @@ export function groupBy<
     const withKeysAndValues = stream.pipe(
       map((data) => {
         const key = keyExtractor(data)
-        const keyString = JSON.stringify(key)
+        const keyString = serializeValue(key)
 
         // Create values object with pre-aggregated values
         const values: Record<string, unknown> = {}
@@ -210,7 +211,7 @@ export function avg<T>(
   }
 }
 
-type CanMinMax = number | Date | bigint
+type CanMinMax = number | Date | bigint | string
 
 /**
  * Creates a min aggregate function that computes the minimum value in a group

@@ -1,5 +1,109 @@
 # @tanstack/react-db
 
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies [[`05130f2`](https://github.com/TanStack/db/commit/05130f2420eb682f11f099310a0af87afa3f35fe)]:
+  - @tanstack/db@0.5.23
+
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [[`f9b741e`](https://github.com/TanStack/db/commit/f9b741e9fb636be1c9f1502b7e28fe691bae2480)]:
+  - @tanstack/db@0.5.22
+
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`6745ed0`](https://github.com/TanStack/db/commit/6745ed003dc25cfd6fa0f7e60f708205a6069ff2), [`1b22e40`](https://github.com/TanStack/db/commit/1b22e40c56323cfa5e7f759272fed53320aa32f7), [`7a2cacd`](https://github.com/TanStack/db/commit/7a2cacd7a426530cb77844a8c2680f6b06e9ce2f), [`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db@0.5.21
+
+## 0.2.0
+
+### Minor Changes
+
+- Update solid-db to enable suspense support. ([#826](https://github.com/TanStack/db/pull/826))
+  You can now run do
+
+  ```tsx
+  // Use Suspense boundaries
+  const todosQuery = useLiveQuery((q) => q.from({ todos: todoCollection }))
+
+  return (
+    <>
+      {/* Status and other getters don't trigger Suspense */}
+      <div>Status {todosQuery.status}</div>
+      <div>Loading {todosQuery.isLoading ? 'yes' : 'no'}</div>
+
+      <Suspense fallback={<div>Loading...</div>}>
+        <For each={todosQuery()}>
+          {(todo) => <li key={todo.id}>{todo.text}</li>}
+        </For>
+      </Suspense>
+    </>
+  )
+  ```
+
+  All values returned from useLiveQuery are now getters, so no longer need to be called as functions. This is a breaking change. This is to match how createResource works, and everything still stays reactive.
+
+  ```tsx
+  const todos = useLiveQuery(() => existingCollection)
+
+  const handleToggle = (id) => {
+    // Can now access collection directly
+    todos.collection.update(id, (draft) => {
+      draft.completed = !draft.completed
+    })
+  }
+
+  return (
+    <>
+      {/* Status and other getters don't trigger Suspense */}
+      <div>Status {todos.status}</div>
+      <div>Loading {todos.isLoading ? 'yes' : 'no'}</div>
+      <div>Ready {todos.isReady ? 'yes' : 'no'}</div>
+      <div>Idle {todos.isIdle ? 'yes' : 'no'}</div>
+      <div>Error {todos.isError ? 'yes' : 'no'}</div>
+    </>
+  )
+  ```
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
+## 0.1.62
+
+### Patch Changes
+
+- Updated dependencies [[`29033b8`](https://github.com/TanStack/db/commit/29033b8f55b0ba5721371ad761037ec813440aa7), [`888ad6a`](https://github.com/TanStack/db/commit/888ad6afe5932b0467320c04fbd4583469cb9c47)]:
+  - @tanstack/db@0.5.19
+
+## 0.1.61
+
+### Patch Changes
+
+- Updated dependencies [[`c1247e8`](https://github.com/TanStack/db/commit/c1247e816950314da6d201613481577834c1d97a)]:
+  - @tanstack/db@0.5.18
+
+## 0.1.60
+
+### Patch Changes
+
+- Updated dependencies [[`f795a67`](https://github.com/TanStack/db/commit/f795a674f21659ef46ff370d4f3b9903a596bcaf), [`d542667`](https://github.com/TanStack/db/commit/d542667a3440415d8e6cbb449b20abd3cbd6855c), [`6503c09`](https://github.com/TanStack/db/commit/6503c091a259208331f471dca29abf086e881147), [`b1cc4a7`](https://github.com/TanStack/db/commit/b1cc4a7e018ffb6804ae7f1c99e9c6eb4bb22812)]:
+  - @tanstack/db@0.5.17
+
+## 0.1.59
+
+### Patch Changes
+
+- Updated dependencies [[`41308b8`](https://github.com/TanStack/db/commit/41308b8ee914aa467e22842cd454f06d1a60032e)]:
+  - @tanstack/db@0.5.16
+
 ## 0.1.58
 
 ### Patch Changes

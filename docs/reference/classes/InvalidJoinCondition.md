@@ -5,7 +5,7 @@ title: InvalidJoinCondition
 
 # Class: InvalidJoinCondition
 
-Defined in: [packages/db/src/errors.ts:531](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L531)
+Defined in: [packages/db/src/errors.ts:544](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L544)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:531](https://github.com/TanStack/db/blob/
 new InvalidJoinCondition(): InvalidJoinCondition;
 ```
 
-Defined in: [packages/db/src/errors.ts:532](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L532)
+Defined in: [packages/db/src/errors.ts:545](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L545)
 
 #### Returns
 

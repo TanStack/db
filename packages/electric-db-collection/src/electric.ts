@@ -22,6 +22,7 @@ import {
   removeTagFromIndex,
   tagMatchesPattern,
 } from './tag-index'
+import type { ColumnEncoder } from './sql-compiler'
 import type {
   MoveOutPattern,
   MoveTag,
@@ -347,6 +348,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   write,
   commit,
   collectionId,
+  encodeColumnName,
 }: {
   stream: ShapeStream<T>
   syncMode: ElectricSyncMode
@@ -359,17 +361,24 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }) => void
   commit: () => void
   collectionId?: string
+  /**
+   * Optional function to encode column names (e.g., camelCase to snake_case).
+   * This is typically the `encode` function from shapeOptions.columnMapper.
+   */
+  encodeColumnName?: ColumnEncoder
 }): DeduplicatedLoadSubset | null {
   // Eager mode doesn't need subset loading
   if (syncMode === `eager`) {
     return null
   }
 
+  const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
+
   const loadSubset = async (opts: LoadSubsetOptions) => {
     // In progressive mode, use fetchSnapshot during snapshot phase
     if (isBufferingInitialSync()) {
       // Progressive mode snapshot phase: fetch and apply immediately
-      const snapshotParams = compileSQL<T>(opts)
+      const snapshotParams = compileSQL<T>(opts, compileOptions)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
 
@@ -428,7 +437,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           orderBy,
           // No limit - get all ties
         }
-        const whereCurrentParams = compileSQL<T>(whereCurrentOpts)
+        const whereCurrentParams = compileSQL<T>(
+          whereCurrentOpts,
+          compileOptions,
+        )
         promises.push(stream.requestSnapshot(whereCurrentParams))
 
         debug(
@@ -442,7 +454,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           orderBy,
           limit,
         }
-        const whereFromParams = compileSQL<T>(whereFromOpts)
+        const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
         promises.push(stream.requestSnapshot(whereFromParams))
 
         debug(
@@ -453,7 +465,7 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         await Promise.all(promises)
       } else {
         // No cursor - standard single request
-        const snapshotParams = compileSQL<T>(opts)
+        const snapshotParams = compileSQL<T>(opts, compileOptions)
         await stream.requestSnapshot(snapshotParams)
       }
     }
@@ -1233,6 +1245,12 @@ function createElectricSync<T extends Row<unknown>>(
         syncMode === `progressive` && !hasReceivedUpToDate
       const bufferedMessages: Array<Message<T>> = [] // Buffer change messages during initial sync
 
+      // Track keys that have been synced to handle overlapping subset queries.
+      // When multiple subset queries return the same row, the server sends `insert`
+      // for each response. We convert subsequent inserts to updates to avoid
+      // duplicate key errors when the row's data has changed between requests.
+      const syncedKeys = new Set<string | number>()
+
       /**
        * Process a change message: handle tags and write the mutation
        */
@@ -1249,14 +1267,28 @@ function createElectricSync<T extends Row<unknown>>(
         const rowId = collection.getKeyFromItem(changeMessage.value)
         const operation = changeMessage.headers.operation
 
-        if (operation === `delete`) {
+        // Track synced keys and handle overlapping subset queries.
+        // When multiple subset queries return the same row, the server sends
+        // `insert` for each response. We convert subsequent inserts to updates
+        // to avoid duplicate key errors when the row's data has changed.
+        const isDelete = operation === `delete`
+        const isDuplicateInsert =
+          operation === `insert` && syncedKeys.has(rowId)
+
+        if (isDelete) {
+          syncedKeys.delete(rowId)
+        } else {
+          syncedKeys.add(rowId)
+        }
+
+        if (isDelete) {
           clearTagsForRow(rowId)
         } else if (hasTags) {
           processTagsForChangeMessage(tags, removedTags, rowId)
         }
 
         write({
-          type: changeMessage.headers.operation,
+          type: isDuplicateInsert ? `update` : operation,
           value: changeMessage.value,
           // Include the primary key and relation info in the metadata
           metadata: {
@@ -1276,6 +1308,9 @@ function createElectricSync<T extends Row<unknown>>(
         write,
         commit,
         collectionId,
+        // Pass the columnMapper's encode function to transform column names
+        // (e.g., camelCase to snake_case) when compiling SQL for subset queries
+        encodeColumnName: shapeOptions.columnMapper?.encode,
       })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
@@ -1303,7 +1338,12 @@ function createElectricSync<T extends Row<unknown>>(
 
           // Check for txids in the message and add them to our store
           // Skip during buffered initial sync in progressive mode (txids will be extracted during atomic swap)
-          if (hasTxids(message) && !isBufferingInitialSync()) {
+          // EXCEPTION: If a transaction is already started (e.g., from must-refetch), track txids
+          // to avoid losing them when messages are written to the existing transaction.
+          if (
+            hasTxids(message) &&
+            (!isBufferingInitialSync() || transactionStarted)
+          ) {
             message.headers.txids?.forEach((txid) => newTxids.add(txid))
           }
 
@@ -1338,7 +1378,9 @@ function createElectricSync<T extends Row<unknown>>(
             }
 
             // In buffered initial sync of progressive mode, buffer messages instead of writing
-            if (isBufferingInitialSync()) {
+            // EXCEPTION: If a transaction is already started (e.g., from must-refetch), write
+            // directly to it instead of buffering. This prevents orphan transactions.
+            if (isBufferingInitialSync() && !transactionStarted) {
               bufferedMessages.push(message)
             } else {
               // Normal processing: write changes immediately
@@ -1352,7 +1394,9 @@ function createElectricSync<T extends Row<unknown>>(
           } else if (isSnapshotEndMessage(message)) {
             // Track postgres snapshot metadata for resolving awaiting mutations
             // Skip during buffered initial sync (will be extracted during atomic swap)
-            if (!isBufferingInitialSync()) {
+            // EXCEPTION: If a transaction is already started (e.g., from must-refetch), track snapshots
+            // to avoid losing them when messages are written to the existing transaction.
+            if (!isBufferingInitialSync() || transactionStarted) {
               newSnapshots.push(parseSnapshotMessage(message))
             }
           } else if (isUpToDateMessage(message)) {
@@ -1365,7 +1409,9 @@ function createElectricSync<T extends Row<unknown>>(
             }
           } else if (isMoveOutMessage(message)) {
             // Handle move-out event: buffer if buffering, otherwise process immediately
-            if (isBufferingInitialSync()) {
+            // EXCEPTION: If a transaction is already started (e.g., from must-refetch), process
+            // immediately to avoid orphan transactions.
+            if (isBufferingInitialSync() && !transactionStarted) {
               bufferedMessages.push(message)
             } else {
               // Normal processing: process move-out immediately
@@ -1392,6 +1438,9 @@ function createElectricSync<T extends Row<unknown>>(
             // Clear tag tracking state
             clearTagTrackingState()
 
+            // Clear synced keys tracking since we're starting fresh
+            syncedKeys.clear()
+
             // Reset the loadSubset deduplication state since we're starting fresh
             // This ensures that previously loaded predicates don't prevent refetching after truncate
             loadSubsetDedupe?.reset()
@@ -1405,7 +1454,13 @@ function createElectricSync<T extends Row<unknown>>(
 
         if (commitPoint !== null) {
           // PROGRESSIVE MODE: Atomic swap on first up-to-date (not subset-end)
-          if (isBufferingInitialSync() && commitPoint === `up-to-date`) {
+          // EXCEPTION: Skip atomic swap if a transaction is already started (e.g., from must-refetch).
+          // In that case, do a normal commit to properly close the existing transaction.
+          if (
+            isBufferingInitialSync() &&
+            commitPoint === `up-to-date` &&
+            !transactionStarted
+          ) {
             debug(
               `${collectionId ? `[${collectionId}] ` : ``}Progressive mode: Performing atomic swap with ${bufferedMessages.length} buffered messages`,
             )
@@ -1418,6 +1473,9 @@ function createElectricSync<T extends Row<unknown>>(
 
             // Clear tag tracking state for atomic swap
             clearTagTrackingState()
+
+            // Clear synced keys tracking for atomic swap
+            syncedKeys.clear()
 
             // Apply all buffered change messages and extract txids/snapshots
             for (const bufferedMsg of bufferedMessages) {

@@ -100,7 +100,7 @@ function processNonMergeOp(
 function processRow(
   [key, namespacedRow]: [unknown, NamespacedRow],
   ops: Array<SelectOp>,
-): [unknown, typeof namespacedRow & { __select_results: any }] {
+): [unknown, typeof namespacedRow & { $selected: any }] {
   const selectResults: Record<string, any> = {}
 
   for (const op of ops) {
@@ -111,21 +111,18 @@ function processRow(
     }
   }
 
-  // Return the namespaced row with __select_results added
+  // Return the namespaced row with $selected added
   return [
     key,
     {
       ...namespacedRow,
-      __select_results: selectResults,
+      $selected: selectResults,
     },
-  ] as [
-    unknown,
-    typeof namespacedRow & { __select_results: typeof selectResults },
-  ]
+  ] as [unknown, typeof namespacedRow & { $selected: typeof selectResults }]
 }
 
 /**
- * Processes the SELECT clause and places results in __select_results
+ * Processes the SELECT clause and places results in $selected
  * while preserving the original namespaced row for ORDER BY access
  */
 export function processSelect(

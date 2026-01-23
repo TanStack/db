@@ -1,3 +1,4 @@
+import { createTransaction } from '@tanstack/db'
 import { DefaultRetryPolicy } from '../retry/RetryPolicy'
 import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
@@ -240,6 +241,10 @@ export class TransactionExecutor {
       this.scheduler.schedule(transaction)
     }
 
+    // Restore optimistic state for loaded transactions
+    // This ensures the UI shows the optimistic data while transactions are pending
+    this.restoreOptimisticState(filteredTransactions)
+
     // Reset retry delays for all loaded transactions so they can run immediately
     this.resetRetryDelays()
 
@@ -252,6 +257,71 @@ export class TransactionExecutor {
 
     if (removedTransactions.length > 0) {
       await this.outbox.removeMany(removedTransactions.map((tx) => tx.id))
+    }
+  }
+
+  /**
+   * Restore optimistic state from loaded transactions.
+   * Creates internal transactions to hold the mutations so the collection's
+   * state manager can show optimistic data while waiting for sync.
+   */
+  private restoreOptimisticState(
+    transactions: Array<OfflineTransaction>,
+  ): void {
+    for (const offlineTx of transactions) {
+      if (offlineTx.mutations.length === 0) {
+        continue
+      }
+
+      try {
+        // Create a restoration transaction that holds mutations for optimistic state display.
+        // It will never commit - the real mutation is handled by the offline executor.
+        const restorationTx = createTransaction({
+          id: offlineTx.id,
+          autoCommit: false,
+          mutationFn: async () => {},
+        })
+
+        // Prevent unhandled promise rejection when cleanup calls rollback()
+        // We don't care about this promise - it's just for holding mutations
+        restorationTx.isPersisted.promise.catch(() => {
+          // Intentionally ignored - restoration transactions are cleaned up
+          // via cleanupRestorationTransaction, not through normal commit flow
+        })
+
+        restorationTx.applyMutations(offlineTx.mutations)
+
+        // Register with each affected collection's state manager
+        const touchedCollections = new Set<string>()
+        for (const mutation of offlineTx.mutations) {
+          // Defensive check for corrupted deserialized data
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          if (!mutation.collection) {
+            continue
+          }
+          const collectionId = mutation.collection.id
+          if (touchedCollections.has(collectionId)) {
+            continue
+          }
+          touchedCollections.add(collectionId)
+
+          mutation.collection._state.transactions.set(
+            restorationTx.id,
+            restorationTx,
+          )
+          mutation.collection._state.recomputeOptimisticState(true)
+        }
+
+        this.offlineExecutor.registerRestorationTransaction(
+          offlineTx.id,
+          restorationTx,
+        )
+      } catch (error) {
+        console.warn(
+          `Failed to restore optimistic state for transaction ${offlineTx.id}:`,
+          error,
+        )
+      }
     }
   }
 

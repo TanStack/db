@@ -148,6 +148,7 @@ export function compileQuery(
     queryMapping,
     aliasToCollectionId,
     aliasRemapping,
+    sourceWhereClauses,
   )
   sources[mainSource] = mainInput
 
@@ -184,6 +185,7 @@ export function compileQuery(
       compileQuery,
       aliasToCollectionId,
       aliasRemapping,
+      sourceWhereClauses,
     )
   }
 
@@ -216,7 +218,7 @@ export function compileQuery(
     throw new DistinctRequiresSelectError()
   }
 
-  // Process the SELECT clause early - always create __select_results
+  // Process the SELECT clause early - always create $selected
   // This eliminates duplication and allows for DISTINCT implementation
   if (query.fnSelect) {
     // Handle functional select - apply the function to transform the row
@@ -227,15 +229,15 @@ export function compileQuery(
           key,
           {
             ...namespacedRow,
-            __select_results: selectResults,
+            $selected: selectResults,
           },
-        ] as [string, typeof namespacedRow & { __select_results: any }]
+        ] as [string, typeof namespacedRow & { $selected: any }]
       }),
     )
   } else if (query.select) {
     pipeline = processSelect(pipeline, query.select, allInputs)
   } else {
-    // If no SELECT clause, create __select_results with the main table data
+    // If no SELECT clause, create $selected with the main table data
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
         const selectResults =
@@ -247,9 +249,9 @@ export function compileQuery(
           key,
           {
             ...namespacedRow,
-            __select_results: selectResults,
+            $selected: selectResults,
           },
-        ] as [string, typeof namespacedRow & { __select_results: any }]
+        ] as [string, typeof namespacedRow & { $selected: any }]
       }),
     )
   }
@@ -310,7 +312,7 @@ export function compileQuery(
 
   // Process the DISTINCT clause if it exists
   if (query.distinct) {
-    pipeline = pipeline.pipe(distinct(([_key, row]) => row.__select_results))
+    pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected))
   }
 
   // Process orderBy parameter if it exists
@@ -327,11 +329,11 @@ export function compileQuery(
       query.offset,
     )
 
-    // Final step: extract the __select_results and include orderBy index
+    // Final step: extract the $selected and include orderBy index
     const resultPipeline = orderedPipeline.pipe(
       map(([key, [row, orderByIndex]]) => {
-        // Extract the final results from __select_results and include orderBy index
-        const raw = (row as any).__select_results
+        // Extract the final results from $selected and include orderBy index
+        const raw = (row as any).$selected
         const finalResults = unwrapValue(raw)
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       }),
@@ -354,11 +356,11 @@ export function compileQuery(
     throw new LimitOffsetRequireOrderByError()
   }
 
-  // Final step: extract the __select_results and return tuple format (no orderBy)
+  // Final step: extract the $selected and return tuple format (no orderBy)
   const resultPipeline: ResultStream = pipeline.pipe(
     map(([key, row]) => {
-      // Extract the final results from __select_results and return [key, [results, undefined]]
-      const raw = (row as any).__select_results
+      // Extract the final results from $selected and return [key, [results, undefined]]
+      const raw = (row as any).$selected
       const finalResults = unwrapValue(raw)
       return [key, [finalResults, undefined]] as [
         unknown,
@@ -466,6 +468,7 @@ function processFrom(
   queryMapping: QueryMapping,
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -503,6 +506,28 @@ function processFrom(
       // any existing remappings from nested subquery levels.
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // Pull up source WHERE clauses from subquery to parent scope.
+      // This enables loadSubset to receive the correct where clauses for subquery collections.
+      //
+      // IMPORTANT: Skip pull-up for optimizer-created subqueries. These are detected when:
+      // 1. The outer alias (from.alias) matches the inner alias (from.query.from.alias)
+      // 2. The subquery was found in queryMapping (it's a user-defined subquery, not optimizer-created)
+      //
+      // For optimizer-created subqueries, the parent already has the sourceWhereClauses
+      // extracted from the original raw query, so pulling up would be redundant.
+      // More importantly, pulling up for optimizer-created subqueries can cause issues
+      // when the optimizer has restructured the query.
+      const isUserDefinedSubquery = queryMapping.has(from.query)
+      const subqueryFromAlias = from.query.from.alias
+      const isOptimizerCreated =
+        !isUserDefinedSubquery && from.alias === subqueryFromAlias
+
+      if (!isOptimizerCreated) {
+        for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause)
+        }
+      }
 
       // Create a FLATTENED remapping from outer alias to innermost alias.
       // For nested subqueries, this ensures one-hop lookups (not recursive chains).

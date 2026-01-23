@@ -360,6 +360,26 @@ describe(`Collection Lifecycle Management`, () => {
       expect(mockSetTimeout).not.toHaveBeenCalled()
       expect(collection.status).not.toBe(`cleaned-up`)
     })
+
+    it(`should disable GC when gcTime is Infinity`, () => {
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `infinity-gc-test`,
+        getKey: (item) => item.id,
+        gcTime: Infinity, // Disabled GC via Infinity
+        sync: {
+          sync: () => {},
+        },
+      })
+
+      const subscription = collection.subscribeChanges(() => {})
+      subscription.unsubscribe()
+
+      // Should not start any timer when gcTime is Infinity
+      // Note: Without this fix, setTimeout(fn, Infinity) would coerce to 0,
+      // causing immediate GC instead of never collecting
+      expect(mockSetTimeout).not.toHaveBeenCalled()
+      expect(collection.status).not.toBe(`cleaned-up`)
+    })
   })
 
   describe(`Manual Preload and Cleanup`, () => {

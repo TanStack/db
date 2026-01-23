@@ -142,7 +142,7 @@ export interface QueryCollectionConfig<
  */
 export type RefetchFn = (opts?: {
   throwOnError?: boolean
-}) => Promise<QueryObserverResult<any, any> | void>
+}) => Promise<Array<QueryObserverResult<any, any> | void>>
 
 /**
  * Utility methods available on Query Collections for direct writes and manual operations.
@@ -692,13 +692,16 @@ export function queryCollectionOptions(
           // Query is still loading, wait for the first result
           return new Promise<void>((resolve, reject) => {
             const unsubscribe = observer.subscribe((result) => {
-              if (result.isSuccess) {
-                unsubscribe()
-                resolve()
-              } else if (result.isError) {
-                unsubscribe()
-                reject(result.error)
-              }
+              // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
+              queueMicrotask(() => {
+                if (result.isSuccess) {
+                  unsubscribe()
+                  resolve()
+                } else if (result.isError) {
+                  unsubscribe()
+                  reject(result.error)
+                }
+              })
             })
           })
         }
@@ -745,13 +748,16 @@ export function queryCollectionOptions(
       // Create a promise that resolves when the query result is first available
       const readyPromise = new Promise<void>((resolve, reject) => {
         const unsubscribe = localObserver.subscribe((result) => {
-          if (result.isSuccess) {
-            unsubscribe()
-            resolve()
-          } else if (result.isError) {
-            unsubscribe()
-            reject(result.error)
-          }
+          // Use a microtask in case `subscribe` is called synchronously, before `unsubscribe` is initialized
+          queueMicrotask(() => {
+            if (result.isSuccess) {
+              unsubscribe()
+              resolve()
+            } else if (result.isError) {
+              unsubscribe()
+              reject(result.error)
+            }
+          })
         })
       })
 
@@ -1127,20 +1133,14 @@ export function queryCollectionOptions(
       })
     })
 
-    await Promise.all(refetchPromises)
+    return Promise.all(refetchPromises)
   }
 
   /**
-   * Updates the query cache with new items, handling both direct arrays
+   * Updates a single query key in the cache with new items, handling both direct arrays
    * and wrapped response formats (when `select` is used).
    */
-  const updateCacheData = (items: Array<any>): void => {
-    // Get the base query key (handle both static and function-based keys)
-    const key =
-      typeof queryKey === `function`
-        ? queryKey({})
-        : (queryKey as unknown as QueryKey)
-
+  const updateCacheDataForKey = (key: QueryKey, items: Array<any>): void => {
     if (select) {
       // When `select` is used, the cache contains a wrapped response (e.g., { data: [...], meta: {...} })
       // We need to update the cache while preserving the wrapper structure
@@ -1194,6 +1194,31 @@ export function queryCollectionOptions(
     } else {
       // No select - cache contains raw array, just set it directly
       queryClient.setQueryData(key, items)
+    }
+  }
+
+  /**
+   * Updates the query cache with new items for ALL active query keys.
+   * This is critical for on-demand mode where multiple query keys may exist
+   * (each with different predicates).
+   */
+  const updateCacheData = (items: Array<any>): void => {
+    // Get all active query keys from the hashToQueryKey map
+    const activeQueryKeys = Array.from(hashToQueryKey.values())
+
+    if (activeQueryKeys.length > 0) {
+      // Update all active query keys in the cache
+      for (const key of activeQueryKeys) {
+        updateCacheDataForKey(key, items)
+      }
+    } else {
+      // Fallback: no active queries yet, use the base query key
+      // This handles the case where updateCacheData is called before any queries are created
+      const baseKey =
+        typeof queryKey === `function`
+          ? queryKey({})
+          : (queryKey as unknown as QueryKey)
+      updateCacheDataForKey(baseKey, items)
     }
   }
 
