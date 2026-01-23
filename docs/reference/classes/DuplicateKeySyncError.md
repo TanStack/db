@@ -40,6 +40,10 @@ Defined in: [packages/db/src/errors.ts:172](https://github.com/TanStack/db/blob/
 
 `boolean`
 
+###### hasDistinct?
+
+`boolean`
+
 ###### hasJoins?
 
 `boolean`

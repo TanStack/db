@@ -9,7 +9,7 @@ title: RxDBCollectionConfig
 type RxDBCollectionConfig<T, TSchema> = Omit<BaseCollectionConfig<T, string, TSchema>, "onInsert" | "onUpdate" | "onDelete" | "getKey"> & object;
 ```
 
-Defined in: [rxdb.ts:49](https://github.com/pubkey/tanstack-db-rxdb/blob/main/packages/rxdb-db-collection/src/rxdb.ts#L49)
+Defined in: [rxdb.ts:49](https://github.com/TanStack/db/blob/main/packages/rxdb-db-collection/src/rxdb.ts#L49)
 
 Configuration interface for RxDB collection options
 

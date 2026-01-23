@@ -5,7 +5,7 @@ title: SubscribeChangesSnapshotOptions
 
 # Interface: SubscribeChangesSnapshotOptions\<T\>
 
-Defined in: [packages/db/src/types.ts:809](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L809)
+Defined in: [packages/db/src/types.ts:814](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L814)
 
 ## Extends
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/types.ts:809](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:813](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L813)
+Defined in: [packages/db/src/types.ts:818](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L818)
 
 ***
 
@@ -35,7 +35,7 @@ Defined in: [packages/db/src/types.ts:813](https://github.com/TanStack/db/blob/m
 optional onStatusChange: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:806](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L806)
+Defined in: [packages/db/src/types.ts:811](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L811)
 
 **`Internal`**
 
@@ -66,7 +66,7 @@ Omit.onStatusChange
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:812](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L812)
+Defined in: [packages/db/src/types.ts:817](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L817)
 
 ***
 
@@ -76,7 +76,7 @@ Defined in: [packages/db/src/types.ts:812](https://github.com/TanStack/db/blob/m
 optional where: (row) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:798](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L798)
+Defined in: [packages/db/src/types.ts:803](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L803)
 
 Callback function for filtering changes using a row proxy.
 The callback receives a proxy object that records property access,
@@ -116,7 +116,7 @@ Omit.where
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:800](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L800)
+Defined in: [packages/db/src/types.ts:805](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L805)
 
 Pre-compiled expression for filtering changes
 
