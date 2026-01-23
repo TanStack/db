@@ -450,7 +450,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
           // Request 1: All rows matching whereCurrent (ties at boundary, no limit)
           // Combine main where with cursor.whereCurrent
           const whereCurrentOpts: LoadSubsetOptions = {
-            where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
+            where: where
+              ? and(where, cursor.whereCurrent)
+              : cursor.whereCurrent,
             orderBy,
             // No limit - get all ties
           }
