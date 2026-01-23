@@ -1,5 +1,14 @@
 # @tanstack/offline-transactions
 
+## 1.0.13
+
+### Patch Changes
+
+- Fix optimistic state not being restored to collections on page refresh while offline. Pending transactions are now automatically rehydrated from storage and their optimistic mutations applied to the UI immediately on startup, providing a seamless offline experience. ([#1169](https://github.com/TanStack/db/pull/1169))
+
+- Updated dependencies [[`05130f2`](https://github.com/TanStack/db/commit/05130f2420eb682f11f099310a0af87afa3f35fe)]:
+  - @tanstack/db@0.5.23
+
 ## 1.0.12
 
 ### Patch Changes
