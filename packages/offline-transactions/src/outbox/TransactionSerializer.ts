@@ -77,18 +77,24 @@ export class TransactionSerializer {
       throw new Error(`Collection with id ${data.collectionId} not found`)
     }
 
+    const modified = this.deserializeValue(data.modified)
+
+    // Extract the key from the modified data using the collection's getKey function
+    // This is needed for optimistic state restoration to work correctly
+    const key = modified ? collection.getKeyFromItem(modified) : null
+
     // Create a partial PendingMutation - we can't fully reconstruct it but
     // we provide what we can. The executor will need to handle the rest.
     return {
       globalKey: data.globalKey,
       type: data.type as any,
-      modified: this.deserializeValue(data.modified),
+      modified,
       original: this.deserializeValue(data.original),
       changes: this.deserializeValue(data.changes) ?? {},
       collection,
       // These fields would need to be reconstructed by the executor
       mutationId: ``, // Will be regenerated
-      key: null, // Will be extracted from the data
+      key,
       metadata: undefined,
       syncMetadata: {},
       optimistic: true,

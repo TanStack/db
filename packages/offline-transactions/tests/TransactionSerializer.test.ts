@@ -6,6 +6,7 @@ import type { PendingMutation } from '@tanstack/db'
 describe(`TransactionSerializer`, () => {
   const mockCollection = {
     id: `test-collection`,
+    getKeyFromItem: (item: any) => item.id,
   }
 
   const createSerializer = () => {
