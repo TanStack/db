@@ -109,6 +109,9 @@ export class FakeOnlineDetector implements OnlineDetector {
   }
 
   notifyOnline(): void {
+    if (!this.isOnline()) {
+      return
+    }
     for (const listener of this.listeners) {
       try {
         listener()
