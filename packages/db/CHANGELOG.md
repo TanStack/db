@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.5.23
+
+### Patch Changes
+
+- Fix bug that caused the WHERE clause of a subquery not to be passed to the `loadSubset` function ([#1097](https://github.com/TanStack/db/pull/1097))
+
 ## 0.5.22
 
 ### Patch Changes

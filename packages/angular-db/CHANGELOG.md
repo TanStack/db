@@ -1,5 +1,12 @@
 # @tanstack/angular-db
 
+## 0.1.49
+
+### Patch Changes
+
+- Updated dependencies [[`05130f2`](https://github.com/TanStack/db/commit/05130f2420eb682f11f099310a0af87afa3f35fe)]:
+  - @tanstack/db@0.5.23
+
 ## 0.1.48
 
 ### Patch Changes
