@@ -60,10 +60,7 @@ await generateReferenceDocs({
         __dirname,
         `../packages/rxdb-db-collection/tsconfig.docs.json`,
       ),
-      outputDir: resolve(
-        __dirname,
-        `../docs/reference/rxdb-db-collection`,
-      ),
+      outputDir: resolve(__dirname, `../docs/reference/rxdb-db-collection`),
       exclude: [`packages/db/**/*`],
     },
     {
