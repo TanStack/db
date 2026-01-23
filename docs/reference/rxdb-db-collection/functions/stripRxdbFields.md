@@ -9,7 +9,7 @@ title: stripRxdbFields
 function stripRxdbFields<T>(obj): T;
 ```
 
-Defined in: [helper.ts:8](https://github.com/pubkey/tanstack-db-rxdb/blob/main/packages/rxdb-db-collection/src/helper.ts#L8)
+Defined in: [helper.ts:8](https://github.com/TanStack/db/blob/main/packages/rxdb-db-collection/src/helper.ts#L8)
 
 ## Type Parameters
 

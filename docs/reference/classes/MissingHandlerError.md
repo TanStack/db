@@ -5,7 +5,7 @@ title: MissingHandlerError
 
 # Class: MissingHandlerError
 
-Defined in: [packages/db/src/errors.ts:238](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L238)
+Defined in: [packages/db/src/errors.ts:254](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L254)
 
 ## Extends
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/errors.ts:238](https://github.com/TanStack/db/blob/
 new MissingHandlerError(message): MissingHandlerError;
 ```
 
-Defined in: [packages/db/src/errors.ts:239](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L239)
+Defined in: [packages/db/src/errors.ts:255](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L255)
 
 #### Parameters
 
