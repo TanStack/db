@@ -374,11 +374,18 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 
   const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
 
+  debug(
+    `${collectionId ? `[${collectionId}] ` : ``}createLoadSubsetDedupe: columnMapper.encode is ${encodeColumnName ? `configured` : `NOT configured`}`,
+  )
+
   const loadSubset = async (opts: LoadSubsetOptions) => {
     // In progressive mode, use fetchSnapshot during snapshot phase
     if (isBufferingInitialSync()) {
       // Progressive mode snapshot phase: fetch and apply immediately
       const snapshotParams = compileSQL<T>(opts, compileOptions)
+      debug(
+        `${collectionId ? `[${collectionId}] ` : ``}loadSubset compiled WHERE: ${snapshotParams.where}`,
+      )
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
 
@@ -466,6 +473,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
       } else {
         // No cursor - standard single request
         const snapshotParams = compileSQL<T>(opts, compileOptions)
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}loadSubset compiled WHERE: ${snapshotParams.where}`,
+        )
         await stream.requestSnapshot(snapshotParams)
       }
     }
