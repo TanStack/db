@@ -1,18 +1,23 @@
 /**
- * Creates a simple iteration counter with a limit check.
- * When the limit is exceeded, calls the provided diagnostic function to capture state.
+ * Creates an iteration counter with limit checks based on state changes.
  *
- * This design avoids per-iteration overhead - state capture only happens when needed.
+ * Tracks both total iterations AND iterations without state change. This catches:
+ * - True infinite loops (same state repeating)
+ * - Slow progress that exceeds total limit
  *
  * @example
  * ```ts
- * const checkLimit = createIterationLimitChecker(100000)
+ * const checkLimit = createIterationLimitChecker({
+ *   maxSameState: 10000,  // Max iterations without state change
+ *   maxTotal: 100000,     // Hard cap regardless of state changes
+ * })
  *
  * while (pendingWork()) {
+ *   const stateKey = operators.filter(op => op.hasPendingWork()).length
  *   if (checkLimit(() => ({
  *     context: 'D2 graph execution',
  *     diagnostics: { totalOperators: operators.length }
- *   }))) {
+ *   }), stateKey)) {
  *     break
  *   }
  *   step()
@@ -25,30 +30,59 @@ export type LimitExceededInfo = {
   diagnostics?: Record<string, unknown>
 }
 
+export type IterationLimitOptions = {
+  /** Max iterations without state change before triggering (default: 10000) */
+  maxSameState?: number
+  /** Hard cap on total iterations regardless of state changes (default: 100000) */
+  maxTotal?: number
+}
+
 /**
- * Creates an iteration limit checker that logs a warning when the limit is exceeded.
+ * Creates an iteration limit checker that logs a warning when limits are exceeded.
  *
- * @param maxIterations - The maximum number of iterations before the limit is exceeded
- * @returns A function that increments the counter and returns true if limit exceeded
+ * @param options - Configuration for iteration limits
+ * @returns A function that checks limits and returns true if exceeded
  */
 export function createIterationLimitChecker(
-  maxIterations: number,
-): (getInfo: () => LimitExceededInfo) => boolean {
-  let iterations = 0
+  options: IterationLimitOptions = {},
+): (getInfo: () => LimitExceededInfo, stateKey?: string | number) => boolean {
+  const maxSameState = options.maxSameState ?? 10000
+  const maxTotal = options.maxTotal ?? 100000
 
-  return function checkLimit(getInfo: () => LimitExceededInfo): boolean {
-    iterations++
+  let totalIterations = 0
+  let sameStateIterations = 0
+  let lastStateKey: string | number | undefined
 
-    if (iterations > maxIterations) {
-      // Only capture diagnostic info when we actually exceed the limit
+  return function checkLimit(
+    getInfo: () => LimitExceededInfo,
+    stateKey?: string | number,
+  ): boolean {
+    totalIterations++
+
+    // Track same-state iterations
+    if (stateKey !== undefined && stateKey !== lastStateKey) {
+      // State changed - reset same-state counter
+      sameStateIterations = 0
+      lastStateKey = stateKey
+    }
+    sameStateIterations++
+
+    const sameStateExceeded = sameStateIterations > maxSameState
+    const totalExceeded = totalIterations > maxTotal
+
+    if (sameStateExceeded || totalExceeded) {
       const { context, diagnostics } = getInfo()
+
+      const reason = sameStateExceeded
+        ? `${sameStateIterations} iterations without state change (limit: ${maxSameState})`
+        : `${totalIterations} total iterations (limit: ${maxTotal})`
 
       const diagnosticSection = diagnostics
         ? `\nDiagnostic info: ${JSON.stringify(diagnostics, null, 2)}\n`
         : `\n`
 
       console.warn(
-        `[TanStack DB] ${context} exceeded ${maxIterations} iterations. ` +
+        `[TanStack DB] ${context} exceeded iteration limit: ${reason}. ` +
           `Continuing with available data.` +
           diagnosticSection +
           `Please report this issue at https://github.com/TanStack/db/issues`,

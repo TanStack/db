@@ -60,10 +60,17 @@ export class D2 implements ID2 {
   run(): void {
     // Safety limit to prevent infinite loops in case of circular data flow
     // or other bugs that cause operators to perpetually produce output.
-    const MAX_RUN_ITERATIONS = 100000
-    const checkLimit = createIterationLimitChecker(MAX_RUN_ITERATIONS)
+    const checkLimit = createIterationLimitChecker({
+      maxSameState: 10000,
+      maxTotal: 100000,
+    })
 
     while (this.pendingWork()) {
+      // Use count of operators with pending work as state key
+      const operatorsWithWorkCount = this.#operators.filter((op) =>
+        op.hasPendingWork(),
+      ).length
+
       if (
         checkLimit(() => {
           // Only compute diagnostics when limit is exceeded (lazy)
@@ -77,7 +84,7 @@ export class D2 implements ID2 {
               totalOperators: this.#operators.length,
             },
           }
-        })
+        }, operatorsWithWorkCount)
       ) {
         break
       }

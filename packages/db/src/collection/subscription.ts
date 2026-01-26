@@ -508,11 +508,16 @@ export class CollectionSubscription
     // Safety limit to prevent infinite loops if the index iteration or filtering
     // logic has issues. The loop should naturally terminate when the index is
     // exhausted, but this provides a backstop.
-    const MAX_SNAPSHOT_ITERATIONS = 10000
-    const checkLimit = createIterationLimitChecker(MAX_SNAPSHOT_ITERATIONS)
+    const checkLimit = createIterationLimitChecker({
+      maxSameState: 1000,
+      maxTotal: 10000,
+    })
     let hitIterationLimit = false
 
     while (valuesNeeded() > 0 && !collectionExhausted()) {
+      // Use changes.length as state key - if we're making progress, this should increase
+      const stateKey = changes.length
+
       if (
         checkLimit(() => ({
           context: `requestLimitedSnapshot`,
@@ -529,7 +534,7 @@ export class CollectionSubscription
             minValueForIndex,
             orderByDirection: orderBy[0]!.compareOptions.direction,
           },
-        }))
+        }), stateKey)
       ) {
         hitIterationLimit = true
         break

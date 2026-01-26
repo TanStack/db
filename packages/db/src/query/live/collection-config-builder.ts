@@ -338,10 +338,15 @@ export class CollectionConfigBuilder<
       if (syncState.subscribedToAllCollections) {
         // Safety limit to prevent infinite loops when data loading and graph processing
         // create a feedback cycle.
-        const MAX_GRAPH_ITERATIONS = 10000
-        const checkLimit = createIterationLimitChecker(MAX_GRAPH_ITERATIONS)
+        const checkLimit = createIterationLimitChecker({
+          maxSameState: 1000,
+          maxTotal: 10000,
+        })
 
         while (syncState.graph.pendingWork()) {
+          // Use messagesCount as state key - if we're processing messages, we're making progress
+          const stateKey = syncState.messagesCount
+
           if (
             checkLimit(() => {
               // Only compute diagnostics when limit is exceeded (lazy)
@@ -363,7 +368,7 @@ export class CollectionConfigBuilder<
                   orderByConfig: orderByInfo,
                 },
               }
-            })
+            }, stateKey)
           ) {
             break
           }
