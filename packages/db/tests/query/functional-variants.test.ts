@@ -609,6 +609,61 @@ describe(`Functional Variants Query`, () => {
       usersCollection.utils.write({ type: `update`, value: bob })
       usersCollection.utils.commit()
     })
+
+    test(`should allow orderBy with table refs after fn.select`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              displayName: row.user.name,
+              salary: row.user.salary,
+            }))
+            .orderBy(({ user }) => user.age),
+      })
+
+      const results = liveCollection.toArray
+
+      expect(results).toHaveLength(5)
+      // Should be ordered by age (from original table, not $selected)
+      expect(results.map((r) => r.displayName)).toEqual([
+        `Bob`, // 19
+        `Dave`, // 22
+        `Alice`, // 25
+        `Eve`, // 28
+        `Charlie`, // 30
+      ])
+    })
+
+    test(`should allow orderBy with both table refs and $selected`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              name: row.user.name,
+              salaryTier: row.user.salary > 60000 ? `high` : `low`,
+            }))
+            .orderBy(({ $selected }) => $selected.salaryTier)
+            .orderBy(({ user }) => user.age, `desc`),
+      })
+
+      const results = liveCollection.toArray
+
+      expect(results).toHaveLength(5)
+      // First by salaryTier (high < low alphabetically), then by age desc
+      // High tier (>60k): Charlie (30), Alice (25), Dave (22)
+      // Low tier (<=60k): Eve (28), Bob (19)
+      expect(results.map((r) => r.name)).toEqual([
+        `Charlie`, // high, 30
+        `Alice`, // high, 25
+        `Dave`, // high, 22
+        `Eve`, // low, 28
+        `Bob`, // low, 19
+      ])
+    })
   })
 
   describe(`combinations`, () => {
