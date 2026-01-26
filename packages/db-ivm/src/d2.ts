@@ -65,9 +65,20 @@ export class D2 implements ID2 {
 
     while (this.pendingWork()) {
       if (++iterations > MAX_RUN_ITERATIONS) {
+        // Gather diagnostic info about which operators have pending work
+        const operatorsWithWork = this.#operators
+          .filter((op) => op.hasPendingWork())
+          .map((op) => ({
+            id: op.id,
+            type: op.constructor.name,
+          }))
+
         throw new Error(
           `D2 graph execution exceeded ${MAX_RUN_ITERATIONS} iterations. ` +
-            `This may indicate an infinite loop in the dataflow graph.`,
+            `This may indicate an infinite loop in the dataflow graph.\n` +
+            `Operators with pending work: ${JSON.stringify(operatorsWithWork)}\n` +
+            `Total operators: ${this.#operators.length}\n` +
+            `Please report this issue at https://github.com/TanStack/db/issues`,
         )
       }
       this.step()

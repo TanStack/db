@@ -347,10 +347,27 @@ export class CollectionConfigBuilder<
 
         while (syncState.graph.pendingWork()) {
           if (++iterations > MAX_GRAPH_ITERATIONS) {
+            // Gather diagnostic info to help debug the root cause
+            const collectionIds = Object.keys(this.collections)
+            const orderByInfo = Object.entries(
+              this.optimizableOrderByCollections,
+            ).map(([id, info]) => ({
+              collectionId: id,
+              limit: info.limit,
+              offset: info.offset,
+              dataNeeded: info.dataNeeded?.() ?? `unknown`,
+            }))
+
             this.transitionToError(
               `Graph execution exceeded ${MAX_GRAPH_ITERATIONS} iterations. ` +
                 `This likely indicates an infinite loop caused by data loading ` +
-                `triggering continuous graph updates.`,
+                `triggering continuous graph updates.\n` +
+                `Diagnostic info:\n` +
+                `  - Live query ID: ${this.id}\n` +
+                `  - Source collections: ${collectionIds.join(`, `)}\n` +
+                `  - Run count: ${this.runCount}\n` +
+                `  - OrderBy optimization info: ${JSON.stringify(orderByInfo)}\n` +
+                `Please report this issue with the above info at https://github.com/TanStack/db/issues`,
             )
             return
           }

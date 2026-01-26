@@ -514,10 +514,27 @@ export class CollectionSubscription
 
     while (valuesNeeded() > 0 && !collectionExhausted()) {
       if (++snapshotIterations > MAX_SNAPSHOT_ITERATIONS) {
+        // Gather diagnostic info to help debug the root cause
+        const diagnosticInfo = {
+          collectionId: this.collection.id,
+          collectionSize: this.collection.size,
+          limit,
+          offset,
+          valuesNeeded: valuesNeeded(),
+          changesCollected: changes.length,
+          sentKeysCount: this.sentKeys.size,
+          cursorValue: biggestObservedValue,
+          minValueForIndex,
+          keysInCurrentBatch: keys.length,
+          orderByDirection: orderBy[0]!.compareOptions.direction,
+        }
+
         console.error(
           `[TanStack DB] requestLimitedSnapshot exceeded ${MAX_SNAPSHOT_ITERATIONS} iterations. ` +
             `This may indicate an infinite loop in index iteration or filtering. ` +
-            `Breaking out to prevent app freeze. Collection: ${this.collection.id}`,
+            `Breaking out to prevent app freeze.\n` +
+            `Diagnostic info: ${JSON.stringify(diagnosticInfo, null, 2)}\n` +
+            `Please report this issue at https://github.com/TanStack/db/issues`,
         )
         hitIterationLimit = true
         break
@@ -573,20 +590,20 @@ export class CollectionSubscription
 
       if (whereFromCursor) {
         const { expression } = orderBy[0]!
-        const minValue = minValues[0]
+        const cursorMinValue = minValues[0]
 
         // Build the whereCurrent expression for the first orderBy column
         // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
         // A JS Date represents a 1ms range, so we query for all values within that range
         let whereCurrentCursor: BasicExpression<boolean>
-        if (minValue instanceof Date) {
-          const minValuePlus1ms = new Date(minValue.getTime() + 1)
+        if (cursorMinValue instanceof Date) {
+          const minValuePlus1ms = new Date(cursorMinValue.getTime() + 1)
           whereCurrentCursor = and(
-            gte(expression, new Value(minValue)),
+            gte(expression, new Value(cursorMinValue)),
             lt(expression, new Value(minValuePlus1ms)),
           )
         } else {
-          whereCurrentCursor = eq(expression, new Value(minValue))
+          whereCurrentCursor = eq(expression, new Value(cursorMinValue))
         }
 
         cursorExpressions = {
