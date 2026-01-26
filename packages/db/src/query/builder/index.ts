@@ -34,8 +34,8 @@ import type {
 import type {
   CompareOptions,
   Context,
-  GetResult,
   FunctionalHavingRow,
+  GetResult,
   GroupByCallback,
   JoinOnCallback,
   MergeContextForJoinCallback,
@@ -516,9 +516,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     options: OrderByDirection | OrderByOptions = `asc`,
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    // Add $selected namespace if SELECT clause exists
+    // Add $selected namespace if SELECT clause exists (either regular or functional)
     const refProxy = (
-      this.query.select
+      this.query.select || this.query.fnSelect
         ? createRefProxyWithSelected(aliases)
         : createRefProxy(aliases)
     ) as RefsForContext<TContext>
