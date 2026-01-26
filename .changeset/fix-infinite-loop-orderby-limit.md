@@ -13,6 +13,10 @@ Add safety limits to prevent app freezes from excessive iterations in ORDER BY +
 - maybeRunGraph: 10,000 iterations
 - requestLimitedSnapshot: 10,000 iterations
 
-When limits are hit, a warning is logged with diagnostic info (collection IDs, query structure, cursor position, etc.) but the query **continues normally** with the data it has - no error state, no app breakage.
+When limits are hit, a warning is logged with:
+- **Iteration breakdown**: Shows where the loop spent time (e.g., "iterations 1-5: [TopK, Filter], 6-10000: [TopK]")
+- Diagnostic info: collection IDs, query structure, cursor position, etc.
 
-This diagnostic info will help identify the root cause if the warnings occur in production. Please report any warnings to https://github.com/TanStack/db/issues
+The query **continues normally** with the data it has - no error state, no app breakage.
+
+The iteration breakdown makes it easy to see the stuck pattern in the state machine. Please report any warnings to https://github.com/TanStack/db/issues
