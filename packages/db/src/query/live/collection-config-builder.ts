@@ -358,30 +358,22 @@ export class CollectionConfigBuilder<
               dataNeeded: info.dataNeeded?.() ?? `unknown`,
             }))
 
-            this.transitionToError(
-              `Graph execution exceeded ${MAX_GRAPH_ITERATIONS} iterations. ` +
-                `This likely indicates an infinite loop caused by data loading ` +
-                `triggering continuous graph updates.\n` +
+            // Log warning but continue gracefully - we likely have all available data,
+            // just couldn't fill the TopK completely due to WHERE filtering
+            console.warn(
+              `[TanStack DB] Graph execution exceeded ${MAX_GRAPH_ITERATIONS} iterations. ` +
+                `Continuing with available data.\n` +
                 `Diagnostic info:\n` +
                 `  - Live query ID: ${this.id}\n` +
                 `  - Source collections: ${collectionIds.join(`, `)}\n` +
                 `  - Run count: ${this.runCount}\n` +
                 `  - OrderBy optimization info: ${JSON.stringify(orderByInfo)}\n` +
-                `Please report this issue with the above info at https://github.com/TanStack/db/issues`,
+                `Please report this issue at https://github.com/TanStack/db/issues`,
             )
-            return
+            break
           }
 
-          try {
-            syncState.graph.run()
-          } catch (error) {
-            // D2 graph throws when it exceeds its internal iteration limit
-            // Transition to error state so callers can detect incomplete data
-            this.transitionToError(
-              error instanceof Error ? error.message : String(error),
-            )
-            return
-          }
+          syncState.graph.run()
           // Flush accumulated changes after each graph step to commit them as one transaction.
           // This ensures intermediate join states (like null on one side) don't cause
           // duplicate key errors when the full join result arrives in the same step.

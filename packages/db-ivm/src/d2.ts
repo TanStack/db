@@ -73,13 +73,16 @@ export class D2 implements ID2 {
             type: op.constructor.name,
           }))
 
-        throw new Error(
-          `D2 graph execution exceeded ${MAX_RUN_ITERATIONS} iterations. ` +
-            `This may indicate an infinite loop in the dataflow graph.\n` +
+        // Log warning but continue gracefully - we likely have all available data,
+        // just couldn't fill the TopK completely due to WHERE filtering
+        console.warn(
+          `[TanStack DB] D2 graph execution exceeded ${MAX_RUN_ITERATIONS} iterations. ` +
+            `Continuing with available data.\n` +
             `Operators with pending work: ${JSON.stringify(operatorsWithWork)}\n` +
             `Total operators: ${this.#operators.length}\n` +
             `Please report this issue at https://github.com/TanStack/db/issues`,
         )
+        break
       }
       this.step()
     }

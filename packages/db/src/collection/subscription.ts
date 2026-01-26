@@ -529,10 +529,9 @@ export class CollectionSubscription
           orderByDirection: orderBy[0]!.compareOptions.direction,
         }
 
-        console.error(
+        console.warn(
           `[TanStack DB] requestLimitedSnapshot exceeded ${MAX_SNAPSHOT_ITERATIONS} iterations. ` +
-            `This may indicate an infinite loop in index iteration or filtering. ` +
-            `Breaking out to prevent app freeze.\n` +
+            `Continuing with available data.\n` +
             `Diagnostic info: ${JSON.stringify(diagnosticInfo, null, 2)}\n` +
             `Please report this issue at https://github.com/TanStack/db/issues`,
         )
