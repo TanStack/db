@@ -14,6 +14,7 @@ Add safety limits to prevent app freezes from excessive iterations in ORDER BY +
 - requestLimitedSnapshot: 10,000 iterations
 
 When limits are hit, a warning is logged with:
+
 - **Iteration breakdown**: Shows where the loop spent time (e.g., "iterations 1-5: [TopK, Filter], 6-10000: [TopK]")
 - Diagnostic info: collection IDs, query structure, cursor position, etc.
 
