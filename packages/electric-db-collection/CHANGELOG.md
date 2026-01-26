@@ -1,5 +1,11 @@
 # @tanstack/electric-db-collection
 
+## 0.2.29
+
+### Patch Changes
+
+- Fix unhandled 409 errors during collection cleanup. When a collection is cleaned up while snapshot requests are in-flight, errors are now properly caught and ignored rather than propagating as unhandled promise rejections. ([#1174](https://github.com/TanStack/db/pull/1174))
+
 ## 0.2.28
 
 ### Patch Changes
