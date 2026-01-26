@@ -14,6 +14,7 @@ Add safety limits and diagnostic error messages to prevent app freezes from infi
 - requestLimitedSnapshot: 10,000 iterations
 
 When limits are hit, detailed error messages include:
+
 - Collection IDs and query info
 - TopK size vs data needed
 - Cursor position and iteration counts

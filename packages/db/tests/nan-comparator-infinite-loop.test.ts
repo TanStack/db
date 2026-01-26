@@ -70,7 +70,11 @@ describe(`NaN comparator infinite loop`, () => {
     // Set up a timeout to detect infinite loop
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Test timed out - infinite loop detected in ORDER BY with NaN date`))
+        reject(
+          new Error(
+            `Test timed out - infinite loop detected in ORDER BY with NaN date`,
+          ),
+        )
       }, 5000)
     })
 
@@ -126,7 +130,11 @@ describe(`NaN comparator infinite loop`, () => {
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Test timed out - infinite loop detected in ORDER BY with NaN value`))
+        reject(
+          new Error(
+            `Test timed out - infinite loop detected in ORDER BY with NaN value`,
+          ),
+        )
       }, 5000)
     })
 
@@ -176,7 +184,11 @@ describe(`NaN comparator infinite loop`, () => {
     // This simulates Electric sending corrupted data
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Test timed out - infinite loop detected after update with NaN date`))
+        reject(
+          new Error(
+            `Test timed out - infinite loop detected after update with NaN date`,
+          ),
+        )
       }, 5000)
     })
 
@@ -184,7 +196,11 @@ describe(`NaN comparator infinite loop`, () => {
       utils.begin()
       utils.write({
         type: `update`,
-        value: { id: 2, name: `Updated Item 2`, createdAt: new Date(`invalid date string`) },
+        value: {
+          id: 2,
+          name: `Updated Item 2`,
+          createdAt: new Date(`invalid date string`),
+        },
       })
       utils.commit()
 
@@ -270,7 +286,11 @@ describe(`NaN comparator infinite loop`, () => {
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Test timed out - infinite loop in JOIN + ORDER BY + LIMIT`))
+        reject(
+          new Error(
+            `Test timed out - infinite loop in JOIN + ORDER BY + LIMIT`,
+          ),
+        )
       }, 5000)
     })
 
@@ -348,7 +368,9 @@ describe(`NaN comparator infinite loop`, () => {
 
     const timeoutPromise = new Promise<never>((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Test timed out - infinite loop with empty string date`))
+        reject(
+          new Error(`Test timed out - infinite loop with empty string date`),
+        )
       }, 5000)
     })
 
