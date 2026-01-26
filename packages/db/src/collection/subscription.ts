@@ -519,22 +519,25 @@ export class CollectionSubscription
       const stateKey = changes.length
 
       if (
-        checkLimit(() => ({
-          context: `requestLimitedSnapshot`,
-          diagnostics: {
-            collectionId: this.collection.id,
-            collectionSize: this.collection.size,
-            limit,
-            offset,
-            valuesNeeded: valuesNeeded(),
-            keysInBatch: keys.length,
-            changesCollected: changes.length,
-            sentKeysCount: this.sentKeys.size,
-            cursorValue: biggestObservedValue,
-            minValueForIndex,
-            orderByDirection: orderBy[0]!.compareOptions.direction,
-          },
-        }), stateKey)
+        checkLimit(
+          () => ({
+            context: `requestLimitedSnapshot`,
+            diagnostics: {
+              collectionId: this.collection.id,
+              collectionSize: this.collection.size,
+              limit,
+              offset,
+              valuesNeeded: valuesNeeded(),
+              keysInBatch: keys.length,
+              changesCollected: changes.length,
+              sentKeysCount: this.sentKeys.size,
+              cursorValue: biggestObservedValue,
+              minValueForIndex,
+              orderByDirection: orderBy[0]!.compareOptions.direction,
+            },
+          }),
+          stateKey,
+        )
       ) {
         hitIterationLimit = true
         break
