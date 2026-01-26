@@ -42,7 +42,7 @@ export type IterationTracker<TState> = {
    */
   formatWarning: (
     context: string,
-    diagnosticInfo?: Record<string, unknown>
+    diagnosticInfo?: Record<string, unknown>,
   ) => string
 
   /**
@@ -65,7 +65,7 @@ export type IterationTracker<TState> = {
  */
 export function createIterationTracker<TState>(
   maxIterations: number,
-  stateToKey: (state: TState) => string = (state) => JSON.stringify(state)
+  stateToKey: (state: TState) => string = (state) => JSON.stringify(state),
 ): IterationTracker<TState> {
   const history: Array<StateHistoryEntry<TState>> = []
   let currentStateKey: string | null = null
@@ -105,7 +105,7 @@ export function createIterationTracker<TState>(
 
   function formatWarning(
     context: string,
-    diagnosticInfo?: Record<string, unknown>
+    diagnosticInfo?: Record<string, unknown>,
   ): string {
     const iterationBreakdown = history
       .map((h) => `    ${h.startIter}-${h.endIter}: ${stateToKey(h.state)}`)

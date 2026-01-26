@@ -512,7 +512,8 @@ export class CollectionSubscription
     type SnapshotState = { valuesNeeded: number; keysInBatch: number }
     const tracker = createIterationTracker<SnapshotState>(
       MAX_SNAPSHOT_ITERATIONS,
-      (state) => `valuesNeeded=${state.valuesNeeded}, keysInBatch=${state.keysInBatch}`
+      (state) =>
+        `valuesNeeded=${state.valuesNeeded}, keysInBatch=${state.keysInBatch}`,
     )
     let hitIterationLimit = false
 
@@ -531,7 +532,7 @@ export class CollectionSubscription
             cursorValue: biggestObservedValue,
             minValueForIndex,
             orderByDirection: orderBy[0]!.compareOptions.direction,
-          })
+          }),
         )
         hitIterationLimit = true
         break

@@ -342,7 +342,7 @@ export class CollectionConfigBuilder<
         type GraphState = Record<string, number | string>
         const tracker = createIterationTracker<GraphState>(
           MAX_GRAPH_ITERATIONS,
-          (state) => `dataNeeded=${JSON.stringify(state)}`
+          (state) => `dataNeeded=${JSON.stringify(state)}`,
         )
 
         while (syncState.graph.pendingWork()) {
@@ -369,7 +369,7 @@ export class CollectionConfigBuilder<
                 sourceCollections: collectionIds,
                 runCount: this.runCount,
                 orderByConfig: orderByInfo,
-              })
+              }),
             )
             break
           }

@@ -63,7 +63,7 @@ export class D2 implements ID2 {
     const MAX_RUN_ITERATIONS = 100000
     const tracker = createIterationTracker<string>(
       MAX_RUN_ITERATIONS,
-      (state) => `operators with work = [${state}]`
+      (state) => `operators with work = [${state}]`,
     )
 
     while (this.pendingWork()) {
@@ -77,7 +77,7 @@ export class D2 implements ID2 {
         console.warn(
           tracker.formatWarning(`D2 graph execution`, {
             totalOperators: this.#operators.length,
-          })
+          }),
         )
         break
       }
