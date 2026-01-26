@@ -512,26 +512,75 @@ export class CollectionSubscription
     let snapshotIterations = 0
     let hitIterationLimit = false
 
+    // Track state transitions to show where iterations were spent
+    type StateEntry = {
+      valuesNeeded: number
+      keysInBatch: number
+      startIter: number
+      endIter: number
+    }
+    const stateHistory: Array<StateEntry> = []
+    let currentStateKey: string | null = null
+    let currentValuesNeeded = 0
+    let currentKeysInBatch = 0
+    let stateStartIter = 1
+
     while (valuesNeeded() > 0 && !collectionExhausted()) {
+      // Capture current state for tracking
+      const vn = valuesNeeded()
+      const kb = keys.length
+      const stateKey = `${vn}-${kb}`
+
+      // Track state transitions
+      if (stateKey !== currentStateKey) {
+        if (currentStateKey !== null) {
+          stateHistory.push({
+            valuesNeeded: currentValuesNeeded,
+            keysInBatch: currentKeysInBatch,
+            startIter: stateStartIter,
+            endIter: snapshotIterations,
+          })
+        }
+        currentStateKey = stateKey
+        currentValuesNeeded = vn
+        currentKeysInBatch = kb
+        stateStartIter = snapshotIterations + 1
+      }
+
       if (++snapshotIterations > MAX_SNAPSHOT_ITERATIONS) {
-        // Gather diagnostic info to help debug the root cause
+        // Record final state period (currentStateKey is always set by now since we've iterated)
+        stateHistory.push({
+          valuesNeeded: currentValuesNeeded,
+          keysInBatch: currentKeysInBatch,
+          startIter: stateStartIter,
+          endIter: snapshotIterations,
+        })
+
+        // Format iteration breakdown
+        const iterationBreakdown = stateHistory
+          .map(
+            (h) =>
+              `    ${h.startIter}-${h.endIter}: valuesNeeded=${h.valuesNeeded}, keysInBatch=${h.keysInBatch}`,
+          )
+          .join(`\n`)
+
+        // Gather additional diagnostic info
         const diagnosticInfo = {
           collectionId: this.collection.id,
           collectionSize: this.collection.size,
           limit,
           offset,
-          valuesNeeded: valuesNeeded(),
           changesCollected: changes.length,
           sentKeysCount: this.sentKeys.size,
           cursorValue: biggestObservedValue,
           minValueForIndex,
-          keysInCurrentBatch: keys.length,
           orderByDirection: orderBy[0]!.compareOptions.direction,
         }
 
         console.warn(
           `[TanStack DB] requestLimitedSnapshot exceeded ${MAX_SNAPSHOT_ITERATIONS} iterations. ` +
             `Continuing with available data.\n` +
+            `Iteration breakdown (where the loop spent time):\n${iterationBreakdown}\n` +
             `Diagnostic info: ${JSON.stringify(diagnosticInfo, null, 2)}\n` +
             `Please report this issue at https://github.com/TanStack/db/issues`,
         )

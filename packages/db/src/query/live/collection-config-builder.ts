@@ -345,9 +345,62 @@ export class CollectionConfigBuilder<
         const MAX_GRAPH_ITERATIONS = 10000
         let iterations = 0
 
+        // Track state transitions to show where iterations were spent
+        // Each entry: { state (dataNeeded values), startIter, endIter }
+        type StateHistoryEntry = {
+          dataNeeded: Record<string, number | string>
+          pendingWork: boolean
+          startIter: number
+          endIter: number
+        }
+        const stateHistory: Array<StateHistoryEntry> = []
+        let currentStateKey: string | null = null
+        let currentDataNeeded: Record<string, number | string> = {}
+        let stateStartIter = 1
+
         while (syncState.graph.pendingWork()) {
+          // Capture current state: dataNeeded values for each orderBy collection
+          const dataNeeded: Record<string, number | string> = {}
+          for (const [id, info] of Object.entries(
+            this.optimizableOrderByCollections,
+          )) {
+            dataNeeded[id] = info.dataNeeded?.() ?? `unknown`
+          }
+          const stateKey = JSON.stringify(dataNeeded)
+
+          // Track state transitions
+          if (stateKey !== currentStateKey) {
+            if (currentStateKey !== null) {
+              stateHistory.push({
+                dataNeeded: currentDataNeeded,
+                pendingWork: true,
+                startIter: stateStartIter,
+                endIter: iterations,
+              })
+            }
+            currentStateKey = stateKey
+            currentDataNeeded = dataNeeded
+            stateStartIter = iterations + 1
+          }
+
           if (++iterations > MAX_GRAPH_ITERATIONS) {
-            // Gather diagnostic info to help debug the root cause
+            // Record final state period (currentStateKey is always set by now since we've iterated)
+            stateHistory.push({
+              dataNeeded: currentDataNeeded,
+              pendingWork: syncState.graph.pendingWork(),
+              startIter: stateStartIter,
+              endIter: iterations,
+            })
+
+            // Format iteration breakdown
+            const iterationBreakdown = stateHistory
+              .map(
+                (h) =>
+                  `    ${h.startIter}-${h.endIter}: dataNeeded=${JSON.stringify(h.dataNeeded)}`,
+              )
+              .join(`\n`)
+
+            // Gather additional diagnostic info
             const collectionIds = Object.keys(this.collections)
             const orderByInfo = Object.entries(
               this.optimizableOrderByCollections,
@@ -355,7 +408,6 @@ export class CollectionConfigBuilder<
               collectionId: id,
               limit: info.limit,
               offset: info.offset,
-              dataNeeded: info.dataNeeded?.() ?? `unknown`,
             }))
 
             // Log warning but continue gracefully - we likely have all available data,
@@ -363,11 +415,12 @@ export class CollectionConfigBuilder<
             console.warn(
               `[TanStack DB] Graph execution exceeded ${MAX_GRAPH_ITERATIONS} iterations. ` +
                 `Continuing with available data.\n` +
+                `Iteration breakdown (where the loop spent time):\n${iterationBreakdown}\n` +
                 `Diagnostic info:\n` +
                 `  - Live query ID: ${this.id}\n` +
                 `  - Source collections: ${collectionIds.join(`, `)}\n` +
                 `  - Run count: ${this.runCount}\n` +
-                `  - OrderBy optimization info: ${JSON.stringify(orderByInfo)}\n` +
+                `  - OrderBy config: ${JSON.stringify(orderByInfo)}\n` +
                 `Please report this issue at https://github.com/TanStack/db/issues`,
             )
             break

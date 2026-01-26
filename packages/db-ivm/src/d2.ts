@@ -63,22 +63,59 @@ export class D2 implements ID2 {
     const MAX_RUN_ITERATIONS = 100000
     let iterations = 0
 
+    // Track state transitions to show where iterations were spent
+    // Each entry: { state: string (operators with work), startIter, endIter }
+    const stateHistory: Array<{
+      state: string
+      startIter: number
+      endIter: number
+    }> = []
+    let currentStateKey: string | null = null
+    let stateStartIter = 1
+
     while (this.pendingWork()) {
+      // Capture which operators have pending work
+      const operatorsWithWork = this.#operators
+        .filter((op) => op.hasPendingWork())
+        .map((op) => op.constructor.name)
+        .sort()
+      const stateKey = operatorsWithWork.join(`,`)
+
+      // Track state transitions
+      if (stateKey !== currentStateKey) {
+        if (currentStateKey !== null) {
+          stateHistory.push({
+            state: currentStateKey,
+            startIter: stateStartIter,
+            endIter: iterations,
+          })
+        }
+        currentStateKey = stateKey
+        stateStartIter = iterations + 1
+      }
+
       if (++iterations > MAX_RUN_ITERATIONS) {
-        // Gather diagnostic info about which operators have pending work
-        const operatorsWithWork = this.#operators
-          .filter((op) => op.hasPendingWork())
-          .map((op) => ({
-            id: op.id,
-            type: op.constructor.name,
-          }))
+        // Record final state period (currentStateKey is always set by now since we've iterated)
+        stateHistory.push({
+          state: currentStateKey,
+          startIter: stateStartIter,
+          endIter: iterations,
+        })
+
+        // Format iteration breakdown
+        const iterationBreakdown = stateHistory
+          .map(
+            (h) =>
+              `    ${h.startIter}-${h.endIter}: operators with work = [${h.state}]`,
+          )
+          .join(`\n`)
 
         // Log warning but continue gracefully - we likely have all available data,
         // just couldn't fill the TopK completely due to WHERE filtering
         console.warn(
           `[TanStack DB] D2 graph execution exceeded ${MAX_RUN_ITERATIONS} iterations. ` +
             `Continuing with available data.\n` +
-            `Operators with pending work: ${JSON.stringify(operatorsWithWork)}\n` +
+            `Iteration breakdown (where the loop spent time):\n${iterationBreakdown}\n` +
             `Total operators: ${this.#operators.length}\n` +
             `Please report this issue at https://github.com/TanStack/db/issues`,
         )
