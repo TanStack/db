@@ -1,4 +1,5 @@
 import { DifferenceStreamWriter } from './graph.js'
+import { createIterationTracker } from './iteration-tracker.js'
 import type {
   BinaryOperator,
   DifferenceStreamReader,
@@ -59,68 +60,28 @@ export class D2 implements ID2 {
   run(): void {
     // Safety limit to prevent infinite loops in case of circular data flow
     // or other bugs that cause operators to perpetually produce output.
-    // For legitimate pipelines, data should flow through in finite steps.
     const MAX_RUN_ITERATIONS = 100000
-    let iterations = 0
-
-    // Track state transitions to show where iterations were spent
-    // Each entry: { state: string (operators with work), startIter, endIter }
-    const stateHistory: Array<{
-      state: string
-      startIter: number
-      endIter: number
-    }> = []
-    let currentStateKey: string | null = null
-    let stateStartIter = 1
+    const tracker = createIterationTracker<string>(
+      MAX_RUN_ITERATIONS,
+      (state) => `operators with work = [${state}]`
+    )
 
     while (this.pendingWork()) {
-      // Capture which operators have pending work
       const operatorsWithWork = this.#operators
         .filter((op) => op.hasPendingWork())
         .map((op) => op.constructor.name)
         .sort()
-      const stateKey = operatorsWithWork.join(`,`)
+        .join(`,`)
 
-      // Track state transitions
-      if (stateKey !== currentStateKey) {
-        if (currentStateKey !== null) {
-          stateHistory.push({
-            state: currentStateKey,
-            startIter: stateStartIter,
-            endIter: iterations,
-          })
-        }
-        currentStateKey = stateKey
-        stateStartIter = iterations + 1
-      }
-
-      if (++iterations > MAX_RUN_ITERATIONS) {
-        // Record final state period (currentStateKey is always set by now since we've iterated)
-        stateHistory.push({
-          state: currentStateKey,
-          startIter: stateStartIter,
-          endIter: iterations,
-        })
-
-        // Format iteration breakdown
-        const iterationBreakdown = stateHistory
-          .map(
-            (h) =>
-              `    ${h.startIter}-${h.endIter}: operators with work = [${h.state}]`,
-          )
-          .join(`\n`)
-
-        // Log warning but continue gracefully - we likely have all available data,
-        // just couldn't fill the TopK completely due to WHERE filtering
+      if (tracker.trackAndCheckLimit(operatorsWithWork)) {
         console.warn(
-          `[TanStack DB] D2 graph execution exceeded ${MAX_RUN_ITERATIONS} iterations. ` +
-            `Continuing with available data.\n` +
-            `Iteration breakdown (where the loop spent time):\n${iterationBreakdown}\n` +
-            `Total operators: ${this.#operators.length}\n` +
-            `Please report this issue at https://github.com/TanStack/db/issues`,
+          tracker.formatWarning(`D2 graph execution`, {
+            totalOperators: this.#operators.length,
+          })
         )
         break
       }
+
       this.step()
     }
   }

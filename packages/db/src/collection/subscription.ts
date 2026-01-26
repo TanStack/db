@@ -1,3 +1,4 @@
+import { createIterationTracker } from '@tanstack/db-ivm'
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
 import { and, eq, gte, lt } from '../query/builder/functions.js'
 import { PropRef, Value } from '../query/ir.js'
@@ -506,83 +507,31 @@ export class CollectionSubscription
 
     // Safety limit to prevent infinite loops if the index iteration or filtering
     // logic has issues. The loop should naturally terminate when the index is
-    // exhausted, but this provides a backstop. 10000 iterations is generous
-    // for any legitimate use case.
+    // exhausted, but this provides a backstop.
     const MAX_SNAPSHOT_ITERATIONS = 10000
-    let snapshotIterations = 0
+    type SnapshotState = { valuesNeeded: number; keysInBatch: number }
+    const tracker = createIterationTracker<SnapshotState>(
+      MAX_SNAPSHOT_ITERATIONS,
+      (state) => `valuesNeeded=${state.valuesNeeded}, keysInBatch=${state.keysInBatch}`
+    )
     let hitIterationLimit = false
 
-    // Track state transitions to show where iterations were spent
-    type StateEntry = {
-      valuesNeeded: number
-      keysInBatch: number
-      startIter: number
-      endIter: number
-    }
-    const stateHistory: Array<StateEntry> = []
-    let currentStateKey: string | null = null
-    let currentValuesNeeded = 0
-    let currentKeysInBatch = 0
-    let stateStartIter = 1
-
     while (valuesNeeded() > 0 && !collectionExhausted()) {
-      // Capture current state for tracking
-      const vn = valuesNeeded()
-      const kb = keys.length
-      const stateKey = `${vn}-${kb}`
+      const state = { valuesNeeded: valuesNeeded(), keysInBatch: keys.length }
 
-      // Track state transitions
-      if (stateKey !== currentStateKey) {
-        if (currentStateKey !== null) {
-          stateHistory.push({
-            valuesNeeded: currentValuesNeeded,
-            keysInBatch: currentKeysInBatch,
-            startIter: stateStartIter,
-            endIter: snapshotIterations,
-          })
-        }
-        currentStateKey = stateKey
-        currentValuesNeeded = vn
-        currentKeysInBatch = kb
-        stateStartIter = snapshotIterations + 1
-      }
-
-      if (++snapshotIterations > MAX_SNAPSHOT_ITERATIONS) {
-        // Record final state period (currentStateKey is always set by now since we've iterated)
-        stateHistory.push({
-          valuesNeeded: currentValuesNeeded,
-          keysInBatch: currentKeysInBatch,
-          startIter: stateStartIter,
-          endIter: snapshotIterations,
-        })
-
-        // Format iteration breakdown
-        const iterationBreakdown = stateHistory
-          .map(
-            (h) =>
-              `    ${h.startIter}-${h.endIter}: valuesNeeded=${h.valuesNeeded}, keysInBatch=${h.keysInBatch}`,
-          )
-          .join(`\n`)
-
-        // Gather additional diagnostic info
-        const diagnosticInfo = {
-          collectionId: this.collection.id,
-          collectionSize: this.collection.size,
-          limit,
-          offset,
-          changesCollected: changes.length,
-          sentKeysCount: this.sentKeys.size,
-          cursorValue: biggestObservedValue,
-          minValueForIndex,
-          orderByDirection: orderBy[0]!.compareOptions.direction,
-        }
-
+      if (tracker.trackAndCheckLimit(state)) {
         console.warn(
-          `[TanStack DB] requestLimitedSnapshot exceeded ${MAX_SNAPSHOT_ITERATIONS} iterations. ` +
-            `Continuing with available data.\n` +
-            `Iteration breakdown (where the loop spent time):\n${iterationBreakdown}\n` +
-            `Diagnostic info: ${JSON.stringify(diagnosticInfo, null, 2)}\n` +
-            `Please report this issue at https://github.com/TanStack/db/issues`,
+          tracker.formatWarning(`requestLimitedSnapshot`, {
+            collectionId: this.collection.id,
+            collectionSize: this.collection.size,
+            limit,
+            offset,
+            changesCollected: changes.length,
+            sentKeysCount: this.sentKeys.size,
+            cursorValue: biggestObservedValue,
+            minValueForIndex,
+            orderByDirection: orderBy[0]!.compareOptions.direction,
+          })
         )
         hitIterationLimit = true
         break

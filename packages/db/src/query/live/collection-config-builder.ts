@@ -1,4 +1,4 @@
-import { D2, output } from '@tanstack/db-ivm'
+import { D2, createIterationTracker, output } from '@tanstack/db-ivm'
 import { compileQuery } from '../compiler/index.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
 import {
@@ -337,70 +337,23 @@ export class CollectionConfigBuilder<
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
         // Safety limit to prevent infinite loops when data loading and graph processing
-        // create a feedback cycle. This can happen when:
-        // 1. OrderBy/limit queries filter out most data, causing dataNeeded() > 0
-        // 2. Loading more data triggers updates that get filtered out
-        // 3. The cycle continues indefinitely
-        // 10000 iterations is generous for legitimate use cases but prevents hangs.
+        // create a feedback cycle.
         const MAX_GRAPH_ITERATIONS = 10000
-        let iterations = 0
-
-        // Track state transitions to show where iterations were spent
-        // Each entry: { state (dataNeeded values), startIter, endIter }
-        type StateHistoryEntry = {
-          dataNeeded: Record<string, number | string>
-          pendingWork: boolean
-          startIter: number
-          endIter: number
-        }
-        const stateHistory: Array<StateHistoryEntry> = []
-        let currentStateKey: string | null = null
-        let currentDataNeeded: Record<string, number | string> = {}
-        let stateStartIter = 1
+        type GraphState = Record<string, number | string>
+        const tracker = createIterationTracker<GraphState>(
+          MAX_GRAPH_ITERATIONS,
+          (state) => `dataNeeded=${JSON.stringify(state)}`
+        )
 
         while (syncState.graph.pendingWork()) {
-          // Capture current state: dataNeeded values for each orderBy collection
-          const dataNeeded: Record<string, number | string> = {}
+          const dataNeeded: GraphState = {}
           for (const [id, info] of Object.entries(
             this.optimizableOrderByCollections,
           )) {
             dataNeeded[id] = info.dataNeeded?.() ?? `unknown`
           }
-          const stateKey = JSON.stringify(dataNeeded)
 
-          // Track state transitions
-          if (stateKey !== currentStateKey) {
-            if (currentStateKey !== null) {
-              stateHistory.push({
-                dataNeeded: currentDataNeeded,
-                pendingWork: true,
-                startIter: stateStartIter,
-                endIter: iterations,
-              })
-            }
-            currentStateKey = stateKey
-            currentDataNeeded = dataNeeded
-            stateStartIter = iterations + 1
-          }
-
-          if (++iterations > MAX_GRAPH_ITERATIONS) {
-            // Record final state period (currentStateKey is always set by now since we've iterated)
-            stateHistory.push({
-              dataNeeded: currentDataNeeded,
-              pendingWork: syncState.graph.pendingWork(),
-              startIter: stateStartIter,
-              endIter: iterations,
-            })
-
-            // Format iteration breakdown
-            const iterationBreakdown = stateHistory
-              .map(
-                (h) =>
-                  `    ${h.startIter}-${h.endIter}: dataNeeded=${JSON.stringify(h.dataNeeded)}`,
-              )
-              .join(`\n`)
-
-            // Gather additional diagnostic info
+          if (tracker.trackAndCheckLimit(dataNeeded)) {
             const collectionIds = Object.keys(this.collections)
             const orderByInfo = Object.entries(
               this.optimizableOrderByCollections,
@@ -410,18 +363,13 @@ export class CollectionConfigBuilder<
               offset: info.offset,
             }))
 
-            // Log warning but continue gracefully - we likely have all available data,
-            // just couldn't fill the TopK completely due to WHERE filtering
             console.warn(
-              `[TanStack DB] Graph execution exceeded ${MAX_GRAPH_ITERATIONS} iterations. ` +
-                `Continuing with available data.\n` +
-                `Iteration breakdown (where the loop spent time):\n${iterationBreakdown}\n` +
-                `Diagnostic info:\n` +
-                `  - Live query ID: ${this.id}\n` +
-                `  - Source collections: ${collectionIds.join(`, `)}\n` +
-                `  - Run count: ${this.runCount}\n` +
-                `  - OrderBy config: ${JSON.stringify(orderByInfo)}\n` +
-                `Please report this issue at https://github.com/TanStack/db/issues`,
+              tracker.formatWarning(`Graph execution`, {
+                liveQueryId: this.id,
+                sourceCollections: collectionIds,
+                runCount: this.runCount,
+                orderByConfig: orderByInfo,
+              })
             )
             break
           }
