@@ -1,4 +1,4 @@
-import { D2, createIterationTracker, output } from '@tanstack/db-ivm'
+import { D2, createIterationLimitChecker, output } from '@tanstack/db-ivm'
 import { compileQuery } from '../compiler/index.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
 import {
@@ -339,38 +339,32 @@ export class CollectionConfigBuilder<
         // Safety limit to prevent infinite loops when data loading and graph processing
         // create a feedback cycle.
         const MAX_GRAPH_ITERATIONS = 10000
-        type GraphState = Record<string, number | string>
-        const tracker = createIterationTracker<GraphState>(
-          MAX_GRAPH_ITERATIONS,
-          (state) => `dataNeeded=${JSON.stringify(state)}`,
-        )
+        const checkLimit = createIterationLimitChecker(MAX_GRAPH_ITERATIONS)
 
         while (syncState.graph.pendingWork()) {
-          const dataNeeded: GraphState = {}
-          for (const [id, info] of Object.entries(
-            this.optimizableOrderByCollections,
-          )) {
-            dataNeeded[id] = info.dataNeeded?.() ?? `unknown`
-          }
-
-          if (tracker.trackAndCheckLimit(dataNeeded)) {
-            const collectionIds = Object.keys(this.collections)
-            const orderByInfo = Object.entries(
-              this.optimizableOrderByCollections,
-            ).map(([id, info]) => ({
-              collectionId: id,
-              limit: info.limit,
-              offset: info.offset,
-            }))
-
-            console.warn(
-              tracker.formatWarning(`Graph execution`, {
-                liveQueryId: this.id,
-                sourceCollections: collectionIds,
-                runCount: this.runCount,
-                orderByConfig: orderByInfo,
-              }),
-            )
+          if (
+            checkLimit(() => {
+              // Only compute diagnostics when limit is exceeded (lazy)
+              const collectionIds = Object.keys(this.collections)
+              const orderByInfo = Object.entries(
+                this.optimizableOrderByCollections,
+              ).map(([id, info]) => ({
+                collectionId: id,
+                limit: info.limit,
+                offset: info.offset,
+                dataNeeded: info.dataNeeded?.() ?? `unknown`,
+              }))
+              return {
+                context: `Graph execution`,
+                diagnostics: {
+                  liveQueryId: this.id,
+                  sourceCollections: collectionIds,
+                  runCount: this.runCount,
+                  orderByConfig: orderByInfo,
+                },
+              }
+            })
+          ) {
             break
           }
 

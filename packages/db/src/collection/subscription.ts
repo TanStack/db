@@ -1,4 +1,4 @@
-import { createIterationTracker } from '@tanstack/db-ivm'
+import { createIterationLimitChecker } from '@tanstack/db-ivm'
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
 import { and, eq, gte, lt } from '../query/builder/functions.js'
 import { PropRef, Value } from '../query/ir.js'
@@ -509,31 +509,28 @@ export class CollectionSubscription
     // logic has issues. The loop should naturally terminate when the index is
     // exhausted, but this provides a backstop.
     const MAX_SNAPSHOT_ITERATIONS = 10000
-    type SnapshotState = { valuesNeeded: number; keysInBatch: number }
-    const tracker = createIterationTracker<SnapshotState>(
-      MAX_SNAPSHOT_ITERATIONS,
-      (state) =>
-        `valuesNeeded=${state.valuesNeeded}, keysInBatch=${state.keysInBatch}`,
-    )
+    const checkLimit = createIterationLimitChecker(MAX_SNAPSHOT_ITERATIONS)
     let hitIterationLimit = false
 
     while (valuesNeeded() > 0 && !collectionExhausted()) {
-      const state = { valuesNeeded: valuesNeeded(), keysInBatch: keys.length }
-
-      if (tracker.trackAndCheckLimit(state)) {
-        console.warn(
-          tracker.formatWarning(`requestLimitedSnapshot`, {
+      if (
+        checkLimit(() => ({
+          context: `requestLimitedSnapshot`,
+          diagnostics: {
             collectionId: this.collection.id,
             collectionSize: this.collection.size,
             limit,
             offset,
+            valuesNeeded: valuesNeeded(),
+            keysInBatch: keys.length,
             changesCollected: changes.length,
             sentKeysCount: this.sentKeys.size,
             cursorValue: biggestObservedValue,
             minValueForIndex,
             orderByDirection: orderBy[0]!.compareOptions.direction,
-          }),
-        )
+          },
+        }))
+      ) {
         hitIterationLimit = true
         break
       }

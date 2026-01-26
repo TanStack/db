@@ -146,9 +146,8 @@ export class CollectionSubscriber<
     // Filter changes to prevent duplicate inserts to D2 pipeline.
     // This ensures D2 multiplicity stays at 1 for visible items, so deletes
     // properly reduce multiplicity to 0 (triggering DELETE output).
-    const changesArray = Array.isArray(changes) ? changes : [...changes]
     const filteredChanges: Array<ChangeMessage<any, string | number>> = []
-    for (const change of changesArray) {
+    for (const change of changes) {
       if (change.type === `insert`) {
         if (this.sentToD2Keys.has(change.key)) {
           // Skip duplicate insert - already sent to D2
@@ -222,9 +221,8 @@ export class CollectionSubscriber<
     const sendChangesInRange = (
       changes: Iterable<ChangeMessage<any, string | number>>,
     ) => {
-      const changesArray = Array.isArray(changes) ? changes : [...changes]
       // Split live updates into a delete of the old value and an insert of the new value
-      const splittedChanges = splitUpdates(changesArray)
+      const splittedChanges = splitUpdates(changes)
       this.sendChangesToPipelineWithTracking(
         splittedChanges,
         subscriptionHolder.current!,
@@ -321,11 +319,7 @@ export class CollectionSubscriber<
       return
     }
 
-    const changesArray = Array.isArray(changes) ? changes : [...changes]
-    const trackedChanges = this.trackSentValues(
-      changesArray,
-      orderByInfo.comparator,
-    )
+    const trackedChanges = this.trackSentValues(changes, orderByInfo.comparator)
 
     // Cache the loadMoreIfNeeded callback on the subscription using a symbol property.
     // This ensures we pass the same function instance to the scheduler each time,
@@ -347,14 +341,10 @@ export class CollectionSubscriber<
 
   // Loads the next `n` items from the collection
   // starting from the biggest item it has sent
-  // Returns true if local data was found, false if the local index is exhausted
-  private loadNextItems(
-    n: number,
-    subscription: CollectionSubscription,
-  ): boolean {
+  private loadNextItems(n: number, subscription: CollectionSubscription) {
     const orderByInfo = this.getOrderByInfo()
     if (!orderByInfo) {
-      return false
+      return
     }
     const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
     const biggestSentRow = this.biggest
@@ -378,8 +368,7 @@ export class CollectionSubscriber<
 
     // Take the `n` items after the biggest sent value
     // Pass the current window offset to ensure proper deduplication
-    // Returns true if local data was found
-    return subscription.requestLimitedSnapshot({
+    subscription.requestLimitedSnapshot({
       orderBy: normalizedOrderBy,
       limit: n,
       minValues,
