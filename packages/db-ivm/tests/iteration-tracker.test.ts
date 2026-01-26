@@ -84,7 +84,10 @@ describe(`createIterationTracker`, () => {
   })
 
   it(`should format warning with iteration breakdown`, () => {
-    const tracker = createIterationTracker<string>(5, (state) => `ops=[${state}]`)
+    const tracker = createIterationTracker<string>(
+      5,
+      (state) => `ops=[${state}]`,
+    )
 
     // Create a pattern: 2 in state-a, then exceed in state-b
     tracker.trackAndCheckLimit(`TopK,Filter`)
@@ -98,9 +101,13 @@ describe(`createIterationTracker`, () => {
       totalOperators: 8,
     })
 
-    expect(warning).toContain(`[TanStack DB] D2 graph execution exceeded 5 iterations`)
+    expect(warning).toContain(
+      `[TanStack DB] D2 graph execution exceeded 5 iterations`,
+    )
     expect(warning).toContain(`Continuing with available data`)
-    expect(warning).toContain(`Iteration breakdown (where the loop spent time):`)
+    expect(warning).toContain(
+      `Iteration breakdown (where the loop spent time):`,
+    )
     expect(warning).toContain(`1-2: ops=[TopK,Filter]`)
     expect(warning).toContain(`3-6: ops=[TopK]`)
     expect(warning).toContain(`"totalOperators": 8`)
@@ -124,7 +131,8 @@ describe(`createIterationTracker`, () => {
     type State = { valuesNeeded: number; keysInBatch: number }
     const tracker = createIterationTracker<State>(
       5,
-      (state) => `valuesNeeded=${state.valuesNeeded}, keysInBatch=${state.keysInBatch}`
+      (state) =>
+        `valuesNeeded=${state.valuesNeeded}, keysInBatch=${state.keysInBatch}`,
     )
 
     tracker.trackAndCheckLimit({ valuesNeeded: 10, keysInBatch: 5 })
@@ -167,7 +175,9 @@ describe(`createIterationTracker`, () => {
 
     const warning = tracker.formatWarning(`Graph execution`)
 
-    expect(warning).toContain(`[TanStack DB] Graph execution exceeded 2 iterations`)
+    expect(warning).toContain(
+      `[TanStack DB] Graph execution exceeded 2 iterations`,
+    )
     expect(warning).not.toContain(`Diagnostic info:`)
   })
 })
