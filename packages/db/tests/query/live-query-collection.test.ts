@@ -1376,6 +1376,82 @@ describe(`createLiveQueryCollection`, () => {
       expect(liveQuery.status).toBe(`ready`)
       expect(liveQuery.isLoadingSubset).toBe(false)
     })
+
+    it(`should not mark non-ordered live query ready before on-demand data loads`, async () => {
+      // This test reproduces a bug where a simple live query (without orderBy/limit)
+      // on an on-demand collection is marked ready before the loadSubset data
+      // actually arrives.
+      //
+      // The bug occurs because subscribeToMatchingChanges passes includeInitialState: true
+      // to subscribeChanges, which calls requestSnapshot({ trackLoadSubsetPromise: false }).
+      // This prevents the subscription status from transitioning to 'loadingSubset',
+      // so the live query's isLoadingSubset stays false and it's marked ready prematurely.
+
+      let resolveLoadSubset: () => void
+      const loadSubsetPromise = new Promise<void>((resolve) => {
+        resolveLoadSubset = resolve
+      })
+
+      let loadSubsetCalled = false
+
+      const sourceCollection = createCollection<{ id: number; name: string }>({
+        id: `source-on-demand-non-ordered`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        sync: {
+          sync: ({ markReady }) => {
+            // On-demand collections mark ready immediately
+            markReady()
+
+            return {
+              loadSubset: () => {
+                loadSubsetCalled = true
+                return loadSubsetPromise
+              },
+            }
+          },
+        },
+      })
+
+      // Create a simple live query WITHOUT orderBy/limit
+      // This triggers the non-ordered code path (subscribeToMatchingChanges)
+      const liveQuery = createLiveQueryCollection({
+        query: (q) => q.from({ item: sourceCollection }),
+        startSync: true,
+      })
+
+      // Wait for subscription setup
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Source should be ready (on-demand marks ready immediately)
+      expect(sourceCollection.isReady()).toBe(true)
+
+      // loadSubset should have been called
+      expect(loadSubsetCalled).toBe(true)
+
+      // KEY ASSERTION: Source collection should track the loadSubset promise
+      expect(sourceCollection.isLoadingSubset).toBe(true)
+
+      // KEY ASSERTION: Live query should ALSO track the loadSubset (via subscription)
+      // Without the fix: isLoadingSubset would be false here
+      // With the fix: isLoadingSubset should be true
+      expect(liveQuery.isLoadingSubset).toBe(true)
+
+      // KEY ASSERTION: Live query should NOT be ready while loadSubset is pending
+      expect(liveQuery.status).not.toBe(`ready`)
+      expect(liveQuery.status).toBe(`loading`)
+
+      // Now resolve the loadSubset promise
+      resolveLoadSubset!()
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now the live query should be ready
+      expect(liveQuery.isLoadingSubset).toBe(false)
+      expect(liveQuery.status).toBe(`ready`)
+    })
   })
 
   describe(`move functionality`, () => {
@@ -2160,13 +2236,9 @@ describe(`createLiveQueryCollection`, () => {
   describe(`where clauses passed to loadSubset`, () => {
     it(`passes eq where clause to loadSubset`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
-      let resolveLoadSubset: () => void
-      const loadSubsetPromise = new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
 
       const baseCollection = createCollection<{ id: number; name: string }>({
-        id: `test-base`,
+        id: `test-base-eq`,
         getKey: (item) => item.id,
         syncMode: `on-demand`,
         sync: {
@@ -2175,7 +2247,8 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 capturedOptions.push(options)
-                return loadSubsetPromise
+                // Return immediately so preload can complete
+                return true
               },
             }
           },
@@ -2200,20 +2273,13 @@ describe(`createLiveQueryCollection`, () => {
       if (lastCall?.where?.type === `func`) {
         expect(lastCall.where.name).toBe(`eq`)
       }
-
-      resolveLoadSubset!()
-      await flushPromises()
     })
 
     it(`passes ilike where clause to loadSubset`, async () => {
       const capturedOptions: Array<LoadSubsetOptions> = []
-      let resolveLoadSubset: () => void
-      const loadSubsetPromise = new Promise<void>((resolve) => {
-        resolveLoadSubset = resolve
-      })
 
       const baseCollection = createCollection<{ id: number; name: string }>({
-        id: `test-base`,
+        id: `test-base-ilike`,
         getKey: (item) => item.id,
         syncMode: `on-demand`,
         sync: {
@@ -2222,7 +2288,8 @@ describe(`createLiveQueryCollection`, () => {
             return {
               loadSubset: (options: LoadSubsetOptions) => {
                 capturedOptions.push(options)
-                return loadSubsetPromise
+                // Return immediately so preload can complete
+                return true
               },
             }
           },
@@ -2252,9 +2319,6 @@ describe(`createLiveQueryCollection`, () => {
       if (lastCall?.where?.type === `func`) {
         expect(lastCall.where.name).toBe(`ilike`)
       }
-
-      resolveLoadSubset!()
-      await flushPromises()
     })
 
     it(`passes single orderBy clause to loadSubset when using limit`, async () => {

@@ -197,14 +197,22 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
-    // Create subscription with onStatusChange - listener is registered before snapshot
-    // Note: For non-ordered queries (no limit/offset), we use trackLoadSubsetPromise: false
-    // which is the default behavior in subscribeChanges
+    // Create subscription with onStatusChange - listener is registered before snapshot.
+    // Do NOT pass includeInitialState to subscribeChanges, because that triggers
+    // requestSnapshot({ trackLoadSubsetPromise: false }) which prevents the subscription
+    // status from transitioning to 'loadingSubset', breaking on-demand sync.
+    // Instead, manually call requestSnapshot() after creating the subscription.
     const subscription = this.collection.subscribeChanges(sendChanges, {
-      ...(includeInitialState && { includeInitialState }),
       whereExpression,
       onStatusChange,
     })
+
+    // Trigger the snapshot request with tracking enabled (default).
+    // The onStatusChange listener is already registered, so we'll catch
+    // the loadingSubset -> ready transition for on-demand collections.
+    if (includeInitialState) {
+      subscription.requestSnapshot()
+    }
 
     return subscription
   }
