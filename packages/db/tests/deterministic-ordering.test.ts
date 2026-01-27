@@ -109,6 +109,40 @@ describe(`Deterministic Ordering`, () => {
   })
 
   describe(`BTreeIndex`, () => {
+    it(`should handle undefined indexed values with take and limit`, () => {
+      const index = new BTreeIndex<string>(
+        1,
+        new PropRef([`priority`]),
+        `priority_index`,
+      )
+
+      // Add items where priority is undefined
+      index.add(`a`, { priority: undefined })
+      index.add(`b`, { priority: undefined })
+      index.add(`c`, { priority: 1 })
+
+      // take() with a limit should return results without hanging
+      const keys = index.take(2)
+      expect(keys).toEqual([`a`, `b`])
+    })
+
+    it(`should handle undefined indexed values with takeReversed and limit`, () => {
+      const index = new BTreeIndex<string>(
+        1,
+        new PropRef([`priority`]),
+        `priority_index`,
+      )
+
+      // Add items where priority is undefined
+      index.add(`a`, { priority: undefined })
+      index.add(`b`, { priority: undefined })
+      index.add(`c`, { priority: 1 })
+
+      // takeReversed() with a limit should return results without hanging
+      const keys = index.takeReversed(2)
+      expect(keys).toEqual([`c`, `b`])
+    })
+
     it(`should return keys in deterministic order when indexed values are equal`, () => {
       const index = new BTreeIndex<string>(
         1,
