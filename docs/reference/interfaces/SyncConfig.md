@@ -5,7 +5,7 @@ title: SyncConfig
 
 # Interface: SyncConfig\<T, TKey\>
 
-Defined in: [packages/db/src/types.ts:324](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L324)
+Defined in: [packages/db/src/types.ts:325](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L325)
 
 ## Type Parameters
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/types.ts:324](https://github.com/TanStack/db/blob/m
 optional getSyncMetadata: () => Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:341](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L341)
+Defined in: [packages/db/src/types.ts:347](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L347)
 
 Get the sync metadata for insert operations
 
@@ -43,7 +43,7 @@ Record containing relation information
 optional rowUpdateMode: "full" | "partial";
 ```
 
-Defined in: [packages/db/src/types.ts:350](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L350)
+Defined in: [packages/db/src/types.ts:356](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L356)
 
 The row update mode used to sync to the collection.
 
@@ -67,7 +67,7 @@ sync: (params) =>
   | SyncConfigRes;
 ```
 
-Defined in: [packages/db/src/types.ts:328](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L328)
+Defined in: [packages/db/src/types.ts:329](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L329)
 
 #### Parameters
 
@@ -75,7 +75,9 @@ Defined in: [packages/db/src/types.ts:328](https://github.com/TanStack/db/blob/m
 
 ###### begin
 
-() => `void`
+(`options?`) => `void`
+
+Begin a new sync transaction.
 
 ###### collection
 

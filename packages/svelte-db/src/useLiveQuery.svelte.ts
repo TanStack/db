@@ -6,18 +6,22 @@ import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
+  SingleResult,
 } from '@tanstack/db'
 
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
- * @property data - Reactive array of query results in order
+ * @property data - Reactive array of query results in order, or single item when using findOne()
  * @property collection - The underlying query collection instance
  * @property status - Current query status
  * @property isLoading - True while initial query data is loading
@@ -26,9 +30,9 @@ import type {
  * @property isError - True when query encountered an error
  * @property isCleanedUp - True when query has been cleaned up
  */
-export interface UseLiveQueryReturn<T extends object> {
+export interface UseLiveQueryReturn<T extends object, TData = Array<T>> {
   state: Map<string | number, T>
-  data: Array<T>
+  data: TData
   collection: Collection<T, string | number, {}>
   status: CollectionStatus
   isLoading: boolean
@@ -42,9 +46,10 @@ export interface UseLiveQueryReturnWithCollection<
   T extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
+  TData = Array<T>,
 > {
   state: Map<TKey, T>
-  data: Array<T>
+  data: TData
   collection: Collection<T, TKey, TUtils>
   status: CollectionStatus
   isLoading: boolean
@@ -155,7 +160,7 @@ function toValue<T>(value: MaybeGetter<T>): T {
 export function useLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
   deps?: Array<() => unknown>,
-): UseLiveQueryReturn<GetResult<TContext>>
+): UseLiveQueryReturn<GetResult<TContext>, InferResultType<TContext>>
 
 // Overload 1b: Accept query function that can return undefined/null
 export function useLiveQuery<TContext extends Context>(
@@ -163,7 +168,10 @@ export function useLiveQuery<TContext extends Context>(
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
   deps?: Array<() => unknown>,
-): UseLiveQueryReturn<GetResult<TContext>>
+): UseLiveQueryReturn<
+  GetResult<TContext>,
+  InferResultType<TContext> | undefined
+>
 
 /**
  * Create a live query using configuration object
@@ -206,7 +214,7 @@ export function useLiveQuery<TContext extends Context>(
 export function useLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
   deps?: Array<() => unknown>,
-): UseLiveQueryReturn<GetResult<TContext>>
+): UseLiveQueryReturn<GetResult<TContext>, InferResultType<TContext>>
 
 /**
  * Subscribe to an existing query collection (can be reactive)
@@ -251,14 +259,27 @@ export function useLiveQuery<TContext extends Context>(
  * //   {/each}
  * // {/if}
  */
-// Overload 3: Accept pre-created live query collection (can be reactive)
+// Overload 3: Accept pre-created live query collection WITHOUT SingleResult (returns array)
 export function useLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: MaybeGetter<Collection<TResult, TKey, TUtils>>,
-): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>
+  liveQueryCollection: MaybeGetter<
+    Collection<TResult, TKey, TUtils> & NonSingleResult
+  >,
+): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, Array<TResult>>
+
+// Overload 4: Accept pre-created live query collection WITH SingleResult (returns single item)
+export function useLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: MaybeGetter<
+    Collection<TResult, TKey, TUtils> & SingleResult
+  >,
+): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils, TResult | undefined>
 
 // Implementation
 export function useLiveQuery(
@@ -288,6 +309,20 @@ export function useLiveQuery(
       typeof unwrappedParam.id === `string`
 
     if (isCollection) {
+      // Warn when passing a collection directly with on-demand sync mode
+      // In on-demand mode, data is only loaded when queries with predicates request it
+      // Passing the collection directly doesn't provide any predicates, so no data loads
+      const syncMode = (unwrappedParam as { config?: { syncMode?: string } })
+        .config?.syncMode
+      if (syncMode === `on-demand`) {
+        console.warn(
+          `[useLiveQuery] Warning: Passing a collection with syncMode "on-demand" directly to useLiveQuery ` +
+            `will not load any data. In on-demand mode, data is only loaded when queries with predicates request it.\n\n` +
+            `Instead, use a query builder function:\n` +
+            `  const { data } = useLiveQuery((q) => q.from({ c: myCollection }).select(({ c }) => c))\n\n` +
+            `Or switch to syncMode "eager" if you want all data to sync automatically.`,
+        )
+      }
       // It's already a collection, ensure sync is started for Svelte helpers
       // Only start sync if the collection is in idle state
       if (unwrappedParam.status === `idle`) {
@@ -438,6 +473,18 @@ export function useLiveQuery(
       return state
     },
     get data() {
+      const currentCollection = collection
+      if (currentCollection) {
+        const config =
+          currentCollection.config as CollectionConfigSingleRowOption<
+            any,
+            any,
+            any
+          >
+        if (config.singleResult) {
+          return internalData[0]
+        }
+      }
       return internalData
     },
     get collection() {

@@ -10,6 +10,8 @@ export {
   type Source,
   type GetResult,
   type InferResultType,
+  type ExtractContext,
+  type QueryResult,
 } from './builder/index.js'
 
 // Expression functions exports

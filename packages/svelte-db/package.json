@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/svelte-db",
-  "version": "0.1.58",
+  "version": "0.1.67",
   "description": "Svelte integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -48,8 +48,8 @@
     "@sveltejs/package": "^2.5.7",
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "publint": "^0.3.15",
-    "svelte": "^5.45.6",
-    "svelte-check": "^4.3.4"
+    "publint": "^0.3.16",
+    "svelte": "^5.46.1",
+    "svelte-check": "^4.3.5"
   }
 }

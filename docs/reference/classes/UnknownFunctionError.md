@@ -5,7 +5,7 @@ title: UnknownFunctionError
 
 # Class: UnknownFunctionError
 
-Defined in: [packages/db/src/errors.ts:475](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L475)
+Defined in: [packages/db/src/errors.ts:504](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L504)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:475](https://github.com/TanStack/db/blob/
 new UnknownFunctionError(functionName): UnknownFunctionError;
 ```
 
-Defined in: [packages/db/src/errors.ts:476](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L476)
+Defined in: [packages/db/src/errors.ts:505](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L505)
 
 #### Parameters
 

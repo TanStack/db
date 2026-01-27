@@ -5,7 +5,7 @@ title: QueryBuilderError
 
 # Class: QueryBuilderError
 
-Defined in: [packages/db/src/errors.ts:345](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L345)
+Defined in: [packages/db/src/errors.ts:361](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L361)
 
 ## Extends
 
@@ -19,6 +19,7 @@ Defined in: [packages/db/src/errors.ts:345](https://github.com/TanStack/db/blob/
 - [`InvalidSourceTypeError`](InvalidSourceTypeError.md)
 - [`JoinConditionMustBeEqualityError`](JoinConditionMustBeEqualityError.md)
 - [`QueryMustHaveFromClauseError`](QueryMustHaveFromClauseError.md)
+- [`InvalidWhereExpressionError`](InvalidWhereExpressionError.md)
 
 ## Constructors
 
@@ -28,7 +29,7 @@ Defined in: [packages/db/src/errors.ts:345](https://github.com/TanStack/db/blob/
 new QueryBuilderError(message): QueryBuilderError;
 ```
 
-Defined in: [packages/db/src/errors.ts:346](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L346)
+Defined in: [packages/db/src/errors.ts:362](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L362)
 
 #### Parameters
 

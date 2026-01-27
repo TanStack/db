@@ -5,7 +5,7 @@ title: QueryCompilationError
 
 # Class: QueryCompilationError
 
-Defined in: [packages/db/src/errors.ts:394](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L394)
+Defined in: [packages/db/src/errors.ts:423](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L423)
 
 ## Extends
 
@@ -36,7 +36,7 @@ Defined in: [packages/db/src/errors.ts:394](https://github.com/TanStack/db/blob/
 new QueryCompilationError(message): QueryCompilationError;
 ```
 
-Defined in: [packages/db/src/errors.ts:395](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L395)
+Defined in: [packages/db/src/errors.ts:424](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L424)
 
 #### Parameters
 

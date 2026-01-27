@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/query-db-collection",
-  "version": "1.0.11",
+  "version": "1.0.21",
   "description": "TanStack Query collection for TanStack DB",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -46,7 +46,7 @@
     "src"
   ],
   "dependencies": {
-    "@standard-schema/spec": "^1.0.0",
+    "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*"
   },
   "peerDependencies": {
@@ -54,7 +54,7 @@
     "typescript": ">=4.7"
   },
   "devDependencies": {
-    "@tanstack/query-core": "^5.90.12",
+    "@tanstack/query-core": "^5.90.16",
     "@vitest/coverage-istanbul": "^3.2.4"
   }
 }

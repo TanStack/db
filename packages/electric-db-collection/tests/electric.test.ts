@@ -1363,6 +1363,93 @@ describe(`Electric Integration`, () => {
       await insert3.isPersisted.promise
       expect(testCollection.has(502)).toBe(true)
     })
+
+    it(`should preserve buffer across heartbeat batches until awaitMatch is called`, async () => {
+      // This test verifies the fix for the race condition where:
+      // 1. Batch 1 arrives with insert message + up-to-date
+      // 2. Batch 2 arrives (heartbeat/empty) BEFORE awaitMatch is called
+      // 3. awaitMatch is called - should still find the message from Batch 1
+      // This was failing before because the buffer was cleared when Batch 2 arrived
+
+      let resolveServerCall: () => void
+      const serverCallPromise = new Promise<void>((resolve) => {
+        resolveServerCall = resolve
+      })
+
+      const onInsert = vi
+        .fn()
+        .mockImplementation(async ({ transaction, collection: col }) => {
+          const item = transaction.mutations[0].modified
+
+          // Simulate a slow API call
+          await serverCallPromise
+
+          // awaitMatch is called AFTER multiple batches have arrived
+          await col.utils.awaitMatch((message: any) => {
+            return (
+              isChangeMessage(message) &&
+              message.headers.operation === `insert` &&
+              message.value.id === item.id
+            )
+          }, 5000)
+        })
+
+      const config = {
+        id: `test-buffer-preserved-across-heartbeats`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        startSync: true,
+        getKey: (item: Row) => item.id as number,
+        onInsert,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Start insert - will call onInsert which waits for serverCallPromise
+      const insertPromise = testCollection.insert({
+        id: 600,
+        name: `Heartbeat Race Test`,
+      })
+
+      // Wait for onInsert to start
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Batch 1: insert message + up-to-date
+      subscriber([
+        {
+          key: `600`,
+          value: { id: 600, name: `Heartbeat Race Test` },
+          headers: { operation: `insert` },
+        },
+        { headers: { control: `up-to-date` } },
+      ])
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Batch 2: heartbeat (just up-to-date, no insert messages)
+      // This simulates Electric sending a heartbeat while the API call is still in progress
+      // Previously, this would clear the buffer and lose the insert message from Batch 1
+      subscriber([{ headers: { control: `up-to-date` } }])
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Batch 3: another heartbeat (to really stress the scenario)
+      subscriber([{ headers: { control: `up-to-date` } }])
+
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // Now resolve the server call - awaitMatch should still find the message
+      // from Batch 1 despite Batches 2 and 3 arriving
+      resolveServerCall!()
+
+      // Should complete successfully
+      await insertPromise.isPersisted.promise
+
+      expect(onInsert).toHaveBeenCalled()
+      expect(testCollection.has(600)).toBe(true)
+    })
   })
 
   // Tests for matching strategies utilities
@@ -2757,6 +2844,322 @@ describe(`Electric Integration`, () => {
     })
   })
 
+  // Tests for overlapping subset queries with duplicate keys
+  describe(`Overlapping subset queries with duplicate keys`, () => {
+    it(`should convert duplicate inserts to updates when overlapping subset queries return the same row with different values`, () => {
+      // This test reproduces the issue where:
+      // 1. Multiple subset queries return the same row (e.g., different WHERE clauses that both match the same record)
+      // 2. The server sends `insert` operations for each response
+      // 3. If the row's data changed between requests (e.g., timestamp field updated), this caused a DuplicateKeySyncError
+
+      const config = {
+        id: `duplicate-insert-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // First subset query returns a row
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1`, updated_at: `2024-01-01T00:00:00Z` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Verify initial data is present
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1`,
+        updated_at: `2024-01-01T00:00:00Z`,
+      })
+
+      // Second subset query returns the SAME row but with a different timestamp
+      // This would throw DuplicateKeySyncError without the fix because:
+      // 1. The key already exists in syncedData
+      // 2. The value is different (timestamp changed)
+      // 3. Without the Electric adapter converting insert->update, sync.ts throws
+      expect(() => {
+        subscriber([
+          {
+            key: `1`,
+            value: {
+              id: 1,
+              name: `User 1`,
+              updated_at: `2024-01-01T00:00:01Z`,
+            }, // Different timestamp!
+            headers: { operation: `insert` },
+          },
+          {
+            headers: { control: `up-to-date` },
+          },
+        ])
+      }).not.toThrow()
+
+      // The row should be updated with the new value
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1`,
+        updated_at: `2024-01-01T00:00:01Z`,
+      })
+    })
+
+    it(`should handle multiple duplicate inserts across several batches`, () => {
+      const config = {
+        id: `multiple-duplicate-inserts-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // First batch - initial inserts
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1`, version: 1 },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2`, version: 1 },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.size).toBe(2)
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1`,
+        version: 1,
+      })
+      expect(testCollection.get(2)).toEqual({
+        id: 2,
+        name: `User 2`,
+        version: 1,
+      })
+
+      // Second batch - overlapping subset query returns same rows with different values
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1`, version: 2 }, // version changed
+          headers: { operation: `insert` },
+        },
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2`, version: 2 }, // version changed
+          headers: { operation: `insert` },
+        },
+        {
+          key: `3`,
+          value: { id: 3, name: `User 3`, version: 1 }, // new row
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // All rows should be present with updated values
+      expect(testCollection.size).toBe(3)
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1`,
+        version: 2,
+      })
+      expect(testCollection.get(2)).toEqual({
+        id: 2,
+        name: `User 2`,
+        version: 2,
+      })
+      expect(testCollection.get(3)).toEqual({
+        id: 3,
+        name: `User 3`,
+        version: 1,
+      })
+    })
+
+    it(`should reset synced keys tracking on must-refetch`, () => {
+      const config = {
+        id: `must-refetch-reset-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Initial sync
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.has(1)).toBe(true)
+
+      // Trigger must-refetch (clears collection and syncedKeys tracking)
+      subscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      // After must-refetch, sending the same key as insert should work
+      // because syncedKeys tracking was cleared
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1 After Refetch` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1 After Refetch`,
+      })
+    })
+
+    it(`should handle delete followed by insert of the same key`, () => {
+      const config = {
+        id: `delete-then-insert-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Initial insert
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.has(1)).toBe(true)
+
+      // Delete the row
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1 },
+          headers: { operation: `delete` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.has(1)).toBe(false)
+
+      // Re-insert the same key - should work because delete cleared the syncedKeys tracking
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1 Recreated` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({ id: 1, name: `User 1 Recreated` })
+    })
+
+    it(`should handle duplicate inserts within the same batch`, () => {
+      const config = {
+        id: `same-batch-duplicate-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Single batch with duplicate inserts for the same key
+      // This can happen when multiple subset responses are batched together
+      subscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1`, version: 1 },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1`, version: 2 }, // Same key, different value
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Should have the latest value
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.get(1)).toEqual({
+        id: 1,
+        name: `User 1`,
+        version: 2,
+      })
+    })
+  })
+
   // Tests for commit and ready behavior with snapshot-end and up-to-date messages
   describe(`Commit and ready behavior`, () => {
     it(`should ignore snapshot-end before first up-to-date in progressive mode`, () => {
@@ -3098,6 +3501,362 @@ describe(`Electric Integration`, () => {
       // Data should be committed and collection ready
       expect(testCollection.has(1)).toBe(true)
       expect(testCollection.status).toBe(`ready`)
+    })
+
+    it(`should handle must-refetch in progressive mode without orphan transactions`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
+      const config = {
+        id: `progressive-must-refetch-orphan-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Phase 1: Complete the initial sync in progressive mode
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // After atomic swap, data should be visible
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(true)
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.size).toBe(2)
+
+      // No pending uncommitted synced transactions after initial sync
+      expect(testCollection._state.pendingSyncedTransactions.length).toBe(0)
+
+      // Phase 2: Receive must-refetch
+      // This resets hasReceivedUpToDate to false but starts a transaction
+      testSubscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      // Old data should still be visible (transaction not committed yet)
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.size).toBe(2)
+
+      // There should be exactly 1 uncommitted pending transaction from must-refetch
+      expect(testCollection._state.pendingSyncedTransactions.length).toBe(1)
+      expect(
+        testCollection._state.pendingSyncedTransactions[0]?.committed,
+      ).toBe(false)
+
+      // Phase 3: Send new data after must-refetch (in separate batch)
+      // Without the fix, these would be buffered and cause orphan transaction
+      testSubscriber([
+        {
+          key: `3`,
+          value: { id: 3, name: `User 3` },
+          headers: { operation: `insert` },
+        },
+        {
+          key: `4`,
+          value: { id: 4, name: `User 4` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Data still not committed (no up-to-date yet)
+      expect(testCollection.size).toBe(2)
+
+      // Still 1 pending transaction (with the fix, data is written to it, not buffered)
+      expect(testCollection._state.pendingSyncedTransactions.length).toBe(1)
+
+      // Phase 4: Send up-to-date (in separate batch)
+      // Without the fix: atomic swap would try to start a new transaction,
+      // leaving the must-refetch transaction uncommitted (orphan)
+      // With the fix: normal commit happens on the existing transaction
+      testSubscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // After the fix: old data truncated, new data committed
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(false) // Truncated by must-refetch
+      expect(testCollection.has(2)).toBe(false) // Truncated by must-refetch
+      expect(testCollection.has(3)).toBe(true) // New data after must-refetch
+      expect(testCollection.has(4)).toBe(true) // New data after must-refetch
+      expect(testCollection.size).toBe(2)
+
+      // CRITICAL: No orphan uncommitted transactions should remain
+      // Without the fix, there would be 1 uncommitted transaction from must-refetch
+      expect(testCollection._state.pendingSyncedTransactions.length).toBe(0)
+
+      // Verify data is correct (not undefined from orphan transaction)
+      expect(testCollection.get(3)).toEqual({ id: 3, name: `User 3` })
+      expect(testCollection.get(4)).toEqual({ id: 4, name: `User 4` })
+    })
+
+    it(`should handle must-refetch in progressive mode with txid tracking`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
+      const config = {
+        id: `progressive-must-refetch-txid-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Complete initial sync
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert`, txids: [100] },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+
+      // Must-refetch
+      testSubscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      // Send data with txids after must-refetch
+      // Without the fix, txids would not be tracked because isBufferingInitialSync() returns true
+      testSubscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2` },
+          headers: { operation: `insert`, txids: [200] },
+        },
+        {
+          key: `3`,
+          value: { id: 3, name: `User 3` },
+          headers: { operation: `insert`, txids: [201] },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.size).toBe(2)
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.has(3)).toBe(true)
+    })
+
+    it(`should handle must-refetch in progressive mode with snapshot-end metadata`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
+      const config = {
+        id: `progressive-must-refetch-snapshot-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Complete initial sync
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `100`,
+            xmax: `110`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+
+      // Must-refetch
+      testSubscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      // Send data with snapshot-end after must-refetch
+      // Without the fix, snapshot-end metadata would not be tracked
+      testSubscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: {
+            control: `snapshot-end`,
+            xmin: `200`,
+            xmax: `210`,
+            xip_list: [],
+          },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.size).toBe(1)
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.get(2)).toEqual({ id: 2, name: `User 2` })
+    })
+
+    it(`should handle multiple batches after must-refetch in progressive mode`, () => {
+      vi.clearAllMocks()
+
+      let testSubscriber!: (messages: Array<Message<Row>>) => void
+      mockSubscribe.mockImplementation((callback) => {
+        testSubscriber = callback
+        return () => {}
+      })
+      mockRequestSnapshot.mockResolvedValue(undefined)
+      mockFetchSnapshot.mockResolvedValue({ metadata: {}, data: [] })
+
+      const config = {
+        id: `progressive-must-refetch-batches-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: { table: `test_table` },
+        },
+        syncMode: `progressive` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Complete initial sync
+      testSubscriber([
+        {
+          key: `1`,
+          value: { id: 1, name: `User 1` },
+          headers: { operation: `insert` },
+        },
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      expect(testCollection.status).toBe(`ready`)
+
+      // Must-refetch
+      testSubscriber([
+        {
+          headers: { control: `must-refetch` },
+        },
+      ])
+
+      // First batch of data after must-refetch
+      testSubscriber([
+        {
+          key: `2`,
+          value: { id: 2, name: `User 2` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Second batch of data after must-refetch
+      testSubscriber([
+        {
+          key: `3`,
+          value: { id: 3, name: `User 3` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Third batch of data after must-refetch
+      testSubscriber([
+        {
+          key: `4`,
+          value: { id: 4, name: `User 4` },
+          headers: { operation: `insert` },
+        },
+      ])
+
+      // Still waiting for up-to-date
+      expect(testCollection.size).toBe(1) // Only old data visible
+
+      // Final up-to-date
+      testSubscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // All new data should be committed
+      expect(testCollection.status).toBe(`ready`)
+      expect(testCollection.has(1)).toBe(false) // Truncated
+      expect(testCollection.has(2)).toBe(true)
+      expect(testCollection.has(3)).toBe(true)
+      expect(testCollection.has(4)).toBe(true)
+      expect(testCollection.size).toBe(3)
     })
   })
 

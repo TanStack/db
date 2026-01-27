@@ -38,7 +38,7 @@ export type OrderByOptimizationInfo = {
 
 /**
  * Processes the ORDER BY clause
- * Works with the new structure that has both namespaced row data and __select_results
+ * Works with the new structure that has both namespaced row data and $selected
  * Always uses fractional indexing and adds the index as __ordering_index to the result
  */
 export function processOrderBy(
@@ -57,7 +57,7 @@ export function processOrderBy(
     const clauseWithoutAggregates = replaceAggregatesByRefs(
       clause.expression,
       selectClause,
-      `__select_results`,
+      `$selected`,
     )
 
     return {
@@ -67,12 +67,13 @@ export function processOrderBy(
   })
 
   // Create a value extractor function for the orderBy operator
-  const valueExtractor = (row: NamespacedRow & { __select_results?: any }) => {
+  const valueExtractor = (row: NamespacedRow & { $selected?: any }) => {
     // The namespaced row contains:
     // 1. Table aliases as top-level properties (e.g., row["tableName"])
-    // 2. SELECT results in __select_results (e.g., row.__select_results["aggregateAlias"])
-    // The replaceAggregatesByRefs function has already transformed any aggregate expressions
-    // that match SELECT aggregates to use the __select_results namespace.
+    // 2. SELECT results in $selected (e.g., row.$selected["aggregateAlias"])
+    // The replaceAggregatesByRefs function has already transformed:
+    // - Aggregate expressions that match SELECT aggregates to use the $selected namespace
+    // - $selected ref expressions are passed through unchanged (already using the correct namespace)
     const orderByContext = row
 
     if (orderByClause.length > 1) {

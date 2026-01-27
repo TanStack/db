@@ -1,4 +1,10 @@
-import { filter, groupBy, groupByOperators, map } from '@tanstack/db-ivm'
+import {
+  filter,
+  groupBy,
+  groupByOperators,
+  map,
+  serializeValue,
+} from '@tanstack/db-ivm'
 import { Func, PropRef, getHavingExpression } from '../ir.js'
 import {
   AggregateFunctionNotInSelectError,
@@ -66,7 +72,7 @@ function validateAndCreateMapping(
 
 /**
  * Processes the GROUP BY clause with optional HAVING and SELECT
- * Works with the new __select_results structure from early SELECT processing
+ * Works with the new $selected structure from early SELECT processing
  */
 export function processGroupBy(
   pipeline: NamespacedAndKeyedStream,
@@ -98,11 +104,11 @@ export function processGroupBy(
       groupBy(keyExtractor, aggregates),
     ) as NamespacedAndKeyedStream
 
-    // Update __select_results to include aggregate values
+    // Update $selected to include aggregate values
     pipeline = pipeline.pipe(
       map(([, aggregatedRow]) => {
-        // Start with the existing __select_results from early SELECT processing
-        const selectResults = (aggregatedRow as any).__select_results || {}
+        // Start with the existing $selected from early SELECT processing
+        const selectResults = (aggregatedRow as any).$selected || {}
         const finalResults: Record<string, any> = { ...selectResults }
 
         if (selectClause) {
@@ -115,12 +121,12 @@ export function processGroupBy(
           }
         }
 
-        // Use a single key for the result and update __select_results
+        // Use a single key for the result and update $selected
         return [
           `single_group`,
           {
             ...aggregatedRow,
-            __select_results: finalResults,
+            $selected: finalResults,
           },
         ] as [unknown, Record<string, any>]
       }),
@@ -133,13 +139,14 @@ export function processGroupBy(
         const transformedHavingClause = replaceAggregatesByRefs(
           havingExpression,
           selectClause || {},
+          `$selected`,
         )
         const compiledHaving = compileExpression(transformedHavingClause)
 
         pipeline = pipeline.pipe(
           filter(([, row]) => {
             // Create a namespaced row structure for HAVING evaluation
-            const namespacedRow = { result: (row as any).__select_results }
+            const namespacedRow = { $selected: (row as any).$selected }
             return toBooleanPredicate(compiledHaving(namespacedRow))
           }),
         )
@@ -152,7 +159,7 @@ export function processGroupBy(
         pipeline = pipeline.pipe(
           filter(([, row]) => {
             // Create a namespaced row structure for functional HAVING evaluation
-            const namespacedRow = { result: (row as any).__select_results }
+            const namespacedRow = { $selected: (row as any).$selected }
             return toBooleanPredicate(fnHaving(namespacedRow))
           }),
         )
@@ -174,11 +181,11 @@ export function processGroupBy(
   // Create a key extractor function using simple __key_X format
   const keyExtractor = ([, row]: [
     string,
-    NamespacedRow & { __select_results?: any },
+    NamespacedRow & { $selected?: any },
   ]) => {
-    // Use the original namespaced row for GROUP BY expressions, not __select_results
+    // Use the original namespaced row for GROUP BY expressions, not $selected
     const namespacedRow = { ...row }
-    delete (namespacedRow as any).__select_results
+    delete (namespacedRow as any).$selected
 
     const key: Record<string, unknown> = {}
 
@@ -208,11 +215,11 @@ export function processGroupBy(
   // Apply the groupBy operator
   pipeline = pipeline.pipe(groupBy(keyExtractor, aggregates))
 
-  // Update __select_results to handle GROUP BY results
+  // Update $selected to handle GROUP BY results
   pipeline = pipeline.pipe(
     map(([, aggregatedRow]) => {
-      // Start with the existing __select_results from early SELECT processing
-      const selectResults = (aggregatedRow as any).__select_results || {}
+      // Start with the existing $selected from early SELECT processing
+      const selectResults = (aggregatedRow as any).$selected || {}
       const finalResults: Record<string, any> = {}
 
       if (selectClause) {
@@ -248,14 +255,14 @@ export function processGroupBy(
         for (let i = 0; i < groupByClause.length; i++) {
           keyParts.push(aggregatedRow[`__key_${i}`])
         }
-        finalKey = JSON.stringify(keyParts)
+        finalKey = serializeValue(keyParts)
       }
 
       return [
         finalKey,
         {
           ...aggregatedRow,
-          __select_results: finalResults,
+          $selected: finalResults,
         },
       ] as [unknown, Record<string, any>]
     }),
@@ -274,7 +281,7 @@ export function processGroupBy(
       pipeline = pipeline.pipe(
         filter(([, row]) => {
           // Create a namespaced row structure for HAVING evaluation
-          const namespacedRow = { result: (row as any).__select_results }
+          const namespacedRow = { $selected: (row as any).$selected }
           return compiledHaving(namespacedRow)
         }),
       )
@@ -287,7 +294,7 @@ export function processGroupBy(
       pipeline = pipeline.pipe(
         filter(([, row]) => {
           // Create a namespaced row structure for functional HAVING evaluation
-          const namespacedRow = { result: (row as any).__select_results }
+          const namespacedRow = { $selected: (row as any).$selected }
           return toBooleanPredicate(fnHaving(namespacedRow))
         }),
       )
@@ -346,20 +353,28 @@ function getAggregateFunction(aggExpr: Aggregate) {
   const valueExtractor = ([, namespacedRow]: [string, NamespacedRow]) => {
     const value = compiledExpr(namespacedRow)
     // Ensure we return a number for numeric aggregate functions
-    return typeof value === `number` ? value : value != null ? Number(value) : 0
+    if (typeof value === `number`) {
+      return value
+    }
+    return value != null ? Number(value) : 0
   }
 
-  // Create a value extractor function for the expression to aggregate
-  const valueExtractorWithDate = ([, namespacedRow]: [
+  // Create a value extractor function for min/max that preserves comparable types
+  const valueExtractorForMinMax = ([, namespacedRow]: [
     string,
     NamespacedRow,
   ]) => {
     const value = compiledExpr(namespacedRow)
-    return typeof value === `number` || value instanceof Date
-      ? value
-      : value != null
-        ? Number(value)
-        : 0
+    // Preserve strings, numbers, Dates, and bigints for comparison
+    if (
+      typeof value === `number` ||
+      typeof value === `string` ||
+      typeof value === `bigint` ||
+      value instanceof Date
+    ) {
+      return value
+    }
+    return value != null ? Number(value) : 0
   }
 
   // Create a raw value extractor function for the expression to aggregate
@@ -376,21 +391,32 @@ function getAggregateFunction(aggExpr: Aggregate) {
     case `avg`:
       return avg(valueExtractor)
     case `min`:
-      return min(valueExtractorWithDate)
+      return min(valueExtractorForMinMax)
     case `max`:
-      return max(valueExtractorWithDate)
+      return max(valueExtractorForMinMax)
     default:
       throw new UnsupportedAggregateFunctionError(aggExpr.name)
   }
 }
 
 /**
- * Transforms basic expressions and aggregates to replace Agg expressions with references to computed values
+ * Transforms expressions to replace aggregate functions with references to computed values.
+ *
+ * For aggregate expressions, finds matching aggregates in the SELECT clause and replaces them
+ * with PropRef([resultAlias, alias]) to reference the computed aggregate value.
+ *
+ * Ref expressions (table columns and $selected fields) and value expressions are passed through unchanged.
+ * Function expressions are recursively transformed.
+ *
+ * @param havingExpr - The expression to transform (can be aggregate, ref, func, or val)
+ * @param selectClause - The SELECT clause containing aliases and aggregate definitions
+ * @param resultAlias - The namespace alias for SELECT results (default: '$selected')
+ * @returns A transformed BasicExpression that references computed values instead of raw expressions
  */
 export function replaceAggregatesByRefs(
   havingExpr: BasicExpression | Aggregate,
   selectClause: Select,
-  resultAlias: string = `result`,
+  resultAlias: string = `$selected`,
 ): BasicExpression {
   switch (havingExpr.type) {
     case `agg`: {
@@ -416,10 +442,11 @@ export function replaceAggregatesByRefs(
       return new Func(funcExpr.name, transformedArgs)
     }
 
-    case `ref`: {
-      // Non-aggregate refs are passed through unchanged (they reference table columns)
+    case `ref`:
+      // Ref expressions are passed through unchanged - they reference either:
+      // - $selected fields (which are already in the correct namespace)
+      // - Table column references (which remain valid)
       return havingExpr as BasicExpression
-    }
 
     case `val`:
       // Return as-is

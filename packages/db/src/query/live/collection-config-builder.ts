@@ -227,6 +227,7 @@ export class CollectionConfigBuilder<
           getBuilder: () => this,
           hasCustomGetKey: !!this.config.getKey,
           hasJoins: this.hasJoins(this.query),
+          hasDistinct: !!this.query.distinct,
         },
       },
     }
@@ -337,6 +338,10 @@ export class CollectionConfigBuilder<
       if (syncState.subscribedToAllCollections) {
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
+          // Flush accumulated changes after each graph step to commit them as one transaction.
+          // This ensures intermediate join states (like null on one side) don't cause
+          // duplicate key errors when the full join result arrives in the same step.
+          syncState.flushPendingChanges?.()
           callback?.()
         }
 
@@ -345,10 +350,14 @@ export class CollectionConfigBuilder<
         if (syncState.messagesCount === 0) {
           begin()
           commit()
-          // After initial commit, check if we should mark ready
-          // (in case all sources were already ready before we subscribed)
-          this.updateLiveQueryStatus(this.currentSyncConfig)
         }
+
+        // After graph processing completes, check if we should mark ready.
+        // This is the canonical place to transition to ready state because:
+        // 1. All data has been processed through the graph
+        // 2. All source collections have had a chance to send their initial data
+        // This prevents marking ready before data is processed (fixes isReady=true with empty data)
+        this.updateLiveQueryStatus(this.currentSyncConfig)
       }
     } finally {
       this.isGraphRunning = false
@@ -566,6 +575,21 @@ export class CollectionConfigBuilder<
       },
     )
 
+    // Listen for loadingSubset changes on the live query collection BEFORE subscribing.
+    // This ensures we don't miss the event if subset loading completes synchronously.
+    // When isLoadingSubset becomes false, we may need to mark the collection as ready
+    // (if all source collections are already ready but we were waiting for subset load to complete)
+    const loadingSubsetUnsubscribe = config.collection.on(
+      `loadingSubset:change`,
+      (event) => {
+        if (!event.isLoadingSubset) {
+          // Subset loading finished, check if we can now mark ready
+          this.updateLiveQueryStatus(config)
+        }
+      },
+    )
+    syncState.unsubscribeCallbacks.add(loadingSubsetUnsubscribe)
+
     const loadSubsetDataCallbacks = this.subscribeToAllCollections(
       config,
       fullSyncState,
@@ -672,21 +696,34 @@ export class CollectionConfigBuilder<
     const { begin, commit } = config
     const { graph, inputs, pipeline } = this.maybeCompileBasePipeline()
 
+    // Accumulator for changes across all output callbacks within a single graph run.
+    // This allows us to batch all changes from intermediate join states into a single
+    // transaction, avoiding duplicate key errors when joins produce multiple outputs
+    // for the same key (e.g., first output with null, then output with joined data).
+    let pendingChanges: Map<unknown, Changes<TResult>> = new Map()
+
     pipeline.pipe(
       output((data) => {
         const messages = data.getInner()
         syncState.messagesCount += messages.length
 
-        begin()
-        messages
-          .reduce(
-            accumulateChanges<TResult>,
-            new Map<unknown, Changes<TResult>>(),
-          )
-          .forEach(this.applyChanges.bind(this, config))
-        commit()
+        // Accumulate changes from this output callback into the pending changes map.
+        // Changes for the same key are merged (inserts/deletes are added together).
+        messages.reduce(accumulateChanges<TResult>, pendingChanges)
       }),
     )
+
+    // Flush pending changes and reset the accumulator.
+    // Called at the end of each graph run to commit all accumulated changes.
+    syncState.flushPendingChanges = () => {
+      if (pendingChanges.size === 0) {
+        return
+      }
+      begin()
+      pendingChanges.forEach(this.applyChanges.bind(this, config))
+      commit()
+      pendingChanges = new Map()
+    }
 
     graph.finalize()
 
@@ -793,8 +830,17 @@ export class CollectionConfigBuilder<
       return
     }
 
-    // Mark ready when all source collections are ready
-    if (this.allCollectionsReady()) {
+    // Mark ready when:
+    // 1. All subscriptions are set up (subscribedToAllCollections)
+    // 2. All source collections are ready
+    // 3. The live query collection is not loading subset data
+    // This prevents marking the live query ready before its data is processed
+    // (fixes issue where useLiveQuery returns isReady=true with empty data)
+    if (
+      this.currentSyncState?.subscribedToAllCollections &&
+      this.allCollectionsReady() &&
+      !this.liveQueryCollection?.isLoadingSubset
+    ) {
       markReady()
     }
   }
@@ -892,8 +938,10 @@ export class CollectionConfigBuilder<
     // (graph only runs when all collections are subscribed)
     syncState.subscribedToAllCollections = true
 
-    // Initial status check after all subscriptions are set up
-    this.updateLiveQueryStatus(config)
+    // Note: We intentionally don't call updateLiveQueryStatus() here.
+    // The graph hasn't run yet, so marking ready would be premature.
+    // The canonical place to mark ready is after the graph processes data
+    // in maybeRunGraph(), which ensures data has been processed first.
 
     return loadSubsetDataCallbacks
   }
@@ -1075,8 +1123,11 @@ function accumulateChanges<T>(
     changes.deletes += Math.abs(multiplicity)
   } else if (multiplicity > 0) {
     changes.inserts += multiplicity
+    // Update value to the latest version for this key
     changes.value = value
-    changes.orderByIndex = orderByIndex
+    if (orderByIndex !== undefined) {
+      changes.orderByIndex = orderByIndex
+    }
   }
   acc.set(key, changes)
   return acc

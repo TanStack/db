@@ -3,13 +3,19 @@ id: SubscribeChangesSnapshotOptions
 title: SubscribeChangesSnapshotOptions
 ---
 
-# Interface: SubscribeChangesSnapshotOptions
+# Interface: SubscribeChangesSnapshotOptions\<T\>
 
-Defined in: [packages/db/src/types.ts:785](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L785)
+Defined in: [packages/db/src/types.ts:814](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L814)
 
 ## Extends
 
-- `Omit`\<[`SubscribeChangesOptions`](SubscribeChangesOptions.md), `"includeInitialState"`\>
+- `Omit`\<[`SubscribeChangesOptions`](SubscribeChangesOptions.md)\<`T`\>, `"includeInitialState"`\>
+
+## Type Parameters
+
+### T
+
+`T` *extends* `object` = `Record`\<`string`, `unknown`\>
 
 ## Properties
 
@@ -19,7 +25,38 @@ Defined in: [packages/db/src/types.ts:785](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:790](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L790)
+Defined in: [packages/db/src/types.ts:818](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L818)
+
+***
+
+### onStatusChange()?
+
+```ts
+optional onStatusChange: (event) => void;
+```
+
+Defined in: [packages/db/src/types.ts:811](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L811)
+
+**`Internal`**
+
+Listener for subscription status changes.
+Registered BEFORE any snapshot is requested, ensuring no status transitions are missed.
+
+#### Parameters
+
+##### event
+
+[`SubscriptionStatusChangeEvent`](SubscriptionStatusChangeEvent.md)
+
+#### Returns
+
+`void`
+
+#### Inherited from
+
+```ts
+Omit.onStatusChange
+```
 
 ***
 
@@ -29,7 +66,47 @@ Defined in: [packages/db/src/types.ts:790](https://github.com/TanStack/db/blob/m
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:789](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L789)
+Defined in: [packages/db/src/types.ts:817](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L817)
+
+***
+
+### where()?
+
+```ts
+optional where: (row) => any;
+```
+
+Defined in: [packages/db/src/types.ts:803](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L803)
+
+Callback function for filtering changes using a row proxy.
+The callback receives a proxy object that records property access,
+allowing you to use query builder functions like `eq`, `gt`, etc.
+
+#### Parameters
+
+##### row
+
+`SingleRowRefProxy`\<`T`\>
+
+#### Returns
+
+`any`
+
+#### Example
+
+```ts
+import { eq } from "@tanstack/db"
+
+collection.subscribeChanges(callback, {
+  where: (row) => eq(row.status, "active")
+})
+```
+
+#### Inherited from
+
+```ts
+Omit.where
+```
 
 ***
 
@@ -39,7 +116,7 @@ Defined in: [packages/db/src/types.ts:789](https://github.com/TanStack/db/blob/m
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:782](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L782)
+Defined in: [packages/db/src/types.ts:805](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L805)
 
 Pre-compiled expression for filtering changes
 

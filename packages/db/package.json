@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/db",
-  "version": "0.5.15",
+  "version": "0.5.24",
   "description": "A reactive client store for building super fast apps on sync",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -44,9 +44,9 @@
     "src"
   ],
   "dependencies": {
-    "@standard-schema/spec": "^1.0.0",
+    "@standard-schema/spec": "^1.1.0",
     "@tanstack/db-ivm": "workspace:*",
-    "@tanstack/pacer-lite": "^0.1.1"
+    "@tanstack/pacer-lite": "^0.2.0"
   },
   "peerDependencies": {
     "typescript": ">=4.7"
@@ -54,7 +54,7 @@
   "devDependencies": {
     "@tanstack/config": "^0.22.2",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "arktype": "^2.1.28",
+    "arktype": "^2.1.29",
     "mitt": "^3.0.1",
     "superjson": "^2.2.6",
     "temporal-polyfill": "^0.3.0"
