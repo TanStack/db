@@ -6,6 +6,10 @@ import type { CompareOptions } from '../query/builder/types.js'
 import type { BasicExpression } from '../query/ir.js'
 import type { IndexOperation } from './base-index.js'
 
+// Sentinel value to represent "start from beginning" in takeInternal,
+// distinct from an actual undefined indexed value.
+const START_ITERATION = Symbol(`START_ITERATION`)
+
 /**
  * Options for Ordered index
  */
@@ -268,10 +272,23 @@ export class BTreeIndex<
     const keysInResult: Set<TKey> = new Set()
     const result: Array<TKey> = []
     let pair: [any, any] | undefined
-    let key = normalizeValue(from)
+    // Use a sentinel to distinguish "start from beginning" (when from is undefined)
+    // from "continue after the actual undefined key". The BTree's nextPair function
+    // treats undefined specially as "return min/max pair", so we need this
+    // distinction to avoid infinite loops when undefined is an actual key value.
+    let key: any = from === undefined ? START_ITERATION : normalizeValue(from)
 
-    while ((pair = nextPair(key)) !== undefined && result.length < n) {
-      key = pair[0]
+    while ((pair = nextPair(key === START_ITERATION ? undefined : key)) !== undefined && result.length < n) {
+      const newKey = pair[0]
+      // When nextPair returns the same key we passed in, we've hit a cycle.
+      // This happens when the indexed value is undefined because:
+      // - nextPair(undefined) returns min/max pair instead of finding the next key
+      // - If the min/max key is also undefined, we get the same pair back
+      // In this case, we need to break out of the loop to prevent infinite iteration.
+      if (key !== START_ITERATION && newKey === key) {
+        break
+      }
+      key = newKey
       const keys = this.valueMap.get(key)
       if (keys && keys.size > 0) {
         // Sort keys for deterministic order, reverse if needed
