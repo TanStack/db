@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.5.24
+
+### Patch Changes
+
+- Fix `$selected` namespace availability in `orderBy`, `having`, and `fn.having` when using `fn.select`. Previously, the `$selected` namespace was only available when using regular `.select()`, not functional `fn.select()`. ([#1183](https://github.com/TanStack/db/pull/1183))
+
 ## 0.5.23
 
 ### Patch Changes

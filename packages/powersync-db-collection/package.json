@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/powersync-db-collection",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "description": "PowerSync collection for TanStack DB",
   "author": "POWERSYNC",
   "license": "MIT",
