@@ -197,23 +197,57 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
-    // Create subscription with onStatusChange - listener is registered before snapshot.
-    // Do NOT pass includeInitialState to subscribeChanges, because that triggers
-    // requestSnapshot({ trackLoadSubsetPromise: false }) which prevents the subscription
-    // status from transitioning to 'loadingSubset', breaking on-demand sync.
-    // Instead, manually call requestSnapshot() after creating the subscription.
+    // Track isLoadingSubset on the source collection BEFORE subscribing.
+    // We'll use this to detect if loadSubset was triggered and track it for isReady.
+    const wasLoadingBefore = this.collection.isLoadingSubset
+
+    // Create subscription with includeInitialState. This uses trackLoadSubsetPromise: false
+    // internally, which is required for truncate handling to work correctly.
     const subscription = this.collection.subscribeChanges(sendChanges, {
+      ...(includeInitialState && { includeInitialState }),
       whereExpression,
       onStatusChange,
     })
 
-    // Trigger the snapshot request with tracking enabled (default).
-    // This ensures on-demand sync properly tracks loading state.
-    if (includeInitialState) {
-      subscription.requestSnapshot()
+    // Track loading state for the live query's isReady status.
+    // We can't rely on subscription status changes (trackLoadSubsetPromise: false breaks that),
+    // so instead we check if the collection's isLoadingSubset changed after subscribing.
+    // If a new loadSubset promise started, listen for when loading ends.
+    if (includeInitialState && !wasLoadingBefore && this.collection.isLoadingSubset) {
+      this.trackCollectionLoading()
     }
 
     return subscription
+  }
+
+  /**
+   * Track the source collection's loading state for the live query's isReady.
+   * Creates a promise that resolves when the collection finishes loading.
+   */
+  private trackCollectionLoading(): void {
+    let resolve: () => void
+    const promise = new Promise<void>((res) => {
+      resolve = res
+    })
+
+    // Track this promise on the live query collection for isReady
+    this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
+      promise,
+    )
+
+    // Listen for when loading ends
+    const unsubscribe = this.collection.on(`loadingSubset:change`, (event) => {
+      if (event.loadingSubsetTransition === `end`) {
+        unsubscribe()
+        resolve!()
+      }
+    })
+
+    // If the collection is no longer loading (race condition), resolve immediately
+    if (!this.collection.isLoadingSubset) {
+      unsubscribe()
+      resolve!()
+    }
   }
 
   private subscribeToOrderedChanges(
