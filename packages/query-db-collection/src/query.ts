@@ -112,6 +112,13 @@ export interface QueryCollectionConfig<
     Array<T>,
     TQueryKey
   >[`staleTime`]
+  structuralSharing?: QueryObserverOptions<
+    Array<T>,
+    TError,
+    Array<T>,
+    Array<T>,
+    TQueryKey
+  >['structuralSharing']
 
   /**
    * Metadata to pass to the query.
@@ -543,6 +550,7 @@ export function queryCollectionOptions(
     onUpdate,
     onDelete,
     meta,
+    structuralSharing,
     ...baseCollectionConfig
   } = config
 
@@ -717,7 +725,6 @@ export function queryCollectionOptions(
         queryKey: key,
         queryFn: queryFunction,
         meta: extendedMeta,
-        structuralSharing: true,
         notifyOnChangeProps: `all`,
 
         // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used
@@ -726,6 +733,7 @@ export function queryCollectionOptions(
         ...(retry !== undefined && { retry }),
         ...(retryDelay !== undefined && { retryDelay }),
         ...(staleTime !== undefined && { staleTime }),
+        ...(structuralSharing !== undefined && { structuralSharing }),
       }
 
       const localObserver = new QueryObserver<
