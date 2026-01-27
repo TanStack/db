@@ -34,8 +34,8 @@ import type {
 import type {
   CompareOptions,
   Context,
-  GetResult,
   FunctionalHavingRow,
+  GetResult,
   GroupByCallback,
   JoinOnCallback,
   MergeContextForJoinCallback,
