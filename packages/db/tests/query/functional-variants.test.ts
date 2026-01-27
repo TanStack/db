@@ -653,7 +653,11 @@ describe(`Functional Variants Query`, () => {
 
       // Only users with salary > 60k: Alice (75k), Charlie (85k), Dave (65k)
       expect(results).toHaveLength(3)
-      expect(results.map((r) => r.name).sort()).toEqual([`Alice`, `Charlie`, `Dave`])
+      expect(results.map((r) => r.name).sort()).toEqual([
+        `Alice`,
+        `Charlie`,
+        `Dave`,
+      ])
     })
 
     test(`should allow orderBy with both table refs and $selected`, () => {
