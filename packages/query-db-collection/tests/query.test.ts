@@ -1795,6 +1795,74 @@ describe(`QueryCollection`, () => {
       expect(collection.has(`1`)).toBe(false)
     })
 
+    it(`should auto-start sync when write operations are called on idle collections`, async () => {
+      // This test verifies that write operations automatically start sync
+      // even when startSync is not explicitly set to true.
+      // This fixes SyncNotInitializedError when trying to writeUpsert on
+      // collections that haven't been preloaded yet.
+
+      const queryKey = [`on-demand-write-test`]
+      const queryFn = vi.fn().mockResolvedValue([])
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `on-demand-write-collection`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+        // Note: startSync is NOT set to true - sync should auto-start on write
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Collection starts in idle state (sync not started yet)
+      expect(collection.status).toBe(`idle`)
+      expect(queryFn).not.toHaveBeenCalled()
+
+      // Write operation should auto-start sync and work without error
+      const newItem: TestItem = { id: `1`, name: `Item 1`, value: 10 }
+      collection.utils.writeInsert(newItem)
+
+      // After write, collection should be ready (sync was auto-started)
+      expect(collection.status).toBe(`ready`)
+      expect(collection.size).toBe(1)
+      expect(collection.get(`1`)).toEqual(newItem)
+
+      // Test writeUpsert (the specific operation from the bug report)
+      collection.utils.writeUpsert({ id: `2`, name: `Item 2`, value: 20 })
+
+      expect(collection.size).toBe(2)
+      expect(collection.get(`2`)).toEqual({
+        id: `2`,
+        name: `Item 2`,
+        value: 20,
+      })
+
+      // Test writeUpdate
+      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
+      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      // Test writeDelete
+      collection.utils.writeDelete(`1`)
+      expect(collection.size).toBe(1)
+      expect(collection.has(`1`)).toBe(false)
+
+      // Test writeBatch
+      collection.utils.writeBatch(() => {
+        collection.utils.writeInsert({ id: `3`, name: `Item 3`, value: 30 })
+        collection.utils.writeUpsert({ id: `4`, name: `Item 4`, value: 40 })
+      })
+
+      expect(collection.size).toBe(3)
+      expect(collection.get(`3`)?.name).toBe(`Item 3`)
+      expect(collection.get(`4`)?.name).toBe(`Item 4`)
+
+      // queryFn should still not be called since no data was loaded via loadSubset
+      expect(queryFn).not.toHaveBeenCalled()
+    })
+
     it(`should handle sync method errors appropriately`, async () => {
       const queryKey = [`sync-error-test`]
       const initialItems: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
@@ -2831,7 +2899,7 @@ describe(`QueryCollection`, () => {
       await collection.cleanup()
     })
 
-    it(`should be no-op when sync has not started (no observer created)`, async () => {
+    it(`should auto-start sync when utils are accessed`, async () => {
       const queryKey = [`refetch-test-no-sync`]
       const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `A` }])
 
@@ -2846,9 +2914,15 @@ describe(`QueryCollection`, () => {
         }),
       )
 
-      // Refetch should be no-op because observer doesn't exist yet
+      // Collection starts idle
+      expect(collection.status).toBe(`idle`)
+
+      // Accessing utils auto-starts sync, so refetch will work
       await collection.utils.refetch()
-      expect(queryFn).not.toHaveBeenCalled()
+
+      // Sync was started and queryFn was called
+      expect(collection.status).toBe(`ready`)
+      expect(queryFn).toHaveBeenCalled()
 
       await collection.cleanup()
     })
