@@ -5187,4 +5187,321 @@ describe(`QueryCollection`, () => {
       customQueryClient.clear()
     })
   })
+
+  describe(`refetchOnWindowFocus`, () => {
+    it(`should accept refetchOnWindowFocus as boolean true`, async () => {
+      const queryKey = [`refetchOnFocus`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-focus`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        refetchOnWindowFocus: true,
+        staleTime: 0,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+
+    it(`should accept refetchOnWindowFocus as boolean false`, async () => {
+      const queryKey = [`refetchOnFocusDisabled`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-focus-disabled`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        refetchOnWindowFocus: false,
+        staleTime: 0,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+
+    it(`should accept refetchOnWindowFocus as function predicate`, async () => {
+      const queryKey = [`refetchOnFocusPredicate`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+      const shouldRefetch = vi.fn().mockReturnValue(true)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-focus-predicate`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        refetchOnWindowFocus: shouldRefetch as any,
+        staleTime: 0,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+  })
+
+  describe(`refetchOnReconnect`, () => {
+    it(`should accept refetchOnReconnect as boolean true`, async () => {
+      const queryKey = [`refetchOnReconnect`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-reconnect`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        refetchOnReconnect: true,
+        staleTime: 0,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+
+    it(`should accept refetchOnReconnect as boolean false`, async () => {
+      const queryKey = [`refetchOnReconnectDisabled`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-reconnect-disabled`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        refetchOnReconnect: false,
+        staleTime: 0,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+
+    it(`should accept refetchOnReconnect as function predicate`, async () => {
+      const queryKey = [`refetchOnReconnectPredicate`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+      const shouldRefetch = vi.fn().mockReturnValue(true)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-reconnect-predicate`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        refetchOnReconnect: shouldRefetch as any,
+        staleTime: 0,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+  })
+
+  describe(`networkMode`, () => {
+    it(`should respect networkMode 'always'`, async () => {
+      const queryKey = [`networkModeAlways`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-network-always`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        networkMode: `always`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+
+    it(`should respect networkMode 'offlineFirst'`, async () => {
+      const queryKey = [`networkModeOfflineFirst`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-network-offline-first`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        networkMode: `offlineFirst`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+
+    it(`should respect networkMode 'online'`, async () => {
+      const queryKey = [`networkModeOnline`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-network-online`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        networkMode: `online`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+  })
+
+  describe(`combined refetch options`, () => {
+    it(`should work with both refetchOnWindowFocus and refetchOnReconnect enabled`, async () => {
+      const queryKey = [`combinedRefetch`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-combined`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        refetchOnWindowFocus: true,
+        refetchOnReconnect: true,
+        staleTime: 0,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+
+    it(`should work with networkMode and refetch triggers`, async () => {
+      const queryKey = [`combinedNetworkAndRefetch`]
+      const items: Array<TestItem> = [{ id: `1`, name: `Item 1` }]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `test-combined-network`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        startSync: true,
+        refetchOnWindowFocus: true,
+        networkMode: `offlineFirst`,
+        staleTime: 0,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalledTimes(1)
+        expect(collection.size).toBe(1)
+      })
+
+      expect(collection.get(`1`)).toEqual(items[0])
+    })
+  })
 })
