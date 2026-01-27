@@ -278,7 +278,11 @@ export class BTreeIndex<
     // distinction to avoid infinite loops when undefined is an actual key value.
     let key: any = from === undefined ? START_ITERATION : normalizeValue(from)
 
-    while ((pair = nextPair(key === START_ITERATION ? undefined : key)) !== undefined && result.length < n) {
+    while (
+      (pair = nextPair(key === START_ITERATION ? undefined : key)) !==
+        undefined &&
+      result.length < n
+    ) {
       const newKey = pair[0]
       // When nextPair returns the same key we passed in, we've hit a cycle.
       // This happens when the indexed value is undefined because:
