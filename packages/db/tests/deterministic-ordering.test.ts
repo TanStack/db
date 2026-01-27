@@ -109,6 +109,40 @@ describe(`Deterministic Ordering`, () => {
   })
 
   describe(`BTreeIndex`, () => {
+    it(`should handle undefined indexed values with take and limit`, () => {
+      const index = new BTreeIndex<string>(
+        1,
+        new PropRef([`priority`]),
+        `priority_index`,
+      )
+
+      // Add items where priority is undefined
+      index.add(`a`, { priority: undefined })
+      index.add(`b`, { priority: undefined })
+      index.add(`c`, { priority: 1 })
+
+      // take() with a limit should return results without hanging
+      const keys = index.take(2)
+      expect(keys).toEqual([`a`, `b`])
+    })
+
+    it(`should handle undefined indexed values with takeReversed and limit`, () => {
+      const index = new BTreeIndex<string>(
+        1,
+        new PropRef([`priority`]),
+        `priority_index`,
+      )
+
+      // Add items where priority is undefined
+      index.add(`a`, { priority: undefined })
+      index.add(`b`, { priority: undefined })
+      index.add(`c`, { priority: 1 })
+
+      // takeReversed() with a limit should return results without hanging
+      const keys = index.takeReversed(2)
+      expect(keys).toEqual([`c`, `b`])
+    })
+
     it(`should return keys in deterministic order when indexed values are equal`, () => {
       const index = new BTreeIndex<string>(
         1,
@@ -393,6 +427,72 @@ describe(`Deterministic Ordering`, () => {
       // First 3 in key order: a, b, c
       const keys = changes?.map((c) => c.key)
       expect(keys).toEqual([`a`, `b`, `c`])
+    })
+
+    it(`should handle undefined indexed values with orderBy and limit without hanging`, () => {
+      type Item = { id: string; priority: number | undefined }
+
+      const options = mockSyncCollectionOptions<Item>({
+        id: `test-undefined-priority`,
+        getKey: (item) => item.id,
+        initialData: [],
+      })
+
+      const collection = createCollection(options)
+
+      options.utils.begin()
+      options.utils.write({ type: `insert`, value: { id: `a`, priority: undefined } })
+      options.utils.write({ type: `insert`, value: { id: `b`, priority: undefined } })
+      options.utils.commit()
+
+      // This should hang on the base branch due to infinite loop in takeInternal
+      // when nextHigherPair(undefined) returns the same pair repeatedly
+      const changes = collection.currentStateAsChanges({
+        orderBy: [
+          {
+            expression: new PropRef([`priority`]),
+            compareOptions: { direction: `asc`, nulls: `last` },
+          },
+        ],
+        limit: 1,
+      })
+
+      // Should return the first item without hanging
+      const keys = changes?.map((c) => c.key)
+      expect(keys).toEqual([`a`])
+    })
+
+    it(`should handle mixed undefined and defined values with orderBy and limit`, () => {
+      type Item = { id: string; priority: number | undefined }
+
+      const options = mockSyncCollectionOptions<Item>({
+        id: `test-mixed-undefined-priority`,
+        getKey: (item) => item.id,
+        initialData: [],
+      })
+
+      const collection = createCollection(options)
+
+      options.utils.begin()
+      options.utils.write({ type: `insert`, value: { id: `a`, priority: undefined } })
+      options.utils.write({ type: `insert`, value: { id: `b`, priority: 1 } })
+      options.utils.write({ type: `insert`, value: { id: `c`, priority: undefined } })
+      options.utils.write({ type: `insert`, value: { id: `d`, priority: 2 } })
+      options.utils.commit()
+
+      // With nulls: last, defined values should come first, then undefined values
+      const changes = collection.currentStateAsChanges({
+        orderBy: [
+          {
+            expression: new PropRef([`priority`]),
+            compareOptions: { direction: `asc`, nulls: `last` },
+          },
+        ],
+        limit: 3,
+      })
+
+      const keys = changes?.map((c) => c.key)
+      expect(keys).toEqual([`b`, `d`, `a`])
     })
   })
 })
