@@ -1,4 +1,4 @@
-import { D2, output } from '@tanstack/db-ivm'
+import { D2, createIterationLimitChecker, output } from '@tanstack/db-ivm'
 import { compileQuery } from '../compiler/index.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
 import {
@@ -336,7 +336,43 @@ export class CollectionConfigBuilder<
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
+        // Safety limit to prevent infinite loops when data loading and graph processing
+        // create a feedback cycle.
+        const checkLimit = createIterationLimitChecker({
+          maxSameState: 1000,
+          maxTotal: 10000,
+        })
+
         while (syncState.graph.pendingWork()) {
+          // Use messagesCount as state key - if we're processing messages, we're making progress
+          const stateKey = syncState.messagesCount
+
+          if (
+            checkLimit(() => {
+              // Only compute diagnostics when limit is exceeded (lazy)
+              const collectionIds = Object.keys(this.collections)
+              const orderByInfo = Object.entries(
+                this.optimizableOrderByCollections,
+              ).map(([id, info]) => ({
+                collectionId: id,
+                limit: info.limit,
+                offset: info.offset,
+                dataNeeded: info.dataNeeded?.() ?? `unknown`,
+              }))
+              return {
+                context: `Graph execution`,
+                diagnostics: {
+                  liveQueryId: this.id,
+                  sourceCollections: collectionIds,
+                  runCount: this.runCount,
+                  orderByConfig: orderByInfo,
+                },
+              }
+            }, stateKey)
+          ) {
+            break
+          }
+
           syncState.graph.run()
           // Flush accumulated changes after each graph step to commit them as one transaction.
           // This ensures intermediate join states (like null on one side) don't cause

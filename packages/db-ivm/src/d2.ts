@@ -1,4 +1,5 @@
 import { DifferenceStreamWriter } from './graph.js'
+import { createIterationLimitChecker } from './iteration-tracker.js'
 import type {
   BinaryOperator,
   DifferenceStreamReader,
@@ -57,7 +58,37 @@ export class D2 implements ID2 {
   }
 
   run(): void {
+    // Safety limit to prevent infinite loops in case of circular data flow
+    // or other bugs that cause operators to perpetually produce output.
+    const checkLimit = createIterationLimitChecker({
+      maxSameState: 10000,
+      maxTotal: 100000,
+    })
+
     while (this.pendingWork()) {
+      // Use count of operators with pending work as state key
+      const operatorsWithWorkCount = this.#operators.filter((op) =>
+        op.hasPendingWork(),
+      ).length
+
+      if (
+        checkLimit(() => {
+          // Only compute diagnostics when limit is exceeded (lazy)
+          const operatorsWithWork = this.#operators
+            .filter((op) => op.hasPendingWork())
+            .map((op) => ({ id: op.id, type: op.constructor.name }))
+          return {
+            context: `D2 graph execution`,
+            diagnostics: {
+              operatorsWithPendingWork: operatorsWithWork,
+              totalOperators: this.#operators.length,
+            },
+          }
+        }, operatorsWithWorkCount)
+      ) {
+        break
+      }
+
       this.step()
     }
   }

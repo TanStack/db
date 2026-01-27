@@ -146,9 +146,8 @@ export class CollectionSubscriber<
     // Filter changes to prevent duplicate inserts to D2 pipeline.
     // This ensures D2 multiplicity stays at 1 for visible items, so deletes
     // properly reduce multiplicity to 0 (triggering DELETE output).
-    const changesArray = Array.isArray(changes) ? changes : [...changes]
     const filteredChanges: Array<ChangeMessage<any, string | number>> = []
-    for (const change of changesArray) {
+    for (const change of changes) {
       if (change.type === `insert`) {
         if (this.sentToD2Keys.has(change.key)) {
           // Skip duplicate insert - already sent to D2

@@ -1,3 +1,4 @@
+import { createIterationLimitChecker } from '@tanstack/db-ivm'
 import { ensureIndexForExpression } from '../indexes/auto-index.js'
 import { and, eq, gte, lt } from '../query/builder/functions.js'
 import { PropRef, Value } from '../query/ir.js'
@@ -399,24 +400,29 @@ export class CollectionSubscription
   }
 
   /**
-   * Sends a snapshot that fulfills the `where` clause and all rows are bigger or equal to the cursor.
-   * Requires a range index to be set with `setOrderByIndex` prior to calling this method.
-   * It uses that range index to load the items in the order of the index.
+   * Loads rows from the local collection in sorted order using the BTree index.
+   *
+   * Uses the BTree index (set via `setOrderByIndex`) to iterate through the local
+   * collection's data in sorted order, starting from the cursor position (`minValues`).
+   * Also triggers an async `loadSubset` call to fetch more data from the sync layer
+   * (e.g., Electric backend) if needed.
    *
    * For multi-column orderBy:
-   * - Uses first value from `minValues` for LOCAL index operations (wide bounds, ensures no missed rows)
-   * - Uses all `minValues` to build a precise composite cursor for SYNC layer loadSubset
+   * - Uses first value from `minValues` for BTree index operations (wide bounds, ensures no missed rows)
+   * - Uses all `minValues` to build a precise composite cursor for sync layer loadSubset
    *
-   * Note 1: it may load more rows than the provided LIMIT because it loads all values equal to the first cursor value + limit values greater.
-   *         This is needed to ensure that it does not accidentally skip duplicate values when the limit falls in the middle of some duplicated values.
-   * Note 2: it does not send keys that have already been sent before.
+   * Note 1: May load more rows than `limit` because it includes all rows equal to the
+   *         cursor value. This prevents skipping duplicates when limit falls mid-duplicates.
+   * Note 2: Skips keys that have already been sent to prevent duplicates.
+   *
+   * @returns true if local data was found, false if no more matching rows exist locally
    */
   requestLimitedSnapshot({
     orderBy,
     limit,
     minValues,
     offset,
-  }: RequestLimitedSnapshotOptions) {
+  }: RequestLimitedSnapshotOptions): boolean {
     if (!limit) throw new Error(`limit is required`)
 
     if (!this.orderByIndex) {
@@ -502,8 +508,43 @@ export class CollectionSubscription
         ? compileExpression(new PropRef(orderByExpression.path), true)
         : null
 
+    // Safety limit to prevent infinite loops if the index iteration or filtering
+    // logic has issues. The loop should naturally terminate when the index is
+    // exhausted, but this provides a backstop.
+    const checkLimit = createIterationLimitChecker({
+      maxSameState: 1000,
+      maxTotal: 10000,
+    })
+    let hitIterationLimit = false
+
     while (valuesNeeded() > 0 && !collectionExhausted()) {
-      const insertedKeys = new Set<string | number>() // Track keys we add to `changes` in this iteration
+      // Use changes.length as state key - if we're making progress, this should increase
+      const stateKey = changes.length
+
+      if (
+        checkLimit(
+          () => ({
+            context: `requestLimitedSnapshot`,
+            diagnostics: {
+              collectionId: this.collection.id,
+              collectionSize: this.collection.size,
+              limit,
+              offset,
+              valuesNeeded: valuesNeeded(),
+              keysInBatch: keys.length,
+              changesCollected: changes.length,
+              sentKeysCount: this.sentKeys.size,
+              cursorValue: biggestObservedValue,
+              minValueForIndex,
+              orderByDirection: orderBy[0]!.compareOptions.direction,
+            },
+          }),
+          stateKey,
+        )
+      ) {
+        hitIterationLimit = true
+        break
+      }
 
       for (const key of keys) {
         const value = this.collection.get(key)!
@@ -515,7 +556,6 @@ export class CollectionSubscription
         // Extract the indexed value (e.g., salary) from the row, not the full row
         // This is needed for index.take() to work correctly with the BTree comparator
         biggestObservedValue = valueExtractor ? valueExtractor(value) : value
-        insertedKeys.add(key) // Track this key
       }
 
       keys = index.take(valuesNeeded(), biggestObservedValue, filterFn)
@@ -556,20 +596,20 @@ export class CollectionSubscription
 
       if (whereFromCursor) {
         const { expression } = orderBy[0]!
-        const minValue = minValues[0]
+        const cursorMinValue = minValues[0]
 
         // Build the whereCurrent expression for the first orderBy column
         // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
         // A JS Date represents a 1ms range, so we query for all values within that range
         let whereCurrentCursor: BasicExpression<boolean>
-        if (minValue instanceof Date) {
-          const minValuePlus1ms = new Date(minValue.getTime() + 1)
+        if (cursorMinValue instanceof Date) {
+          const minValuePlus1ms = new Date(cursorMinValue.getTime() + 1)
           whereCurrentCursor = and(
-            gte(expression, new Value(minValue)),
+            gte(expression, new Value(cursorMinValue)),
             lt(expression, new Value(minValuePlus1ms)),
           )
         } else {
-          whereCurrentCursor = eq(expression, new Value(minValue))
+          whereCurrentCursor = eq(expression, new Value(cursorMinValue))
         }
 
         cursorExpressions = {
@@ -597,6 +637,10 @@ export class CollectionSubscription
     // Track this loadSubset call
     this.loadedSubsets.push(loadOptions)
     this.trackLoadSubsetPromise(syncResult)
+
+    // Return true if we found and sent local data, false otherwise.
+    // The async loadSubset call may still fetch data from the backend.
+    return changes.length > 0 && !hitIterationLimit
   }
 
   // TODO: also add similar test but that checks that it can also load it from the collection's loadSubset function
