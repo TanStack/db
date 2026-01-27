@@ -413,9 +413,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   having(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    // Add $selected namespace if SELECT clause exists
+    // Add $selected namespace if SELECT clause exists (either regular or functional)
     const refProxy = (
-      this.query.select
+      this.query.select || this.query.fnSelect
         ? createRefProxyWithSelected(aliases)
         : createRefProxy(aliases)
     ) as RefsForContext<TContext>

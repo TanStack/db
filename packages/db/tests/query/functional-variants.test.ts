@@ -636,6 +636,26 @@ describe(`Functional Variants Query`, () => {
       ])
     })
 
+    test(`should allow fn.having to reference $selected fields from fn.select`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              name: row.user.name,
+              salaryTier: row.user.salary > 60000 ? `high` : `low`,
+            }))
+            .fn.having(({ $selected }) => $selected.salaryTier === `high`),
+      })
+
+      const results = liveCollection.toArray
+
+      // Only users with salary > 60k: Alice (75k), Charlie (85k), Dave (65k)
+      expect(results).toHaveLength(3)
+      expect(results.map((r) => r.name).sort()).toEqual([`Alice`, `Charlie`, `Dave`])
+    })
+
     test(`should allow orderBy with both table refs and $selected`, () => {
       const liveCollection = createLiveQueryCollection({
         startSync: true,
