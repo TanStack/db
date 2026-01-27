@@ -213,7 +213,11 @@ export class CollectionSubscriber<
     // We can't rely on subscription status changes (trackLoadSubsetPromise: false breaks that),
     // so instead we check if the collection's isLoadingSubset changed after subscribing.
     // If a new loadSubset promise started, listen for when loading ends.
-    if (includeInitialState && !wasLoadingBefore && this.collection.isLoadingSubset) {
+    if (
+      includeInitialState &&
+      !wasLoadingBefore &&
+      this.collection.isLoadingSubset
+    ) {
       this.trackCollectionLoading()
     }
 
