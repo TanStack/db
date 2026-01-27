@@ -208,8 +208,7 @@ export class CollectionSubscriber<
     })
 
     // Trigger the snapshot request with tracking enabled (default).
-    // The onStatusChange listener is already registered, so we'll catch
-    // the loadingSubset -> ready transition for on-demand collections.
+    // This ensures on-demand sync properly tracks loading state.
     if (includeInitialState) {
       subscription.requestSnapshot()
     }
