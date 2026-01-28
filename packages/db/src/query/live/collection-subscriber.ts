@@ -197,10 +197,6 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
-    // Track isLoadingSubset on the source collection BEFORE subscribing.
-    // We'll use this to detect if loadSubset was triggered and track it for isReady.
-    const wasLoadingBefore = this.collection.isLoadingSubset
-
     // Create subscription with includeInitialState. This uses trackLoadSubsetPromise: false
     // internally, which is required for truncate handling to work correctly.
     const subscription = this.collection.subscribeChanges(sendChanges, {
@@ -211,13 +207,10 @@ export class CollectionSubscriber<
 
     // Track loading state for the live query's isReady status.
     // We can't rely on subscription status changes (trackLoadSubsetPromise: false breaks that),
-    // so instead we check if the collection's isLoadingSubset changed after subscribing.
-    // If a new loadSubset promise started, listen for when loading ends.
-    if (
-      includeInitialState &&
-      !wasLoadingBefore &&
-      this.collection.isLoadingSubset
-    ) {
+    // so we check if the source collection is loading and track when it finishes.
+    // Each live query needs its own tracking even if another query already started loading,
+    // since each query's isReady state is independent.
+    if (includeInitialState && this.collection.isLoadingSubset) {
       this.trackCollectionLoading()
     }
 
