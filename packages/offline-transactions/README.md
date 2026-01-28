@@ -13,15 +13,46 @@ Offline-first transaction capabilities for TanStack DB that provides durable per
 
 ## Installation
 
+### Web
+
 ```bash
 npm install @tanstack/offline-transactions
 ```
 
+### React Native / Expo
+
+```bash
+npm install @tanstack/offline-transactions @react-native-community/netinfo
+```
+
+The React Native implementation requires the `@react-native-community/netinfo` peer dependency for network connectivity detection.
+
+## Platform Support
+
+This package provides platform-specific implementations for web and React Native environments:
+
+- **Web**: Uses browser APIs (`window.online/offline` events, `document.visibilitychange`)
+- **React Native**: Uses React Native primitives (`@react-native-community/netinfo` for network status, `AppState` for foreground/background detection)
+
 ## Quick Start
+
+Using offline transactions on web and React Native/Expo is identical except for the import. Choose the appropriate import based on your target platform:
+
+**Web:**
 
 ```typescript
 import { startOfflineExecutor } from '@tanstack/offline-transactions'
+```
 
+**React Native / Expo:**
+
+```typescript
+import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
+```
+
+**Usage (same for both platforms):**
+
+```typescript
 // Setup offline executor
 const offline = startOfflineExecutor({
   collections: { todos: todoCollection },
@@ -207,12 +238,21 @@ tx.mutate(() => todoCollection.insert({ id: '1', text: 'Buy milk' }))
 await tx.commit() // Works offline!
 ```
 
-## Browser Support
+## Platform Support
+
+### Web Browsers
 
 - **IndexedDB**: Modern browsers (primary storage)
 - **localStorage**: Fallback for limited environments
 - **Web Locks API**: Chrome 69+, Firefox 96+ (preferred leader election)
 - **BroadcastChannel**: All modern browsers (fallback leader election)
+
+### React Native
+
+- **React Native**: 0.60+ (tested with latest versions)
+- **Expo**: SDK 40+ (tested with latest versions)
+- **Required peer dependency**: `@react-native-community/netinfo` for network connectivity detection
+- **Storage**: Uses AsyncStorage or custom storage adapters
 
 ## License
 

@@ -148,6 +148,7 @@ export function compileQuery(
     queryMapping,
     aliasToCollectionId,
     aliasRemapping,
+    sourceWhereClauses,
   )
   sources[mainSource] = mainInput
 
@@ -184,6 +185,7 @@ export function compileQuery(
       compileQuery,
       aliasToCollectionId,
       aliasRemapping,
+      sourceWhereClauses,
     )
   }
 
@@ -466,6 +468,7 @@ function processFrom(
   queryMapping: QueryMapping,
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -503,6 +506,28 @@ function processFrom(
       // any existing remappings from nested subquery levels.
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // Pull up source WHERE clauses from subquery to parent scope.
+      // This enables loadSubset to receive the correct where clauses for subquery collections.
+      //
+      // IMPORTANT: Skip pull-up for optimizer-created subqueries. These are detected when:
+      // 1. The outer alias (from.alias) matches the inner alias (from.query.from.alias)
+      // 2. The subquery was found in queryMapping (it's a user-defined subquery, not optimizer-created)
+      //
+      // For optimizer-created subqueries, the parent already has the sourceWhereClauses
+      // extracted from the original raw query, so pulling up would be redundant.
+      // More importantly, pulling up for optimizer-created subqueries can cause issues
+      // when the optimizer has restructured the query.
+      const isUserDefinedSubquery = queryMapping.has(from.query)
+      const subqueryFromAlias = from.query.from.alias
+      const isOptimizerCreated =
+        !isUserDefinedSubquery && from.alias === subqueryFromAlias
+
+      if (!isOptimizerCreated) {
+        for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause)
+        }
+      }
 
       // Create a FLATTENED remapping from outer alias to innermost alias.
       // For nested subqueries, this ensures one-hop lookups (not recursive chains).

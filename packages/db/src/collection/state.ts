@@ -25,6 +25,12 @@ interface PendingSyncedTransaction<
     upserts: Map<TKey, T>
     deletes: Set<TKey>
   }
+  /**
+   * When true, this transaction should be processed immediately even if there
+   * are persisting user transactions. Used by manual write operations (writeInsert,
+   * writeUpdate, writeDelete, writeUpsert) which need synchronous updates to syncedData.
+   */
+  immediate?: boolean
 }
 
 export class CollectionStateManager<
@@ -437,12 +443,16 @@ export class CollectionStateManager<
       committedSyncedTransactions,
       uncommittedSyncedTransactions,
       hasTruncateSync,
+      hasImmediateSync,
     } = this.pendingSyncedTransactions.reduce(
       (acc, t) => {
         if (t.committed) {
           acc.committedSyncedTransactions.push(t)
-          if (t.truncate === true) {
+          if (t.truncate) {
             acc.hasTruncateSync = true
+          }
+          if (t.immediate) {
+            acc.hasImmediateSync = true
           }
         } else {
           acc.uncommittedSyncedTransactions.push(t)
@@ -457,10 +467,21 @@ export class CollectionStateManager<
           PendingSyncedTransaction<TOutput, TKey>
         >,
         hasTruncateSync: false,
+        hasImmediateSync: false,
       },
     )
 
-    if (!hasPersistingTransaction || hasTruncateSync) {
+    // Process committed transactions if:
+    // 1. No persisting user transaction (normal sync flow), OR
+    // 2. There's a truncate operation (must be processed immediately), OR
+    // 3. There's an immediate transaction (manual writes must be processed synchronously)
+    //
+    // Note: When hasImmediateSync or hasTruncateSync is true, we process ALL committed
+    // sync transactions (not just the immediate/truncate ones). This is intentional for
+    // ordering correctness: if we only processed the immediate transaction, earlier
+    // non-immediate transactions would be applied later and could overwrite newer state.
+    // Processing all committed transactions together preserves causal ordering.
+    if (!hasPersistingTransaction || hasTruncateSync || hasImmediateSync) {
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 

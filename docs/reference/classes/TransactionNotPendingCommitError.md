@@ -5,7 +5,7 @@ title: TransactionNotPendingCommitError
 
 # Class: TransactionNotPendingCommitError
 
-Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L308)
+Defined in: [packages/db/src/errors.ts:324](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L324)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:308](https://github.com/TanStack/db/blob/
 new TransactionNotPendingCommitError(): TransactionNotPendingCommitError;
 ```
 
-Defined in: [packages/db/src/errors.ts:309](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L309)
+Defined in: [packages/db/src/errors.ts:325](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L325)
 
 #### Returns
 

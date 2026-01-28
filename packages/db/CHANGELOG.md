@@ -1,5 +1,58 @@
 # @tanstack/db
 
+## 0.5.24
+
+### Patch Changes
+
+- Fix `$selected` namespace availability in `orderBy`, `having`, and `fn.having` when using `fn.select`. Previously, the `$selected` namespace was only available when using regular `.select()`, not functional `fn.select()`. ([#1183](https://github.com/TanStack/db/pull/1183))
+
+## 0.5.23
+
+### Patch Changes
+
+- Fix bug that caused the WHERE clause of a subquery not to be passed to the `loadSubset` function ([#1097](https://github.com/TanStack/db/pull/1097))
+
+## 0.5.22
+
+### Patch Changes
+
+- Fix `gcTime: Infinity` causing immediate garbage collection instead of disabling GC. JavaScript's `setTimeout` coerces `Infinity` to `0` via ToInt32, so we now explicitly check for non-finite values. ([#1135](https://github.com/TanStack/db/pull/1135))
+
+## 0.5.21
+
+### Patch Changes
+
+- Clarify queueStrategy error handling behavior in documentation. Changed "guaranteed to persist" to "guaranteed to be attempted" and added explicit documentation about how failed mutations are handled (not retried, queue continues). Added new Retry Behavior section with example code for implementing custom retry logic. ([#1107](https://github.com/TanStack/db/pull/1107))
+
+- Improve DuplicateKeySyncError message when using `.distinct()` with custom `getKey`. The error now explains that `.distinct()` deduplicates by the entire selected object, and provides actionable guidance to fix the issue. ([#1119](https://github.com/TanStack/db/pull/1119))
+
+- Fix syncedData not updating when manual write operations (writeUpsert, writeInsert, etc.) are called after async operations in mutation handlers. Previously, the sync transaction would be blocked by the persisting user transaction, leaving syncedData stale until the next sync cycle. ([#1130](https://github.com/TanStack/db/pull/1130))
+
+- Add string support to `min()` and `max()` aggregate functions. These functions now work with strings using lexicographic comparison, matching standard SQL behavior. ([#1120](https://github.com/TanStack/db/pull/1120))
+
+- Updated dependencies [[`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db-ivm@0.1.17
+
+## 0.5.20
+
+### Patch Changes
+
+- Updated dependencies [[`f5b504e`](https://github.com/TanStack/db/commit/f5b504e6d105034d23cb2ae27782e8cba0094cbe)]:
+  - @tanstack/db-ivm@0.1.16
+
+## 0.5.19
+
+### Patch Changes
+
+- Fix `isReady()` returning `true` while `toArray()` returns empty results. The status now correctly waits until data has been processed through the graph before marking ready. ([#1114](https://github.com/TanStack/db/pull/1114))
+
+  Also fix duplicate key errors when live queries use joins with custom `getKey` functions. D2's incremental join can produce multiple outputs for the same key during a single graph run; this change batches all outputs into a single transaction to prevent conflicts.
+
+- Introduce $selected namespace for accessing fields from SELECT clause inside ORDER BY and HAVING clauses. ([#1094](https://github.com/TanStack/db/pull/1094))
+
+- Updated dependencies [[`2456adb`](https://github.com/TanStack/db/commit/2456adbdb78b01d3f7323b3a0405b25f578df956)]:
+  - @tanstack/db-ivm@0.1.15
+
 ## 0.5.18
 
 ### Patch Changes

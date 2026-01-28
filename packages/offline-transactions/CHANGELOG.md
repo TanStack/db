@@ -1,5 +1,55 @@
 # @tanstack/offline-transactions
 
+## 1.0.14
+
+### Patch Changes
+
+- Updated dependencies [[`7099459`](https://github.com/TanStack/db/commit/7099459291810b237a9fb24bbfe6e543852a2ab2)]:
+  - @tanstack/db@0.5.24
+
+## 1.0.13
+
+### Patch Changes
+
+- Fix optimistic state not being restored to collections on page refresh while offline. Pending transactions are now automatically rehydrated from storage and their optimistic mutations applied to the UI immediately on startup, providing a seamless offline experience. ([#1169](https://github.com/TanStack/db/pull/1169))
+
+- Updated dependencies [[`05130f2`](https://github.com/TanStack/db/commit/05130f2420eb682f11f099310a0af87afa3f35fe)]:
+  - @tanstack/db@0.5.23
+
+## 1.0.12
+
+### Patch Changes
+
+- Updated dependencies [[`f9b741e`](https://github.com/TanStack/db/commit/f9b741e9fb636be1c9f1502b7e28fe691bae2480)]:
+  - @tanstack/db@0.5.22
+
+## 1.0.11
+
+### Patch Changes
+
+- Fix date field corruption after app restart. String values matching ISO date format were incorrectly converted to Date objects during deserialization, corrupting user data. Now only explicit Date markers are converted, preserving string values intact. ([#1127](https://github.com/TanStack/db/pull/1127))
+
+- Fix mutation.changes field being lost during offline transaction serialization. Previously, the changes field was not included in serialized mutations, causing it to be empty ({}) after app restart. This led to sync functions receiving incomplete data when using mutation.changes for partial updates. ([#1124](https://github.com/TanStack/db/pull/1124))
+
+- Introduce specialized OnlineDetector for React Native ([#1137](https://github.com/TanStack/db/pull/1137))
+
+- Updated dependencies [[`6745ed0`](https://github.com/TanStack/db/commit/6745ed003dc25cfd6fa0f7e60f708205a6069ff2), [`1b22e40`](https://github.com/TanStack/db/commit/1b22e40c56323cfa5e7f759272fed53320aa32f7), [`7a2cacd`](https://github.com/TanStack/db/commit/7a2cacd7a426530cb77844a8c2680f6b06e9ce2f), [`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db@0.5.21
+
+## 1.0.10
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
+## 1.0.9
+
+### Patch Changes
+
+- Updated dependencies [[`29033b8`](https://github.com/TanStack/db/commit/29033b8f55b0ba5721371ad761037ec813440aa7), [`888ad6a`](https://github.com/TanStack/db/commit/888ad6afe5932b0467320c04fbd4583469cb9c47)]:
+  - @tanstack/db@0.5.19
+
 ## 1.0.8
 
 ### Patch Changes

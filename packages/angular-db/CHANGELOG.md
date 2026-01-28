@@ -1,5 +1,47 @@
 # @tanstack/angular-db
 
+## 0.1.50
+
+### Patch Changes
+
+- Updated dependencies [[`7099459`](https://github.com/TanStack/db/commit/7099459291810b237a9fb24bbfe6e543852a2ab2)]:
+  - @tanstack/db@0.5.24
+
+## 0.1.49
+
+### Patch Changes
+
+- Updated dependencies [[`05130f2`](https://github.com/TanStack/db/commit/05130f2420eb682f11f099310a0af87afa3f35fe)]:
+  - @tanstack/db@0.5.23
+
+## 0.1.48
+
+### Patch Changes
+
+- Updated dependencies [[`f9b741e`](https://github.com/TanStack/db/commit/f9b741e9fb636be1c9f1502b7e28fe691bae2480)]:
+  - @tanstack/db@0.5.22
+
+## 0.1.47
+
+### Patch Changes
+
+- Updated dependencies [[`6745ed0`](https://github.com/TanStack/db/commit/6745ed003dc25cfd6fa0f7e60f708205a6069ff2), [`1b22e40`](https://github.com/TanStack/db/commit/1b22e40c56323cfa5e7f759272fed53320aa32f7), [`7a2cacd`](https://github.com/TanStack/db/commit/7a2cacd7a426530cb77844a8c2680f6b06e9ce2f), [`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db@0.5.21
+
+## 0.1.46
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
+## 0.1.45
+
+### Patch Changes
+
+- Updated dependencies [[`29033b8`](https://github.com/TanStack/db/commit/29033b8f55b0ba5721371ad761037ec813440aa7), [`888ad6a`](https://github.com/TanStack/db/commit/888ad6afe5932b0467320c04fbd4583469cb9c47)]:
+  - @tanstack/db@0.5.19
+
 ## 0.1.44
 
 ### Patch Changes

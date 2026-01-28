@@ -402,6 +402,49 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(books?.order_count).toBe(3)
         expect(books?.total_amount).toBe(800) // 150+250+400
       })
+
+      test(`min/max on string fields`, () => {
+        const categorySummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                first_status: min(orders.status), // alphabetically first
+                last_status: max(orders.status), // alphabetically last
+                first_category: min(orders.product_category),
+                last_category: max(orders.product_category),
+              })),
+        })
+
+        expect(categorySummary.size).toBe(3) // 3 customers
+
+        // Customer 1: orders 1, 2, 7 (statuses: completed, completed, completed; categories: electronics, electronics, books)
+        const customer1 = categorySummary.get(1)
+        expect(customer1?.customer_id).toBe(1)
+        expect(customer1?.first_status).toBe(`completed`) // all completed
+        expect(customer1?.last_status).toBe(`completed`)
+        expect(customer1?.first_category).toBe(`books`) // alphabetically books < electronics
+        expect(customer1?.last_category).toBe(`electronics`)
+
+        // Customer 2: orders 3, 4 (statuses: pending, completed; categories: books, electronics)
+        const customer2 = categorySummary.get(2)
+        expect(customer2?.customer_id).toBe(2)
+        expect(customer2?.first_status).toBe(`completed`) // alphabetically completed < pending
+        expect(customer2?.last_status).toBe(`pending`)
+        expect(customer2?.first_category).toBe(`books`)
+        expect(customer2?.last_category).toBe(`electronics`)
+
+        // Customer 3: orders 5, 6 (statuses: pending, cancelled; categories: books, electronics)
+        const customer3 = categorySummary.get(3)
+        expect(customer3?.customer_id).toBe(3)
+        expect(customer3?.first_status).toBe(`cancelled`) // alphabetically cancelled < pending
+        expect(customer3?.last_status).toBe(`pending`)
+        expect(customer3?.first_category).toBe(`books`)
+        expect(customer3?.last_category).toBe(`electronics`)
+      })
     })
 
     describe(`Multiple Column Grouping`, () => {

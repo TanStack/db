@@ -66,6 +66,7 @@ export function processJoins(
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
 
@@ -89,6 +90,7 @@ export function processJoins(
       onCompileSubquery,
       aliasToCollectionId,
       aliasRemapping,
+      sourceWhereClauses,
     )
   }
 
@@ -118,6 +120,7 @@ function processJoin(
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): NamespacedAndKeyedStream {
   const isCollectionRef = joinClause.from.type === `collectionRef`
 
@@ -140,6 +143,7 @@ function processJoin(
     onCompileSubquery,
     aliasToCollectionId,
     aliasRemapping,
+    sourceWhereClauses,
   )
 
   // Add the joined source to the sources map
@@ -431,6 +435,7 @@ function processJoinSource(
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
   aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -468,6 +473,26 @@ function processJoinSource(
       // any existing remappings from nested subquery levels.
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // Pull up source WHERE clauses from subquery to parent scope.
+      // This enables loadSubset to receive the correct where clauses for subquery collections.
+      //
+      // IMPORTANT: Skip pull-up for optimizer-created subqueries. These are detected when:
+      // 1. The outer alias (from.alias) matches the inner alias (from.query.from.alias)
+      // 2. The subquery was found in queryMapping (it's a user-defined subquery, not optimizer-created)
+      //
+      // For optimizer-created subqueries, the parent already has the sourceWhereClauses
+      // extracted from the original raw query, so pulling up would be redundant.
+      const isUserDefinedSubquery = queryMapping.has(from.query)
+      const fromInnerAlias = from.query.from.alias
+      const isOptimizerCreated =
+        !isUserDefinedSubquery && from.alias === fromInnerAlias
+
+      if (!isOptimizerCreated) {
+        for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause)
+        }
+      }
 
       // Create a flattened remapping from outer alias to innermost alias.
       // For nested subqueries, this ensures one-hop lookups (not recursive chains).
