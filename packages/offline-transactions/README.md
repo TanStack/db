@@ -5,6 +5,7 @@ Offline-first transaction capabilities for TanStack DB that provides durable per
 ## Features
 
 - **Outbox Pattern**: Persist mutations before dispatch for zero data loss
+- **Offline Detection**: Skip retries when offline, auto-resume when connectivity restored
 - **Automatic Retry**: Exponential backoff with jitter for failed transactions
 - **Multi-tab Coordination**: Leader election ensures safe storage access
 - **FIFO Sequential Processing**: Transactions execute one at a time in creation order
@@ -129,8 +130,38 @@ interface OfflineConfig {
   beforeRetry?: (transactions: OfflineTransaction[]) => OfflineTransaction[]
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
+  onlineDetector?: OnlineDetector
+}
+
+interface OnlineDetector {
+  subscribe: (callback: () => void) => () => void
+  notifyOnline: () => void
+  isOnline: () => boolean
+  dispose: () => void
 }
 ```
+
+### onlineDetector
+
+By default, `onlineDetector` is `undefined` and the system will use the built-in `DefaultOnlineDetector`.
+
+**How it works:**
+- Provides an `isOnline()` method to check connectivity status before executing transactions
+
+**Transactions are skipped when offline** 
+- Avoid unnecessary retry attempts
+- Allows subscribers to be notified when connectivity is restored, triggering pending transaction execution
+
+**DefaultOnlineDetector behavior:**
+- Uses the browser's `navigator.onLine` API to detect online/offline state
+- Automatically triggers transaction execution on these events:
+  - `online` event (browser detects network connection)
+  - `visibilitychange` event (when tab becomes visible)
+
+**Manual trigger:**
+- `notifyOnline()` method can be used to manually trigger transaction execution
+- Only succeeds if `isOnline()` returns `true` 
+
 
 ### OfflineExecutor
 
@@ -144,7 +175,7 @@ interface OfflineConfig {
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
 - `peekOutbox()` - View all pending transactions
-- `notifyOnline()` - Manually trigger retry execution
+- `notifyOnline()` - Manually trigger transaction execution (only succeeds if online) 
 - `dispose()` - Clean up resources
 
 ### Error Handling
@@ -167,6 +198,55 @@ const mutationFn = async ({ transaction }) => {
 ```
 
 ## Advanced Usage
+
+### Custom Online Detector
+
+By default, the executor uses the browser's `navigator.onLine` API to detect connectivity. You can provide a custom detector for more sophisticated detection logic:
+
+```typescript
+class CustomOnlineDetector implements OnlineDetector {
+  private listeners = new Set<() => void>()
+  private online = true
+
+  constructor() {
+    // Poll your API endpoint to check connectivity
+    setInterval(async () => {
+      try {
+        await fetch('/api/health', { method: 'HEAD' })
+        const wasOffline = !this.online
+        this.online = true
+        if (wasOffline) {
+          this.notifyOnline()
+        }
+      } catch {
+        this.online = false
+      }
+    }, 60000)
+  }
+
+  isOnline(): boolean {
+    return this.online
+  }
+
+  subscribe(callback: () => void): () => void {
+    this.listeners.add(callback)
+    return () => this.listeners.delete(callback)
+  }
+
+  notifyOnline(): void {
+    this.listeners.forEach((cb) => cb())
+  }
+
+  dispose(): void {
+    this.listeners.clear()
+  }
+}
+
+const executor = startOfflineExecutor({
+  onlineDetector: new CustomOnlineDetector(),
+  // ... other config
+})
+```
 
 ### Custom Storage Adapter
 
