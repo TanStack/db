@@ -103,11 +103,12 @@ The freeze occurs in the `while (pendingWork())` loop in
 while (syncState.graph.pendingWork()) {
   syncState.graph.run()
   syncState.flushPendingChanges?.()
-  callback?.()  // loadMoreIfNeeded → may add data → creates pendingWork
+  callback?.() // loadMoreIfNeeded → may add data → creates pendingWork
 }
 ```
 
 Each iteration:
+
 1. `graph.run()` processes data through the D2 pipeline (WHERE, ORDER BY, LIMIT)
 2. `flushPendingChanges()` commits output changes
 3. `callback()` → `loadMoreIfNeeded()` checks if the topK operator needs more
@@ -148,6 +149,7 @@ appear in profiling because:
 **Calendar event**: `7ddee14e-e233-46ce-9fb4-2c65973e1c42`
 
 **Query**: `useUpcomingMeetings` with:
+
 ```typescript
 .where(({ ce }) =>
   and(
@@ -161,6 +163,7 @@ appear in profiling because:
 ```
 
 **Sequence of events**:
+
 1. User loads meeting page → shape established (previous handle
    `100275401-1769099428807830`)
 2. User navigates to inbox page → meeting page unmounts
@@ -180,6 +183,7 @@ appear in profiling because:
 10. App freezes in `maybeRunGraph` loop
 
 **HTTP evidence**:
+
 - Request 1 (`offset=-1`): `cf-cache-status: HIT`, `age: 663` (11 min stale)
 - Requests 2-3: `cf-cache-status: REVALIDATED` (snapshot continuation)
 - Request 4: offset jumps from `0_2` to `5264441183696_0` (snapshot→log transition),
@@ -239,6 +243,7 @@ related to the stale cache offset bug tracked in
 [electric-sql/electric#3785](https://github.com/electric-sql/electric/issues/3785).
 
 Options:
+
 - Investigate why `expired_handle` doesn't prevent Cloudflare cache HITs
 - Ensure the Cloudflare cache key includes the `expired_handle` parameter
 - Add a unique nonce/timestamp to the initial `offset=-1` request URL
@@ -260,28 +265,30 @@ while (syncState.graph.pendingWork() && iterations < MAX_GRAPH_ITERATIONS) {
   iterations++
 }
 if (iterations >= MAX_GRAPH_ITERATIONS) {
-  console.warn('maybeRunGraph reached maximum iterations — possible infinite loop')
+  console.warn(
+    'maybeRunGraph reached maximum iterations — possible infinite loop',
+  )
 }
 ```
 
 ## Key Code Locations
 
-| File | Lines | Role |
-|------|-------|------|
-| `packages/db/src/collection/state.ts` | 590-601 | Partial update merging (root cause) |
+| File                                                      | Lines   | Role                                         |
+| --------------------------------------------------------- | ------- | -------------------------------------------- |
+| `packages/db/src/collection/state.ts`                     | 590-601 | Partial update merging (root cause)          |
 | `packages/db/src/query/live/collection-config-builder.ts` | 339-346 | `maybeRunGraph` while loop (freeze location) |
-| `packages/db/src/query/live/collection-subscriber.ts` | 142-187 | `sendChangesToPipeline` with dedup |
-| `packages/db/src/query/live/collection-subscriber.ts` | 286-311 | `loadMoreIfNeeded` callback |
-| `packages/db/src/query/live/collection-subscriber.ts` | 343-378 | `loadNextItems` cursor-based loading |
-| `packages/db/src/collection/subscription.ts` | 414-600 | `requestLimitedSnapshot` with BTree |
-| `packages/db/src/collection/subscription.ts` | 146-219 | `handleTruncate` buffering |
-| `packages/db/src/collection/change-events.ts` | 221-236 | `createFilterFunctionFromExpression` |
-| `packages/db/src/collection/change-events.ts` | 244-299 | `createFilteredCallback` WHERE filter |
-| `packages/db/src/indexes/btree-index.ts` | 261-291 | `takeInternal` BTree traversal |
-| `packages/db/src/query/compiler/evaluators.ts` | 13-31 | `isUnknown`/`toBooleanPredicate` |
-| `packages/db/src/query/compiler/order-by.ts` | 224-290 | OrderBy optimization info |
-| `packages/db/src/utils/comparison.ts` | 24-78 | `ascComparator` null handling |
-| `packages/electric-db-collection/src/electric.ts` | — | ElectricSQL shape stream integration |
+| `packages/db/src/query/live/collection-subscriber.ts`     | 142-187 | `sendChangesToPipeline` with dedup           |
+| `packages/db/src/query/live/collection-subscriber.ts`     | 286-311 | `loadMoreIfNeeded` callback                  |
+| `packages/db/src/query/live/collection-subscriber.ts`     | 343-378 | `loadNextItems` cursor-based loading         |
+| `packages/db/src/collection/subscription.ts`              | 414-600 | `requestLimitedSnapshot` with BTree          |
+| `packages/db/src/collection/subscription.ts`              | 146-219 | `handleTruncate` buffering                   |
+| `packages/db/src/collection/change-events.ts`             | 221-236 | `createFilterFunctionFromExpression`         |
+| `packages/db/src/collection/change-events.ts`             | 244-299 | `createFilteredCallback` WHERE filter        |
+| `packages/db/src/indexes/btree-index.ts`                  | 261-291 | `takeInternal` BTree traversal               |
+| `packages/db/src/query/compiler/evaluators.ts`            | 13-31   | `isUnknown`/`toBooleanPredicate`             |
+| `packages/db/src/query/compiler/order-by.ts`              | 224-290 | OrderBy optimization info                    |
+| `packages/db/src/utils/comparison.ts`                     | 24-78   | `ascComparator` null handling                |
+| `packages/electric-db-collection/src/electric.ts`         | —       | ElectricSQL shape stream integration         |
 
 ## ElectricSQL Behavior Reference
 
