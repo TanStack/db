@@ -505,11 +505,6 @@ export type CollectionStatus =
 
 export type SyncMode = `eager` | `on-demand`
 
-/**
- * @typeParam TReturn - @internal DEPRECATED: This generic parameter exists for backward compatibility only.
- * Mutation handlers should not return values. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination.
- * This parameter will be removed in v1.0.
- */
 export interface BaseCollectionConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -519,7 +514,6 @@ export interface BaseCollectionConfig<
   // requires either T to be provided or a schema to be provided but not both!
   TSchema extends StandardSchemaV1 = never,
   TUtils extends UtilsRecord = UtilsRecord,
-  TReturn = any,
 > {
   // If an id isn't passed in, a UUID will be
   // generated for it.
@@ -634,7 +628,7 @@ export interface BaseCollectionConfig<
     /**
      * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
      */
-    | InsertMutationFn<T, TKey, TUtils, TReturn>
+    | InsertMutationFn<T, TKey, TUtils, unknown>
 
   /**
    * Optional asynchronous handler function called before an update operation
@@ -694,7 +688,7 @@ export interface BaseCollectionConfig<
     /**
      * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
      */
-    | UpdateMutationFn<T, TKey, TUtils, TReturn>
+    | UpdateMutationFn<T, TKey, TUtils, unknown>
   /**
    * Optional asynchronous handler function called before a delete operation
    *
@@ -752,7 +746,7 @@ export interface BaseCollectionConfig<
     /**
      * @deprecated Returning values from mutation handlers is deprecated. Use collection utilities (refetch, awaitTxId, etc.) for sync coordination. This signature will be removed in v1.0.
      */
-    | DeleteMutationFn<T, TKey, TUtils, TReturn>
+    | DeleteMutationFn<T, TKey, TUtils, unknown>
 
   /**
    * Specifies how to compare data in the collection.

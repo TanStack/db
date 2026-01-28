@@ -1265,108 +1265,55 @@ export function queryCollectionOptions(
     () => writeContext,
   )
 
+  // Helper to handle deprecated auto-refetch behavior with warnings
+  async function handleDeprecatedAutoRefetch(
+    handlerResult: object,
+  ): Promise<void> {
+    const explicitRefetchFalse =
+      'refetch' in handlerResult &&
+      (handlerResult as Record<string, unknown>).refetch === false
+
+    if (explicitRefetchFalse) {
+      warnOnce(
+        'query-collection-refetch-false',
+        '[TanStack DB] Note: `return { refetch: false }` is the correct way to skip auto-refetch for now. ' +
+          'In v1.0, auto-refetch will be removed entirely and you should call `await collection.utils.refetch()` explicitly when needed, ' +
+          'or omit it to skip refetching. ' +
+          'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
+      )
+    } else {
+      warnOnce(
+        'query-collection-auto-refetch',
+        '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
+          'This behavior will be removed in v1.0. To prepare: ' +
+          '(1) Add `await collection.utils.refetch()` to your handler if you need refetching, or ' +
+          "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
+          'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
+      )
+      await refetch()
+    }
+  }
+
   // Create wrapper handlers for direct persistence operations that handle refetching
+  // These wrappers process deprecated return values but don't pass them through
   const wrappedOnInsert = onInsert
-    ? async (params: InsertMutationFnParams<any>) => {
+    ? async (params: InsertMutationFnParams<any>): Promise<void> => {
         const handlerResult = (await onInsert(params)) ?? {}
-
-        const explicitRefetchFalse =
-          handlerResult &&
-          typeof handlerResult === 'object' &&
-          'refetch' in handlerResult &&
-          handlerResult.refetch === false
-
-        if (explicitRefetchFalse) {
-          // User is correctly opting out of auto-refetch - warn about upcoming change
-          warnOnce(
-            'query-collection-refetch-false',
-            '[TanStack DB] Note: `return { refetch: false }` is the correct way to skip auto-refetch for now. ' +
-              'In v1.0, auto-refetch will be removed entirely and you should call `await collection.utils.refetch()` explicitly when needed, ' +
-              'or omit it to skip refetching. ' +
-              'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
-          )
-        } else {
-          // Auto-refetch is happening - warn about upcoming removal
-          warnOnce(
-            'query-collection-auto-refetch',
-            '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
-              'This behavior will be removed in v1.0. To prepare: ' +
-              '(1) Add `await collection.utils.refetch()` to your handler if you need refetching, or ' +
-              "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
-              'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
-          )
-          await refetch()
-        }
-
-        return handlerResult
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnUpdate = onUpdate
-    ? async (params: UpdateMutationFnParams<any>) => {
+    ? async (params: UpdateMutationFnParams<any>): Promise<void> => {
         const handlerResult = (await onUpdate(params)) ?? {}
-
-        const explicitRefetchFalse =
-          handlerResult &&
-          typeof handlerResult === 'object' &&
-          'refetch' in handlerResult &&
-          handlerResult.refetch === false
-
-        if (explicitRefetchFalse) {
-          warnOnce(
-            'query-collection-refetch-false',
-            '[TanStack DB] Note: `return { refetch: false }` is the correct way to skip auto-refetch for now. ' +
-              'In v1.0, auto-refetch will be removed entirely and you should call `await collection.utils.refetch()` explicitly when needed, ' +
-              'or omit it to skip refetching. ' +
-              'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
-          )
-        } else {
-          warnOnce(
-            'query-collection-auto-refetch',
-            '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
-              'This behavior will be removed in v1.0. To prepare: ' +
-              '(1) Add `await collection.utils.refetch()` to your handler if you need refetching, or ' +
-              "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
-              'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
-          )
-          await refetch()
-        }
-
-        return handlerResult
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 
   const wrappedOnDelete = onDelete
-    ? async (params: DeleteMutationFnParams<any>) => {
+    ? async (params: DeleteMutationFnParams<any>): Promise<void> => {
         const handlerResult = (await onDelete(params)) ?? {}
-
-        const explicitRefetchFalse =
-          handlerResult &&
-          typeof handlerResult === 'object' &&
-          'refetch' in handlerResult &&
-          handlerResult.refetch === false
-
-        if (explicitRefetchFalse) {
-          warnOnce(
-            'query-collection-refetch-false',
-            '[TanStack DB] Note: `return { refetch: false }` is the correct way to skip auto-refetch for now. ' +
-              'In v1.0, auto-refetch will be removed entirely and you should call `await collection.utils.refetch()` explicitly when needed, ' +
-              'or omit it to skip refetching. ' +
-              'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
-          )
-        } else {
-          warnOnce(
-            'query-collection-auto-refetch',
-            '[TanStack DB] DEPRECATED: QueryCollection handlers currently auto-refetch after completion. ' +
-              'This behavior will be removed in v1.0. To prepare: ' +
-              '(1) Add `await collection.utils.refetch()` to your handler if you need refetching, or ' +
-              "(2) Return `{ refetch: false }` to opt out now if you don't need it. " +
-              'See: https://tanstack.com/db/latest/docs/collections/query-collection#controlling-refetch-behavior',
-          )
-          await refetch()
-        }
-
-        return handlerResult
+        await handleDeprecatedAutoRefetch(handlerResult)
       }
     : undefined
 

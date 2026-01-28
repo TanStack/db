@@ -142,13 +142,7 @@ export interface ElectricCollectionConfig<
   T extends Row<unknown> = Row<unknown>,
   TSchema extends StandardSchemaV1 = never,
 > extends Omit<
-  BaseCollectionConfig<
-    T,
-    string | number,
-    TSchema,
-    ElectricCollectionUtils<T>,
-    any
-  >,
+  BaseCollectionConfig<T, string | number, TSchema, ElectricCollectionUtils<T>>,
   `onInsert` | `onUpdate` | `onDelete` | `syncMode`
 > {
   /**
@@ -167,16 +161,18 @@ export interface ElectricCollectionConfig<
    * Optional asynchronous handler function called before an insert operation
    *
    * **IMPORTANT - Electric Synchronization:**
-   * This handler returns `Promise<void>`, but **must not resolve** until synchronization is confirmed.
-   * You must await one of these synchronization utilities before the handler completes:
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
    * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
    * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
    *
    * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
    *
    * @param params Object containing transaction and collection information
-   * @returns Promise<void> - Must not resolve until synchronization is complete
-   * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
    *
    * @example
    * // Recommended: Wait for txid to sync
@@ -258,16 +254,18 @@ export interface ElectricCollectionConfig<
    * Optional asynchronous handler function called before an update operation
    *
    * **IMPORTANT - Electric Synchronization:**
-   * This handler returns `Promise<void>`, but **must not resolve** until synchronization is confirmed.
-   * You must await one of these synchronization utilities before the handler completes:
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
    * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
    * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
    *
    * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
    *
    * @param params Object containing transaction and collection information
-   * @returns Promise<void> - Must not resolve until synchronization is complete
-   * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
    *
    * @example
    * // Recommended: Wait for txid to sync
@@ -306,16 +304,18 @@ export interface ElectricCollectionConfig<
    * Optional asynchronous handler function called before a delete operation
    *
    * **IMPORTANT - Electric Synchronization:**
-   * This handler returns `Promise<void>`, but **must not resolve** until synchronization is confirmed.
-   * You must await one of these synchronization utilities before the handler completes:
+   * This handler **must not resolve** until synchronization is confirmed.
+   * Await one of these synchronization utilities before the handler completes:
    * 1. `await collection.utils.awaitTxId(txid)` (recommended for most cases)
    * 2. `await collection.utils.awaitMatch(fn)` for custom matching logic
    *
    * Simply returning without waiting for sync will drop optimistic state too early, causing UI glitches.
    *
    * @param params Object containing transaction and collection information
-   * @returns Promise<void> - Must not resolve until synchronization is complete
-   * @deprecated Returning { txid } from handlers is deprecated. Use `await collection.utils.awaitTxId(txid)` instead.
+   * @returns Promise that should resolve after synchronization is complete
+   *
+   * **Deprecation notice:** Returning `{ txid }` from handlers is deprecated and will be removed in v1.0.
+   * Use `await collection.utils.awaitTxId(txid)` within the handler instead.
    *
    * @example
    * // Recommended: Wait for txid to sync
@@ -745,7 +745,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
    */
   const awaitMatch: AwaitMatchFn<any> = async (
     matchFn: MatchFunction<any>,
-    timeout: number = 3000,
+    timeout: number = 15000,
   ): Promise<boolean> => {
     debug(
       `${config.id ? `[${config.id}] ` : ``}awaitMatch called with custom function`,
@@ -867,6 +867,7 @@ export function electricCollectionOptions<T extends Row<unknown>>(
   }
 
   // Create wrapper handlers for direct persistence operations that handle different matching strategies
+  // These wrappers process deprecated return values but don't pass them through
   const wrappedOnInsert = config.onInsert
     ? async (
         params: InsertMutationFnParams<
@@ -874,10 +875,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           string | number,
           ElectricCollectionUtils<T>
         >,
-      ) => {
+      ): Promise<void> => {
         const handlerResult = await config.onInsert!(params)
         await processMatchingStrategy(handlerResult)
-        return handlerResult
       }
     : undefined
 
@@ -888,10 +888,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           string | number,
           ElectricCollectionUtils<T>
         >,
-      ) => {
+      ): Promise<void> => {
         const handlerResult = await config.onUpdate!(params)
         await processMatchingStrategy(handlerResult)
-        return handlerResult
       }
     : undefined
 
@@ -902,10 +901,9 @@ export function electricCollectionOptions<T extends Row<unknown>>(
           string | number,
           ElectricCollectionUtils<T>
         >,
-      ) => {
+      ): Promise<void> => {
         const handlerResult = await config.onDelete!(params)
         await processMatchingStrategy(handlerResult)
-        return handlerResult
       }
     : undefined
 
