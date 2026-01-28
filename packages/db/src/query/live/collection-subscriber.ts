@@ -7,6 +7,7 @@ import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../../collection/index.js'
 import type {
   ChangeMessage,
+  JoinInfo,
   SubscriptionStatusChangeEvent,
 } from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
@@ -197,6 +198,9 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
+    // Get join info if this is the main source in a join query
+    const joinInfo = this.getJoinInfoForAlias()
+
     // Create subscription with onStatusChange - listener is registered before snapshot
     // Note: For non-ordered queries (no limit/offset), we use trackLoadSubsetPromise: false
     // which is the default behavior in subscribeChanges
@@ -204,6 +208,7 @@ export class CollectionSubscriber<
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
       onStatusChange,
+      joinInfo,
     })
 
     return subscription
@@ -230,11 +235,15 @@ export class CollectionSubscriber<
       )
     }
 
+    // Get join info if this is the main source in a join query
+    const joinInfo = this.getJoinInfoForAlias()
+
     // Subscribe to changes with onStatusChange - listener is registered before any snapshot
     // values bigger than what we've sent don't need to be sent because they can't affect the topK
     const subscription = this.collection.subscribeChanges(sendChangesInRange, {
       whereExpression,
       onStatusChange,
+      joinInfo,
     })
     subscriptionHolder.current = subscription
 
@@ -384,6 +393,21 @@ export class CollectionSubscriber<
       return undefined
     }
     return sourceWhereClausesCache.get(this.alias)
+  }
+
+  /**
+   * Gets join info for this alias if it's the main source in a join query.
+   * Join info is only returned for the main collection (FROM clause),
+   * not for joined collections, since only the main collection needs
+   * to know about joins for server-side query construction.
+   */
+  private getJoinInfoForAlias(): Array<JoinInfo> | undefined {
+    const joinInfoBySourceCache =
+      this.collectionConfigBuilder.joinInfoBySourceCache
+    if (!joinInfoBySourceCache) {
+      return undefined
+    }
+    return joinInfoBySourceCache.get(this.alias)
   }
 
   private getOrderByInfo(): OrderByOptimizationInfo | undefined {

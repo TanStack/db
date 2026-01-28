@@ -25,6 +25,7 @@ import type {
 import type { LazyCollectionCallbacks } from './joins.js'
 import type { Collection } from '../../collection/index.js'
 import type {
+  JoinInfo,
   KeyedStream,
   NamespacedAndKeyedStream,
   ResultStream,
@@ -67,6 +68,13 @@ export interface CompilationResult {
    * the inner aliases where collection subscriptions were created.
    */
   aliasRemapping: Record<string, string>
+
+  /**
+   * Map of main source aliases to their join information for server-side query construction.
+   * This enables the sync layer to perform joins before pagination, ensuring consistent page sizes
+   * when filtering by joined collection properties.
+   */
+  joinInfoBySource: Map<string, Array<JoinInfo>>
 }
 
 /**
@@ -106,7 +114,11 @@ export function compileQuery(
   validateQueryStructure(rawQuery)
 
   // Optimize the query before compilation
-  const { optimizedQuery: query, sourceWhereClauses } = optimizeQuery(rawQuery)
+  const {
+    optimizedQuery: query,
+    sourceWhereClauses,
+    joinInfoBySource,
+  } = optimizeQuery(rawQuery)
 
   // Create mapping from optimized query to original for caching
   queryMapping.set(query, rawQuery)
@@ -347,6 +359,7 @@ export function compileQuery(
       sourceWhereClauses,
       aliasToCollectionId,
       aliasRemapping,
+      joinInfoBySource,
     }
     cache.set(rawQuery, compilationResult)
 
@@ -377,6 +390,7 @@ export function compileQuery(
     sourceWhereClauses,
     aliasToCollectionId,
     aliasRemapping,
+    joinInfoBySource,
   }
   cache.set(rawQuery, compilationResult)
 
