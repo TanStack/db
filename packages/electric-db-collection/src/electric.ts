@@ -1,4 +1,5 @@
 import {
+  FetchError,
   ShapeStream,
   isChangeMessage,
   isControlMessage,
@@ -382,13 +383,51 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 
   /**
    * Handles errors from snapshot operations. Returns true if the error was
-   * handled (signal aborted during cleanup), false if it should be re-thrown.
+   * handled (signal aborted during cleanup, or 409 must-refetch), false if it should be re-thrown.
+   *
+   * 409 errors indicate "must-refetch" - the shape handle has changed or expired.
+   * During cleanup/shutdown, this is expected behavior when shapes are being torn down.
+   * Even when not explicitly cleaning up, a 409 during a snapshot request means the
+   * shape has been invalidated and the subscription loop will handle the refetch.
+   * We silently ignore 409s in snapshot operations to prevent unhandled promise rejections.
+   *
+   * 500 errors with "Shape terminated" message indicate the shape was cleaned up
+   * while a snapshot request was in flight - also expected during shutdown.
    */
   function handleSnapshotError(error: unknown, operation: string): boolean {
     if (signal.aborted) {
       debug(`${logPrefix}Ignoring ${operation} error during cleanup: %o`, error)
       return true
     }
+
+    // Handle 409 "must-refetch" errors gracefully - these occur when the shape
+    // handle has changed (e.g., during shutdown or when Electric restarts).
+    // The subscription loop handles refetching; we just ignore these in snapshot operations.
+    if (error instanceof FetchError && error.status === 409) {
+      debug(
+        `${logPrefix}Ignoring ${operation} 409 must-refetch error (shape handle changed): %o`,
+        error,
+      )
+      return true
+    }
+
+    // Handle 500 errors that indicate the shape was terminated during the request.
+    // This happens when Electric cleans up a shape while a snapshot request is in flight.
+    if (error instanceof FetchError && error.status === 500) {
+      const jsonMessage =
+        error.json && `message` in error.json
+          ? String((error.json as { message: unknown }).message)
+          : ``
+      const errorMessage = error.text || jsonMessage
+      if (errorMessage.includes(`Shape terminated`)) {
+        debug(
+          `${logPrefix}Ignoring ${operation} 500 error (shape terminated during request): %o`,
+          error,
+        )
+        return true
+      }
+    }
+
     debug(`${logPrefix}Error in ${operation}: %o`, error)
     return false
   }
