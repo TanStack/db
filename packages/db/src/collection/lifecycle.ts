@@ -269,7 +269,16 @@ export class CollectionLifecycleManager<
       // This ensures preload() promises resolve during cleanup instead of hanging.
       const callbacks = [...this.onFirstReadyCallbacks]
       this.onFirstReadyCallbacks = []
-      callbacks.forEach((callback) => callback())
+      callbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error(
+            `${this.config.id ? `[${this.config.id}] ` : ``}Error in onFirstReady callback during cleanup:`,
+            error,
+          )
+        }
+      })
 
       // Set status to cleaned-up after everything is cleaned up
       // This fires the status:change event to notify listeners

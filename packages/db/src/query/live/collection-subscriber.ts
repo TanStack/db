@@ -229,29 +229,37 @@ export class CollectionSubscriber<
    * Creates a promise that resolves when the collection finishes loading.
    */
   private trackCollectionLoading(): void {
+    // Handle race condition: if loading already ended, no tracking needed
+    if (!this.collection.isLoadingSubset) {
+      return
+    }
+
     let resolve: () => void
     const promise = new Promise<void>((res) => {
       resolve = res
     })
 
-    // Track this promise on the live query collection for isReady
     this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
       promise,
     )
 
-    // Listen for when loading ends
     const unsubscribe = this.collection.on(`loadingSubset:change`, (event) => {
       if (event.loadingSubsetTransition === `end`) {
-        unsubscribe()
-        resolve!()
+        cleanup()
       }
     })
 
-    // If the collection is no longer loading (race condition), resolve immediately
-    if (!this.collection.isLoadingSubset) {
+    // Cleanup function to unsubscribe and resolve promise
+    const cleanup = () => {
       unsubscribe()
-      resolve!()
+      resolve()
     }
+
+    // Register cleanup for when the subscription is unsubscribed early
+    // (e.g., component unmounts before loading completes)
+    this.collectionConfigBuilder.currentSyncState!.unsubscribeCallbacks.add(
+      cleanup,
+    )
   }
 
   private subscribeToOrderedChanges(
