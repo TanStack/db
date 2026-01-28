@@ -689,6 +689,15 @@ export function queryCollectionOptions(
           // Error already occurred, reject immediately
           return Promise.reject(currentResult.error)
         } else {
+          // Check QueryClient cache directly - observer's getCurrentResult() may show
+          // a loading state even when data exists in cache. This happens because observer
+          // state can lag behind the QueryClient cache during unsubscribe/resubscribe
+          // cycles (e.g., when a live query is cleaned up and recreated).
+          const cachedData = queryClient.getQueryData(key)
+          if (cachedData !== undefined) {
+            return true
+          }
+
           // Query is still loading, wait for the first result
           return new Promise<void>((resolve, reject) => {
             const unsubscribe = observer.subscribe((result) => {
@@ -744,6 +753,18 @@ export function queryCollectionOptions(
         hashedQueryKey,
         (queryRefCounts.get(hashedQueryKey) || 0) + 1,
       )
+
+      // Check if data already exists in QueryClient cache (persisted within gcTime from
+      // a previous observer). This avoids creating unnecessary promises and subscription
+      // delays when recreating an observer for data that's already cached.
+      const cachedData = queryClient.getQueryData(key)
+      if (cachedData !== undefined) {
+        // Still subscribe if sync is active so we receive future updates
+        if (syncStarted || collection.subscriberCount > 0) {
+          subscribeToQuery(localObserver, hashedQueryKey)
+        }
+        return true
+      }
 
       // Create a promise that resolves when the query result is first available
       const readyPromise = new Promise<void>((resolve, reject) => {

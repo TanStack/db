@@ -197,16 +197,62 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
-    // Create subscription with onStatusChange - listener is registered before snapshot
-    // Note: For non-ordered queries (no limit/offset), we use trackLoadSubsetPromise: false
-    // which is the default behavior in subscribeChanges
+    // Create subscription with includeInitialState. This uses trackLoadSubsetPromise: false
+    // internally, which is required for truncate handling to work correctly.
     const subscription = this.collection.subscribeChanges(sendChanges, {
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
       onStatusChange,
     })
 
+    // Track loading state for the live query's isReady status.
+    // We can't rely on subscription status changes (trackLoadSubsetPromise: false breaks that),
+    // so we check if the source collection is loading and track when it finishes.
+    // Each live query needs its own tracking even if another query already started loading,
+    // since each query's isReady state is independent.
+    if (includeInitialState && this.collection.isLoadingSubset) {
+      this.trackCollectionLoading()
+    }
+
     return subscription
+  }
+
+  /**
+   * Track the source collection's loading state for the live query's isReady.
+   * Creates a promise that resolves when the collection finishes loading.
+   */
+  private trackCollectionLoading(): void {
+    // Handle race condition: if loading already ended, no tracking needed
+    if (!this.collection.isLoadingSubset) {
+      return
+    }
+
+    let resolve: () => void
+    const promise = new Promise<void>((res) => {
+      resolve = res
+    })
+
+    this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
+      promise,
+    )
+
+    const unsubscribe = this.collection.on(`loadingSubset:change`, (event) => {
+      if (event.loadingSubsetTransition === `end`) {
+        cleanup()
+      }
+    })
+
+    // Cleanup function to unsubscribe and resolve promise
+    const cleanup = () => {
+      unsubscribe()
+      resolve()
+    }
+
+    // Register cleanup for when the subscription is unsubscribed early
+    // (e.g., component unmounts before loading completes)
+    this.collectionConfigBuilder.currentSyncState!.unsubscribeCallbacks.add(
+      cleanup,
+    )
   }
 
   private subscribeToOrderedChanges(
