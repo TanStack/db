@@ -1,0 +1,26 @@
+email {}
+server {
+  application_name: "TrailBase E2E"
+}
+auth {}
+jobs {}
+record_apis: [
+  {
+    name: "users_e2e"
+    table_name: "users_e2e"
+    acl_world: [CREATE, READ, UPDATE, DELETE]
+    enable_subscriptions: true
+  },
+  {
+    name: "posts_e2e"
+    table_name: "posts_e2e"
+    acl_world: [CREATE, READ, UPDATE, DELETE]
+    enable_subscriptions: true
+  },
+  {
+    name: "comments_e2e"
+    table_name: "comments_e2e"
+    acl_world: [CREATE, READ, UPDATE, DELETE]
+    enable_subscriptions: true
+  }
+]
