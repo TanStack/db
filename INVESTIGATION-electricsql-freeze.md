@@ -1,27 +1,44 @@
-# Investigation: ElectricSQL Freeze After Shape Handle Expiration
+# Investigation: ElectricSQL Freeze — Stale Snapshot + Partial UPDATE on Non-Existent Row
 
 ## Summary
 
 An application freezes (main thread blocked) when navigating back to a meeting
-page after the ElectricSQL shape handle has expired. The freeze occurs because a
-**partial UPDATE** is applied to a row that **never existed** in the current sync
-session, creating an incomplete row object with only 5 of ~20 expected fields.
+page. The freeze occurs because a **partial UPDATE** is applied to a row that
+**never existed** in the current sync session, creating an incomplete row object
+with only 5 of ~20 expected fields.
 
 ## Root Cause: Two-Layer Problem
 
-### Layer 1: ElectricSQL Cloud Stale Cache
+### Layer 1: Stale Cloudflare-Cached Snapshot
 
-The ElectricSQL Cloud service uses Cloudflare caching for shape snapshots. When a
-shape handle expires and the client reconnects:
+The original notes show 4 data requests to the shape endpoint. **No 409 response
+was observed.** All requests carry `expired_handle=100275401-1769099428807830` —
+the old handle was already known-expired before these requests began (from
+ElectricSQL's `ExpiredShapesCache`, likely persisted from a prior session or
+earlier navigation).
 
-1. The initial GET to `/v1/shape` returns a **stale cached snapshot**
-   (`cf-cache-status: HIT`, `age: 663` = 11 minutes old)
-2. This snapshot is missing rows that were created/modified after the cache was
-   populated
-3. The subsequent log entries (from the live `offset` parameter) DO include
-   operations referencing the missing row
+The `expired_handle` parameter is designed to bust the Cloudflare cache when
+requesting a fresh shape (`offset=-1`). However, Cloudflare still served a stale
+cached response:
 
-This creates a gap: the log references a row the client has never seen.
+- **Request 1** (`offset=-1`): `cf-cache-status: HIT`, `age: 663` (11 min stale)
+  — Returns new handle `100275401-1769509446955764`, offset `0_0`
+- **Requests 2-3** (`offset=0_0`, `0_1`): Snapshot pages — `cf-cache-status: REVALIDATED`
+- **Request 4** (`offset=0_2`): Jumps to `5264441183696_0` (real LSN — this is the
+  snapshot-to-log transition). Contains the partial UPDATE for `7ddee14e` and
+  `electric-up-to-date` header.
+- **Request 5**: `live=true` polling, returns `up-to-date`
+
+The stale snapshot (requests 1-3) is missing the calendar event `7ddee14e`. The
+log (request 4) includes a partial UPDATE for it — creating a gap where the log
+references a row the client has never seen.
+
+**Related**: This may be related to the stale cache offset bug described in
+[electric-sql/electric#3785](https://github.com/electric-sql/electric/issues/3785),
+where the system "correctly kept its current handle but incorrectly updated the
+offset from the stale response, creating mismatched state." The `expired_handle`
+cache-busting mechanism appears insufficient to prevent Cloudflare from serving
+stale snapshot data.
 
 ### Layer 2: TanStack/db Partial Update Without Guard
 
@@ -144,22 +161,33 @@ appear in profiling because:
 ```
 
 **Sequence of events**:
-1. User loads meeting page → shape established with handle `66584833-2`
+1. User loads meeting page → shape established (previous handle
+   `100275401-1769099428807830`)
 2. User navigates to inbox page → meeting page unmounts
-3. User navigates back to meeting page → shape reconnects
-4. Server responds with `409 Gone` (handle expired)
-5. Client performs must-refetch with new handle `66584833-3`
-6. Initial GET returns **stale snapshot** (cached 11 min, missing event 7ddee14e)
-7. Live log includes partial UPDATE for event 7ddee14e (only 5 fields changed
-   externally — someone moved the meeting time)
-8. `state.ts` creates incomplete row via `Object.assign({}, undefined, partial)`
-9. App freezes in `maybeRunGraph` loop
+3. At some prior point, the old handle was marked expired in `ExpiredShapesCache`
+   (stored in localStorage). The original notes do **not** show a 409 response —
+   the handle may have been marked expired in a prior session or earlier navigation.
+4. User navigates back to meeting page → client requests fresh shape (`offset=-1`)
+   with `expired_handle=100275401-1769099428807830` as cache buster
+5. Cloudflare serves **stale cached snapshot** (`cf-cache-status: HIT`, `age: 663`)
+   despite the `expired_handle` cache-busting param
+6. Server returns new handle `100275401-1769509446955764`
+7. Snapshot (requests 1-3, offsets `0_0` → `0_1` → `0_2`) is missing event
+   `7ddee14e` due to stale cache
+8. Log (request 4, offset jumps to `5264441183696_0`) includes partial UPDATE for
+   event 7ddee14e (only 5 fields — `replica=default` sends only changed columns)
+9. `state.ts` creates incomplete row via `Object.assign({}, undefined, partial)`
+10. App freezes in `maybeRunGraph` loop
 
 **HTTP evidence**:
-- Request 4 (GET `/v1/shape?handle=66584833-3`): `cf-cache-status: HIT`,
-  `age: 663` (11 minutes stale)
-- Event 7ddee14e appears ONLY as a partial UPDATE in the log, never as INSERT in
+- Request 1 (`offset=-1`): `cf-cache-status: HIT`, `age: 663` (11 min stale)
+- Requests 2-3: `cf-cache-status: REVALIDATED` (snapshot continuation)
+- Request 4: offset jumps from `0_2` to `5264441183696_0` (snapshot→log transition),
+  contains partial UPDATE for 7ddee14e, has `electric-up-to-date` header
+- Event 7ddee14e appears ONLY as a partial UPDATE in request 4, never as INSERT in
   any request
+- Possibly related to [electric-sql/electric#3785](https://github.com/electric-sql/electric/issues/3785)
+  (stale handle / stale cache offset bug)
 
 ## Recommended Fixes
 
@@ -203,14 +231,19 @@ if (operation.type === 'update' && !this.syncedKeys.has(key)) {
 }
 ```
 
-### Fix 3: ElectricSQL Cloud — Cache coherence
+### Fix 3: ElectricSQL — Stale snapshot cache busting
 
-Ensure that after a shape handle expires, the initial snapshot served to the
-reconnecting client is **fresh** (not stale from Cloudflare cache). Options:
-- Add `Cache-Control: no-cache` for initial shape requests after handle changes
-- Include the previous handle in the reconnect request to ensure the snapshot is
-  at least as recent as that handle's epoch
-- Use `Vary` headers or cache keys that include handle-relevant state
+The `expired_handle` query parameter is supposed to bust the Cloudflare cache, but
+request 1 still returned `cf-cache-status: HIT` with `age: 663`. This may be
+related to the stale cache offset bug tracked in
+[electric-sql/electric#3785](https://github.com/electric-sql/electric/issues/3785).
+
+Options:
+- Investigate why `expired_handle` doesn't prevent Cloudflare cache HITs
+- Ensure the Cloudflare cache key includes the `expired_handle` parameter
+- Add a unique nonce/timestamp to the initial `offset=-1` request URL
+- Address the broader state machine issues described in #3785 to prevent
+  mismatched handle/offset state from stale responses
 
 ### Fix 4: Defensive maybeRunGraph loop bound (TanStack/db)
 
@@ -254,9 +287,18 @@ if (iterations >= MAX_GRAPH_ITERATIONS) {
 
 - **`replica=default`** (default mode): UPDATE log entries contain **only changed
   columns**, not the full row. This is why the partial UPDATE has only 5 fields.
-- **Shape handle expiration**: When a handle expires, the client receives a `409
-  Gone` response and must re-establish the shape with a new handle.
+- **Shape handle invalidation**: Handles become invalid when the server evicts,
+  rotates, or otherwise removes a shape. The client receives a `409 Gone`
+  response and must re-establish with a new handle. The client tracks expired
+  handles in `ExpiredShapesCache` (localStorage) and passes them as
+  `expired_handle` query param on fresh requests for cache busting.
+  **Note**: In this bug, no 409 was observed — the handle was already marked
+  expired from a prior session.
 - **Log offset format**: `{tx_offset}_{op_offset}` — the log contains operations
-  since the snapshot's offset.
-- **Snapshot vs. log gap**: If the snapshot is stale (cached), the log may
-  reference rows not present in the snapshot.
+  since the snapshot's offset. Snapshot offsets use `0_N` format; real log offsets
+  use LSN-based values like `5264441183696_0`.
+- **Snapshot vs. log gap**: If the snapshot is stale (cached by Cloudflare), the
+  log may reference rows not present in the snapshot. The `expired_handle` cache
+  buster is supposed to prevent this but does not always succeed.
+- **Related issue**: [electric-sql/electric#3785](https://github.com/electric-sql/electric/issues/3785)
+  — ShapeStream state machine bugs including stale cache offset handling.
