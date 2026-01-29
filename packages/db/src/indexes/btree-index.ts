@@ -240,9 +240,7 @@ export class BTreeIndex<
     const fromKey = hasFrom
       ? normalizeForBTree(from)
       : this.orderedEntries.minKey()
-    const toKey = hasTo
-      ? normalizeForBTree(to)
-      : this.orderedEntries.maxKey()
+    const toKey = hasTo ? normalizeForBTree(to) : this.orderedEntries.maxKey()
 
     this.orderedEntries.forRange(
       fromKey,
@@ -406,7 +404,10 @@ export class BTreeIndex<
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
     return this.orderedEntries
       .keysArray()
-      .map((key) => [denormalizeUndefined(key), this.valueMap.get(key) ?? new Set()])
+      .map((key) => [
+        denormalizeUndefined(key),
+        this.valueMap.get(key) ?? new Set(),
+      ])
   }
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
