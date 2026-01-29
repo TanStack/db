@@ -109,53 +109,39 @@ describe(`BTreeIndex - Issue #1186: Infinite loop with undefined indexed values`
 
 /**
  * Direct unit tests for BTreeIndex undefined value handling.
- * These test the sentinel mechanism that distinguishes between
- * "start from beginning" (no from parameter) vs "the key is literally undefined".
+ * Tests the sentinel mechanism that distinguishes "start from beginning"
+ * (no from parameter) from "the key is literally undefined".
  */
 describe(`BTreeIndex - undefined value handling`, () => {
+  function createIndex(propName: string): BTreeIndex<string> {
+    return new BTreeIndex<string>(1, new PropRef([propName]), `test_index`)
+  }
+
   describe(`take vs takeFromStart`, () => {
     it(`should distinguish take(n, undefined) from takeFromStart(n)`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`value`]),
-        `test_index`,
-      )
-
-      // Add items with various values including undefined
+      const index = createIndex(`value`)
       index.add(`a`, { value: undefined })
       index.add(`b`, { value: 1 })
       index.add(`c`, { value: 2 })
 
-      // takeFromStart should return all items from the beginning
       const fromStart = index.takeFromStart(3)
       expect(fromStart).toHaveLength(3)
 
-      // take(n, undefined) should return items AFTER undefined
-      // (since undefined is the smallest value in default comparator)
+      // take(n, undefined) returns items AFTER undefined (smallest value)
       const afterUndefined = index.take(3, undefined)
-      expect(afterUndefined).toHaveLength(2)
-      expect(afterUndefined).toContain(`b`)
-      expect(afterUndefined).toContain(`c`)
-      expect(afterUndefined).not.toContain(`a`)
+      expect(afterUndefined).toEqual([`b`, `c`])
     })
 
     it(`should distinguish takeReversed(n, undefined) from takeReversedFromEnd(n)`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`value`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`value`)
       index.add(`a`, { value: undefined })
       index.add(`b`, { value: 1 })
       index.add(`c`, { value: 2 })
 
-      // takeReversedFromEnd should return all items from the end
       const fromEnd = index.takeReversedFromEnd(3)
       expect(fromEnd).toHaveLength(3)
 
-      // takeReversed(n, undefined) should return items BEFORE undefined
-      // Since undefined is smallest, there should be nothing before it
+      // Since undefined is smallest, nothing comes before it
       const beforeUndefined = index.takeReversed(3, undefined)
       expect(beforeUndefined).toHaveLength(0)
     })
@@ -163,96 +149,71 @@ describe(`BTreeIndex - undefined value handling`, () => {
 
   describe(`multiple undefined values`, () => {
     it(`should store and retrieve multiple items with undefined indexed values`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`priority`]),
-        `test_index`,
-      )
-
-      // Add multiple items with undefined priority
+      const index = createIndex(`priority`)
       index.add(`a`, { priority: undefined })
       index.add(`b`, { priority: undefined })
       index.add(`c`, { priority: undefined })
 
-      // All should be retrievable
-      const all = index.takeFromStart(10)
-      expect(all).toHaveLength(3)
-      expect(all).toEqual([`a`, `b`, `c`]) // Sorted by key
+      expect(index.takeFromStart(10)).toEqual([`a`, `b`, `c`])
 
-      // Equality lookup should find all
       const undefinedItems = index.equalityLookup(undefined)
       expect(undefinedItems.size).toBe(3)
-      expect(undefinedItems).toContain(`a`)
-      expect(undefinedItems).toContain(`b`)
-      expect(undefinedItems).toContain(`c`)
     })
 
     it(`should correctly remove items with undefined values`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`priority`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`priority`)
       index.add(`a`, { priority: undefined })
       index.add(`b`, { priority: undefined })
 
-      // Remove one
       index.remove(`a`, { priority: undefined })
 
       const remaining = index.equalityLookup(undefined)
       expect(remaining.size).toBe(1)
       expect(remaining).toContain(`b`)
-      expect(remaining).not.toContain(`a`)
+    })
+
+    it(`should iterate past multiple undefined values correctly`, () => {
+      const index = createIndex(`value`)
+      index.add(`undef1`, { value: undefined })
+      index.add(`undef2`, { value: undefined })
+      index.add(`undef3`, { value: undefined })
+      index.add(`one`, { value: 1 })
+      index.add(`two`, { value: 2 })
+
+      // Start from undefined, should get items after all undefined values
+      const afterUndefined = index.take(10, undefined)
+      expect(afterUndefined).toEqual([`one`, `two`])
     })
   })
 
   describe(`ordering of undefined relative to other values`, () => {
     it(`should sort undefined before numbers with default comparator`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`value`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`value`)
       index.add(`num1`, { value: 1 })
       index.add(`undef`, { value: undefined })
       index.add(`num2`, { value: 2 })
       index.add(`num0`, { value: 0 })
 
       const ordered = index.orderedEntriesArray
-      // undefined should come first (sorts as smallest)
       expect(ordered[0]![0]).toBe(undefined)
       expect(ordered[0]![1]).toContain(`undef`)
     })
 
     it(`should sort undefined before strings with default comparator`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`name`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`name`)
       index.add(`str1`, { name: `apple` })
       index.add(`undef`, { name: undefined })
       index.add(`str2`, { name: `banana` })
 
-      const ordered = index.orderedEntriesArray
-      expect(ordered[0]![0]).toBe(undefined)
+      expect(index.orderedEntriesArray[0]![0]).toBe(undefined)
     })
 
     it(`should handle mixed undefined and null values`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`value`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`value`)
       index.add(`null1`, { value: null })
       index.add(`undef1`, { value: undefined })
       index.add(`num1`, { value: 1 })
 
-      // Both null and undefined should be stored separately
       const nullItems = index.equalityLookup(null)
       const undefItems = index.equalityLookup(undefined)
 
@@ -265,49 +226,33 @@ describe(`BTreeIndex - undefined value handling`, () => {
 
   describe(`rangeQuery with undefined bounds`, () => {
     it(`should distinguish explicit undefined from vs no from`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`value`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`value`)
       index.add(`undef`, { value: undefined })
       index.add(`one`, { value: 1 })
       index.add(`two`, { value: 2 })
       index.add(`three`, { value: 3 })
 
-      // Range with explicit from: undefined should start AT undefined
       const withExplicitFrom = index.rangeQuery({
         from: undefined,
         to: 2,
         fromInclusive: true,
         toInclusive: true,
       })
-      expect(withExplicitFrom.size).toBe(3) // undefined, 1, 2
+      expect(withExplicitFrom.size).toBe(3)
       expect(withExplicitFrom).toContain(`undef`)
       expect(withExplicitFrom).toContain(`one`)
       expect(withExplicitFrom).toContain(`two`)
 
-      // Range without from should also start from min (which happens to be undefined)
-      const withoutFrom = index.rangeQuery({
-        to: 2,
-        toInclusive: true,
-      })
+      const withoutFrom = index.rangeQuery({ to: 2, toInclusive: true })
       expect(withoutFrom.size).toBe(3)
     })
 
     it(`should handle range query from undefined to undefined`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`value`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`value`)
       index.add(`a`, { value: undefined })
       index.add(`b`, { value: undefined })
       index.add(`c`, { value: 1 })
 
-      // Query for just undefined values
       const justUndefined = index.rangeQuery({
         from: undefined,
         to: undefined,
@@ -324,15 +269,14 @@ describe(`BTreeIndex - undefined value handling`, () => {
 
   describe(`custom comparator with undefined values`, () => {
     it(`should pass actual undefined to custom comparator, not sentinel`, () => {
-      const comparisons: Array<[any, any]> = []
+      const comparisons: Array<[unknown, unknown]> = []
 
-      const customComparator = (a: any, b: any): number => {
+      function customComparator(a: unknown, b: unknown): number {
         comparisons.push([a, b])
-        // Custom logic: treat undefined as largest (opposite of default)
         if (a === undefined && b === undefined) return 0
         if (a === undefined) return 1
         if (b === undefined) return -1
-        return a - b
+        return (a as number) - (b as number)
       }
 
       const index = new BTreeIndex<string>(
@@ -341,31 +285,23 @@ describe(`BTreeIndex - undefined value handling`, () => {
         `test_index`,
         { compareFn: customComparator },
       )
-
       index.add(`num`, { value: 1 })
       index.add(`undef`, { value: undefined })
 
-      // Verify comparator received actual undefined, not the sentinel string
       const undefinedComparisons = comparisons.filter(
         ([a, b]) => a === undefined || b === undefined,
       )
       expect(undefinedComparisons.length).toBeGreaterThan(0)
 
-      // With our custom comparator, undefined should sort AFTER numbers
       const ordered = index.orderedEntriesArray
-      expect(ordered[0]![0]).toBe(1) // number first
-      expect(ordered[1]![0]).toBe(undefined) // undefined last
+      expect(ordered[0]![0]).toBe(1)
+      expect(ordered[1]![0]).toBe(undefined)
     })
   })
 
   describe(`equalityLookup with undefined`, () => {
     it(`should find items with undefined indexed value`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`status`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`status`)
       index.add(`a`, { status: `active` })
       index.add(`b`, { status: undefined })
       index.add(`c`, { status: `inactive` })
@@ -378,34 +314,83 @@ describe(`BTreeIndex - undefined value handling`, () => {
     })
 
     it(`should return empty set when no undefined values exist`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`value`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`value`)
       index.add(`a`, { value: 1 })
       index.add(`b`, { value: 2 })
 
-      const undefinedItems = index.equalityLookup(undefined)
-      expect(undefinedItems.size).toBe(0)
+      expect(index.equalityLookup(undefined).size).toBe(0)
+    })
+  })
+
+  describe(`inArrayLookup with undefined`, () => {
+    it(`should handle undefined in inArrayLookup`, () => {
+      const index = createIndex(`value`)
+      index.add(`undef`, { value: undefined })
+      index.add(`one`, { value: 1 })
+      index.add(`two`, { value: 2 })
+      index.add(`three`, { value: 3 })
+
+      const result = index.inArrayLookup([undefined, 1])
+      expect(result.size).toBe(2)
+      expect(result).toContain(`undef`)
+      expect(result).toContain(`one`)
+    })
+
+    it(`should handle inArrayLookup with only undefined`, () => {
+      const index = createIndex(`value`)
+      index.add(`undef1`, { value: undefined })
+      index.add(`undef2`, { value: undefined })
+      index.add(`one`, { value: 1 })
+
+      const result = index.inArrayLookup([undefined])
+      expect(result.size).toBe(2)
+      expect(result).toContain(`undef1`)
+      expect(result).toContain(`undef2`)
+    })
+  })
+
+  describe(`update operation with undefined`, () => {
+    it(`should update item from defined to undefined value`, () => {
+      const index = createIndex(`value`)
+      index.add(`a`, { value: 1 })
+
+      index.update(`a`, { value: 1 }, { value: undefined })
+
+      expect(index.equalityLookup(1).size).toBe(0)
+      expect(index.equalityLookup(undefined).size).toBe(1)
+      expect(index.equalityLookup(undefined)).toContain(`a`)
+    })
+
+    it(`should update item from undefined to defined value`, () => {
+      const index = createIndex(`value`)
+      index.add(`a`, { value: undefined })
+
+      index.update(`a`, { value: undefined }, { value: 1 })
+
+      expect(index.equalityLookup(undefined).size).toBe(0)
+      expect(index.equalityLookup(1).size).toBe(1)
+      expect(index.equalityLookup(1)).toContain(`a`)
+    })
+
+    it(`should update item from undefined to undefined (same value)`, () => {
+      const index = createIndex(`value`)
+      index.add(`a`, { value: undefined })
+
+      index.update(`a`, { value: undefined }, { value: undefined })
+
+      expect(index.equalityLookup(undefined).size).toBe(1)
+      expect(index.equalityLookup(undefined)).toContain(`a`)
     })
   })
 
   describe(`valueMapData getter`, () => {
     it(`should return undefined keys denormalized, not as sentinel`, () => {
-      const index = new BTreeIndex<string>(
-        1,
-        new PropRef([`value`]),
-        `test_index`,
-      )
-
+      const index = createIndex(`value`)
       index.add(`a`, { value: undefined })
       index.add(`b`, { value: 1 })
 
       const mapData = index.valueMapData
 
-      // Should have undefined as an actual key, not the sentinel string
       expect(mapData.has(undefined)).toBe(true)
       expect(mapData.has(`__TS_DB_BTREE_UNDEFINED_VALUE__`)).toBe(false)
 
