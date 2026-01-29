@@ -29,6 +29,45 @@ Whether to include the current state as initial changes
 
 ***
 
+### limit?
+
+```ts
+optional limit: number;
+```
+
+Defined in: [packages/db/src/types.ts:821](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L821)
+
+**`Internal`**
+
+Optional limit to include in loadSubset for query-specific cache keys.
+
+***
+
+### onLoadSubsetResult()?
+
+```ts
+optional onLoadSubsetResult: (result) => void;
+```
+
+Defined in: [packages/db/src/types.ts:827](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L827)
+
+**`Internal`**
+
+Callback that receives the loadSubset result (Promise or true) from requestSnapshot.
+Allows the caller to directly track the loading promise for isReady status.
+
+#### Parameters
+
+##### result
+
+`true` | `Promise`\<`void`\>
+
+#### Returns
+
+`void`
+
+***
+
 ### onStatusChange()?
 
 ```ts
@@ -51,6 +90,20 @@ Registered BEFORE any snapshot is requested, ensuring no status transitions are 
 #### Returns
 
 `void`
+
+***
+
+### orderBy?
+
+```ts
+optional orderBy: OrderBy;
+```
+
+Defined in: [packages/db/src/types.ts:816](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L816)
+
+**`Internal`**
+
+Optional orderBy to include in loadSubset for query-specific cache keys.
 
 ***
 
