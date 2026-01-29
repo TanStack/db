@@ -2120,6 +2120,139 @@ describe(`createLiveQueryCollection`, () => {
         vi.useRealTimers()
       }
     })
+
+    it(`advances offset when async loadSubset fills an initially empty window`, async () => {
+      type Item = { id: number; value: number }
+      const remoteData: Array<Item> = [
+        { id: 1, value: 1 },
+        { id: 2, value: 2 },
+        { id: 3, value: 3 },
+        { id: 4, value: 4 },
+      ]
+      const loadOffsets: Array<number | undefined> = []
+
+      const sourceCollection = createCollection<Item>({
+        id: `offset-advances-async`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                loadOffsets.push(options.offset)
+                return new Promise<void>((resolve) => {
+                  setTimeout(() => {
+                    begin()
+                    const start = options.offset ?? 0
+                    const end = options.limit
+                      ? start + options.limit
+                      : remoteData.length
+                    remoteData.slice(start, end).forEach((item) => {
+                      write({ type: `insert`, value: item })
+                    })
+                    commit()
+                    resolve()
+                  }, 0)
+                })
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ item: sourceCollection })
+          .orderBy(({ item }) => item.value, `asc`)
+          .limit(2)
+          .offset(0),
+      )
+
+      await liveQuery.preload()
+      expect(liveQuery.toArray.map((item) => item.value)).toEqual([1, 2])
+      expect(loadOffsets[0]).toBe(0)
+
+      const moveResult = liveQuery.utils.setWindow({ offset: 2, limit: 2 })
+      if (moveResult !== true) {
+        await moveResult
+      }
+
+      expect(loadOffsets).toEqual([0, 2])
+      expect(liveQuery.toArray.map((item) => item.value)).toEqual([3, 4])
+    })
+
+    it(`requests new offsets when window moves across identical orderBy values`, async () => {
+      type Item = { id: number; rank: number }
+      const remoteData: Array<Item> = [
+        { id: 1, rank: 1 },
+        { id: 2, rank: 1 },
+        { id: 3, rank: 1 },
+        { id: 4, rank: 1 },
+        { id: 5, rank: 1 },
+        { id: 6, rank: 1 },
+      ]
+      const loadOffsets: Array<number | undefined> = []
+
+      const sourceCollection = createCollection<Item>({
+        id: `offset-moves-constant-orderby`,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+        autoIndex: `eager`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            markReady()
+            return {
+              loadSubset: (options: LoadSubsetOptions) => {
+                loadOffsets.push(options.offset)
+                const start = options.offset ?? 0
+                const end = options.limit
+                  ? start + options.limit
+                  : remoteData.length
+                begin()
+                remoteData.slice(start, end).forEach((item) => {
+                  write({ type: `insert`, value: item })
+                })
+                commit()
+                return true
+              },
+            }
+          },
+        },
+      })
+
+      const liveQuery = createLiveQueryCollection((q) =>
+        q
+          .from({ item: sourceCollection })
+          .orderBy(({ item }) => item.rank, `asc`)
+          .limit(2)
+          .offset(0),
+      )
+
+      await liveQuery.preload()
+      await flushPromises()
+      expect(loadOffsets[0]).toBe(0)
+      expect(liveQuery.toArray.map((item) => item.id)).toEqual([1, 2])
+
+      const moveFirst = liveQuery.utils.setWindow({ offset: 2, limit: 2 })
+      if (moveFirst !== true) {
+        await moveFirst
+      }
+      await flushPromises()
+      expect(loadOffsets).toEqual([0, 2])
+      expect(liveQuery.toArray.map((item) => item.id)).toEqual([3, 4])
+
+      const moveSecond = liveQuery.utils.setWindow({ offset: 4, limit: 2 })
+      if (moveSecond !== true) {
+        await moveSecond
+      }
+      await flushPromises()
+      expect(loadOffsets).toEqual([0, 2, 4])
+      expect(liveQuery.toArray.map((item) => item.id)).toEqual([5, 6])
+    })
   })
 
   describe(`custom getKey with joins error handling`, () => {
