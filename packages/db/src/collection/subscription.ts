@@ -425,6 +425,9 @@ export class CollectionSubscription
       )
     }
 
+    // Check if minValues has a first element (regardless of its value)
+    // This distinguishes between "no min value provided" vs "min value is undefined"
+    const hasMinValue = minValues !== undefined && minValues.length > 0
     // Derive first column value from minValues (used for local index operations)
     const minValue = minValues?.[0]
     // Cast for index operations (index expects string | number)
@@ -436,8 +439,8 @@ export class CollectionSubscription
       ? createFilterFunctionFromExpression(where)
       : undefined
 
-    const filterFn = (key: string | number): boolean => {
-      if (this.sentKeys.has(key)) {
+    const filterFn = (key: string | number | undefined): boolean => {
+      if (key !== undefined && this.sentKeys.has(key)) {
         return false
       }
 
@@ -462,7 +465,7 @@ export class CollectionSubscription
     // For multi-column orderBy, we use the first column value for index operations (wide bounds)
     // This may load some duplicates but ensures we never miss any rows.
     let keys: Array<string | number> = []
-    if (minValueForIndex !== undefined) {
+    if (hasMinValue) {
       // First, get all items with the same FIRST COLUMN value as minValue
       // This provides wide bounds for the local index
       const { expression } = orderBy[0]!
@@ -481,15 +484,16 @@ export class CollectionSubscription
         // Then get items greater than minValue
         const keysGreaterThanMin = index.take(
           limit - keys.length,
-          minValueForIndex,
+          minValueForIndex!,
           filterFn,
         )
         keys.push(...keysGreaterThanMin)
       } else {
-        keys = index.take(limit, minValueForIndex, filterFn)
+        keys = index.take(limit, minValueForIndex!, filterFn)
       }
     } else {
-      keys = index.take(limit, minValueForIndex, filterFn)
+      // No min value provided, start from the beginning
+      keys = index.takeFromStart(limit, filterFn)
     }
 
     const valuesNeeded = () => Math.max(limit - changes.length, 0)
@@ -518,7 +522,7 @@ export class CollectionSubscription
         insertedKeys.add(key) // Track this key
       }
 
-      keys = index.take(valuesNeeded(), biggestObservedValue, filterFn)
+      keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
     }
 
     // Track row count for offset-based pagination (before sending to callback)
