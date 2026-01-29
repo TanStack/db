@@ -331,6 +331,15 @@ export function useLiveQuery(
   // Track collection status reactively
   let status = $state(collection ? collection.status : (`disabled` as const))
 
+  // SSR: Synchronously initialize data from collection (effects don't run during SSR)
+  // This ensures initial data is available for server-side rendering
+  if (collection) {
+    for (const [key, value] of collection.entries()) {
+      state.set(key, value)
+    }
+    internalData = Array.from(collection.values())
+  }
+
   // Helper to sync data array from collection in correct order
   const syncDataFromCollection = (
     currentCollection: Collection<any, any, any>,
@@ -344,7 +353,7 @@ export function useLiveQuery(
   // Track current unsubscribe function
   let currentUnsubscribe: (() => void) | null = null
 
-  // Watch for collection changes and subscribe to updates
+  // Watch for collection changes and subscribe to updates (client-side only)
   $effect(() => {
     const currentCollection = collection
 
