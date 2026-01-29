@@ -230,14 +230,27 @@ export class CollectionSubscriber<
     }
 
     // Get the query's orderBy and limit to pass to loadSubset.
-    // This ensures each live query with different parameters gets its own cache entry
-    // in on-demand source collections.
+    // Only include orderBy when it is scoped to this alias and uses simple refs,
+    // to avoid leaking cross-collection paths into backend-specific compilers.
     const { orderBy, limit, offset } = this.collectionConfigBuilder.query
     const effectiveLimit =
       limit !== undefined && offset !== undefined ? limit + offset : limit
     const normalizedOrderBy = orderBy
       ? normalizeOrderByPaths(orderBy, this.alias)
       : undefined
+    const canPassOrderBy =
+      normalizedOrderBy?.every((clause) => {
+        const exp = clause.expression
+        if (exp.type !== `ref`) {
+          return false
+        }
+        const path = exp.path
+        return Array.isArray(path) && path.length === 1
+      }) ?? false
+    const orderByForSubscription = canPassOrderBy
+      ? normalizedOrderBy
+      : undefined
+    const limitForSubscription = canPassOrderBy ? effectiveLimit : undefined
 
     // Track loading via the loadSubset promise directly.
     // requestSnapshot uses trackLoadSubsetPromise: false (needed for truncate handling),
@@ -256,8 +269,8 @@ export class CollectionSubscriber<
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
       onStatusChange,
-      orderBy: normalizedOrderBy,
-      limit: effectiveLimit,
+      orderBy: orderByForSubscription,
+      limit: limitForSubscription,
       onLoadSubsetResult,
     })
 
