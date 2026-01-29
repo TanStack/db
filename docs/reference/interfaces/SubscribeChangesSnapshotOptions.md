@@ -5,7 +5,7 @@ title: SubscribeChangesSnapshotOptions
 
 # Interface: SubscribeChangesSnapshotOptions\<T\>
 
-Defined in: [packages/db/src/types.ts:814](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L814)
+Defined in: [packages/db/src/types.ts:830](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L830)
 
 ## Extends
 
@@ -25,7 +25,46 @@ Defined in: [packages/db/src/types.ts:814](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:818](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L818)
+Defined in: [packages/db/src/types.ts:834](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L834)
+
+**`Internal`**
+
+Optional limit to include in loadSubset for query-specific cache keys.
+
+#### Overrides
+
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`limit`](SubscribeChangesOptions.md#limit)
+
+***
+
+### onLoadSubsetResult()?
+
+```ts
+optional onLoadSubsetResult: (result) => void;
+```
+
+Defined in: [packages/db/src/types.ts:827](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L827)
+
+**`Internal`**
+
+Callback that receives the loadSubset result (Promise or true) from requestSnapshot.
+Allows the caller to directly track the loading promise for isReady status.
+
+#### Parameters
+
+##### result
+
+`true` | `Promise`\<`void`\>
+
+#### Returns
+
+`void`
+
+#### Inherited from
+
+```ts
+Omit.onLoadSubsetResult
+```
 
 ***
 
@@ -66,7 +105,15 @@ Omit.onStatusChange
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:817](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L817)
+Defined in: [packages/db/src/types.ts:833](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L833)
+
+**`Internal`**
+
+Optional orderBy to include in loadSubset for query-specific cache keys.
+
+#### Overrides
+
+[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`orderBy`](SubscribeChangesOptions.md#orderby)
 
 ***
 
