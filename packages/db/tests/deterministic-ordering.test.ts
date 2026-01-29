@@ -122,7 +122,7 @@ describe(`Deterministic Ordering`, () => {
       index.add(`b`, { priority: 1 })
 
       // take() should return keys in key-sorted order when priorities are equal
-      const keys = index.take(3)
+      const keys = index.takeFromStart(3)
       expect(keys).toEqual([`a`, `b`, `c`])
     })
 
@@ -140,7 +140,7 @@ describe(`Deterministic Ordering`, () => {
       index.add(`b`, { priority: 1 })
 
       // take() should return priority 1 keys sorted by key, then priority 2 keys sorted by key
-      const keys = index.take(5)
+      const keys = index.takeFromStart(5)
       expect(keys).toEqual([`a`, `b`, `c`, `d`, `e`])
     })
 
@@ -155,7 +155,7 @@ describe(`Deterministic Ordering`, () => {
       index.add(10, { priority: 1 })
       index.add(20, { priority: 1 })
 
-      const keys = index.take(3)
+      const keys = index.takeFromStart(3)
       expect(keys).toEqual([10, 20, 30])
     })
 
@@ -171,7 +171,7 @@ describe(`Deterministic Ordering`, () => {
       index.add(`b`, { priority: 1 })
 
       // takeReversed should return keys in reverse key order when priorities are equal
-      const keys = index.takeReversed(3)
+      const keys = index.takeReversedFromEnd(3)
       expect(keys).toEqual([`c`, `b`, `a`])
     })
 
@@ -189,7 +189,7 @@ describe(`Deterministic Ordering`, () => {
       index.remove(`b`, { priority: 1 })
       index.add(`b`, { priority: 1 })
 
-      const keys = index.take(3)
+      const keys = index.takeReversedFromEnd(3)
       expect(keys).toEqual([`a`, `b`, `c`])
     })
 
@@ -209,7 +209,7 @@ describe(`Deterministic Ordering`, () => {
       index.add(`b`, { priority: 1 })
 
       // First batch - should get priority 1 keys in key order
-      const firstBatch = index.take(3)
+      const firstBatch = index.takeFromStart(3)
       expect(firstBatch).toEqual([`a`, `b`, `c`])
 
       // Continue from cursor value 1 (exclusive) - should get priority 2 keys in key order
