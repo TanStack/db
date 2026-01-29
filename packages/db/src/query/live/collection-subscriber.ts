@@ -50,6 +50,7 @@ export class CollectionSubscriber<
   // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
   // used by loadNextItems for subsequent requestLimitedSnapshot calls)
   private orderedLoadSubsetResult?: (result: Promise<void> | true) => void
+  private pendingOrderedLoadPromise: Promise<void> | undefined
 
   constructor(
     private alias: string,
@@ -285,8 +286,22 @@ export class CollectionSubscriber<
   ): CollectionSubscription {
     const { orderBy, offset, limit, index } = orderByInfo
 
-    // Store the callback so loadNextItems can also use direct tracking
-    this.orderedLoadSubsetResult = onLoadSubsetResult
+    // Store the callback so loadNextItems can also use direct tracking.
+    // Track in-flight ordered loads to avoid issuing redundant requests while
+    // a previous snapshot is still pending.
+    const handleLoadSubsetResult = (result: Promise<void> | true) => {
+      if (result instanceof Promise) {
+        this.pendingOrderedLoadPromise = result
+        result.finally(() => {
+          if (this.pendingOrderedLoadPromise === result) {
+            this.pendingOrderedLoadPromise = undefined
+          }
+        })
+      }
+      onLoadSubsetResult(result)
+    }
+
+    this.orderedLoadSubsetResult = handleLoadSubsetResult
 
     // Use a holder to forward-reference subscription in the callback
     const subscriptionHolder: { current?: CollectionSubscription } = {}
@@ -322,6 +337,7 @@ export class CollectionSubscriber<
       this.loadRequestedForCurrentCursor = false
       this.lastLoadRequestKey = undefined
       this.seenKeys.clear()
+      this.pendingOrderedLoadPromise = undefined
       this.sentToD2Keys.clear()
     })
 
@@ -345,7 +361,7 @@ export class CollectionSubscriber<
         limit: offset + limit,
         orderBy: normalizedOrderBy,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult,
+        onLoadSubsetResult: handleLoadSubsetResult,
       })
     } else {
       // No index available (e.g., non-ref expression): pass orderBy/limit to loadSubset
@@ -353,7 +369,7 @@ export class CollectionSubscriber<
         orderBy: normalizedOrderBy,
         limit: offset + limit,
         trackLoadSubsetPromise: false,
-        onLoadSubsetResult,
+        onLoadSubsetResult: handleLoadSubsetResult,
       })
     }
 
@@ -378,6 +394,11 @@ export class CollectionSubscriber<
       // dataNeeded is not set when there's no index (e.g., non-ref expression).
       // In this case, we've already loaded all data via requestSnapshot
       // and don't need to lazily load more.
+      return true
+    }
+
+    if (this.pendingOrderedLoadPromise) {
+      // Wait for in-flight ordered loads to resolve before issuing another request.
       return true
     }
 
