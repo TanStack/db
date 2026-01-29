@@ -233,9 +233,8 @@ export class CollectionSubscriber<
     // This ensures each live query with different parameters gets its own cache entry
     // in on-demand source collections.
     const { orderBy, limit, offset } = this.collectionConfigBuilder.query
-    const effectiveLimit = limit !== undefined && offset !== undefined
-      ? limit + offset
-      : limit
+    const effectiveLimit =
+      limit !== undefined && offset !== undefined ? limit + offset : limit
     const normalizedOrderBy = orderBy
       ? normalizeOrderByPaths(orderBy, this.alias)
       : undefined
