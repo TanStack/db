@@ -3,7 +3,7 @@ import { BTree } from '../utils/btree.js'
 import {
   defaultComparator,
   denormalizeUndefined,
-  normalizeValue,
+  normalizeForBTree,
 } from '../utils/comparison.js'
 import { BaseIndex } from './base-index.js'
 import type { CompareOptions } from '../query/builder/types.js'
@@ -91,7 +91,7 @@ export class BTreeIndex<
     }
 
     // Normalize the value for Map key usage
-    const normalizedValue = normalizeValue(indexedValue)
+    const normalizedValue = normalizeForBTree(indexedValue)
 
     // Check if this value already exists
     if (this.valueMap.has(normalizedValue)) {
@@ -124,7 +124,7 @@ export class BTreeIndex<
     }
 
     // Normalize the value for Map key usage
-    const normalizedValue = normalizeValue(indexedValue)
+    const normalizedValue = normalizeForBTree(indexedValue)
 
     if (this.valueMap.has(normalizedValue)) {
       const keySet = this.valueMap.get(normalizedValue)!
@@ -220,7 +220,7 @@ export class BTreeIndex<
    * Performs an equality lookup
    */
   equalityLookup(value: any): Set<TKey> {
-    const normalizedValue = normalizeValue(value)
+    const normalizedValue = normalizeForBTree(value)
     return new Set(this.valueMap.get(normalizedValue) ?? [])
   }
 
@@ -232,10 +232,17 @@ export class BTreeIndex<
     const { from, to, fromInclusive = true, toInclusive = true } = options
     const result = new Set<TKey>()
 
-    const normalizedFrom = normalizeValue(from)
-    const normalizedTo = normalizeValue(to)
-    const fromKey = normalizedFrom ?? this.orderedEntries.minKey()
-    const toKey = normalizedTo ?? this.orderedEntries.maxKey()
+    // Check if from/to were explicitly provided (even if undefined)
+    // vs not provided at all (should use min/max key)
+    const hasFrom = `from` in options
+    const hasTo = `to` in options
+
+    const fromKey = hasFrom
+      ? normalizeForBTree(from)
+      : this.orderedEntries.minKey()
+    const toKey = hasTo
+      ? normalizeForBTree(to)
+      : this.orderedEntries.maxKey()
 
     this.orderedEntries.forRange(
       fromKey,
@@ -263,9 +270,13 @@ export class BTreeIndex<
    */
   rangeQueryReversed(options: RangeQueryOptions = {}): Set<TKey> {
     const { from, to, fromInclusive = true, toInclusive = true } = options
+    const hasFrom = `from` in options
+    const hasTo = `to` in options
+
+    // Swap from/to for reversed query, respecting explicit undefined values
     return this.rangeQuery({
-      from: to ?? this.orderedEntries.maxKey(),
-      to: from ?? this.orderedEntries.minKey(),
+      from: hasTo ? to : this.orderedEntries.maxKey(),
+      to: hasFrom ? from : this.orderedEntries.minKey(),
       fromInclusive: toInclusive,
       toInclusive: fromInclusive,
     })
@@ -322,7 +333,7 @@ export class BTreeIndex<
   take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     const nextPair = (k?: any) => this.orderedEntries.nextHigherPair(k)
     // Normalize the from value
-    const normalizedFrom = normalizeValue(from)
+    const normalizedFrom = normalizeForBTree(from)
     return this.takeInternal(n, nextPair, normalizedFrom, filterFn)
   }
 
@@ -351,7 +362,7 @@ export class BTreeIndex<
   ): Array<TKey> {
     const nextPair = (k?: any) => this.orderedEntries.nextLowerPair(k)
     // Normalize the from value
-    const normalizedFrom = normalizeValue(from)
+    const normalizedFrom = normalizeForBTree(from)
     return this.takeInternal(n, nextPair, normalizedFrom, filterFn, true)
   }
 
@@ -377,7 +388,7 @@ export class BTreeIndex<
     const result = new Set<TKey>()
 
     for (const value of values) {
-      const normalizedValue = normalizeValue(value)
+      const normalizedValue = normalizeForBTree(value)
       const keys = this.valueMap.get(normalizedValue)
       if (keys) {
         keys.forEach((key) => result.add(key))
@@ -395,17 +406,22 @@ export class BTreeIndex<
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {
     return this.orderedEntries
       .keysArray()
-      .map((key) => [key, this.valueMap.get(key) ?? new Set()])
+      .map((key) => [denormalizeUndefined(key), this.valueMap.get(key) ?? new Set()])
   }
 
   get orderedEntriesArrayReversed(): Array<[any, Set<TKey>]> {
     return this.takeReversedFromEnd(this.orderedEntries.size).map((key) => [
-      key,
+      denormalizeUndefined(key),
       this.valueMap.get(key) ?? new Set(),
     ])
   }
 
   get valueMapData(): Map<any, Set<TKey>> {
-    return this.valueMap
+    // Return a new Map with denormalized keys
+    const result = new Map<any, Set<TKey>>()
+    for (const [key, value] of this.valueMap) {
+      result.set(denormalizeUndefined(key), value)
+    }
+    return result
   }
 }

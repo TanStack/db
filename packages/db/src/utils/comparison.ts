@@ -145,14 +145,11 @@ export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
  * Normalize a value for comparison and Map key usage
  * Converts values that can't be directly compared or used as Map keys
  * into comparable primitive representations
+ *
+ * Note: This does NOT convert undefined to a sentinel. Use normalizeForBTree
+ * for BTree index operations that need to distinguish undefined values.
  */
 export function normalizeValue(value: any): any {
-  // Handle undefined first
-  // convert to sentinel because the BTree does not properly support `undefined` as a key
-  if (value === undefined) {
-    return UNDEFINED_SENTINEL
-  }
-
   if (value instanceof Date) {
     return value.getTime()
   }
@@ -175,6 +172,19 @@ export function normalizeValue(value: any): any {
   }
 
   return value
+}
+
+/**
+ * Normalize a value for BTree index usage.
+ * Extends normalizeValue to also convert undefined to a sentinel value.
+ * This is needed because the BTree does not properly support `undefined` as a key
+ * (it interprets undefined as "start from beginning" in nextHigherPair/nextLowerPair).
+ */
+export function normalizeForBTree(value: any): any {
+  if (value === undefined) {
+    return UNDEFINED_SENTINEL
+  }
+  return normalizeValue(value)
 }
 
 /**
