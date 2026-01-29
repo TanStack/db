@@ -1,36 +1,37 @@
-import { distinct, filter, map } from "@tanstack/db-ivm"
-import { optimizeQuery } from "../optimizer.js"
+import { distinct, filter, map } from '@tanstack/db-ivm'
+import { optimizeQuery } from '../optimizer.js'
 import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
+  DuplicateAliasInSubqueryError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
-} from "../../errors.js"
-import { PropRef, Value as ValClass, getWhereExpression } from "../ir.js"
-import { compileExpression } from "./evaluators.js"
-import { processJoins } from "./joins.js"
-import { processGroupBy } from "./group-by.js"
-import { processOrderBy } from "./order-by.js"
-import { processSelect } from "./select.js"
-import type { CollectionSubscription } from "../../collection/subscription.js"
-import type { OrderByOptimizationInfo } from "./order-by.js"
+} from '../../errors.js'
+import { PropRef, Value as ValClass, getWhereExpression } from '../ir.js'
+import { compileExpression, toBooleanPredicate } from './evaluators.js'
+import { processJoins } from './joins.js'
+import { processGroupBy } from './group-by.js'
+import { processOrderBy } from './order-by.js'
+import { processSelect } from './select.js'
+import type { CollectionSubscription } from '../../collection/subscription.js'
+import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
   BasicExpression,
   CollectionRef,
   QueryIR,
   QueryRef,
-} from "../ir.js"
-import type { LazyCollectionCallbacks } from "./joins.js"
-import type { Collection } from "../../collection/index.js"
+} from '../ir.js'
+import type { LazyCollectionCallbacks } from './joins.js'
+import type { Collection } from '../../collection/index.js'
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
   ResultStream,
-} from "../../types.js"
-import type { QueryCache, QueryMapping, WindowOptions } from "./types.js"
+} from '../../types.js'
+import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 
-export type { WindowOptions } from "./types.js"
+export type { WindowOptions } from './types.js'
 
 /**
  * Result of query compilation including both the pipeline and source-specific WHERE clauses
@@ -91,13 +92,18 @@ export function compileQuery(
   optimizableOrderByCollections: Record<string, OrderByOptimizationInfo>,
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache: QueryCache = new WeakMap(),
-  queryMapping: QueryMapping = new WeakMap()
+  queryMapping: QueryMapping = new WeakMap(),
 ): CompilationResult {
   // Check if the original raw query has already been compiled
   const cachedResult = cache.get(rawQuery)
   if (cachedResult) {
     return cachedResult
   }
+
+  // Validate the raw query BEFORE optimization to check user's original structure.
+  // This must happen before optimization because the optimizer may create internal
+  // subqueries (e.g., for predicate pushdown) that reuse aliases, which is fine.
+  validateQueryStructure(rawQuery)
 
   // Optimize the query before compilation
   const { optimizedQuery: query, sourceWhereClauses } = optimizeQuery(rawQuery)
@@ -141,7 +147,8 @@ export function compileQuery(
     cache,
     queryMapping,
     aliasToCollectionId,
-    aliasRemapping
+    aliasRemapping,
+    sourceWhereClauses,
   )
   sources[mainSource] = mainInput
 
@@ -154,7 +161,7 @@ export function compileQuery(
         Record<string, typeof row>,
       ]
       return ret
-    })
+    }),
   )
 
   // Process JOIN clauses if they exist
@@ -177,7 +184,8 @@ export function compileQuery(
       rawQuery,
       compileQuery,
       aliasToCollectionId,
-      aliasRemapping
+      aliasRemapping,
+      sourceWhereClauses,
     )
   }
 
@@ -189,8 +197,8 @@ export function compileQuery(
       const compiledWhere = compileExpression(whereExpression)
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
-          return compiledWhere(namespacedRow)
-        })
+          return toBooleanPredicate(compiledWhere(namespacedRow))
+        }),
       )
     }
   }
@@ -200,8 +208,8 @@ export function compileQuery(
     for (const fnWhere of query.fnWhere) {
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
-          return fnWhere(namespacedRow)
-        })
+          return toBooleanPredicate(fnWhere(namespacedRow))
+        }),
       )
     }
   }
@@ -210,7 +218,7 @@ export function compileQuery(
     throw new DistinctRequiresSelectError()
   }
 
-  // Process the SELECT clause early - always create __select_results
+  // Process the SELECT clause early - always create $selected
   // This eliminates duplication and allows for DISTINCT implementation
   if (query.fnSelect) {
     // Handle functional select - apply the function to transform the row
@@ -221,15 +229,15 @@ export function compileQuery(
           key,
           {
             ...namespacedRow,
-            __select_results: selectResults,
+            $selected: selectResults,
           },
-        ] as [string, typeof namespacedRow & { __select_results: any }]
-      })
+        ] as [string, typeof namespacedRow & { $selected: any }]
+      }),
     )
   } else if (query.select) {
     pipeline = processSelect(pipeline, query.select, allInputs)
   } else {
-    // If no SELECT clause, create __select_results with the main table data
+    // If no SELECT clause, create $selected with the main table data
     pipeline = pipeline.pipe(
       map(([key, namespacedRow]) => {
         const selectResults =
@@ -241,10 +249,10 @@ export function compileQuery(
           key,
           {
             ...namespacedRow,
-            __select_results: selectResults,
+            $selected: selectResults,
           },
-        ] as [string, typeof namespacedRow & { __select_results: any }]
-      })
+        ] as [string, typeof namespacedRow & { $selected: any }]
+      }),
     )
   }
 
@@ -255,12 +263,12 @@ export function compileQuery(
       query.groupBy,
       query.having,
       query.select,
-      query.fnHaving
+      query.fnHaving,
     )
   } else if (query.select) {
     // Check if SELECT contains aggregates but no GROUP BY (implicit single-group aggregation)
     const hasAggregates = Object.values(query.select).some(
-      (expr) => expr.type === `agg`
+      (expr) => expr.type === `agg`,
     )
     if (hasAggregates) {
       // Handle implicit single-group aggregation
@@ -269,7 +277,7 @@ export function compileQuery(
         [], // Empty group by means single group
         query.having,
         query.select,
-        query.fnHaving
+        query.fnHaving,
       )
     }
   }
@@ -297,14 +305,14 @@ export function compileQuery(
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
           return fnHaving(namespacedRow)
-        })
+        }),
       )
     }
   }
 
   // Process the DISTINCT clause if it exists
   if (query.distinct) {
-    pipeline = pipeline.pipe(distinct(([_key, row]) => row.__select_results))
+    pipeline = pipeline.pipe(distinct(([_key, row]) => row.$selected))
   }
 
   // Process orderBy parameter if it exists
@@ -318,17 +326,17 @@ export function compileQuery(
       optimizableOrderByCollections,
       setWindowFn,
       query.limit,
-      query.offset
+      query.offset,
     )
 
-    // Final step: extract the __select_results and include orderBy index
+    // Final step: extract the $selected and include orderBy index
     const resultPipeline = orderedPipeline.pipe(
       map(([key, [row, orderByIndex]]) => {
-        // Extract the final results from __select_results and include orderBy index
-        const raw = (row as any).__select_results
+        // Extract the final results from $selected and include orderBy index
+        const raw = (row as any).$selected
         const finalResults = unwrapValue(raw)
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
-      })
+      }),
     )
 
     const result = resultPipeline
@@ -348,17 +356,17 @@ export function compileQuery(
     throw new LimitOffsetRequireOrderByError()
   }
 
-  // Final step: extract the __select_results and return tuple format (no orderBy)
+  // Final step: extract the $selected and return tuple format (no orderBy)
   const resultPipeline: ResultStream = pipeline.pipe(
     map(([key, row]) => {
-      // Extract the final results from __select_results and return [key, [results, undefined]]
-      const raw = (row as any).__select_results
+      // Extract the final results from $selected and return [key, [results, undefined]]
+      const raw = (row as any).$selected
       const finalResults = unwrapValue(raw)
       return [key, [finalResults, undefined]] as [
         unknown,
         [any, string | undefined],
       ]
-    })
+    }),
   )
 
   const result = resultPipeline
@@ -373,6 +381,74 @@ export function compileQuery(
   cache.set(rawQuery, compilationResult)
 
   return compilationResult
+}
+
+/**
+ * Collects aliases used for DIRECT collection references (not subqueries).
+ * Used to validate that subqueries don't reuse parent query collection aliases.
+ * Only direct CollectionRef aliases matter - QueryRef aliases don't cause conflicts.
+ */
+function collectDirectCollectionAliases(query: QueryIR): Set<string> {
+  const aliases = new Set<string>()
+
+  // Collect FROM alias only if it's a direct collection reference
+  if (query.from.type === `collectionRef`) {
+    aliases.add(query.from.alias)
+  }
+
+  // Collect JOIN aliases only for direct collection references
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (joinClause.from.type === `collectionRef`) {
+        aliases.add(joinClause.from.alias)
+      }
+    }
+  }
+
+  return aliases
+}
+
+/**
+ * Validates the structure of a query and its subqueries.
+ * Checks that subqueries don't reuse collection aliases from parent queries.
+ * This must be called on the RAW query before optimization.
+ */
+function validateQueryStructure(
+  query: QueryIR,
+  parentCollectionAliases: Set<string> = new Set(),
+): void {
+  // Collect direct collection aliases from this query level
+  const currentLevelAliases = collectDirectCollectionAliases(query)
+
+  // Check if any current alias conflicts with parent aliases
+  for (const alias of currentLevelAliases) {
+    if (parentCollectionAliases.has(alias)) {
+      throw new DuplicateAliasInSubqueryError(
+        alias,
+        Array.from(parentCollectionAliases),
+      )
+    }
+  }
+
+  // Combine parent and current aliases for checking nested subqueries
+  const combinedAliases = new Set([
+    ...parentCollectionAliases,
+    ...currentLevelAliases,
+  ])
+
+  // Recursively validate FROM subquery
+  if (query.from.type === `queryRef`) {
+    validateQueryStructure(query.from.query, combinedAliases)
+  }
+
+  // Recursively validate JOIN subqueries
+  if (query.join) {
+    for (const joinClause of query.join) {
+      if (joinClause.from.type === `queryRef`) {
+        validateQueryStructure(joinClause.from.query, combinedAliases)
+      }
+    }
+  }
 }
 
 /**
@@ -391,7 +467,8 @@ function processFrom(
   cache: QueryCache,
   queryMapping: QueryMapping,
   aliasToCollectionId: Record<string, string>,
-  aliasRemapping: Record<string, string>
+  aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -400,7 +477,7 @@ function processFrom(
         throw new CollectionInputNotFoundError(
           from.alias,
           from.collection.id,
-          Object.keys(allInputs)
+          Object.keys(allInputs),
         )
       }
       aliasToCollectionId[from.alias] = from.collection.id
@@ -421,7 +498,7 @@ function processFrom(
         optimizableOrderByCollections,
         setWindowFn,
         cache,
-        queryMapping
+        queryMapping,
       )
 
       // Pull up alias mappings from subquery to parent scope.
@@ -429,6 +506,28 @@ function processFrom(
       // any existing remappings from nested subquery levels.
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // Pull up source WHERE clauses from subquery to parent scope.
+      // This enables loadSubset to receive the correct where clauses for subquery collections.
+      //
+      // IMPORTANT: Skip pull-up for optimizer-created subqueries. These are detected when:
+      // 1. The outer alias (from.alias) matches the inner alias (from.query.from.alias)
+      // 2. The subquery was found in queryMapping (it's a user-defined subquery, not optimizer-created)
+      //
+      // For optimizer-created subqueries, the parent already has the sourceWhereClauses
+      // extracted from the original raw query, so pulling up would be redundant.
+      // More importantly, pulling up for optimizer-created subqueries can cause issues
+      // when the optimizer has restructured the query.
+      const isUserDefinedSubquery = queryMapping.has(from.query)
+      const subqueryFromAlias = from.query.from.alias
+      const isOptimizerCreated =
+        !isUserDefinedSubquery && from.alias === subqueryFromAlias
+
+      if (!isOptimizerCreated) {
+        for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause)
+        }
+      }
 
       // Create a FLATTENED remapping from outer alias to innermost alias.
       // For nested subqueries, this ensures one-hop lookups (not recursive chains).
@@ -445,7 +544,7 @@ function processFrom(
       const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
         (alias) =>
           subQueryResult.aliasToCollectionId[alias] ===
-          subQueryResult.collectionId
+          subQueryResult.collectionId,
       )
       if (innerAlias && innerAlias !== from.alias) {
         aliasRemapping[from.alias] = innerAlias
@@ -462,7 +561,7 @@ function processFrom(
           // Unwrap Value expressions that might have leaked through as the entire row
           const unwrapped = unwrapValue(value)
           return [key, unwrapped] as [unknown, any]
-        })
+        }),
       )
 
       return {
@@ -497,7 +596,7 @@ function unwrapValue(value: any): any {
 function mapNestedQueries(
   optimizedQuery: QueryIR,
   originalQuery: QueryIR,
-  queryMapping: QueryMapping
+  queryMapping: QueryMapping,
 ): void {
   // Map the FROM clause if it's a QueryRef
   if (
@@ -509,7 +608,7 @@ function mapNestedQueries(
     mapNestedQueries(
       optimizedQuery.from.query,
       originalQuery.from.query,
-      queryMapping
+      queryMapping,
     )
   }
 
@@ -532,7 +631,7 @@ function mapNestedQueries(
         mapNestedQueries(
           optimizedJoin.from.query,
           originalJoin.from.query,
-          queryMapping
+          queryMapping,
         )
       }
     }
@@ -541,7 +640,7 @@ function mapNestedQueries(
 
 function getRefFromAlias(
   query: QueryIR,
-  alias: string
+  alias: string,
 ): CollectionRef | QueryRef | void {
   if (query.from.alias === alias) {
     return query.from
@@ -562,7 +661,7 @@ function getRefFromAlias(
 export function followRef(
   query: QueryIR,
   ref: PropRef<any>,
-  collection: Collection
+  collection: Collection,
 ): { collection: Collection; path: Array<string> } | void {
   if (ref.path.length === 0) {
     return

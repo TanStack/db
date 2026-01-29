@@ -2,10 +2,33 @@ import {
   EmptyReferencePathError,
   UnknownExpressionTypeError,
   UnknownFunctionError,
-} from "../../errors.js"
-import { normalizeValue } from "../../utils/comparison.js"
-import type { BasicExpression, Func, PropRef } from "../ir.js"
-import type { NamespacedRow } from "../../types.js"
+} from '../../errors.js'
+import { areValuesEqual, normalizeValue } from '../../utils/comparison.js'
+import type { BasicExpression, Func, PropRef } from '../ir.js'
+import type { NamespacedRow } from '../../types.js'
+
+/**
+ * Helper function to check if a value is null or undefined (represents UNKNOWN in 3-valued logic)
+ */
+function isUnknown(value: any): boolean {
+  return value === null || value === undefined
+}
+
+/**
+ * Converts a 3-valued logic result to a boolean for use in WHERE/HAVING filters.
+ * In SQL, UNKNOWN (null) values in WHERE clauses exclude rows, matching false behavior.
+ *
+ * @param result - The 3-valued logic result: true, false, or null (UNKNOWN)
+ * @returns true only if result is explicitly true, false otherwise
+ *
+ * Truth table:
+ * - true → true (include row)
+ * - false → false (exclude row)
+ * - null (UNKNOWN) → false (exclude row, matching SQL behavior)
+ */
+export function toBooleanPredicate(result: boolean | null): boolean {
+  return result === true
+}
 
 /**
  * Compiled expression evaluator function type
@@ -23,7 +46,7 @@ export type CompiledSingleRowExpression = (item: Record<string, unknown>) => any
  */
 export function compileExpression(
   expr: BasicExpression,
-  isSingleRow: boolean = false
+  isSingleRow: boolean = false,
 ): CompiledExpression | CompiledSingleRowExpression {
   const compiledFn = compileExpressionInternal(expr, isSingleRow)
   return compiledFn
@@ -33,7 +56,7 @@ export function compileExpression(
  * Compiles a single-row expression into an optimized evaluator function.
  */
 export function compileSingleRowExpression(
-  expr: BasicExpression
+  expr: BasicExpression,
 ): CompiledSingleRowExpression {
   const compiledFn = compileExpressionInternal(expr, true)
   return compiledFn as CompiledSingleRowExpression
@@ -44,7 +67,7 @@ export function compileSingleRowExpression(
  */
 function compileExpressionInternal(
   expr: BasicExpression,
-  isSingleRow: boolean
+  isSingleRow: boolean,
 ): (data: any) => any {
   switch (expr.type) {
     case `val`: {
@@ -72,11 +95,47 @@ function compileExpressionInternal(
  * Compiles a reference expression into an optimized evaluator
  */
 function compileRef(ref: PropRef): CompiledExpression {
-  const [tableAlias, ...propertyPath] = ref.path
+  const [namespace, ...propertyPath] = ref.path
 
-  if (!tableAlias) {
+  if (!namespace) {
     throw new EmptyReferencePathError()
   }
+
+  // Handle $selected namespace - references SELECT result fields
+  if (namespace === `$selected`) {
+    // Access $selected directly
+    if (propertyPath.length === 0) {
+      // Just $selected - return entire $selected object
+      return (namespacedRow) => (namespacedRow as any).$selected
+    } else if (propertyPath.length === 1) {
+      // Single property access - most common case
+      const prop = propertyPath[0]!
+      return (namespacedRow) => {
+        const selectResults = (namespacedRow as any).$selected
+        return selectResults?.[prop]
+      }
+    } else {
+      // Multiple property navigation (nested SELECT fields)
+      return (namespacedRow) => {
+        const selectResults = (namespacedRow as any).$selected
+        if (selectResults === undefined) {
+          return undefined
+        }
+
+        let value: any = selectResults
+        for (const prop of propertyPath) {
+          if (value == null) {
+            return value
+          }
+          value = value[prop]
+        }
+        return value
+      }
+    }
+  }
+
+  // Handle table alias namespace (existing logic)
+  const tableAlias = namespace
 
   // Pre-compile the property path navigation
   if (propertyPath.length === 0) {
@@ -134,7 +193,7 @@ function compileSingleRowRef(ref: PropRef): CompiledSingleRowExpression {
 function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
   // Pre-compile all arguments using the appropriate compiler
   const compiledArgs = func.args.map((arg) =>
-    compileExpressionInternal(arg, isSingleRow)
+    compileExpressionInternal(arg, isSingleRow),
   )
 
   switch (func.name) {
@@ -145,7 +204,12 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = normalizeValue(argA(data))
         const b = normalizeValue(argB(data))
-        return a === b
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
+        // Use areValuesEqual for proper Uint8Array/Buffer comparison
+        return areValuesEqual(a, b)
       }
     }
     case `gt`: {
@@ -154,6 +218,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = argA(data)
         const b = argB(data)
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
         return a > b
       }
     }
@@ -163,6 +231,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = argA(data)
         const b = argB(data)
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
         return a >= b
       }
     }
@@ -172,6 +244,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = argA(data)
         const b = argB(data)
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
         return a < b
       }
     }
@@ -181,6 +257,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const a = argA(data)
         const b = argB(data)
+        // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
+        if (isUnknown(a) || isUnknown(b)) {
+          return null
+        }
         return a <= b
       }
     }
@@ -188,25 +268,67 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
     // Boolean operators
     case `and`:
       return (data) => {
+        // 3-valued logic for AND:
+        // - false AND anything = false (short-circuit)
+        // - null AND false = false
+        // - null AND anything (except false) = null
+        // - anything (except false) AND null = null
+        // - true AND true = true
+        let hasUnknown = false
         for (const compiledArg of compiledArgs) {
-          if (!compiledArg(data)) {
+          const result = compiledArg(data)
+          if (result === false) {
             return false
           }
+          if (isUnknown(result)) {
+            hasUnknown = true
+          }
         }
+        // If we got here, no operand was false
+        // If any operand was null, return null (UNKNOWN)
+        if (hasUnknown) {
+          return null
+        }
+
         return true
       }
     case `or`:
       return (data) => {
+        // 3-valued logic for OR:
+        // - true OR anything = true (short-circuit)
+        // - null OR anything (except true) = null
+        // - false OR false = false
+        let hasUnknown = false
         for (const compiledArg of compiledArgs) {
-          if (compiledArg(data)) {
+          const result = compiledArg(data)
+          if (result === true) {
             return true
           }
+          if (isUnknown(result)) {
+            hasUnknown = true
+          }
         }
+        // If we got here, no operand was true
+        // If any operand was null, return null (UNKNOWN)
+        if (hasUnknown) {
+          return null
+        }
+
         return false
       }
     case `not`: {
       const arg = compiledArgs[0]!
-      return (data) => !arg(data)
+      return (data) => {
+        // 3-valued logic for NOT:
+        // - NOT null = null
+        // - NOT true = false
+        // - NOT false = true
+        const result = arg(data)
+        if (isUnknown(result)) {
+          return null
+        }
+        return !result
+      }
     }
 
     // Array operators
@@ -216,6 +338,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const value = valueEvaluator(data)
         const array = arrayEvaluator(data)
+        // In 3-valued logic, if the value is null/undefined, return UNKNOWN
+        if (isUnknown(value)) {
+          return null
+        }
         if (!Array.isArray(array)) {
           return false
         }
@@ -230,6 +356,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const value = valueEvaluator(data)
         const pattern = patternEvaluator(data)
+        // In 3-valued logic, if value or pattern is null/undefined, return UNKNOWN
+        if (isUnknown(value) || isUnknown(pattern)) {
+          return null
+        }
         return evaluateLike(value, pattern, false)
       }
     }
@@ -239,6 +369,10 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       return (data) => {
         const value = valueEvaluator(data)
         const pattern = patternEvaluator(data)
+        // In 3-valued logic, if value or pattern is null/undefined, return UNKNOWN
+        if (isUnknown(value) || isUnknown(pattern)) {
+          return null
+        }
         return evaluateLike(value, pattern, true)
       }
     }
@@ -365,7 +499,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
 function evaluateLike(
   value: any,
   pattern: any,
-  caseInsensitive: boolean
+  caseInsensitive: boolean,
 ): boolean {
   if (typeof value !== `string` || typeof pattern !== `string`) {
     return false

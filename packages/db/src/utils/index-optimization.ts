@@ -15,15 +15,12 @@
  * - Optimizes IN array expressions
  */
 
-import { DEFAULT_COMPARE_OPTIONS } from "../utils.js"
-import { ReverseIndex } from "../indexes/reverse-index.js"
-import type { CompareOptions } from "../query/builder/types.js"
-import type {
-  BaseIndex,
-  IndexInterface,
-  IndexOperation,
-} from "../indexes/base-index.js"
-import type { BasicExpression } from "../query/ir.js"
+import { DEFAULT_COMPARE_OPTIONS } from '../utils.js'
+import { ReverseIndex } from '../indexes/reverse-index.js'
+import type { CompareOptions } from '../query/builder/types.js'
+import type { IndexInterface, IndexOperation } from '../indexes/base-index.js'
+import type { BasicExpression } from '../query/ir.js'
+import type { CollectionLike } from '../types.js'
 
 /**
  * Result of index-based query optimization
@@ -37,16 +34,21 @@ export interface OptimizationResult<TKey> {
  * Finds an index that matches a given field path
  */
 export function findIndexForField<TKey extends string | number>(
-  indexes: Map<number, IndexInterface<TKey>>,
+  collection: CollectionLike<any, TKey>,
   fieldPath: Array<string>,
-  compareOptions: CompareOptions = DEFAULT_COMPARE_OPTIONS
+  compareOptions?: CompareOptions,
 ): IndexInterface<TKey> | undefined {
-  for (const index of indexes.values()) {
+  const compareOpts = compareOptions ?? {
+    ...DEFAULT_COMPARE_OPTIONS,
+    ...collection.compareOptions,
+  }
+
+  for (const index of collection.indexes.values()) {
     if (
       index.matchesField(fieldPath) &&
-      index.matchesCompareOptions(compareOptions)
+      index.matchesCompareOptions(compareOpts)
     ) {
-      if (!index.matchesDirection(compareOptions.direction)) {
+      if (!index.matchesDirection(compareOpts.direction)) {
         return new ReverseIndex(index)
       }
       return index
@@ -91,19 +93,22 @@ export function unionSets<T>(sets: Array<Set<T>>): Set<T> {
 /**
  * Optimizes a query expression using available indexes to find matching keys
  */
-export function optimizeExpressionWithIndexes<TKey extends string | number>(
+export function optimizeExpressionWithIndexes<
+  T extends object,
+  TKey extends string | number,
+>(
   expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
-  return optimizeQueryRecursive(expression, indexes)
+  return optimizeQueryRecursive(expression, collection)
 }
 
 /**
  * Recursively optimizes query expressions
  */
-function optimizeQueryRecursive<TKey extends string | number>(
+function optimizeQueryRecursive<T extends object, TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type === `func`) {
     switch (expression.name) {
@@ -112,16 +117,16 @@ function optimizeQueryRecursive<TKey extends string | number>(
       case `gte`:
       case `lt`:
       case `lte`:
-        return optimizeSimpleComparison(expression, indexes)
+        return optimizeSimpleComparison(expression, collection)
 
       case `and`:
-        return optimizeAndExpression(expression, indexes)
+        return optimizeAndExpression(expression, collection)
 
       case `or`:
-        return optimizeOrExpression(expression, indexes)
+        return optimizeOrExpression(expression, collection)
 
       case `in`:
-        return optimizeInArrayExpression(expression, indexes)
+        return optimizeInArrayExpression(expression, collection)
     }
   }
 
@@ -131,10 +136,10 @@ function optimizeQueryRecursive<TKey extends string | number>(
 /**
  * Checks if an expression can be optimized
  */
-export function canOptimizeExpression<TKey extends string | number>(
-  expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
-): boolean {
+export function canOptimizeExpression<
+  T extends object,
+  TKey extends string | number,
+>(expression: BasicExpression, collection: CollectionLike<T, TKey>): boolean {
   if (expression.type === `func`) {
     switch (expression.name) {
       case `eq`:
@@ -142,16 +147,16 @@ export function canOptimizeExpression<TKey extends string | number>(
       case `gte`:
       case `lt`:
       case `lte`:
-        return canOptimizeSimpleComparison(expression, indexes)
+        return canOptimizeSimpleComparison(expression, collection)
 
       case `and`:
-        return canOptimizeAndExpression(expression, indexes)
+        return canOptimizeAndExpression(expression, collection)
 
       case `or`:
-        return canOptimizeOrExpression(expression, indexes)
+        return canOptimizeOrExpression(expression, collection)
 
       case `in`:
-        return canOptimizeInArrayExpression(expression, indexes)
+        return canOptimizeInArrayExpression(expression, collection)
     }
   }
 
@@ -162,9 +167,12 @@ export function canOptimizeExpression<TKey extends string | number>(
  * Optimizes compound range queries on the same field
  * Example: WHERE age > 5 AND age < 10
  */
-function optimizeCompoundRangeQuery<TKey extends string | number>(
+function optimizeCompoundRangeQuery<
+  T extends object,
+  TKey extends string | number,
+>(
   expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -236,7 +244,7 @@ function optimizeCompoundRangeQuery<TKey extends string | number>(
   for (const [fieldKey, operations] of fieldOperations) {
     if (operations.length >= 2) {
       const fieldPath = fieldKey.split(`.`)
-      const index = findIndexForField(indexes, fieldPath)
+      const index = findIndexForField(collection, fieldPath)
 
       if (index && index.supports(`gt`) && index.supports(`lt`)) {
         // Build range query options
@@ -292,9 +300,12 @@ function optimizeCompoundRangeQuery<TKey extends string | number>(
 /**
  * Optimizes simple comparison expressions (eq, gt, gte, lt, lte)
  */
-function optimizeSimpleComparison<TKey extends string | number>(
+function optimizeSimpleComparison<
+  T extends object,
+  TKey extends string | number,
+>(
   expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -337,7 +348,7 @@ function optimizeSimpleComparison<TKey extends string | number>(
 
   if (fieldArg && valueArg) {
     const fieldPath = (fieldArg as any).path
-    const index = findIndexForField(indexes, fieldPath)
+    const index = findIndexForField(collection, fieldPath)
 
     if (index) {
       const queryValue = (valueArg as any).value
@@ -361,10 +372,10 @@ function optimizeSimpleComparison<TKey extends string | number>(
 /**
  * Checks if a simple comparison can be optimized
  */
-function canOptimizeSimpleComparison<TKey extends string | number>(
-  expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
-): boolean {
+function canOptimizeSimpleComparison<
+  T extends object,
+  TKey extends string | number,
+>(expression: BasicExpression, collection: CollectionLike<T, TKey>): boolean {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return false
   }
@@ -382,7 +393,7 @@ function canOptimizeSimpleComparison<TKey extends string | number>(
   }
 
   if (fieldPath) {
-    const index = findIndexForField(indexes, fieldPath)
+    const index = findIndexForField(collection, fieldPath)
     return index !== undefined
   }
 
@@ -392,16 +403,16 @@ function canOptimizeSimpleComparison<TKey extends string | number>(
 /**
  * Optimizes AND expressions
  */
-function optimizeAndExpression<TKey extends string | number>(
+function optimizeAndExpression<T extends object, TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
   }
 
   // First, try to optimize compound range queries on the same field
-  const compoundRangeResult = optimizeCompoundRangeQuery(expression, indexes)
+  const compoundRangeResult = optimizeCompoundRangeQuery(expression, collection)
   if (compoundRangeResult.canOptimize) {
     return compoundRangeResult
   }
@@ -410,7 +421,7 @@ function optimizeAndExpression<TKey extends string | number>(
 
   // Try to optimize each part, keep the optimizable ones
   for (const arg of expression.args) {
-    const result = optimizeQueryRecursive(arg, indexes)
+    const result = optimizeQueryRecursive(arg, collection)
     if (result.canOptimize) {
       results.push(result)
     }
@@ -429,24 +440,24 @@ function optimizeAndExpression<TKey extends string | number>(
 /**
  * Checks if an AND expression can be optimized
  */
-function canOptimizeAndExpression<TKey extends string | number>(
-  expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
-): boolean {
+function canOptimizeAndExpression<
+  T extends object,
+  TKey extends string | number,
+>(expression: BasicExpression, collection: CollectionLike<T, TKey>): boolean {
   if (expression.type !== `func` || expression.args.length < 2) {
     return false
   }
 
   // If any argument can be optimized, we can gain some speedup
-  return expression.args.some((arg) => canOptimizeExpression(arg, indexes))
+  return expression.args.some((arg) => canOptimizeExpression(arg, collection))
 }
 
 /**
  * Optimizes OR expressions
  */
-function optimizeOrExpression<TKey extends string | number>(
+function optimizeOrExpression<T extends object, TKey extends string | number>(
   expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length < 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -456,7 +467,7 @@ function optimizeOrExpression<TKey extends string | number>(
 
   // Try to optimize each part, keep the optimizable ones
   for (const arg of expression.args) {
-    const result = optimizeQueryRecursive(arg, indexes)
+    const result = optimizeQueryRecursive(arg, collection)
     if (result.canOptimize) {
       results.push(result)
     }
@@ -475,24 +486,27 @@ function optimizeOrExpression<TKey extends string | number>(
 /**
  * Checks if an OR expression can be optimized
  */
-function canOptimizeOrExpression<TKey extends string | number>(
-  expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
-): boolean {
+function canOptimizeOrExpression<
+  T extends object,
+  TKey extends string | number,
+>(expression: BasicExpression, collection: CollectionLike<T, TKey>): boolean {
   if (expression.type !== `func` || expression.args.length < 2) {
     return false
   }
 
   // If any argument can be optimized, we can gain some speedup
-  return expression.args.some((arg) => canOptimizeExpression(arg, indexes))
+  return expression.args.some((arg) => canOptimizeExpression(arg, collection))
 }
 
 /**
  * Optimizes IN array expressions
  */
-function optimizeInArrayExpression<TKey extends string | number>(
+function optimizeInArrayExpression<
+  T extends object,
+  TKey extends string | number,
+>(
   expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
+  collection: CollectionLike<T, TKey>,
 ): OptimizationResult<TKey> {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return { canOptimize: false, matchingKeys: new Set() }
@@ -508,7 +522,7 @@ function optimizeInArrayExpression<TKey extends string | number>(
   ) {
     const fieldPath = (fieldArg as any).path
     const values = (arrayArg as any).value
-    const index = findIndexForField(indexes, fieldPath)
+    const index = findIndexForField(collection, fieldPath)
 
     if (index) {
       // Check if the index supports IN operation
@@ -535,10 +549,10 @@ function optimizeInArrayExpression<TKey extends string | number>(
 /**
  * Checks if an IN array expression can be optimized
  */
-function canOptimizeInArrayExpression<TKey extends string | number>(
-  expression: BasicExpression,
-  indexes: Map<number, BaseIndex<TKey>>
-): boolean {
+function canOptimizeInArrayExpression<
+  T extends object,
+  TKey extends string | number,
+>(expression: BasicExpression, collection: CollectionLike<T, TKey>): boolean {
   if (expression.type !== `func` || expression.args.length !== 2) {
     return false
   }
@@ -552,7 +566,7 @@ function canOptimizeInArrayExpression<TKey extends string | number>(
     Array.isArray((arrayArg as any).value)
   ) {
     const fieldPath = (fieldArg as any).path
-    const index = findIndexForField(indexes, fieldPath)
+    const index = findIndexForField(collection, fieldPath)
     return index !== undefined
   }
 

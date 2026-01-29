@@ -1,4 +1,4 @@
-import { filter, join as joinOperator, map, tap } from "@tanstack/db-ivm"
+import { filter, join as joinOperator, map, tap } from '@tanstack/db-ivm'
 import {
   CollectionInputNotFoundError,
   InvalidJoinCondition,
@@ -10,29 +10,29 @@ import {
   SubscriptionNotFoundError,
   UnsupportedJoinSourceTypeError,
   UnsupportedJoinTypeError,
-} from "../../errors.js"
-import { ensureIndexForField } from "../../indexes/auto-index.js"
-import { PropRef, followRef } from "../ir.js"
-import { inArray } from "../builder/functions.js"
-import { compileExpression } from "./evaluators.js"
-import type { CompileQueryFn } from "./index.js"
-import type { OrderByOptimizationInfo } from "./order-by.js"
+} from '../../errors.js'
+import { ensureIndexForField } from '../../indexes/auto-index.js'
+import { PropRef, followRef } from '../ir.js'
+import { inArray } from '../builder/functions.js'
+import { compileExpression } from './evaluators.js'
+import type { CompileQueryFn } from './index.js'
+import type { OrderByOptimizationInfo } from './order-by.js'
 import type {
   BasicExpression,
   CollectionRef,
   JoinClause,
   QueryIR,
   QueryRef,
-} from "../ir.js"
-import type { IStreamBuilder, JoinType } from "@tanstack/db-ivm"
-import type { Collection } from "../../collection/index.js"
+} from '../ir.js'
+import type { IStreamBuilder, JoinType } from '@tanstack/db-ivm'
+import type { Collection } from '../../collection/index.js'
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
   NamespacedRow,
-} from "../../types.js"
-import type { QueryCache, QueryMapping, WindowOptions } from "./types.js"
-import type { CollectionSubscription } from "../../collection/subscription.js"
+} from '../../types.js'
+import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
+import type { CollectionSubscription } from '../../collection/subscription.js'
 
 /** Function type for loading specific keys into a lazy collection */
 export type LoadKeysFn = (key: Set<string | number>) => void
@@ -65,7 +65,8 @@ export function processJoins(
   rawQuery: QueryIR,
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
-  aliasRemapping: Record<string, string>
+  aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): NamespacedAndKeyedStream {
   let resultPipeline = pipeline
 
@@ -88,7 +89,8 @@ export function processJoins(
       rawQuery,
       onCompileSubquery,
       aliasToCollectionId,
-      aliasRemapping
+      aliasRemapping,
+      sourceWhereClauses,
     )
   }
 
@@ -117,7 +119,8 @@ function processJoin(
   rawQuery: QueryIR,
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
-  aliasRemapping: Record<string, string>
+  aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): NamespacedAndKeyedStream {
   const isCollectionRef = joinClause.from.type === `collectionRef`
 
@@ -139,7 +142,8 @@ function processJoin(
     queryMapping,
     onCompileSubquery,
     aliasToCollectionId,
-    aliasRemapping
+    aliasRemapping,
+    sourceWhereClauses,
   )
 
   // Add the joined source to the sources map
@@ -164,7 +168,7 @@ function processJoin(
   const { activeSource, lazySource } = getActiveAndLazySources(
     joinClause.type,
     mainCollection,
-    joinedCollection
+    joinedCollection,
   )
 
   // Analyze which source each expression refers to and swap if necessary
@@ -173,7 +177,7 @@ function processJoin(
     joinClause.left,
     joinClause.right,
     availableSources,
-    joinedSource
+    joinedSource,
   )
 
   // Pre-compile the join expressions
@@ -191,7 +195,7 @@ function processJoin(
         unknown,
         [string, typeof namespacedRow],
       ]
-    })
+    }),
   )
 
   // Prepare the joined pipeline
@@ -208,7 +212,7 @@ function processJoin(
         unknown,
         [string, typeof namespacedRow],
       ]
-    })
+    }),
   )
 
   // Apply the join operation
@@ -255,7 +259,7 @@ function processJoin(
       const followRefResult = followRef(
         rawQuery,
         lazySourceJoinExpr,
-        lazySource
+        lazySource,
       )!
       const followRefCollection = followRefResult.collection
 
@@ -264,7 +268,7 @@ function processJoin(
         ensureIndexForField(
           fieldName,
           followRefResult.path,
-          followRefCollection
+          followRefCollection,
         )
       }
 
@@ -288,7 +292,7 @@ function processJoin(
               resolvedAlias,
               lazyAlias,
               lazySource.id,
-              Object.keys(subscriptions)
+              Object.keys(subscriptions),
             )
           }
 
@@ -309,7 +313,7 @@ function processJoin(
             // Snapshot wasn't sent because it could not be loaded from the indexes
             lazySourceSubscription.requestSnapshot()
           }
-        })
+        }),
       )
 
       if (activeSource === `main`) {
@@ -322,7 +326,7 @@ function processJoin(
 
   return mainPipeline.pipe(
     joinOperator(joinedPipeline, joinClause.type as JoinType),
-    processJoinResults(joinClause.type)
+    processJoinResults(joinClause.type),
   )
 }
 
@@ -334,11 +338,11 @@ function analyzeJoinExpressions(
   left: BasicExpression,
   right: BasicExpression,
   allAvailableSourceAliases: Array<string>,
-  joinedSource: string
+  joinedSource: string,
 ): { mainExpr: BasicExpression; joinedExpr: BasicExpression } {
   // Filter out the joined source alias from the available source aliases
   const availableSources = allAvailableSourceAliases.filter(
-    (alias) => alias !== joinedSource
+    (alias) => alias !== joinedSource,
   )
 
   const leftSourceAlias = getSourceAliasFromExpression(left)
@@ -430,7 +434,8 @@ function processJoinSource(
   queryMapping: QueryMapping,
   onCompileSubquery: CompileQueryFn,
   aliasToCollectionId: Record<string, string>,
-  aliasRemapping: Record<string, string>
+  aliasRemapping: Record<string, string>,
+  sourceWhereClauses: Map<string, BasicExpression<boolean>>,
 ): { alias: string; input: KeyedStream; collectionId: string } {
   switch (from.type) {
     case `collectionRef`: {
@@ -439,7 +444,7 @@ function processJoinSource(
         throw new CollectionInputNotFoundError(
           from.alias,
           from.collection.id,
-          Object.keys(allInputs)
+          Object.keys(allInputs),
         )
       }
       aliasToCollectionId[from.alias] = from.collection.id
@@ -460,7 +465,7 @@ function processJoinSource(
         optimizableOrderByCollections,
         setWindowFn,
         cache,
-        queryMapping
+        queryMapping,
       )
 
       // Pull up alias mappings from subquery to parent scope.
@@ -468,6 +473,26 @@ function processJoinSource(
       // any existing remappings from nested subquery levels.
       Object.assign(aliasToCollectionId, subQueryResult.aliasToCollectionId)
       Object.assign(aliasRemapping, subQueryResult.aliasRemapping)
+
+      // Pull up source WHERE clauses from subquery to parent scope.
+      // This enables loadSubset to receive the correct where clauses for subquery collections.
+      //
+      // IMPORTANT: Skip pull-up for optimizer-created subqueries. These are detected when:
+      // 1. The outer alias (from.alias) matches the inner alias (from.query.from.alias)
+      // 2. The subquery was found in queryMapping (it's a user-defined subquery, not optimizer-created)
+      //
+      // For optimizer-created subqueries, the parent already has the sourceWhereClauses
+      // extracted from the original raw query, so pulling up would be redundant.
+      const isUserDefinedSubquery = queryMapping.has(from.query)
+      const fromInnerAlias = from.query.from.alias
+      const isOptimizerCreated =
+        !isUserDefinedSubquery && from.alias === fromInnerAlias
+
+      if (!isOptimizerCreated) {
+        for (const [alias, whereClause] of subQueryResult.sourceWhereClauses) {
+          sourceWhereClauses.set(alias, whereClause)
+        }
+      }
 
       // Create a flattened remapping from outer alias to innermost alias.
       // For nested subqueries, this ensures one-hop lookups (not recursive chains).
@@ -483,7 +508,7 @@ function processJoinSource(
       const innerAlias = Object.keys(subQueryResult.aliasToCollectionId).find(
         (alias) =>
           subQueryResult.aliasToCollectionId[alias] ===
-          subQueryResult.collectionId
+          subQueryResult.collectionId,
       )
       if (innerAlias && innerAlias !== from.alias) {
         aliasRemapping[from.alias] = innerAlias
@@ -498,7 +523,7 @@ function processJoinSource(
         map((data: any) => {
           const [key, [value, _orderByIndex]] = data
           return [key, value] as [unknown, any]
-        })
+        }),
       )
 
       return {
@@ -525,7 +550,7 @@ function processJoinResults(joinType: string) {
           [string, NamespacedRow] | undefined,
         ],
       ]
-    >
+    >,
   ): NamespacedAndKeyedStream {
     return pipeline.pipe(
       // Process the join result and handle nulls
@@ -574,7 +599,7 @@ function processJoinResults(joinType: string) {
         const resultKey = `[${mainKey},${joinedKey}]`
 
         return [resultKey, mergedNamespacedRow] as [string, NamespacedRow]
-      })
+      }),
     )
   }
 }
@@ -592,7 +617,7 @@ function processJoinResults(joinType: string) {
 function getActiveAndLazySources(
   joinType: JoinClause[`type`],
   leftCollection: Collection,
-  rightCollection: Collection
+  rightCollection: Collection,
 ):
   | { activeSource: `main` | `joined`; lazySource: Collection }
   | { activeSource: undefined; lazySource: undefined } {

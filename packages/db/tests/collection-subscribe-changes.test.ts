@@ -1,16 +1,16 @@
-import { describe, expect, it, vi } from "vitest"
-import mitt from "mitt"
-import { createCollection } from "../src/collection/index.js"
-import { createTransaction } from "../src/transactions"
-import { eq } from "../src/query/builder/functions"
-import { PropRef } from "../src/query/ir"
+import { describe, expect, it, vi } from 'vitest'
+import mitt from 'mitt'
+import { createCollection } from '../src/collection/index.js'
+import { createTransaction } from '../src/transactions'
+import { and, eq, gt } from '../src/query/builder/functions'
+import { PropRef } from '../src/query/ir'
 import type {
   ChangeMessage,
   ChangesPayload,
   MutationFn,
   PendingMutation,
   SyncConfig,
-} from "../src/types"
+} from '../src/types'
 
 // Helper function to wait for changes to be processed
 const waitForChanges = () => new Promise((resolve) => setTimeout(resolve, 10))
@@ -294,7 +294,7 @@ describe(`Collection.subscribeChanges`, () => {
       collection.update(item.id, (draft) => {
         draft.value = `updated optimistic value`
         draft.updated = true
-      })
+      }),
     )
 
     // Verify that update was emitted
@@ -437,7 +437,7 @@ describe(`Collection.subscribeChanges`, () => {
     updateTx.mutate(() =>
       collection.update(optItem.id, (draft) => {
         draft.value = `updated optimistic value`
-      })
+      }),
     )
 
     // Verify the optimistic update was emitted
@@ -557,7 +557,7 @@ describe(`Collection.subscribeChanges`, () => {
         { id: 3, value: `batch1` },
         { id: 4, value: `batch2` },
         { id: 5, value: `batch3` },
-      ])
+      ]),
     )
 
     // Verify only the 3 new items were emitted, not the existing ones
@@ -587,7 +587,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx2.mutate(() =>
       collection.update(itemToUpdate.id, (draft) => {
         draft.value = `updated value`
-      })
+      }),
     )
 
     // Verify only the updated item was emitted
@@ -734,7 +734,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx1.mutate(() =>
       collection.update(1, (draft) => {
         draft.status = `active`
-      })
+      }),
     )
 
     // Should emit an insert event for the newly active item
@@ -757,7 +757,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx2.mutate(() =>
       collection.update(2, (draft) => {
         draft.status = `inactive`
-      })
+      }),
     )
 
     // Should emit a delete event for the newly inactive item
@@ -780,7 +780,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx3.mutate(() =>
       collection.update(1, (draft) => {
         draft.value = `updated item1`
-      })
+      }),
     )
 
     // Should emit an update event for the active item
@@ -803,7 +803,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx4.mutate(() =>
       collection.update(2, (draft) => {
         draft.value = `updated inactive item`
-      })
+      }),
     )
 
     // Should not emit any events for inactive items
@@ -849,7 +849,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     await collection.stateWhenReady()
@@ -926,7 +926,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     await collection.stateWhenReady()
@@ -1042,7 +1042,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
       {
         includeInitialState: true,
-      }
+      },
     )
 
     await collection.stateWhenReady()
@@ -1182,7 +1182,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx.mutate(() =>
       collection.update(1, (draft) => {
         draft.value = `client-update`
-      })
+      }),
     )
 
     changeEvents.length = 0
@@ -1193,8 +1193,10 @@ describe(`Collection.subscribeChanges`, () => {
     f.write({ type: `insert`, value: { id: 1, value: `server-after` } })
     f.commit()
 
-    // Expect delete, insert with optimistic value, and an empty event from markReady
-    expect(changeEvents.length).toBe(3)
+    // Expect delete and insert with optimistic value
+    // Note: Previously there was a duplicate insert event that was incorrectly
+    // being sent, causing 3 events. Now duplicates are filtered correctly.
+    expect(changeEvents.length).toBe(2)
     expect(changeEvents[0]).toEqual({
       type: `delete`,
       key: 1,
@@ -1250,6 +1252,70 @@ describe(`Collection.subscribeChanges`, () => {
     expect(collection.state.has(1)).toBe(false)
   })
 
+  it(`should emit synced delete after a non-optimistic delete`, async () => {
+    const emitter = mitt()
+    const callback = vi.fn()
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `non-optimistic-delete-sync`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // replay any pending mutations emitted via mitt
+          // @ts-expect-error Mitt typings are loose for our test helpers
+          emitter.on(`*`, (_, changes: Array<PendingMutation>) => {
+            begin()
+            changes.forEach((change) => {
+              write({
+                type: change.type,
+                // @ts-expect-error test helper
+                value: change.modified,
+              })
+            })
+            commit()
+          })
+
+          // seed initial row
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial` },
+          })
+          commit()
+        },
+      },
+      onDelete: async ({ transaction }) => {
+        emitter.emit(`sync`, transaction.mutations)
+      },
+    })
+
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+    })
+
+    // initial insert emitted
+    expect(callback).toHaveBeenCalledTimes(1)
+    callback.mockClear()
+
+    const tx = collection.delete(1, { optimistic: false })
+    await tx.isPersisted.promise
+
+    expect(callback).toHaveBeenCalledTimes(1)
+    const deleteChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      value: string
+    }>
+    expect(deleteChanges).toEqual([
+      {
+        type: `delete`,
+        key: 1,
+        value: { id: 1, value: `initial` },
+      },
+    ])
+    expect(collection.state.has(1)).toBe(false)
+
+    subscription.unsubscribe()
+  })
+
   it(`truncate + optimistic insert: server did NOT reinsert key -> inserted optimistically`, async () => {
     const changeEvents: Array<any> = []
     let f: any = null
@@ -1288,15 +1354,15 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Expect delete for id 1, and insert for id 2
     expect(changeEvents.some((e) => e.type === `delete` && e.key === 1)).toBe(
-      true
+      true,
     )
     expect(
       changeEvents.some(
         (e) =>
           e.type === `insert` &&
           e.key === 2 &&
-          e.value.value === `client-insert`
-      )
+          e.value.value === `client-insert`,
+      ),
     ).toBe(true)
     expect(collection.state.get(2)).toEqual({ id: 2, value: `client-insert` })
   })
@@ -1328,7 +1394,7 @@ describe(`Collection.subscribeChanges`, () => {
     tx.mutate(() =>
       collection.update(1, (draft) => {
         draft.value = `client-update`
-      })
+      }),
     )
 
     changeEvents.length = 0
@@ -1343,7 +1409,7 @@ describe(`Collection.subscribeChanges`, () => {
     const inserts = changeEvents.filter((e) => e.type === `insert`)
     expect(deletes.some((e) => e.key === 1)).toBe(true)
     expect(
-      inserts.some((e) => e.key === 1 && e.value.value === `client-update`)
+      inserts.some((e) => e.key === 1 && e.value.value === `client-update`),
     ).toBe(true)
     expect(collection.state.get(1)).toEqual({ id: 1, value: `client-update` })
   })
@@ -1776,7 +1842,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
       {
         whereExpression: eq(new PropRef([`active`]), true),
-      }
+      },
     )
 
     const { begin, write, commit, markReady } = testSyncFunctions
@@ -1849,5 +1915,170 @@ describe(`Collection.subscribeChanges`, () => {
 
     expect(collection.status).toBe(`ready`)
     expect(collection.size).toBe(2)
+  })
+
+  it(`should support where callback for filtering changes`, () => {
+    const callback = vi.fn()
+
+    // Create collection with items that have a status field
+    const collection = createCollection<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>({
+      id: `where-callback-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          // Start with some initial data
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `item1`, status: `inactive` },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `item2`, status: `active` },
+          })
+          commit()
+        },
+      },
+    })
+
+    const mutationFn: MutationFn = async () => {}
+
+    // Subscribe to changes with a where callback for active items only
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+      where: (row) => eq(row.status, `active`),
+    })
+
+    // Should only receive the active item in initial state
+    expect(callback).toHaveBeenCalledTimes(1)
+    const initialChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(initialChanges).toHaveLength(1)
+    expect(initialChanges[0]!.key).toBe(2)
+    expect(initialChanges[0]!.type).toBe(`insert`)
+
+    // Reset mock
+    callback.mockReset()
+
+    // Update an inactive item to active (should emit insert)
+    const tx1 = createTransaction({ mutationFn })
+    tx1.mutate(() =>
+      collection.update(1, (draft) => {
+        draft.status = `active`
+      }),
+    )
+
+    // Should emit an insert event for the newly active item
+    expect(callback).toHaveBeenCalledTimes(1)
+    const insertChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(insertChanges).toHaveLength(1)
+    expect(insertChanges[0]!.type).toBe(`insert`)
+    expect(insertChanges[0]!.key).toBe(1)
+    expect(insertChanges[0]!.value.status).toBe(`active`)
+
+    // Reset mock
+    callback.mockReset()
+
+    // Update an active item to inactive (should emit delete)
+    const tx2 = createTransaction({ mutationFn })
+    tx2.mutate(() =>
+      collection.update(2, (draft) => {
+        draft.status = `inactive`
+      }),
+    )
+
+    // Should emit a delete event for the newly inactive item
+    expect(callback).toHaveBeenCalledTimes(1)
+    const deleteChanges = callback.mock.calls[0]![0] as ChangesPayload<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+    }>
+    expect(deleteChanges).toHaveLength(1)
+    expect(deleteChanges[0]!.type).toBe(`delete`)
+    expect(deleteChanges[0]!.key).toBe(2)
+
+    // Clean up
+    subscription.unsubscribe()
+  })
+
+  it(`should support where callback with multiple conditions`, () => {
+    const callback = vi.fn()
+
+    // Create collection with items
+    const collection = createCollection<{
+      id: number
+      value: string
+      status: `active` | `inactive`
+      priority: number
+    }>({
+      id: `where-callback-and-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `item1`, status: `active`, priority: 3 },
+          })
+          write({
+            type: `insert`,
+            value: { id: 2, value: `item2`, status: `active`, priority: 8 },
+          })
+          write({
+            type: `insert`,
+            value: { id: 3, value: `item3`, status: `inactive`, priority: 10 },
+          })
+          commit()
+        },
+      },
+    })
+
+    // Subscribe with where callback using and() for multiple conditions
+    const subscription = collection.subscribeChanges(callback, {
+      includeInitialState: true,
+      where: (row) => and(eq(row.status, `active`), gt(row.priority, 5)),
+    })
+
+    // Should only receive item2 (active AND priority > 5)
+    expect(callback).toHaveBeenCalledTimes(1)
+    const initialChanges = callback.mock.calls[0]![0] as ChangesPayload<any>
+    expect(initialChanges).toHaveLength(1)
+    expect(initialChanges[0]!.key).toBe(2)
+    expect(initialChanges[0]!.value).toEqual({
+      id: 2,
+      value: `item2`,
+      status: `active`,
+      priority: 8,
+    })
+
+    // Clean up
+    subscription.unsubscribe()
+  })
+
+  it(`should throw if both where and whereExpression are provided`, () => {
+    const collection = createCollection<{ id: number; status: string }>({
+      id: `where-both-error-test`,
+      getKey: (item) => item.id,
+      sync: { sync: () => {} },
+    })
+
+    expect(() => {
+      collection.subscribeChanges(() => {}, {
+        where: (row) => eq(row.status, `active`),
+        whereExpression: eq(new PropRef([`status`]), `active`),
+      })
+    }).toThrow(`Cannot specify both 'where' and 'whereExpression' options`)
   })
 })

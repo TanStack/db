@@ -2,7 +2,7 @@
  * Generic utility functions
  */
 
-import type { CompareOptions } from "./query/builder/types"
+import type { CompareOptions } from './query/builder/types'
 
 interface TypedArray {
   length: number
@@ -36,7 +36,7 @@ export function deepEquals(a: any, b: any): boolean {
 function deepEqualsInternal(
   a: any,
   b: any,
-  visited: Map<object, object>
+  visited: Map<object, object>,
 ): boolean {
   // Handle strict equality (primitives, same reference)
   if (a === b) return true
@@ -52,12 +52,16 @@ function deepEqualsInternal(
     if (!(b instanceof Date)) return false
     return a.getTime() === b.getTime()
   }
+  // Symmetric check: if b is Date but a is not, they're not equal
+  if (b instanceof Date) return false
 
   // Handle RegExp objects
   if (a instanceof RegExp) {
     if (!(b instanceof RegExp)) return false
     return a.source === b.source && a.flags === b.flags
   }
+  // Symmetric check: if b is RegExp but a is not, they're not equal
+  if (b instanceof RegExp) return false
 
   // Handle Map objects - only if both are Maps
   if (a instanceof Map) {
@@ -78,6 +82,8 @@ function deepEqualsInternal(
     visited.delete(a)
     return result
   }
+  // Symmetric check: if b is Map but a is not, they're not equal
+  if (b instanceof Map) return false
 
   // Handle Set objects - only if both are Sets
   if (a instanceof Set) {
@@ -106,6 +112,8 @@ function deepEqualsInternal(
     visited.delete(a)
     return result
   }
+  // Symmetric check: if b is Set but a is not, they're not equal
+  if (b instanceof Set) return false
 
   // Handle TypedArrays
   if (
@@ -123,6 +131,14 @@ function deepEqualsInternal(
     }
 
     return true
+  }
+  // Symmetric check: if b is TypedArray but a is not, they're not equal
+  if (
+    ArrayBuffer.isView(b) &&
+    !(b instanceof DataView) &&
+    !ArrayBuffer.isView(a)
+  ) {
+    return false
   }
 
   // Handle Temporal objects
@@ -142,6 +158,8 @@ function deepEqualsInternal(
     // Fallback to toString comparison for other types
     return a.toString() === b.toString()
   }
+  // Symmetric check: if b is Temporal but a is not, they're not equal
+  if (isTemporal(b)) return false
 
   // Handle arrays
   if (Array.isArray(a)) {
@@ -154,11 +172,13 @@ function deepEqualsInternal(
     visited.set(a, b)
 
     const result = a.every((item, index) =>
-      deepEqualsInternal(item, b[index], visited)
+      deepEqualsInternal(item, b[index], visited),
     )
     visited.delete(a)
     return result
   }
+  // Symmetric check: if b is array but a is not, they're not equal
+  if (Array.isArray(b)) return false
 
   // Handle objects
   if (typeof a === `object`) {
@@ -180,7 +200,7 @@ function deepEqualsInternal(
 
     // Check if all keys exist in both objects and their values are equal
     const result = keysA.every(
-      (key) => key in b && deepEqualsInternal(a[key], b[key], visited)
+      (key) => key in b && deepEqualsInternal(a[key], b[key], visited),
     )
 
     visited.delete(a)

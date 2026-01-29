@@ -1,10 +1,10 @@
-import { describe, expect, expectTypeOf, it, vi } from "vitest"
-import { createCollection, createOptimisticAction } from "../src"
+import { describe, expect, expectTypeOf, it, vi } from 'vitest'
+import { createCollection, createOptimisticAction } from '../src'
 import type {
   MutationFnParams,
   Transaction,
   TransactionWithMutations,
-} from "../src"
+} from '../src'
 
 describe(`createOptimisticAction`, () => {
   // Runtime tests
@@ -56,6 +56,31 @@ describe(`createOptimisticAction`, () => {
     expect(mutationFnMock).toHaveBeenCalledTimes(1)
     expect(mutationFnMock.mock.calls[0]?.[0]).toBe(`Test Todo`)
     expect(mutationFnMock.mock.calls[0]?.[1]).toHaveProperty(`transaction`)
+  })
+
+  it(`should throw if onMutate returns a promise`, () => {
+    const collection = createCollection<{ id: string; text: string }>({
+      id: `async-on-mutate-collection`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: () => {
+          // No-op sync for testing
+        },
+      },
+    })
+
+    const addTodo = createOptimisticAction<string>({
+      onMutate: async (text) => {
+        collection.insert({ id: `1`, text })
+      },
+      mutationFn: async () => {
+        return Promise.resolve()
+      },
+    })
+
+    expect(() => addTodo(`Async Todo`)).toThrowError(
+      `onMutate must be synchronous`,
+    )
   })
 
   // Test with complex object variables
@@ -140,7 +165,7 @@ describe(`createOptimisticAction`, () => {
         expectTypeOf(text).toBeString()
         expectTypeOf(params).toEqualTypeOf<MutationFnParams>()
         expectTypeOf(
-          params.transaction
+          params.transaction,
         ).toEqualTypeOf<TransactionWithMutations>()
         return Promise.resolve({ success: true })
       },
@@ -171,7 +196,7 @@ describe(`createOptimisticAction`, () => {
         expectTypeOf(user.id).toBeNumber()
         expectTypeOf(params).toEqualTypeOf<MutationFnParams>()
         expectTypeOf(
-          params.transaction
+          params.transaction,
         ).toEqualTypeOf<TransactionWithMutations>()
         return Promise.resolve({ success: true })
       },

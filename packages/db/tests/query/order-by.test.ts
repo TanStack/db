@@ -1,7 +1,7 @@
-import { beforeEach, describe, expect, it } from "vitest"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
-import { createLiveQueryCollection } from "../../src/query/live-query-collection.js"
+import { beforeEach, describe, expect, it } from 'vitest'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
+import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import {
   eq,
   gt,
@@ -9,7 +9,8 @@ import {
   lt,
   max,
   not,
-} from "../../src/query/builder/functions.js"
+} from '../../src/query/builder/functions.js'
+import { createFilterFunctionFromExpression } from '../../src/collection/change-events.js'
 
 type Person = {
   id: string
@@ -224,7 +225,7 @@ function createEmployeesCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (employee) => employee.id,
       initialData: employeeData,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -235,12 +236,12 @@ function createDepartmentsCollection(autoIndex: `off` | `eager` = `eager`) {
       getKey: (department) => department.id,
       initialData: departmentData,
       autoIndex,
-    })
+    }),
   )
 }
 
 function createEmployeesWithNullableCollection(
-  autoIndex: `off` | `eager` = `eager`
+  autoIndex: `off` | `eager` = `eager`,
 ) {
   return createCollection(
     mockSyncCollectionOptions<EmployeeWithNullableFields>({
@@ -248,7 +249,7 @@ function createEmployeesWithNullableCollection(
       getKey: (employee) => employee.id,
       initialData: employeeWithNullableData,
       autoIndex,
-    })
+    }),
   )
 }
 
@@ -271,7 +272,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -296,7 +297,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -316,7 +317,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -339,7 +340,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               name: employees.name,
               department_id: employees.department_id,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -351,7 +352,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         // Department 1: Charlie (55000), Eve (52000), Alice (50000)
         // Department 2: Diana (65000), Bob (60000)
         expect(
-          results.map((r) => ({ dept: r.department_id, salary: r.salary }))
+          results.map((r) => ({ dept: r.department_id, salary: r.salary })),
         ).toEqual([
           { dept: 1, salary: 55000 }, // Charlie
           { dept: 1, salary: 52000 }, // Eve
@@ -371,7 +372,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               hire_date: employees.hire_date,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -395,7 +396,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -415,7 +416,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -436,7 +437,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -455,10 +456,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               .select(({ employees }) => ({
                 id: employees.id,
                 name: employees.name,
-              }))
+              })),
           )
         }).toThrow(
-          `LIMIT and OFFSET require an ORDER BY clause to ensure deterministic results`
+          `LIMIT and OFFSET require an ORDER BY clause to ensure deterministic results`,
         )
       })
 
@@ -473,7 +474,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -520,7 +521,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -567,7 +568,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -618,7 +619,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -661,7 +662,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -704,7 +705,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -732,6 +733,38 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           [5, 52_000],
         ])
       })
+
+      it(`handles deletion from partial page with limit larger than data`, async () => {
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ employees: employeesCollection })
+            .orderBy(({ employees }) => employees.salary, `desc`)
+            .limit(20) // Limit larger than number of employees (5)
+            .select(({ employees }) => ({
+              id: employees.id,
+              name: employees.name,
+              salary: employees.salary,
+            })),
+        )
+        await collection.preload()
+
+        const results = Array.from(collection.values())
+        expect(results).toHaveLength(5)
+        expect(results[0]!.name).toBe(`Diana`)
+
+        // Delete Diana (the highest paid employee, first in DESC order)
+        const dianaData = employeeData.find((e) => e.id === 4)!
+        employeesCollection.utils.begin()
+        employeesCollection.utils.write({
+          type: `delete`,
+          value: dianaData,
+        })
+        employeesCollection.utils.commit()
+
+        const newResults = Array.from(collection.values())
+        expect(newResults).toHaveLength(4)
+        expect(newResults[0]!.name).toBe(`Bob`)
+      })
     })
 
     describe(`OrderBy with Joins`, () => {
@@ -742,7 +775,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .join(
               { departments: departmentsCollection },
               ({ employees, departments }) =>
-                eq(employees.department_id, departments.id)
+                eq(employees.department_id, departments.id),
             )
             .orderBy(({ departments }) => departments?.name, `asc`)
             .orderBy(({ employees }) => employees.salary, `desc`)
@@ -751,7 +784,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               employee_name: employees.name,
               department_name: departments?.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -763,7 +796,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         // Engineering: Charlie (55000), Eve (52000), Alice (50000)
         // Sales: Diana (65000), Bob (60000)
         expect(
-          results.map((r) => ({ dept: r.department_name, salary: r.salary }))
+          results.map((r) => ({ dept: r.department_name, salary: r.salary })),
         ).toEqual([
           { dept: `Engineering`, salary: 55000 }, // Charlie
           { dept: `Engineering`, salary: 52000 }, // Eve
@@ -794,7 +827,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             getKey: (doc) => doc.id,
             autoIndex: `eager`,
             initialData: vehicleDocumentsData,
-          })
+          }),
         )
 
         const liveQuery = createLiveQueryCollection({
@@ -850,7 +883,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             getKey: (doc) => doc.id,
             autoIndex: `eager`,
             initialData: vehicleDocumentsData,
-          })
+          }),
         )
 
         const liveQuery = createLiveQueryCollection({
@@ -905,7 +938,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -926,7 +959,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -948,7 +981,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -970,7 +1003,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1015,7 +1048,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1050,7 +1083,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1077,7 +1110,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             id: `test-string-id-sequence`,
             getKey: (person: Person) => person.id,
             initialData: initialPersons,
-          })
+          }),
         )
 
         const liveQuery = createLiveQueryCollection((q) =>
@@ -1087,7 +1120,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: c.id,
               name: c.name,
             }))
-            .orderBy(({ collection: c }) => c.id, `asc`)
+            .orderBy(({ collection: c }) => c.id, `asc`),
         )
         await liveQuery.preload()
 
@@ -1170,7 +1203,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             id: `test-empty-employees`,
             getKey: (employee) => employee.id,
             initialData: [],
-          })
+          }),
         )
 
         const collection = createLiveQueryCollection((q) =>
@@ -1180,7 +1213,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1212,7 +1245,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               },
             ],
             autoIndex,
-          })
+          }),
         )
 
         // When autoIndex is `eager` this creates an index on the date field
@@ -1220,7 +1253,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           q
             .from({ numbers: dateCollection })
             .orderBy(({ numbers }) => numbers.date, `asc`)
-            .limit(1)
+            .limit(1),
         )
         await firstQuery.preload()
 
@@ -1229,7 +1262,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           q
             .from({ numbers: dateCollection })
             .orderBy(({ numbers }) => numbers.value, `asc`)
-            .limit(1)
+            .limit(1),
         )
         await orderByQuery.preload()
 
@@ -1269,7 +1302,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               },
             ],
             autoIndex,
-          })
+          }),
         )
 
         // When autoIndex is `eager` this creates an index on the date field
@@ -1281,7 +1314,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .select(({ numbers }) => ({
               id: numbers.id,
               date: numbers.date,
-            }))
+            })),
         )
         await firstQuery.preload()
 
@@ -1294,7 +1327,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .select(({ numbers }) => ({
               id: numbers.id,
               date: numbers.date,
-            }))
+            })),
         )
         await orderByQuery.preload()
 
@@ -1330,7 +1363,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               },
             ],
             autoIndex,
-          })
+          }),
         )
 
         // When autoIndex is `eager` this creates an index on the date field
@@ -1341,7 +1374,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               direction: `asc`,
               nulls: `last`,
             })
-            .limit(3)
+            .limit(3),
         )
         await query1.preload()
 
@@ -1349,18 +1382,18 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         expect(result1).toHaveLength(3)
         expect(result1.map((r) => r.age)).toEqual([14, 25, null])
 
-        // The default compare options defaults to nulls first
+        // With 3-valued logic, lt(null, 18) returns UNKNOWN (null), which excludes the row
         const query2 = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .where(({ persons }) => lt(persons.age, 18))
+            .where(({ persons }) => lt(persons.age, 18)),
         )
         await query2.preload()
 
         const result2 = Array.from(query2.values())
         const ages = result2.map((r) => r.age)
-        expect(ages).toHaveLength(2)
-        expect(ages).toContain(null)
+        // null should NOT be included because lt(null, 18) returns UNKNOWN in 3-valued logic
+        expect(ages).toHaveLength(1)
         expect(ages).toContain(14)
 
         // The default compare options defaults to nulls first
@@ -1368,7 +1401,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         const query3 = createLiveQueryCollection((q) =>
           q
             .from({ persons: personsCollection })
-            .where(({ persons }) => gt(persons.age, 18))
+            .where(({ persons }) => gt(persons.age, 18)),
         )
         await query3.preload()
 
@@ -1403,7 +1436,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               },
             ],
             autoIndex,
-          })
+          }),
         )
 
         // When autoIndex is `eager` this creates an index on the date field
@@ -1414,7 +1447,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               direction: `asc`,
               stringSort: `lexical`,
             })
-            .limit(2)
+            .limit(2),
         )
         await query1.preload()
 
@@ -1430,7 +1463,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               stringSort: `locale`,
               locale: `en-US`,
             })
-            .limit(2)
+            .limit(2),
         )
         await query2.preload()
 
@@ -1467,7 +1500,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               },
             ],
             autoIndex,
-          })
+          }),
         )
 
         // When autoIndex is `eager` this creates an index on the value field with nulls first
@@ -1482,7 +1515,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .select(({ items }) => ({
               id: items.id,
               value: items.value,
-            }))
+            })),
         )
         await query1.preload()
 
@@ -1501,7 +1534,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .select(({ items }) => ({
               id: items.id,
               value: items.value,
-            }))
+            })),
         )
         await query2.preload()
 
@@ -1532,7 +1565,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1563,7 +1596,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1594,7 +1627,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1625,7 +1658,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1661,7 +1694,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               name: employees.name,
               department_id: employees.department_id,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1674,7 +1707,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         // Department 1: Alice (50000), Eve (52000)
         // Department 2: Diana (65000), Bob (null)
         expect(
-          results.map((r) => ({ dept: r.department_id, salary: r.salary }))
+          results.map((r) => ({ dept: r.department_id, salary: r.salary })),
         ).toEqual([
           { dept: null, salary: 55000 }, // Charlie
           { dept: null, salary: null }, // Frank
@@ -1697,7 +1730,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: employees.id,
               name: employees.name,
               salary: employees.salary,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -1773,7 +1806,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
                   id: employees.id,
                   name: employees.name,
                   salary: employees.salary,
-                }))
+                })),
             )
 
             await collection.preload()
@@ -1781,12 +1814,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             const builder = (collection as any).config.__builder
             expect(builder).toBeTruthy()
             expect(
-              Object.keys(builder.optimizableOrderByCollections)
+              Object.keys(builder.optimizableOrderByCollections),
             ).toContain(employeesCollection.id)
           } finally {
             CollectionConfigBuilder.prototype.getConfig = originalGetConfig
           }
-        }
+        },
       )
 
       itWhenAutoIndex(
@@ -1811,7 +1844,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
                 .join(
                   { departments: departmentsCollection },
                   ({ employees, departments }) =>
-                    eq(employees.department_id, departments.id)
+                    eq(employees.department_id, departments.id),
                 )
                 .orderBy(({ departments }) => departments?.name, `asc`)
                 .limit(5)
@@ -1819,7 +1852,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
                   employeeId: employees.id,
                   employeeName: employees.name,
                   departmentName: departments?.name,
-                }))
+                })),
             )
 
             await collection.preload()
@@ -1829,7 +1862,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 
             // Verify that the order-by optimization is scoped to the departments alias
             const orderByInfo = Object.values(
-              builder.optimizableOrderByCollections
+              builder.optimizableOrderByCollections,
             )[0] as any
             expect(orderByInfo).toBeDefined()
             expect(orderByInfo.alias).toBe(`departments`)
@@ -1838,7 +1871,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
           } finally {
             CollectionConfigBuilder.prototype.getConfig = originalGetConfig
           }
-        }
+        },
       )
 
       itWhenAutoIndex(
@@ -1866,7 +1899,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
                   id: employees.id,
                   name: employees.name,
                   salary: employees.salary,
-                }))
+                })),
             )
 
             await collection.preload()
@@ -1874,12 +1907,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             const builder = (collection as any).config.__builder
             expect(builder).toBeTruthy()
             expect(
-              Object.keys(builder.optimizableOrderByCollections)
+              Object.keys(builder.optimizableOrderByCollections),
             ).toContain(employeesCollection.id)
           } finally {
             CollectionConfigBuilder.prototype.getConfig = originalGetConfig
           }
-        }
+        },
       )
     })
 
@@ -1915,7 +1948,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             getKey: (employee) => employee.id,
             initialData: numericEmployees,
             autoIndex,
-          })
+          }),
         )
 
         // Test lexical sorting (should sort by character code)
@@ -1929,7 +1962,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
-            }))
+            })),
         )
         await lexicalCollection.preload()
 
@@ -1949,7 +1982,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             .select(({ employees }) => ({
               id: employees.id,
               name: employees.name,
-            }))
+            })),
         )
         await localeCollection.preload()
 
@@ -1970,7 +2003,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
             getKey: (person) => person.id,
             initialData: initialPersons,
             autoIndex,
-          })
+          }),
         )
       }
 
@@ -1989,7 +2022,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: persons.id,
               name: persons.name,
               score: persons.profile?.score,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -2012,7 +2045,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: persons.id,
               name: persons.name,
               score: persons.profile?.score,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -2036,7 +2069,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               name: persons.name,
               rating: persons.profile?.stats.rating,
               tasksCompleted: persons.profile?.stats.tasksCompleted,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -2061,7 +2094,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               name: persons.name,
               team: persons.team,
               score: persons.profile?.score,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -2091,7 +2124,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               name: persons.name,
               city: persons.address?.city,
               lat: persons.address?.coordinates.lat,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -2127,7 +2160,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: persons.id,
               name: persons.name,
               score: persons.profile?.score,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -2148,7 +2181,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: persons.id,
               name: persons.name,
               score: persons.profile?.score,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -2196,7 +2229,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               id: persons.id,
               name: persons.name,
               city: persons.address?.city,
-            }))
+            })),
         )
         await collection.preload()
 
@@ -2223,6 +2256,161 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
 describe(`Query2 OrderBy Compiler`, () => {
   createOrderByTests(`off`)
   createOrderByTests(`eager`)
+})
+
+describe(`OrderBy with collection-level StringSortOpts`, () => {
+  type StringItem = {
+    id: number
+    name: string
+  }
+
+  const stringItemsData: Array<StringItem> = [
+    { id: 1, name: `Charlie` },
+    { id: 2, name: `alice` },
+    { id: 3, name: `bob` },
+  ]
+
+  it(`should use collection's compareOptions when query doesn't specify stringSort`, async () => {
+    // Create collection with lexical string sorting as default
+    const collectionWithLexical = createCollection(
+      mockSyncCollectionOptions<StringItem>({
+        id: `test-lexical-collection`,
+        getKey: (item) => item.id,
+        initialData: stringItemsData,
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      }),
+    )
+
+    // Query without specifying stringSort should use collection's lexical default
+    const lexicalQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, `asc`)
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        })),
+    )
+    await lexicalQuery.preload()
+
+    // In lexical comparison, uppercase letters come before lowercase letters
+    const lexicalResults = Array.from(lexicalQuery.values())
+    expect(lexicalResults.map((r) => r.name)).toEqual([
+      `Charlie`,
+      `alice`,
+      `bob`,
+    ])
+  })
+
+  it(`should override collection's compareOptions when query specifies stringSort`, async () => {
+    // Create collection with lexical string sorting as default
+    const collectionWithLexical = createCollection(
+      mockSyncCollectionOptions<StringItem>({
+        id: `test-lexical-collection-override`,
+        getKey: (item) => item.id,
+        initialData: stringItemsData,
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      }),
+    )
+
+    // Query with explicit locale stringSort should override collection's lexical default
+    const localeQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, {
+          direction: `asc`,
+          stringSort: `locale`,
+          locale: `en-US`,
+        })
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        })),
+    )
+    await localeQuery.preload()
+
+    // In locale comparison, case-insensitive sorting puts lowercase first
+    const localeResults = Array.from(localeQuery.values())
+    expect(localeResults.map((r) => r.name)).toEqual([
+      `alice`,
+      `bob`,
+      `Charlie`,
+    ])
+  })
+
+  it(`should use collection default and allow query overrides`, async () => {
+    // Create collection with lexical string sorting as default
+    const collectionWithLexical = createCollection(
+      mockSyncCollectionOptions<StringItem>({
+        id: `test-lexical-collection-sequence`,
+        getKey: (item) => item.id,
+        initialData: stringItemsData,
+        defaultStringCollation: {
+          stringSort: `lexical`,
+        },
+      }),
+    )
+
+    // First query without specifying stringSort should use collection's lexical default
+    const firstQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, `asc`)
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        })),
+    )
+    await firstQuery.preload()
+
+    // In lexical comparison, uppercase letters come before lowercase letters
+    const firstResults = Array.from(firstQuery.values())
+    expect(firstResults.map((r) => r.name)).toEqual([`Charlie`, `alice`, `bob`])
+
+    // Second query with explicit locale stringSort should override collection's lexical default
+    const secondQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, {
+          direction: `asc`,
+          stringSort: `locale`,
+          locale: `en-US`,
+        })
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        })),
+    )
+    await secondQuery.preload()
+
+    // Should use locale sorting (case-insensitive) for this query
+    const secondResults = Array.from(secondQuery.values())
+    expect(secondResults.map((r) => r.name)).toEqual([
+      `alice`,
+      `bob`,
+      `Charlie`,
+    ])
+
+    // Third query without specifying stringSort should use collection's lexical default again
+    const thirdQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ items: collectionWithLexical })
+        .orderBy(({ items }) => items.name, `desc`)
+        .select(({ items }) => ({
+          id: items.id,
+          name: items.name,
+        })),
+    )
+    await thirdQuery.preload()
+
+    // Should revert back to lexical sorting (collection default)
+    const thirdResults = Array.from(thirdQuery.values())
+    expect(thirdResults.map((r) => r.name)).toEqual([`bob`, `alice`, `Charlie`])
+  })
 })
 
 describe(`OrderBy with collection alias conflicts`, () => {
@@ -2299,5 +2487,774 @@ describe(`OrderBy with collection alias conflicts`, () => {
     expect(result[0]?.email).toBe(`first@test.com`)
     expect(result[1]?.email).toBe(`second@test.com`)
     expect(result[2]?.email).toBe(`third@test.com`)
+  })
+})
+
+describe(`OrderBy with duplicate values`, () => {
+  type TestItem = {
+    id: number
+    a: number
+    keep: boolean
+  }
+
+  function createOrderByBugTests(autoIndex: `off` | `eager`): void {
+    describe(`with autoIndex ${autoIndex}`, () => {
+      it(`should correctly advance window when there are duplicate values`, async () => {
+        // Create test data that reproduces the specific bug described:
+        // Items with many duplicates at value 5, then normal progression
+        const duplicateTestData: Array<TestItem> = [
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+          { id: 16, a: 16, keep: true },
+        ]
+
+        const duplicateCollection = createCollection(
+          mockSyncCollectionOptions<TestItem>({
+            id: `test-duplicate-window-bug`,
+            getKey: (item) => item.id,
+            initialData: duplicateTestData,
+            autoIndex,
+          }),
+        )
+
+        // Create a live query with offset 0, limit 5 (first page)
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ items: duplicateCollection })
+            .where(({ items }) => eq(items.keep, true))
+            .orderBy(({ items }) => items.a, `asc`)
+            .offset(0)
+            .limit(5)
+            .select(({ items }) => ({
+              id: items.id,
+              a: items.a,
+              keep: items.keep,
+            })),
+        )
+        await collection.preload()
+
+        // First page should return items 1-5
+        let results = Array.from(collection.values()).sort(
+          (a, b) => a.id - b.id,
+        )
+        expect(results).toEqual([
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+        ])
+
+        // Now move to next page (offset 5, limit 5)
+        collection.utils.setWindow({ offset: 5, limit: 5 })
+        await collection.stateWhenReady()
+
+        // Second page should return items 6-10 (all with value 5)
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+        ])
+
+        // Now move to third page (offset 10, limit 5)
+        // It should advance past the duplicate 5s
+        collection.utils.setWindow({ offset: 10, limit: 5 })
+        await collection.stateWhenReady()
+
+        // Third page should return items 11-13 (the items after the duplicate 5s)
+        // The bug would cause this to stall and return empty or get stuck
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+        ])
+
+        // Verify we can continue to next page
+        collection.utils.setWindow({ offset: 15, limit: 5 })
+        await collection.stateWhenReady()
+
+        // Should be empty since we've exhausted all items
+        results = Array.from(collection.values())
+        expect(results).toEqual([{ id: 16, a: 16, keep: true }])
+      })
+
+      it(`should correctly advance window when there are duplicate values loaded from sync layer`, async () => {
+        // Create test data that reproduces the specific bug described:
+        // Items with many duplicates at value 5, then normal progression
+        // Note: loadSubset now receives cursor expressions (whereFrom/whereCurrent) separately from where
+        const allTestData: Array<TestItem> = [
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+          { id: 16, a: 16, keep: true },
+        ]
+
+        // Start with only the first 5 items in the local collection
+        const initialData = allTestData.slice(0, 5)
+        let loadSubsetCallCount = 0
+        const loadSubsetCursors: Array<unknown> = []
+
+        const duplicateCollection = createCollection(
+          mockSyncCollectionOptions<TestItem>({
+            id: `test-duplicate-sync-layer-bug`,
+            getKey: (item) => item.id,
+            initialData,
+            autoIndex,
+            syncMode: `on-demand`,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                // Load initial data
+                begin()
+                initialData.forEach((item) => {
+                  write({
+                    type: `insert`,
+                    value: item,
+                  })
+                })
+                commit()
+                markReady()
+
+                return {
+                  loadSubset: (options) => {
+                    loadSubsetCallCount++
+                    loadSubsetCursors.push(options.cursor)
+
+                    // Simulate async loading from remote source
+                    return new Promise<void>((resolve) => {
+                      setTimeout(() => {
+                        begin()
+
+                        // Order all test data by field 'a' in ascending order
+                        const sortedData = [...allTestData].sort(
+                          (a, b) => a.a - b.a,
+                        )
+
+                        // Apply where clause filter if present
+                        let filteredData = sortedData
+                        if (options.where) {
+                          try {
+                            const filterFn = createFilterFunctionFromExpression(
+                              options.where,
+                            )
+                            filteredData = sortedData.filter(filterFn)
+                          } catch (error) {
+                            console.log(`Error compiling where clause:`, error)
+                            // If compilation fails, use all data
+                            filteredData = sortedData
+                          }
+                        }
+
+                        // Apply cursor expressions if present (cursor-based pagination)
+                        // For proper cursor-based pagination:
+                        // - whereCurrent should load ALL ties (no limit)
+                        // - whereFrom should load with remaining limit
+                        if (options.cursor) {
+                          const { whereFrom, whereCurrent } = options.cursor
+                          const { limit } = options
+                          try {
+                            // Get ALL rows matching whereCurrent (no limit for ties)
+                            const whereCurrentFn =
+                              createFilterFunctionFromExpression(whereCurrent)
+                            const currentData =
+                              filteredData.filter(whereCurrentFn)
+
+                            // Get rows matching whereFrom with limit (for next page data)
+                            const whereFromFn =
+                              createFilterFunctionFromExpression(whereFrom)
+                            const fromData = filteredData.filter(whereFromFn)
+                            const limitedFromData = limit
+                              ? fromData.slice(0, limit)
+                              : fromData
+
+                            // Combine: current rows + from rows (deduplicated)
+                            const seenIds = new Set<number>()
+                            filteredData = []
+                            for (const item of currentData) {
+                              if (!seenIds.has(item.id)) {
+                                seenIds.add(item.id)
+                                filteredData.push(item)
+                              }
+                            }
+                            for (const item of limitedFromData) {
+                              if (!seenIds.has(item.id)) {
+                                seenIds.add(item.id)
+                                filteredData.push(item)
+                              }
+                            }
+                            // Re-sort after combining
+                            filteredData.sort((a, b) => a.a - b.a)
+                          } catch (error) {
+                            console.log(`Error applying cursor:`, error)
+                          }
+                        }
+
+                        // Apply limit for initial page load (no cursor).
+                        // When cursor is present, limit was already applied in the cursor block above.
+                        const { limit } = options
+                        const dataToLoad =
+                          limit && !options.cursor
+                            ? filteredData.slice(0, limit)
+                            : filteredData
+
+                        dataToLoad.forEach((item) => {
+                          write({
+                            type: `insert`,
+                            value: item,
+                          })
+                        })
+
+                        commit()
+                        resolve()
+                      }, 10) // Small delay to simulate network
+                    })
+                  },
+                }
+              },
+            },
+          }),
+        )
+
+        // Create a live query with offset 0, limit 5 (first page)
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ items: duplicateCollection })
+            .where(({ items }) => eq(items.keep, true))
+            .orderBy(({ items }) => items.a, `asc`)
+            .offset(0)
+            .limit(5)
+            .select(({ items }) => ({
+              id: items.id,
+              a: items.a,
+              keep: items.keep,
+            })),
+        )
+        await collection.preload()
+
+        // First page should return items 1-5 (all local data)
+        let results = Array.from(collection.values()).sort(
+          (a, b) => a.id - b.id,
+        )
+        expect(results).toEqual([
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+        ])
+        expect(loadSubsetCallCount).toBe(1)
+        // First loadSubset call (initial page at offset 0) has no cursor
+        expect(loadSubsetCursors[0]).toBeUndefined()
+
+        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset with a cursor
+        const moveToSecondPage = collection.utils.setWindow({
+          offset: 5,
+          limit: 5,
+        })
+        expect(moveToSecondPage).toBeInstanceOf(Promise)
+        await moveToSecondPage
+
+        // Second page should return items 6-10 (all with value 5, loaded from sync layer)
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+        ])
+        // we expect 1 new loadSubset call (cursor expressions for whereFrom/whereCurrent are now combined in single call)
+        expect(loadSubsetCallCount).toBe(2)
+        // Second loadSubset call (pagination) has a cursor with whereFrom and whereCurrent
+        expect(loadSubsetCursors[1]).toBeDefined()
+        expect(loadSubsetCursors[1]).toHaveProperty(`whereFrom`)
+        expect(loadSubsetCursors[1]).toHaveProperty(`whereCurrent`)
+
+        // Now move to third page (offset 10, limit 5)
+        // It should advance past the duplicate 5s
+        const moveToThirdPage = collection.utils.setWindow({
+          offset: 10,
+          limit: 5,
+        })
+
+        // Now it is `true` because we already have that page
+        // because when we loaded the 2nd page we loaded all the duplicate 5s and then we loaded
+        // values > 5 with limit 5 but since the entire 2nd page is filled with the duplicate 5s
+        // we in fact already loaded the third page so it is immediately available here
+        expect(moveToThirdPage).toBe(true)
+
+        // Third page should return items 11-13 (the items after the duplicate 5s)
+        // The bug would cause this to stall and return empty or get stuck
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+        ])
+        // We expect no more loadSubset calls because when we loaded the previous page
+        // we asked for all data equal to max value and LIMIT values greater than max value
+        // and the LIMIT values greater than max value already loaded the next page
+        expect(loadSubsetCallCount).toBe(2)
+      })
+
+      it(`should correctly advance window when there are duplicate values loaded from both local collection and sync layer`, async () => {
+        // Create test data that reproduces the specific bug described:
+        // Items with many duplicates at value 5, then normal progression
+        // Note: loadSubset now receives cursor expressions (whereFrom/whereCurrent) separately from where
+        const allTestData: Array<TestItem> = [
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+          { id: 16, a: 16, keep: true },
+        ]
+
+        // Start with the first 10 items in the local collection (includes all duplicates)
+        const initialData = allTestData.slice(0, 10)
+        let loadSubsetCallCount = 0
+        const loadSubsetCursors: Array<unknown> = []
+
+        const duplicateCollection = createCollection(
+          mockSyncCollectionOptions<TestItem>({
+            id: `test-duplicate-sync-layer-bug`,
+            getKey: (item) => item.id,
+            initialData,
+            autoIndex,
+            syncMode: `on-demand`,
+            sync: {
+              sync: ({ begin, write, commit, markReady }) => {
+                // Load initial data
+                begin()
+                initialData.forEach((item) => {
+                  write({
+                    type: `insert`,
+                    value: item,
+                  })
+                })
+                commit()
+                markReady()
+
+                return {
+                  loadSubset: (options) => {
+                    loadSubsetCallCount++
+                    loadSubsetCursors.push(options.cursor)
+
+                    // Simulate async loading from remote source
+                    return new Promise<void>((resolve) => {
+                      setTimeout(() => {
+                        begin()
+
+                        // Order all test data by field 'a' in ascending order
+                        const sortedData = [...allTestData].sort(
+                          (a, b) => a.a - b.a,
+                        )
+
+                        // Apply where clause filter if present
+                        let filteredData = sortedData
+                        if (options.where) {
+                          try {
+                            const filterFn = createFilterFunctionFromExpression(
+                              options.where,
+                            )
+                            filteredData = sortedData.filter(filterFn)
+                          } catch (error) {
+                            console.log(`Error compiling where clause:`, error)
+                            // If compilation fails, use all data
+                            filteredData = sortedData
+                          }
+                        }
+
+                        // Apply cursor expressions if present (cursor-based pagination)
+                        // For proper cursor-based pagination:
+                        // - whereCurrent should load ALL ties (no limit)
+                        // - whereFrom should load with remaining limit
+                        if (options.cursor) {
+                          const { whereFrom, whereCurrent } = options.cursor
+                          const { limit } = options
+                          try {
+                            // Get ALL rows matching whereCurrent (no limit for ties)
+                            const whereCurrentFn =
+                              createFilterFunctionFromExpression(whereCurrent)
+                            const currentData =
+                              filteredData.filter(whereCurrentFn)
+
+                            // Get rows matching whereFrom with limit (for next page data)
+                            const whereFromFn =
+                              createFilterFunctionFromExpression(whereFrom)
+                            const fromData = filteredData.filter(whereFromFn)
+                            const limitedFromData = limit
+                              ? fromData.slice(0, limit)
+                              : fromData
+
+                            // Combine: current rows + from rows (deduplicated)
+                            const seenIds = new Set<number>()
+                            filteredData = []
+                            for (const item of currentData) {
+                              if (!seenIds.has(item.id)) {
+                                seenIds.add(item.id)
+                                filteredData.push(item)
+                              }
+                            }
+                            for (const item of limitedFromData) {
+                              if (!seenIds.has(item.id)) {
+                                seenIds.add(item.id)
+                                filteredData.push(item)
+                              }
+                            }
+                            // Re-sort after combining
+                            filteredData.sort((a, b) => a.a - b.a)
+                          } catch (error) {
+                            console.log(`Error applying cursor:`, error)
+                          }
+                        }
+
+                        // Apply limit for initial page load (no cursor).
+                        // When cursor is present, limit was already applied in the cursor block above.
+                        const { limit } = options
+                        const dataToLoad =
+                          limit && !options.cursor
+                            ? filteredData.slice(0, limit)
+                            : filteredData
+
+                        dataToLoad.forEach((item) => {
+                          write({
+                            type: `insert`,
+                            value: item,
+                          })
+                        })
+
+                        commit()
+                        resolve()
+                      }, 10) // Small delay to simulate network
+                    })
+                  },
+                }
+              },
+            },
+          }),
+        )
+
+        // Create a live query with offset 0, limit 5 (first page)
+        const collection = createLiveQueryCollection((q) =>
+          q
+            .from({ items: duplicateCollection })
+            .where(({ items }) => eq(items.keep, true))
+            .orderBy(({ items }) => items.a, `asc`)
+            .offset(0)
+            .limit(5)
+            .select(({ items }) => ({
+              id: items.id,
+              a: items.a,
+              keep: items.keep,
+            })),
+        )
+        await collection.preload()
+
+        // First page should return items 1-5 (all local data)
+        let results = Array.from(collection.values()).sort(
+          (a, b) => a.id - b.id,
+        )
+        expect(results).toEqual([
+          { id: 1, a: 1, keep: true },
+          { id: 2, a: 2, keep: true },
+          { id: 3, a: 3, keep: true },
+          { id: 4, a: 4, keep: true },
+          { id: 5, a: 5, keep: true },
+        ])
+        expect(loadSubsetCallCount).toBe(1)
+        // First loadSubset call (initial page at offset 0) has no cursor
+        expect(loadSubsetCursors[0]).toBeUndefined()
+
+        // Now move to next page (offset 5, limit 5) - this should trigger loadSubset with a cursor
+        const moveToSecondPage = collection.utils.setWindow({
+          offset: 5,
+          limit: 5,
+        })
+        expect(moveToSecondPage).toBeInstanceOf(Promise)
+        await moveToSecondPage
+
+        // Second page should return items 6-10 (all with value 5, loaded from sync layer)
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 6, a: 5, keep: true },
+          { id: 7, a: 5, keep: true },
+          { id: 8, a: 5, keep: true },
+          { id: 9, a: 5, keep: true },
+          { id: 10, a: 5, keep: true },
+        ])
+        // we expect 1 new loadSubset call (cursor expressions for whereFrom/whereCurrent are now combined in single call)
+        expect(loadSubsetCallCount).toBe(2)
+        // Second loadSubset call (pagination) has a cursor with whereFrom and whereCurrent
+        expect(loadSubsetCursors[1]).toBeDefined()
+        expect(loadSubsetCursors[1]).toHaveProperty(`whereFrom`)
+        expect(loadSubsetCursors[1]).toHaveProperty(`whereCurrent`)
+
+        // Now move to third page (offset 10, limit 5)
+        // It should advance past the duplicate 5s
+        const moveToThirdPage = collection.utils.setWindow({
+          offset: 10,
+          limit: 5,
+        })
+
+        // Now it is `true` because we already have that page
+        // because when we loaded the 2nd page we loaded all the duplicate 5s and then we loaded
+        // values > 5 with limit 5 but since the entire 2nd page is filled with the duplicate 5s
+        // we in fact already loaded the third page so it is immediately available here
+        expect(moveToThirdPage).toBe(true)
+
+        // Third page should return items 11-13 (the items after the duplicate 5s)
+        // The bug would cause this to stall and return empty or get stuck
+        results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+        expect(results).toEqual([
+          { id: 11, a: 11, keep: true },
+          { id: 12, a: 12, keep: true },
+          { id: 13, a: 13, keep: true },
+          { id: 14, a: 14, keep: true },
+          { id: 15, a: 15, keep: true },
+        ])
+        // We expect no more loadSubset calls because when we loaded the previous page
+        // we asked for all data equal to max value and LIMIT values greater than max value
+        // and the LIMIT values greater than max value already loaded the next page
+        expect(loadSubsetCallCount).toBe(2)
+      })
+    })
+  }
+
+  createOrderByBugTests(`eager`)
+})
+
+describe(`OrderBy with Date values and precision differences`, () => {
+  type TestItemWithDate = {
+    id: number
+    createdAt: Date
+    keep: boolean
+  }
+
+  it(`should use range query for Date values to handle backend precision differences`, async () => {
+    // This test verifies that when paginating with Date orderBy values,
+    // the code uses a range query (gte/lt) instead of exact equality (eq)
+    // to handle backends with higher precision than JavaScript's millisecond precision.
+    //
+    // The bug: PostgreSQL stores timestamps with microsecond precision.
+    // When JS has a Date "2024-01-15T10:30:45.123Z", the backend might have multiple
+    // rows with 123.000μs, 123.100μs, 123.200μs, etc. Using eq() would only match
+    // 123.000μs, missing the others. The fix uses gte/lt to match the full 1ms range.
+
+    const baseTime = new Date(`2024-01-15T10:30:45.123Z`)
+
+    const testData: Array<TestItemWithDate> = [
+      { id: 1, createdAt: new Date(`2024-01-15T10:30:45.120Z`), keep: true },
+      { id: 2, createdAt: new Date(`2024-01-15T10:30:45.121Z`), keep: true },
+      { id: 3, createdAt: new Date(`2024-01-15T10:30:45.122Z`), keep: true },
+      { id: 4, createdAt: new Date(`2024-01-15T10:30:45.122Z`), keep: true },
+      { id: 5, createdAt: baseTime, keep: true },
+      { id: 6, createdAt: baseTime, keep: true },
+      { id: 7, createdAt: baseTime, keep: true },
+      { id: 8, createdAt: baseTime, keep: true },
+      { id: 9, createdAt: baseTime, keep: true },
+      { id: 10, createdAt: baseTime, keep: true },
+      { id: 11, createdAt: new Date(`2024-01-15T10:30:45.124Z`), keep: true },
+      { id: 12, createdAt: new Date(`2024-01-15T10:30:45.125Z`), keep: true },
+    ]
+
+    const initialData = testData.slice(0, 5)
+
+    // Track the cursor expressions sent to loadSubset
+    // Note: cursor expressions are now passed separately from where (whereFrom/whereCurrent/lastKey)
+    const loadSubsetCursors: Array<any> = []
+
+    const sourceCollection = createCollection(
+      mockSyncCollectionOptions<TestItemWithDate>({
+        id: `test-date-precision-query`,
+        getKey: (item) => item.id,
+        initialData,
+        autoIndex: `eager`,
+        syncMode: `on-demand`,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            initialData.forEach((item) => {
+              write({ type: `insert`, value: item })
+            })
+            commit()
+            markReady()
+
+            return {
+              loadSubset: (options) => {
+                // Capture the cursor for inspection (now contains whereFrom/whereCurrent/lastKey)
+                loadSubsetCursors.push(options.cursor)
+
+                return new Promise<void>((resolve) => {
+                  setTimeout(() => {
+                    begin()
+                    const sortedData = [...testData].sort(
+                      (a, b) => a.createdAt.getTime() - b.createdAt.getTime(),
+                    )
+
+                    let filteredData = sortedData
+                    if (options.where) {
+                      try {
+                        const filterFn = createFilterFunctionFromExpression(
+                          options.where,
+                        )
+                        filteredData = sortedData.filter(filterFn)
+                      } catch {
+                        filteredData = sortedData
+                      }
+                    }
+
+                    // Apply cursor expressions if present
+                    if (options.cursor) {
+                      const { whereFrom, whereCurrent } = options.cursor
+                      try {
+                        const whereFromFn =
+                          createFilterFunctionFromExpression(whereFrom)
+                        const fromData = filteredData.filter(whereFromFn)
+
+                        const whereCurrentFn =
+                          createFilterFunctionFromExpression(whereCurrent)
+                        const currentData = filteredData.filter(whereCurrentFn)
+
+                        // Combine and deduplicate
+                        const seenIds = new Set<number>()
+                        filteredData = []
+                        for (const item of currentData) {
+                          if (!seenIds.has(item.id)) {
+                            seenIds.add(item.id)
+                            filteredData.push(item)
+                          }
+                        }
+                        for (const item of fromData) {
+                          if (!seenIds.has(item.id)) {
+                            seenIds.add(item.id)
+                            filteredData.push(item)
+                          }
+                        }
+                        filteredData.sort(
+                          (a, b) =>
+                            a.createdAt.getTime() - b.createdAt.getTime(),
+                        )
+                      } catch (error) {
+                        console.log(`Error applying cursor:`, error)
+                      }
+                    }
+
+                    const { limit } = options
+                    const dataToLoad = limit
+                      ? filteredData.slice(0, limit)
+                      : filteredData
+
+                    dataToLoad.forEach((item) => {
+                      write({ type: `insert`, value: item })
+                    })
+
+                    commit()
+                    resolve()
+                  }, 10)
+                })
+              },
+            }
+          },
+        },
+      }),
+    )
+
+    const collection = createLiveQueryCollection((q) =>
+      q
+        .from({ items: sourceCollection })
+        .where(({ items }) => eq(items.keep, true))
+        .orderBy(({ items }) => items.createdAt, `asc`)
+        .offset(0)
+        .limit(5)
+        .select(({ items }) => ({
+          id: items.id,
+          createdAt: items.createdAt,
+          keep: items.keep,
+        })),
+    )
+    await collection.preload()
+
+    // First page loads
+    const results = Array.from(collection.values()).sort((a, b) => a.id - b.id)
+    expect(results.map((r) => r.id)).toEqual([1, 2, 3, 4, 5])
+
+    // Clear tracked cursors before moving to next page
+    loadSubsetCursors.length = 0
+
+    // Move to next page - this should trigger the Date precision handling
+    const moveToSecondPage = collection.utils.setWindow({ offset: 5, limit: 5 })
+    await moveToSecondPage
+
+    // Find the cursor that contains the "whereCurrent" expression (the minValue query)
+    // With the fix, whereCurrent should be: and(gte(createdAt, baseTime), lt(createdAt, baseTime+1ms))
+    // Without the fix, this would be: eq(createdAt, baseTime)
+    const cursorWithDateRange = loadSubsetCursors.find((cursor) => {
+      if (!cursor?.whereCurrent) return false
+      const whereCurrent = cursor.whereCurrent
+      // Check if whereCurrent is an 'and' with 'gte' and 'lt' (the fix)
+      if (whereCurrent.name === `and` && whereCurrent.args?.length === 2) {
+        const [first, second] = whereCurrent.args
+        return first?.name === `gte` && second?.name === `lt`
+      }
+      return false
+    })
+
+    // The fix should produce a range query (and(gte, lt)) for Date values
+    // instead of an exact equality query (eq)
+    expect(cursorWithDateRange).toBeDefined()
+    const equalValuesQuery = cursorWithDateRange.whereCurrent
+    expect(equalValuesQuery.name).toBe(`and`)
+    expect(equalValuesQuery.args[0].name).toBe(`gte`)
+    expect(equalValuesQuery.args[1].name).toBe(`lt`)
+
+    // Verify the range is exactly 1ms
+    const gteValue = equalValuesQuery.args[0].args[1].value
+    const ltValue = equalValuesQuery.args[1].args[1].value
+    expect(gteValue).toBeInstanceOf(Date)
+    expect(ltValue).toBeInstanceOf(Date)
+    expect(ltValue.getTime() - gteValue.getTime()).toBe(1) // 1ms difference
   })
 })

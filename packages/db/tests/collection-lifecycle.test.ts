@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { createCollection } from "../src/collection/index.js"
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createCollection } from '../src/collection/index.js'
 
 // Mock setTimeout and clearTimeout for testing GC behavior
 const originalSetTimeout = global.setTimeout
@@ -360,6 +360,26 @@ describe(`Collection Lifecycle Management`, () => {
       expect(mockSetTimeout).not.toHaveBeenCalled()
       expect(collection.status).not.toBe(`cleaned-up`)
     })
+
+    it(`should disable GC when gcTime is Infinity`, () => {
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `infinity-gc-test`,
+        getKey: (item) => item.id,
+        gcTime: Infinity, // Disabled GC via Infinity
+        sync: {
+          sync: () => {},
+        },
+      })
+
+      const subscription = collection.subscribeChanges(() => {})
+      subscription.unsubscribe()
+
+      // Should not start any timer when gcTime is Infinity
+      // Note: Without this fix, setTimeout(fn, Infinity) would coerce to 0,
+      // causing immediate GC instead of never collecting
+      expect(mockSetTimeout).not.toHaveBeenCalled()
+      expect(collection.status).not.toBe(`cleaned-up`)
+    })
   })
 
   describe(`Manual Preload and Cleanup`, () => {
@@ -473,6 +493,53 @@ describe(`Collection Lifecycle Management`, () => {
       expect(callbacks).toHaveLength(2)
 
       subscription.unsubscribe()
+    })
+
+    it(`should fire status:change event with 'cleaned-up' status before clearing event handlers`, () => {
+      const collection = createCollection<{ id: string; name: string }>({
+        id: `cleanup-event-test`,
+        getKey: (item) => item.id,
+        gcTime: 1000,
+        sync: {
+          sync: () => {},
+        },
+      })
+
+      // Track status changes
+      const statusChanges: Array<{ status: string; previousStatus: string }> =
+        []
+
+      // Add event listener for status changes
+      collection.on(`status:change`, ({ status, previousStatus }) => {
+        statusChanges.push({ status, previousStatus })
+      })
+
+      // Subscribe and unsubscribe to trigger GC
+      const subscription = collection.subscribeChanges(() => {})
+      subscription.unsubscribe()
+
+      expect(statusChanges).toHaveLength(1)
+      expect(statusChanges[0]).toEqual({
+        status: `loading`,
+        previousStatus: `idle`,
+      })
+
+      // Trigger GC timeout to schedule cleanup
+      const gcTimerId = mockSetTimeout.mock.results[0]?.value
+      if (gcTimerId) {
+        triggerTimeout(gcTimerId)
+      }
+
+      // Trigger all remaining timeouts to handle the idle callback
+      triggerAllTimeouts()
+
+      // Verify that the listener received the 'cleaned-up' status change event
+      expect(statusChanges).toHaveLength(2)
+      expect(statusChanges[1]).toEqual({
+        status: `cleaned-up`,
+        previousStatus: `loading`,
+      })
+      expect(collection.status).toBe(`cleaned-up`)
     })
   })
 })

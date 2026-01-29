@@ -1,5 +1,47 @@
 # @tanstack/db-ivm
 
+## 0.1.17
+
+### Patch Changes
+
+- Add string support to `min()` and `max()` aggregate functions. These functions now work with strings using lexicographic comparison, matching standard SQL behavior. ([#1120](https://github.com/TanStack/db/pull/1120))
+
+## 0.1.16
+
+### Patch Changes
+
+- Add `groupedOrderByWithFractionalIndex` operator. This operator groups elements by a provided `groupKeyFn` and applies ordering and limits independently to each group. Each group maintains its own sorted collection with independent limit/offset, which is useful for hierarchical data projections where child collections need to enforce limits within each parent's slice of the stream rather than across the entire dataset. ([#997](https://github.com/TanStack/db/pull/997))
+
+## 0.1.15
+
+### Patch Changes
+
+- Adds a GroupedTopKWithFractionalIndexOperator that maintains separate topK windows for each group. ([#993](https://github.com/TanStack/db/pull/993))
+
+## 0.1.14
+
+### Patch Changes
+
+- Use row keys for stable tie-breaking in ORDER BY operations instead of hash-based object IDs. ([#957](https://github.com/TanStack/db/pull/957))
+
+  Previously, when multiple rows had equal ORDER BY values, tie-breaking used `globalObjectIdGenerator.getId(key)` which could produce hash collisions and wasn't stable across page reloads for object references. Now, the row key (which is always `string | number` and unique per row) is used directly for tie-breaking, ensuring deterministic and stable ordering.
+
+  This also simplifies the internal `TaggedValue` type from a 3-tuple `[K, V, Tag]` to a 2-tuple `[K, V]`, removing unnecessary complexity.
+
+## 0.1.13
+
+### Patch Changes
+
+- Fix Uint8Array/Buffer comparison to work by content instead of reference. This enables proper equality checks for binary IDs like ULIDs in WHERE clauses using the `eq` function. ([#779](https://github.com/TanStack/db/pull/779))
+
+- Fix bug with setWindow on ordered queries that have no limit. ([#763](https://github.com/TanStack/db/pull/763))
+
+## 0.1.12
+
+### Patch Changes
+
+- Fix bug with setWindow on ordered queries that have no limit. ([#701](https://github.com/TanStack/db/pull/701))
+
 ## 0.1.11
 
 ### Patch Changes
@@ -12,9 +54,9 @@
   const users = createLiveQueryCollection((q) =>
     q
       .from({ user: usersCollection })
-      .orderBy(({ user }) => user.name, "asc")
+      .orderBy(({ user }) => user.name, 'asc')
       .limit(10)
-      .offset(0)
+      .offset(0),
   )
 
   users.utils.setWindow({ offset: 10, limit: 10 })

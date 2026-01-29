@@ -1,8 +1,8 @@
-import { Aggregate, Func } from "../ir"
-import { toExpression } from "./ref-proxy.js"
-import type { BasicExpression } from "../ir"
-import type { RefProxy } from "./ref-proxy.js"
-import type { RefLeaf } from "./types.js"
+import { Aggregate, Func } from '../ir'
+import { toExpression } from './ref-proxy.js'
+import type { BasicExpression } from '../ir'
+import type { RefProxy } from './ref-proxy.js'
+import type { RefLeaf } from './types.js'
 
 type StringRef =
   | RefLeaf<string>
@@ -53,10 +53,10 @@ type ExtractType<T> =
 // Helper type to determine aggregate return type based on input nullability
 type AggregateReturnType<T> =
   ExtractType<T> extends infer U
-    ? U extends number | undefined | null | Date | bigint
+    ? U extends number | undefined | null | Date | bigint | string
       ? Aggregate<U>
-      : Aggregate<number | undefined | null | Date | bigint>
-    : Aggregate<number | undefined | null | Date | bigint>
+      : Aggregate<number | undefined | null | Date | bigint | string>
+    : Aggregate<number | undefined | null | Date | bigint | string>
 
 // Helper type to determine string function return type based on input nullability
 type StringFunctionReturnType<T> =
@@ -114,11 +114,11 @@ type BinaryNumericReturnType<T1, T2> =
 
 export function eq<T>(
   left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
+  right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
 export function eq<T extends string | number | boolean>(
   left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
+  right: ComparisonOperandPrimitive<T>,
 ): BasicExpression<boolean>
 export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function eq(left: any, right: any): BasicExpression<boolean> {
@@ -127,11 +127,11 @@ export function eq(left: any, right: any): BasicExpression<boolean> {
 
 export function gt<T>(
   left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
+  right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
 export function gt<T extends string | number>(
   left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
+  right: ComparisonOperandPrimitive<T>,
 ): BasicExpression<boolean>
 export function gt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gt(left: any, right: any): BasicExpression<boolean> {
@@ -140,11 +140,11 @@ export function gt(left: any, right: any): BasicExpression<boolean> {
 
 export function gte<T>(
   left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
+  right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
 export function gte<T extends string | number>(
   left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
+  right: ComparisonOperandPrimitive<T>,
 ): BasicExpression<boolean>
 export function gte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function gte(left: any, right: any): BasicExpression<boolean> {
@@ -153,11 +153,11 @@ export function gte(left: any, right: any): BasicExpression<boolean> {
 
 export function lt<T>(
   left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
+  right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
 export function lt<T extends string | number>(
   left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
+  right: ComparisonOperandPrimitive<T>,
 ): BasicExpression<boolean>
 export function lt<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lt(left: any, right: any): BasicExpression<boolean> {
@@ -166,11 +166,11 @@ export function lt(left: any, right: any): BasicExpression<boolean> {
 
 export function lte<T>(
   left: ComparisonOperand<T>,
-  right: ComparisonOperand<T>
+  right: ComparisonOperand<T>,
 ): BasicExpression<boolean>
 export function lte<T extends string | number>(
   left: ComparisonOperandPrimitive<T>,
-  right: ComparisonOperandPrimitive<T>
+  right: ComparisonOperandPrimitive<T>,
 ): BasicExpression<boolean>
 export function lte<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function lte(left: any, right: any): BasicExpression<boolean> {
@@ -180,7 +180,7 @@ export function lte(left: any, right: any): BasicExpression<boolean> {
 // Overloads for and() - support 2 or more arguments
 export function and(
   left: ExpressionLike,
-  right: ExpressionLike
+  right: ExpressionLike,
 ): BasicExpression<boolean>
 export function and(
   left: ExpressionLike,
@@ -195,14 +195,14 @@ export function and(
   const allArgs = [left, right, ...rest]
   return new Func(
     `and`,
-    allArgs.map((arg) => toExpression(arg))
+    allArgs.map((arg) => toExpression(arg)),
   )
 }
 
 // Overloads for or() - support 2 or more arguments
 export function or(
   left: ExpressionLike,
-  right: ExpressionLike
+  right: ExpressionLike,
 ): BasicExpression<boolean>
 export function or(
   left: ExpressionLike,
@@ -217,7 +217,7 @@ export function or(
   const allArgs = [left, right, ...rest]
   return new Func(
     `or`,
-    allArgs.map((arg) => toExpression(arg))
+    allArgs.map((arg) => toExpression(arg)),
   )
 }
 
@@ -236,14 +236,14 @@ export function isNull(value: ExpressionLike): BasicExpression<boolean> {
 
 export function inArray(
   value: ExpressionLike,
-  array: ExpressionLike
+  array: ExpressionLike,
 ): BasicExpression<boolean> {
   return new Func(`in`, [toExpression(value), toExpression(array)])
 }
 
 export function like(
   left: StringLike,
-  right: StringLike
+  right: StringLike,
 ): BasicExpression<boolean>
 export function like(left: any, right: any): BasicExpression<boolean> {
   return new Func(`like`, [toExpression(left), toExpression(right)])
@@ -251,7 +251,7 @@ export function like(left: any, right: any): BasicExpression<boolean> {
 
 export function ilike(
   left: StringLike,
-  right: StringLike
+  right: StringLike,
 ): BasicExpression<boolean> {
   return new Func(`ilike`, [toExpression(left), toExpression(right)])
 }
@@ -259,19 +259,19 @@ export function ilike(
 // Functions
 
 export function upper<T extends ExpressionLike>(
-  arg: T
+  arg: T,
 ): StringFunctionReturnType<T> {
   return new Func(`upper`, [toExpression(arg)]) as StringFunctionReturnType<T>
 }
 
 export function lower<T extends ExpressionLike>(
-  arg: T
+  arg: T,
 ): StringFunctionReturnType<T> {
   return new Func(`lower`, [toExpression(arg)]) as StringFunctionReturnType<T>
 }
 
 export function length<T extends ExpressionLike>(
-  arg: T
+  arg: T,
 ): NumericFunctionReturnType<T> {
   return new Func(`length`, [toExpression(arg)]) as NumericFunctionReturnType<T>
 }
@@ -281,20 +281,20 @@ export function concat(
 ): BasicExpression<string> {
   return new Func(
     `concat`,
-    args.map((arg) => toExpression(arg))
+    args.map((arg) => toExpression(arg)),
   )
 }
 
 export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
   return new Func(
     `coalesce`,
-    args.map((arg) => toExpression(arg))
+    args.map((arg) => toExpression(arg)),
   )
 }
 
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
   left: T1,
-  right: T2
+  right: T2,
 ): BinaryNumericReturnType<T1, T2> {
   return new Func(`add`, [
     toExpression(left),
@@ -337,3 +337,42 @@ export const comparisonFunctions = [
   `like`,
   `ilike`,
 ] as const
+
+/**
+ * All supported operator names in TanStack DB expressions
+ */
+export const operators = [
+  // Comparison operators
+  `eq`,
+  `gt`,
+  `gte`,
+  `lt`,
+  `lte`,
+  `in`,
+  `like`,
+  `ilike`,
+  // Logical operators
+  `and`,
+  `or`,
+  `not`,
+  // Null checking
+  `isNull`,
+  `isUndefined`,
+  // String functions
+  `upper`,
+  `lower`,
+  `length`,
+  `concat`,
+  // Numeric functions
+  `add`,
+  // Utility functions
+  `coalesce`,
+  // Aggregate functions
+  `count`,
+  `avg`,
+  `sum`,
+  `min`,
+  `max`,
+] as const
+
+export type OperatorName = (typeof operators)[number]

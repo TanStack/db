@@ -1,9 +1,10 @@
-import { expect } from "vitest"
+import { expect } from 'vitest'
 import type {
   CollectionConfig,
   MutationFnParams,
+  StringCollationConfig,
   SyncConfig,
-} from "../src/index.js"
+} from '../src/index.js'
 
 // Index usage tracking utilities
 export interface IndexUsageStats {
@@ -126,7 +127,7 @@ export function expectIndexUsage(
     shouldUseFullScan?: boolean
     indexCallCount?: number
     fullScanCallCount?: number
-  }
+  },
 ) {
   if (expectations.shouldUseIndex) {
     expect(stats.rangeQueryCalls).toBeGreaterThan(0)
@@ -156,7 +157,7 @@ export function expectIndexUsage(
 // Helper to run a test with index usage tracking (automatically handles setup/cleanup)
 export function withIndexTracking(
   collection: any,
-  testFn: (tracker: { stats: IndexUsageStats }) => void | Promise<void>
+  testFn: (tracker: { stats: IndexUsageStats }) => void | Promise<void>,
 ): void | Promise<void> {
   const tracker = createIndexUsageTracker(collection)
 
@@ -172,11 +173,14 @@ export function withIndexTracking(
   }
 }
 
-type MockSyncCollectionConfig<T> = {
+type MockSyncCollectionConfig<T extends object = Record<string, unknown>> = {
   id: string
   initialData: Array<T>
   getKey: (item: T) => string | number
   autoIndex?: `off` | `eager`
+  sync?: SyncConfig<T>
+  syncMode?: `eager` | `on-demand`
+  defaultStringCollation?: StringCollationConfig
 }
 
 export function mockSyncCollectionOptions<
@@ -218,27 +222,30 @@ export function mockSyncCollectionOptions<
     },
   }
 
+  const sync = config.sync ?? {
+    sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
+      begin = params.begin
+      write = params.write
+      commit = params.commit
+      const markReady = params.markReady
+
+      begin()
+      config.initialData.forEach((item) => {
+        write({
+          type: `insert`,
+          value: item,
+        })
+      })
+      commit()
+      markReady()
+    },
+  }
+
   const options: CollectionConfig<T, string | number, never> & {
     utils: typeof utils
   } = {
-    sync: {
-      sync: (params: Parameters<SyncConfig<T>[`sync`]>[0]) => {
-        begin = params.begin
-        write = params.write
-        commit = params.commit
-        const markReady = params.markReady
-
-        begin()
-        config.initialData.forEach((item) => {
-          write({
-            type: `insert`,
-            value: item,
-          })
-        })
-        commit()
-        markReady()
-      },
-    },
+    sync,
+    ...(config.syncMode ? { syncMode: config.syncMode } : {}),
     startSync: true,
     onInsert: async (_params: MutationFnParams<T>) => {
       // TODO
@@ -374,7 +381,7 @@ export const flushPromises = () =>
  */
 export function withExpectedRejection<T>(
   expectedMessage: string,
-  testFn: () => T | Promise<T>
+  testFn: () => T | Promise<T>,
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     // Find and temporarily remove the vitest unhandled rejection handler
@@ -406,8 +413,8 @@ export function withExpectedRejection<T>(
         if (!expectedRejectionCaught) {
           reject(
             new Error(
-              `Expected rejection with message "${expectedMessage}" was not caught`
-            )
+              `Expected rejection with message "${expectedMessage}" was not caught`,
+            ),
           )
           return
         }

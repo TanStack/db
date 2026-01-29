@@ -1,11 +1,15 @@
-import { NegativeActiveSubscribersError } from "../errors"
-import { CollectionSubscription } from "./subscription.js"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { ChangeMessage, SubscribeChangesOptions } from "../types"
-import type { CollectionLifecycleManager } from "./lifecycle.js"
-import type { CollectionSyncManager } from "./sync.js"
-import type { CollectionEventsManager } from "./events.js"
-import type { CollectionImpl } from "./index.js"
+import { NegativeActiveSubscribersError } from '../errors'
+import {
+  createSingleRowRefProxy,
+  toExpression,
+} from '../query/builder/ref-proxy.js'
+import { CollectionSubscription } from './subscription.js'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { ChangeMessage, SubscribeChangesOptions } from '../types'
+import type { CollectionLifecycleManager } from './lifecycle.js'
+import type { CollectionSyncManager } from './sync.js'
+import type { CollectionEventsManager } from './events.js'
+import type { CollectionImpl } from './index.js'
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -56,7 +60,7 @@ export class CollectionChangesManager<
    */
   public emitEvents(
     changes: Array<ChangeMessage<TOutput, TKey>>,
-    forceEmit = false
+    forceEmit = false,
   ): void {
     // Skip batching for user actions (forceEmit=true) to keep UI responsive
     if (this.shouldBatchEvents && !forceEmit) {
@@ -94,21 +98,48 @@ export class CollectionChangesManager<
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions = {}
+    options: SubscribeChangesOptions<TOutput> = {},
   ): CollectionSubscription {
     // Start sync and track subscriber
     this.addSubscriber()
 
+    // Compile where callback to whereExpression if provided
+    if (options.where && options.whereExpression) {
+      throw new Error(
+        `Cannot specify both 'where' and 'whereExpression' options. Use one or the other.`,
+      )
+    }
+
+    const { where, ...opts } = options
+    let whereExpression = opts.whereExpression
+    if (where) {
+      const proxy = createSingleRowRefProxy<TOutput>()
+      const result = where(proxy)
+      whereExpression = toExpression(result)
+    }
+
     const subscription = new CollectionSubscription(this.collection, callback, {
-      ...options,
+      ...opts,
+      whereExpression,
       onUnsubscribe: () => {
         this.removeSubscriber()
         this.changeSubscriptions.delete(subscription)
       },
     })
 
+    // Register status listener BEFORE requesting snapshot to avoid race condition.
+    // This ensures the listener catches all status transitions, even if the
+    // loadSubset promise resolves synchronously or very quickly.
+    if (options.onStatusChange) {
+      subscription.on(`status:change`, options.onStatusChange)
+    }
+
     if (options.includeInitialState) {
-      subscription.requestSnapshot()
+      subscription.requestSnapshot({ trackLoadSubsetPromise: false })
+    } else if (options.includeInitialState === false) {
+      // When explicitly set to false (not just undefined), mark all state as "seen"
+      // so that all future changes (including deletes) pass through unfiltered.
+      subscription.markAllStateAsSeen()
     }
 
     // Add to batched listeners
@@ -135,7 +166,7 @@ export class CollectionChangesManager<
 
     this.events.emitSubscribersChange(
       this.activeSubscribersCount,
-      previousSubscriberCount
+      previousSubscriberCount,
     )
   }
 
@@ -154,7 +185,7 @@ export class CollectionChangesManager<
 
     this.events.emitSubscribersChange(
       this.activeSubscribersCount,
-      previousSubscriberCount
+      previousSubscriberCount,
     )
   }
 

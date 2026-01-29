@@ -1,4 +1,4 @@
-import type { CompareOptions } from "../query/builder/types"
+import type { CompareOptions } from '../query/builder/types'
 
 // WeakMap to store stable IDs for objects
 const objectIds = new WeakMap<object, number>()
@@ -84,7 +84,7 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
 export const descComparator = (
   a: unknown,
   b: unknown,
-  opts: CompareOptions
+  opts: CompareOptions,
 ): number => {
   return ascComparator(b, a, {
     ...opts,
@@ -93,7 +93,7 @@ export const descComparator = (
 }
 
 export function makeComparator(
-  opts: CompareOptions
+  opts: CompareOptions,
 ): (a: any, b: any) => number {
   return (a, b) => {
     if (opts.direction === `asc`) {
@@ -112,11 +112,80 @@ export const defaultComparator = makeComparator({
 })
 
 /**
- * Normalize a value for comparison
+ * Compare two Uint8Arrays for content equality
+ */
+function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.byteLength !== b.byteLength) {
+    return false
+  }
+  for (let i = 0; i < a.byteLength; i++) {
+    if (a[i] !== b[i]) {
+      return false
+    }
+  }
+  return true
+}
+
+/**
+ * Threshold for normalizing Uint8Arrays to string representations.
+ * Arrays larger than this will use reference equality to avoid memory overhead.
+ * 128 bytes is enough for common ID formats (ULIDs are 16 bytes, UUIDs are 16 bytes)
+ * while avoiding excessive string allocation for large binary data.
+ */
+const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
+
+/**
+ * Normalize a value for comparison and Map key usage
+ * Converts values that can't be directly compared or used as Map keys
+ * into comparable primitive representations
  */
 export function normalizeValue(value: any): any {
   if (value instanceof Date) {
     return value.getTime()
   }
+
+  // Normalize Uint8Arrays/Buffers to a string representation for Map key usage
+  // This enables content-based equality for binary data like ULIDs
+  const isUint8Array =
+    (typeof Buffer !== `undefined` && value instanceof Buffer) ||
+    value instanceof Uint8Array
+
+  if (isUint8Array) {
+    // Only normalize small arrays to avoid memory overhead for large binary data
+    if (value.byteLength <= UINT8ARRAY_NORMALIZE_THRESHOLD) {
+      // Convert to a string representation that can be used as a Map key
+      // Use a special prefix to avoid collisions with user strings
+      return `__u8__${Array.from(value).join(`,`)}`
+    }
+    // For large arrays, fall back to reference equality
+    // Users working with large binary data should use a derived key if needed
+  }
+
   return value
+}
+
+/**
+ * Compare two values for equality, with special handling for Uint8Arrays and Buffers
+ */
+export function areValuesEqual(a: any, b: any): boolean {
+  // Fast path for reference equality
+  if (a === b) {
+    return true
+  }
+
+  // Check for Uint8Array/Buffer comparison
+  const aIsUint8Array =
+    (typeof Buffer !== `undefined` && a instanceof Buffer) ||
+    a instanceof Uint8Array
+  const bIsUint8Array =
+    (typeof Buffer !== `undefined` && b instanceof Buffer) ||
+    b instanceof Uint8Array
+
+  // If both are Uint8Arrays, compare by content
+  if (aIsUint8Array && bIsUint8Array) {
+    return areUint8ArraysEqual(a, b)
+  }
+
+  // Different types or not Uint8Arrays
+  return false
 }

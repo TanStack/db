@@ -1,13 +1,13 @@
-import { map } from "@tanstack/db-ivm"
-import { PropRef, Value as ValClass, isExpressionLike } from "../ir.js"
-import { AggregateNotSupportedError } from "../../errors.js"
-import { compileExpression } from "./evaluators.js"
-import type { Aggregate, BasicExpression, Select } from "../ir.js"
+import { map } from '@tanstack/db-ivm'
+import { PropRef, Value as ValClass, isExpressionLike } from '../ir.js'
+import { AggregateNotSupportedError } from '../../errors.js'
+import { compileExpression } from './evaluators.js'
+import type { Aggregate, BasicExpression, Select } from '../ir.js'
 import type {
   KeyedStream,
   NamespacedAndKeyedStream,
   NamespacedRow,
-} from "../../types.js"
+} from '../../types.js'
 
 /**
  * Type for operations array used in select processing
@@ -34,7 +34,7 @@ function unwrapVal(input: any): any {
 function processMerge(
   op: Extract<SelectOp, { kind: `merge` }>,
   namespacedRow: NamespacedRow,
-  selectResults: Record<string, any>
+  selectResults: Record<string, any>,
 ): void {
   const value = op.source(namespacedRow)
   if (value && typeof value === `object`) {
@@ -74,7 +74,7 @@ function processMerge(
 function processNonMergeOp(
   op: Extract<SelectOp, { kind: `field` }>,
   namespacedRow: NamespacedRow,
-  selectResults: Record<string, any>
+  selectResults: Record<string, any>,
 ): void {
   // Support nested alias paths like "meta.author.name"
   const path = op.alias.split(`.`)
@@ -99,8 +99,8 @@ function processNonMergeOp(
  */
 function processRow(
   [key, namespacedRow]: [unknown, NamespacedRow],
-  ops: Array<SelectOp>
-): [unknown, typeof namespacedRow & { __select_results: any }] {
+  ops: Array<SelectOp>,
+): [unknown, typeof namespacedRow & { $selected: any }] {
   const selectResults: Record<string, any> = {}
 
   for (const op of ops) {
@@ -111,27 +111,24 @@ function processRow(
     }
   }
 
-  // Return the namespaced row with __select_results added
+  // Return the namespaced row with $selected added
   return [
     key,
     {
       ...namespacedRow,
-      __select_results: selectResults,
+      $selected: selectResults,
     },
-  ] as [
-    unknown,
-    typeof namespacedRow & { __select_results: typeof selectResults },
-  ]
+  ] as [unknown, typeof namespacedRow & { $selected: typeof selectResults }]
 }
 
 /**
- * Processes the SELECT clause and places results in __select_results
+ * Processes the SELECT clause and places results in $selected
  * while preserving the original namespaced row for ORDER BY access
  */
 export function processSelect(
   pipeline: NamespacedAndKeyedStream,
   select: Select,
-  _allInputs: Record<string, KeyedStream>
+  _allInputs: Record<string, KeyedStream>,
 ): NamespacedAndKeyedStream {
   // Build ordered operations to preserve authoring order (spreads and fields)
   const ops: Array<SelectOp> = []
@@ -145,7 +142,7 @@ export function processSelect(
  * Helper function to check if an expression is an aggregate
  */
 function isAggregateExpression(
-  expr: BasicExpression | Aggregate
+  expr: BasicExpression | Aggregate,
 ): expr is Aggregate {
   return expr.type === `agg`
 }
@@ -155,7 +152,7 @@ function isAggregateExpression(
  */
 export function processArgument(
   arg: BasicExpression | Aggregate,
-  namespacedRow: NamespacedRow
+  namespacedRow: NamespacedRow,
 ): any {
   if (isAggregateExpression(arg)) {
     throw new AggregateNotSupportedError()
@@ -189,7 +186,7 @@ function isNestedSelectObject(obj: any): boolean {
 function addFromObject(
   prefixPath: Array<string>,
   obj: any,
-  ops: Array<SelectOp>
+  ops: Array<SelectOp>,
 ) {
   for (const [key, value] of Object.entries(obj)) {
     if (key.startsWith(`__SPREAD_SENTINEL__`)) {

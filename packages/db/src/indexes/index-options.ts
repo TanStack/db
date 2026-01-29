@@ -1,4 +1,4 @@
-import type { IndexConstructor, IndexResolver } from "./base-index.js"
+import type { IndexConstructor, IndexResolver } from './base-index.js'
 
 /**
  * Enhanced index options that support both sync and async resolvers
@@ -11,7 +11,7 @@ export interface IndexOptions<TResolver extends IndexResolver = IndexResolver> {
         id: number,
         expr: any,
         name?: string,
-        options?: infer O
+        options?: infer O,
       ) => any
       ? O
       : never
@@ -20,7 +20,7 @@ export interface IndexOptions<TResolver extends IndexResolver = IndexResolver> {
           id: number,
           expr: any,
           name?: string,
-          options?: infer O
+          options?: infer O,
         ) => any
         ? O
         : never

@@ -1,9 +1,9 @@
-import { describe, expectTypeOf, test } from "vitest"
-import { Query } from "../../../src/query/builder/index.js"
-import { CollectionImpl } from "../../../src/collection/index.js"
-import { avg, count, eq } from "../../../src/query/builder/functions.js"
-import type { ExtractContext } from "../../../src/query/builder/index.js"
-import type { GetResult } from "../../../src/query/builder/types.js"
+import { describe, expectTypeOf, test } from 'vitest'
+import { Query } from '../../../src/query/builder/index.js'
+import { CollectionImpl } from '../../../src/collection/index.js'
+import { avg, count, eq } from '../../../src/query/builder/functions.js'
+import type { ExtractContext } from '../../../src/query/builder/index.js'
+import type { GetResult } from '../../../src/query/builder/types.js'
 
 // Test schema types
 interface Issue {
@@ -114,7 +114,7 @@ describe(`Subquery Types`, () => {
       const _query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: activeUsersQuery }, ({ issue, activeUser }) =>
-          eq(issue.userId, activeUser.id)
+          eq(issue.userId, activeUser.id),
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
@@ -144,7 +144,7 @@ describe(`Subquery Types`, () => {
       const _query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: userNamesQuery }, ({ issue, activeUser }) =>
-          eq(issue.userId, activeUser.id)
+          eq(issue.userId, activeUser.id),
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
@@ -246,7 +246,7 @@ describe(`Subquery Types`, () => {
       const _query = new Query()
         .from({ issue: issuesCollection })
         .join({ activeUser: activeUsers }, ({ issue, activeUser }) =>
-          eq(issue.userId, activeUser.id)
+          eq(issue.userId, activeUser.id),
         )
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
@@ -270,7 +270,7 @@ describe(`Subquery Types`, () => {
       const _query = new Query()
         .from({ issue: filteredIssues })
         .join({ user: usersCollection }, ({ issue, user }) =>
-          eq(issue.userId, user.id)
+          eq(issue.userId, user.id),
         )
         .select(({ issue, user }) => ({
           issueId: issue.id,

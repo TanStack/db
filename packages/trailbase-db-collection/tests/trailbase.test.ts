@@ -1,13 +1,22 @@
-import { describe, expect, it, vi } from "vitest"
-import { createCollection } from "@tanstack/db"
-import { trailBaseCollectionOptions } from "../src/trailbase"
+import { describe, expect, it, vi } from 'vitest'
+import { createCollection } from '@tanstack/db'
+import { trailBaseCollectionOptions } from '../src/trailbase'
 import type {
+  CreateOperation,
+  DeleteOperation,
   Event,
   FilterOrComposite,
+  ListOperation,
+  ListOpts,
   ListResponse,
   Pagination,
+  ReadOperation,
+  ReadOpts,
   RecordApi,
-} from "trailbase"
+  RecordId,
+  SubscribeOpts,
+  UpdateOperation,
+} from 'trailbase'
 
 type Data = {
   id: number | null
@@ -25,19 +34,25 @@ class MockRecordApi<T> implements RecordApi<T> {
       expand?: Array<string>
     }): Promise<ListResponse<T>> => {
       return Promise.resolve({ records: [] })
-    }
+    },
   )
+  listOp = vi.fn((_opts?: ListOpts): ListOperation<T> => {
+    throw `listOp`
+  })
 
   read = vi.fn(
     (
       _id: string | number,
       _opt?: {
         expand?: Array<string>
-      }
+      },
     ): Promise<T> => {
       throw `read`
-    }
+    },
   )
+  readOp = vi.fn((_id: RecordId, _opt?: ReadOpts): ReadOperation<T> => {
+    throw `readOp`
+  })
 
   create = vi.fn((_record: T): Promise<string | number> => {
     throw `create`
@@ -45,22 +60,38 @@ class MockRecordApi<T> implements RecordApi<T> {
   createBulk = vi.fn((_records: Array<T>): Promise<Array<string | number>> => {
     throw `createBulk`
   })
+  createOp = vi.fn((_record: T): CreateOperation<T> => {
+    throw `createOp`
+  })
 
   update = vi.fn((_id: string | number, _record: Partial<T>): Promise<void> => {
     throw `update`
   })
+  updateOp = vi.fn((_id: RecordId, _record: Partial<T>): UpdateOperation => {
+    throw `updateOp`
+  })
+
   delete = vi.fn((_id: string | number): Promise<void> => {
     throw `delete`
   })
+  deleteOp = vi.fn((_id: RecordId): DeleteOperation => {
+    throw `deleteOp`
+  })
+
   subscribe = vi.fn((_id: string | number): Promise<ReadableStream<Event>> => {
     return Promise.resolve(
       new ReadableStream({
         start: (controller: ReadableStreamDefaultController<Event>) => {
           controller.close()
         },
-      })
+      }),
     )
   })
+  subscribeAll = vi.fn(
+    (_opts?: SubscribeOpts): Promise<ReadableStream<Event>> => {
+      throw `subscribeAll`
+    },
+  )
 }
 
 function setUp(recordApi: MockRecordApi<Data>) {
@@ -124,7 +155,7 @@ describe(`TrailBase Integration`, () => {
     await injectEvent({ Update: updatedRecord })
 
     expect(collection.state).toEqual(
-      new Map([updatedRecord].map((d) => [d.id, d]))
+      new Map([updatedRecord].map((d) => [d.id, d])),
     )
 
     // Await cancellation.
@@ -196,7 +227,7 @@ describe(`TrailBase Integration`, () => {
         }, 1)
 
         return Promise.resolve(records.map((r) => r.id ?? 0))
-      }
+      },
     )
 
     const options = setUp(recordApi)
@@ -231,7 +262,7 @@ describe(`TrailBase Integration`, () => {
         })
         writer.releaseLock()
         return Promise.resolve()
-      }
+      },
     )
 
     collection.update(data.id, (old: Data) => {
@@ -250,7 +281,7 @@ describe(`TrailBase Integration`, () => {
         })
         writer.releaseLock()
         return Promise.resolve()
-      }
+      },
     )
 
     collection.delete(updatedData.id!)

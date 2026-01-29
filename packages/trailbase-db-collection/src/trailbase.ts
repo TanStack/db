@@ -1,12 +1,12 @@
 /* eslint-disable @typescript-eslint/no-unnecessary-condition */
-import { Store } from "@tanstack/store"
+import { Store } from '@tanstack/store'
 import {
   ExpectedDeleteTypeError,
   ExpectedInsertTypeError,
   ExpectedUpdateTypeError,
   TimeoutWaitingForIdsError,
-} from "./errors"
-import type { Event, RecordApi } from "trailbase"
+} from './errors'
+import type { Event, RecordApi } from 'trailbase'
 
 import type {
   BaseCollectionConfig,
@@ -16,7 +16,7 @@ import type {
   SyncConfig,
   UpdateMutationFnParams,
   UtilsRecord,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 type ShapeOf<T> = Record<keyof T, unknown>
 type Conversion<I, O> = (value: I) => O
@@ -52,7 +52,7 @@ function convert<
   OutputType extends ShapeOf<InputType>,
 >(
   conversions: Conversions<InputType, OutputType>,
-  input: InputType
+  input: InputType,
 ): OutputType {
   const c = conversions as Record<string, Conversion<InputType, OutputType>>
 
@@ -60,7 +60,7 @@ function convert<
     Object.keys(input).map((k: string) => {
       const value = input[k]
       return [k, c[k]?.(value as any) ?? value]
-    })
+    }),
   ) as OutputType
 }
 
@@ -69,7 +69,7 @@ function convertPartial<
   OutputType extends ShapeOf<InputType>,
 >(
   conversions: Conversions<InputType, OutputType>,
-  input: Partial<InputType>
+  input: Partial<InputType>,
 ): Partial<OutputType> {
   const c = conversions as Record<string, Conversion<InputType, OutputType>>
 
@@ -77,7 +77,7 @@ function convertPartial<
     Object.keys(input).map((k: string) => {
       const value = input[k]
       return [k, c[k]?.(value as any) ?? value]
-    })
+    }),
   ) as OutputType
 }
 
@@ -89,9 +89,9 @@ export interface TrailBaseCollectionConfig<
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
 > extends Omit<
-    BaseCollectionConfig<TItem, TKey>,
-    `onInsert` | `onUpdate` | `onDelete`
-  > {
+  BaseCollectionConfig<TItem, TKey>,
+  `onInsert` | `onUpdate` | `onDelete`
+> {
   /**
    * Record API name
    */
@@ -112,7 +112,7 @@ export function trailBaseCollectionOptions<
   TRecord extends ShapeOf<TItem> = TItem,
   TKey extends string | number = string | number,
 >(
-  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>
+  config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
 ): CollectionConfig<TItem, TKey> & { utils: TrailBaseCollectionUtils } {
   const getKey = config.getKey
 
@@ -127,7 +127,7 @@ export function trailBaseCollectionOptions<
 
   const awaitIds = (
     ids: Array<string>,
-    timeout: number = 120 * 1000
+    timeout: number = 120 * 1000,
   ): Promise<void> => {
     const completed = (value: Map<string, number>) =>
       ids.every((id) => value.has(id))
@@ -295,7 +295,7 @@ export function trailBaseCollectionOptions<
     sync,
     getKey,
     onInsert: async (
-      params: InsertMutationFnParams<TItem, TKey>
+      params: InsertMutationFnParams<TItem, TKey>,
     ): Promise<Array<number | string>> => {
       const ids = await config.recordApi.createBulk(
         params.transaction.mutations.map((tx) => {
@@ -304,7 +304,7 @@ export function trailBaseCollectionOptions<
             throw new ExpectedInsertTypeError(type)
           }
           return serialIns(modified)
-        })
+        }),
       )
 
       // The optimistic mutation overlay is removed on return, so at this point
@@ -325,7 +325,7 @@ export function trailBaseCollectionOptions<
           await config.recordApi.update(key, serialUpd(changes))
 
           return String(key)
-        })
+        }),
       )
 
       // The optimistic mutation overlay is removed on return, so at this point
@@ -343,7 +343,7 @@ export function trailBaseCollectionOptions<
 
           await config.recordApi.delete(key)
           return String(key)
-        })
+        }),
       )
 
       // The optimistic mutation overlay is removed on return, so at this point

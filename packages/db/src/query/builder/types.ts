@@ -1,5 +1,5 @@
-import type { CollectionImpl } from "../../collection/index.js"
-import type { SingleResult } from "../../types.js"
+import type { CollectionImpl } from '../../collection/index.js'
+import type { SingleResult, StringCollationConfig } from '../../types.js'
 import type {
   Aggregate,
   BasicExpression,
@@ -7,8 +7,8 @@ import type {
   OrderByDirection,
   PropRef,
   Value,
-} from "../ir.js"
-import type { QueryBuilder } from "./index.js"
+} from '../ir.js'
+import type { QueryBuilder } from './index.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -121,7 +121,7 @@ export type GetAliases<TContext extends Context> = keyof TContext[`schema`]
  * Example: `(refs) => eq(refs.users.age, 25)`
  */
 export type WhereCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -290,7 +290,7 @@ type NeedsExtraction<T> = T extends
  * Example: `(refs) => refs.users.createdAt`
  */
 export type OrderByCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -303,26 +303,7 @@ export type OrderByCallback<TContext extends Context> = (
 export type OrderByOptions = {
   direction?: OrderByDirection
   nulls?: `first` | `last`
-} & StringSortOpts
-
-/**
- * StringSortOpts - Options for string sorting behavior
- *
- * This discriminated union allows for two types of string sorting:
- * - **Lexical**: Simple character-by-character comparison (default)
- * - **Locale**: Locale-aware sorting with optional customization
- *
- * The union ensures that locale options are only available when locale sorting is selected.
- */
-export type StringSortOpts =
-  | {
-      stringSort?: `lexical`
-    }
-  | {
-      stringSort?: `locale`
-      locale?: string
-      localeOptions?: object
-    }
+} & StringCollationConfig
 
 /**
  * CompareOptions - Final resolved options for comparison operations
@@ -331,12 +312,9 @@ export type StringSortOpts =
  * to their concrete values. Unlike OrderByOptions, all fields are required
  * since defaults have been applied.
  */
-export type CompareOptions = {
+export type CompareOptions = StringCollationConfig & {
   direction: OrderByDirection
   nulls: `first` | `last`
-  stringSort: `lexical` | `locale`
-  locale?: string
-  localeOptions?: object
 }
 
 /**
@@ -348,7 +326,7 @@ export type CompareOptions = {
  * Example: `(refs) => refs.orders.status`
  */
 export type GroupByCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
 
 /**
@@ -364,8 +342,28 @@ export type GroupByCallback<TContext extends Context> = (
  * Example: `(refs) => eq(refs.users.id, refs.orders.userId)`
  */
 export type JoinOnCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>
+  refs: RefsForContext<TContext>,
 ) => any
+
+/**
+ * FunctionalHavingRow - Type for the row parameter in functional having callbacks
+ *
+ * Functional having callbacks receive a namespaced row that includes:
+ * - Table data from the schema (when available)
+ * - $selected: The SELECT result fields (when select() has been called)
+ *
+ * After `select()` is called, this type includes `$selected` which provides access
+ * to the SELECT result fields via `$selected.fieldName` syntax.
+ *
+ * Note: When used with GROUP BY, functional having receives `{ $selected: ... }` with the
+ * aggregated SELECT results. When used without GROUP BY, it receives the full namespaced row
+ * which includes both table data and `$selected`.
+ *
+ * Example: `({ $selected }) => $selected.sessionCount > 2`
+ * Example (no GROUP BY): `(row) => row.user.salary > 70000 && row.$selected.user_count > 2`
+ */
+export type FunctionalHavingRow<TContext extends Context> = TContext[`schema`] &
+  (TContext[`result`] extends object ? { $selected: TContext[`result`] } : {})
 
 /**
  * RefProxyForContext - Creates ref proxies for all tables/collections in a query context
@@ -386,6 +384,9 @@ export type JoinOnCallback<TContext extends Context> = (
  *
  * The logic prioritizes optional chaining by always placing `undefined` outside when
  * a type is both optional and nullable (e.g., `string | null | undefined`).
+ *
+ * After `select()` is called, this type also includes `$selected` which provides access
+ * to the SELECT result fields via `$selected.fieldName` syntax.
  */
 export type RefsForContext<TContext extends Context> = {
   [K in keyof TContext[`schema`]]: IsNonExactOptional<
@@ -393,11 +394,11 @@ export type RefsForContext<TContext extends Context> = {
   > extends true
     ? IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
-        // Extract the non-undefined and non-null part and place undefined outside
-        Ref<NonNullable<TContext[`schema`][K]>> | undefined
+          // Extract the non-undefined and non-null part and place undefined outside
+          Ref<NonNullable<TContext[`schema`][K]>> | undefined
       : // T is optional (T | undefined) but not exactly undefined, and not nullable
-        // Extract the non-undefined part and place undefined outside
-        Ref<NonUndefined<TContext[`schema`][K]>> | undefined
+          // Extract the non-undefined part and place undefined outside
+          Ref<NonUndefined<TContext[`schema`][K]>> | undefined
     : IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is nullable (T | null) but not exactly null, and not optional
         // Extract the non-null part and place null outside
@@ -405,7 +406,9 @@ export type RefsForContext<TContext extends Context> = {
       : // T is exactly undefined, exactly null, or neither optional nor nullable
         // Wrap in RefProxy as-is (includes exact undefined, exact null, and normal types)
         Ref<TContext[`schema`][K]>
-}
+} & (TContext[`result`] extends object
+  ? { $selected: Ref<TContext[`result`]> }
+  : {})
 
 /**
  * Type Detection Helpers
@@ -531,6 +534,20 @@ type WithoutRefBrand<T> =
   T extends Record<string, any> ? Omit<T, typeof RefBrand> : T
 
 /**
+ * PreserveSingleResultFlag - Conditionally includes the singleResult flag
+ *
+ * This helper type ensures the singleResult flag is only added to the context when it's
+ * explicitly true. It uses a non-distributive conditional (tuple wrapper) to prevent
+ * unexpected behavior when TFlag is a union type.
+ *
+ * @template TFlag - The singleResult flag value to check
+ * @returns { singleResult: true } if TFlag is true, otherwise {}
+ */
+type PreserveSingleResultFlag<TFlag> = [TFlag] extends [true]
+  ? { singleResult: true }
+  : {}
+
+/**
  * MergeContextWithJoinType - Creates a new context after a join operation
  *
  * This is the core type that handles the complex logic of merging schemas
@@ -551,6 +568,7 @@ type WithoutRefBrand<T> =
  * - `hasJoins`: Set to true
  * - `joinTypes`: Updated to track this join type
  * - `result`: Preserved from previous operations
+ * - `singleResult`: Preserved only if already true (via PreserveSingleResultFlag)
  */
 export type MergeContextWithJoinType<
   TContext extends Context,
@@ -574,8 +592,7 @@ export type MergeContextWithJoinType<
     [K in keyof TNewSchema & string]: TJoinType
   }
   result: TContext[`result`]
-  singleResult: TContext[`singleResult`] extends true ? true : false
-}
+} & PreserveSingleResultFlag<TContext[`singleResult`]>
 
 /**
  * ApplyJoinOptionalityToMergedSchema - Applies optionality rules when merging schemas
@@ -620,7 +637,7 @@ export type ApplyJoinOptionalityToMergedSchema<
   // Apply optionality to new schema based on join type
   [K in keyof TNewSchema]: TJoinType extends `left` | `full`
     ? // New table becomes optional for left and full joins
-      TNewSchema[K] | undefined
+        TNewSchema[K] | undefined
     : // New table is required for inner and right joins
       TNewSchema[K]
 }

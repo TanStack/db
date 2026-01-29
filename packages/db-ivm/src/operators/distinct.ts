@@ -1,10 +1,10 @@
-import { DifferenceStreamWriter, UnaryOperator } from "../graph.js"
-import { StreamBuilder } from "../d2.js"
-import { hash } from "../hashing/index.js"
-import { MultiSet } from "../multiset.js"
-import type { Hash } from "../hashing/index.js"
-import type { DifferenceStreamReader } from "../graph.js"
-import type { IStreamBuilder, KeyValue } from "../types.js"
+import { DifferenceStreamWriter, UnaryOperator } from '../graph.js'
+import { StreamBuilder } from '../d2.js'
+import { hash } from '../hashing/index.js'
+import { MultiSet } from '../multiset.js'
+import type { Hash } from '../hashing/index.js'
+import type { DifferenceStreamReader } from '../graph.js'
+import type { IStreamBuilder, KeyValue } from '../types.js'
 
 type Multiplicity = number
 
@@ -23,7 +23,7 @@ export class DistinctOperator<
     id: number,
     input: DifferenceStreamReader<T>,
     output: DifferenceStreamWriter<KeyValue<number, GetValue<T>>>,
-    by: (value: T) => any = (value: T) => value
+    by: (value: T) => any = (value: T) => value,
   ) {
     super(id, input, output)
     this.#by = by
@@ -83,18 +83,18 @@ export class DistinctOperator<
  * Removes duplicate values
  */
 export function distinct<T extends KeyValue<any, any>>(
-  by: (value: T) => any = (value: T) => value
+  by: (value: T) => any = (value: T) => value,
 ) {
   return (stream: IStreamBuilder<T>): IStreamBuilder<T> => {
     const output = new StreamBuilder<T>(
       stream.graph,
-      new DifferenceStreamWriter<T>()
+      new DifferenceStreamWriter<T>(),
     )
     const operator = new DistinctOperator<T>(
       stream.graph.getNextOperatorId(),
       stream.connectReader(),
       output.writer,
-      by
+      by,
     )
     stream.graph.addOperator(operator)
     return output

@@ -1,12 +1,12 @@
-import { describe, expectTypeOf, test } from "vitest"
+import { describe, expectTypeOf, test } from 'vitest'
 import {
   count,
   createLiveQueryCollection,
   eq,
   gt,
-} from "../../src/query/index.js"
-import { createCollection } from "../../src/collection/index.js"
-import { mockSyncCollectionOptions } from "../utils.js"
+} from '../../src/query/index.js'
+import { createCollection } from '../../src/collection/index.js'
+import { mockSyncCollectionOptions } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -57,7 +57,7 @@ function createUsersCollection() {
       id: `test-users`,
       getKey: (user) => user.id,
       initialData: sampleUsers,
-    })
+    }),
   )
 }
 
@@ -67,7 +67,7 @@ function createDepartmentsCollection() {
       id: `test-departments`,
       getKey: (dept) => dept.id,
       initialData: sampleDepartments,
-    })
+    }),
   )
 }
 
@@ -204,7 +204,7 @@ describe(`Functional Variants Types`, () => {
         q
           .from({ user: usersCollection })
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id)
+            eq(user.department_id, dept.id),
           )
           .fn.select((row) => ({
             employeeInfo: `${row.user.name} works in ${row.dept?.name || `Unknown`}`,
@@ -237,11 +237,11 @@ describe(`Functional Variants Types`, () => {
         q
           .from({ user: usersCollection })
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id)
+            eq(user.department_id, dept.id),
           )
           .fn.where(
             (row) =>
-              row.user.active && (row.dept?.name === `Engineering` || false)
+              row.user.active && (row.dept?.name === `Engineering` || false),
           ),
     })
 
@@ -261,7 +261,7 @@ describe(`Functional Variants Types`, () => {
         q
           .from({ user: usersCollection })
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id)
+            eq(user.department_id, dept.id),
           )
           .fn.where((row) => row.user.active)
           .fn.where((row) => row.user.salary > 60000)
@@ -410,7 +410,7 @@ describe(`Functional Variants Types`, () => {
         .fn.select((row) => ({
           name: row.user.name,
           isActive: row.user.active,
-        }))
+        })),
     )
 
     const results = liveCollection.toArray
@@ -448,7 +448,7 @@ describe(`Functional Variants Types`, () => {
         q
           .from({ user: usersCollection })
           .join({ dept: departmentsCollection }, ({ user, dept }) =>
-            eq(user.department_id, dept.id)
+            eq(user.department_id, dept.id),
           )
           .groupBy(({ dept }) => dept?.name)
           .fn.having((row) => row.dept?.name !== `HR`)
@@ -465,6 +465,58 @@ describe(`Functional Variants Types`, () => {
         departmentId: number | undefined
         departmentName: string | undefined
         totalEmployees: number
+      }>
+    >()
+  })
+
+  test(`fn.select with orderBy has access to $selected`, () => {
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .fn.select((row) => ({
+            name: row.user.name,
+            salaryInThousands: row.user.salary / 1000,
+            ageCategory:
+              row.user.age > 30
+                ? (`senior` as const)
+                : row.user.age > 25
+                  ? (`mid` as const)
+                  : (`junior` as const),
+          }))
+          .orderBy(({ $selected }) => $selected.salaryInThousands),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        name: string
+        salaryInThousands: number
+        ageCategory: `senior` | `mid` | `junior`
+      }>
+    >()
+  })
+
+  test(`fn.select with multiple orderBy clauses using $selected`, () => {
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .fn.select((row) => ({
+            displayName: row.user.name,
+            isActive: row.user.active,
+            salary: row.user.salary,
+          }))
+          .orderBy(({ $selected }) => $selected.isActive, `desc`)
+          .orderBy(({ $selected }) => $selected.salary),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        displayName: string
+        isActive: boolean
+        salary: number
       }>
     >()
   })

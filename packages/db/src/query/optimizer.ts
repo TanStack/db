@@ -120,8 +120,8 @@
  * transformed into a D2Mini pipeline.
  */
 
-import { deepEquals } from "../utils.js"
-import { CannotCombineEmptyExpressionListError } from "../errors.js"
+import { deepEquals } from '../utils.js'
+import { CannotCombineEmptyExpressionListError } from '../errors.js'
 import {
   CollectionRef as CollectionRefClass,
   Func,
@@ -130,9 +130,8 @@ import {
   createResidualWhere,
   getWhereExpression,
   isResidualWhere,
-} from "./ir.js"
-import { isConvertibleToCollectionFilter } from "./compiler/expressions.js"
-import type { BasicExpression, From, QueryIR, Select, Where } from "./ir.js"
+} from './ir.js'
+import type { BasicExpression, From, QueryIR, Select, Where } from './ir.js'
 
 /**
  * Represents a WHERE clause after source analysis
@@ -227,7 +226,7 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
  * @returns Map of source aliases to their WHERE clauses
  */
 function extractSourceWhereClauses(
-  query: QueryIR
+  query: QueryIR,
 ): Map<string, BasicExpression<boolean>> {
   const sourceWhereClauses = new Map<string, BasicExpression<boolean>>()
 
@@ -241,21 +240,17 @@ function extractSourceWhereClauses(
 
   // Analyze each WHERE clause to determine which sources it touches
   const analyzedClauses = splitWhereClauses.map((clause) =>
-    analyzeWhereClause(clause)
+    analyzeWhereClause(clause),
   )
 
   // Group clauses by single-source vs multi-source
   const groupedClauses = groupWhereClauses(analyzedClauses)
 
   // Only include single-source clauses that reference collections directly
-  // and can be converted to BasicExpression format for collection indexes
   for (const [sourceAlias, whereClause] of groupedClauses.singleSource) {
     // Check if this source alias corresponds to a collection reference
     if (isCollectionReference(query, sourceAlias)) {
-      // Check if the WHERE clause can be converted to collection-compatible format
-      if (isConvertibleToCollectionFilter(whereClause)) {
-        sourceWhereClauses.set(sourceAlias, whereClause)
-      }
+      sourceWhereClauses.set(sourceAlias, whereClause)
     }
   }
 
@@ -302,7 +297,7 @@ function applyRecursiveOptimization(query: QueryIR): QueryIR {
       query.from.type === `queryRef`
         ? new QueryRefClass(
             applyRecursiveOptimization(query.from.query),
-            query.from.alias
+            query.from.alias,
           )
         : query.from,
     join: query.join?.map((joinClause) => ({
@@ -311,7 +306,7 @@ function applyRecursiveOptimization(query: QueryIR): QueryIR {
         joinClause.from.type === `queryRef`
           ? new QueryRefClass(
               applyRecursiveOptimization(joinClause.from.query),
-              joinClause.from.alias
+              joinClause.from.alias,
             )
           : joinClause.from,
     })),
@@ -330,15 +325,28 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
     return query
   }
 
-  // Skip optimization if there are no joins - predicate pushdown only benefits joins
-  // Single-table queries don't benefit from this optimization
+  // For queries without joins, combine multiple WHERE clauses into a single clause
+  // to avoid creating multiple filter operators in the pipeline
   if (!query.join || query.join.length === 0) {
+    // Only optimize if there are multiple WHERE clauses to combine
+    if (query.where.length > 1) {
+      // Combine multiple WHERE clauses into a single AND expression
+      const splitWhereClauses = splitAndClauses(query.where)
+      const combinedWhere = combineWithAnd(splitWhereClauses)
+
+      return {
+        ...query,
+        where: [combinedWhere],
+      }
+    }
+
+    // For single WHERE clauses, no optimization needed
     return query
   }
 
   // Filter out residual WHERE clauses to prevent them from being optimized again
   const nonResidualWhereClauses = query.where.filter(
-    (where) => !isResidualWhere(where)
+    (where) => !isResidualWhere(where),
   )
 
   // Step 1: Split all AND clauses at the root level for granular optimization
@@ -346,7 +354,7 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
 
   // Step 2: Analyze each WHERE clause to determine which sources it touches
   const analyzedClauses = splitWhereClauses.map((clause) =>
-    analyzeWhereClause(clause)
+    analyzeWhereClause(clause),
   )
 
   // Step 3: Group clauses by single-source vs multi-source
@@ -357,7 +365,7 @@ function applySingleLevelOptimization(query: QueryIR): QueryIR {
 
   // Add back any residual WHERE clauses that were filtered out
   const residualWhereClauses = query.where.filter((where) =>
-    isResidualWhere(where)
+    isResidualWhere(where),
   )
   if (residualWhereClauses.length > 0) {
     optimizedQuery.where = [
@@ -453,7 +461,7 @@ function isRedundantSubquery(query: QueryIR): boolean {
  * ```
  */
 function splitAndClauses(
-  whereClauses: Array<Where>
+  whereClauses: Array<Where>,
 ): Array<BasicExpression<boolean>> {
   const result: Array<BasicExpression<boolean>> = []
 
@@ -467,7 +475,7 @@ function splitAndClauses(
 
 // Helper function for recursive splitting of BasicExpression arrays
 function splitAndClausesRecursive(
-  clause: BasicExpression<boolean>
+  clause: BasicExpression<boolean>,
 ): Array<BasicExpression<boolean>> {
   if (clause.type === `func` && clause.name === `and`) {
     // Recursively split nested AND clauses to handle complex expressions
@@ -507,7 +515,7 @@ function splitAndClausesRecursive(
  * ```
  */
 function analyzeWhereClause(
-  clause: BasicExpression<boolean>
+  clause: BasicExpression<boolean>,
 ): AnalyzedWhereClause {
   // Track which table aliases this WHERE clause touches
   const touchedSources = new Set<string>()
@@ -572,7 +580,7 @@ function analyzeWhereClause(
  * @returns Grouped clauses ready for optimization
  */
 function groupWhereClauses(
-  analyzedClauses: Array<AnalyzedWhereClause>
+  analyzedClauses: Array<AnalyzedWhereClause>,
 ): GroupedWhereClauses {
   const singleSource = new Map<string, Array<BasicExpression<boolean>>>()
   const multiSource: Array<BasicExpression<boolean>> = []
@@ -622,7 +630,7 @@ function groupWhereClauses(
  */
 function applyOptimizations(
   query: QueryIR,
-  groupedClauses: GroupedWhereClauses
+  groupedClauses: GroupedWhereClauses,
 ): QueryIR {
   // Track which single-source clauses were actually optimized
   const actuallyOptimized = new Set<string>()
@@ -631,7 +639,7 @@ function applyOptimizations(
   const optimizedFrom = optimizeFromWithTracking(
     query.from,
     groupedClauses.singleSource,
-    actuallyOptimized
+    actuallyOptimized,
   )
 
   // Optimize JOIN clauses and track what was optimized
@@ -641,7 +649,7 @@ function applyOptimizations(
         from: optimizeFromWithTracking(
           joinClause.from,
           groupedClauses.singleSource,
-          actuallyOptimized
+          actuallyOptimized,
         ),
       }))
     : undefined
@@ -659,7 +667,7 @@ function applyOptimizations(
     query.join &&
     query.join.some(
       (join) =>
-        join.type === `left` || join.type === `right` || join.type === `full`
+        join.type === `left` || join.type === `right` || join.type === `full`,
     )
 
   // Add single-source clauses
@@ -673,6 +681,20 @@ function applyOptimizations(
     }
     // If optimized and no outer JOINs - don't keep (original behavior)
   }
+
+  // Combine multiple remaining WHERE clauses into a single clause to avoid
+  // multiple filter operations in the pipeline (performance optimization)
+  // First flatten any nested AND expressions to avoid and(and(...), ...)
+  const finalWhere: Array<Where> =
+    remainingWhereClauses.length > 1
+      ? [
+          combineWithAnd(
+            remainingWhereClauses.flatMap((clause) =>
+              splitAndClausesRecursive(getWhereExpression(clause)),
+            ),
+          ),
+        ]
+      : remainingWhereClauses
 
   // Create a completely new query object to ensure immutability
   const optimizedQuery: QueryIR = {
@@ -692,8 +714,8 @@ function applyOptimizations(
     from: optimizedFrom,
     join: optimizedJoins,
 
-    // Only include WHERE clauses that weren't successfully optimized
-    where: remainingWhereClauses.length > 0 ? remainingWhereClauses : [],
+    // Include combined WHERE clauses
+    where: finalWhere.length > 0 ? finalWhere : [],
   }
 
   return optimizedQuery
@@ -727,11 +749,11 @@ function deepCopyQuery(query: QueryIR): QueryIR {
             joinClause.from.type === `collectionRef`
               ? new CollectionRefClass(
                   joinClause.from.collection,
-                  joinClause.from.alias
+                  joinClause.from.alias,
                 )
               : new QueryRefClass(
                   deepCopyQuery(joinClause.from.query),
-                  joinClause.from.alias
+                  joinClause.from.alias,
                 ),
         }))
       : undefined,
@@ -758,7 +780,7 @@ function deepCopyQuery(query: QueryIR): QueryIR {
 function optimizeFromWithTracking(
   from: From,
   singleSourceClauses: Map<string, BasicExpression<boolean>>,
-  actuallyOptimized: Set<string>
+  actuallyOptimized: Set<string>,
 ): From {
   const whereClause = singleSourceClauses.get(from.alias)
 
@@ -811,7 +833,7 @@ function optimizeFromWithTracking(
 function unsafeSelect(
   query: QueryIR,
   whereClause: BasicExpression<boolean>,
-  outerAlias: string
+  outerAlias: string,
 ): boolean {
   if (!query.select) return false
 
@@ -848,7 +870,7 @@ function unsafeFnSelect(query: QueryIR) {
 function isSafeToPushIntoExistingSubquery(
   query: QueryIR,
   whereClause: BasicExpression<boolean>,
-  outerAlias: string
+  outerAlias: string,
 ): boolean {
   return !(
     unsafeSelect(query, whereClause, outerAlias) ||
@@ -923,7 +945,7 @@ function collectRefs(expr: any): Array<PropRef> {
 function whereReferencesComputedSelectFields(
   select: Select,
   whereClause: BasicExpression<boolean>,
-  outerAlias: string
+  outerAlias: string,
 ): boolean {
   // Build a set of computed field names at the top-level of the subquery output
   const computed = new Set<string>()
@@ -957,7 +979,7 @@ function whereReferencesComputedSelectFields(
 function referencesAliasWithRemappedSelect(
   subquery: QueryIR,
   whereClause: BasicExpression<boolean>,
-  outerAlias: string
+  outerAlias: string,
 ): boolean {
   const refs = collectRefs(whereClause)
   // Only care about clauses that actually reference the outer alias.
@@ -1024,7 +1046,7 @@ function referencesAliasWithRemappedSelect(
  * @throws Error if the expressions array is empty
  */
 function combineWithAnd(
-  expressions: Array<BasicExpression<boolean>>
+  expressions: Array<BasicExpression<boolean>>,
 ): BasicExpression<boolean> {
   if (expressions.length === 0) {
     throw new CannotCombineEmptyExpressionListError()

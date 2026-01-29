@@ -1,20 +1,20 @@
 import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
-} from "../errors"
-import { currentStateAsChanges } from "./change-events"
+} from '../errors'
+import { currentStateAsChanges } from './change-events'
 
-import { CollectionStateManager } from "./state"
-import { CollectionChangesManager } from "./changes"
-import { CollectionLifecycleManager } from "./lifecycle.js"
-import { CollectionSyncManager } from "./sync"
-import { CollectionIndexesManager } from "./indexes"
-import { CollectionMutationsManager } from "./mutations"
-import { CollectionEventsManager } from "./events.js"
-import type { CollectionSubscription } from "./subscription"
-import type { AllCollectionEvents, CollectionEventHandler } from "./events.js"
-import type { BaseIndex, IndexResolver } from "../indexes/base-index.js"
-import type { IndexOptions } from "../indexes/index-options.js"
+import { CollectionStateManager } from './state'
+import { CollectionChangesManager } from './changes'
+import { CollectionLifecycleManager } from './lifecycle.js'
+import { CollectionSyncManager } from './sync'
+import { CollectionIndexesManager } from './indexes'
+import { CollectionMutationsManager } from './mutations'
+import { CollectionEventsManager } from './events.js'
+import type { CollectionSubscription } from './subscription'
+import type { AllCollectionEvents, CollectionEventHandler } from './events.js'
+import type { BaseIndex, IndexResolver } from '../indexes/base-index.js'
+import type { IndexOptions } from '../indexes/index-options.js'
 import type {
   ChangeMessage,
   CollectionConfig,
@@ -27,15 +27,16 @@ import type {
   NonSingleResult,
   OperationConfig,
   SingleResult,
+  StringCollationConfig,
   SubscribeChangesOptions,
   Transaction as TransactionType,
   UtilsRecord,
   WritableDeep,
-} from "../types"
-import type { SingleRowRefProxy } from "../query/builder/ref-proxy"
-import type { StandardSchemaV1 } from "@standard-schema/spec"
-import type { BTreeIndex } from "../indexes/btree-index.js"
-import type { IndexProxy } from "../indexes/lazy-index.js"
+} from '../types'
+import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
+import type { StandardSchemaV1 } from '@standard-schema/spec'
+import type { BTreeIndex } from '../indexes/btree-index.js'
+import type { IndexProxy } from '../indexes/lazy-index.js'
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -126,31 +127,84 @@ export interface Collection<
  *
  */
 
-// Overload for when schema is provided
+// Overload for when schema is provided and utils is required (not optional)
+// We can't infer the Utils type from the CollectionConfig because it will always be optional
+// So we omit it from that type and instead infer it from the extension `& { utils: TUtils }`
+// such that we have the real, non-optional Utils type
 export function createCollection<
   T extends StandardSchemaV1,
-  TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = UtilsRecord,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
 >(
-  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  options: Omit<
+    CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils>,
+    `utils`
+  > & {
     schema: T
-    utils?: TUtils
-  } & NonSingleResult
+    utils: TUtils // Required utils
+  } & NonSingleResult,
 ): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
   NonSingleResult
+
+// Overload for when schema is provided and utils is optional
+// In this case we can simply infer the Utils type from the CollectionConfig type
+export function createCollection<
+  T extends StandardSchemaV1,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+>(
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils> & {
+    schema: T
+  } & NonSingleResult,
+): Collection<
+  InferSchemaOutput<T>,
+  TKey,
+  Exclude<TUtils, undefined>,
+  T,
+  InferSchemaInput<T>
+> &
+  NonSingleResult
+
+// Overload for when schema is provided, singleResult is true, and utils is required
+export function createCollection<
+  T extends StandardSchemaV1,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+>(
+  options: Omit<
+    CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils>,
+    `utils`
+  > & {
+    schema: T
+    utils: TUtils // Required utils
+  } & SingleResult,
+): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
+  SingleResult
 
 // Overload for when schema is provided and singleResult is true
 export function createCollection<
   T extends StandardSchemaV1,
-  TKey extends string | number = string | number,
-  TUtils extends UtilsRecord = UtilsRecord,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
 >(
-  options: CollectionConfig<InferSchemaOutput<T>, TKey, T> & {
+  options: CollectionConfig<InferSchemaOutput<T>, TKey, T, TUtils> & {
     schema: T
-    utils?: TUtils
-  } & SingleResult
+  } & SingleResult,
 ): Collection<InferSchemaOutput<T>, TKey, TUtils, T, InferSchemaInput<T>> &
   SingleResult
+
+// Overload for when no schema is provided and utils is required
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
+export function createCollection<
+  T extends object,
+  TKey extends string | number,
+  TUtils extends UtilsRecord,
+>(
+  options: Omit<CollectionConfig<T, TKey, never, TUtils>, `utils`> & {
+    schema?: never // prohibit schema if an explicit type is provided
+    utils: TUtils // Required utils
+  } & NonSingleResult,
+): Collection<T, TKey, TUtils, never, T> & NonSingleResult
 
 // Overload for when no schema is provided
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
@@ -159,11 +213,23 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<T, TKey, never> & {
+  options: CollectionConfig<T, TKey, never, TUtils> & {
     schema?: never // prohibit schema if an explicit type is provided
-    utils?: TUtils
-  } & NonSingleResult
+  } & NonSingleResult,
 ): Collection<T, TKey, TUtils, never, T> & NonSingleResult
+
+// Overload for when no schema is provided, singleResult is true, and utils is required
+// the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
+export function createCollection<
+  T extends object,
+  TKey extends string | number = string | number,
+  TUtils extends UtilsRecord = UtilsRecord,
+>(
+  options: Omit<CollectionConfig<T, TKey, never, TUtils>, `utils`> & {
+    schema?: never // prohibit schema if an explicit type is provided
+    utils: TUtils // Required utils
+  } & SingleResult,
+): Collection<T, TKey, TUtils, never, T> & SingleResult
 
 // Overload for when no schema is provided and singleResult is true
 // the type T needs to be passed explicitly unless it can be inferred from the getKey function in the config
@@ -172,26 +238,24 @@ export function createCollection<
   TKey extends string | number = string | number,
   TUtils extends UtilsRecord = UtilsRecord,
 >(
-  options: CollectionConfig<T, TKey, never> & {
+  options: CollectionConfig<T, TKey, never, TUtils> & {
     schema?: never // prohibit schema if an explicit type is provided
-    utils?: TUtils
-  } & SingleResult
+  } & SingleResult,
 ): Collection<T, TKey, TUtils, never, T> & SingleResult
 
 // Implementation
 export function createCollection(
-  options: CollectionConfig<any, string | number, any> & {
+  options: CollectionConfig<any, string | number, any, UtilsRecord> & {
     schema?: StandardSchemaV1
-    utils?: UtilsRecord
-  }
+  },
 ): Collection<any, string | number, UtilsRecord, any, any> {
   const collection = new CollectionImpl<any, string | number, any, any, any>(
-    options
+    options,
   )
 
-  // Copy utils to both top level and .utils namespace
+  // Attach utils to collection
   if (options.utils) {
-    collection.utils = { ...options.utils }
+    collection.utils = options.utils
   } else {
     collection.utils = {}
   }
@@ -230,6 +294,8 @@ export class CollectionImpl<
   // and for debugging
   public _state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
+  private comparisonOpts: StringCollationConfig
+
   /**
    * Creates a new Collection instance
    *
@@ -267,6 +333,8 @@ export class CollectionImpl<
     this._state = new CollectionStateManager(config)
     this._sync = new CollectionSyncManager(config, this.id)
 
+    this.comparisonOpts = buildCompareOptionsFromConfig(config)
+
     this._changes.setDeps({
       collection: this, // Required for passing to CollectionSubscription
       lifecycle: this._lifecycle,
@@ -297,6 +365,7 @@ export class CollectionImpl<
       lifecycle: this._lifecycle,
       changes: this._changes,
       indexes: this._indexes,
+      events: this._events,
     })
     this._sync.setDeps({
       collection: this, // Required for passing to config.sync callback
@@ -432,7 +501,7 @@ export class CollectionImpl<
    * Execute a callback for each entry in the collection
    */
   public forEach(
-    callbackfn: (value: TOutput, key: TKey, index: number) => void
+    callbackfn: (value: TOutput, key: TKey, index: number) => void,
   ): void {
     return this._state.forEach(callbackfn)
   }
@@ -441,7 +510,7 @@ export class CollectionImpl<
    * Create a new array with the results of calling a function for each entry in the collection
    */
   public map<U>(
-    callbackfn: (value: TOutput, key: TKey, index: number) => U
+    callbackfn: (value: TOutput, key: TKey, index: number) => U,
   ): Array<U> {
     return this._state.map(callbackfn)
   }
@@ -485,7 +554,7 @@ export class CollectionImpl<
    */
   public createIndex<TResolver extends IndexResolver<TKey> = typeof BTreeIndex>(
     indexCallback: (row: SingleRowRefProxy<TOutput>) => any,
-    config: IndexOptions<TResolver> = {}
+    config: IndexOptions<TResolver> = {},
   ): IndexProxy<TKey> {
     return this._indexes.createIndex(indexCallback, config)
   }
@@ -503,9 +572,14 @@ export class CollectionImpl<
   public validateData(
     data: unknown,
     type: `insert` | `update`,
-    key?: TKey
+    key?: TKey,
   ): TOutput | never {
     return this._mutations.validateData(data, type, key)
+  }
+
+  get compareOptions(): StringCollationConfig {
+    // return a copy such that no one can mutate the internal comparison object
+    return { ...this.comparisonOpts }
   }
 
   /**
@@ -591,27 +665,27 @@ export class CollectionImpl<
   // Overload 1: Update multiple items with a callback
   update(
     key: Array<TKey | unknown>,
-    callback: (drafts: Array<WritableDeep<TInput>>) => void
+    callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 2: Update multiple items with config and a callback
   update(
     keys: Array<TKey | unknown>,
     config: OperationConfig,
-    callback: (drafts: Array<WritableDeep<TInput>>) => void
+    callback: (drafts: Array<WritableDeep<TInput>>) => void,
   ): TransactionType
 
   // Overload 3: Update a single item with a callback
   update(
     id: TKey | unknown,
-    callback: (draft: WritableDeep<TInput>) => void
+    callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   // Overload 4: Update a single item with config and a callback
   update(
     id: TKey | unknown,
     config: OperationConfig,
-    callback: (draft: WritableDeep<TInput>) => void
+    callback: (draft: WritableDeep<TInput>) => void,
   ): TransactionType
 
   update(
@@ -622,7 +696,7 @@ export class CollectionImpl<
       | OperationConfig,
     maybeCallback?:
       | ((draft: WritableDeep<TInput>) => void)
-      | ((drafts: Array<WritableDeep<TInput>>) => void)
+      | ((drafts: Array<WritableDeep<TInput>>) => void),
   ) {
     return this._mutations.update(keys, configOrCallback, maybeCallback)
   }
@@ -659,7 +733,7 @@ export class CollectionImpl<
    */
   delete = (
     keys: Array<TKey> | TKey,
-    config?: OperationConfig
+    config?: OperationConfig,
   ): TransactionType<any> => {
     return this._mutations.delete(keys, config)
   }
@@ -748,7 +822,7 @@ export class CollectionImpl<
    * })
    */
   public currentStateAsChanges(
-    options: CurrentStateAsChangesOptions = {}
+    options: CurrentStateAsChangesOptions = {},
   ): Array<ChangeMessage<TOutput>> | void {
     return currentStateAsChanges(this, options)
   }
@@ -775,26 +849,29 @@ export class CollectionImpl<
    * }, { includeInitialState: true })
    *
    * @example
-   * // Subscribe only to changes matching a condition
+   * // Subscribe only to changes matching a condition using where callback
+   * import { eq } from "@tanstack/db"
+   *
    * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
    *   includeInitialState: true,
-   *   where: (row) => row.status === 'active'
+   *   where: (row) => eq(row.status, "active")
    * })
    *
    * @example
-   * // Subscribe using a pre-compiled expression
+   * // Using multiple conditions with and()
+   * import { and, eq, gt } from "@tanstack/db"
+   *
    * const subscription = collection.subscribeChanges((changes) => {
    *   updateUI(changes)
    * }, {
-   *   includeInitialState: true,
-   *   whereExpression: eq(row.status, 'active')
+   *   where: (row) => and(eq(row.status, "active"), gt(row.priority, 5))
    * })
    */
   public subscribeChanges(
     callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions = {}
+    options: SubscribeChangesOptions<TOutput> = {},
   ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
   }
@@ -804,7 +881,7 @@ export class CollectionImpl<
    */
   public on<T extends keyof AllCollectionEvents>(
     event: T,
-    callback: CollectionEventHandler<T>
+    callback: CollectionEventHandler<T>,
   ) {
     return this._events.on(event, callback)
   }
@@ -814,7 +891,7 @@ export class CollectionImpl<
    */
   public once<T extends keyof AllCollectionEvents>(
     event: T,
-    callback: CollectionEventHandler<T>
+    callback: CollectionEventHandler<T>,
   ) {
     return this._events.once(event, callback)
   }
@@ -824,7 +901,7 @@ export class CollectionImpl<
    */
   public off<T extends keyof AllCollectionEvents>(
     event: T,
-    callback: CollectionEventHandler<T>
+    callback: CollectionEventHandler<T>,
   ) {
     this._events.off(event, callback)
   }
@@ -834,7 +911,7 @@ export class CollectionImpl<
    */
   public waitFor<T extends keyof AllCollectionEvents>(
     event: T,
-    timeout?: number
+    timeout?: number,
   ) {
     return this._events.waitFor(event, timeout)
   }
@@ -846,5 +923,23 @@ export class CollectionImpl<
   public async cleanup(): Promise<void> {
     this._lifecycle.cleanup()
     return Promise.resolve()
+  }
+}
+
+function buildCompareOptionsFromConfig(
+  config: CollectionConfig<any, any, any>,
+): StringCollationConfig {
+  if (config.defaultStringCollation) {
+    const options = config.defaultStringCollation
+    return {
+      stringSort: options.stringSort ?? `locale`,
+      locale: options.stringSort === `locale` ? options.locale : undefined,
+      localeOptions:
+        options.stringSort === `locale` ? options.localeOptions : undefined,
+    }
+  } else {
+    return {
+      stringSort: `locale`,
+    }
   }
 }
