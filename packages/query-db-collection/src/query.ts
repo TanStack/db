@@ -852,7 +852,10 @@ export function queryCollectionOptions(
           // Mark collection as ready after first successful query result
           markReady()
         } else if (result.isError) {
-          if (result.errorUpdatedAt !== state.lastErrorUpdatedAt) {
+          const isNewError =
+            result.errorUpdatedAt !== state.lastErrorUpdatedAt ||
+            result.error !== state.lastError
+          if (isNewError) {
             state.lastError = result.error
             state.errorCount++
             state.lastErrorUpdatedAt = result.errorUpdatedAt

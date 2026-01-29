@@ -135,7 +135,12 @@ export class CollectionChangesManager<
     }
 
     if (options.includeInitialState) {
-      subscription.requestSnapshot({ trackLoadSubsetPromise: false })
+      subscription.requestSnapshot({
+        trackLoadSubsetPromise: false,
+        orderBy: options.orderBy,
+        limit: options.limit,
+        onLoadSubsetResult: options.onLoadSubsetResult,
+      })
     } else if (options.includeInitialState === false) {
       // When explicitly set to false (not just undefined), mark all state as "seen"
       // so that all future changes (including deletes) pass through unfiltered.
