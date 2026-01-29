@@ -837,6 +837,55 @@ describe(`Query Collections`, () => {
     })
   })
 
+  it(`should handle nullable collection getter returning null`, () => {
+    const collection = createCollection(
+      mockSyncCollectionOptions<Person>({
+        id: `nullable-getter-test`,
+        getKey: (person: Person) => person.id,
+        initialData: initialPersons,
+      }),
+    )
+
+    cleanup = $effect.root(() => {
+      // Create a live query collection
+      const liveQueryCollection = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ persons: collection })
+            .where(({ persons }) => gt(persons.age, 30))
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        startSync: true,
+      })
+
+      // Simulate SSR scenario: collection getter initially returns null
+      let currentCollection = $state<typeof liveQueryCollection | null>(null)
+
+      // This should not throw when the getter returns null
+      const queryResult = useLiveQuery(() => currentCollection)
+
+      flushSync()
+
+      // When collection is null, should return empty/idle state
+      expect(queryResult.state.size).toBe(0)
+      expect(queryResult.data).toEqual([])
+
+      // Now set the actual collection
+      currentCollection = liveQueryCollection
+
+      flushSync()
+
+      // Should now have data from the collection
+      expect(queryResult.state.size).toBe(1)
+      expect(queryResult.state.get(`3`)).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+    })
+  })
+
   describe(`isReady property`, () => {
     it(`should be false initially and true after collection is ready`, () => {
       let beginFn: (() => void) | undefined
