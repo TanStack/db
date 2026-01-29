@@ -26,15 +26,10 @@ export class CollectionSubscriber<
   // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
   private biggest: any = undefined
 
-  // Track whether we've already requested a load for the current cursor position.
-  // We de-dupe by request parameters (cursor + window) to avoid infinite loops when
-  // cached data is re-written as UPDATEs, while still allowing window moves.
-  private loadRequestedForCurrentCursor = false
+  // Track the most recent ordered load request key (cursor + window).
+  // This avoids infinite loops from cached data re-writes while still allowing
+  // window moves or new keys at the same cursor value to trigger new requests.
   private lastLoadRequestKey: string | undefined
-
-  // Track keys we've seen in this subscription to detect genuinely new rows
-  // (as opposed to repeated updates for the same keys).
-  private seenKeys = new Set<string | number>()
 
   // Track deferred promises for subscription loading states
   private subscriptionLoadingPromises = new Map<
@@ -91,19 +86,7 @@ export class CollectionSubscriber<
     const onStatusChange = (event: SubscriptionStatusChangeEvent) => {
       const subscription = event.subscription as CollectionSubscription
       if (event.status === `loadingSubset`) {
-        if (!this.subscriptionLoadingPromises.has(subscription)) {
-          let resolve: () => void
-          const promise = new Promise<void>((res) => {
-            resolve = res
-          })
-
-          this.subscriptionLoadingPromises.set(subscription, {
-            resolve: resolve!,
-          })
-          this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
-            promise,
-          )
-        }
+        this.ensureLoadingPromise(subscription)
       } else {
         // status is 'ready'
         const deferred = this.subscriptionLoadingPromises.get(subscription)
@@ -139,19 +122,7 @@ export class CollectionSubscriber<
     // Check current status after subscribing - if status is 'loadingSubset', track it.
     // The onStatusChange listener will catch the transition to 'ready'.
     if (subscription.status === `loadingSubset`) {
-      if (!this.subscriptionLoadingPromises.has(subscription)) {
-        let resolve: () => void
-        const promise = new Promise<void>((res) => {
-          resolve = res
-        })
-
-        this.subscriptionLoadingPromises.set(subscription, {
-          resolve: resolve!,
-        })
-        this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
-          promise,
-        )
-      }
+      this.ensureLoadingPromise(subscription)
     }
 
     const unsubscribe = () => {
@@ -334,9 +305,7 @@ export class CollectionSubscriber<
     // and allow re-inserts of previously sent keys
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.biggest = undefined
-      this.loadRequestedForCurrentCursor = false
       this.lastLoadRequestKey = undefined
-      this.seenKeys.clear()
       this.pendingOrderedLoadPromise = undefined
       this.sentToD2Keys.clear()
     })
@@ -472,10 +441,7 @@ export class CollectionSubscriber<
     // Skip if we already requested a load for this cursor+window.
     // This prevents infinite loops from cached data re-writes while still allowing
     // window moves (offset/limit changes) to trigger new requests.
-    if (
-      this.loadRequestedForCurrentCursor &&
-      this.lastLoadRequestKey === loadRequestKey
-    ) {
+    if (this.lastLoadRequestKey === loadRequestKey) {
       return
     }
 
@@ -494,7 +460,6 @@ export class CollectionSubscriber<
       onLoadSubsetResult: this.orderedLoadSubsetResult,
     })
 
-    this.loadRequestedForCurrentCursor = true
     this.lastLoadRequestKey = loadRequestKey
   }
 
@@ -524,27 +489,41 @@ export class CollectionSubscriber<
   ): void {
     for (const change of changes) {
       if (change.type === `delete`) {
-        this.seenKeys.delete(change.key)
         continue
       }
 
-      const isNewKey = !this.seenKeys.has(change.key)
-      if (isNewKey) {
-        this.seenKeys.add(change.key)
-      }
+      const isNewKey = !this.sentToD2Keys.has(change.key)
 
       // Only track inserts/updates for cursor positioning, not deletes
       if (!this.biggest) {
         this.biggest = change.value
-        this.loadRequestedForCurrentCursor = false
+        this.lastLoadRequestKey = undefined
       } else if (comparator(this.biggest, change.value) < 0) {
         this.biggest = change.value
-        this.loadRequestedForCurrentCursor = false
+        this.lastLoadRequestKey = undefined
       } else if (isNewKey) {
         // New key with same orderBy value - allow another load if needed
-        this.loadRequestedForCurrentCursor = false
+        this.lastLoadRequestKey = undefined
       }
     }
+  }
+
+  private ensureLoadingPromise(subscription: CollectionSubscription) {
+    if (this.subscriptionLoadingPromises.has(subscription)) {
+      return
+    }
+
+    let resolve: () => void
+    const promise = new Promise<void>((res) => {
+      resolve = res
+    })
+
+    this.subscriptionLoadingPromises.set(subscription, {
+      resolve: resolve!,
+    })
+    this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
+      promise,
+    )
   }
 
   private getLoadRequestKey(options: {
