@@ -425,12 +425,12 @@ export class CollectionSubscriber<
       : undefined
 
     // Normalize to array format for minValues
-    const minValues =
-      extractedValues !== undefined
-        ? Array.isArray(extractedValues)
-          ? extractedValues
-          : [extractedValues]
-        : undefined
+    let minValues: Array<unknown> | undefined
+    if (extractedValues !== undefined) {
+      minValues = Array.isArray(extractedValues)
+        ? extractedValues
+        : [extractedValues]
+    }
 
     const loadRequestKey = this.getLoadRequestKey({
       minValues,

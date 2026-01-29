@@ -683,13 +683,9 @@ export class CollectionSubscription
 
     for (const change of changes) {
       if (change.type === `delete`) {
-        // Remove deleted keys from sentKeys so future re-inserts are allowed
         this.sentKeys.delete(change.key)
       } else {
-        // For inserts and updates, track the key as sent
-        if (!this.sentKeys.has(change.key)) {
-          this.sentKeys.add(change.key)
-        }
+        this.sentKeys.add(change.key)
       }
     }
 
