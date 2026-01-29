@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/rxdb-db-collection",
-  "version": "0.1.56",
+  "version": "0.1.57",
   "description": "RxDB collection for TanStack DB",
   "author": "Kyle Mathews",
   "license": "MIT",
