@@ -1,5 +1,17 @@
 # @tanstack/db
 
+## 0.5.25
+
+### Patch Changes
+
+- Fixed infinite loop in `BTreeIndex.takeInternal` when indexed values are `undefined`. ([#1198](https://github.com/TanStack/db/pull/1198))
+
+  The BTree uses `undefined` as a special parameter meaning "start from beginning/end", which caused an infinite loop when the actual indexed value was `undefined`.
+
+  Added `takeFromStart` and `takeReversedFromEnd` methods to explicitly start from the beginning/end, and introduced a sentinel value for storing `undefined` in the BTree.
+
+- Fix `isReady` tracking for on-demand live queries without orderBy. Previously, non-ordered live queries using `syncMode: 'on-demand'` were incorrectly marked as ready before data finished loading. Also fix `preload()` promises hanging when cleanup occurs before the collection becomes ready. Additionally, fix concurrent live queries subscribing to the same source collection - each now independently tracks loading state. ([#1192](https://github.com/TanStack/db/pull/1192))
+
 ## 0.5.24
 
 ### Patch Changes

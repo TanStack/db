@@ -1,5 +1,14 @@
 # @tanstack/query-db-collection
 
+## 1.0.22
+
+### Patch Changes
+
+- Fix `isReady` tracking for on-demand live queries without orderBy. Previously, non-ordered live queries using `syncMode: 'on-demand'` were incorrectly marked as ready before data finished loading. Also fix `preload()` promises hanging when cleanup occurs before the collection becomes ready. Additionally, fix concurrent live queries subscribing to the same source collection - each now independently tracks loading state. ([#1192](https://github.com/TanStack/db/pull/1192))
+
+- Updated dependencies [[`43c7c9d`](https://github.com/TanStack/db/commit/43c7c9d5f2b47366a58f87470ac5dca95020ac57), [`284ebcc`](https://github.com/TanStack/db/commit/284ebcc8346bd237c3381de766995b8bda35009a)]:
+  - @tanstack/db@0.5.25
+
 ## 1.0.21
 
 ### Patch Changes
