@@ -42,7 +42,6 @@ export function createPredicatesTestSuite(
         )
 
         await query.preload()
-
         await waitForQueryData(query, { minSize: 1 })
 
         const results = Array.from(query.state.values())

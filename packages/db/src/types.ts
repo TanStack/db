@@ -809,6 +809,22 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   onStatusChange?: (event: SubscriptionStatusChangeEvent) => void
+  /**
+   * Optional orderBy to include in loadSubset for query-specific cache keys.
+   * @internal
+   */
+  orderBy?: OrderBy
+  /**
+   * Optional limit to include in loadSubset for query-specific cache keys.
+   * @internal
+   */
+  limit?: number
+  /**
+   * Callback that receives the loadSubset result (Promise or true) from requestSnapshot.
+   * Allows the caller to directly track the loading promise for isReady status.
+   * @internal
+   */
+  onLoadSubsetResult?: (result: Promise<void> | true) => void
 }
 
 export interface SubscribeChangesSnapshotOptions<

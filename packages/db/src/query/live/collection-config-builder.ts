@@ -830,17 +830,16 @@ export class CollectionConfigBuilder<
       return
     }
 
+    const subscribedToAll = this.currentSyncState?.subscribedToAllCollections
+    const allReady = this.allCollectionsReady()
+    const isLoading = this.liveQueryCollection?.isLoadingSubset
     // Mark ready when:
     // 1. All subscriptions are set up (subscribedToAllCollections)
     // 2. All source collections are ready
     // 3. The live query collection is not loading subset data
     // This prevents marking the live query ready before its data is processed
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
-    if (
-      this.currentSyncState?.subscribedToAllCollections &&
-      this.allCollectionsReady() &&
-      !this.liveQueryCollection?.isLoadingSubset
-    ) {
+    if (subscribedToAll && allReady && !isLoading) {
       markReady()
     }
   }
