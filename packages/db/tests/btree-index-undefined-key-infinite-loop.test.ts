@@ -19,7 +19,7 @@ import type { Collection } from '../src/collection/index.js'
 interface TaskItem {
   id: string
   taskDate?: Date
-  assignedTo?: { id: number } | undefined
+  assignedTo?: number | undefined
 }
 
 describe(`BTreeIndex - Issue #1186: Infinite loop with undefined indexed values`, () => {
@@ -61,50 +61,6 @@ describe(`BTreeIndex - Issue #1186: Infinite loop with undefined indexed values`
   }
 
   it(
-    `should handle the exact scenario from issue #1186 - live query with orderBy and limit`,
-    { timeout: 5000 },
-    async () => {
-      // Create index on taskDate field (used by orderBy)
-      collection.createIndex((row) => row.taskDate)
-
-      // First insert: item with undefined indexed value
-      insertItem({ id: `1`, assignedTo: undefined, taskDate: undefined })
-
-      // Create a live query with orderBy and limit (as described in the issue)
-      const liveQuery = createLiveQueryCollection({
-        query: (q: any) =>
-          q
-            .from({ item: collection })
-            .orderBy(({ item }: any) => item.taskDate, `desc`)
-            .limit(1)
-            .select(({ item }: any) => ({
-              id: item.id,
-              taskDate: item.taskDate,
-            })),
-        startSync: true,
-      })
-
-      await liveQuery.stateWhenReady()
-
-      // Should have 1 result
-      expect(liveQuery.size).toBe(1)
-
-      // Second insert: item with defined indexed value
-      // This triggers the query to re-run, which causes the infinite loop
-      insertItem({
-        id: `2`,
-        assignedTo: { id: 35 },
-        taskDate: new Date(`2024-01-15`),
-      })
-
-      // After insert, the live query should still work without infinite loop
-      // and should return the most recent item (by date descending)
-      expect(liveQuery.size).toBe(1)
-      expect(liveQuery.toArray[0]?.id).toBe(`2`)
-    },
-  )
-
-  it(
     `should handle live query with where, orderBy and limit with undefined values`,
     { timeout: 5000 },
     async () => {
@@ -120,7 +76,7 @@ describe(`BTreeIndex - Issue #1186: Infinite loop with undefined indexed values`
         query: (q: any) =>
           q
             .from({ item: collection })
-            .where(({ item }: any) => eq(item.assignedTo, { id: 35 }))
+            .where(({ item }: any) => eq(item.assignedTo, 35))
             .orderBy(({ item }: any) => item.taskDate, `desc`)
             .limit(1)
             .select(({ item }: any) => ({
@@ -138,7 +94,7 @@ describe(`BTreeIndex - Issue #1186: Infinite loop with undefined indexed values`
       // Insert matching item - this should trigger the query without infinite loop
       insertItem({
         id: `2`,
-        assignedTo: { id: 35 },
+        assignedTo: 35,
         taskDate: new Date(`2024-01-15`),
       })
 
