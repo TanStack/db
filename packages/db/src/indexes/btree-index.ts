@@ -293,7 +293,9 @@ export class BTreeIndex<
 
     while ((pair = nextPair(key)) !== undefined && result.length < n) {
       key = pair[0]
-      const keys = this.valueMap.get(key) as Set<Exclude<TKey, undefined>> | undefined
+      const keys = this.valueMap.get(key) as
+        | Set<Exclude<TKey, undefined>>
+        | undefined
       if (keys && keys.size > 0) {
         // Sort keys for deterministic order, reverse if needed
         const sorted = Array.from(keys).sort(compareKeys)

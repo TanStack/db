@@ -48,10 +48,7 @@ export interface IndexInterface<
     from: TKey,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
-  takeFromStart: (
-    n: number,
-    filterFn?: (key: TKey) => boolean,
-  ) => Array<TKey>
+  takeFromStart: (n: number, filterFn?: (key: TKey) => boolean) => Array<TKey>
   takeReversed: (
     n: number,
     from: TKey,
