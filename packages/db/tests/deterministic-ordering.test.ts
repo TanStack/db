@@ -189,7 +189,7 @@ describe(`Deterministic Ordering`, () => {
       index.remove(`b`, { priority: 1 })
       index.add(`b`, { priority: 1 })
 
-      const keys = index.takeReversedFromEnd(3)
+      const keys = index.takeFromStart(3)
       expect(keys).toEqual([`a`, `b`, `c`])
     })
 
