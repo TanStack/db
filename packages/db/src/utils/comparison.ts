@@ -135,11 +135,24 @@ function areUint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
 const UINT8ARRAY_NORMALIZE_THRESHOLD = 128
 
 /**
+ * Sentinel value representing undefined in normalized form.
+ * This allows distinguishing between "start from beginning" (undefined parameter)
+ * and "start from the key undefined" (actual undefined value in the tree).
+ */
+export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
+
+/**
  * Normalize a value for comparison and Map key usage
  * Converts values that can't be directly compared or used as Map keys
  * into comparable primitive representations
  */
 export function normalizeValue(value: any): any {
+  // Handle undefined first
+  // convert to sentinel because the BTree does not properly support `undefined` as a key
+  if (value === undefined) {
+    return UNDEFINED_SENTINEL
+  }
+
   if (value instanceof Date) {
     return value.getTime()
   }
@@ -161,6 +174,17 @@ export function normalizeValue(value: any): any {
     // Users working with large binary data should use a derived key if needed
   }
 
+  return value
+}
+
+/**
+ * Converts the `UNDEFINED_SENTINEL` back to `undefined`.
+ * Needed such that the sentinel is converted back to `undefined` before comparison.
+ */
+export function denormalizeUndefined(value: any): any {
+  if (value === UNDEFINED_SENTINEL) {
+    return undefined
+  }
   return value
 }
 

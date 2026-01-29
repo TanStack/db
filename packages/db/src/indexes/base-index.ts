@@ -26,7 +26,7 @@ export interface IndexStats {
 }
 
 export interface IndexInterface<
-  TKey extends string | number = string | number,
+  TKey extends string | number | undefined = string | number | undefined,
 > {
   add: (key: TKey, item: any) => void
   remove: (key: TKey, item: any) => void
@@ -45,12 +45,20 @@ export interface IndexInterface<
 
   take: (
     n: number,
-    from?: TKey,
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ) => Array<TKey>
+  takeFromStart: (
+    n: number,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
   takeReversed: (
     n: number,
-    from?: TKey,
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ) => Array<TKey>
+  takeReversedFromEnd: (
+    n: number,
     filterFn?: (key: TKey) => boolean,
   ) => Array<TKey>
 
@@ -74,7 +82,7 @@ export interface IndexInterface<
  * Base abstract class that all index types extend
  */
 export abstract class BaseIndex<
-  TKey extends string | number = string | number,
+  TKey extends string | number | undefined = string | number | undefined,
 > implements IndexInterface<TKey> {
   public readonly id: number
   public readonly name?: string
@@ -108,12 +116,20 @@ export abstract class BaseIndex<
   abstract lookup(operation: IndexOperation, value: any): Set<TKey>
   abstract take(
     n: number,
-    from?: TKey,
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey>
+  abstract takeFromStart(
+    n: number,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract takeReversed(
     n: number,
-    from?: TKey,
+    from: TKey,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey>
+  abstract takeReversedFromEnd(
+    n: number,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey>
   abstract get keyCount(): number
