@@ -259,12 +259,22 @@ interface CollectionOptions {
 }
 ```
 
+## Collection-Specific Skills
+
+For detailed patterns on each collection type, see the dedicated skill directories:
+
+| Skill                  | Directory       | When to Use                                      |
+| ---------------------- | --------------- | ------------------------------------------------ |
+| **QueryCollection**    | `../query/`     | REST API integration, TanStack Query, refetch    |
+| **ElectricCollection** | `../electric/`  | ElectricSQL, shapes, txid matching, proxy setup  |
+| **PowerSyncCollection**| `../powersync/` | Offline-first, SQLite, type serialization        |
+| **RxDBCollection**     | `../rxdb/`      | RxDB storage backends, replication, migrations   |
+| **TrailBaseCollection**| `../trailbase/` | TrailBase events, type conversions               |
+
 ## Detailed References
 
 | Reference                           | When to Use                                      |
 | ----------------------------------- | ------------------------------------------------ |
-| `references/query-collection.md`    | REST API integration, predicate push-down, delta |
-| `references/electric-collection.md` | Electric setup, txid matching, shapes            |
 | `references/local-collections.md`   | LocalStorage, LocalOnly, cross-tab sync          |
 | `references/sync-modes.md`          | Eager vs on-demand vs progressive tradeoffs      |
 | `references/custom-collections.md`  | Building your own collection type                |
