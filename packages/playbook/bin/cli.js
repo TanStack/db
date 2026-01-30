@@ -75,14 +75,14 @@ const command = args[0]
 
 switch (command) {
   case 'list':
-    console.log('TanStack DB Skills\n')
+    console.log('TanStack Playbook\n')
     listSkills(skillsDir)
     break
 
   case 'show':
     if (!args[1]) {
-      console.error('Usage: db-skills show <skill-name>')
-      console.error('Example: db-skills show tanstack-db/live-queries')
+      console.error('Usage: db-playbook show <skill-name>')
+      console.error('Example: db-playbook show tanstack-db/live-queries')
       process.exit(1)
     }
     showSkill(args[1])
@@ -92,23 +92,23 @@ switch (command) {
   case '--help':
   case '-h':
   case undefined:
-    console.log(`TanStack DB Skills CLI
+    console.log(`TanStack Playbook CLI
 
 Usage:
-  db-skills list              List all available skills
-  db-skills show <skill>      Show a specific skill
-  db-skills help              Show this help message
+  db-playbook list              List all available skills
+  db-playbook show <skill>      Show a specific skill
+  db-playbook help              Show this help message
 
 Examples:
-  db-skills list
-  db-skills show tanstack-db
-  db-skills show tanstack-db/live-queries
-  db-skills show tanstack-db/mutations
+  db-playbook list
+  db-playbook show tanstack-db
+  db-playbook show tanstack-db/live-queries
+  db-playbook show tanstack-db/mutations
 `)
     break
 
   default:
     console.error(`Unknown command: ${command}`)
-    console.log(`Run 'db-skills help' for usage information.`)
+    console.log(`Run 'db-playbook help' for usage information.`)
     process.exit(1)
 }
