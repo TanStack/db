@@ -1,16 +1,13 @@
 {
-  "name": "@scape-app/electric-db-collection",
+  "name": "@tanstack/electric-db-collection",
   "version": "0.2.31",
   "description": "ElectricSQL collection for TanStack DB",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/scape-app/tanstack-db.git",
+    "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/electric-db-collection"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
   },
   "homepage": "https://tanstack.com/db",
   "keywords": [
@@ -51,7 +48,7 @@
   "dependencies": {
     "@electric-sql/client": "^1.3.1",
     "@standard-schema/spec": "^1.1.0",
-    "@scape-app/db": "workspace:*",
+    "@tanstack/db": "workspace:*",
     "@tanstack/store": "^0.8.0",
     "debug": "^4.4.3"
   },

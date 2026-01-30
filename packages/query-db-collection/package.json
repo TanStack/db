@@ -1,16 +1,13 @@
 {
-  "name": "@scape-app/query-db-collection",
+  "name": "@tanstack/query-db-collection",
   "version": "1.0.22",
   "description": "TanStack Query collection for TanStack DB",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/scape-app/tanstack-db.git",
+    "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/query-db-collection"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
   },
   "homepage": "https://tanstack.com/db",
   "keywords": [
@@ -50,7 +47,7 @@
   ],
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
-    "@scape-app/db": "workspace:*"
+    "@tanstack/db": "workspace:*"
   },
   "peerDependencies": {
     "@tanstack/query-core": "^5.0.0",

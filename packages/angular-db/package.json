@@ -44,7 +44,7 @@
     "src"
   ],
   "dependencies": {
-    "@scape-app/db": "workspace:*"
+    "@tanstack/db": "workspace:*"
   },
   "peerDependencies": {
     "@angular/core": ">=16.0.0",

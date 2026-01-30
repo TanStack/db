@@ -1,4 +1,4 @@
-name: Publish to GitHub Packages
+name: Release Tarballs
 
 on:
   push:
@@ -7,11 +7,10 @@ on:
   workflow_dispatch:
 
 jobs:
-  publish:
+  release:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-      packages: write
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -21,8 +20,6 @@ jobs:
         with:
           node-version: 22
           cache: 'pnpm'
-          registry-url: 'https://npm.pkg.github.com'
-          scope: '@scape-app'
 
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
@@ -30,27 +27,27 @@ jobs:
       - name: Build packages
         run: pnpm build
 
-      - name: Set version suffix
-        run: |
-          SUFFIX="fork.$(date +%Y%m%d%H%M%S)"
-          echo "VERSION_SUFFIX=$SUFFIX" >> $GITHUB_ENV
+      - name: Get short SHA
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
 
-      - name: Update package versions
+      - name: Create tarballs
         run: |
-          cd packages/db
-          npm version prerelease --preid=${{ env.VERSION_SUFFIX }} --no-git-tag-version
-          cd ../react-db
-          npm version prerelease --preid=${{ env.VERSION_SUFFIX }} --no-git-tag-version
-          cd ../query-db-collection
-          npm version prerelease --preid=${{ env.VERSION_SUFFIX }} --no-git-tag-version
-          cd ../electric-db-collection
-          npm version prerelease --preid=${{ env.VERSION_SUFFIX }} --no-git-tag-version
+          mkdir -p release-assets
+          cd packages/db && npm pack && mv *.tgz ../../release-assets/tanstack-db.tgz
+          cd ../react-db && npm pack && mv *.tgz ../../release-assets/tanstack-react-db.tgz
+          cd ../query-db-collection && npm pack && mv *.tgz ../../release-assets/tanstack-query-db-collection.tgz
+          cd ../electric-db-collection && npm pack && mv *.tgz ../../release-assets/tanstack-electric-db-collection.tgz
 
-      - name: Publish packages
-        run: |
-          cd packages/db && npm publish
-          cd ../react-db && npm publish
-          cd ../query-db-collection && npm publish
-          cd ../electric-db-collection && npm publish
+      - name: Delete existing release for this SHA (if exists)
+        run: gh release delete "sha-${{ env.SHORT_SHA }}" --yes || true
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: sha-${{ env.SHORT_SHA }}
+          name: Build ${{ env.SHORT_SHA }}
+          files: release-assets/*.tgz
+          body: |
+            Automated build from commit ${{ github.sha }}
