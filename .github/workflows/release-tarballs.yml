@@ -1,0 +1,47 @@
+name: Release Tarballs
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.5.25-fork.1)'
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Create tarballs
+        run: |
+          mkdir -p release-assets
+          cd packages/db && npm pack && mv *.tgz ../../release-assets/
+          cd ../react-db && npm pack && mv *.tgz ../../release-assets/
+          cd ../query-db-collection && npm pack && mv *.tgz ../../release-assets/
+          cd ../electric-db-collection && npm pack && mv *.tgz ../../release-assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: release-assets/*.tgz
+          generate_release_notes: true
