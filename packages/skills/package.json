@@ -1,0 +1,35 @@
+{
+  "name": "@tanstack/db-skills",
+  "version": "0.0.1",
+  "description": "TanStack DB skills documentation for AI agents",
+  "author": "TanStack",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanStack/db.git",
+    "directory": "packages/skills"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "tanstack",
+    "db",
+    "skills",
+    "ai",
+    "llm",
+    "documentation",
+    "reactive",
+    "live-queries",
+    "optimistic-updates"
+  ],
+  "bin": {
+    "db-skills": "./bin/cli.js"
+  },
+  "type": "module",
+  "files": [
+    "bin",
+    "skills"
+  ],
+  "engines": {
+    "node": ">=18"
+  }
+}
