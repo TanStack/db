@@ -46,7 +46,8 @@ function showSkill(skillName) {
     const match = items.find(
       (item) =>
         item.toLowerCase() === part.toLowerCase() ||
-        item.toLowerCase().replace(/-/g, '') === part.toLowerCase().replace(/-/g, '')
+        item.toLowerCase().replace(/-/g, '') ===
+          part.toLowerCase().replace(/-/g, ''),
     )
 
     if (match) {

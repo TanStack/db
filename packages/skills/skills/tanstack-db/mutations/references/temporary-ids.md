@@ -39,6 +39,7 @@ todoCollection.delete(id)
 ```
 
 **Requirements:**
+
 - Backend must accept client-generated IDs
 - Use UUID format to avoid collisions
 
@@ -86,7 +87,7 @@ Don't show item until server confirms:
 ```tsx
 const tx = todoCollection.insert(
   { id: tempId, text: 'New todo' },
-  { optimistic: false } // Don't show until persisted
+  { optimistic: false }, // Don't show until persisted
 )
 
 await tx.isPersisted.promise
@@ -214,11 +215,11 @@ function TodoApp() {
 
 ## Summary
 
-| Approach | Complexity | Best For |
-|----------|------------|----------|
-| Client UUIDs | Low | New projects, flexible backends |
-| Wait for persistence | Low | Critical operations |
-| Non-optimistic | Low | Server-validated data |
-| View key mapping | Medium | Existing backends with server IDs |
+| Approach             | Complexity | Best For                          |
+| -------------------- | ---------- | --------------------------------- |
+| Client UUIDs         | Low        | New projects, flexible backends   |
+| Wait for persistence | Low        | Critical operations               |
+| Non-optimistic       | Low        | Server-validated data             |
+| View key mapping     | Medium     | Existing backends with server IDs |
 
 **Recommendation:** Use client-generated UUIDs when possible. It's the simplest solution that eliminates the entire problem.

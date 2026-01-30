@@ -50,12 +50,12 @@ const serve = async ({ request }: { request: Request }) => {
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
-    headers
+    headers,
   })
 }
 
 export const ServerRoute = createServerFileRoute('/api/todos').methods({
-  GET: serve
+  GET: serve,
 })
 ```
 
@@ -93,9 +93,13 @@ app.get('/api/todos', async (req, res) => {
   // Stream response
   response.body?.pipeTo(
     new WritableStream({
-      write(chunk) { res.write(chunk) },
-      close() { res.end() }
-    })
+      write(chunk) {
+        res.write(chunk)
+      },
+      close() {
+        res.end()
+      },
+    }),
   )
 })
 ```
@@ -133,8 +137,9 @@ export async function GET(request: NextRequest) {
   return new Response(response.body, {
     status: response.status,
     headers: {
-      'content-type': response.headers.get('content-type') || 'application/json'
-    }
+      'content-type':
+        response.headers.get('content-type') || 'application/json',
+    },
   })
 }
 ```
@@ -177,9 +182,9 @@ const todosCollection = createCollection(
     id: 'todos',
     getKey: (item) => item.id,
     shapeOptions: {
-      url: '/api/todos'
-    }
-  })
+      url: '/api/todos',
+    },
+  }),
 )
 
 const projectsCollection = createCollection(
@@ -187,9 +192,9 @@ const projectsCollection = createCollection(
     id: 'projects',
     getKey: (item) => item.id,
     shapeOptions: {
-      url: '/api/projects'
-    }
-  })
+      url: '/api/projects',
+    },
+  }),
 )
 ```
 
@@ -208,7 +213,8 @@ These params are passed through from client to Electric:
 
 ```typescript
 // Use environment variables for Electric URL
-const ELECTRIC_URL = process.env.ELECTRIC_URL || 'http://localhost:3000/v1/shape'
+const ELECTRIC_URL =
+  process.env.ELECTRIC_URL || 'http://localhost:3000/v1/shape'
 
 // Different environments
 // Development: http://localhost:3000/v1/shape

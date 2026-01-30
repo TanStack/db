@@ -12,6 +12,7 @@ TanStack DB uses schemas to validate and transform data during mutations. Schema
 ## Supported Libraries
 
 Any [StandardSchema](https://standardschema.dev) compatible library:
+
 - [Zod](https://zod.dev)
 - [Valibot](https://valibot.dev)
 - [ArkType](https://arktype.io)
@@ -39,15 +40,15 @@ const collection = createCollection(
     queryKey: ['todos'],
     queryFn: async () => api.todos.getAll(),
     getKey: (item) => item.id,
-  })
+  }),
 )
 
 // Invalid data throws SchemaValidationError
 collection.insert({
   id: '1',
-  text: '',        // ❌ Too short
+  text: '', // ❌ Too short
   completed: 'yes', // ❌ Wrong type
-  priority: 10,     // ❌ Out of range
+  priority: 10, // ❌ Out of range
 })
 ```
 
@@ -83,8 +84,9 @@ const eventSchema = z.object({
   id: z.string(),
   name: z.string(),
   // IMPORTANT: Accept both input AND output types
-  start_time: z.union([z.string(), z.date()])
-    .transform(val => typeof val === 'string' ? new Date(val) : val),
+  start_time: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
 })
 
 // Insert with string (TInput)
@@ -106,7 +108,7 @@ When transforming types, TInput MUST be a superset of TOutput for updates to wor
 ```tsx
 // ❌ BAD: TInput only accepts string, but draft contains Date
 const badSchema = z.object({
-  created_at: z.string().transform(val => new Date(val))
+  created_at: z.string().transform((val) => new Date(val)),
 })
 // TInput:  { created_at: string }
 // TOutput: { created_at: Date }
@@ -114,8 +116,9 @@ const badSchema = z.object({
 
 // ✅ GOOD: TInput accepts both string and Date
 const goodSchema = z.object({
-  created_at: z.union([z.string(), z.date()])
-    .transform(val => typeof val === 'string' ? new Date(val) : val)
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
 })
 // TInput:  { created_at: string | Date }
 // TOutput: { created_at: Date }
@@ -143,8 +146,8 @@ z.number().min(0).max(100)
 z.enum(['low', 'medium', 'high'])
 
 // Optional and nullable
-z.string().optional()      // Can be omitted
-z.string().nullable()      // Can be null
+z.string().optional() // Can be omitted
+z.string().nullable() // Can be null
 z.string().optional().nullable() // Either
 
 // Arrays
@@ -153,17 +156,14 @@ z.array(z.string()).min(1, 'At least one required')
 // Custom validation
 z.string().refine(
   (val) => /^[a-zA-Z0-9_]+$/.test(val),
-  'Only letters, numbers, underscores'
+  'Only letters, numbers, underscores',
 )
 
 // Cross-field validation
 z.object({
   start: z.date(),
   end: z.date(),
-}).refine(
-  (data) => data.end > data.start,
-  'End must be after start'
-)
+}).refine((data) => data.end > data.start, 'End must be after start')
 ```
 
 ### Error Handling
@@ -179,9 +179,9 @@ try {
   })
 } catch (error) {
   if (error instanceof SchemaValidationError) {
-    console.log(error.type)    // 'insert' or 'update'
+    console.log(error.type) // 'insert' or 'update'
     console.log(error.message) // 'Validation failed with 2 issues'
-    console.log(error.issues)  // Array of issues
+    console.log(error.issues) // Array of issues
     // [
     //   { path: ['email'], message: 'Invalid email' },
     //   { path: ['age'], message: 'Must be positive' }
@@ -235,16 +235,18 @@ function TodoForm() {
 ### Schema with Computed Fields
 
 ```tsx
-const productSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  base_price: z.number(),
-  discount_percent: z.number().default(0),
-}).transform((data) => ({
-  ...data,
-  final_price: data.base_price * (1 - data.discount_percent / 100),
-  display_price: `$${(data.base_price * (1 - data.discount_percent / 100)).toFixed(2)}`,
-}))
+const productSchema = z
+  .object({
+    id: z.string(),
+    name: z.string(),
+    base_price: z.number(),
+    discount_percent: z.number().default(0),
+  })
+  .transform((data) => ({
+    ...data,
+    final_price: data.base_price * (1 - data.discount_percent / 100),
+    display_price: `$${(data.base_price * (1 - data.discount_percent / 100)).toFixed(2)}`,
+  }))
 
 collection.insert({
   id: '1',
@@ -254,7 +256,7 @@ collection.insert({
 })
 
 const product = collection.get('1')
-console.log(product.final_price)   // 90
+console.log(product.final_price) // 90
 console.log(product.display_price) // '$90.00'
 ```
 
@@ -265,8 +267,9 @@ Schema transforms happen BEFORE handlers run:
 ```tsx
 const schema = z.object({
   id: z.string(),
-  created_at: z.union([z.string(), z.date()])
-    .transform(val => typeof val === 'string' ? new Date(val) : val),
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
 })
 
 const collection = createCollection({
@@ -293,9 +296,9 @@ const collection = createCollection({
 
 ## Detailed References
 
-| Reference                     | When to Use                                        |
-| ----------------------------- | -------------------------------------------------- |
-| `references/validation.md`    | Comprehensive validation patterns                  |
-| `references/transformations.md` | Type transformations, computed fields            |
-| `references/tinput-toutput.md` | Deep dive on TInput/TOutput relationship         |
-| `references/error-handling.md` | SchemaValidationError, form integration          |
+| Reference                       | When to Use                              |
+| ------------------------------- | ---------------------------------------- |
+| `references/validation.md`      | Comprehensive validation patterns        |
+| `references/transformations.md` | Type transformations, computed fields    |
+| `references/tinput-toutput.md`  | Deep dive on TInput/TOutput relationship |
+| `references/error-handling.md`  | SchemaValidationError, form integration  |

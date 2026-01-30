@@ -4,11 +4,11 @@ Define how mutations persist to your backend.
 
 ## Handler Types
 
-| Handler | Triggered By | Use Case |
-|---------|--------------|----------|
-| `onInsert` | `collection.insert()` | Create new records |
+| Handler    | Triggered By          | Use Case                |
+| ---------- | --------------------- | ----------------------- |
+| `onInsert` | `collection.insert()` | Create new records      |
 | `onUpdate` | `collection.update()` | Modify existing records |
-| `onDelete` | `collection.delete()` | Remove records |
+| `onDelete` | `collection.delete()` | Remove records          |
 
 ## Handler Signature
 
@@ -26,8 +26,8 @@ interface PendingMutation {
   collection: Collection
   type: 'insert' | 'update' | 'delete'
   key: string | number
-  original: TData       // Original item (update/delete only)
-  modified: TData       // New/modified item (insert/update)
+  original: TData // Original item (update/delete only)
+  modified: TData // New/modified item (insert/update)
   changes: Partial<TData> // Changed fields only (update only)
   metadata?: Record<string, unknown>
 }
@@ -44,28 +44,24 @@ const todoCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       await Promise.all(
-        transaction.mutations.map((m) =>
-          api.todos.create(m.modified)
-        )
+        transaction.mutations.map((m) => api.todos.create(m.modified)),
       )
     },
 
     onUpdate: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((m) =>
-          api.todos.update(m.original.id, m.changes)
-        )
+          api.todos.update(m.original.id, m.changes),
+        ),
       )
     },
 
     onDelete: async ({ transaction }) => {
       await Promise.all(
-        transaction.mutations.map((m) =>
-          api.todos.delete(m.original.id)
-        )
+        transaction.mutations.map((m) => api.todos.delete(m.original.id)),
       )
     },
-  })
+  }),
 )
 ```
 
@@ -79,8 +75,8 @@ Automatic refetch after handler completes:
 onUpdate: async ({ transaction }) => {
   await Promise.all(
     transaction.mutations.map((m) =>
-      api.todos.update(m.original.id, m.changes)
-    )
+      api.todos.update(m.original.id, m.changes),
+    ),
   )
   // QueryCollection automatically refetches after this returns
 }
@@ -96,7 +92,7 @@ onUpdate: async ({ transaction }) => {
     transaction.mutations.map(async (m) => {
       const response = await api.todos.update(m.original.id, m.changes)
       return response.txid
-    })
+    }),
   )
   return { txid: txids }
 }
@@ -122,13 +118,9 @@ Customize behavior based on mutation metadata:
 
 ```tsx
 // When mutating
-todoCollection.update(
-  todoId,
-  { metadata: { intent: 'complete' } },
-  (draft) => {
-    draft.completed = true
-  }
-)
+todoCollection.update(todoId, { metadata: { intent: 'complete' } }, (draft) => {
+  draft.completed = true
+})
 
 // In handler
 onUpdate: async ({ transaction }) => {
@@ -155,7 +147,7 @@ onUpdate: async ({ transaction }) => {
     transaction.mutations.map((m) => ({
       id: m.original.id,
       changes: m.changes,
-    }))
+    })),
   )
 }
 ```
@@ -172,7 +164,7 @@ const mutationFn: MutationFn = async ({ transaction }) => {
       table: 'todos',
       key: m.key,
       data: m.type === 'delete' ? undefined : m.modified,
-    }))
+    })),
   )
 
   if (!response.ok) {
@@ -194,8 +186,9 @@ Handlers receive transformed data (TOutput):
 ```tsx
 const schema = z.object({
   id: z.string(),
-  created_at: z.union([z.string(), z.date()])
-    .transform(val => typeof val === 'string' ? new Date(val) : val),
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
 })
 
 onInsert: async ({ transaction }) => {

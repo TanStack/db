@@ -11,13 +11,13 @@ TanStack DB is the reactive client store for your API. It provides sub-milliseco
 
 ## Routing Table
 
-| Topic            | Directory        | When to Use                                                                                              |
-| ---------------- | ---------------- | -------------------------------------------------------------------------------------------------------- |
-| **Live Queries** | `live-queries/`  | Querying data: filters, joins, aggregations, groupBy, orderBy, subqueries, reactive updates              |
-| **Mutations**    | `mutations/`     | Writing data: insert/update/delete, optimistic updates, transactions, paced mutations, error handling    |
-| **Collections**  | `collections/`   | Data sources: QueryCollection, ElectricCollection, local collections, sync modes, collection setup       |
-| **Schemas**      | `schemas/`       | Validation: schema definition, TInput/TOutput types, transformations, defaults, error handling           |
-| **Electric**     | `electric/`      | ElectricSQL integration: shapes, txid matching, real-time sync, proxy setup                              |
+| Topic            | Directory       | When to Use                                                                                           |
+| ---------------- | --------------- | ----------------------------------------------------------------------------------------------------- |
+| **Live Queries** | `live-queries/` | Querying data: filters, joins, aggregations, groupBy, orderBy, subqueries, reactive updates           |
+| **Mutations**    | `mutations/`    | Writing data: insert/update/delete, optimistic updates, transactions, paced mutations, error handling |
+| **Collections**  | `collections/`  | Data sources: QueryCollection, ElectricCollection, local collections, sync modes, collection setup    |
+| **Schemas**      | `schemas/`      | Validation: schema definition, TInput/TOutput types, transformations, defaults, error handling        |
+| **Electric**     | `electric/`     | ElectricSQL integration: shapes, txid matching, real-time sync, proxy setup                           |
 
 ## Quick Detection
 
@@ -73,12 +73,15 @@ import { queryCollectionOptions } from '@tanstack/query-db-collection'
 const todoCollection = createCollection(
   queryCollectionOptions({
     queryKey: ['todos'],
-    queryFn: async () => fetch('/api/todos').then(r => r.json()),
+    queryFn: async () => fetch('/api/todos').then((r) => r.json()),
     getKey: (item) => item.id,
     onUpdate: async ({ transaction }) => {
-      await api.todos.update(transaction.mutations[0].original.id, transaction.mutations[0].changes)
+      await api.todos.update(
+        transaction.mutations[0].original.id,
+        transaction.mutations[0].changes,
+      )
     },
-  })
+  }),
 )
 
 // 2. Query with live queries (reactive, incremental updates)
@@ -87,7 +90,7 @@ function TodoList() {
     q
       .from({ todo: todoCollection })
       .where(({ todo }) => eq(todo.completed, false))
-      .orderBy(({ todo }) => todo.createdAt, 'desc')
+      .orderBy(({ todo }) => todo.createdAt, 'desc'),
   )
 
   // 3. Mutate with optimistic updates
@@ -127,13 +130,13 @@ TanStack DB extends unidirectional data flow beyond the client:
 
 ## Package Overview
 
-| Package                         | Purpose                                    |
-| ------------------------------- | ------------------------------------------ |
-| `@tanstack/db`                  | Core: collections, queries, mutations      |
-| `@tanstack/react-db`            | React hooks: useLiveQuery, etc.            |
-| `@tanstack/query-db-collection` | REST API integration via TanStack Query    |
+| Package                            | Purpose                                 |
+| ---------------------------------- | --------------------------------------- |
+| `@tanstack/db`                     | Core: collections, queries, mutations   |
+| `@tanstack/react-db`               | React hooks: useLiveQuery, etc.         |
+| `@tanstack/query-db-collection`    | REST API integration via TanStack Query |
 | `@tanstack/electric-db-collection` | ElectricSQL real-time sync              |
-| `@tanstack/vue-db`              | Vue adapter                                |
-| `@tanstack/angular-db`          | Angular adapter                            |
-| `@tanstack/svelte-db`           | Svelte adapter                             |
-| `@tanstack/solid-db`            | Solid adapter                              |
+| `@tanstack/vue-db`                 | Vue adapter                             |
+| `@tanstack/angular-db`             | Angular adapter                         |
+| `@tanstack/svelte-db`              | Svelte adapter                          |
+| `@tanstack/solid-db`               | Solid adapter                           |

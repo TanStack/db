@@ -60,24 +60,24 @@ const todoCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       await Promise.all(
-        transaction.mutations.map((m) => api.todos.create(m.modified))
+        transaction.mutations.map((m) => api.todos.create(m.modified)),
       )
     },
 
     onUpdate: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((m) =>
-          api.todos.update(m.original.id, m.changes)
-        )
+          api.todos.update(m.original.id, m.changes),
+        ),
       )
     },
 
     onDelete: async ({ transaction }) => {
       await Promise.all(
-        transaction.mutations.map((m) => api.todos.delete(m.original.id))
+        transaction.mutations.map((m) => api.todos.delete(m.original.id)),
       )
     },
-  })
+  }),
 )
 ```
 
@@ -111,29 +111,31 @@ likePost(postId)
 ### Multi-Collection Actions
 
 ```tsx
-const createProject = createOptimisticAction<{ name: string; ownerId: string }>({
-  onMutate: ({ name, ownerId }) => {
-    const projectId = crypto.randomUUID()
+const createProject = createOptimisticAction<{ name: string; ownerId: string }>(
+  {
+    onMutate: ({ name, ownerId }) => {
+      const projectId = crypto.randomUUID()
 
-    projectCollection.insert({
-      id: projectId,
-      name,
-      ownerId,
-      createdAt: new Date(),
-    })
+      projectCollection.insert({
+        id: projectId,
+        name,
+        ownerId,
+        createdAt: new Date(),
+      })
 
-    userCollection.update(ownerId, (draft) => {
-      draft.projectCount += 1
-    })
+      userCollection.update(ownerId, (draft) => {
+        draft.projectCount += 1
+      })
+    },
+    mutationFn: async ({ name, ownerId }) => {
+      await api.projects.create({ name, ownerId })
+      await Promise.all([
+        projectCollection.utils.refetch(),
+        userCollection.utils.refetch(),
+      ])
+    },
   },
-  mutationFn: async ({ name, ownerId }) => {
-    await api.projects.create({ name, ownerId })
-    await Promise.all([
-      projectCollection.utils.refetch(),
-      userCollection.utils.refetch(),
-    ])
-  },
-})
+)
 ```
 
 ### Manual Transactions
@@ -152,15 +154,21 @@ const reviewTx = createTransaction({
 
 // Accumulate changes
 reviewTx.mutate(() => {
-  todoCollection.update(id1, (d) => { d.status = 'reviewed' })
-  todoCollection.update(id2, (d) => { d.status = 'reviewed' })
+  todoCollection.update(id1, (d) => {
+    d.status = 'reviewed'
+  })
+  todoCollection.update(id2, (d) => {
+    d.status = 'reviewed'
+  })
 })
 
 // User reviews changes...
 
 // Add more changes
 reviewTx.mutate(() => {
-  todoCollection.update(id3, (d) => { d.status = 'reviewed' })
+  todoCollection.update(id3, (d) => {
+    d.status = 'reviewed'
+  })
 })
 
 // Commit all at once
@@ -172,7 +180,12 @@ await reviewTx.commit()
 ### Paced Mutations (Debounce/Throttle/Queue)
 
 ```tsx
-import { usePacedMutations, debounceStrategy, throttleStrategy, queueStrategy } from '@tanstack/react-db'
+import {
+  usePacedMutations,
+  debounceStrategy,
+  throttleStrategy,
+  queueStrategy,
+} from '@tanstack/react-db'
 
 // Debounce: Wait for inactivity (auto-save forms)
 const mutate = usePacedMutations<{ field: string; value: string }>({
@@ -190,7 +203,9 @@ const mutate = usePacedMutations<{ field: string; value: string }>({
 // Throttle: Minimum spacing (sliders)
 const mutate = usePacedMutations<number>({
   onMutate: (volume) => {
-    settingsCollection.update('volume', (d) => { d.value = volume })
+    settingsCollection.update('volume', (d) => {
+      d.value = volume
+    })
   },
   mutationFn: async ({ transaction }) => {
     await api.settings.updateVolume(transaction.mutations)
@@ -201,7 +216,11 @@ const mutate = usePacedMutations<number>({
 // Queue: Sequential processing (file uploads)
 const mutate = usePacedMutations<File>({
   onMutate: (file) => {
-    uploadCollection.insert({ id: crypto.randomUUID(), file, status: 'pending' })
+    uploadCollection.insert({
+      id: crypto.randomUUID(),
+      file,
+      status: 'pending',
+    })
   },
   mutationFn: async ({ transaction }) => {
     await api.files.upload(transaction.mutations[0].modified)
@@ -218,7 +237,7 @@ Wait for server confirmation before showing change:
 // Insert without optimistic update
 const tx = todoCollection.insert(
   { id: '1', text: 'Server-validated', completed: false },
-  { optimistic: false }
+  { optimistic: false },
 )
 
 // Wait for persistence
@@ -235,13 +254,9 @@ try {
 Annotate mutations for custom handler behavior:
 
 ```tsx
-todoCollection.update(
-  todoId,
-  { metadata: { intent: 'complete' } },
-  (draft) => {
-    draft.completed = true
-  }
-)
+todoCollection.update(todoId, { metadata: { intent: 'complete' } }, (draft) => {
+  draft.completed = true
+})
 
 // In handler
 onUpdate: async ({ transaction }) => {
@@ -302,8 +317,8 @@ interface PendingMutation {
   collection: Collection
   type: 'insert' | 'update' | 'delete'
   key: string | number
-  original: TData       // Original item (update/delete)
-  modified: TData       // New item (insert/update)
+  original: TData // Original item (update/delete)
+  modified: TData // New item (insert/update)
   changes: Partial<TData> // Only changed fields (update)
   metadata?: Record<string, unknown>
 }
@@ -313,19 +328,19 @@ interface PendingMutation {
 
 Multiple mutations on same item within a transaction merge:
 
-| Existing → New      | Result    | Description                       |
-| ------------------- | --------- | --------------------------------- |
-| insert + update     | `insert`  | Merged into single insert         |
-| insert + delete     | _removed_ | Cancel out                        |
-| update + delete     | `delete`  | Delete wins                       |
-| update + update     | `update`  | Changes merged, first original    |
+| Existing → New  | Result    | Description                    |
+| --------------- | --------- | ------------------------------ |
+| insert + update | `insert`  | Merged into single insert      |
+| insert + delete | _removed_ | Cancel out                     |
+| update + delete | `delete`  | Delete wins                    |
+| update + update | `update`  | Changes merged, first original |
 
 ## Detailed References
 
-| Reference                       | When to Use                                           |
-| ------------------------------- | ----------------------------------------------------- |
-| `references/handlers.md`        | Handler patterns, collection-specific behavior        |
-| `references/transactions.md`    | Manual transactions, autoCommit, lifecycle            |
-| `references/paced-mutations.md` | Debounce, throttle, queue strategies                  |
-| `references/error-handling.md`  | Rollback, retry patterns, error recovery              |
-| `references/temporary-ids.md`   | Server-generated IDs, view key mapping                |
+| Reference                       | When to Use                                    |
+| ------------------------------- | ---------------------------------------------- |
+| `references/handlers.md`        | Handler patterns, collection-specific behavior |
+| `references/transactions.md`    | Manual transactions, autoCommit, lifecycle     |
+| `references/paced-mutations.md` | Debounce, throttle, queue strategies           |
+| `references/error-handling.md`  | Rollback, retry patterns, error recovery       |
+| `references/temporary-ids.md`   | Server-generated IDs, view key mapping         |

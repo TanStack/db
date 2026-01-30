@@ -8,11 +8,11 @@ Shapes configure which rows and columns Electric syncs to the client. Configure 
 
 ## Shape Parameters
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `table` | Postgres table name | `todos` |
-| `where` | SQL WHERE clause | `user_id = '123'` |
-| `columns` | Columns to include | `id,text,completed` |
+| Parameter | Description         | Example             |
+| --------- | ------------------- | ------------------- |
+| `table`   | Postgres table name | `todos`             |
+| `where`   | SQL WHERE clause    | `user_id = '123'`   |
+| `columns` | Columns to include  | `id,text,completed` |
 
 ## Proxy Configuration
 
@@ -45,7 +45,7 @@ export async function GET(request: Request) {
   const response = await fetch(originUrl)
   return new Response(response.body, {
     status: response.status,
-    headers: response.headers
+    headers: response.headers,
   })
 }
 ```
@@ -60,9 +60,9 @@ const todosCollection = createCollection(
     id: 'todos',
     getKey: (item) => item.id,
     shapeOptions: {
-      url: '/api/todos',  // Your proxy
-    }
-  })
+      url: '/api/todos', // Your proxy
+    },
+  }),
 )
 ```
 
@@ -91,8 +91,10 @@ originUrl.searchParams.set('table', 'documents')
 originUrl.searchParams.set('where', `owner_id = '${user.id}'`)
 
 // Complex conditions
-originUrl.searchParams.set('where',
-  `org_id = '${user.orgId}' AND archived = false`)
+originUrl.searchParams.set(
+  'where',
+  `org_id = '${user.orgId}' AND archived = false`,
+)
 ```
 
 ## Custom Match Functions
@@ -100,7 +102,10 @@ originUrl.searchParams.set('where',
 When txid matching isn't available, use custom match functions:
 
 ```tsx
-import { isChangeMessage, isControlMessage } from '@tanstack/electric-db-collection'
+import {
+  isChangeMessage,
+  isControlMessage,
+} from '@tanstack/electric-db-collection'
 
 onInsert: async ({ transaction, collection }) => {
   const newItem = transaction.mutations[0].modified
@@ -114,7 +119,7 @@ onInsert: async ({ transaction, collection }) => {
         message.value.text === newItem.text
       )
     },
-    5000  // timeout in ms
+    5000, // timeout in ms
   )
 }
 ```
@@ -153,9 +158,7 @@ if (isControlMessage(message)) {
 
 ```tsx
 await collection.utils.awaitMatch(
-  (message) =>
-    isChangeMessage(message) &&
-    message.value.id === expectedId
+  (message) => isChangeMessage(message) && message.value.id === expectedId,
 )
 ```
 
@@ -164,8 +167,7 @@ await collection.utils.awaitMatch(
 ```tsx
 await collection.utils.awaitMatch(
   (message) =>
-    isChangeMessage(message) &&
-    message.headers.operation === 'delete'
+    isChangeMessage(message) && message.headers.operation === 'delete',
 )
 ```
 
@@ -177,7 +179,7 @@ await collection.utils.awaitMatch(
     isChangeMessage(message) &&
     message.headers.operation === 'insert' &&
     message.value.user_id === userId &&
-    message.value.title === title
+    message.value.title === title,
 )
 ```
 
@@ -204,7 +206,7 @@ onInsert: async ({ transaction }) => {
   await api.todos.create(newItem)
 
   // Simple wait - crude but works for prototyping
-  await new Promise(resolve => setTimeout(resolve, 2000))
+  await new Promise((resolve) => setTimeout(resolve, 2000))
 }
 ```
 

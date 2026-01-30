@@ -4,11 +4,11 @@ Control how data loads into QueryCollections.
 
 ## Overview
 
-| Mode | Load Behavior | Best For |
-|------|---------------|----------|
-| `eager` | Load all upfront | Small datasets (<10k rows) |
-| `on-demand` | Load only what queries request | Large datasets (>50k rows) |
-| `progressive` | Load subset first, full in background | Collaborative apps |
+| Mode          | Load Behavior                         | Best For                   |
+| ------------- | ------------------------------------- | -------------------------- |
+| `eager`       | Load all upfront                      | Small datasets (<10k rows) |
+| `on-demand`   | Load only what queries request        | Large datasets (>50k rows) |
+| `progressive` | Load subset first, full in background | Collaborative apps         |
 
 ## Eager Mode (Default)
 
@@ -21,20 +21,23 @@ const todoCollection = createCollection(
     queryFn: async () => api.todos.getAll(),
     getKey: (item) => item.id,
     syncMode: 'eager', // Default
-  })
+  }),
 )
 ```
 
 **Pros:**
+
 - Simplest mental model
 - All data available immediately for queries
 - No network requests when filtering/sorting
 
 **Cons:**
+
 - Slow initial load for large datasets
 - Memory usage for full dataset
 
 **Best for:**
+
 - User preferences
 - Small reference tables
 - Data that's mostly accessed
@@ -53,7 +56,7 @@ const productsCollection = createCollection(
     },
     getKey: (item) => item.id,
     syncMode: 'on-demand',
-  })
+  }),
 )
 
 // Only loads electronics products
@@ -61,20 +64,23 @@ const { data } = useLiveQuery((q) =>
   q
     .from({ product: productsCollection })
     .where(({ product }) => eq(product.category, 'electronics'))
-    .limit(50)
+    .limit(50),
 )
 ```
 
 **Pros:**
+
 - Fast initial load
 - Low memory usage
 - Scales to any dataset size
 
 **Cons:**
+
 - Network request on each new query pattern
 - Can't query data that isn't loaded
 
 **Best for:**
+
 - Product catalogs
 - Search interfaces
 - Large datasets where most data isn't accessed
@@ -90,27 +96,32 @@ const issuesCollection = createCollection(
     queryFn: async (ctx) => {
       if (ctx.meta?.loadSubsetOptions) {
         // First: load what query needs
-        return api.issues.search(parseLoadSubsetOptions(ctx.meta.loadSubsetOptions))
+        return api.issues.search(
+          parseLoadSubsetOptions(ctx.meta.loadSubsetOptions),
+        )
       }
       // Then: load everything in background
       return api.issues.getAll()
     },
     getKey: (item) => item.id,
     syncMode: 'progressive',
-  })
+  }),
 )
 ```
 
 **Pros:**
+
 - Instant first paint
 - Eventually has all data for fast local queries
 - Good for collaborative apps
 
 **Cons:**
+
 - More complex implementation
 - Uses more memory than on-demand
 
 **Best for:**
+
 - Issue trackers (like Linear)
 - Collaborative documents
 - Apps that benefit from local-first after initial sync
@@ -159,7 +170,7 @@ const q1 = q.where(({ p }) => eq(p.category, 'electronics'))
 
 // Second query expands to include clothing
 const q2 = q.where(({ p }) =>
-  or(eq(p.category, 'electronics'), eq(p.category, 'clothing'))
+  or(eq(p.category, 'electronics'), eq(p.category, 'clothing')),
 )
 // Only loads clothing, keeps electronics from cache
 ```
@@ -180,6 +191,7 @@ const q2 = q.where(({ p }) =>
 ```
 
 **Additional considerations:**
+
 - Need instant filtering on all data? → eager or progressive
 - Search/filter is primary use case? → on-demand
 - Collaborative with real-time updates? → progressive

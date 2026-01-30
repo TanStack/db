@@ -17,15 +17,15 @@ const userSchema = z.object({
   name: z.string(),
   age: z.number(),
   email: z.string().email(),
-  active: z.boolean()
+  active: z.boolean(),
 })
 
 collection.insert({
-  id: "1",
-  name: "Alice",
-  age: "25",  // Wrong type - expects number
-  email: "not-an-email",  // Invalid format
-  active: true
+  id: '1',
+  name: 'Alice',
+  age: '25', // Wrong type - expects number
+  email: 'not-an-email', // Invalid format
+  active: true,
 })
 // Throws SchemaValidationError
 ```
@@ -35,10 +35,10 @@ collection.insert({
 ```tsx
 const productSchema = z.object({
   id: z.string(),
-  name: z.string().min(3, "Name must be at least 3 characters"),
-  sku: z.string().length(8, "SKU must be exactly 8 characters"),
-  description: z.string().max(500, "Description too long"),
-  url: z.string().url("Must be a valid URL")
+  name: z.string().min(3, 'Name must be at least 3 characters'),
+  sku: z.string().length(8, 'SKU must be exactly 8 characters'),
+  description: z.string().max(500, 'Description too long'),
+  url: z.string().url('Must be a valid URL'),
 })
 ```
 
@@ -47,13 +47,15 @@ const productSchema = z.object({
 ```tsx
 const orderSchema = z.object({
   id: z.string(),
-  quantity: z.number()
-    .int("Must be a whole number")
-    .positive("Must be greater than 0"),
-  price: z.number()
-    .min(0.01, "Price must be at least $0.01")
-    .max(999999.99, "Price too high"),
-  discount: z.number().min(0).max(100)
+  quantity: z
+    .number()
+    .int('Must be a whole number')
+    .positive('Must be greater than 0'),
+  price: z
+    .number()
+    .min(0.01, 'Price must be at least $0.01')
+    .max(999999.99, 'Price too high'),
+  discount: z.number().min(0).max(100),
 })
 ```
 
@@ -63,13 +65,13 @@ const orderSchema = z.object({
 const taskSchema = z.object({
   id: z.string(),
   status: z.enum(['todo', 'in-progress', 'done']),
-  priority: z.enum(['low', 'medium', 'high', 'urgent'])
+  priority: z.enum(['low', 'medium', 'high', 'urgent']),
 })
 
 collection.insert({
-  id: "1",
-  status: "completed",  // Not in enum - fails
-  priority: "medium"
+  id: '1',
+  status: 'completed', // Not in enum - fails
+  priority: 'medium',
 })
 ```
 
@@ -79,14 +81,14 @@ collection.insert({
 const personSchema = z.object({
   id: z.string(),
   name: z.string(),
-  nickname: z.string().optional(),  // Can be omitted
-  middleName: z.string().nullable(),  // Can be null
-  bio: z.string().optional().nullable()  // Can be omitted OR null
+  nickname: z.string().optional(), // Can be omitted
+  middleName: z.string().nullable(), // Can be null
+  bio: z.string().optional().nullable(), // Can be omitted OR null
 })
 
 // All valid:
-collection.insert({ id: "1", name: "Alice" })
-collection.insert({ id: "2", name: "Bob", middleName: null })
+collection.insert({ id: '1', name: 'Alice' })
+collection.insert({ id: '2', name: 'Bob', middleName: null })
 ```
 
 ## Array Validation
@@ -95,8 +97,8 @@ collection.insert({ id: "2", name: "Bob", middleName: null })
 const postSchema = z.object({
   id: z.string(),
   title: z.string(),
-  tags: z.array(z.string()).min(1, "At least one tag required"),
-  likes: z.array(z.number()).max(1000)
+  tags: z.array(z.string()).min(1, 'At least one tag required'),
+  likes: z.array(z.number()).max(1000),
 })
 ```
 
@@ -105,32 +107,36 @@ const postSchema = z.object({
 ```tsx
 const userSchema = z.object({
   id: z.string(),
-  username: z.string()
+  username: z
+    .string()
     .min(3)
     .refine(
       (val) => /^[a-zA-Z0-9_]+$/.test(val),
-      "Username can only contain letters, numbers, and underscores"
+      'Username can only contain letters, numbers, and underscores',
     ),
-  password: z.string()
+  password: z
+    .string()
     .min(8)
     .refine(
       (val) => /[A-Z]/.test(val) && /[0-9]/.test(val),
-      "Must contain uppercase letter and number"
-    )
+      'Must contain uppercase letter and number',
+    ),
 })
 ```
 
 ## Cross-Field Validation
 
 ```tsx
-const dateRangeSchema = z.object({
-  id: z.string(),
-  start_date: z.string(),
-  end_date: z.string()
-}).refine(
-  (data) => new Date(data.end_date) > new Date(data.start_date),
-  "End date must be after start date"
-)
+const dateRangeSchema = z
+  .object({
+    id: z.string(),
+    start_date: z.string(),
+    end_date: z.string(),
+  })
+  .refine(
+    (data) => new Date(data.end_date) > new Date(data.start_date),
+    'End date must be after start date',
+  )
 ```
 
 ## Schema Scope
@@ -145,8 +151,8 @@ const todoCollection = createCollection(
     queryKey: ['todos'],
     queryFn: async () => api.todos.getAll(),
     getKey: (item) => item.id,
-    schema: todoSchema,  // Validates mutations
-  })
+    schema: todoSchema, // Validates mutations
+  }),
 )
 ```
 
@@ -156,7 +162,7 @@ const todoCollection = createCollection(
 const todoSchema = z.object({
   id: z.string(),
   text: z.string(),
-  completed: z.boolean()
+  completed: z.boolean(),
 })
 
 type Todo = z.infer<typeof todoSchema>
@@ -165,7 +171,7 @@ type Todo = z.infer<typeof todoSchema>
 const collection = createCollection(
   queryCollectionOptions({
     schema: todoSchema,
-    getKey: (item) => item.id  // item is Todo
-  })
+    getKey: (item) => item.id, // item is Todo
+  }),
 )
 ```

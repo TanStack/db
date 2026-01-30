@@ -4,13 +4,13 @@ Group data and compute aggregate values with groupBy, having, and aggregate func
 
 ## Aggregate Functions
 
-| Function | Description | Example |
-|----------|-------------|---------|
-| `count(field)` | Count non-null values | `count(order.id)` |
-| `sum(field)` | Sum numeric values | `sum(order.amount)` |
-| `avg(field)` | Average of values | `avg(order.amount)` |
-| `min(field)` | Minimum value | `min(order.amount)` |
-| `max(field)` | Maximum value | `max(order.amount)` |
+| Function       | Description           | Example             |
+| -------------- | --------------------- | ------------------- |
+| `count(field)` | Count non-null values | `count(order.id)`   |
+| `sum(field)`   | Sum numeric values    | `sum(order.amount)` |
+| `avg(field)`   | Average of values     | `avg(order.amount)` |
+| `min(field)`   | Minimum value         | `min(order.amount)` |
+| `max(field)`   | Maximum value         | `max(order.amount)` |
 
 ## Basic Aggregation
 
@@ -26,7 +26,7 @@ const { data } = useLiveQuery((q) =>
       totalOrders: count(order.id),
       totalSpent: sum(order.amount),
       avgOrder: avg(order.amount),
-    }))
+    })),
 )
 ```
 
@@ -45,7 +45,7 @@ const { data } = useLiveQuery((q) =>
       category: sale.category,
       totalSales: sum(sale.amount),
       count: count(sale.id),
-    }))
+    })),
 )
 ```
 
@@ -63,7 +63,7 @@ const { data } = useLiveQuery((q) =>
       totalSpent: sum(order.amount),
       orderCount: count(order.id),
     }))
-    .having(({ $selected }) => gt($selected.totalSpent, 1000))
+    .having(({ $selected }) => gt($selected.totalSpent, 1000)),
 )
 ```
 
@@ -80,7 +80,7 @@ const { data } = useLiveQuery((q) =>
     .select(({ order }) => ({
       customerId: order.customerId,
       orderCount: count(order.id),
-    }))
+    })),
 )
 ```
 
@@ -90,14 +90,12 @@ Aggregates without groupBy treat entire dataset as one group:
 
 ```tsx
 const { data } = useLiveQuery((q) =>
-  q
-    .from({ user: usersCollection })
-    .select(({ user }) => ({
-      totalUsers: count(user.id),
-      avgAge: avg(user.age),
-      oldestUser: max(user.age),
-      youngestUser: min(user.age),
-    }))
+  q.from({ user: usersCollection }).select(({ user }) => ({
+    totalUsers: count(user.id),
+    avgAge: avg(user.age),
+    oldestUser: max(user.age),
+    youngestUser: min(user.age),
+  })),
 )
 
 // Returns single object: { totalUsers, avgAge, oldestUser, youngestUser }
@@ -117,7 +115,7 @@ const { data } = useLiveQuery((q) =>
       totalSpent: sum(order.amount),
     }))
     .orderBy(({ $selected }) => $selected.totalSpent, 'desc')
-    .limit(10)
+    .limit(10),
 )
 ```
 
@@ -133,7 +131,7 @@ const deptStats = createLiveQueryCollection((q) =>
     .select(({ user }) => ({
       departmentId: user.departmentId,
       count: count(user.id),
-    }))
+    })),
 )
 
 // Single column grouping: keyed by actual value
@@ -148,7 +146,7 @@ const stats = createLiveQueryCollection((q) =>
       departmentId: user.departmentId,
       role: user.role,
       count: count(user.id),
-    }))
+    })),
 )
 
 const adminEngineers = stats.get('[1,"admin"]')
@@ -157,6 +155,7 @@ const adminEngineers = stats.get('[1,"admin"]')
 ## Rules for groupBy Select
 
 In grouped queries, select can only include:
+
 1. Fields used in groupBy
 2. Aggregate functions
 
@@ -184,9 +183,8 @@ Aggregate across joined data:
 const { data } = useLiveQuery((q) =>
   q
     .from({ user: usersCollection })
-    .leftJoin(
-      { order: ordersCollection },
-      ({ user, order }) => eq(user.id, order.userId)
+    .leftJoin({ order: ordersCollection }, ({ user, order }) =>
+      eq(user.id, order.userId),
     )
     .groupBy(({ user }) => user.id)
     .select(({ user, order }) => ({
@@ -194,6 +192,6 @@ const { data } = useLiveQuery((q) =>
       userName: user.name,
       orderCount: count(order.id),
       totalSpent: sum(order.amount),
-    }))
+    })),
 )
 ```

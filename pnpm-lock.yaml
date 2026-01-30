@@ -1030,6 +1030,8 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
 
+  packages/skills: {}
+
   packages/solid-db:
     dependencies:
       '@solid-primitives/map':

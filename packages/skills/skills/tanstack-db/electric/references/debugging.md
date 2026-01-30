@@ -43,16 +43,18 @@ ts/db:electric new txids synced from pg [123]
 **Cause**: Txid returned from API doesn't match actual mutation transaction.
 
 **Debug**:
+
 ```javascript
 localStorage.debug = 'ts/db:electric'
 // Watch for mismatch between requested txid and received txids
 ```
 
 **Fix**:
+
 ```typescript
 // WRONG - different transaction
 async function createTodo(data) {
-  const txid = await generateTxId(sql)  // Separate transaction!
+  const txid = await generateTxId(sql) // Separate transaction!
   await sql.begin(async (tx) => {
     await tx`INSERT INTO todos ${tx(data)}`
   })
@@ -63,7 +65,7 @@ async function createTodo(data) {
 async function createTodo(data) {
   let txid!: number
   await sql.begin(async (tx) => {
-    txid = await generateTxId(tx)  // Same transaction!
+    txid = await generateTxId(tx) // Same transaction!
     await tx`INSERT INTO todos ${tx(data)}`
   })
   return { txid }
@@ -75,11 +77,13 @@ async function createTodo(data) {
 **Symptom**: Collection stays empty or stale.
 
 **Debug**:
+
 1. Check browser Network tab for requests to your proxy
 2. Verify proxy returns 200 status
 3. Check proxy logs for errors
 
 **Common causes**:
+
 - Proxy authentication failing
 - Electric service not running
 - Shape configuration errors (invalid table/column names)
@@ -106,17 +110,14 @@ onInsert: async ({ transaction }) => {
 **Debug**: Log incoming messages to verify your match logic:
 
 ```tsx
-await collection.utils.awaitMatch(
-  (message) => {
-    console.log('Received message:', message)
-    return isChangeMessage(message) &&
-           message.value.id === expectedId
-  },
-  10000
-)
+await collection.utils.awaitMatch((message) => {
+  console.log('Received message:', message)
+  return isChangeMessage(message) && message.value.id === expectedId
+}, 10000)
 ```
 
 **Common causes**:
+
 - Wrong field names in match condition
 - Message already arrived before `awaitMatch` was called
 - Shape doesn't include the expected row
@@ -126,6 +127,7 @@ await collection.utils.awaitMatch(
 **Symptom**: "Failed to fetch" or network errors.
 
 **Debug**:
+
 1. Verify Electric service is running
 2. Check proxy URL is correct
 3. Test proxy endpoint directly: `curl http://localhost:3000/api/todos`

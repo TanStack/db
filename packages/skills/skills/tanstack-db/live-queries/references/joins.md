@@ -4,12 +4,12 @@ Combine data from multiple collections with type-safe joins.
 
 ## Join Types
 
-| Type | Method | Behavior |
-|------|--------|----------|
-| Left | `.leftJoin()` or `'left'` | All left rows, matched right rows or undefined |
+| Type  | Method                      | Behavior                                       |
+| ----- | --------------------------- | ---------------------------------------------- |
+| Left  | `.leftJoin()` or `'left'`   | All left rows, matched right rows or undefined |
 | Right | `.rightJoin()` or `'right'` | All right rows, matched left rows or undefined |
-| Inner | `.innerJoin()` or `'inner'` | Only rows that match in both |
-| Full | `.fullJoin()` or `'full'` | All rows from both, undefined where no match |
+| Inner | `.innerJoin()` or `'inner'` | Only rows that match in both                   |
+| Full  | `.fullJoin()` or `'full'`   | All rows from both, undefined where no match   |
 
 ## Basic Join
 
@@ -20,8 +20,8 @@ const { data } = useLiveQuery((q) =>
     .join(
       { post: postsCollection },
       ({ user, post }) => eq(user.id, post.userId),
-      'left'
-    )
+      'left',
+    ),
 )
 
 // Result type: { user: User; post?: Post }[]
@@ -74,19 +74,17 @@ Chain joins to combine many collections:
 const { data } = useLiveQuery((q) =>
   q
     .from({ user: usersCollection })
-    .leftJoin(
-      { post: postsCollection },
-      ({ user, post }) => eq(user.id, post.userId)
+    .leftJoin({ post: postsCollection }, ({ user, post }) =>
+      eq(user.id, post.userId),
     )
-    .leftJoin(
-      { comment: commentsCollection },
-      ({ post, comment }) => eq(post.id, comment.postId)
+    .leftJoin({ comment: commentsCollection }, ({ post, comment }) =>
+      eq(post.id, comment.postId),
     )
     .select(({ user, post, comment }) => ({
       userName: user.name,
       postTitle: post?.title,
       commentText: comment?.text,
-    }))
+    })),
 )
 ```
 
@@ -98,16 +96,15 @@ Flatten joined data:
 const { data } = useLiveQuery((q) =>
   q
     .from({ user: usersCollection })
-    .innerJoin(
-      { post: postsCollection },
-      ({ user, post }) => eq(user.id, post.userId)
+    .innerJoin({ post: postsCollection }, ({ user, post }) =>
+      eq(user.id, post.userId),
     )
     .select(({ user, post }) => ({
       postId: post.id,
       postTitle: post.title,
       authorName: user.name,
       authorEmail: user.email,
-    }))
+    })),
 )
 
 // Result: { postId, postTitle, authorName, authorEmail }[]
@@ -125,9 +122,8 @@ const { data } = useLiveQuery((q) => {
 
   return q
     .from({ user: usersCollection })
-    .innerJoin(
-      { recentPost: recentPosts },
-      ({ user, recentPost }) => eq(user.id, recentPost.userId)
+    .innerJoin({ recentPost: recentPosts }, ({ user, recentPost }) =>
+      eq(user.id, recentPost.userId),
     )
 })
 ```
@@ -141,15 +137,14 @@ Use `isUndefined` to find unmatched rows:
 const { data } = useLiveQuery((q) =>
   q
     .from({ user: usersCollection })
-    .leftJoin(
-      { post: postsCollection },
-      ({ user, post }) => eq(user.id, post.userId)
+    .leftJoin({ post: postsCollection }, ({ user, post }) =>
+      eq(user.id, post.userId),
     )
     .where(({ post }) => isUndefined(post))
     .select(({ user }) => ({
       id: user.id,
       name: user.name,
-    }))
+    })),
 )
 ```
 

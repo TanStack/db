@@ -11,15 +11,15 @@ Collections are typed data stores that decouple data loading from data binding. 
 
 ## Collection Types
 
-| Type                  | Package                            | Use Case                              |
-| --------------------- | ---------------------------------- | ------------------------------------- |
-| **QueryCollection**   | `@tanstack/query-db-collection`    | REST APIs via TanStack Query          |
-| **ElectricCollection**| `@tanstack/electric-db-collection` | Real-time Postgres sync via Electric  |
-| **PowerSyncCollection**| `@tanstack/powersync-db-collection`| Offline-first with PowerSync         |
-| **RxDBCollection**    | `@tanstack/rxdb-db-collection`     | RxDB local persistence                |
-| **TrailBaseCollection**| `@tanstack/trailbase-db-collection`| TrailBase real-time backend          |
-| **LocalStorageCollection** | `@tanstack/db`                | Browser localStorage persistence      |
-| **LocalOnlyCollection**| `@tanstack/db`                    | In-memory state (no persistence)      |
+| Type                       | Package                             | Use Case                             |
+| -------------------------- | ----------------------------------- | ------------------------------------ |
+| **QueryCollection**        | `@tanstack/query-db-collection`     | REST APIs via TanStack Query         |
+| **ElectricCollection**     | `@tanstack/electric-db-collection`  | Real-time Postgres sync via Electric |
+| **PowerSyncCollection**    | `@tanstack/powersync-db-collection` | Offline-first with PowerSync         |
+| **RxDBCollection**         | `@tanstack/rxdb-db-collection`      | RxDB local persistence               |
+| **TrailBaseCollection**    | `@tanstack/trailbase-db-collection` | TrailBase real-time backend          |
+| **LocalStorageCollection** | `@tanstack/db`                      | Browser localStorage persistence     |
+| **LocalOnlyCollection**    | `@tanstack/db`                      | In-memory state (no persistence)     |
 
 ## Common Patterns
 
@@ -45,8 +45,8 @@ const todoCollection = createCollection(
           fetch('/api/todos', {
             method: 'POST',
             body: JSON.stringify(m.modified),
-          })
-        )
+          }),
+        ),
       )
     },
 
@@ -56,19 +56,19 @@ const todoCollection = createCollection(
           fetch(`/api/todos/${m.original.id}`, {
             method: 'PUT',
             body: JSON.stringify(m.modified),
-          })
-        )
+          }),
+        ),
       )
     },
 
     onDelete: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((m) =>
-          fetch(`/api/todos/${m.original.id}`, { method: 'DELETE' })
-        )
+          fetch(`/api/todos/${m.original.id}`, { method: 'DELETE' }),
+        ),
       )
     },
-  })
+  }),
 )
 ```
 
@@ -88,18 +88,18 @@ const productsCollection = createCollection(
     getKey: (item) => item.id,
 
     // Choose sync mode:
-    syncMode: 'eager',       // Default: Load all upfront (<10k rows)
+    syncMode: 'eager', // Default: Load all upfront (<10k rows)
     // syncMode: 'on-demand', // Load only what queries request (>50k rows)
     // syncMode: 'progressive', // Load subset first, sync full in background
-  })
+  }),
 )
 ```
 
-| Mode            | Behavior                                    | Best For                                    |
-| --------------- | ------------------------------------------- | ------------------------------------------- |
-| `eager`         | Load entire collection upfront              | <10k rows, mostly static data               |
-| `on-demand`     | Load only what queries request              | >50k rows, search interfaces, catalogs      |
-| `progressive`   | Load query subset, sync full in background  | Collaborative apps, instant first paint     |
+| Mode          | Behavior                                   | Best For                                |
+| ------------- | ------------------------------------------ | --------------------------------------- |
+| `eager`       | Load entire collection upfront             | <10k rows, mostly static data           |
+| `on-demand`   | Load only what queries request             | >50k rows, search interfaces, catalogs  |
+| `progressive` | Load query subset, sync full in background | Collaborative apps, instant first paint |
 
 ### ElectricCollection (Real-time Sync)
 
@@ -128,14 +128,17 @@ const todoCollection = createCollection(
       const response = await api.todos.update(original.id, changes)
       return { txid: response.txid }
     },
-  })
+  }),
 )
 ```
 
 ### LocalStorageCollection
 
 ```tsx
-import { createCollection, localStorageCollectionOptions } from '@tanstack/react-db'
+import {
+  createCollection,
+  localStorageCollectionOptions,
+} from '@tanstack/react-db'
 
 const settingsCollection = createCollection(
   localStorageCollectionOptions({
@@ -143,7 +146,7 @@ const settingsCollection = createCollection(
     storageKey: 'app-settings',
     getKey: (item) => item.id,
     schema: settingsSchema,
-  })
+  }),
 )
 
 // Data persists across sessions and syncs across tabs
@@ -153,13 +156,16 @@ settingsCollection.insert({ id: 'theme', value: 'dark' })
 ### LocalOnlyCollection
 
 ```tsx
-import { createCollection, localOnlyCollectionOptions } from '@tanstack/react-db'
+import {
+  createCollection,
+  localOnlyCollectionOptions,
+} from '@tanstack/react-db'
 
 const uiStateCollection = createCollection(
   localOnlyCollectionOptions({
     id: 'ui-state',
     getKey: (item) => item.id,
-  })
+  }),
 )
 
 // In-memory only, lost on refresh
@@ -175,8 +181,9 @@ const todoSchema = z.object({
   id: z.string(),
   text: z.string().min(1),
   completed: z.boolean().default(false),
-  created_at: z.union([z.string(), z.date()])
-    .transform(val => typeof val === 'string' ? new Date(val) : val)
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val))
     .default(() => new Date()),
 })
 
@@ -186,7 +193,7 @@ const todoCollection = createCollection(
     queryKey: ['todos'],
     queryFn: async () => api.todos.getAll(),
     getKey: (item) => item.id,
-  })
+  }),
 )
 ```
 
@@ -203,7 +210,7 @@ const todoCollection = createCollection(
     queryFn: async () => api.todos.getAll(),
     getKey: (item) => item.id,
     queryClient, // Use your existing query client
-  })
+  }),
 )
 ```
 
@@ -211,19 +218,19 @@ const todoCollection = createCollection(
 
 ```tsx
 // Read operations
-collection.get(key)           // Get item by key
-collection.has(key)           // Check if key exists
-collection.toArray            // Get all items as array
-collection.size               // Number of items
+collection.get(key) // Get item by key
+collection.has(key) // Check if key exists
+collection.toArray // Get all items as array
+collection.size // Number of items
 
 // Write operations (trigger handlers)
-collection.insert(item)       // Insert item(s)
-collection.update(key, fn)    // Update item(s) with draft function
-collection.delete(key)        // Delete item(s)
+collection.insert(item) // Insert item(s)
+collection.update(key, fn) // Update item(s) with draft function
+collection.delete(key) // Delete item(s)
 
 // Utilities (collection-specific)
-collection.utils.refetch()    // QueryCollection: refetch from API
-collection.utils.awaitTxId()  // ElectricCollection: wait for txid
+collection.utils.refetch() // QueryCollection: refetch from API
+collection.utils.awaitTxId() // ElectricCollection: wait for txid
 collection.utils.awaitMatch() // ElectricCollection: wait for custom match
 collection.utils.acceptMutations() // LocalCollection: accept in manual tx
 ```
@@ -232,9 +239,9 @@ collection.utils.acceptMutations() // LocalCollection: accept in manual tx
 
 ```tsx
 interface CollectionOptions {
-  id?: string              // Unique identifier
-  getKey: (item) => Key    // Extract unique key from item
-  schema?: StandardSchema  // Validation schema (Zod, Valibot, etc.)
+  id?: string // Unique identifier
+  getKey: (item) => Key // Extract unique key from item
+  schema?: StandardSchema // Validation schema (Zod, Valibot, etc.)
 
   // Persistence handlers
   onInsert?: MutationFn
@@ -254,10 +261,10 @@ interface CollectionOptions {
 
 ## Detailed References
 
-| Reference                        | When to Use                                          |
-| -------------------------------- | ---------------------------------------------------- |
-| `references/query-collection.md` | REST API integration, predicate push-down, delta     |
-| `references/electric-collection.md` | Electric setup, txid matching, shapes             |
-| `references/local-collections.md`| LocalStorage, LocalOnly, cross-tab sync              |
-| `references/sync-modes.md`       | Eager vs on-demand vs progressive tradeoffs          |
-| `references/custom-collections.md` | Building your own collection type                  |
+| Reference                           | When to Use                                      |
+| ----------------------------------- | ------------------------------------------------ |
+| `references/query-collection.md`    | REST API integration, predicate push-down, delta |
+| `references/electric-collection.md` | Electric setup, txid matching, shapes            |
+| `references/local-collections.md`   | LocalStorage, LocalOnly, cross-tab sync          |
+| `references/sync-modes.md`          | Eager vs on-demand vs progressive tradeoffs      |
+| `references/custom-collections.md`  | Building your own collection type                |

@@ -26,7 +26,7 @@ const todoCollection = createCollection(
     },
     getKey: (item) => item.id,
     queryClient,
-  })
+  }),
 )
 ```
 
@@ -79,7 +79,7 @@ const productsCollection = createCollection(
     },
     getKey: (item) => item.id,
     syncMode: 'on-demand',
-  })
+  }),
 )
 
 // This query triggers API call with predicates
@@ -88,7 +88,7 @@ const { data } = useLiveQuery((q) =>
     .from({ product: productsCollection })
     .where(({ product }) => eq(product.category, 'electronics'))
     .where(({ product }) => lt(product.price, 100))
-    .limit(50)
+    .limit(50),
 )
 ```
 
@@ -103,7 +103,7 @@ const q1 = q.where(({ p }) => eq(p.category, 'electronics'))
 // Second query expands: category=electronics OR category=clothing
 // Only loads clothing items, keeps electronics from cache
 const q2 = q.where(({ p }) =>
-  or(eq(p.category, 'electronics'), eq(p.category, 'clothing'))
+  or(eq(p.category, 'electronics'), eq(p.category, 'clothing')),
 )
 ```
 
@@ -204,7 +204,7 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 5 * 60 * 1000, // 5 minutes
-      gcTime: 10 * 60 * 1000,   // 10 minutes
+      gcTime: 10 * 60 * 1000, // 10 minutes
     },
   },
 })
@@ -222,7 +222,7 @@ const todoCollection = createCollection(
       }
       return response.json()
     },
-  })
+  }),
 )
 
 // Check collection state
@@ -241,7 +241,7 @@ const activeTodos = createCollection(
     queryKey: ['todos', 'active'],
     queryFn: () => fetch('/api/todos?status=active').then((r) => r.json()),
     getKey: (item) => item.id,
-  })
+  }),
 )
 
 const completedTodos = createCollection(
@@ -249,6 +249,6 @@ const completedTodos = createCollection(
     queryKey: ['todos', 'completed'],
     queryFn: () => fetch('/api/todos?status=completed').then((r) => r.json()),
     getKey: (item) => item.id,
-  })
+  }),
 )
 ```

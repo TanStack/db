@@ -134,13 +134,13 @@ Return single item instead of array:
 
 ```tsx
 const {
-  data,          // Query results (T[] or T | undefined for findOne)
-  isLoading,     // True during initial load
-  isEnabled,     // False when query returns undefined
-  error,         // Any error that occurred
+  data, // Query results (T[] or T | undefined for findOne)
+  isLoading, // True during initial load
+  isEnabled, // False when query returns undefined
+  error, // Any error that occurred
 } = useLiveQuery(
   (q) => q.from({ user: usersCollection }),
-  [dep1, dep2]  // Optional dependency array
+  [dep1, dep2], // Optional dependency array
 )
 ```
 
@@ -150,7 +150,7 @@ const {
 // data is always defined (suspends until ready)
 const { data } = useLiveSuspenseQuery(
   (q) => q.from({ user: usersCollection }),
-  [dep1, dep2]
+  [dep1, dep2],
 )
 ```
 
@@ -158,20 +158,21 @@ const { data } = useLiveSuspenseQuery(
 
 ```tsx
 const {
-  data,          // All loaded pages flattened
+  data, // All loaded pages flattened
   hasNextPage,
   fetchNextPage,
   isFetchingNextPage,
 } = useLiveInfiniteQuery(
   (q, { pageParam }) =>
-    q.from({ user: usersCollection })
+    q
+      .from({ user: usersCollection })
       .orderBy(({ user }) => user.id, 'asc')
       .limit(20)
       .offset(pageParam * 20),
   {
     getNextPageParam: (lastPage, allPages) =>
       lastPage.length === 20 ? allPages.length : undefined,
-  }
+  },
 )
 ```
 
@@ -181,11 +182,10 @@ Query results are fully typed based on your select:
 
 ```tsx
 const { data } = useLiveQuery((q) =>
-  q.from({ user: usersCollection })
-   .select(({ user }) => ({
-     id: user.id,
-     name: user.name,
-   }))
+  q.from({ user: usersCollection }).select(({ user }) => ({
+    id: user.id,
+    name: user.name,
+  })),
 )
 
 // data is typed as { id: string; name: string }[]

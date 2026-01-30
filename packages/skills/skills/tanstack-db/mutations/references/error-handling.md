@@ -42,7 +42,10 @@ try {
 ### With Custom Actions
 
 ```tsx
-const updateTodo = createOptimisticAction<{ id: string; changes: Partial<Todo> }>({
+const updateTodo = createOptimisticAction<{
+  id: string
+  changes: Partial<Todo>
+}>({
   onMutate: ({ id, changes }) => {
     todoCollection.update(id, (d) => Object.assign(d, changes))
   },
@@ -73,7 +76,7 @@ TanStack DB does not auto-retry. Implement retry logic in handlers:
 async function withRetry<T>(
   fn: () => Promise<T>,
   maxRetries = 3,
-  delay = 1000
+  delay = 1000,
 ): Promise<T> {
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
@@ -89,7 +92,10 @@ async function withRetry<T>(
 const todoCollection = createCollection({
   onUpdate: async ({ transaction }) => {
     await withRetry(() =>
-      api.update(transaction.mutations[0].original.id, transaction.mutations[0].changes)
+      api.update(
+        transaction.mutations[0].original.id,
+        transaction.mutations[0].changes,
+      ),
     )
   },
 })
@@ -116,7 +122,9 @@ onUpdate: async ({ transaction }) => {
 ## Transaction State Monitoring
 
 ```tsx
-const tx = todoCollection.update(id, (d) => { d.done = true })
+const tx = todoCollection.update(id, (d) => {
+  d.done = true
+})
 
 // Poll state
 const interval = setInterval(() => {
@@ -146,8 +154,8 @@ try {
   })
 } catch (error) {
   if (error instanceof SchemaValidationError) {
-    console.log(error.type)    // 'insert'
-    console.log(error.issues)  // [{ path: ['text'], message: '...' }]
+    console.log(error.type) // 'insert'
+    console.log(error.issues) // [{ path: ['text'], message: '...' }]
   }
 }
 ```
@@ -189,9 +197,7 @@ When batching, handle partial failures:
 ```tsx
 onUpdate: async ({ transaction }) => {
   const results = await Promise.allSettled(
-    transaction.mutations.map((m) =>
-      api.update(m.original.id, m.changes)
-    )
+    transaction.mutations.map((m) => api.update(m.original.id, m.changes)),
   )
 
   const failures = results.filter((r) => r.status === 'rejected')
@@ -232,9 +238,9 @@ function TodoItem({ todo }) {
 
 ## Rollback vs Recovery
 
-| Scenario | What Happens | User Experience |
-|----------|--------------|-----------------|
-| Handler throws | Auto-rollback | UI reverts, show error |
-| Network timeout | Auto-rollback | UI reverts, retry option |
-| Validation error | Never applied | Show validation message |
-| Conflict | Auto-rollback | Refresh and retry |
+| Scenario         | What Happens  | User Experience          |
+| ---------------- | ------------- | ------------------------ |
+| Handler throws   | Auto-rollback | UI reverts, show error   |
+| Network timeout  | Auto-rollback | UI reverts, retry option |
+| Validation error | Never applied | Show validation message  |
+| Conflict         | Auto-rollback | Refresh and retry        |

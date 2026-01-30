@@ -33,11 +33,11 @@ createTransaction({
 })
 ```
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `autoCommit` | `true` | Commit immediately after mutate() |
-| `id` | auto-generated | Transaction identifier |
-| `metadata` | undefined | Custom data attached to transaction |
+| Option       | Default        | Description                         |
+| ------------ | -------------- | ----------------------------------- |
+| `autoCommit` | `true`         | Commit immediately after mutate()   |
+| `id`         | auto-generated | Transaction identifier              |
+| `metadata`   | undefined      | Custom data attached to transaction |
 
 ## Transaction Methods
 
@@ -81,12 +81,16 @@ const tx = createTransaction({
 
 // Step 1: User makes changes
 tx.mutate(() => {
-  todoCollection.update(id1, (d) => { d.status = 'reviewed' })
+  todoCollection.update(id1, (d) => {
+    d.status = 'reviewed'
+  })
 })
 
 // Step 2: User adds more changes
 tx.mutate(() => {
-  todoCollection.update(id2, (d) => { d.status = 'reviewed' })
+  todoCollection.update(id2, (d) => {
+    d.status = 'reviewed'
+  })
 })
 
 // Step 3: User confirms
@@ -101,12 +105,12 @@ await tx.commit()
 tx.state // 'pending' | 'persisting' | 'completed' | 'failed'
 ```
 
-| State | Description |
-|-------|-------------|
-| `pending` | Accepting mutations, not yet committed |
-| `persisting` | mutationFn is running |
-| `completed` | Successfully persisted |
-| `failed` | mutationFn threw error |
+| State        | Description                            |
+| ------------ | -------------------------------------- |
+| `pending`    | Accepting mutations, not yet committed |
+| `persisting` | mutationFn is running                  |
+| `completed`  | Successfully persisted                 |
+| `failed`     | mutationFn threw error                 |
 
 ## Waiting for Completion
 
@@ -180,7 +184,7 @@ const tx = createTransaction({
   mutationFn: async ({ transaction }) => {
     // Server mutations
     const serverMutations = transaction.mutations.filter(
-      (m) => m.collection !== localSettings
+      (m) => m.collection !== localSettings,
     )
     await api.save(serverMutations)
 
@@ -191,8 +195,12 @@ const tx = createTransaction({
 
 tx.mutate(() => {
   // Both in same transaction
-  userProfile.update('user-1', (d) => { d.name = 'New Name' })
-  localSettings.update('theme', (d) => { d.mode = 'dark' })
+  userProfile.update('user-1', (d) => {
+    d.name = 'New Name'
+  })
+  localSettings.update('theme', (d) => {
+    d.mode = 'dark'
+  })
 })
 ```
 
@@ -212,7 +220,9 @@ const tx = createTransaction({
 })
 
 tx.mutate(() => {
-  todoCollection.update(id, (d) => { d.status = 'done' })
+  todoCollection.update(id, (d) => {
+    d.status = 'done'
+  })
 })
 
 try {
@@ -231,14 +241,18 @@ Combine with createOptimisticAction:
 const archiveProject = createOptimisticAction<string>({
   onMutate: (projectId) => {
     // These mutations are wrapped in an auto-committed transaction
-    projectCollection.update(projectId, (d) => { d.archived = true })
+    projectCollection.update(projectId, (d) => {
+      d.archived = true
+    })
     taskCollection.update(
       taskCollection.toArray
         .filter((t) => t.projectId === projectId)
         .map((t) => t.id),
       (drafts) => {
-        drafts.forEach((d) => { d.archived = true })
-      }
+        drafts.forEach((d) => {
+          d.archived = true
+        })
+      },
     )
   },
   mutationFn: async (projectId) => {

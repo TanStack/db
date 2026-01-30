@@ -29,12 +29,12 @@ const todosCollection = createCollection(
       const { original, changes } = transaction.mutations[0]
       const response = await api.todos.update({
         where: { id: original.id },
-        data: changes
+        data: changes,
       })
 
       return { txid: response.txid }
-    }
-  })
+    },
+  }),
 )
 ```
 
@@ -80,13 +80,13 @@ async function generateTxId(tx: any): Promise<number> {
 ```typescript
 // WRONG - txid from separate transaction
 async function createTodo(data) {
-  const txid = await generateTxId(sql)  // Wrong: different transaction
+  const txid = await generateTxId(sql) // Wrong: different transaction
 
   await sql.begin(async (tx) => {
     await tx`INSERT INTO todos ${tx(data)}`
   })
 
-  return { txid }  // Won't match!
+  return { txid } // Won't match!
 }
 
 // CORRECT - txid from same transaction
@@ -94,11 +94,11 @@ async function createTodo(data) {
   let txid!: number
 
   await sql.begin(async (tx) => {
-    txid = await generateTxId(tx)  // Correct: same transaction
+    txid = await generateTxId(tx) // Correct: same transaction
     await tx`INSERT INTO todos ${tx(data)}`
   })
 
-  return { txid }  // Matches!
+  return { txid } // Matches!
 }
 ```
 
@@ -112,7 +112,7 @@ const addTodoAction = createOptimisticAction({
     todosCollection.insert({
       id: crypto.randomUUID(),
       text,
-      completed: false
+      completed: false,
     })
   },
 
@@ -121,7 +121,7 @@ const addTodoAction = createOptimisticAction({
 
     // Wait for specific txid
     await todosCollection.utils.awaitTxId(response.txid)
-  }
+  },
 })
 ```
 
@@ -177,7 +177,7 @@ onInsert: async ({ transaction, collection }) => {
       isChangeMessage(message) &&
       message.headers.operation === 'insert' &&
       message.value.text === newItem.text,
-    5000
+    5000,
   )
 }
 ```

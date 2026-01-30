@@ -35,15 +35,17 @@ import { usePacedMutations, throttleStrategy } from '@tanstack/react-db'
 
 const mutate = usePacedMutations<number>({
   onMutate: (volume) => {
-    settingsCollection.update('volume', (d) => { d.value = volume })
+    settingsCollection.update('volume', (d) => {
+      d.value = volume
+    })
   },
   mutationFn: async ({ transaction }) => {
     await api.settings.updateVolume(transaction.mutations)
   },
   strategy: throttleStrategy({
     wait: 200,
-    leading: true,   // Execute immediately on first call
-    trailing: true,  // Execute after wait if there were mutations
+    leading: true, // Execute immediately on first call
+    trailing: true, // Execute after wait if there were mutations
   }),
 })
 ```
@@ -70,7 +72,7 @@ const mutate = usePacedMutations<File>({
   },
   strategy: queueStrategy({
     wait: 500,
-    addItemsTo: 'back',    // FIFO: add to back
+    addItemsTo: 'back', // FIFO: add to back
     getItemsFrom: 'front', // FIFO: process from front
   }),
 })
@@ -80,14 +82,14 @@ const mutate = usePacedMutations<File>({
 
 ## Choosing a Strategy
 
-| Scenario | Strategy | Reason |
-|----------|----------|--------|
-| Auto-save form | debounce | Wait for user to stop typing |
-| Volume slider | throttle | Smooth updates without flooding |
-| File uploads | queue | Every file must upload in order |
-| Search input | debounce | Only search after user pauses |
-| Real-time cursor | throttle | Consistent update rate |
-| Chat messages | queue | Order matters, all must send |
+| Scenario         | Strategy | Reason                          |
+| ---------------- | -------- | ------------------------------- |
+| Auto-save form   | debounce | Wait for user to stop typing    |
+| Volume slider    | throttle | Smooth updates without flooding |
+| File uploads     | queue    | Every file must upload in order |
+| Search input     | debounce | Only search after user pauses   |
+| Real-time cursor | throttle | Consistent update rate          |
+| Chat messages    | queue    | Order matters, all must send    |
 
 ## Shared Queues
 
@@ -97,7 +99,9 @@ Each hook call creates its own queue. To share across components:
 // Create single shared instance
 export const mutateDraft = createPacedMutations<{ id: string; text: string }>({
   onMutate: ({ id, text }) => {
-    draftCollection.update(id, (d) => { d.text = text })
+    draftCollection.update(id, (d) => {
+      d.text = text
+    })
   },
   mutationFn: async ({ transaction }) => {
     await api.saveDraft(transaction.mutations)
@@ -107,11 +111,19 @@ export const mutateDraft = createPacedMutations<{ id: string; text: string }>({
 
 // Use everywhere - same debounce timer
 function Editor1() {
-  return <textarea onChange={(e) => mutateDraft({ id: '1', text: e.target.value })} />
+  return (
+    <textarea
+      onChange={(e) => mutateDraft({ id: '1', text: e.target.value })}
+    />
+  )
 }
 
 function Editor2() {
-  return <textarea onChange={(e) => mutateDraft({ id: '2', text: e.target.value })} />
+  return (
+    <textarea
+      onChange={(e) => mutateDraft({ id: '2', text: e.target.value })}
+    />
+  )
 }
 ```
 
@@ -121,7 +133,9 @@ Queue strategy continues processing after failures:
 
 ```tsx
 const mutate = usePacedMutations({
-  onMutate: (data) => { /* ... */ },
+  onMutate: (data) => {
+    /* ... */
+  },
   mutationFn: async ({ transaction }) => {
     // If this throws, transaction fails but queue continues
     await api.save(transaction.mutations)
@@ -157,8 +171,12 @@ Same API, but outside React:
 
 ```tsx
 const mutate = createPacedMutations<T>({
-  onMutate: (input) => { /* ... */ },
-  mutationFn: async ({ transaction }) => { /* ... */ },
+  onMutate: (input) => {
+    /* ... */
+  },
+  mutationFn: async ({ transaction }) => {
+    /* ... */
+  },
   strategy: debounceStrategy({ wait: 500 }),
 })
 ```

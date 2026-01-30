@@ -7,13 +7,16 @@ In-memory and localStorage-backed collections for client-only state.
 In-memory state, lost on refresh:
 
 ```tsx
-import { createCollection, localOnlyCollectionOptions } from '@tanstack/react-db'
+import {
+  createCollection,
+  localOnlyCollectionOptions,
+} from '@tanstack/react-db'
 
 const uiStateCollection = createCollection(
   localOnlyCollectionOptions({
     id: 'ui-state',
     getKey: (item) => item.id,
-  })
+  }),
 )
 
 // Use for temporary state
@@ -21,9 +24,7 @@ uiStateCollection.insert({ id: 'sidebar', expanded: true })
 uiStateCollection.insert({ id: 'modal', open: false })
 
 // Query like any collection
-const { data } = useLiveQuery((q) =>
-  q.from({ state: uiStateCollection })
-)
+const { data } = useLiveQuery((q) => q.from({ state: uiStateCollection }))
 ```
 
 ## LocalStorageCollection
@@ -31,14 +32,17 @@ const { data } = useLiveQuery((q) =>
 Persists to localStorage, syncs across tabs:
 
 ```tsx
-import { createCollection, localStorageCollectionOptions } from '@tanstack/react-db'
+import {
+  createCollection,
+  localStorageCollectionOptions,
+} from '@tanstack/react-db'
 
 const settingsCollection = createCollection(
   localStorageCollectionOptions({
     id: 'user-settings',
     storageKey: 'app-settings', // localStorage key
     getKey: (item) => item.id,
-  })
+  }),
 )
 
 // Persists across sessions
@@ -94,7 +98,7 @@ const settingsCollection = createCollection(
         newValue: transaction.mutations[0].modified.value,
       })
     },
-  })
+  }),
 )
 ```
 
@@ -131,7 +135,7 @@ const tx = createTransaction({
   mutationFn: async ({ transaction }) => {
     // Server collection mutations
     const serverMutations = transaction.mutations.filter(
-      (m) => m.collection !== localSettings
+      (m) => m.collection !== localSettings,
     )
     if (serverMutations.length > 0) {
       await api.save(serverMutations)
@@ -144,9 +148,13 @@ const tx = createTransaction({
 
 tx.mutate(() => {
   // Server
-  userProfile.update('user-1', (d) => { d.name = 'New Name' })
+  userProfile.update('user-1', (d) => {
+    d.name = 'New Name'
+  })
   // Local
-  localSettings.update('theme', (d) => { d.value = 'dark' })
+  localSettings.update('theme', (d) => {
+    d.value = 'dark'
+  })
 })
 
 await tx.commit()
@@ -158,7 +166,9 @@ LocalStorageCollection automatically syncs across tabs:
 
 ```tsx
 // Tab 1
-settingsCollection.update('theme', (d) => { d.value = 'dark' })
+settingsCollection.update('theme', (d) => {
+  d.value = 'dark'
+})
 
 // Tab 2 - automatically receives the update
 // Live queries update reactively
@@ -167,16 +177,17 @@ settingsCollection.update('theme', (d) => { d.value = 'dark' })
 ## Storage Limits
 
 localStorage has ~5MB limit per origin. For larger data:
+
 - Consider IndexedDB (via RxDBCollection or custom)
 - Split into multiple collections
 - Store references, not full data
 
 ## Use Cases
 
-| Collection | Use Case |
-|------------|----------|
-| LocalOnly | Modal state, form drafts, temp selections |
-| LocalStorage | User preferences, theme, recently viewed |
+| Collection   | Use Case                                  |
+| ------------ | ----------------------------------------- |
+| LocalOnly    | Modal state, form drafts, temp selections |
+| LocalStorage | User preferences, theme, recently viewed  |
 
 ## Schema Validation
 
@@ -195,7 +206,7 @@ const settingsCollection = createCollection(
     storageKey: 'app-settings',
     getKey: (item) => item.id,
     schema: settingsSchema,
-  })
+  }),
 )
 ```
 

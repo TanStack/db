@@ -40,10 +40,12 @@ const todoCollection = createCollection(
     },
 
     onDelete: async ({ transaction }) => {
-      const response = await api.todos.delete(transaction.mutations[0].original.id)
+      const response = await api.todos.delete(
+        transaction.mutations[0].original.id,
+      )
       return { txid: response.txid }
     },
-  })
+  }),
 )
 ```
 
@@ -64,7 +66,7 @@ onInsert: async ({ transaction }) => {
 async function createTodo(data: TodoInput, tx: Transaction) {
   // Query txid INSIDE the same transaction as the mutation
   const result = await tx.execute(
-    sql`SELECT pg_current_xact_id()::xid::text as txid`
+    sql`SELECT pg_current_xact_id()::xid::text as txid`,
   )
   const txid = parseInt(result.rows[0].txid, 10)
 
@@ -90,11 +92,13 @@ onInsert: async ({ transaction, collection }) => {
   // Wait for matching message in stream
   await collection.utils.awaitMatch(
     (message) => {
-      return isChangeMessage(message) &&
-             message.headers.operation === 'insert' &&
-             message.value.text === newItem.text
+      return (
+        isChangeMessage(message) &&
+        message.headers.operation === 'insert' &&
+        message.value.text === newItem.text
+      )
     },
-    5000 // timeout ms (optional, default 3000)
+    5000, // timeout ms (optional, default 3000)
   )
 }
 ```
@@ -106,7 +110,7 @@ For quick prototyping when you're confident about timing:
 ```tsx
 onInsert: async ({ transaction }) => {
   await api.todos.create(transaction.mutations[0].modified)
-  await new Promise(resolve => setTimeout(resolve, 2000))
+  await new Promise((resolve) => setTimeout(resolve, 2000))
 }
 ```
 
@@ -186,13 +190,16 @@ await todoCollection.utils.awaitTxId(12345, 10000) // with timeout
 // Wait for custom match
 await todoCollection.utils.awaitMatch(
   (message) => isChangeMessage(message) && message.value.id === '123',
-  5000
+  5000,
 )
 
 // Helper functions
-import { isChangeMessage, isControlMessage } from '@tanstack/electric-db-collection'
+import {
+  isChangeMessage,
+  isControlMessage,
+} from '@tanstack/electric-db-collection'
 
-isChangeMessage(message)  // insert/update/delete
+isChangeMessage(message) // insert/update/delete
 isControlMessage(message) // up-to-date/must-refetch
 ```
 
@@ -249,19 +256,19 @@ async function createTodo(data) {
 
 Shapes define what data syncs to the client:
 
-| Parameter | Description                           | Example                    |
-| --------- | ------------------------------------- | -------------------------- |
-| `table`   | Postgres table name                   | `todos`                    |
-| `where`   | Row filter clause                     | `user_id = $1`             |
-| `columns` | Columns to sync (default: all)        | `id,text,completed`        |
+| Parameter | Description                    | Example             |
+| --------- | ------------------------------ | ------------------- |
+| `table`   | Postgres table name            | `todos`             |
+| `where`   | Row filter clause              | `user_id = $1`      |
+| `columns` | Columns to sync (default: all) | `id,text,completed` |
 
 **Important:** Configure shapes server-side in your proxy, not client-side, for security.
 
 ## Detailed References
 
-| Reference                       | When to Use                                          |
-| ------------------------------- | ---------------------------------------------------- |
-| `references/txid-matching.md`   | Transaction ID patterns, backend setup               |
-| `references/shapes.md`          | Shape configuration, filtering, security             |
-| `references/proxy-setup.md`     | Electric proxy patterns, authentication              |
-| `references/debugging.md`       | Debug logging, common issues, troubleshooting        |
+| Reference                     | When to Use                                   |
+| ----------------------------- | --------------------------------------------- |
+| `references/txid-matching.md` | Transaction ID patterns, backend setup        |
+| `references/shapes.md`        | Shape configuration, filtering, security      |
+| `references/proxy-setup.md`   | Electric proxy patterns, authentication       |
+| `references/debugging.md`     | Debug logging, common issues, troubleshooting |

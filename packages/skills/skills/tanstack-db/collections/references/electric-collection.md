@@ -21,7 +21,7 @@ const todoCollection = createCollection(
     shapeOptions: {
       url: '/api/todos', // Your Electric proxy
     },
-  })
+  }),
 )
 ```
 
@@ -51,11 +51,11 @@ electricCollectionOptions({
 
 Shapes define what data syncs. Configure in your proxy:
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `table` | Postgres table | `todos` |
-| `where` | Row filter | `user_id = $1` |
-| `columns` | Column filter | `id,text,completed` |
+| Parameter | Description    | Example             |
+| --------- | -------------- | ------------------- |
+| `table`   | Postgres table | `todos`             |
+| `where`   | Row filter     | `user_id = $1`      |
+| `columns` | Column filter  | `id,text,completed` |
 
 **Note:** Configure shapes server-side for security, not client-side.
 
@@ -80,7 +80,7 @@ async function createTodo(data: TodoInput) {
   await db.transaction(async (tx) => {
     // Get txid INSIDE the transaction
     const result = await tx.execute(
-      sql`SELECT pg_current_xact_id()::xid::text as txid`
+      sql`SELECT pg_current_xact_id()::xid::text as txid`,
     )
     txid = parseInt(result.rows[0].txid, 10)
 
@@ -107,7 +107,7 @@ onInsert: async ({ transaction, collection }) => {
       isChangeMessage(message) &&
       message.headers.operation === 'insert' &&
       message.value.text === item.text,
-    5000 // timeout ms
+    5000, // timeout ms
   )
 }
 ```
@@ -126,7 +126,10 @@ await collection.utils.awaitMatch(matchFn, timeout)
 ## Helper Functions
 
 ```tsx
-import { isChangeMessage, isControlMessage } from '@tanstack/electric-db-collection'
+import {
+  isChangeMessage,
+  isControlMessage,
+} from '@tanstack/electric-db-collection'
 
 // Check message type
 if (isChangeMessage(message)) {
@@ -229,8 +232,6 @@ Electric automatically streams changes. No polling needed:
 // 3. Database trigger fires
 
 // Your live queries update automatically
-const { data } = useLiveQuery((q) =>
-  q.from({ todo: todoCollection })
-)
+const { data } = useLiveQuery((q) => q.from({ todo: todoCollection }))
 // `data` updates in real-time
 ```

@@ -14,11 +14,11 @@ TanStack DB uses differential dataflow (via d2ts). Instead of re-running queries
 
 ## Benchmarks
 
-| Operation | 100 items | 10k items | 100k items |
-|-----------|-----------|-----------|------------|
-| Single update | <0.1ms | ~0.3ms | ~0.7ms |
-| Filter change | <0.1ms | ~1ms | ~5ms |
-| Full re-render | ~1ms | ~50ms | ~500ms |
+| Operation      | 100 items | 10k items | 100k items |
+| -------------- | --------- | --------- | ---------- |
+| Single update  | <0.1ms    | ~0.3ms    | ~0.7ms     |
+| Filter change  | <0.1ms    | ~1ms      | ~5ms       |
+| Full re-render | ~1ms      | ~50ms     | ~500ms     |
 
 ## Optimization Strategies
 
@@ -87,13 +87,11 @@ const { data } = useLiveQuery((q) =>
   q
     .from({ item: itemsCollection })
     .orderBy(({ item }) => item.createdAt, 'desc')
-    .limit(50)
+    .limit(50),
 )
 
 // ❌ Loading everything
-const { data } = useLiveQuery((q) =>
-  q.from({ item: itemsCollection })
-)
+const { data } = useLiveQuery((q) => q.from({ item: itemsCollection }))
 ```
 
 ### 5. Use On-Demand Sync Mode
@@ -108,7 +106,7 @@ const collection = createCollection(
       const params = parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
       return api.getItems(params)
     },
-  })
+  }),
 )
 ```
 
@@ -119,18 +117,14 @@ Only select fields you need:
 ```tsx
 // ✅ Only needed fields
 const { data } = useLiveQuery((q) =>
-  q
-    .from({ user: usersCollection })
-    .select(({ user }) => ({
-      id: user.id,
-      name: user.name,
-    }))
+  q.from({ user: usersCollection }).select(({ user }) => ({
+    id: user.id,
+    name: user.name,
+  })),
 )
 
 // ❌ All fields (includes large blobs, etc.)
-const { data } = useLiveQuery((q) =>
-  q.from({ user: usersCollection })
-)
+const { data } = useLiveQuery((q) => q.from({ user: usersCollection }))
 ```
 
 ## Memory Considerations
@@ -191,9 +185,9 @@ Use React DevTools Profiler to identify re-render causes.
 
 ## Common Pitfalls
 
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| Slow initial load | Too much data | Use on-demand sync |
-| Slow updates | Functional variants | Use expression functions |
-| Memory growth | Too many active queries | Consolidate queries, check gcTime |
-| Unnecessary re-renders | New query reference each render | Use dependency array correctly |
+| Issue                  | Cause                           | Fix                               |
+| ---------------------- | ------------------------------- | --------------------------------- |
+| Slow initial load      | Too much data                   | Use on-demand sync                |
+| Slow updates           | Functional variants             | Use expression functions          |
+| Memory growth          | Too many active queries         | Consolidate queries, check gcTime |
+| Unnecessary re-renders | New query reference each render | Use dependency array correctly    |

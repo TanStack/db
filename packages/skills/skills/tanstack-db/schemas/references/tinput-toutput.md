@@ -13,7 +13,7 @@ When a schema has transformations, it has two types:
 const todoSchema = z.object({
   id: z.string(),
   text: z.string(),
-  created_at: z.string().transform(val => new Date(val))
+  created_at: z.string().transform((val) => new Date(val)),
 })
 
 // TInput:  { id: string, text: string, created_at: string }
@@ -27,6 +27,7 @@ When using transformations, **TInput must accept all values that TOutput contain
 ### Why?
 
 When you call `collection.update(id, (draft) => {...})`:
+
 1. The `draft` parameter contains data that's already been transformed (TOutput)
 2. After your modifications, it goes back through the schema
 3. The schema must accept the transformed data
@@ -36,14 +37,14 @@ When you call `collection.update(id, (draft) => {...})`:
 ```tsx
 // TInput only accepts strings
 const schema = z.object({
-  created_at: z.string().transform(val => new Date(val))
+  created_at: z.string().transform((val) => new Date(val)),
 })
 // TInput:  { created_at: string }
 // TOutput: { created_at: Date }
 
 // Problem: draft.created_at is a Date, but TInput only accepts string!
-collection.update("1", (draft) => {
-  draft.text = "Updated"
+collection.update('1', (draft) => {
+  draft.text = 'Updated'
   // draft.created_at is Date - schema rejects it!
 })
 ```
@@ -53,15 +54,16 @@ collection.update("1", (draft) => {
 ```tsx
 // TInput accepts both string and Date
 const schema = z.object({
-  created_at: z.union([z.string(), z.date()])
-    .transform(val => typeof val === 'string' ? new Date(val) : val)
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
 })
 // TInput:  { created_at: string | Date }
 // TOutput: { created_at: Date }
 
 // Works: draft.created_at (Date) is accepted by TInput
-collection.update("1", (draft) => {
-  draft.text = "Updated"
+collection.update('1', (draft) => {
+  draft.text = 'Updated'
   // draft.created_at passes through unchanged
 })
 ```
@@ -73,6 +75,7 @@ If your schema transforms type A to type B, use `z.union([A, B])` to ensure TInp
 ## Where TOutput Appears
 
 All data in your collection is TOutput:
+
 - Data stored in the collection
 - Data returned from queries
 - Data in `PendingMutation.modified`
@@ -85,14 +88,14 @@ const collection = createCollection({
     const item = transaction.mutations[0].modified
 
     // item is TOutput - created_at is Date
-    console.log(item.created_at instanceof Date)  // true
+    console.log(item.created_at instanceof Date) // true
 
     // Serialize for API
     await api.todos.create({
       ...item,
-      created_at: item.created_at.toISOString()  // Date -> string
+      created_at: item.created_at.toISOString(), // Date -> string
     })
-  }
+  },
 })
 ```
 
@@ -103,9 +106,9 @@ const collection = createCollection({
 ```tsx
 // User provides TInput
 collection.insert({
-  id: "1",
-  text: "Task",
-  created_at: "2024-01-01T00:00:00Z"  // string (TInput)
+  id: '1',
+  text: 'Task',
+  created_at: '2024-01-01T00:00:00Z', // string (TInput)
 })
 
 // Schema transforms to TOutput
@@ -116,9 +119,9 @@ collection.insert({
 
 ```tsx
 // Draft contains TOutput
-collection.update("1", (draft) => {
+collection.update('1', (draft) => {
   // draft.created_at is already a Date (TOutput)
-  draft.text = "Updated task"
+  draft.text = 'Updated task'
 })
 
 // After modification, goes through schema again
@@ -131,12 +134,14 @@ collection.update("1", (draft) => {
 
 ```tsx
 const schema = z.object({
-  created_at: z.union([z.string(), z.date()])
-    .transform(val => typeof val === 'string' ? new Date(val) : val)
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val))
     .default(() => new Date()),
-  updated_at: z.union([z.string(), z.date()])
-    .transform(val => typeof val === 'string' ? new Date(val) : val)
-    .default(() => new Date())
+  updated_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val))
+    .default(() => new Date()),
 })
 ```
 
@@ -144,8 +149,9 @@ const schema = z.object({
 
 ```tsx
 const schema = z.object({
-  quantity: z.union([z.string(), z.number()])
-    .transform(val => typeof val === 'string' ? parseInt(val, 10) : val)
+  quantity: z
+    .union([z.string(), z.number()])
+    .transform((val) => (typeof val === 'string' ? parseInt(val, 10) : val)),
 })
 ```
 
@@ -153,8 +159,9 @@ const schema = z.object({
 
 ```tsx
 const schema = z.object({
-  metadata: z.union([z.string(), z.record(z.unknown())])
-    .transform(val => typeof val === 'string' ? JSON.parse(val) : val)
+  metadata: z
+    .union([z.string(), z.record(z.unknown())])
+    .transform((val) => (typeof val === 'string' ? JSON.parse(val) : val)),
 })
 ```
 
@@ -168,9 +175,10 @@ If updates fail with validation errors, check:
 
 ```tsx
 // Before (broken)
-z.string().transform(val => new Date(val))
+z.string().transform((val) => new Date(val))
 
 // After (fixed)
-z.union([z.string(), z.date()])
-  .transform(val => typeof val === 'string' ? new Date(val) : val)
+z.union([z.string(), z.date()]).transform((val) =>
+  typeof val === 'string' ? new Date(val) : val,
+)
 ```

@@ -26,7 +26,11 @@ interface Collection<TData, TKey> {
 
   // Write operations
   insert(item: TData | TData[], options?: MutationOptions): Transaction
-  update(key: TKey | TKey[], updater: (draft: TData) => void, options?: MutationOptions): Transaction
+  update(
+    key: TKey | TKey[],
+    updater: (draft: TData) => void,
+    options?: MutationOptions,
+  ): Transaction
   delete(key: TKey | TKey[], options?: MutationOptions): Transaction
 
   // State
@@ -43,7 +47,7 @@ interface Collection<TData, TKey> {
 import { createCollection, type CollectionOptions } from '@tanstack/db'
 
 export function myCollectionOptions<TData, TKey>(
-  options: MyCollectionConfig<TData, TKey>
+  options: MyCollectionConfig<TData, TKey>,
 ): CollectionOptions<TData, TKey> {
   return {
     id: options.id,
@@ -123,13 +127,17 @@ export function websocketCollectionOptions<TData, TKey>(config: {
       },
     },
 
-    onInsert: config.onInsert ?? (async ({ transaction }) => {
-      // Default: send via WebSocket
-      ws.send(JSON.stringify({
-        type: 'insert',
-        data: transaction.mutations.map((m) => m.modified),
-      }))
-    }),
+    onInsert:
+      config.onInsert ??
+      (async ({ transaction }) => {
+        // Default: send via WebSocket
+        ws.send(
+          JSON.stringify({
+            type: 'insert',
+            data: transaction.mutations.map((m) => m.modified),
+          }),
+        )
+      }),
 
     onUpdate: config.onUpdate,
     onDelete: config.onDelete,
@@ -181,9 +189,7 @@ export function indexedDBCollectionOptions<TData, TKey>(config: {
     onInsert: async ({ transaction }) => {
       const tx = db.transaction(config.storeName, 'readwrite')
       await Promise.all(
-        transaction.mutations.map((m) =>
-          tx.store.add(m.modified)
-        )
+        transaction.mutations.map((m) => tx.store.add(m.modified)),
       )
       await tx.done
     },
@@ -191,9 +197,7 @@ export function indexedDBCollectionOptions<TData, TKey>(config: {
     onUpdate: async ({ transaction }) => {
       const tx = db.transaction(config.storeName, 'readwrite')
       await Promise.all(
-        transaction.mutations.map((m) =>
-          tx.store.put(m.modified)
-        )
+        transaction.mutations.map((m) => tx.store.put(m.modified)),
       )
       await tx.done
     },
@@ -201,9 +205,7 @@ export function indexedDBCollectionOptions<TData, TKey>(config: {
     onDelete: async ({ transaction }) => {
       const tx = db.transaction(config.storeName, 'readwrite')
       await Promise.all(
-        transaction.mutations.map((m) =>
-          tx.store.delete(m.key as IDBValidKey)
-        )
+        transaction.mutations.map((m) => tx.store.delete(m.key as IDBValidKey)),
       )
       await tx.done
     },
@@ -258,7 +260,7 @@ describe('MyCustomCollection', () => {
         id: 'test',
         getKey: (item) => item.id,
         // ... test config
-      })
+      }),
     )
 
     // Wait for sync
@@ -272,6 +274,7 @@ describe('MyCustomCollection', () => {
 ## Reference Implementations
 
 Study existing implementations:
+
 - `@tanstack/query-db-collection` - REST API integration
 - `@tanstack/electric-db-collection` - Real-time sync
 - Built-in `localOnlyCollectionOptions` - Simple in-memory

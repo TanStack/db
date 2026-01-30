@@ -4,10 +4,10 @@ Embed queries within queries for complex data transformations.
 
 ## Subqueries vs Derived Collections
 
-| Approach | Materialized? | Use Case |
-|----------|---------------|----------|
-| Subquery | No | Internal to parent query, not accessible separately |
-| Derived Collection | Yes | Reusable, cacheable intermediate result |
+| Approach           | Materialized? | Use Case                                            |
+| ------------------ | ------------- | --------------------------------------------------- |
+| Subquery           | No            | Internal to parent query, not accessible separately |
+| Derived Collection | Yes           | Reusable, cacheable intermediate result             |
 
 ## Subquery in From
 
@@ -21,12 +21,10 @@ const { data } = useLiveQuery((q) => {
     .where(({ user }) => eq(user.active, true))
 
   // Use in main query
-  return q
-    .from({ activeUser: activeUsers })
-    .select(({ activeUser }) => ({
-      id: activeUser.id,
-      name: activeUser.name,
-    }))
+  return q.from({ activeUser: activeUsers }).select(({ activeUser }) => ({
+    id: activeUser.id,
+    name: activeUser.name,
+  }))
 })
 ```
 
@@ -43,9 +41,8 @@ const { data } = useLiveQuery((q) => {
 
   return q
     .from({ user: usersCollection })
-    .leftJoin(
-      { recentPost: recentPosts },
-      ({ user, recentPost }) => eq(user.id, recentPost.userId)
+    .leftJoin({ recentPost: recentPosts }, ({ user, recentPost }) =>
+      eq(user.id, recentPost.userId),
     )
 })
 ```
@@ -68,9 +65,8 @@ const { data } = useLiveQuery((q) => {
   // Second level: join with users
   const userStats = q
     .from({ user: usersCollection })
-    .leftJoin(
-      { stats: postCounts },
-      ({ user, stats }) => eq(user.id, stats.userId)
+    .leftJoin({ stats: postCounts }, ({ user, stats }) =>
+      eq(user.id, stats.userId),
     )
     .select(({ user, stats }) => ({
       id: user.id,
@@ -100,13 +96,11 @@ const { data } = useLiveQuery((q) => {
   // Used in multiple places - only computed once
   return q
     .from({ activeUser: activeUsers })
-    .join(
-      { post: postsCollection },
-      ({ activeUser, post }) => eq(activeUser.id, post.userId)
+    .join({ post: postsCollection }, ({ activeUser, post }) =>
+      eq(activeUser.id, post.userId),
     )
-    .join(
-      { comment: commentsCollection },
-      ({ activeUser, comment }) => eq(activeUser.id, comment.userId)
+    .join({ comment: commentsCollection }, ({ activeUser, comment }) =>
+      eq(activeUser.id, comment.userId),
     )
 })
 ```
@@ -140,11 +134,13 @@ const activeUserComments = useLiveQuery((q) =>
 ## When to Use Subqueries
 
 **Use subqueries when:**
+
 - Query is only needed within a single parent query
 - You don't need to access intermediate results
 - Building complex multi-step transformations
 
 **Use derived collections when:**
+
 - Same query is used in multiple places
 - You want to cache intermediate results
 - You need to access the intermediate collection directly
@@ -179,9 +175,8 @@ const { data } = useLiveQuery((q) => {
 
   return q
     .from({ user: usersCollection })
-    .leftJoin(
-      { totals: orderTotals },
-      ({ user, totals }) => eq(user.id, totals.userId)
+    .leftJoin({ totals: orderTotals }, ({ user, totals }) =>
+      eq(user.id, totals.userId),
     )
 })
 ```
@@ -196,10 +191,9 @@ const { data } = useLiveQuery((q) => {
 
   return q
     .from({ user: usersCollection })
-    .leftJoin(
-      { topPost: rankedPosts },
-      ({ user, topPost }) => eq(user.id, topPost.userId)
+    .leftJoin({ topPost: rankedPosts }, ({ user, topPost }) =>
+      eq(user.id, topPost.userId),
     )
-    // Further processing...
+  // Further processing...
 })
 ```
