@@ -28,16 +28,17 @@ npx @tanstack/db-skills show tanstack-db/mutations
 
 ## Skills Structure
 
-| Skill | Purpose |
-|-------|---------|
-| `tanstack-db` | Router/entry point with routing table |
-| `tanstack-db/live-queries` | Reactive queries, joins, aggregations |
-| `tanstack-db/mutations` | Optimistic updates, transactions, paced mutations |
-| `tanstack-db/collections` | QueryCollection, ElectricCollection, sync modes |
-| `tanstack-db/schemas` | Validation, transformations, TInput/TOutput |
-| `tanstack-db/electric` | ElectricSQL integration, txid matching |
+| Skill                      | Purpose                                           |
+| -------------------------- | ------------------------------------------------- |
+| `tanstack-db`              | Router/entry point with routing table             |
+| `tanstack-db/live-queries` | Reactive queries, joins, aggregations             |
+| `tanstack-db/mutations`    | Optimistic updates, transactions, paced mutations |
+| `tanstack-db/collections`  | QueryCollection, ElectricCollection, sync modes   |
+| `tanstack-db/schemas`      | Validation, transformations, TInput/TOutput       |
+| `tanstack-db/electric`     | ElectricSQL integration, txid matching            |
 
 Each skill includes:
+
 - **SKILL.md** - Common patterns and routing table
 - **references/** - Deep-dive documentation for specialized topics
 
