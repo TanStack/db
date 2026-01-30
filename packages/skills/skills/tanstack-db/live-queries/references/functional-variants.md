@@ -25,11 +25,16 @@ const { data } = useLiveQuery((q) =>
     id: row.user.id,
     displayName: `${row.user.firstName} ${row.user.lastName}`.trim(),
     emailDomain: row.user.email.split('@')[1],
-    ageGroup:
-      row.user.age < 25 ? 'young' : row.user.age < 50 ? 'adult' : 'senior',
+    ageGroup: getAgeGroup(row.user.age),
     isHighEarner: row.user.salary > 75000,
   })),
 )
+
+function getAgeGroup(age: number): 'young' | 'adult' | 'senior' {
+  if (age < 25) return 'young'
+  if (age < 50) return 'adult'
+  return 'senior'
+}
 ```
 
 ## fn.where
@@ -90,7 +95,7 @@ const { data } = useLiveQuery((q) =>
       },
       demographics: {
         age: user.age,
-        ageGroup: user.age < 25 ? 'young' : user.age < 50 ? 'adult' : 'senior',
+        ageGroup: getAgeGroup(user.age),
         isAdult: user.age >= 18,
       },
       profileStrength: calculateProfileStrength(user),
@@ -145,8 +150,7 @@ const { data } = useLiveQuery((q) =>
     (row): ProcessedUser => ({
       id: row.user.id,
       name: row.user.name,
-      ageGroup:
-        row.user.age < 25 ? 'young' : row.user.age < 50 ? 'adult' : 'senior',
+      ageGroup: getAgeGroup(row.user.age),
     }),
   ),
 )

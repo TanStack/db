@@ -14,26 +14,28 @@ function listSkills(dir, prefix = '') {
     const itemPath = join(dir, item)
     const stat = statSync(itemPath)
 
-    if (stat.isDirectory()) {
-      const skillPath = join(itemPath, 'SKILL.md')
-      try {
-        const content = readFileSync(skillPath, 'utf-8')
-        const nameMatch = content.match(/^name:\s*(.+)$/m)
-        const descMatch = content.match(/description:\s*\|?\s*\n?\s*(.+)/m)
+    if (!stat.isDirectory()) continue
 
-        const name = nameMatch?.[1] || item
-        const desc = descMatch?.[1]?.trim() || 'No description'
+    const skillPath = join(itemPath, 'SKILL.md')
+    try {
+      const content = readFileSync(skillPath, 'utf-8')
+      const nameMatch = content.match(/^name:\s*(.+)$/m)
+      const descMatch = content.match(/description:\s*\|?\s*\n?\s*(.+)/m)
 
-        console.log(`${prefix}${name}`)
-        console.log(`${prefix}  ${desc}`)
-        console.log()
-      } catch {
-        // No SKILL.md, check subdirectories
+      const name = nameMatch?.[1] || item
+      const desc = descMatch?.[1]?.trim() || 'No description'
+
+      console.log(`${prefix}${name}`)
+      console.log(`${prefix}  ${desc}`)
+      console.log()
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        throw err
       }
-
-      // Recurse into subdirectories
-      listSkills(itemPath, prefix + '  ')
+      // No SKILL.md, check subdirectories
     }
+
+    listSkills(itemPath, prefix + '  ')
   }
 }
 
@@ -89,7 +91,7 @@ switch (command) {
   case 'help':
   case '--help':
   case '-h':
-  default:
+  case undefined:
     console.log(`TanStack DB Skills CLI
 
 Usage:
@@ -104,4 +106,9 @@ Examples:
   db-skills show tanstack-db/mutations
 `)
     break
+
+  default:
+    console.error(`Unknown command: ${command}`)
+    console.log(`Run 'db-skills help' for usage information.`)
+    process.exit(1)
 }
