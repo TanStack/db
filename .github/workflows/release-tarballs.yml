@@ -1,20 +1,17 @@
-name: Release Tarballs
+name: Publish to GitHub Packages
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Release tag (e.g., v0.5.25-fork.1)'
-        required: true
 
 jobs:
-  release:
+  publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
 
@@ -24,6 +21,8 @@ jobs:
         with:
           node-version: 22
           cache: 'pnpm'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@scape-app'
 
       - name: Install dependencies
         run: pnpm install
@@ -31,17 +30,27 @@ jobs:
       - name: Build packages
         run: pnpm build
 
-      - name: Create tarballs
+      - name: Set version suffix
         run: |
-          mkdir -p release-assets
-          cd packages/db && npm pack && mv *.tgz ../../release-assets/
-          cd ../react-db && npm pack && mv *.tgz ../../release-assets/
-          cd ../query-db-collection && npm pack && mv *.tgz ../../release-assets/
-          cd ../electric-db-collection && npm pack && mv *.tgz ../../release-assets/
+          SUFFIX="fork.$(date +%Y%m%d%H%M%S)"
+          echo "VERSION_SUFFIX=$SUFFIX" >> $GITHUB_ENV
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
-          files: release-assets/*.tgz
-          generate_release_notes: true
+      - name: Update package versions
+        run: |
+          cd packages/db
+          npm version prerelease --preid=${{ env.VERSION_SUFFIX }} --no-git-tag-version
+          cd ../react-db
+          npm version prerelease --preid=${{ env.VERSION_SUFFIX }} --no-git-tag-version
+          cd ../query-db-collection
+          npm version prerelease --preid=${{ env.VERSION_SUFFIX }} --no-git-tag-version
+          cd ../electric-db-collection
+          npm version prerelease --preid=${{ env.VERSION_SUFFIX }} --no-git-tag-version
+
+      - name: Publish packages
+        run: |
+          cd packages/db && npm publish
+          cd ../react-db && npm publish
+          cd ../query-db-collection && npm publish
+          cd ../electric-db-collection && npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,13 +1,16 @@
 {
-  "name": "@tanstack/db",
+  "name": "@scape-app/db",
   "version": "0.5.25",
   "description": "A reactive client store for building super fast apps on sync",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TanStack/db.git",
+    "url": "git+https://github.com/scape-app/tanstack-db.git",
     "directory": "packages/db"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "homepage": "https://tanstack.com/db",
   "keywords": [

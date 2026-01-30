@@ -1,13 +1,16 @@
 {
-  "name": "@tanstack/react-db",
+  "name": "@scape-app/react-db",
   "version": "0.1.69",
-  "description": "React integration for @tanstack/db",
+  "description": "React integration for @scape-app/db",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/TanStack/db.git",
+    "url": "git+https://github.com/scape-app/tanstack-db.git",
     "directory": "packages/react-db"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   },
   "homepage": "https://tanstack.com/db",
   "keywords": [
@@ -45,7 +48,7 @@
     "src"
   ],
   "dependencies": {
-    "@tanstack/db": "workspace:*",
+    "@scape-app/db": "workspace:*",
     "use-sync-external-store": "^1.6.0"
   },
   "peerDependencies": {
