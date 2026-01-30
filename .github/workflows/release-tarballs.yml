@@ -33,7 +33,8 @@ jobs:
       - name: Create tarballs
         run: |
           mkdir -p release-assets
-          cd packages/db && npm pack && mv *.tgz ../../release-assets/tanstack-db.tgz
+          cd packages/db-ivm && npm pack && mv *.tgz ../../release-assets/tanstack-db-ivm.tgz
+          cd ../db && npm pack && mv *.tgz ../../release-assets/tanstack-db.tgz
           cd ../react-db && npm pack && mv *.tgz ../../release-assets/tanstack-react-db.tgz
           cd ../query-db-collection && npm pack && mv *.tgz ../../release-assets/tanstack-query-db-collection.tgz
           cd ../electric-db-collection && npm pack && mv *.tgz ../../release-assets/tanstack-electric-db-collection.tgz
