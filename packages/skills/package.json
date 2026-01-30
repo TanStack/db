@@ -25,9 +25,11 @@
     "db-skills": "./bin/cli.js"
   },
   "type": "module",
+  "sideEffects": false,
   "files": [
     "bin",
-    "skills"
+    "skills",
+    "README.md"
   ],
   "engines": {
     "node": ">=18"
