@@ -105,7 +105,10 @@ const schema = z.object({
 // Deserialization schema converts SQLite integers to booleans
 const deserializationSchema = z.object({
   id: z.string(),
-  is_active: z.number().nullable().transform((v) => v == null ? true : v > 0),
+  is_active: z
+    .number()
+    .nullable()
+    .transform((v) => (v == null ? true : v > 0)),
 })
 
 const collection = createCollection(
@@ -251,11 +254,11 @@ powerSyncCollectionOptions({
 
 ## PowerSync Schema Types
 
-| Column Type      | SQLite Type | TypeScript Type    |
-| ---------------- | ----------- | ------------------ |
-| `column.text`    | TEXT        | `string \| null`   |
-| `column.integer` | INTEGER     | `number \| null`   |
-| `column.real`    | REAL        | `number \| null`   |
+| Column Type      | SQLite Type | TypeScript Type  |
+| ---------------- | ----------- | ---------------- |
+| `column.text`    | TEXT        | `string \| null` |
+| `column.integer` | INTEGER     | `number \| null` |
+| `column.real`    | REAL        | `number \| null` |
 
 **Note:** PowerSync always adds an `id` column (TEXT PRIMARY KEY) automatically.
 
@@ -325,8 +328,8 @@ const collection = createCollection(
 
 ## Detailed References
 
-| Reference                        | When to Use                                |
-| -------------------------------- | ------------------------------------------ |
-| `references/type-transforms.md`  | Schema transforms, serialization patterns  |
-| `references/sync-lifecycle.md`   | Understanding the sync flow                |
-| `references/offline-first.md`    | Offline-first patterns, conflict handling  |
+| Reference                       | When to Use                               |
+| ------------------------------- | ----------------------------------------- |
+| `references/type-transforms.md` | Schema transforms, serialization patterns |
+| `references/sync-lifecycle.md`  | Understanding the sync flow               |
+| `references/offline-first.md`   | Offline-first patterns, conflict handling |

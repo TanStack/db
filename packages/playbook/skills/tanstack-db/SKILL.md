@@ -164,16 +164,16 @@ TanStack DB extends unidirectional data flow beyond the client:
 
 ## Package Overview
 
-| Package                              | Purpose                                 |
-| ------------------------------------ | --------------------------------------- |
-| `@tanstack/db`                       | Core: collections, queries, mutations   |
-| `@tanstack/react-db`                 | React hooks: useLiveQuery, etc.         |
-| `@tanstack/query-db-collection`      | REST API integration via TanStack Query |
-| `@tanstack/electric-db-collection`   | ElectricSQL real-time Postgres sync     |
-| `@tanstack/powersync-db-collection`  | PowerSync offline-first SQLite sync     |
-| `@tanstack/rxdb-db-collection`       | RxDB reactive local databases           |
-| `@tanstack/trailbase-db-collection`  | TrailBase real-time backend             |
-| `@tanstack/vue-db`                   | Vue adapter                             |
-| `@tanstack/angular-db`               | Angular adapter                         |
-| `@tanstack/svelte-db`                | Svelte adapter                          |
-| `@tanstack/solid-db`                 | Solid adapter                           |
+| Package                             | Purpose                                 |
+| ----------------------------------- | --------------------------------------- |
+| `@tanstack/db`                      | Core: collections, queries, mutations   |
+| `@tanstack/react-db`                | React hooks: useLiveQuery, etc.         |
+| `@tanstack/query-db-collection`     | REST API integration via TanStack Query |
+| `@tanstack/electric-db-collection`  | ElectricSQL real-time Postgres sync     |
+| `@tanstack/powersync-db-collection` | PowerSync offline-first SQLite sync     |
+| `@tanstack/rxdb-db-collection`      | RxDB reactive local databases           |
+| `@tanstack/trailbase-db-collection` | TrailBase real-time backend             |
+| `@tanstack/vue-db`                  | Vue adapter                             |
+| `@tanstack/angular-db`              | Angular adapter                         |
+| `@tanstack/svelte-db`               | Svelte adapter                          |
+| `@tanstack/solid-db`                | Solid adapter                           |

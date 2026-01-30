@@ -252,8 +252,12 @@ const tagCollection = createCollection(
 // Now use joins across collections
 const todosWithProjects = useLiveQuery((db) =>
   db.todos
-    .leftJoin(db.projects, (todo) => todo.projectId, (project) => project.id)
-    .select(todo, project => ({
+    .leftJoin(
+      db.projects,
+      (todo) => todo.projectId,
+      (project) => project.id,
+    )
+    .select(todo, (project) => ({
       ...todo,
       projectName: project?.name,
     })),
@@ -281,24 +285,24 @@ RxDB has specific schema requirements:
 
 ```tsx
 const rxSchema = {
-  version: 0,           // Schema version for migrations
-  primaryKey: 'id',     // Must be string type
+  version: 0, // Schema version for migrations
+  primaryKey: 'id', // Must be string type
   type: 'object',
   properties: {
     id: {
       type: 'string',
-      maxLength: 100,   // Required for primary key
+      maxLength: 100, // Required for primary key
     },
     // ... other fields
   },
-  required: ['id'],     // Primary key must be required
+  required: ['id'], // Primary key must be required
 }
 ```
 
 ## Detailed References
 
-| Reference                      | When to Use                                |
-| ------------------------------ | ------------------------------------------ |
-| `references/storage-backends.md` | Choosing and configuring RxDB storage    |
-| `references/replication.md`    | RxDB replication patterns                  |
-| `references/migrations.md`     | Schema versioning and migrations           |
+| Reference                        | When to Use                           |
+| -------------------------------- | ------------------------------------- |
+| `references/storage-backends.md` | Choosing and configuring RxDB storage |
+| `references/replication.md`      | RxDB replication patterns             |
+| `references/migrations.md`       | Schema versioning and migrations      |

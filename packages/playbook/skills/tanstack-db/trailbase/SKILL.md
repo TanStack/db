@@ -63,16 +63,16 @@ TrailBase uses a conversion system for bidirectional type mapping:
 ```tsx
 interface AppType {
   id: string
-  isActive: boolean       // App uses boolean
-  createdAt: Date         // App uses Date
-  tags: string[]          // App uses array
+  isActive: boolean // App uses boolean
+  createdAt: Date // App uses Date
+  tags: string[] // App uses array
 }
 
 interface RecordType {
   id: string
-  isActive: number        // Server stores 0/1
-  createdAt: string       // Server stores ISO string
-  tags: string            // Server stores JSON string
+  isActive: number // Server stores 0/1
+  createdAt: string // Server stores ISO string
+  tags: string // Server stores JSON string
 }
 
 const collection = createCollection(
@@ -170,12 +170,12 @@ trailBaseCollectionOptions<TItem, TRecord>({
 
 The collection handles these event types from the subscription:
 
-| Event Type | Action                           |
-| ---------- | -------------------------------- |
-| `Insert`   | Add new record to collection     |
-| `Update`   | Update existing record           |
-| `Delete`   | Remove record from collection    |
-| `Error`    | Logged to console                |
+| Event Type | Action                        |
+| ---------- | ----------------------------- |
+| `Insert`   | Add new record to collection  |
+| `Update`   | Update existing record        |
+| `Delete`   | Remove record from collection |
+| `Error`    | Logged to console             |
 
 ## Common Patterns
 
@@ -194,8 +194,12 @@ const todoCollection = createCollection(
   trailBaseCollectionOptions<Todo, TodoRecord>({
     recordApi,
     getKey: (item) => item.id,
-    parse: { /* ... */ },
-    serialize: { /* ... */ },
+    parse: {
+      /* ... */
+    },
+    serialize: {
+      /* ... */
+    },
   }),
 )
 ```
@@ -210,8 +214,12 @@ const todoCollection = createCollection(
   trailBaseCollectionOptions<Todo, TodoRecord>({
     recordApi: todosApi,
     getKey: (item) => item.id,
-    parse: { /* ... */ },
-    serialize: { /* ... */ },
+    parse: {
+      /* ... */
+    },
+    serialize: {
+      /* ... */
+    },
   }),
 )
 
@@ -219,8 +227,12 @@ const projectCollection = createCollection(
   trailBaseCollectionOptions<Project, ProjectRecord>({
     recordApi: projectsApi,
     getKey: (item) => item.id,
-    parse: { /* ... */ },
-    serialize: { /* ... */ },
+    parse: {
+      /* ... */
+    },
+    serialize: {
+      /* ... */
+    },
   }),
 )
 ```
@@ -269,8 +281,8 @@ The collection tracks seen IDs to correlate mutations with server events. IDs ar
 
 ## Detailed References
 
-| Reference                        | When to Use                                |
-| -------------------------------- | ------------------------------------------ |
-| `references/event-subscription.md` | Understanding the event stream           |
-| `references/type-conversions.md` | Complex parse/serialize patterns           |
-| `references/error-handling.md`   | Handling timeouts and connection errors    |
+| Reference                          | When to Use                             |
+| ---------------------------------- | --------------------------------------- |
+| `references/event-subscription.md` | Understanding the event stream          |
+| `references/type-conversions.md`   | Complex parse/serialize patterns        |
+| `references/error-handling.md`     | Handling timeouts and connection errors |

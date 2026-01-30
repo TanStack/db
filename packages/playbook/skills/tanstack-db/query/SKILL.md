@@ -45,9 +45,7 @@ const todoCollection = createCollection(
 
     onInsert: async ({ transaction }) => {
       await Promise.all(
-        transaction.mutations.map((m) =>
-          api.todos.create(m.modified),
-        ),
+        transaction.mutations.map((m) => api.todos.create(m.modified)),
       )
       // Refetch happens automatically after handler completes
     },
@@ -62,9 +60,7 @@ const todoCollection = createCollection(
 
     onDelete: async ({ transaction }) => {
       await Promise.all(
-        transaction.mutations.map((m) =>
-          api.todos.delete(m.original.id),
-        ),
+        transaction.mutations.map((m) => api.todos.delete(m.original.id)),
       )
     },
   }),
@@ -219,14 +215,14 @@ todoCollection.utils.writeBatch(() => {
 })
 
 // Query state
-todoCollection.utils.isLoading    // First fetch in progress
-todoCollection.utils.isFetching   // Any fetch in progress
+todoCollection.utils.isLoading // First fetch in progress
+todoCollection.utils.isFetching // Any fetch in progress
 todoCollection.utils.isRefetching // Background refetch
-todoCollection.utils.isError      // Has error
-todoCollection.utils.lastError    // Error object
-todoCollection.utils.errorCount   // Consecutive failures
+todoCollection.utils.isError // Has error
+todoCollection.utils.lastError // Error object
+todoCollection.utils.errorCount // Consecutive failures
 todoCollection.utils.dataUpdatedAt // Last successful update timestamp
-todoCollection.utils.fetchStatus  // 'fetching' | 'paused' | 'idle'
+todoCollection.utils.fetchStatus // 'fetching' | 'paused' | 'idle'
 
 // Clear error and retry
 await todoCollection.utils.clearError()
@@ -310,9 +306,9 @@ const todoCollection = createCollection(
 
 ## Detailed References
 
-| Reference                         | When to Use                                |
-| --------------------------------- | ------------------------------------------ |
-| `references/sync-modes.md`        | Choosing between eager/on-demand modes     |
-| `references/predicate-pushdown.md`| Forwarding query predicates to APIs        |
-| `references/direct-writes.md`     | Using writeInsert/writeUpdate/writeDelete  |
-| `references/query-state.md`       | Monitoring loading, error, and fetch state |
+| Reference                          | When to Use                                |
+| ---------------------------------- | ------------------------------------------ |
+| `references/sync-modes.md`         | Choosing between eager/on-demand modes     |
+| `references/predicate-pushdown.md` | Forwarding query predicates to APIs        |
+| `references/direct-writes.md`      | Using writeInsert/writeUpdate/writeDelete  |
+| `references/query-state.md`        | Monitoring loading, error, and fetch state |
