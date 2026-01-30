@@ -38,16 +38,19 @@ jobs:
           cd ../query-db-collection && npm pack && mv *.tgz ../../release-assets/tanstack-query-db-collection.tgz
           cd ../electric-db-collection && npm pack && mv *.tgz ../../release-assets/tanstack-electric-db-collection.tgz
 
-      - name: Delete existing release for this SHA (if exists)
-        run: gh release delete "sha-${{ env.SHORT_SHA }}" --yes || true
+      - name: Delete existing latest release
+        run: gh release delete "latest" --yes || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete existing latest tag
+        run: git push origin :refs/tags/latest || true
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: sha-${{ env.SHORT_SHA }}
-          name: Build ${{ env.SHORT_SHA }}
+          tag_name: latest
+          name: Latest Build (${{ env.SHORT_SHA }})
           files: release-assets/*.tgz
           body: |
             Automated build from commit ${{ github.sha }}
