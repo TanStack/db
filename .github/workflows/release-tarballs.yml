@@ -25,7 +25,7 @@ jobs:
           scope: '@scape-app'
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build packages
         run: pnpm build

@@ -58,7 +58,7 @@
     "src"
   ],
   "dependencies": {
-    "@tanstack/db": "workspace:*"
+    "@scape-app/db": "workspace:*"
   },
   "peerDependencies": {
     "@react-native-community/netinfo": ">=11.0.0",

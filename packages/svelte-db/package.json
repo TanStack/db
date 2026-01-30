@@ -39,7 +39,7 @@
     "!dist/**/*.spec.*"
   ],
   "dependencies": {
-    "@tanstack/db": "workspace:*"
+    "@scape-app/db": "workspace:*"
   },
   "peerDependencies": {
     "svelte": "^5.0.0"

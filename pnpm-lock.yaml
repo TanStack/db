@@ -139,7 +139,7 @@ importers:
         version: link:../../../packages/angular-db
       '@tanstack/db':
         specifier: ^0.5.25
-        version: link:../../../packages/db
+        version: 0.5.25(typescript@5.9.3)
       rxjs:
         specifier: ^7.8.2
         version: 7.8.2
@@ -209,10 +209,10 @@ importers:
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
         specifier: ^1.0.22
-        version: link:../../../packages/query-db-collection
+        version: 1.0.22(@tanstack/query-core@5.90.16)(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.69
-        version: link:../../../packages/react-db
+        version: 0.1.69(react@19.2.3)(typescript@5.9.3)
       '@tanstack/react-query':
         specifier: ^5.90.16
         version: 5.90.16(react@19.2.3)
@@ -282,10 +282,10 @@ importers:
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
         specifier: ^1.0.22
-        version: link:../../../packages/query-db-collection
+        version: 1.0.22(@tanstack/query-core@5.90.16)(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.69
-        version: link:../../../packages/react-db
+        version: 0.1.69(react@19.2.3)(typescript@5.9.3)
       '@tanstack/react-query':
         specifier: ^5.90.16
         version: 5.90.16(react@19.2.3)
@@ -346,10 +346,10 @@ importers:
     dependencies:
       '@tanstack/db':
         specifier: ^0.5.25
-        version: link:../../../packages/db
+        version: 0.5.25(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.69
-        version: link:../../../packages/react-db
+        version: 0.1.69(react@19.2.3)(typescript@5.9.3)
       mitt:
         specifier: ^3.0.1
         version: 3.0.1
@@ -386,10 +386,10 @@ importers:
         version: 5.90.16
       '@tanstack/query-db-collection':
         specifier: ^1.0.22
-        version: link:../../../packages/query-db-collection
+        version: 1.0.22(@tanstack/query-core@5.90.16)(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.69
-        version: link:../../../packages/react-db
+        version: 0.1.69(react@19.2.3)(typescript@5.9.3)
       '@tanstack/react-router':
         specifier: ^1.144.0
         version: 1.144.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -519,16 +519,16 @@ importers:
     dependencies:
       '@tanstack/electric-db-collection':
         specifier: ^0.2.31
-        version: link:../../../packages/electric-db-collection
+        version: 0.2.31(typescript@5.9.3)
       '@tanstack/query-core':
         specifier: ^5.90.16
         version: 5.90.16
       '@tanstack/query-db-collection':
         specifier: ^1.0.22
-        version: link:../../../packages/query-db-collection
+        version: 1.0.22(@tanstack/query-core@5.90.16)(typescript@5.9.3)
       '@tanstack/react-db':
         specifier: ^0.1.69
-        version: link:../../../packages/react-db
+        version: 0.1.69(react@19.2.3)(typescript@5.9.3)
       '@tanstack/react-router':
         specifier: ^1.144.0
         version: 1.144.0(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -640,13 +640,13 @@ importers:
     dependencies:
       '@tanstack/electric-db-collection':
         specifier: ^0.2.31
-        version: link:../../../packages/electric-db-collection
+        version: 0.2.31(typescript@5.9.3)
       '@tanstack/query-core':
         specifier: ^5.90.16
         version: 5.90.16
       '@tanstack/query-db-collection':
         specifier: ^1.0.22
-        version: link:../../../packages/query-db-collection
+        version: 1.0.22(@tanstack/query-core@5.90.16)(typescript@5.9.3)
       '@tanstack/solid-db':
         specifier: ^0.2.5
         version: link:../../../packages/solid-db
@@ -744,7 +744,7 @@ importers:
 
   packages/angular-db:
     dependencies:
-      '@tanstack/db':
+      '@scape-app/db':
         specifier: workspace:*
         version: link:../db
     devDependencies:
@@ -809,13 +809,13 @@ importers:
 
   packages/db-collection-e2e:
     dependencies:
-      '@tanstack/db':
+      '@scape-app/db':
         specifier: workspace:*
         version: link:../db
-      '@tanstack/electric-db-collection':
+      '@scape-app/electric-db-collection':
         specifier: workspace:*
         version: link:../electric-db-collection
-      '@tanstack/query-db-collection':
+      '@scape-app/query-db-collection':
         specifier: workspace:*
         version: link:../query-db-collection
       pg:
@@ -864,12 +864,12 @@ importers:
       '@electric-sql/client':
         specifier: ^1.3.1
         version: 1.3.1
+      '@scape-app/db':
+        specifier: workspace:*
+        version: link:../db
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
-      '@tanstack/db':
-        specifier: workspace:*
-        version: link:../db
       '@tanstack/store':
         specifier: ^0.8.0
         version: 0.8.0
@@ -892,7 +892,7 @@ importers:
 
   packages/offline-transactions:
     dependencies:
-      '@tanstack/db':
+      '@scape-app/db':
         specifier: workspace:*
         version: link:../db
     devDependencies:
@@ -917,12 +917,12 @@ importers:
 
   packages/powersync-db-collection:
     dependencies:
+      '@scape-app/db':
+        specifier: workspace:*
+        version: link:../db
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
-      '@tanstack/db':
-        specifier: workspace:*
-        version: link:../db
       '@tanstack/store':
         specifier: ^0.8.0
         version: 0.8.0
@@ -948,12 +948,12 @@ importers:
 
   packages/query-db-collection:
     dependencies:
+      '@scape-app/db':
+        specifier: workspace:*
+        version: link:../db
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
-      '@tanstack/db':
-        specifier: workspace:*
-        version: link:../db
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
@@ -967,7 +967,7 @@ importers:
 
   packages/react-db:
     dependencies:
-      '@tanstack/db':
+      '@scape-app/db':
         specifier: workspace:*
         version: link:../db
       use-sync-external-store:
@@ -1001,12 +1001,12 @@ importers:
 
   packages/rxdb-db-collection:
     dependencies:
+      '@scape-app/db':
+        specifier: workspace:*
+        version: link:../db
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
-      '@tanstack/db':
-        specifier: workspace:*
-        version: link:../db
       '@tanstack/store':
         specifier: ^0.8.0
         version: 0.8.0
@@ -1032,12 +1032,12 @@ importers:
 
   packages/solid-db:
     dependencies:
+      '@scape-app/db':
+        specifier: workspace:*
+        version: link:../db
       '@solid-primitives/map':
         specifier: ^0.7.2
         version: 0.7.2(solid-js@1.9.10)
-      '@tanstack/db':
-        specifier: workspace:*
-        version: link:../db
     devDependencies:
       '@electric-sql/client':
         specifier: ^1.3.1
@@ -1063,7 +1063,7 @@ importers:
 
   packages/svelte-db:
     dependencies:
-      '@tanstack/db':
+      '@scape-app/db':
         specifier: workspace:*
         version: link:../db
     devDependencies:
@@ -1088,12 +1088,12 @@ importers:
 
   packages/trailbase-db-collection:
     dependencies:
+      '@scape-app/db':
+        specifier: workspace:*
+        version: link:../db
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
-      '@tanstack/db':
-        specifier: workspace:*
-        version: link:../db
       '@tanstack/store':
         specifier: ^0.8.0
         version: 0.8.0
@@ -1116,7 +1116,7 @@ importers:
 
   packages/vue-db:
     dependencies:
-      '@tanstack/db':
+      '@scape-app/db':
         specifier: workspace:*
         version: link:../db
     devDependencies:
@@ -4472,6 +4472,19 @@ packages:
     engines: {node: '>=18'}
     deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
 
+  '@tanstack/db-ivm@0.1.17':
+    resolution: {integrity: sha512-DK7vm56CDxNuRAdsbiPs+gITJ+16tUtYgZg3BRTLYKGIDsy8sdIO7sQFq5zl7Y+aIKAPmMAbVp9UjJ75FTtwgQ==}
+    peerDependencies:
+      typescript: '>=4.7'
+
+  '@tanstack/db@0.5.25':
+    resolution: {integrity: sha512-VqVchs6Mm4rw2GyiOkaoD+PJw6lCJT8EI/TzPu8KWZy3QxyOlilpMvEuDTCl0LZdp1iLYlQT1NdgDg0gimV3kQ==}
+    peerDependencies:
+      typescript: '>=4.7'
+
+  '@tanstack/electric-db-collection@0.2.31':
+    resolution: {integrity: sha512-QQeMrl3Go+nq99Gj/X0kN7uC8nYbZkIEbPhwMnCCE/w03q2h1iNkbRY3X1sjWxP+CPvlsitlExd3djKGm2gapg==}
+
   '@tanstack/eslint-config@0.3.3':
     resolution: {integrity: sha512-8VFyAaIFV9onJcfc5yVj5WWl6DmN3W4m+t0Mb+nZrQmqHy+kDndw5O5Xv2BHVWRRPTqnhlJYh6wHWGh0R81ZzQ==}
     engines: {node: '>=18'}
@@ -4496,6 +4509,17 @@ packages:
 
   '@tanstack/query-core@5.90.16':
     resolution: {integrity: sha512-MvtWckSVufs/ja463/K4PyJeqT+HMlJWtw6PrCpywznd2NSgO3m4KwO9RqbFqGg6iDE8vVMFWMeQI4Io3eEYww==}
+
+  '@tanstack/query-db-collection@1.0.22':
+    resolution: {integrity: sha512-feYfOIA/xgf3S/aWIhq7Oov/RE66M0wMOZUk1+oAHZ3W7x0br7JzRKFYwdTtIMtopFt8tDq3Pt2gtZVZu+S7rA==}
+    peerDependencies:
+      '@tanstack/query-core': ^5.0.0
+      typescript: '>=4.7'
+
+  '@tanstack/react-db@0.1.69':
+    resolution: {integrity: sha512-rqhajRK5InIEKT9RABE9zNbYZL5NGkySjGNVANyilu/ADFHV8rhtkMEnhHcbrzv0grIKpcSlx1AvTgJNbbzjkw==}
+    peerDependencies:
+      react: '>=16.8.0'
 
   '@tanstack/react-query@5.90.16':
     resolution: {integrity: sha512-bpMGOmV4OPmif7TNMteU/Ehf/hoC0Kf98PDc0F4BZkFrEapRMEqI/V6YS0lyzwSV6PQpY1y4xxArUIfBW5LVxQ==}
@@ -14365,6 +14389,30 @@ snapshots:
       - typescript
       - vite
 
+  '@tanstack/db-ivm@0.1.17(typescript@5.9.3)':
+    dependencies:
+      fractional-indexing: 3.2.0
+      sorted-btree: 1.8.1
+      typescript: 5.9.3
+
+  '@tanstack/db@0.5.25(typescript@5.9.3)':
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      '@tanstack/db-ivm': 0.1.17(typescript@5.9.3)
+      '@tanstack/pacer-lite': 0.2.0
+      typescript: 5.9.3
+
+  '@tanstack/electric-db-collection@0.2.31(typescript@5.9.3)':
+    dependencies:
+      '@electric-sql/client': 1.3.1
+      '@standard-schema/spec': 1.1.0
+      '@tanstack/db': 0.5.25(typescript@5.9.3)
+      '@tanstack/store': 0.8.0
+      debug: 4.4.3
+    transitivePeerDependencies:
+      - supports-color
+      - typescript
+
   '@tanstack/eslint-config@0.3.3(@typescript-eslint/utils@8.51.0(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3))(eslint@9.39.2(jiti@2.6.1))(typescript@5.9.3)':
     dependencies:
       '@eslint/js': 9.39.2
@@ -14411,6 +14459,21 @@ snapshots:
       - supports-color
 
   '@tanstack/query-core@5.90.16': {}
+
+  '@tanstack/query-db-collection@1.0.22(@tanstack/query-core@5.90.16)(typescript@5.9.3)':
+    dependencies:
+      '@standard-schema/spec': 1.1.0
+      '@tanstack/db': 0.5.25(typescript@5.9.3)
+      '@tanstack/query-core': 5.90.16
+      typescript: 5.9.3
+
+  '@tanstack/react-db@0.1.69(react@19.2.3)(typescript@5.9.3)':
+    dependencies:
+      '@tanstack/db': 0.5.25(typescript@5.9.3)
+      react: 19.2.3
+      use-sync-external-store: 1.6.0(react@19.2.3)
+    transitivePeerDependencies:
+      - typescript
 
   '@tanstack/react-query@5.90.16(react@19.2.3)':
     dependencies:

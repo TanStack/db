@@ -44,7 +44,7 @@
     "src"
   ],
   "dependencies": {
-    "@tanstack/db": "workspace:*"
+    "@scape-app/db": "workspace:*"
   },
   "peerDependencies": {
     "vue": ">=3.3.0"

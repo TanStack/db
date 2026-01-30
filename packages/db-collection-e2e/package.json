@@ -10,9 +10,9 @@
   },
   "type": "module",
   "dependencies": {
-    "@tanstack/db": "workspace:*",
-    "@tanstack/electric-db-collection": "workspace:*",
-    "@tanstack/query-db-collection": "workspace:*",
+    "@scape-app/db": "workspace:*",
+    "@scape-app/electric-db-collection": "workspace:*",
+    "@scape-app/query-db-collection": "workspace:*",
     "pg": "^8.16.3"
   },
   "devDependencies": {
