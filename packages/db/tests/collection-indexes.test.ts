@@ -788,6 +788,42 @@ describe(`Collection Indexes`, () => {
       })
     })
 
+    it(`should return all matching items for OR with mixed indexed/non-indexed fields`, () => {
+      // BUG: When using OR with one indexed field and one non-indexed field,
+      // items matching the non-indexed condition are silently dropped.
+      // This test demonstrates the bug reported by users:
+      // or(eq(element.id, itemId), eq(element.group_id, itemId))
+      // where 'id' has an index but 'group_id' does not.
+      //
+      // Expected: Items matching EITHER condition should be returned
+      // Actual (bug): Only items matching the indexed condition are returned
+
+      withIndexTracking(collection, (_tracker) => {
+        // age has an index (created in beforeEach), name does NOT have an index
+        // Query: Find items where age=25 OR name='Bob'
+        // Expected results:
+        //   - Alice (age=25) - matches via indexed field
+        //   - Bob (name='Bob') - should match via non-indexed field but gets DROPPED due to bug
+        const result = collection.currentStateAsChanges({
+          where: or(
+            eq(new PropRef([`age`]), 25), // Indexed - Alice matches
+            eq(new PropRef([`name`]), `Bob`), // NOT indexed - Bob should match
+          ),
+        })!
+
+        // This is the EXPECTED behavior - both Alice AND Bob should be returned
+        // The bug causes only Alice to be returned (Bob is silently dropped)
+        expect(result).toHaveLength(2) // Should be Alice AND Bob
+        const names = result.map((r) => r.value.name).sort()
+        expect(names).toEqual([`Alice`, `Bob`])
+
+        // Note: With the bug fixed, this should fall back to full scan
+        // since not all OR branches can be optimized with indexes.
+        // The correct behavior for OR is: if ANY branch can't be optimized,
+        // fall back to full scan to ensure all matching items are found.
+      })
+    })
+
     it(`should optimize inArray queries using indexes`, () => {
       withIndexTracking(collection, (tracker) => {
         const result = collection.currentStateAsChanges({
