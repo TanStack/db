@@ -274,6 +274,10 @@ function processJoin(
 
       // Set up lazy loading: intercept active side's stream and dynamically load
       // matching rows from lazy side based on join keys.
+      // Track which join keys have already been loaded to avoid duplicate requests
+      // and unbounded growth of loadedSubsets array.
+      const loadedJoinKeys = new Set<unknown>()
+
       const activePipelineWithLoading: IStreamBuilder<
         [key: unknown, [originalKey: string, namespacedRow: NamespacedRow]]
       > = activePipeline.pipe(
@@ -301,15 +305,31 @@ function processJoin(
             return
           }
 
+          // Extract join keys and filter out already-loaded ones to prevent
+          // unbounded accumulation of loadedSubsets
+          const allJoinKeys = data.getInner().map(([[joinKey]]) => joinKey)
+          const newJoinKeys = allJoinKeys.filter(
+            (key) => !loadedJoinKeys.has(key),
+          )
+
+          // Skip if all keys have already been loaded
+          if (newJoinKeys.length === 0) {
+            return
+          }
+
           // Request filtered snapshot from lazy collection for matching join keys
-          const joinKeys = data.getInner().map(([[joinKey]]) => joinKey)
           const lazyJoinRef = new PropRef(followRefResult.path)
           const loaded = lazySourceSubscription.requestSnapshot({
-            where: inArray(lazyJoinRef, joinKeys),
+            where: inArray(lazyJoinRef, newJoinKeys),
             optimizedOnly: true,
           })
 
-          if (!loaded) {
+          if (loaded) {
+            // Mark keys as loaded only if requestSnapshot succeeded
+            for (const key of newJoinKeys) {
+              loadedJoinKeys.add(key)
+            }
+          } else {
             // Snapshot wasn't sent because it could not be loaded from the indexes
             lazySourceSubscription.requestSnapshot()
           }
