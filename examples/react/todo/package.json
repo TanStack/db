@@ -37,7 +37,7 @@
     "concurrently": "^9.2.1",
     "dotenv": "^17.2.3",
     "drizzle-kit": "^0.31.8",
-    "eslint": "^9.39.2",
+    "eslint": "^9.21.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.26",
     "pg": "^8.16.3",
