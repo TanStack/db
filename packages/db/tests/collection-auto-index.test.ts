@@ -387,6 +387,56 @@ describe(`Collection Auto-Indexing`, () => {
     subscription.unsubscribe()
   })
 
+  it(`should create auto-indexes for fields inside OR expressions`, async () => {
+    // BUG: Auto-indexing only recurses into AND expressions, not OR expressions.
+    // This means fields used inside OR don't get auto-indexed, which combined with
+    // the optimizer bug (dropping non-indexed OR branches), causes silent data loss.
+    //
+    // This test demonstrates what SHOULD happen: auto-indexing should create indexes
+    // for all fields in OR expressions so queries return correct results.
+
+    const autoIndexCollection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      autoIndex: `eager`,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const item of testData) {
+            write({
+              type: `insert`,
+              value: item,
+            })
+          }
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await autoIndexCollection.stateWhenReady()
+
+    // Subscribe with OR expression containing two DIFFERENT fields
+    // Expected: Both fields should get auto-indexed
+    // Actual (bug): Neither field gets auto-indexed because OR isn't handled
+    const subscription = autoIndexCollection.subscribeChanges(() => {}, {
+      whereExpression: or(eq(row.status, `active`), eq(row.name, `Bob`)),
+    })
+
+    // EXPECTED: Should have created auto-indexes for BOTH fields in the OR
+    // This ensures the query can be properly evaluated
+    expect(autoIndexCollection.indexes.size).toBe(2)
+
+    const indexPaths = Array.from(autoIndexCollection.indexes.values()).map(
+      (index) => (index.expression as any).path,
+    )
+
+    expect(indexPaths).toContainEqual([`status`])
+    expect(indexPaths).toContainEqual([`name`])
+
+    subscription.unsubscribe()
+  })
+
   it(`should create auto-indexes for complex AND expressions with multiple fields`, async () => {
     const autoIndexCollection = createCollection<TestItem, string>({
       getKey: (item) => item.id,
