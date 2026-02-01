@@ -184,10 +184,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
   // Create a live query with initial limit and offset
   // Either pass collection directly or wrap query function
+  // Use pageSize + 1 for the initial limit to include the peek-ahead item
   const queryResult = isCollection
     ? useLiveQuery(queryFnOrCollection)
     : useLiveQuery(
-        (q) => queryFnOrCollection(q).limit(pageSize).offset(0),
+        (q) => queryFnOrCollection(q).limit(pageSize + 1).offset(0),
         deps,
       )
 
