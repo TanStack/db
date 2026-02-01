@@ -4,7 +4,11 @@ import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
-import type { OfflineConfig, OfflineTransaction } from '../types'
+import type {
+  OfflineConfig,
+  OfflineTransaction,
+  OnlineDetector,
+} from '../types'
 
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
 
@@ -17,18 +21,21 @@ export class TransactionExecutor {
   private executionPromise: Promise<void> | null = null
   private offlineExecutor: any // Reference to OfflineExecutor for signaling
   private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private onlineDetector: OnlineDetector
 
   constructor(
     scheduler: KeyScheduler,
     outbox: OutboxManager,
     config: OfflineConfig,
     offlineExecutor: any,
+    onlineDetector: OnlineDetector,
   ) {
     this.scheduler = scheduler
     this.outbox = outbox
     this.config = config
     this.retryPolicy = new DefaultRetryPolicy(10, config.jitter ?? true)
     this.offlineExecutor = offlineExecutor
+    this.onlineDetector = onlineDetector
   }
 
   async execute(transaction: OfflineTransaction): Promise<void> {
@@ -54,6 +61,11 @@ export class TransactionExecutor {
 
   private async runExecution(): Promise<void> {
     const maxConcurrency = this.config.maxConcurrency ?? 3
+
+    // Check online status before executing transactions
+    if (!this.onlineDetector.isOnline()) {
+      return
+    }
 
     while (this.scheduler.getPendingCount() > 0) {
       const batch = this.scheduler.getNextBatch(maxConcurrency)
@@ -223,6 +235,7 @@ export class TransactionExecutor {
     if (this.config.beforeRetry) {
       filteredTransactions = this.config.beforeRetry(transactions)
     }
+
 
     for (const transaction of filteredTransactions) {
       this.scheduler.schedule(transaction)
