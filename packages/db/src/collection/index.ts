@@ -340,6 +340,7 @@ export class CollectionImpl<
       lifecycle: this._lifecycle,
       sync: this._sync,
       events: this._events,
+      state: this._state, // Required for enriching changes with virtual properties
     })
     this._events.setDeps({
       collection: this, // Required for adding to emitted events

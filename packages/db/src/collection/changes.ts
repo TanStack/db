@@ -10,6 +10,7 @@ import type { CollectionLifecycleManager } from './lifecycle.js'
 import type { CollectionSyncManager } from './sync.js'
 import type { CollectionEventsManager } from './events.js'
 import type { CollectionImpl } from './index.js'
+import type { CollectionStateManager } from './state.js'
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -21,6 +22,7 @@ export class CollectionChangesManager<
   private sync!: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
   private events!: CollectionEventsManager
   private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+  private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
   public activeSubscribersCount = 0
   public changeSubscriptions = new Set<CollectionSubscription>()
@@ -37,11 +39,13 @@ export class CollectionChangesManager<
     sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
     events: CollectionEventsManager
     collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+    state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   }) {
     this.lifecycle = deps.lifecycle
     this.sync = deps.sync
     this.events = deps.events
     this.collection = deps.collection
+    this.state = deps.state
   }
 
   /**
@@ -53,6 +57,16 @@ export class CollectionChangesManager<
     for (const subscription of this.changeSubscriptions) {
       subscription.emitEvents([])
     }
+  }
+
+  /**
+   * Enriches a change message with virtual properties ($synced, $origin, $key, $collectionId).
+   * Uses the "add-if-missing" pattern to preserve virtual properties from upstream collections.
+   */
+  private enrichChangeWithVirtualProps(
+    change: ChangeMessage<TOutput, TKey>,
+  ): ChangeMessage<TOutput, TKey> {
+    return this.state.enrichChangeMessage(change)
   }
 
   /**
@@ -87,9 +101,15 @@ export class CollectionChangesManager<
       return
     }
 
+    // Enrich all change messages with virtual properties
+    // This uses the "add-if-missing" pattern to preserve pass-through semantics
+    const enrichedEvents = eventsToEmit.map((change) =>
+      this.enrichChangeWithVirtualProps(change),
+    )
+
     // Emit to all listeners
     for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents(eventsToEmit)
+      subscription.emitEvents(enrichedEvents)
     }
   }
 

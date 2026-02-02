@@ -1,5 +1,11 @@
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
+import {
+  
+  
+  enrichRowWithVirtualProps
+} from '../virtual-props.js'
+import type {VirtualOrigin, WithVirtualProps} from '../virtual-props.js';
 import type { Transaction } from '../transactions'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -58,6 +64,24 @@ export class CollectionStateManager<
   public optimisticUpserts = new Map<TKey, TOutput>()
   public optimisticDeletes = new Set<TKey>()
 
+  /**
+   * Tracks the origin of confirmed changes for each row.
+   * 'local' = change originated from this client
+   * 'remote' = change was received via sync
+   *
+   * This is used for the $origin virtual property.
+   * Note: This only tracks *confirmed* changes, not optimistic ones.
+   * Optimistic changes are always considered 'local' for $origin.
+   */
+  public rowOrigins = new Map<TKey, VirtualOrigin>()
+
+  /**
+   * Tracks keys that have pending local changes.
+   * Used to determine whether sync-confirmed data should have 'local' or 'remote' origin.
+   * When sync confirms data for a key with pending local changes, it keeps 'local' origin.
+   */
+  public pendingLocalChanges = new Set<TKey>()
+
   // Cached size for performance
   public size = 0
 
@@ -94,6 +118,66 @@ export class CollectionStateManager<
     this.changes = deps.changes
     this.indexes = deps.indexes
     this._events = deps.events
+  }
+
+  /**
+   * Checks if a row has pending optimistic mutations (not yet confirmed by sync).
+   * Used to compute the $synced virtual property.
+   */
+  public isRowSynced(key: TKey): boolean {
+    return !this.optimisticUpserts.has(key) && !this.optimisticDeletes.has(key)
+  }
+
+  /**
+   * Gets the origin of the last confirmed change to a row.
+   * Returns 'local' if the row has optimistic mutations (optimistic changes are local).
+   * Used to compute the $origin virtual property.
+   */
+  public getRowOrigin(key: TKey): VirtualOrigin {
+    // If there are optimistic changes, they're local
+    if (this.optimisticUpserts.has(key) || this.optimisticDeletes.has(key)) {
+      return 'local'
+    }
+    // Otherwise, return the confirmed origin (defaults to 'remote' for synced data)
+    return this.rowOrigins.get(key) ?? 'remote'
+  }
+
+  /**
+   * Enriches a row with virtual properties using the "add-if-missing" pattern.
+   * If the row already has virtual properties (from an upstream collection),
+   * they are preserved. Otherwise, new values are computed.
+   */
+  public enrichWithVirtualProps(
+    row: TOutput,
+    key: TKey,
+  ): WithVirtualProps<TOutput, TKey> {
+    return enrichRowWithVirtualProps(
+      row,
+      key,
+      this.collection.id,
+      () => this.isRowSynced(key),
+      () => this.getRowOrigin(key),
+    )
+  }
+
+  /**
+   * Creates a change message with virtual properties.
+   * Uses the "add-if-missing" pattern so that pass-through from upstream
+   * collections works correctly.
+   */
+  public enrichChangeMessage(
+    change: ChangeMessage<TOutput, TKey>,
+  ): ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey> {
+    const enrichedValue = this.enrichWithVirtualProps(change.value, change.key)
+    const enrichedPreviousValue = change.previousValue
+      ? this.enrichWithVirtualProps(change.previousValue, change.key)
+      : undefined
+
+    return {
+      ...change,
+      value: enrichedValue,
+      previousValue: enrichedPreviousValue,
+    } as ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
   }
 
   /**
@@ -259,6 +343,9 @@ export class CollectionStateManager<
     for (const transaction of activeTransactions) {
       for (const mutation of transaction.mutations) {
         if (this.isThisCollection(mutation.collection) && mutation.optimistic) {
+          // Track that this key has pending local changes for $origin tracking
+          this.pendingLocalChanges.add(mutation.key)
+
           switch (mutation.type) {
             case `insert`:
             case `update`:
@@ -582,10 +669,18 @@ export class CollectionStateManager<
               break
           }
 
+          // Determine origin: 'local' if this key had pending local changes, 'remote' otherwise
+          const origin: VirtualOrigin = this.pendingLocalChanges.has(key)
+            ? 'local'
+            : 'remote'
+
           // Update synced data
           switch (operation.type) {
             case `insert`:
               this.syncedData.set(key, operation.value)
+              this.rowOrigins.set(key, origin)
+              // Clear pending local changes now that sync has confirmed
+              this.pendingLocalChanges.delete(key)
               break
             case `update`: {
               if (rowUpdateMode === `partial`) {
@@ -598,10 +693,16 @@ export class CollectionStateManager<
               } else {
                 this.syncedData.set(key, operation.value)
               }
+              this.rowOrigins.set(key, origin)
+              // Clear pending local changes now that sync has confirmed
+              this.pendingLocalChanges.delete(key)
               break
             }
             case `delete`:
               this.syncedData.delete(key)
+              // Clean up origin and pending tracking for deleted rows
+              this.rowOrigins.delete(key)
+              this.pendingLocalChanges.delete(key)
               break
           }
         }
@@ -908,6 +1009,8 @@ export class CollectionStateManager<
     this.syncedMetadata.clear()
     this.optimisticUpserts.clear()
     this.optimisticDeletes.clear()
+    this.rowOrigins.clear()
+    this.pendingLocalChanges.clear()
     this.size = 0
     this.pendingSyncedTransactions = []
     this.syncedKeys.clear()
