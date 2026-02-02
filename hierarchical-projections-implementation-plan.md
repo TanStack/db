@@ -18,6 +18,12 @@ Status: draft plan
 - Composite join keys and complex join expressions.
 - Server-side rendering of child collections.
 
+## Confirmed decisions
+- ChildCollection<T> will be exported as a public API type.
+- Add new test files for hierarchical projections (not reuse existing harness).
+- Child joins are deferred to a post-v1 phase (see Post-v1 section).
+- Plan file location is repo root (this file).
+
 ## Stage 0: Foundation and IR plumbing
 
 Objective: establish types, IR nodes, and error types without behavior changes.
@@ -132,31 +138,7 @@ Exit criteria
 
 - Aggregate ordering behaves like normal queries.
 
-## Stage 4: Child queries with joins (within child branch)
-
-Objective: allow child subqueries that join additional collections.
-
-Scope
-
-- Expand join key extraction to handle child alias sets from joins.
-- Ensure child compilation supports multi-source aliases.
-- Validate join key only references one parent alias and one child alias.
-
-Deliverables
-
-- Child query with join compiles and runs.
-
-Tests
-
-- Child query with join and parent join key in WHERE.
-- Invalid join expression throws InvalidJoinExpressionError.
-
-Exit criteria
-
-- Child joins work without regressions.
-
-## Stage 5: Multi-level child collections
-
+## Stage 4: Multi-level child collections
 Objective: recursive child collections (grandchildren, etc).
 
 Scope
@@ -178,8 +160,7 @@ Exit criteria
 
 - Multi-level includes behave consistently.
 
-## Stage 6: Hardening, docs, and examples
-
+## Stage 5: Hardening, docs, and examples
 Objective: stabilize UX and document usage.
 
 Scope
@@ -205,11 +186,23 @@ Exit criteria
 - Preserve type safety (avoid any).
 - Defer graph finalization until all outputs are wired.
 
-## Open questions / blockers
+## Post-v1: Child queries with joins (deferred)
+Objective: allow child subqueries that join additional collections.
 
-1. Should ChildCollection be exported as part of the public API, or remain
-   an internal type with a branded alias?
-2. Where should tests live for live query + D2 graph fan-out (existing
-   harness or new integration tests)?
-3. Any desire to include child joins in v1, or keep them for later?
-4. Preferred filename or location for this plan (top-level OK)?
+Scope
+- Expand join key extraction to handle child alias sets from joins.
+- Ensure child compilation supports multi-source aliases.
+- Validate join key only references one parent alias and one child alias.
+
+Deliverables
+- Child query with join compiles and runs.
+
+Tests
+- Child query with join and parent join key in WHERE.
+- Invalid join expression throws InvalidJoinExpressionError.
+
+Exit criteria
+- Child joins work without regressions.
+
+## Open questions / blockers
+- None currently. Add here if new decisions are needed.
