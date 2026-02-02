@@ -66,7 +66,9 @@ describe(`queryOnce`, () => {
   describe(`filtering with where clause`, () => {
     it(`should filter results with a where clause`, async () => {
       const activeUsers = await queryOnce((q) =>
-        q.from({ user: usersCollection }).where(({ user }) => eq(user.active, true)),
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.active, true)),
       )
 
       expect(activeUsers.length).toBe(3)
@@ -75,7 +77,9 @@ describe(`queryOnce`, () => {
 
     it(`should handle empty results from filtering`, async () => {
       const noUsers = await queryOnce((q) =>
-        q.from({ user: usersCollection }).where(({ user }) => eq(user.age, 100)),
+        q
+          .from({ user: usersCollection })
+          .where(({ user }) => eq(user.age, 100)),
       )
 
       expect(noUsers.length).toBe(0)
@@ -116,7 +120,9 @@ describe(`queryOnce`, () => {
   describe(`ordering and limits`, () => {
     it(`should order results with orderBy clause`, async () => {
       const orderedUsers = await queryOnce((q) =>
-        q.from({ user: usersCollection }).orderBy(({ user }) => user.name, `asc`),
+        q
+          .from({ user: usersCollection })
+          .orderBy(({ user }) => user.name, `asc`),
       )
 
       expect(orderedUsers.map((u) => u.name)).toEqual([
@@ -130,7 +136,9 @@ describe(`queryOnce`, () => {
 
     it(`should order results in descending order`, async () => {
       const orderedUsers = await queryOnce((q) =>
-        q.from({ user: usersCollection }).orderBy(({ user }) => user.age, `desc`),
+        q
+          .from({ user: usersCollection })
+          .orderBy(({ user }) => user.age, `desc`),
       )
 
       expect(orderedUsers[0]!.age).toBe(35) // Charlie
