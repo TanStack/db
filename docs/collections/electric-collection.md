@@ -60,7 +60,7 @@ Handlers are called before mutations to persist changes to your backend:
 - `onUpdate`: Handler called before update operations
 - `onDelete`: Handler called before delete operations
 
-Each handler should return `{ txid }` to wait for synchronization. For cases where your API can not return txids, use the `awaitMatch` utility function.
+Each handler should call `await collection.utils.awaitTxId(txid)` to wait for synchronization. For cases where your API cannot return txids, use the `awaitMatch` utility function.
 
 ## Persistence Handlers & Synchronization
 
@@ -81,22 +81,23 @@ const todosCollection = createCollection(
       params: { table: 'todos' },
     },
 
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const newItem = transaction.mutations[0].modified
       const response = await api.todos.create(newItem)
 
-      // Return txid to wait for sync
-      return { txid: response.txid }
+      // Wait for txid to sync
+      await collection.utils.awaitTxId(response.txid)
     },
 
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       const { original, changes } = transaction.mutations[0]
       const response = await api.todos.update({
         where: { id: original.id },
         data: changes
       })
 
-      return { txid: response.txid }
+      // Wait for txid to sync
+      await collection.utils.awaitTxId(response.txid)
     }
   })
 )
@@ -305,13 +306,13 @@ The collection provides these utility methods via `collection.utils`:
 
 ### `awaitTxId(txid, timeout?)`
 
-Manually wait for a specific transaction ID to be synchronized:
+Wait for a specific transaction ID to be synchronized:
 
 ```typescript
 // Wait for specific txid
 await todosCollection.utils.awaitTxId(12345)
 
-// With custom timeout (default is 30 seconds)
+// With custom timeout (default is 15 seconds)
 await todosCollection.utils.awaitTxId(12345, 10000)
 ```
 
@@ -319,7 +320,7 @@ This is useful when you need to ensure a mutation has been synchronized before p
 
 ### `awaitMatch(matchFn, timeout?)`
 
-Manually wait for a custom match function to find a matching message:
+Wait for a custom match function to find a matching message:
 
 ```typescript
 import { isChangeMessage } from '@tanstack/electric-db-collection'
