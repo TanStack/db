@@ -1289,19 +1289,22 @@ describe(`useLiveInfiniteQuery`, () => {
     // Should be fetching
     expect(result.current.isFetchingNextPage).toBe(true)
 
-    // Wait for page 2 to load
+    // Wait for page 2 data to actually load (not just loadedPageCount to increment)
+    // The async loadSubset takes 10ms to resolve, so we need to wait for the data
     await waitFor(
       () => {
-        expect(result.current.pages).toHaveLength(2)
+        expect(result.current.data).toHaveLength(20)
       },
       { timeout: 500 },
     )
 
+    // Verify pages structure
+    expect(result.current.pages).toHaveLength(2)
+
     // CRITICAL: Verify loadSubset was called again for page 2
     expect(loadSubsetCalls.length).toBeGreaterThan(initialCallCount)
 
-    // Verify data
-    expect(result.current.data).toHaveLength(20)
+    // Verify hasNextPage
     expect(result.current.hasNextPage).toBe(true)
   })
 
