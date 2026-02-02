@@ -19,6 +19,7 @@ Status: draft plan
 - Server-side rendering of child collections.
 
 ## Confirmed decisions
+
 - ChildCollection<T> will be exported as a public API type.
 - Add new test files for hierarchical projections (not reuse existing harness).
 - Child joins are deferred to a post-v1 phase (see Post-v1 section).
@@ -139,6 +140,7 @@ Exit criteria
 - Aggregate ordering behaves like normal queries.
 
 ## Stage 4: Multi-level child collections
+
 Objective: recursive child collections (grandchildren, etc).
 
 Scope
@@ -161,6 +163,7 @@ Exit criteria
 - Multi-level includes behave consistently.
 
 ## Stage 5: Hardening, docs, and examples
+
 Objective: stabilize UX and document usage.
 
 Scope
@@ -187,22 +190,28 @@ Exit criteria
 - Defer graph finalization until all outputs are wired.
 
 ## Post-v1: Child queries with joins (deferred)
+
 Objective: allow child subqueries that join additional collections.
 
 Scope
+
 - Expand join key extraction to handle child alias sets from joins.
 - Ensure child compilation supports multi-source aliases.
 - Validate join key only references one parent alias and one child alias.
 
 Deliverables
+
 - Child query with join compiles and runs.
 
 Tests
+
 - Child query with join and parent join key in WHERE.
 - Invalid join expression throws InvalidJoinExpressionError.
 
 Exit criteria
+
 - Child joins work without regressions.
 
 ## Open questions / blockers
+
 - None currently. Add here if new decisions are needed.
