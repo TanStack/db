@@ -57,6 +57,9 @@ export {
   liveQueryCollectionOptions,
 } from './live-query-collection.js'
 
+// One-shot query execution
+export { queryOnce, type QueryOnceConfig } from './query-once.js'
+
 export { type LiveQueryCollectionConfig } from './live/types.js'
 export { type LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 
