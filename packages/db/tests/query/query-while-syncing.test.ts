@@ -31,6 +31,20 @@ const sampleDepartments: Array<Department> = [
   { id: 3, name: `Marketing`, budget: 60000 },
 ]
 
+const stripVirtualProps = <T extends Record<string, unknown> | undefined>(
+  value: T,
+) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value
+  return rest as T
+}
+
 describe(`Query while syncing`, () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -122,7 +136,7 @@ describe(`Query while syncing`, () => {
         expect(liveQuery.status).toBe(`ready`)
 
         // Final data check
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: 1, name: `Alice` },
           { id: 2, name: `Bob` },
           { id: 4, name: `Dave` },
@@ -335,7 +349,7 @@ describe(`Query while syncing`, () => {
 
         expect(usersCollection.size).toBe(1)
         expect(liveQuery.size).toBe(1) // Should have a join result now
-        expect(liveQuery.toArray[0]).toEqual({
+        expect(stripVirtualProps(liveQuery.toArray[0])).toEqual({
           user_name: `Alice`,
           department_name: `Engineering`,
         })
@@ -367,7 +381,7 @@ describe(`Query while syncing`, () => {
         expect(departmentsCollection.status).toBe(`ready`)
         expect(liveQuery.status).toBe(`ready`) // Now ready because all sources are ready
 
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { user_name: `Alice`, department_name: `Engineering` },
           { user_name: `Bob`, department_name: `Sales` },
         ])
@@ -443,7 +457,7 @@ describe(`Query while syncing`, () => {
         userSyncCommit!()
 
         expect(liveQuery.size).toBe(1)
-        expect(liveQuery.toArray[0]).toEqual({
+        expect(stripVirtualProps(liveQuery.toArray[0])).toEqual({
           user_name: `Alice`,
           department_name: undefined,
         })
@@ -463,7 +477,7 @@ describe(`Query while syncing`, () => {
         userSyncCommit!()
 
         expect(liveQuery.size).toBe(2)
-        const results = liveQuery.toArray
+        const results = liveQuery.toArray.map((row) => stripVirtualProps(row))
         expect(results.find((r) => r.user_name === `Alice`)).toEqual({
           user_name: `Alice`,
           department_name: undefined,
@@ -748,7 +762,7 @@ describe(`Query while syncing`, () => {
         await preloadPromise
 
         // Final data check
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: 1, name: `Alice` },
           { id: 2, name: `Bob` },
           { id: 4, name: `Dave` },
@@ -915,7 +929,7 @@ describe(`Query while syncing`, () => {
         userSyncCommit!()
 
         expect(liveQuery.size).toBe(1) // Should have a join result now
-        expect(liveQuery.toArray[0]).toEqual({
+        expect(stripVirtualProps(liveQuery.toArray[0])).toEqual({
           user_name: `Alice`,
           department_name: `Engineering`,
         })

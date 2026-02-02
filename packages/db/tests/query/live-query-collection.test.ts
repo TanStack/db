@@ -31,6 +31,20 @@ const sampleUsers: Array<User> = [
   { id: 3, name: `Charlie`, active: false },
 ]
 
+const stripVirtualProps = <T extends Record<string, unknown> | undefined>(
+  value: T,
+) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value
+  return rest as T
+}
+
 function createUsersCollection() {
   return createCollection(
     mockSyncCollectionOptions<User>({
@@ -417,8 +431,16 @@ describe(`createLiveQueryCollection`, () => {
 
     // The live query should be ready and have the initial data
     expect(liveQuery.size).toBe(2) // Alice and Charlie are active
-    expect(liveQuery.get(1)).toEqual({ id: 1, name: `Alice`, active: true })
-    expect(liveQuery.get(3)).toEqual({ id: 3, name: `Charlie`, active: true })
+    expect(stripVirtualProps(liveQuery.get(1))).toEqual({
+      id: 1,
+      name: `Alice`,
+      active: true,
+    })
+    expect(stripVirtualProps(liveQuery.get(3))).toEqual({
+      id: 3,
+      name: `Charlie`,
+      active: true,
+    })
     expect(liveQuery.get(2)).toBeUndefined() // Bob is not active
     expect(liveQuery.status).toBe(`ready`)
 
@@ -430,7 +452,11 @@ describe(`createLiveQueryCollection`, () => {
 
     // The live query should update to include the new data
     expect(liveQuery.size).toBe(3) // Alice, Charlie, and David are active
-    expect(liveQuery.get(4)).toEqual({ id: 4, name: `David`, active: true })
+    expect(stripVirtualProps(liveQuery.get(4))).toEqual({
+      id: 4,
+      name: `David`,
+      active: true,
+    })
   })
 
   it(`should not reuse finalized graph after GC cleanup (resubscribe is safe)`, async () => {

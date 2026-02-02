@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import mitt from 'mitt'
 import { createCollection } from '../src/collection/index.js'
+import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
+import { createLocalOnlyCollection } from '../src/local-only.js'
 import { createTransaction } from '../src/transactions'
 import { and, eq, gt } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
@@ -14,6 +16,32 @@ import type {
 
 // Helper function to wait for changes to be processed
 const waitForChanges = () => new Promise((resolve) => setTimeout(resolve, 10))
+
+const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value as Record<string, unknown>
+  return rest as T
+}
+
+const normalizeChange = <T extends Record<string, any>>(
+  change: ChangeMessage<T>,
+): ChangeMessage<T> => ({
+  ...change,
+  value: stripVirtualProps(change.value),
+  previousValue: change.previousValue
+    ? (stripVirtualProps(change.previousValue))
+    : undefined,
+})
+
+const normalizeChanges = <T extends Record<string, any>>(
+  changes: Array<ChangeMessage<T>>,
+) => changes.map(normalizeChange)
 
 describe(`Collection.subscribeChanges`, () => {
   it(`should emit initial collection state as insert changes`, () => {
@@ -160,7 +188,10 @@ describe(`Collection.subscribeChanges`, () => {
     }>
     expect(insertChange).toBeDefined()
     expect(insertChange.type).toBe(`insert`)
-    expect(insertChange.value).toEqual({ id: 1, value: `sync value 1` })
+    expect(stripVirtualProps(insertChange.value)).toEqual({
+      id: 1,
+      value: `sync value 1`,
+    })
 
     // Reset mock
     callback.mockReset()
@@ -185,7 +216,10 @@ describe(`Collection.subscribeChanges`, () => {
     }>
     expect(updateChange).toBeDefined()
     expect(updateChange.type).toBe(`update`)
-    expect(updateChange.value).toEqual({ id: 1, value: `updated sync value` })
+    expect(stripVirtualProps(updateChange.value)).toEqual({
+      id: 1,
+      value: `updated sync value`,
+    })
 
     // Reset mock
     callback.mockReset()
@@ -275,7 +309,7 @@ describe(`Collection.subscribeChanges`, () => {
       value: string
     }>
     expect(insertChange).toBeDefined()
-    expect(insertChange).toEqual({
+    expect(normalizeChange(insertChange)).toEqual({
       key: 1,
       type: `insert`,
       value: { id: 1, value: `optimistic value` },
@@ -313,7 +347,7 @@ describe(`Collection.subscribeChanges`, () => {
     }>
     expect(updateChange).toBeDefined()
     expect(updateChange.type).toBe(`update`)
-    expect(updateChange.value).toEqual({
+    expect(stripVirtualProps(updateChange.value)).toEqual({
       id: 1,
       value: `updated optimistic value`,
       updated: true,
@@ -399,7 +433,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Verify synced insert was emitted
     expect(callback).toHaveBeenCalledTimes(1)
-    expect(callback.mock.calls[0]![0]).toEqual([
+    expect(normalizeChanges(callback.mock.calls[0]![0])).toEqual([
       {
         key: 1,
         type: `insert`,
@@ -414,7 +448,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Verify optimistic insert was emitted - this is the synchronous optimistic update
     expect(callback).toHaveBeenCalledTimes(1)
-    expect(callback.mock.calls[0]![0]).toEqual([
+    expect(normalizeChanges(callback.mock.calls[0]![0])).toEqual([
       {
         key: 2,
         type: `insert`,
@@ -442,7 +476,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Verify the optimistic update was emitted
     expect(callback).toHaveBeenCalledTimes(1)
-    expect(callback.mock.calls[0]![0]).toEqual([
+    expect(normalizeChanges(callback.mock.calls[0]![0])).toEqual([
       {
         type: `update`,
         key: 2,
@@ -486,7 +520,10 @@ describe(`Collection.subscribeChanges`, () => {
     }>
     expect(updateChange).toBeDefined()
     expect(updateChange.type).toBe(`update`)
-    expect(updateChange.value).toEqual({ id: 1, value: `updated synced value` })
+    expect(stripVirtualProps(updateChange.value)).toEqual({
+      id: 1,
+      value: `updated synced value`,
+    })
 
     // Clean up
     subscription.unsubscribe()
@@ -856,8 +893,14 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Verify initial state
     expect(collection.state.size).toBe(2)
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `initial value 1` })
-    expect(collection.state.get(2)).toEqual({ id: 2, value: `initial value 2` })
+    expect(stripVirtualProps(collection.state.get(1))).toEqual({
+      id: 1,
+      value: `initial value 1`,
+    })
+    expect(stripVirtualProps(collection.state.get(2))).toEqual({
+      id: 2,
+      value: `initial value 2`,
+    })
 
     expect(changeEvents).toHaveLength(2)
 
@@ -875,12 +918,12 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Verify delete events were emitted for all existing items
     expect(changeEvents).toHaveLength(2)
-    expect(changeEvents[0]).toEqual({
+    expect(normalizeChange(changeEvents[0])).toEqual({
       type: `delete`,
       key: 1,
       value: { id: 1, value: `initial value 1` },
     })
-    expect(changeEvents[1]).toEqual({
+    expect(normalizeChange(changeEvents[1])).toEqual({
       type: `delete`,
       key: 2,
       value: { id: 2, value: `initial value 2` },
@@ -955,11 +998,11 @@ describe(`Collection.subscribeChanges`, () => {
     // Verify collection is cleared
     // After truncate, preserved optimistic inserts should be re-applied
     expect(collection.state.size).toBe(2)
-    expect(collection.state.get(1)).toEqual({
+    expect(stripVirtualProps(collection.state.get(1))).toEqual({
       id: 1,
       value: `optimistic update 1`,
     })
-    expect(collection.state.get(3)).toEqual({
+    expect(stripVirtualProps(collection.state.get(3))).toEqual({
       id: 3,
       value: `optimistic insert`,
     })
@@ -974,29 +1017,29 @@ describe(`Collection.subscribeChanges`, () => {
     const deleteByKey = new Map(deletes.map((e) => [e.key, e]))
     const insertByKey = new Map(inserts.map((e) => [e.key, e]))
 
-    expect(deleteByKey.get(1)).toEqual({
+    expect(normalizeChange(deleteByKey.get(1))).toEqual({
       type: `delete`,
       key: 1,
       value: { id: 1, value: `optimistic update 1` },
     })
-    expect(deleteByKey.get(2)).toEqual({
+    expect(normalizeChange(deleteByKey.get(2))).toEqual({
       type: `delete`,
       key: 2,
       value: { id: 2, value: `initial value 2` },
     })
-    expect(deleteByKey.get(3)).toEqual({
+    expect(normalizeChange(deleteByKey.get(3))).toEqual({
       type: `delete`,
       key: 3,
       value: { id: 3, value: `optimistic insert` },
     })
 
     // Insert events for preserved optimistic entries (1 and 3)
-    expect(insertByKey.get(1)).toEqual({
+    expect(normalizeChange(insertByKey.get(1))).toEqual({
       type: `insert`,
       key: 1,
       value: { id: 1, value: `optimistic update 1` },
     })
-    expect(insertByKey.get(3)).toEqual({
+    expect(normalizeChange(insertByKey.get(3))).toEqual({
       type: `insert`,
       key: 3,
       value: { id: 3, value: `optimistic insert` },
@@ -1083,23 +1126,23 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Verify new data is added correctly
     expect(collection.state.size).toBe(2)
-    expect(collection.state.get(3)).toEqual({
+    expect(stripVirtualProps(collection.state.get(3))).toEqual({
       id: 3,
       value: `new value after truncate`,
     })
-    expect(collection.state.get(4)).toEqual({
+    expect(stripVirtualProps(collection.state.get(4))).toEqual({
       id: 4,
       value: `another new value`,
     })
 
     // Verify insert events were emitted for new data
     expect(changeEvents).toHaveLength(2)
-    expect(changeEvents[0]).toEqual({
+    expect(normalizeChange(changeEvents[0])).toEqual({
       type: `insert`,
       key: 3,
       value: { id: 3, value: `new value after truncate` },
     })
-    expect(changeEvents[1]).toEqual({
+    expect(normalizeChange(changeEvents[1])).toEqual({
       type: `insert`,
       key: 4,
       value: { id: 4, value: `another new value` },
@@ -1197,19 +1240,22 @@ describe(`Collection.subscribeChanges`, () => {
     // Note: Previously there was a duplicate insert event that was incorrectly
     // being sent, causing 3 events. Now duplicates are filtered correctly.
     expect(changeEvents.length).toBe(2)
-    expect(changeEvents[0]).toEqual({
+    expect(normalizeChange(changeEvents[0])).toEqual({
       type: `delete`,
       key: 1,
       value: { id: 1, value: `client-update` },
     })
-    expect(changeEvents[1]).toEqual({
+    expect(normalizeChange(changeEvents[1])).toEqual({
       type: `insert`,
       key: 1,
       value: { id: 1, value: `client-update` },
     })
 
     // Final state reflects optimistic value
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `client-update` })
+    expect(stripVirtualProps(collection.state.get(1))).toEqual({
+      id: 1,
+      value: `client-update`,
+    })
   })
 
   it(`truncate + optimistic delete: server reinserted key -> remains deleted (no duplicate delete event)`, async () => {
@@ -1304,7 +1350,7 @@ describe(`Collection.subscribeChanges`, () => {
     const deleteChanges = callback.mock.calls[0]![0] as ChangesPayload<{
       value: string
     }>
-    expect(deleteChanges).toEqual([
+    expect(normalizeChanges(deleteChanges)).toEqual([
       {
         type: `delete`,
         key: 1,
@@ -1364,7 +1410,10 @@ describe(`Collection.subscribeChanges`, () => {
           e.value.value === `client-insert`,
       ),
     ).toBe(true)
-    expect(collection.state.get(2)).toEqual({ id: 2, value: `client-insert` })
+    expect(stripVirtualProps(collection.state.get(2))).toEqual({
+      id: 2,
+      value: `client-insert`,
+    })
   })
 
   it(`truncate + optimistic update: server did NOT reinsert key -> optimistic insert then update minimal`, async () => {
@@ -1411,7 +1460,10 @@ describe(`Collection.subscribeChanges`, () => {
     expect(
       inserts.some((e) => e.key === 1 && e.value.value === `client-update`),
     ).toBe(true)
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `client-update` })
+    expect(stripVirtualProps(collection.state.get(1))).toEqual({
+      id: 1,
+      value: `client-update`,
+    })
   })
 
   it(`truncate + optimistic delete: server did NOT reinsert key -> remains deleted (no extra event)`, async () => {
@@ -1508,7 +1560,7 @@ describe(`Collection.subscribeChanges`, () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     expect(callback.mock.calls.length).toBe(1)
-    expect(callback.mock.calls[0]![0]).toEqual([
+    expect(normalizeChanges(callback.mock.calls[0]![0])).toEqual([
       {
         type: `delete`,
         key: 0,
@@ -1578,7 +1630,7 @@ describe(`Collection.subscribeChanges`, () => {
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     expect(callback.mock.calls.length).toBe(1)
-    expect(callback.mock.calls[0]![0]).toEqual([
+    expect(normalizeChanges(callback.mock.calls[0]![0])).toEqual([
       {
         type: `delete`,
         key: 0,
@@ -1743,12 +1795,12 @@ describe(`Collection.subscribeChanges`, () => {
     commit()
 
     expect(changeEvents).toHaveLength(2)
-    expect(changeEvents[0]).toEqual({
+    expect(normalizeChange(changeEvents[0])).toEqual({
       type: `insert`,
       key: 1,
       value: { id: 1, value: `first item` },
     })
-    expect(changeEvents[1]).toEqual({
+    expect(normalizeChange(changeEvents[1])).toEqual({
       type: `insert`,
       key: 2,
       value: { id: 2, value: `second item` },
@@ -1767,13 +1819,13 @@ describe(`Collection.subscribeChanges`, () => {
     commit()
 
     expect(changeEvents).toHaveLength(2)
-    expect(changeEvents[0]).toEqual({
+    expect(normalizeChange(changeEvents[0])).toEqual({
       type: `update`,
       key: 1,
       value: { id: 1, value: `first item updated` },
       previousValue: { id: 1, value: `first item` },
     })
-    expect(changeEvents[1]).toEqual({
+    expect(normalizeChange(changeEvents[1])).toEqual({
       type: `insert`,
       key: 3,
       value: { id: 3, value: `third item` },
@@ -1790,7 +1842,7 @@ describe(`Collection.subscribeChanges`, () => {
     commit()
 
     expect(changeEvents).toHaveLength(1)
-    expect(changeEvents[0]).toEqual({
+    expect(normalizeChange(changeEvents[0])).toEqual({
       type: `delete`,
       key: 2,
       value: { id: 2, value: `second item` },
@@ -1809,11 +1861,14 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Verify final state
     expect(collection.size).toBe(2)
-    expect(collection.state.get(1)).toEqual({
+    expect(stripVirtualProps(collection.state.get(1))).toEqual({
       id: 1,
       value: `first item updated`,
     })
-    expect(collection.state.get(3)).toEqual({ id: 3, value: `third item` })
+    expect(stripVirtualProps(collection.state.get(3))).toEqual({
+      id: 3,
+      value: `third item`,
+    })
   })
 
   it(`should emit change events while collection is loading for filtered subscriptions`, () => {
@@ -1861,7 +1916,7 @@ describe(`Collection.subscribeChanges`, () => {
 
     // Should only receive the active item
     expect(changeEvents).toHaveLength(1)
-    expect(changeEvents[0]).toEqual({
+    expect(normalizeChange(changeEvents[0])).toEqual({
       type: `insert`,
       key: 1,
       value: { id: 1, value: `active item`, active: true },
@@ -2056,7 +2111,7 @@ describe(`Collection.subscribeChanges`, () => {
     const initialChanges = callback.mock.calls[0]![0] as ChangesPayload<any>
     expect(initialChanges).toHaveLength(1)
     expect(initialChanges[0]!.key).toBe(2)
-    expect(initialChanges[0]!.value).toEqual({
+    expect(stripVirtualProps(initialChanges[0]!.value)).toEqual({
       id: 2,
       value: `item2`,
       status: `active`,
@@ -2080,5 +2135,196 @@ describe(`Collection.subscribeChanges`, () => {
         whereExpression: eq(new PropRef([`status`]), `active`),
       })
     }).toThrow(`Cannot specify both 'where' and 'whereExpression' options`)
+  })
+})
+
+describe(`Virtual properties`, () => {
+  it(`should include virtual properties in change messages`, async () => {
+    const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-change-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `row-1`, value: `synced` },
+          })
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: true },
+    )
+
+    await waitForChanges()
+
+    const insertChange = changes.find((change) => change.type === `insert`)
+    expect(insertChange).toBeDefined()
+
+    const value = insertChange!.value as Record<string, any>
+    expect(value.$synced).toBe(true)
+    expect(value.$origin).toBe(`remote`)
+    expect(value.$key).toBe(`row-1`)
+    expect(value.$collectionId).toBe(`virtual-props-change-test`)
+
+    subscription.unsubscribe()
+  })
+
+  it(`should set $synced false and $origin local for optimistic inserts`, async () => {
+    const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-optimistic-test`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+      onInsert: async () => {
+        await waitForChanges()
+      },
+    })
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    collection.insert({ id: `opt-1`, value: `optimistic` })
+    await waitForChanges()
+
+    const insertChange = changes.find((change) => change.key === `opt-1`)
+    expect(insertChange).toBeDefined()
+
+    const value = insertChange!.value as Record<string, any>
+    expect(value.$synced).toBe(false)
+    expect(value.$origin).toBe(`local`)
+
+    subscription.unsubscribe()
+  })
+
+  it(`should pass through virtual properties in live query collections`, async () => {
+    const source = createCollection<{ id: string; active: boolean }, string>({
+      id: `virtual-props-source`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `row-1`, active: true },
+          })
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    const live = createLiveQueryCollection({
+      id: `virtual-props-live`,
+      query: (q) =>
+        q.from({ item: source }).where(({ item }) => eq(item.active, true)),
+    })
+
+    const liveChanges: Array<ChangeMessage<any>> = []
+    const liveSub = live.subscribeChanges(
+      (events) => liveChanges.push(...events),
+      { includeInitialState: true },
+    )
+
+    await waitForChanges()
+
+    const liveRow = liveChanges[0]?.value as Record<string, any>
+    expect(liveRow.$synced).toBe(true)
+    expect(liveRow.$origin).toBe(`remote`)
+    expect(liveRow.$collectionId).toBe(`virtual-props-source`)
+
+    liveSub.unsubscribe()
+    await source.cleanup()
+    await live.cleanup()
+  })
+
+  it(`should allow filtering on $synced in live queries`, async () => {
+    const source = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-filter-source`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `synced-1`, value: `synced` },
+          })
+          commit()
+          markReady()
+        },
+      },
+      onInsert: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      },
+    })
+
+    const syncedOnly = createLiveQueryCollection({
+      id: `virtual-props-filter-live`,
+      query: (q) =>
+        q.from({ item: source }).where(({ item }) => eq(item.$synced, true)),
+    })
+
+    const liveChanges: Array<ChangeMessage<any>> = []
+    const liveSub = syncedOnly.subscribeChanges(
+      (events) => liveChanges.push(...events),
+      { includeInitialState: true },
+    )
+
+    await waitForChanges()
+
+    expect(liveChanges.some((change) => change.value.id === `synced-1`)).toBe(
+      true,
+    )
+
+    source.insert({ id: `optimistic-1`, value: `pending` })
+    await waitForChanges()
+
+    expect(liveChanges.some((change) => change.value.id === `optimistic-1`)).toBe(
+      false,
+    )
+
+    liveSub.unsubscribe()
+    await source.cleanup()
+    await syncedOnly.cleanup()
+  })
+
+  it(`should mark local-only collections as synced with local origin`, async () => {
+    const collection = createLocalOnlyCollection<{ id: string; value: string }>({
+      id: `virtual-props-local-only`,
+      getKey: (item) => item.id,
+    })
+
+    const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    collection.insert({ id: `local-1`, value: `local` })
+    await waitForChanges()
+
+    const insertChange = changes.find((change) => change.key === `local-1`)
+    expect(insertChange).toBeDefined()
+
+    const value = insertChange!.value as Record<string, any>
+    expect(value.$synced).toBe(true)
+    expect(value.$origin).toBe(`local`)
+
+    subscription.unsubscribe()
+    await collection.cleanup()
   })
 })

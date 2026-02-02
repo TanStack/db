@@ -2,6 +2,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
 import type { LoadSubsetOptions, SyncConfig } from '../src/types'
 
+const stripVirtualProps = <T extends Record<string, unknown> | undefined>(
+  value: T,
+) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value
+  return rest as T
+}
+
+const getStateValue = <
+  T extends Record<string, unknown>,
+  TKey extends string | number,
+>(
+  collection: { state: Map<TKey, T> },
+  key: TKey,
+) => stripVirtualProps(collection.state.get(key))
+
 describe(`Collection truncate operations`, () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -75,9 +97,9 @@ describe(`Collection truncate operations`, () => {
 
     // Verify final state includes all items
     expect(collection.state.size).toBe(3)
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `initial-1` })
-    expect(collection.state.get(2)).toEqual({ id: 2, value: `initial-2` })
-    expect(collection.state.get(3)).toEqual({ id: 3, value: `new-item` })
+    expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `initial-1` })
+    expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `initial-2` })
+    expect(getStateValue(collection, 3)).toEqual({ id: 3, value: `new-item` })
 
     // Verify only one insert event for the optimistic item
     const key3Inserts = changeEvents.filter(
@@ -138,7 +160,7 @@ describe(`Collection truncate operations`, () => {
     expect(collection.state.size).toBe(2)
     expect(collection.state.has(1)).toBe(true)
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.state.get(2)).toEqual({ id: 2, value: `new-item` })
+    expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `new-item` })
   })
 
   it(`should handle truncate on empty collection followed by mutation sync`, async () => {
@@ -194,7 +216,7 @@ describe(`Collection truncate operations`, () => {
     await tx.isPersisted.promise
 
     // Item should be present in final state
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `user-item` })
+    expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `user-item` })
 
     // Should not have duplicate insert events
     const insertCount = changeEvents.filter(
@@ -329,9 +351,12 @@ describe(`Collection truncate operations`, () => {
 
     expect(collection.state.size).toBe(2)
     expect(collection.state.has(1)).toBe(true)
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `server-item` })
+    expect(getStateValue(collection, 1)).toEqual({
+      id: 1,
+      value: `server-item`,
+    })
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.state.get(2)).toEqual({
+    expect(getStateValue(collection, 2)).toEqual({
       id: 2,
       value: `late-optimistic`,
     })
@@ -400,7 +425,10 @@ describe(`Collection truncate operations`, () => {
     expect(collection.state.size).toBe(2)
     expect(collection.state.has(1)).toBe(true)
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.state.get(2)).toEqual({ id: 2, value: `optimistic-item` })
+    expect(getStateValue(collection, 2)).toEqual({
+      id: 2,
+      value: `optimistic-item`,
+    })
   })
 
   it(`should preserve optimistic delete when transaction still active during truncate`, async () => {
@@ -490,7 +518,10 @@ describe(`Collection truncate operations`, () => {
     collection.subscribeChanges((changes) => changeEvents.push(...changes))
     await collection.stateWhenReady()
 
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `server-value-1` })
+    expect(getStateValue(collection, 1)).toEqual({
+      id: 1,
+      value: `server-value-1`,
+    })
     changeEvents.length = 0
 
     // Optimistically update item 1 (handler stays pending)
@@ -498,7 +529,7 @@ describe(`Collection truncate operations`, () => {
       draft.value = `optimistic-value`
     })
 
-    expect(collection.state.get(1)).toEqual({
+    expect(getStateValue(collection, 1)).toEqual({
       id: 1,
       value: `optimistic-value`,
     })
@@ -515,7 +546,7 @@ describe(`Collection truncate operations`, () => {
     syncOps!.commit()
 
     // Optimistic value should win (client intent preserved)
-    expect(collection.state.get(1)).toEqual({
+    expect(getStateValue(collection, 1)).toEqual({
       id: 1,
       value: `optimistic-value`,
     })
@@ -626,7 +657,7 @@ describe(`Collection truncate operations`, () => {
       draft.value = `value-1`
     })
 
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `value-1` })
+    expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `value-1` })
 
     // Truncate is called (snapshot captures value-1)
     syncOps!.begin()
@@ -637,14 +668,14 @@ describe(`Collection truncate operations`, () => {
       draft.value = `value-2`
     })
 
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `value-2` })
+    expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `value-2` })
 
     // Now commit the truncate
     syncOps!.write({ type: `insert`, value: { id: 1, value: `initial` } })
     syncOps!.commit()
 
     // Should show value-2 (newest intent wins)
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `value-2` })
+    expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `value-2` })
 
     // Clean up
     onUpdateResolvers.forEach((r) => r())
@@ -704,7 +735,7 @@ describe(`Collection truncate operations`, () => {
     // Item 2 should still be present (preserved from snapshot)
     expect(collection.state.size).toBe(2)
     expect(collection.state.has(2)).toBe(true)
-    expect(collection.state.get(2)).toEqual({ id: 2, value: `optimistic` })
+    expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `optimistic` })
   })
 
   it(`should buffer subscription changes during truncate until loadSubset refetch completes`, async () => {
@@ -820,8 +851,8 @@ describe(`Collection truncate operations`, () => {
 
     // Verify final state is correct
     expect(collection.state.size).toBe(2)
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `refetched-1` })
-    expect(collection.state.get(2)).toEqual({ id: 2, value: `refetched-2` })
+    expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `refetched-1` })
+    expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `refetched-2` })
 
     subscription.unsubscribe()
   })
@@ -1125,8 +1156,8 @@ describe(`Collection truncate operations`, () => {
 
     // Verify collection state is correct
     expect(collection.state.size).toBe(2)
-    expect(collection.state.get(1)).toEqual({ id: 1, value: `sync-item-1` })
-    expect(collection.state.get(2)).toEqual({ id: 2, value: `sync-item-2` })
+    expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `sync-item-1` })
+    expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `sync-item-2` })
 
     subscription.unsubscribe()
   })
