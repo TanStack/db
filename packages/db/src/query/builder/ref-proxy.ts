@@ -1,6 +1,36 @@
 import { PropRef, Value } from '../ir.js'
+import { JavaScriptOperatorInQueryError } from '../../errors.js'
 import type { BasicExpression } from '../ir.js'
 import type { RefLeaf } from './types.js'
+
+/**
+ * Creates a handler for Symbol.toPrimitive that throws an error when
+ * JavaScript tries to coerce a RefProxy to a primitive value.
+ * This catches misuse like string concatenation, arithmetic, etc.
+ */
+function getOperatorTypeFromHint(hint: string): string {
+  switch (hint) {
+    case `number`:
+      return `arithmetic`
+    case `string`:
+      return `string concatenation`
+    default:
+      return `comparison`
+  }
+}
+
+function createToPrimitiveHandler(
+  path: Array<string>,
+): (hint: string) => never {
+  return (hint: string) => {
+    const pathStr = path.length > 0 ? path.join(`.`) : `<root>`
+    throw new JavaScriptOperatorInQueryError(
+      getOperatorTypeFromHint(hint),
+      `Attempted to use "${pathStr}" in a JavaScript ${hint} context.\n` +
+        `Query references can only be used with query functions, not JavaScript operators.`,
+    )
+  }
+}
 
 export interface RefProxy<T = any> {
   /** @internal */
@@ -44,6 +74,10 @@ export function createSingleRowRefProxy<
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
+        // Intercept Symbol.toPrimitive to catch JS coercion attempts
+        if (prop === Symbol.toPrimitive) {
+          return createToPrimitiveHandler(path)
+        }
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
@@ -97,6 +131,10 @@ export function createRefProxy<T extends Record<string, any>>(
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return path
         if (prop === `__type`) return undefined // Type is only for TypeScript inference
+        // Intercept Symbol.toPrimitive to catch JS coercion attempts
+        if (prop === Symbol.toPrimitive) {
+          return createToPrimitiveHandler(path)
+        }
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
@@ -140,6 +178,10 @@ export function createRefProxy<T extends Record<string, any>>(
       if (prop === `__refProxy`) return true
       if (prop === `__path`) return []
       if (prop === `__type`) return undefined // Type is only for TypeScript inference
+      // Intercept Symbol.toPrimitive to catch JS coercion attempts
+      if (prop === Symbol.toPrimitive) {
+        return createToPrimitiveHandler([])
+      }
       if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
       const propStr = String(prop)
@@ -204,6 +246,10 @@ export function createRefProxyWithSelected<T extends Record<string, any>>(
         if (prop === `__refProxy`) return true
         if (prop === `__path`) return [`$selected`, ...path]
         if (prop === `__type`) return undefined
+        // Intercept Symbol.toPrimitive to catch JS coercion attempts
+        if (prop === Symbol.toPrimitive) {
+          return createToPrimitiveHandler([`$selected`, ...path])
+        }
         if (typeof prop === `symbol`) return Reflect.get(target, prop, receiver)
 
         const newPath = [...path, String(prop)]
@@ -302,4 +348,84 @@ export function isRefProxy(value: any): value is RefProxy {
  */
 export function val<T>(value: T): BasicExpression<T> {
   return new Value(value)
+}
+
+/**
+ * Checks a callback function's source code for JavaScript operators that
+ * cannot be translated to query operations.
+ *
+ * Only runs in development mode (NODE_ENV !== 'production') and logs a warning
+ * instead of throwing, since regex-based detection can have false positives
+ * (e.g., operators inside regex literals).
+ *
+ * All detection logic is inside the dev check so bundlers can eliminate it
+ * entirely from production builds.
+ *
+ * @param callback - The callback function to check
+ *
+ * @example
+ * // This will log a warning in dev:
+ * checkCallbackForJsOperators(({users}) => users.data || [])
+ *
+ * // This is fine:
+ * checkCallbackForJsOperators(({users}) => users.data)
+ */
+export function checkCallbackForJsOperators<
+  T extends (...args: Array<any>) => any,
+>(callback: T): void {
+  if (process.env.NODE_ENV !== `production`) {
+    // Patterns that indicate JavaScript operators being used in query callbacks
+    const JS_OPERATOR_PATTERNS = [
+      { pattern: /\|\|/, operator: `||`, description: `logical OR` },
+      { pattern: /&&/, operator: `&&`, description: `logical AND` },
+      { pattern: /\?\?/, operator: `??`, description: `nullish coalescing` },
+      {
+        // Matches ? followed by : with something in between,
+        // but not ?. (optional chaining) or ?? (nullish coalescing)
+        pattern: /\?[^.?][^:]*:/,
+        operator: `?:`,
+        description: `ternary`,
+      },
+    ]
+
+    const getHintForOperator = (operator: string): string => {
+      switch (operator) {
+        case `||`:
+        case `??`:
+          return `Use coalesce() instead: coalesce(value, defaultValue)`
+        case `&&`:
+          return `Use and() for logical conditions`
+        case `?:`:
+          return `Use cond() for conditional expressions: cond(condition, trueValue, falseValue)`
+        default:
+          return `Use the appropriate query function instead`
+      }
+    }
+
+    // Strip string literals and comments to avoid false positives
+    const cleanedSource = callback
+      .toString()
+      .replace(/`(?:[^`\\]|\\.)*`/g, `""`) // template literals
+      .replace(/"(?:[^"\\]|\\.)*"/g, `""`) // double-quoted strings
+      .replace(/'(?:[^'\\]|\\.)*'/g, `""`) // single-quoted strings
+      .replace(/\/\/[^\n]*/g, ``) // single-line comments
+      .replace(/\/\*[\s\S]*?\*\//g, ``) // multi-line comments
+
+    for (const { pattern, operator, description } of JS_OPERATOR_PATTERNS) {
+      if (pattern.test(cleanedSource)) {
+        console.warn(
+          `[TanStack DB] JavaScript operator "${operator}" detected in query callback.\n\n` +
+            `Found JavaScript ${description} operator (${operator}) in query callback.\n` +
+            `This operator is evaluated at query construction time, not at query execution time,\n` +
+            `which means it will not behave as expected.\n\n` +
+            `${getHintForOperator(operator)}\n\n` +
+            `Example of incorrect usage:\n` +
+            `  .select(({users}) => ({ data: users.data || [] }))\n\n` +
+            `Correct usage:\n` +
+            `  .select(({users}) => ({ data: coalesce(users.data, []) }))`,
+        )
+        return // Only warn once per callback
+      }
+    }
+  }
 }
