@@ -32,6 +32,7 @@ The result types are automatically inferred from your query structure, providing
 ## Table of Contents
 
 - [Creating Live Query Collections](#creating-live-query-collections)
+- [One-shot Queries with queryOnce](#one-shot-queries-with-queryonce)
 - [From Clause](#from-clause)
 - [Where Clauses](#where-clauses)
 - [Select Projections](#select)
@@ -113,6 +114,35 @@ const activeUsers = createLiveQueryCollection((q) =>
     }))
 )
 ```
+
+## One-shot Queries with queryOnce
+
+If you need a one-time snapshot (no ongoing reactivity), use `queryOnce`. It
+creates a live query collection, preloads it, extracts the results, and cleans
+up automatically so you do not have to remember to call `cleanup()`.
+
+```ts
+import { queryOnce } from '@tanstack/db'
+
+// Basic one-shot query
+const activeUsers = await queryOnce((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.active, true))
+    .select(({ user }) => ({ id: user.id, name: user.name }))
+)
+
+// Single result with findOne()
+const user = await queryOnce((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.id, userId))
+    .findOne()
+)
+```
+
+Use `queryOnce` for scripts, background tasks, data export, or AI/LLM context
+building. For UI bindings and reactive updates, use live queries instead.
 
 ### Using with Frameworks
 
