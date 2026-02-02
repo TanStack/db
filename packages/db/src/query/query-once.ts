@@ -79,11 +79,11 @@ export async function queryOnce<TContext extends Context>(
       ? { query: configOrQuery }
       : configOrQuery
 
-  // Create collection with immediate GC (gcTime: 0) and start sync immediately
+  // Create collection with minimal GC time and start sync immediately
   const collection = createLiveQueryCollection({
     query: config.query,
     startSync: true,
-    gcTime: 0, // Cleanup immediately when no subscribers
+    gcTime: 1, // Cleanup in next tick when no subscribers (0 disables GC)
   })
 
   try {
