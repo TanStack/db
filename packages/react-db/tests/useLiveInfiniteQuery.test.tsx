@@ -629,7 +629,7 @@ describe(`useLiveInfiniteQuery`, () => {
         {
           pageSize: 10,
           initialPageParam: 0,
-          getNextPageParam: (lastPage, allPages, lastPageParam) =>
+          getNextPageParam: (lastPage, _allPages, lastPageParam) =>
             lastPage.length === 10 ? lastPageParam + 1 : undefined,
         },
       )
@@ -838,7 +838,7 @@ describe(`useLiveInfiniteQuery`, () => {
         {
           pageSize: 10,
           initialPageParam: 100,
-          getNextPageParam: (lastPage, allPages, lastPageParam) =>
+          getNextPageParam: (lastPage, _allPages, lastPageParam) =>
             lastPage.length === 10 ? lastPageParam + 1 : undefined,
         },
       )
@@ -988,10 +988,8 @@ describe(`useLiveInfiniteQuery`, () => {
   })
 
   it(`should request limit+1 (peek-ahead) from loadSubset for hasNextPage detection`, async () => {
-    // This test verifies that useLiveInfiniteQuery requests pageSize+1 items from loadSubset
-    // so that it can detect whether there are more pages available (peek-ahead strategy).
-    // Bug report: https://discord.com - useLiveInfiniteQuery always returns false for hasMorePages
-    // because the shape request is sent with limit=PAGE_SIZE instead of PAGE_SIZE+1
+    // Verifies that useLiveInfiniteQuery requests pageSize+1 items from loadSubset
+    // to detect whether there are more pages available (peek-ahead strategy)
     const PAGE_SIZE = 10
     const allPosts = createMockPosts(PAGE_SIZE) // Exactly PAGE_SIZE posts
 
@@ -1051,22 +1049,14 @@ describe(`useLiveInfiniteQuery`, () => {
       expect(result.current.isReady).toBe(true)
     })
 
-    // The initial load should request PAGE_SIZE + 1 items (peek-ahead)
-    // to detect if there are more pages available
-    expect(loadSubsetCalls.length).toBeGreaterThan(0)
-
-    // Find the loadSubset call that has a limit (the initial page load)
-    const callsWithLimit = loadSubsetCalls.filter(
+    // Find the loadSubset call with a limit (the initial page load)
+    const callWithLimit = loadSubsetCalls.find(
       (call) => call.limit !== undefined,
     )
-    expect(callsWithLimit.length).toBeGreaterThan(0)
+    expect(callWithLimit).toBeDefined()
+    expect(callWithLimit!.limit).toBe(PAGE_SIZE + 1)
 
-    // The limit should be PAGE_SIZE + 1 for peek-ahead detection
-    const firstCallWithLimit = callsWithLimit[0]!
-    expect(firstCallWithLimit.limit).toBe(PAGE_SIZE + 1)
-
-    // With PAGE_SIZE posts and requesting PAGE_SIZE+1, hasNextPage should be false
-    // because we only get PAGE_SIZE items back (no peek-ahead item)
+    // With exactly PAGE_SIZE posts, hasNextPage should be false (no peek-ahead item returned)
     expect(result.current.hasNextPage).toBe(false)
     expect(result.current.data).toHaveLength(PAGE_SIZE)
   })
