@@ -3,6 +3,7 @@ import { CollectionImpl } from '@tanstack/db'
 import { useLiveQuery } from './useLiveQuery'
 import type {
   Collection,
+  CollectionStatus,
   Context,
   InferResultType,
   InitialQueryBuilder,
@@ -20,9 +21,37 @@ function isLiveQueryCollectionUtils(
   return typeof (utils as any).setWindow === `function`
 }
 
+/**
+ * Calculate initial page count from existing collection window state.
+ * This allows restoring pagination state when the component remounts.
+ */
+function getPageCountFromWindow(
+  collection: Collection<any, any, any> | undefined,
+  pageSize: number,
+): number {
+  if (!collection) return 1
+
+  const utils = collection.utils
+  if (!isLiveQueryCollectionUtils(utils)) return 1
+
+  const window = utils.getWindow()
+  if (window && window.limit > 0) {
+    // window.limit = pageCount * pageSize + 1 (the +1 is for peek-ahead)
+    return Math.max(1, Math.floor((window.limit - 1) / pageSize))
+  }
+
+  return 1
+}
+
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
   pageSize?: number
   initialPageParam?: number
+  /**
+   * Time in milliseconds before the live query collection is garbage collected
+   * after all subscribers leave. Set to 0 to disable GC and preserve pagination
+   * state across navigation. Default uses useLiveQuery's default (1ms).
+   */
+  gcTime?: number
   getNextPageParam: (
     lastPage: Array<InferResultType<TContext>[number]>,
     allPages: Array<Array<InferResultType<TContext>[number]>>,
@@ -116,8 +145,34 @@ export function useLiveInfiniteQuery<
   TUtils extends Record<string, any>,
 >(
   liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult,
-  config: UseLiveInfiniteQueryConfig<any>,
-): UseLiveInfiniteQueryReturn<any>
+  config: {
+    pageSize?: number
+    initialPageParam?: number
+    gcTime?: number
+    getNextPageParam: (
+      lastPage: Array<TResult>,
+      allPages: Array<Array<TResult>>,
+      lastPageParam: number,
+      allPageParams: Array<number>,
+    ) => number | undefined
+  },
+): {
+  state: Map<TKey, TResult>
+  data: Array<TResult>
+  collection: Collection<TResult, TKey, TUtils>
+  status: CollectionStatus
+  isLoading: boolean
+  isReady: boolean
+  isIdle: boolean
+  isError: boolean
+  isCleanedUp: boolean
+  isEnabled: true
+  pages: Array<Array<TResult>>
+  pageParams: Array<number>
+  fetchNextPage: () => void
+  hasNextPage: boolean
+  isFetchingNextPage: boolean
+}
 
 // Overload for query function
 export function useLiveInfiniteQuery<TContext extends Context>(
@@ -146,13 +201,39 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     )
   }
 
+  // Create a live query with initial limit and offset
+  // Either pass collection directly or wrap query function
+  // Use pageSize + 1 for the initial limit to include the peek-ahead item
+  // NOTE: This must come before state initialization so we can restore from window
+  const queryResult = isCollection
+    ? useLiveQuery(queryFnOrCollection)
+    : useLiveQuery(
+        (q) => {
+          const query = queryFnOrCollection(q).limit(pageSize + 1).offset(0)
+          // Return config object to pass gcTime through (if provided)
+          // When gcTime is undefined, useLiveQuery uses its default (1ms)
+          return config.gcTime !== undefined
+            ? { query, gcTime: config.gcTime }
+            : query
+        },
+        deps,
+      )
+
   // Track how many pages have been loaded
-  const [loadedPageCount, setLoadedPageCount] = useState(1)
+  // Initialize from collection window to restore state after navigation
+  const [loadedPageCount, setLoadedPageCount] = useState(() =>
+    getPageCountFromWindow(queryResult.collection, pageSize),
+  )
   const [isFetchingNextPage, setIsFetchingNextPage] = useState(false)
+
+  // Use a ref to track fetching state synchronously (closure values can be stale during rapid scrolling)
+  const isFetchingRef = useRef(false)
 
   // Track collection instance and whether we've validated it (only for pre-created collections)
   const collectionRef = useRef(isCollection ? queryFnOrCollection : null)
   const hasValidatedCollectionRef = useRef(false)
+  // Track if this is the initial mount (vs. a remount after navigation)
+  const isInitialMountRef = useRef(true)
 
   // Track deps for query functions (stringify for comparison)
   const depsKey = JSON.stringify(deps)
@@ -160,6 +241,12 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
   // Reset pagination when inputs change
   useEffect(() => {
+    // Skip the initial mount - we want to preserve restored state from initial useState
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false
+      return
+    }
+
     let shouldReset = false
 
     if (isCollection) {
@@ -167,30 +254,24 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       if (collectionRef.current !== queryFnOrCollection) {
         collectionRef.current = queryFnOrCollection
         hasValidatedCollectionRef.current = false
+        // Always reset when collection instance changes (user is switching data sources)
         shouldReset = true
       }
     } else {
       // Reset if deps changed (for query functions)
       if (prevDepsKeyRef.current !== depsKey) {
         prevDepsKeyRef.current = depsKey
+        // Always reset when deps change (query parameters changed)
         shouldReset = true
       }
     }
 
     if (shouldReset) {
       setLoadedPageCount(1)
+      isFetchingRef.current = false
+      setIsFetchingNextPage(false)
     }
   }, [isCollection, queryFnOrCollection, depsKey])
-
-  // Create a live query with initial limit and offset
-  // Either pass collection directly or wrap query function
-  // Use pageSize + 1 for the initial limit to include the peek-ahead item
-  const queryResult = isCollection
-    ? useLiveQuery(queryFnOrCollection)
-    : useLiveQuery(
-        (q) => queryFnOrCollection(q).limit(pageSize + 1).offset(0),
-        deps,
-      )
 
   // Adjust window when pagination changes
   useEffect(() => {
@@ -236,11 +317,17 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     })
 
     if (result !== true) {
+      // Async setWindow - ensure both ref and state are set
+      // (ref may already be true from fetchNextPage, or false on initial mount)
+      isFetchingRef.current = true
       setIsFetchingNextPage(true)
       result.then(() => {
+        isFetchingRef.current = false
         setIsFetchingNextPage(false)
       })
     } else {
+      // Synchronous completion
+      isFetchingRef.current = false
       setIsFetchingNextPage(false)
     }
   }, [
@@ -261,6 +348,10 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     // Check if we have more data than requested (the peek ahead item)
     const hasMore = dataArray.length > totalItemsRequested
 
+    // During page fetch, assume there's more data
+    // This prevents hasNextPage from becoming false prematurely during loading transitions
+    const assumeMoreDuringFetch = isFetchingNextPage
+
     // Build pages array (without the peek ahead item)
     const pagesResult: Array<Array<InferResultType<TContext>[number]>> = []
     const pageParamsResult: Array<number> = []
@@ -280,17 +371,28 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     return {
       pages: pagesResult,
       pageParams: pageParamsResult,
-      hasNextPage: hasMore,
+      hasNextPage: hasMore || assumeMoreDuringFetch,
       flatData: flatDataResult,
     }
-  }, [queryResult.data, loadedPageCount, pageSize, initialPageParam])
+  }, [
+    queryResult.data,
+    loadedPageCount,
+    pageSize,
+    initialPageParam,
+    isFetchingNextPage,
+  ])
 
   // Fetch next page
   const fetchNextPage = useCallback(() => {
-    if (!hasNextPage || isFetchingNextPage) return
+    // Use ref for synchronous check to prevent race conditions during rapid scrolling
+    // (closure values can be stale when virtualizer.range changes rapidly)
+    if (!hasNextPage || isFetchingRef.current) return
 
+    // Set ref immediately for synchronous guard
+    isFetchingRef.current = true
+    setIsFetchingNextPage(true)
     setLoadedPageCount((prev) => prev + 1)
-  }, [hasNextPage, isFetchingNextPage])
+  }, [hasNextPage])
 
   return {
     ...queryResult,
