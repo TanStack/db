@@ -1056,7 +1056,9 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(loadSubsetCalls.length).toBeGreaterThan(0)
 
     // Find the loadSubset call that has a limit (the initial page load)
-    const callsWithLimit = loadSubsetCalls.filter((call) => call.limit !== undefined)
+    const callsWithLimit = loadSubsetCalls.filter(
+      (call) => call.limit !== undefined,
+    )
     expect(callsWithLimit.length).toBeGreaterThan(0)
 
     // The limit should be PAGE_SIZE + 1 for peek-ahead detection
