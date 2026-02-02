@@ -188,7 +188,10 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const queryResult = isCollection
     ? useLiveQuery(queryFnOrCollection)
     : useLiveQuery(
-        (q) => queryFnOrCollection(q).limit(pageSize + 1).offset(0),
+        (q) =>
+          queryFnOrCollection(q)
+            .limit(pageSize + 1)
+            .offset(0),
         deps,
       )
 
