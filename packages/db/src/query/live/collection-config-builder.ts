@@ -336,12 +336,23 @@ export class CollectionConfigBuilder<
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
+        let callbackCalled = false
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
           // Flush accumulated changes after each graph step to commit them as one transaction.
           // This ensures intermediate join states (like null on one side) don't cause
           // duplicate key errors when the full join result arrives in the same step.
           syncState.flushPendingChanges?.()
+          callback?.()
+          callbackCalled = true
+        }
+
+        // Call the callback at least once if it wasn't already called (no pending work).
+        // This is important for lazy loading scenarios where:
+        // 1. setWindow() increases the limit and needs to trigger loadMoreIfNeeded
+        // 2. An async loadSubset completes and we need to check if more data is needed
+        // Without this, the callback would never be called if the graph has no work.
+        if (!callbackCalled) {
           callback?.()
         }
 

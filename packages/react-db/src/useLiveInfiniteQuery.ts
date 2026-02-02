@@ -184,10 +184,14 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
   // Create a live query with initial limit and offset
   // Either pass collection directly or wrap query function
+  // Use pageSize + 1 for peek-ahead detection (to know if there are more pages)
   const queryResult = isCollection
     ? useLiveQuery(queryFnOrCollection)
     : useLiveQuery(
-        (q) => queryFnOrCollection(q).limit(pageSize).offset(0),
+        (q) =>
+          queryFnOrCollection(q)
+            .limit(pageSize + 1)
+            .offset(0),
         deps,
       )
 
