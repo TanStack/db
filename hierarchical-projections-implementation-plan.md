@@ -1,0 +1,178 @@
+# Hierarchical Projections Implementation Plan
+
+Source RFC: hierarchical-projections-rfc.md (lines 1-1938)
+Status: draft plan
+
+## Goals
+- Allow subqueries in select() that return ChildCollection<T>.
+- Extract a single parent-child join key from child WHERE.
+- Compile child branches as parallel D2 outputs (not N+1).
+- Support per-parent ordering and limits.
+- Support nested (multi-level) child collections.
+- Disallow child collection fields in parent WHERE/HAVING.
+
+## Non-goals (v1)
+- asArray() / asMap() projection of child data into parent rows.
+- Composite join keys and complex join expressions.
+- Server-side rendering of child collections.
+
+## Stage 0: Foundation and IR plumbing
+Objective: establish types, IR nodes, and error types without behavior changes.
+
+Scope
+- Types:
+  - Add ChildCollection<T> brand type.
+  - Extend SelectValue and ResultTypeFromSelect to handle BaseQueryBuilder.
+- IR:
+  - Add SubQuerySelectRef and include in isExpressionLike().
+- Errors:
+  - MissingJoinKeyError, InvalidJoinExpressionError,
+    ChildCollectionAccessError, SubQueryMustHaveFromClauseError,
+    PerParentOrderByRequiresPreSelectError.
+
+Deliverables
+- Type changes compile.
+- IR nodes exist and are recognized by expression checks.
+- Errors exported for use by builder/compiler.
+
+Exit criteria
+- Type-only tests or typecheck pass.
+
+## Stage 1: ChildCollection runtime and basic includes
+Objective: basic child collections without orderBy/limit/aggregates/child joins.
+
+Scope
+- Builder:
+  - Detect BaseQueryBuilder in select before isPlainObject.
+  - Emit SubQuerySelectRef and metadata extraction for join key.
+- Compiler:
+  - Extract join key from original child WHERE (eq parent-child).
+  - Strip join predicate from child WHERE.
+  - Ensure join key is included in child SELECT (hidden field if needed).
+  - Add preSelectPipeline to CompilationResult when child collections exist.
+- Live query:
+  - Defer graph.finalize until all outputs are wired.
+  - Add ChildCollectionManager and fan-out wiring.
+  - Cleanup child collections on parent delete.
+- Validation:
+  - Track child fields from select and reject in parent WHERE/HAVING.
+
+Deliverables
+- Basic include works: parent select returns ChildCollection handle.
+- Child collection updates on insert/update/delete.
+- Parent delete removes child collection.
+
+Tests
+- Query with subquery select and simple eq join key.
+- Join key missing throws MissingJoinKeyError.
+- Child query missing FROM throws SubQueryMustHaveFromClauseError.
+- Child field usage in parent WHERE/HAVING throws ChildCollectionAccessError.
+
+Exit criteria
+- All tests green for basic includes.
+
+## Stage 2: Per-parent orderBy, limit, offset
+Objective: enable per-parent ordering and pagination using groupedOrderBy.
+
+Scope
+- Use child preSelectPipeline to evaluate orderBy expressions.
+- Mirror processOrderBy semantics (replaceAggregatesByRefs,
+  buildCompareOptions, makeComparator).
+- groupedOrderByWithFractionalIndex for per-parent ordering/limit/offset.
+- Map grouped output to [parentKey, [childKey, selectedRow, index]].
+
+Deliverables
+- Child collections ordered independently per parent.
+- limit/offset applied per parent, not globally.
+
+Tests
+- Two parents with interleaved child inserts maintain independent order.
+- limit/offset edge cases (0, 1, undefined).
+- Mixed orderBy direction and nulls behavior matches normal query.
+
+Exit criteria
+- OrderBy/limit parity with normal queries.
+
+## Stage 3: Aggregates and $selected references in child orderBy
+Objective: allow child orderBy expressions that reference aggregates.
+
+Scope
+- Ensure replaceAggregatesByRefs and $selected handling works for child.
+- Validate orderBy expressions compile against namespaced rows with $selected.
+- Ensure auto-added join key does not pollute aggregates or select outputs.
+
+Deliverables
+- orderBy on aggregate expression works within child query.
+
+Tests
+- Child query with groupBy + aggregate select and orderBy aggregate.
+- orderBy referencing $selected alias.
+
+Exit criteria
+- Aggregate ordering behaves like normal queries.
+
+## Stage 4: Child queries with joins (within child branch)
+Objective: allow child subqueries that join additional collections.
+
+Scope
+- Expand join key extraction to handle child alias sets from joins.
+- Ensure child compilation supports multi-source aliases.
+- Validate join key only references one parent alias and one child alias.
+
+Deliverables
+- Child query with join compiles and runs.
+
+Tests
+- Child query with join and parent join key in WHERE.
+- Invalid join expression throws InvalidJoinExpressionError.
+
+Exit criteria
+- Child joins work without regressions.
+
+## Stage 5: Multi-level child collections
+Objective: recursive child collections (grandchildren, etc).
+
+Scope
+- Track nested child metadata in builder.
+- Recursively compile child branches using child preSelectPipeline.
+- Cleanup nested child collections on parent delete.
+
+Deliverables
+- Parent -> child -> grandchild works with fan-out.
+
+Tests
+- 2-level nesting with inserts/deletes at each level.
+- Parent removal cleans up child and grandchild collections.
+
+Exit criteria
+- Multi-level includes behave consistently.
+
+## Stage 6: Hardening, docs, and examples
+Objective: stabilize UX and document usage.
+
+Scope
+- Add docs/examples for React usage and nested patterns.
+- Add error message guidance and troubleshooting.
+- Performance sanity checks on large parent sets.
+
+Deliverables
+- Documentation and example updates.
+- Any final refactors to simplify code paths.
+
+Exit criteria
+- Docs updated and reviewed.
+
+## Cross-cutting constraints and risk notes
+- Keep join key extraction on original query (pre-optimization).
+- Ensure join key field is available post-select for child branches.
+- Avoid leaking hidden join key fields to users.
+- Preserve type safety (avoid any).
+- Defer graph finalization until all outputs are wired.
+
+## Open questions / blockers
+1) Should ChildCollection be exported as part of the public API, or remain
+   an internal type with a branded alias?
+2) Where should tests live for live query + D2 graph fan-out (existing
+   harness or new integration tests)?
+3) Any desire to include child joins in v1, or keep them for later?
+4) Preferred filename or location for this plan (top-level OK)?
