@@ -50,6 +50,13 @@ export class CollectionSyncManager<
   private pendingLoadSubsetPromises: Set<Promise<void>> = new Set()
 
   /**
+   * Tracks whether ANY loadSubset has been called on this collection.
+   * Used to detect cross-query contamination: when a new subscription sees
+   * data loaded by a DIFFERENT subscription's loadSubset call.
+   */
+  public hasLoadSubsetBeenCalled = false
+
+  /**
    * Creates a new CollectionSyncManager instance
    */
   constructor(config: CollectionConfig<TOutput, TKey, TSchema>, id: string) {
@@ -349,6 +356,10 @@ export class CollectionSyncManager<
     }
 
     if (this.syncLoadSubsetFn) {
+      // Mark that loadSubset has been called on this collection.
+      // This is used to detect cross-query contamination in subscriptions.
+      this.hasLoadSubsetBeenCalled = true
+
       const result = this.syncLoadSubsetFn(options)
       // If the result is a promise, track it
       if (result instanceof Promise) {
