@@ -1,5 +1,11 @@
 # @tanstack/db-ivm
 
+## 0.1.17
+
+### Patch Changes
+
+- Add string support to `min()` and `max()` aggregate functions. These functions now work with strings using lexicographic comparison, matching standard SQL behavior. ([#1120](https://github.com/TanStack/db/pull/1120))
+
 ## 0.1.16
 
 ### Patch Changes

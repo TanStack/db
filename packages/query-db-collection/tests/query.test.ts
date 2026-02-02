@@ -2286,6 +2286,99 @@ describe(`QueryCollection`, () => {
       expect(todo?.id).not.toBe(clientId)
     })
 
+    it(`should update syncedData immediately when writeUpsert is called after async API in onUpdate handler`, async () => {
+      // Reproduces bug where syncedData shows stale values when writeUpsert is called
+      // AFTER an async API call in a mutation handler. The async await causes the
+      // transaction to be added to state.transactions before writeUpsert runs,
+      // which means commitPendingTransactions() sees hasPersistingTransaction=true
+      // and would skip processing the sync transaction without the immediate flag.
+      const queryKey = [`writeUpsert-after-api-test`]
+
+      type Brand = {
+        id: string
+        brandName: string
+      }
+
+      const serverBrands: Array<Brand> = [{ id: `123`, brandName: `A` }]
+
+      const queryFn = vi.fn().mockImplementation(async () => {
+        return [...serverBrands]
+      })
+
+      // Track syncedData state immediately after writeUpsert
+      let syncedDataAfterWriteUpsert: Brand | undefined
+      let hasPersistingTransactionDuringWrite = false
+
+      const collection = createCollection(
+        queryCollectionOptions<Brand>({
+          id: `writeUpsert-after-api-test`,
+          queryKey,
+          queryFn,
+          queryClient,
+          getKey: (item: Brand) => item.id,
+          startSync: true,
+          onUpdate: async ({ transaction }) => {
+            const updates = transaction.mutations.map((m) => m.modified)
+
+            // Simulate async API call - THIS IS KEY!
+            // After this await, the transaction will be in state.transactions
+            await new Promise((resolve) => setTimeout(resolve, 10))
+
+            // Check if there's now a persisting transaction
+            hasPersistingTransactionDuringWrite = Array.from(
+              collection._state.transactions.values(),
+            ).some((tx) => tx.state === `persisting`)
+
+            // Update server state
+            for (const update of updates) {
+              const idx = serverBrands.findIndex((b) => b.id === update.id)
+              if (idx !== -1) {
+                serverBrands[idx] = { ...serverBrands[idx], ...update }
+              }
+            }
+
+            // Write the server response back to syncedData
+            // Without the immediate flag, this would be blocked by the persisting transaction
+            collection.utils.writeBatch(() => {
+              for (const update of updates) {
+                collection.utils.writeUpsert(update)
+              }
+            })
+
+            // Check syncedData IMMEDIATELY after writeUpsert
+            syncedDataAfterWriteUpsert = collection._state.syncedData.get(`123`)
+
+            return { refetch: false }
+          },
+        }),
+      )
+
+      await vi.waitFor(() => {
+        expect(collection.status).toBe(`ready`)
+      })
+
+      // Verify initial state
+      expect(collection._state.syncedData.get(`123`)?.brandName).toBe(`A`)
+
+      // Update brandName from A to B
+      collection.update(`123`, (draft) => {
+        draft.brandName = `B`
+      })
+
+      // Wait for mutation to complete
+      await flushPromises()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+
+      // Verify we had a persisting transaction during the write
+      expect(hasPersistingTransactionDuringWrite).toBe(true)
+
+      // The CRITICAL assertion: syncedData should have been updated IMMEDIATELY after writeUpsert
+      // Without the fix, this would fail because commitPendingTransactions() would skip
+      // processing due to hasPersistingTransaction being true
+      expect(syncedDataAfterWriteUpsert).toBeDefined()
+      expect(syncedDataAfterWriteUpsert?.brandName).toBe(`B`)
+    })
+
     it(`should not rollback object field updates after server response with refetch: false`, async () => {
       const queryKey = [`object-field-update-test`]
 
@@ -4847,6 +4940,251 @@ describe(`QueryCollection`, () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       const call = queryFn.mock.calls[0]?.[0]
       expect(call?.meta?.loadSubsetOptions).toEqual({})
+    })
+  })
+
+  describe(`On-demand collection directWrite cache update`, () => {
+    it(`should update query cache for all active query keys when using writeUpdate with computed queryKey`, async () => {
+      // Ensures writeUpdate on on-demand collections with computed query keys
+      // updates all active cache keys to prevent data loss on remount
+
+      const items: Array<CategorisedItem> = [
+        { id: `1`, name: `Item 1`, category: `A` },
+        { id: `2`, name: `Item 2`, category: `A` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      // Use a custom queryClient with longer gcTime to prevent cache from being removed
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000, // 5 minutes
+            staleTime: Infinity, // Prevent refetch
+            retry: false,
+          },
+        },
+      })
+
+      // Function-based queryKey (computed) - the bug scenario
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `directwrite-computed-key-test`,
+        queryClient: customQueryClient,
+        queryKey: (opts) => {
+          // Computed key includes predicate info
+          if (opts.where) {
+            return [`directwrite-test`, JSON.stringify(opts.where)]
+          }
+          return [`directwrite-test`]
+        },
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create a live query that will load data with a specific where clause
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await query1.preload()
+
+      // Wait for data to load
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // Perform a direct write update
+      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
+
+      // Verify the collection reflects the update
+      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      // IMPORTANT: Simulate remount by cleaning up and recreating the live query
+      // This is where the bug manifests - the updated data should persist
+      await query1.cleanup()
+      await flushPromises()
+
+      // Recreate the same live query (simulating component remount)
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await query2.preload()
+
+      // Wait for data to be available
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // BUG ASSERTION: After remount, the updated data should persist
+      // With the bug, this will fail because writeUpdate updated the wrong cache key
+      // and on remount, the stale cached data is loaded instead
+      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      // Cleanup
+      await query2.cleanup()
+      customQueryClient.clear()
+    })
+
+    it(`should update query cache for static queryKey with where clause in on-demand mode`, async () => {
+      // Scenario: static queryKey + on-demand mode + where clause
+      // The where clause causes a computed query key to be generated
+
+      const items: Array<CategorisedItem> = [
+        { id: `1`, name: `Item 1`, category: `A` },
+        { id: `2`, name: `Item 2`, category: `A` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000,
+            staleTime: Infinity,
+            retry: false,
+          },
+        },
+      })
+
+      // Static queryKey but with on-demand mode, the where clause will append serialized predicates
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `directwrite-static-key-where-test`,
+        queryClient: customQueryClient,
+        queryKey: [`static-directwrite-test`],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      // Create a live query with a where clause
+      const query1 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await query1.preload()
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // Perform a direct write update
+      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
+
+      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      // Simulate remount
+      await query1.cleanup()
+      await flushPromises()
+
+      const query2 = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ item: collection })
+            .where(({ item }) => eq(item.category, `A`))
+            .select(({ item }) => ({ id: item.id, name: item.name })),
+      })
+
+      await query2.preload()
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // After remount, the updated data should persist
+      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      await query2.cleanup()
+      customQueryClient.clear()
+    })
+
+    it(`should update query cache for function queryKey that returns constant value in on-demand mode`, async () => {
+      // Scenario: function queryKey that returns same value
+      // This creates an undefined entry in the cache
+
+      const items: Array<TestItem> = [
+        { id: `1`, name: `Item 1` },
+        { id: `2`, name: `Item 2` },
+      ]
+
+      const queryFn = vi.fn().mockResolvedValue(items)
+
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000,
+            staleTime: Infinity,
+            retry: false,
+          },
+        },
+      })
+
+      // Function queryKey that always returns the same value
+      const config: QueryCollectionConfig<TestItem> = {
+        id: `directwrite-constant-fn-key-test`,
+        queryClient: customQueryClient,
+        queryKey: () => [`constant-fn-key-test`],
+        queryFn,
+        getKey,
+        syncMode: `on-demand`,
+      }
+
+      const options = queryCollectionOptions(config)
+      const collection = createCollection(options)
+
+      const query1 = createLiveQueryCollection({
+        query: (q) => q.from({ item: collection }).select(({ item }) => item),
+      })
+
+      await query1.preload()
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // Perform a direct write update
+      collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
+
+      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      // Simulate remount
+      await query1.cleanup()
+      await flushPromises()
+
+      const query2 = createLiveQueryCollection({
+        query: (q) => q.from({ item: collection }).select(({ item }) => item),
+      })
+
+      await query2.preload()
+
+      await vi.waitFor(() => {
+        expect(collection.size).toBe(2)
+      })
+
+      // After remount, the updated data should persist
+      expect(collection.get(`1`)?.name).toBe(`Updated Item 1`)
+
+      await query2.cleanup()
+      customQueryClient.clear()
     })
   })
 })

@@ -5,7 +5,7 @@ title: InvalidJoinConditionSameSourceError
 
 # Class: InvalidJoinConditionSameSourceError
 
-Defined in: [packages/db/src/errors.ts:514](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L514)
+Defined in: [packages/db/src/errors.ts:530](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L530)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/db/src/errors.ts:514](https://github.com/TanStack/db/blob/
 new InvalidJoinConditionSameSourceError(sourceAlias): InvalidJoinConditionSameSourceError;
 ```
 
-Defined in: [packages/db/src/errors.ts:515](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L515)
+Defined in: [packages/db/src/errors.ts:531](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L531)
 
 #### Parameters
 

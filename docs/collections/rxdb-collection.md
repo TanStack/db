@@ -20,9 +20,9 @@ The `@tanstack/rxdb-db-collection` package allows you to create collections that
 - Leverage RxDB's [replication plugins](https://rxdb.info/replication.html) to sync with CouchDB, MongoDB, Supabase, REST APIs, GraphQL, WebRTC (P2P) and more.
 
 
-## 1. Installation
+### 1. Installation
 
-Install the RXDB collection packages along with your preferred framework integration.
+Install the RxDB collection packages along with your preferred framework integration.
 
 ```bash
 npm install @tanstack/rxdb-db-collection rxdb @tanstack/react-db
@@ -35,8 +35,8 @@ npm install @tanstack/rxdb-db-collection rxdb @tanstack/react-db
 import { createRxDatabase, addRxPlugin } from 'rxdb/plugins/core'
 
 /**
- * Here we use the localstorage based storage for RxDB.
- * RxDB has a wide range of storages based on Dexie.js, IndexedDB, SQLite and more.
+ * Here we use the localStorage based storage for RxDB.
+ * RxDB has a wide range of storages based on Dexie.js, IndexedDB, SQLite, and more.
  */
 import { getRxStorageLocalstorage } from 'rxdb/plugins/storage-localstorage'
 
@@ -93,7 +93,7 @@ import { rxdbCollectionOptions } from '@tanstack/rxdb-db-collection'
 
 const todosCollection = createCollection(
   rxdbCollectionOptions({
-    rxCollection: myDatabase.todos,
+    rxCollection: db.todos,
     startSync: true, // start ingesting RxDB data immediately
   })
 )
@@ -118,7 +118,7 @@ The `rxdbCollectionOptions` function accepts the following options:
 ### Optional
 
 - `id`: Unique identifier for the collection
-- `schema`: Schema for validating items. RxDB already has schema validation but having additional validation on the TanStack DB side can help to unify error handling between different tanstack collections.
+- `schema`: Schema for validating items. RxDB already has schema validation but having additional validation on the TanStack DB side can help to unify error handling between different TanStack collections.
 - `startSync`: Whether to start syncing immediately (default: true)
 - `onInsert, onUpdate, onDelete`: Override default persistence handlers. By default, TanStack DB writes are persisted to RxDB using bulkUpsert, patch, and bulkRemove.
 - `syncBatchSize`: The maximum number of documents fetched per batch during the initial sync from RxDB into TanStack DB (default: 1000). Larger values reduce round trips but use more memory; smaller values are lighter but may increase query calls. Note that this only affects the initial sync. Ongoing live updates are streamed one by one via RxDB's change feed.
@@ -132,3 +132,36 @@ Replication and sync in RxDB run independently of TanStack DB. You set up replic
 When replication runs, it pulls and pushes changes to the backend and applies them to the RxDB collection. Since the TanStack DB integration subscribes to the RxDB change stream, any changes applied by replication are automatically reflected in your TanStack DB collection.
 
 This separation of concerns means you configure replication entirely in RxDB, and TanStack DB automatically benefits: your TanStack collections always stay up to date with whatever sync strategy you choose.
+
+
+## FAQ
+
+### Do I still need RxDB schema indexes if I only query TanStack DB?
+
+Usually not, at least for TanStack DB queries themselves. TanStack DB queries run entirely in memory, so RxDB schema indexes do not affect the performance of TanStack DB's live queries. However, RxDB indexes may still be important if:
+- You run queries directly against RxDB (e.g. `rxCollection.find(...)`).
+- Your replication setup uses filtered queries or selectors.
+- You rely on RxDB to selectively load subsets of data instead of hydrating everything into memory.
+
+### Is data duplicated between RxDB and TanStack DB?
+
+Yes, intentionally. RxDB stores data durably on disk. TanStack DB stores data in memory for fast queries and reactivity. This duplication enables high-performance UI queries while retaining [local-first](https://rxdb.info/articles/local-first-future.html) persistence and sync.
+
+### How does backend ↔ RxDB ↔ TanStack DB synchronization work?
+
+Synchronization follows a clear separation of responsibilities between RxDB and TanStack DB.
+
+**RxDB** is responsible for persistence and networking. It stores data durably using a local storage engine (IndexedDB, SQLite, etc.) and handles all replication logic. Replication is configured directly on the RxDB collection and runs independently of TanStack DB. RxDB pulls changes from the backend, applies them locally, resolves conflicts, and pushes local changes back to the backend.
+
+**TanStack DB** sits on top as an in-memory, reactive query layer. It does not talk to the backend directly and does not participate in replication. Instead, it mirrors the current state of the RxDB collection in memory and provides fast live queries and optimistic mutations for the UI.
+
+This design intentionally forms two independent loops:
+- A durability and sync loop managed entirely by RxDB (backend to RxDB).
+- A reactive UI loop managed by TanStack DB (RxDB change stream to in-memory collections to live queries).
+
+## Learn More
+
+- [RxDB Documentation](https://rxdb.info/overview.html)
+- [RxDB Sync Engine](https://rxdb.info/replication.html)
+- [Tanstack DB Live Queries](https://tanstack.com/db/latest/docs/guides/live-queries)
+

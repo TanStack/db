@@ -22,6 +22,7 @@ import {
   removeTagFromIndex,
   tagMatchesPattern,
 } from './tag-index'
+import type { ColumnEncoder } from './sql-compiler'
 import type {
   MoveOutPattern,
   MoveTag,
@@ -347,6 +348,8 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   write,
   commit,
   collectionId,
+  encodeColumnName,
+  signal,
 }: {
   stream: ShapeStream<T>
   syncMode: ElectricSyncMode
@@ -359,103 +362,111 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
   }) => void
   commit: () => void
   collectionId?: string
+  /**
+   * Optional function to encode column names (e.g., camelCase to snake_case).
+   * This is typically the `encode` function from shapeOptions.columnMapper.
+   */
+  encodeColumnName?: ColumnEncoder
+  /**
+   * Abort signal to check if the stream has been aborted during cleanup.
+   * When aborted, errors from requestSnapshot are silently ignored.
+   */
+  signal: AbortSignal
 }): DeduplicatedLoadSubset | null {
-  // Eager mode doesn't need subset loading
   if (syncMode === `eager`) {
     return null
   }
 
+  const compileOptions = encodeColumnName ? { encodeColumnName } : undefined
+  const logPrefix = collectionId ? `[${collectionId}] ` : ``
+
+  /**
+   * Handles errors from snapshot operations. Returns true if the error was
+   * handled (signal aborted during cleanup), false if it should be re-thrown.
+   */
+  function handleSnapshotError(error: unknown, operation: string): boolean {
+    if (signal.aborted) {
+      debug(`${logPrefix}Ignoring ${operation} error during cleanup: %o`, error)
+      return true
+    }
+    debug(`${logPrefix}Error in ${operation}: %o`, error)
+    return false
+  }
+
   const loadSubset = async (opts: LoadSubsetOptions) => {
-    // In progressive mode, use fetchSnapshot during snapshot phase
     if (isBufferingInitialSync()) {
-      // Progressive mode snapshot phase: fetch and apply immediately
-      const snapshotParams = compileSQL<T>(opts)
+      const snapshotParams = compileSQL<T>(opts, compileOptions)
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
 
-        // Check again if we're still buffering - we might have received up-to-date
-        // and completed the atomic swap while waiting for the snapshot
         if (!isBufferingInitialSync()) {
-          debug(
-            `${collectionId ? `[${collectionId}] ` : ``}Ignoring snapshot - sync completed while fetching`,
-          )
+          debug(`${logPrefix}Ignoring snapshot - sync completed while fetching`)
           return
         }
 
-        // Apply snapshot data in a sync transaction (only if we have data)
         if (rows.length > 0) {
           begin()
           for (const row of rows) {
             write({
               type: `insert`,
               value: row.value,
-              metadata: {
-                ...row.headers,
-              },
+              metadata: { ...row.headers },
             })
           }
           commit()
-
-          debug(
-            `${collectionId ? `[${collectionId}] ` : ``}Applied snapshot with ${rows.length} rows`,
-          )
+          debug(`${logPrefix}Applied snapshot with ${rows.length} rows`)
         }
       } catch (error) {
-        debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Error fetching snapshot: %o`,
-          error,
-        )
+        if (handleSnapshotError(error, `fetchSnapshot`)) {
+          return
+        }
         throw error
       }
-    } else if (syncMode === `progressive`) {
-      // Progressive mode after full sync complete: no need to load more
       return
-    } else {
-      // On-demand mode: use requestSnapshot
-      // When cursor is provided, make two calls:
-      // 1. whereCurrent (all ties, no limit)
-      // 2. whereFrom (rows > cursor, with limit)
-      const { cursor, where, orderBy, limit } = opts
+    }
 
+    if (syncMode === `progressive`) {
+      return
+    }
+
+    const { cursor, where, orderBy, limit } = opts
+
+    try {
       if (cursor) {
-        // Make parallel requests for cursor-based pagination
-        const promises: Array<Promise<unknown>> = []
-
-        // Request 1: All rows matching whereCurrent (ties at boundary, no limit)
-        // Combine main where with cursor.whereCurrent
         const whereCurrentOpts: LoadSubsetOptions = {
           where: where ? and(where, cursor.whereCurrent) : cursor.whereCurrent,
           orderBy,
-          // No limit - get all ties
         }
-        const whereCurrentParams = compileSQL<T>(whereCurrentOpts)
-        promises.push(stream.requestSnapshot(whereCurrentParams))
-
-        debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereCurrent snapshot (all ties)`,
+        const whereCurrentParams = compileSQL<T>(
+          whereCurrentOpts,
+          compileOptions,
         )
 
-        // Request 2: Rows matching whereFrom (rows > cursor, with limit)
-        // Combine main where with cursor.whereFrom
         const whereFromOpts: LoadSubsetOptions = {
           where: where ? and(where, cursor.whereFrom) : cursor.whereFrom,
           orderBy,
           limit,
         }
-        const whereFromParams = compileSQL<T>(whereFromOpts)
-        promises.push(stream.requestSnapshot(whereFromParams))
+        const whereFromParams = compileSQL<T>(whereFromOpts, compileOptions)
 
+        debug(`${logPrefix}Requesting cursor.whereCurrent snapshot (all ties)`)
         debug(
-          `${collectionId ? `[${collectionId}] ` : ``}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
+          `${logPrefix}Requesting cursor.whereFrom snapshot (with limit ${limit})`,
         )
 
-        // Wait for both requests to complete
-        await Promise.all(promises)
+        await Promise.all([
+          stream.requestSnapshot(whereCurrentParams),
+          stream.requestSnapshot(whereFromParams),
+        ])
       } else {
-        // No cursor - standard single request
-        const snapshotParams = compileSQL<T>(opts)
+        const snapshotParams = compileSQL<T>(opts, compileOptions)
         await stream.requestSnapshot(snapshotParams)
       }
+    } catch (error) {
+      if (handleSnapshotError(error, `requestSnapshot`)) {
+        return
+      }
+      throw error
     }
   }
 
@@ -1296,6 +1307,11 @@ function createElectricSync<T extends Row<unknown>>(
         write,
         commit,
         collectionId,
+        // Pass the columnMapper's encode function to transform column names
+        // (e.g., camelCase to snake_case) when compiling SQL for subset queries
+        encodeColumnName: shapeOptions.columnMapper?.encode,
+        // Pass abort signal so requestSnapshot errors can be ignored during cleanup
+        signal: abortController.signal,
       })
 
       unsubscribeStream = stream.subscribe((messages: Array<Message<T>>) => {
