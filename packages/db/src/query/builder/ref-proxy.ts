@@ -15,7 +15,9 @@ export interface RefProxy<T = any> {
  * Virtual properties available on all row ref proxies.
  * These allow querying on sync status, origin, key, and collection ID.
  */
-export type VirtualPropsRefProxy<TKey extends string | number = string | number> = {
+export type VirtualPropsRefProxy<
+  TKey extends string | number = string | number,
+> = {
   readonly $synced: RefLeaf<boolean>
   readonly $origin: RefLeaf<'local' | 'remote'>
   readonly $key: RefLeaf<TKey>
@@ -29,13 +31,17 @@ export type VirtualPropsRefProxy<TKey extends string | number = string | number>
  * Includes virtual properties ($synced, $origin, $key, $collectionId) for
  * querying on sync status and row metadata.
  */
-export type SingleRowRefProxy<T, TKey extends string | number = string | number> =
+export type SingleRowRefProxy<
+  T,
+  TKey extends string | number = string | number,
+> =
   T extends Record<string, any>
     ? {
         [K in keyof T]: T[K] extends Record<string, any>
           ? SingleRowRefProxy<T[K], TKey> & RefProxy<T[K]>
           : RefLeaf<T[K]>
-      } & RefProxy<T> & VirtualPropsRefProxy<TKey>
+      } & RefProxy<T> &
+        VirtualPropsRefProxy<TKey>
     : RefProxy<T> & VirtualPropsRefProxy<TKey>
 
 /**

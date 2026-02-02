@@ -54,7 +54,9 @@ export type VirtualOrigin = 'local' | 'remote'
  * })
  * ```
  */
-export interface VirtualRowProps<TKey extends string | number = string | number> {
+export interface VirtualRowProps<
+  TKey extends string | number = string | number,
+> {
   /**
    * Whether this row reflects confirmed state from the backend.
    *

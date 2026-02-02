@@ -544,7 +544,8 @@ export type Ref<T = any> = {
         IsPlainObject<T[K]> extends true
         ? Ref<T[K]>
         : RefLeaf<T[K]>
-} & RefLeaf<T> & VirtualPropsRef
+} & RefLeaf<T> &
+  VirtualPropsRef
 
 /**
  * Ref - The user-facing ref type with clean IDE display

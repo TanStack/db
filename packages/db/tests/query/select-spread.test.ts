@@ -115,7 +115,9 @@ describe(`select spreads (runtime)`, () => {
     const results = Array.from(collection.values())
     expect(results).toHaveLength(2)
     // Should match initial data exactly
-    expect(results.map((row) => stripVirtualProps(row))).toEqual(initialMessages)
+    expect(results.map((row) => stripVirtualProps(row))).toEqual(
+      initialMessages,
+    )
     // Index access by key
     expect(stripVirtualProps(collection.get(1))).toEqual(initialMessages[0])
   })

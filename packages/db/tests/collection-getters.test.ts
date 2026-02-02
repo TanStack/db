@@ -24,7 +24,10 @@ const stripValues = <T extends Record<string, unknown>>(
   values: Array<T>,
 ): Array<T> => values.map((value) => stripVirtualProps(value))
 
-const stripEntries = <TKey extends string | number, T extends Record<string, any>>(
+const stripEntries = <
+  TKey extends string | number,
+  T extends Record<string, any>,
+>(
   entries: Array<[TKey, T]>,
 ): Array<[TKey, T]> =>
   entries.map(([key, value]) => [key, stripVirtualProps(value)])

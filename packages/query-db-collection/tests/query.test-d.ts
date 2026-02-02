@@ -10,17 +10,19 @@ import {
 import { QueryClient } from '@tanstack/query-core'
 import { z } from 'zod'
 import { queryCollectionOptions } from '../src/query'
-import type { DeleteMutationFnParams,
+import type {
+  DeleteMutationFnParams,
   InsertMutationFnParams,
   LoadSubsetOptions,
   UpdateMutationFnParams,
-  WithVirtualProps } from '@tanstack/db'
+  WithVirtualProps,
+} from '@tanstack/db'
 import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
 
-type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
+type OutputWithVirtual<
   T,
-  TKey
->
+  TKey extends string | number = string,
+> = WithVirtualProps<T, TKey>
 
 describe(`Query collection type resolution tests`, () => {
   // Define test types
