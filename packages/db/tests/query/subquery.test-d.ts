@@ -56,10 +56,10 @@ function createIssuesCollection() {
   )
 }
 
-type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
+type OutputWithVirtual<
   T,
-  TKey
->
+  TKey extends string | number = string,
+> = WithVirtualProps<T, TKey>
 
 describe(`Subquery Types`, () => {
   const issuesCollection = createIssuesCollection()

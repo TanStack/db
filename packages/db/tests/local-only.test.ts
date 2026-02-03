@@ -13,7 +13,9 @@ interface TestItem extends Record<string, unknown> {
   number?: number
 }
 
-const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+const stripVirtualProps = <T extends Record<string, any> | undefined>(
+  value: T,
+) => {
   if (!value || typeof value !== `object`) return value
   const {
     $synced: _synced,

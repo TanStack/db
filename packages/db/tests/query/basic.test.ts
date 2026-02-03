@@ -9,7 +9,9 @@ import {
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
-const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+const stripVirtualProps = <T extends Record<string, any> | undefined>(
+  value: T,
+) => {
   if (!value || typeof value !== `object`) return value
   const {
     $synced: _synced,

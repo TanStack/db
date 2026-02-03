@@ -6,7 +6,9 @@ import type {
   TransactionWithMutations,
 } from '../src'
 
-const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+const stripVirtualProps = <T extends Record<string, any> | undefined>(
+  value: T,
+) => {
   if (!value || typeof value !== `object`) return value
   const {
     $synced: _synced,

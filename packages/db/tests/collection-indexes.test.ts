@@ -18,7 +18,9 @@ import { expectIndexUsage, withIndexTracking } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
 
-const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+const stripVirtualProps = <T extends Record<string, any> | undefined>(
+  value: T,
+) => {
   if (!value || typeof value !== `object`) return value
   const {
     $synced: _synced,

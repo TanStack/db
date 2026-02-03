@@ -25,10 +25,10 @@ type Department = {
   name: string
 }
 
-type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
+type OutputWithVirtual<
   T,
-  TKey
->
+  TKey extends string | number = string,
+> = WithVirtualProps<T, TKey>
 type UserRow = OutputWithVirtual<User>
 type DepartmentRow = OutputWithVirtual<Department>
 

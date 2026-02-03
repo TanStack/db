@@ -26,10 +26,10 @@ type User = {
   }
 }
 
-type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
+type OutputWithVirtual<
   T,
-  TKey
->
+  TKey extends string | number = string,
+> = WithVirtualProps<T, TKey>
 
 function createUsers() {
   return createCollection(
