@@ -2,6 +2,7 @@ import { describe, expectTypeOf, test } from 'vitest'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { WithVirtualProps } from '../../src/virtual-props.js'
 
 type Todo = {
   id: string
@@ -14,6 +15,11 @@ type TodoOption = {
   todoId: string
   optionText: string
 }
+
+type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
+  T,
+  TKey
+>
 
 const todoCollection = createCollection(
   mockSyncCollectionOptions<Todo>({
@@ -47,10 +53,12 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          todo: OutputWithVirtual<Todo>
+          todoOptions: OutputWithVirtual<TodoOption> | undefined
+        }>
+      >
     >()
   })
 
@@ -68,10 +76,12 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption
-      }>
+      Array<
+        OutputWithVirtual<{
+          todo: OutputWithVirtual<Todo>
+          todoOptions: OutputWithVirtual<TodoOption>
+        }>
+      >
     >()
   })
 
@@ -89,10 +99,12 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          todo: OutputWithVirtual<Todo>
+          todoOptions: OutputWithVirtual<TodoOption> | undefined
+        }>
+      >
     >()
   })
 
@@ -110,10 +122,12 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo | undefined
-        todoOptions: TodoOption
-      }>
+      Array<
+        OutputWithVirtual<{
+          todo: OutputWithVirtual<Todo> | undefined
+          todoOptions: OutputWithVirtual<TodoOption>
+        }>
+      >
     >()
   })
 
@@ -131,10 +145,12 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo | undefined
-        todoOptions: TodoOption | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          todo: OutputWithVirtual<Todo> | undefined
+          todoOptions: OutputWithVirtual<TodoOption> | undefined
+        }>
+      >
     >()
   })
 
@@ -168,11 +184,13 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-        tag: TodoTag
-      }>
+      Array<
+        OutputWithVirtual<{
+          todo: OutputWithVirtual<Todo>
+          todoOptions: OutputWithVirtual<TodoOption> | undefined
+          tag: OutputWithVirtual<TodoTag>
+        }>
+      >
     >()
   })
 
@@ -193,10 +211,12 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todoText: string
-        optionText: string | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          todoText: string
+          optionText: string | undefined
+        }>
+      >
     >()
   })
 
@@ -217,10 +237,12 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todoText: string
-        optionText: string | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          todoText: string
+          optionText: string | undefined
+        }>
+      >
     >()
   })
 
@@ -239,10 +261,12 @@ describe(`findOne() with joins`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        todo: Todo
-        todoOptions: TodoOption | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          todo: OutputWithVirtual<Todo>
+          todoOptions: OutputWithVirtual<TodoOption> | undefined
+        }>
+      >
     >()
   })
 })

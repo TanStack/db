@@ -15,6 +15,7 @@ import {
   or,
   sum,
 } from '../../src/query/builder/functions.js'
+import type { WithVirtualProps } from '../../src/virtual-props.js'
 
 // Sample data types for comprehensive GROUP BY testing
 type Order = {
@@ -29,6 +30,11 @@ type Order = {
   discount: number
   sales_rep_id: number | null
 }
+
+type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
+  T,
+  TKey
+>
 
 // Sample order data
 const sampleOrders: Array<Order> = [
@@ -91,7 +97,7 @@ describe(`Query GROUP BY Types`, () => {
 
     const customer1 = customerSummary.get(1)
     expectTypeOf(customer1).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           customer_id: number
           total_amount: number
           order_count: number
@@ -100,7 +106,7 @@ describe(`Query GROUP BY Types`, () => {
           max_amount: number
           min_date: Date
           max_date: Date
-        }
+        }>
       | undefined
     >()
   })
@@ -121,12 +127,12 @@ describe(`Query GROUP BY Types`, () => {
 
     const completed = statusSummary.get(`completed`)
     expectTypeOf(completed).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           status: string
           total_amount: number
           order_count: number
           avg_amount: number
-        }
+        }>
       | undefined
     >()
   })
@@ -147,12 +153,12 @@ describe(`Query GROUP BY Types`, () => {
 
     const electronics = categorySummary.get(`electronics`)
     expectTypeOf(electronics).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           product_category: string
           total_quantity: number
           order_count: number
           total_amount: number
-        }
+        }>
       | undefined
     >()
   })
@@ -173,12 +179,12 @@ describe(`Query GROUP BY Types`, () => {
 
     const customer1Completed = customerStatusSummary.get(`[1,"completed"]`)
     expectTypeOf(customer1Completed).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           customer_id: number
           status: string
           total_amount: number
           order_count: number
-        }
+        }>
       | undefined
     >()
   })
@@ -199,11 +205,11 @@ describe(`Query GROUP BY Types`, () => {
 
     const customer1 = completedOrdersSummary.get(1)
     expectTypeOf(customer1).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           customer_id: number
           total_amount: number
           order_count: number
-        }
+        }>
       | undefined
     >()
   })
@@ -224,11 +230,11 @@ describe(`Query GROUP BY Types`, () => {
 
     const customer1 = highVolumeCustomers.get(1)
     expectTypeOf(customer1).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           customer_id: number
           total_amount: number
           order_count: number
-        }
+        }>
       | undefined
     >()
   })
@@ -250,12 +256,12 @@ describe(`Query GROUP BY Types`, () => {
 
     const customer1 = highValueCustomers.get(1)
     expectTypeOf(customer1).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           customer_id: number
           total_amount: number
           order_count: number
           avg_amount: number
-        }
+        }>
       | undefined
     >()
   })
@@ -277,12 +283,12 @@ describe(`Query GROUP BY Types`, () => {
 
     const customer1 = consistentCustomers.get(1)
     expectTypeOf(customer1).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           customer_id: number
           total_amount: number
           order_count: number
           avg_amount: number
-        }
+        }>
       | undefined
     >()
   })
@@ -306,12 +312,12 @@ describe(`Query GROUP BY Types`, () => {
 
     const customer1 = premiumCustomers.get(1)
     expectTypeOf(customer1).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           customer_id: number
           total_amount: number
           order_count: number
           avg_amount: number
-        }
+        }>
       | undefined
     >()
   })
@@ -335,12 +341,12 @@ describe(`Query GROUP BY Types`, () => {
 
     const customer1 = interestingCustomers.get(1)
     expectTypeOf(customer1).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           customer_id: number
           total_amount: number
           order_count: number
           min_amount: number
-        }
+        }>
       | undefined
     >()
   })
@@ -360,11 +366,11 @@ describe(`Query GROUP BY Types`, () => {
 
     const salesRep1 = salesRepSummary.get(1)
     expectTypeOf(salesRep1).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           sales_rep_id: number | null
           total_amount: number
           order_count: number
-        }
+        }>
       | undefined
     >()
   })
@@ -391,7 +397,7 @@ describe(`Query GROUP BY Types`, () => {
 
     const customer1 = comprehensiveStats.get(1)
     expectTypeOf(customer1).toEqualTypeOf<
-      | {
+      | OutputWithVirtual<{
           customer_id: number
           order_count: number
           total_amount: number
@@ -402,7 +408,7 @@ describe(`Query GROUP BY Types`, () => {
           avg_quantity: number
           min_quantity: number
           max_quantity: number
-        }
+        }>
       | undefined
     >()
   })

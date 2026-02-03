@@ -2,6 +2,7 @@ import { describe, expectTypeOf, test } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { WithVirtualProps } from '../../src/virtual-props.js'
 
 // Sample types for subquery testing
 type Issue = {
@@ -55,6 +56,11 @@ function createIssuesCollection() {
   )
 }
 
+type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
+  T,
+  TKey
+>
+
 describe(`Subquery Types`, () => {
   const issuesCollection = createIssuesCollection()
 
@@ -79,11 +85,13 @@ describe(`Subquery Types`, () => {
 
       // Should infer the correct result type from the SELECT clause
       expectTypeOf(liveCollection.toArray).toEqualTypeOf<
-        Array<{
-          id: number
-          title: string
-          status: `open` | `in_progress` | `closed`
-        }>
+        Array<
+          OutputWithVirtual<{
+            id: number
+            title: string
+            status: `open` | `in_progress` | `closed`
+          }>
+        >
       >()
     })
 
@@ -100,7 +108,9 @@ describe(`Subquery Types`, () => {
       })
 
       // Should return the original Issue type
-      expectTypeOf(liveCollection.toArray).toEqualTypeOf<Array<Issue>>()
+      expectTypeOf(liveCollection.toArray).toEqualTypeOf<
+        Array<OutputWithVirtual<Issue>>
+      >()
     })
 
     test(`subquery with SELECT clause transforms type correctly`, () => {
@@ -132,12 +142,14 @@ describe(`Subquery Types`, () => {
 
       // Should infer the final transformed type
       expectTypeOf(liveCollection.toArray).toEqualTypeOf<
-        Array<{
-          key: number
-          title: string
-          hours: number
-          type: `open` | `in_progress` | `closed`
-        }>
+        Array<
+          OutputWithVirtual<{
+            key: number
+            title: string
+            hours: number
+            type: `open` | `in_progress` | `closed`
+          }>
+        >
       >()
     })
 
@@ -172,11 +184,13 @@ describe(`Subquery Types`, () => {
 
       // Should infer the final nested transformation type
       expectTypeOf(liveCollection.toArray).toEqualTypeOf<
-        Array<{
-          id: number
-          name: string
-          workHours: number
-        }>
+        Array<
+          OutputWithVirtual<{
+            id: number
+            name: string
+            workHours: number
+          }>
+        >
       >()
     })
 
@@ -199,20 +213,22 @@ describe(`Subquery Types`, () => {
 
       // Should infer the correct result type
       expectTypeOf(customKeyCollection.toArray).toEqualTypeOf<
-        Array<{
-          issueId: number
-          issueTitle: string
-          durationHours: number
-        }>
+        Array<
+          OutputWithVirtual<{
+            issueId: number
+            issueTitle: string
+            durationHours: number
+          }>
+        >
       >()
 
       // getKey should work with the transformed type
       expectTypeOf(customKeyCollection.get(1)).toEqualTypeOf<
-        | {
+        | OutputWithVirtual<{
             issueId: number
             issueTitle: string
             durationHours: number
-          }
+          }>
         | undefined
       >()
     })
@@ -232,11 +248,13 @@ describe(`Subquery Types`, () => {
 
       // Should infer the correct result type
       expectTypeOf(liveCollection.toArray).toEqualTypeOf<
-        Array<{
-          id: number
-          title: string
-          projectId: number
-        }>
+        Array<
+          OutputWithVirtual<{
+            id: number
+            title: string
+            projectId: number
+          }>
+        >
       >()
     })
   })

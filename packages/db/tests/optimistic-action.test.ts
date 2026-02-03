@@ -6,6 +6,18 @@ import type {
   TransactionWithMutations,
 } from '../src'
 
+const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value as Record<string, unknown>
+  return rest as T
+}
+
 describe(`createOptimisticAction`, () => {
   // Runtime tests
   it(`should apply optimistic updates and execute mutation function`, async () => {
@@ -47,7 +59,10 @@ describe(`createOptimisticAction`, () => {
     expect(onMutateMock).toHaveBeenCalledWith(`Test Todo`)
 
     // Verify the optimistic update was applied to the collection
-    expect(collection.get(`1`)).toEqual({ id: `1`, text: `Test Todo` })
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({
+      id: `1`,
+      text: `Test Todo`,
+    })
 
     // Wait for the mutation to complete
     await transaction.isPersisted.promise
@@ -141,7 +156,7 @@ describe(`createOptimisticAction`, () => {
     expect(onMutateMock).toHaveBeenCalledWith(todoData)
 
     // Verify the optimistic update was applied to the collection
-    expect(collection.get(`2`)).toEqual(todoData)
+    expect(stripVirtualProps(collection.get(`2`))).toEqual(todoData)
 
     // Wait for the mutation to complete
     await transaction.isPersisted.promise
@@ -234,7 +249,10 @@ describe(`createOptimisticAction`, () => {
     const transaction = failingAction(`Will Fail`)
 
     // Verify the optimistic update was applied
-    expect(collection.get(`3`)).toEqual({ id: `3`, text: `Will Fail` })
+    expect(stripVirtualProps(collection.get(`3`))).toEqual({
+      id: `3`,
+      text: `Will Fail`,
+    })
 
     // Wait for the transaction to complete (it will fail)
     try {

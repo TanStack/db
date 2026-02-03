@@ -2,6 +2,7 @@ import { describe, expectTypeOf, test } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { WithVirtualProps } from '../../src/virtual-props.js'
 
 // Test types with optional fields
 type UserWithOptional = {
@@ -17,6 +18,11 @@ type Department = {
   name: string
   budget: number
 }
+
+type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
+  T,
+  TKey
+>
 
 function createUsersCollection() {
   return createCollection(
@@ -51,7 +57,9 @@ describe(`Optional Fields - Type Safety Tests`, () => {
     })
 
     // The query should be typed correctly
-    expectTypeOf(query.toArray).toEqualTypeOf<Array<UserWithOptional>>()
+    expectTypeOf(query.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<UserWithOptional>>
+    >()
   })
 
   test(`should allow using optional fields in comparisons with proper type inference`, () => {
@@ -65,7 +73,9 @@ describe(`Optional Fields - Type Safety Tests`, () => {
         }),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<Array<UserWithOptional>>()
+    expectTypeOf(query.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<UserWithOptional>>
+    >()
   })
 
   test(`should allow using optional fields in join conditions with proper type inference`, () => {
@@ -85,10 +95,12 @@ describe(`Optional Fields - Type Safety Tests`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        user: UserWithOptional
-        dept: Department
-      }>
+      Array<
+        OutputWithVirtual<{
+          user: OutputWithVirtual<UserWithOptional>
+          dept: OutputWithVirtual<Department>
+        }>
+      >
     >()
   })
 
@@ -106,11 +118,13 @@ describe(`Optional Fields - Type Safety Tests`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        email: string | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          email: string | undefined
+        }>
+      >
     >()
   })
 
@@ -132,9 +146,11 @@ describe(`Optional Fields - Type Safety Tests`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        name: string
-      }>
+      Array<
+        OutputWithVirtual<{
+          name: string
+        }>
+      >
     >()
   })
 
@@ -159,10 +175,12 @@ describe(`Optional Fields - Type Safety Tests`, () => {
     })
 
     expectTypeOf(query.toArray).toEqualTypeOf<
-      Array<{
-        user_name: string
-        dept_name: string | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          user_name: string
+          dept_name: string | undefined
+        }>
+      >
     >()
   })
 })

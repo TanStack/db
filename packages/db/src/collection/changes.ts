@@ -11,6 +11,7 @@ import type { CollectionSyncManager } from './sync.js'
 import type { CollectionEventsManager } from './events.js'
 import type { CollectionImpl } from './index.js'
 import type { CollectionStateManager } from './state.js'
+import type { WithVirtualProps } from '../virtual-props.js'
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -65,7 +66,7 @@ export class CollectionChangesManager<
    */
   private enrichChangeWithVirtualProps(
     change: ChangeMessage<TOutput, TKey>,
-  ): ChangeMessage<TOutput, TKey> {
+  ): ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey> {
     return this.state.enrichChangeMessage(change)
   }
 
@@ -103,9 +104,9 @@ export class CollectionChangesManager<
 
     // Enrich all change messages with virtual properties
     // This uses the "add-if-missing" pattern to preserve pass-through semantics
-    const enrichedEvents = eventsToEmit.map((change) =>
-      this.enrichChangeWithVirtualProps(change),
-    )
+    const enrichedEvents: Array<
+      ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
+    > = eventsToEmit.map((change) => this.enrichChangeWithVirtualProps(change))
 
     // Emit to all listeners
     for (const subscription of this.changeSubscriptions) {
@@ -117,7 +118,9 @@ export class CollectionChangesManager<
    * Subscribe to changes in the collection
    */
   public subscribeChanges(
-    callback: (changes: Array<ChangeMessage<TOutput>>) => void,
+    callback: (
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+    ) => void,
     options: SubscribeChangesOptions<TOutput> = {},
   ): CollectionSubscription {
     // Start sync and track subscriber

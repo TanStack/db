@@ -77,6 +77,9 @@ type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualPr
     expectTypeOf(_collection.toArray).toEqualTypeOf<
       Array<OutputWithVirtual<ExplicitType, string>>
     >()
+    expectTypeOf(_collection.get(`test`)).toEqualTypeOf<
+      OutputWithVirtual<ExplicitType, string> | undefined
+    >()
 
     type Key = Parameters<typeof _collection.get>[0]
     expectTypeOf<Key>().toEqualTypeOf<string>()
@@ -97,6 +100,9 @@ type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualPr
 
     expectTypeOf(_collection.toArray).toEqualTypeOf<
       Array<OutputWithVirtual<SchemaType, string>>
+    >()
+    expectTypeOf(_collection.get(`test`)).toEqualTypeOf<
+      OutputWithVirtual<SchemaType, string> | undefined
     >()
 
     type Key = Parameters<typeof _collection.get>[0]

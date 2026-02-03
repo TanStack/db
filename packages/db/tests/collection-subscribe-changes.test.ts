@@ -4,7 +4,7 @@ import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
 import { createLocalOnlyCollection } from '../src/local-only.js'
 import { createTransaction } from '../src/transactions'
-import { and, eq, gt } from '../src/query/builder/functions'
+import { and, count, eq, gt } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
 import type {
   ChangeMessage,
@@ -2211,6 +2211,133 @@ describe(`Virtual properties`, () => {
     subscription.unsubscribe()
   })
 
+  it(`should set $origin local for non-optimistic inserts`, async () => {
+    const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `insert`
+            value: { id: string; value: string }
+          }) => void
+          commit: () => void
+        }
+      | undefined
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-non-optimistic-origin`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncFns = {
+            begin,
+            write,
+            commit,
+          }
+          markReady()
+        },
+      },
+      onInsert: async ({ transaction }) => {
+        if (!syncFns) {
+          throw new Error(`Sync not ready`)
+        }
+        syncFns.begin()
+        transaction.mutations.forEach((mutation) => {
+          syncFns!.write({
+            type: `insert`,
+            value: mutation.modified as { id: string; value: string },
+          })
+        })
+        syncFns.commit()
+      },
+    })
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    collection.insert({ id: `local-1`, value: `local` }, { optimistic: false })
+    await waitForChanges()
+
+    const insertChange = changes.find((change) => change.key === `local-1`)
+    expect(insertChange).toBeDefined()
+
+    const value = insertChange!.value as Record<string, any>
+    expect(value.$synced).toBe(true)
+    expect(value.$origin).toBe(`local`)
+
+    subscription.unsubscribe()
+  })
+
+  it(`should clear local origin after failed optimistic mutations`, async () => {
+    const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `insert`
+            value: { id: string; value: string }
+          }) => void
+          commit: () => void
+        }
+      | undefined
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-failed-optimistic-origin`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncFns = {
+            begin,
+            write,
+            commit,
+          }
+          markReady()
+        },
+      },
+      onInsert: async () => {
+        throw new Error(`insert failed`)
+      },
+    })
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    const tx = collection.insert({ id: `row-1`, value: `optimistic` })
+    try {
+      await tx.isPersisted.promise
+    } catch {
+      // Expected failure
+    }
+
+    await waitForChanges()
+
+    if (!syncFns) {
+      throw new Error(`Sync not ready`)
+    }
+    syncFns.begin()
+    syncFns.write({
+      type: `insert`,
+      value: { id: `row-1`, value: `remote` },
+    })
+    syncFns.commit()
+
+    await waitForChanges()
+
+    const rowChanges = changes.filter((change) => change.key === `row-1`)
+    const latestChange = rowChanges[rowChanges.length - 1]
+
+    expect(latestChange).toBeDefined()
+    const value = latestChange!.value as Record<string, any>
+    expect(value.$synced).toBe(true)
+    expect(value.$origin).toBe(`remote`)
+
+    subscription.unsubscribe()
+  })
+
   it(`should pass through virtual properties in live query collections`, async () => {
     const source = createCollection<{ id: string; active: boolean }, string>({
       id: `virtual-props-source`,
@@ -2300,6 +2427,70 @@ describe(`Virtual properties`, () => {
     liveSub.unsubscribe()
     await source.cleanup()
     await syncedOnly.cleanup()
+  })
+
+  it(`should aggregate $synced and $origin for grouped rows`, async () => {
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `insert`
+            value: { id: string; group: string }
+          }) => void
+          commit: () => void
+        }
+      | undefined
+
+    const source = createCollection<{ id: string; group: string }, string>({
+      id: `virtual-props-aggregate-source`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncFns = {
+            begin,
+            write,
+            commit,
+          }
+          markReady()
+        },
+      },
+      onInsert: async () => {
+        await waitForChanges()
+      },
+    })
+
+    const grouped = createLiveQueryCollection({
+      id: `virtual-props-aggregate-live`,
+      query: (q) =>
+        q
+          .from({ item: source })
+          .groupBy(({ item }) => item.group)
+          .select(({ item }) => ({
+            group: item.group,
+            total: count(item.id),
+          })),
+    })
+
+    if (!syncFns) {
+      throw new Error(`Sync not ready`)
+    }
+    syncFns.begin()
+    syncFns.write({ type: `insert`, value: { id: `remote-1`, group: `g1` } })
+    syncFns.commit()
+
+    await waitForChanges()
+
+    source.insert({ id: `local-1`, group: `g1` })
+    await waitForChanges()
+
+    const groupRow = grouped.toArray.find((row) => row.group === `g1`)
+    expect(groupRow).toBeDefined()
+    expect(groupRow!.$synced).toBe(false)
+    expect(groupRow!.$origin).toBe(`local`)
+    expect(groupRow!.$collectionId).toBe(`virtual-props-aggregate-source`)
+
+    await source.cleanup()
+    await grouped.cleanup()
   })
 
   it(`should mark local-only collections as synced with local origin`, async () => {

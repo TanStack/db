@@ -9,6 +9,18 @@ import {
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
+const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value as Record<string, unknown>
+  return rest as T
+}
+
 // Sample user type for tests
 type User = {
   id: number
@@ -564,7 +576,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       usersCollection.utils.commit()
 
       expect(liveCollection.size).toBe(5)
-      expect(liveCollection.get(5)).toEqual(newUser)
+      expect(stripVirtualProps(liveCollection.get(5))).toEqual(newUser)
 
       // Update the new user
       const updatedUser = { ...newUser, name: `Eve Updated` }
@@ -576,7 +588,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       usersCollection.utils.commit()
 
       expect(liveCollection.size).toBe(5)
-      expect(liveCollection.get(5)).toEqual(updatedUser)
+      expect(stripVirtualProps(liveCollection.get(5))).toEqual(updatedUser)
 
       // Delete the new user
       usersCollection.utils.begin()
@@ -634,7 +646,7 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       usersCollection.utils.commit()
 
       expect(activeLiveCollection.size).toBe(4) // Should include the new active user
-      expect(activeLiveCollection.get(5)).toEqual(newUser)
+      expect(stripVirtualProps(activeLiveCollection.get(5))).toEqual(newUser)
 
       // Update the new user to inactive (should remove from active collection)
       const inactiveUser = { ...newUser, active: false }

@@ -8,6 +8,7 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { WithVirtualProps } from '../../src/virtual-props.js'
 
 // Complex nested type for testing with optional properties
 type Person = {
@@ -34,6 +35,11 @@ type Person = {
     }
   }
 }
+
+type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
+  T,
+  TKey
+>
 
 // Sample data
 const samplePersons: Array<Person> = [
@@ -99,18 +105,20 @@ describe(`Nested Properties Types`, () => {
 
     const results = collection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        bio: string | undefined // Now optional because profile is optional
-        score: number | undefined // Now optional because profile is optional
-        tasksCompleted: number | undefined // Now optional because profile?.stats is optional
-        rating: number | undefined // Now optional because profile?.stats is optional
-        city: string | undefined // Now optional because address is optional
-        country: string | undefined // Now optional because address is optional
-        lat: number | undefined // Now optional because address?.coordinates is optional
-        lng: number | undefined // Now optional because address?.coordinates is optional
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          bio: string | undefined // Now optional because profile is optional
+          score: number | undefined // Now optional because profile is optional
+          tasksCompleted: number | undefined // Now optional because profile?.stats is optional
+          rating: number | undefined // Now optional because profile?.stats is optional
+          city: string | undefined // Now optional because address is optional
+          country: string | undefined // Now optional because address is optional
+          lat: number | undefined // Now optional because address?.coordinates is optional
+          lng: number | undefined // Now optional because address?.coordinates is optional
+        }>
+      >
     >()
   })
 
@@ -132,10 +140,12 @@ describe(`Nested Properties Types`, () => {
 
     const results = collection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+        }>
+      >
     >()
   })
 
@@ -162,11 +172,13 @@ describe(`Nested Properties Types`, () => {
 
     const results = collection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        score: number | undefined // Optional because profile is optional
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          score: number | undefined // Optional because profile is optional
+        }>
+      >
     >()
   })
 
@@ -189,13 +201,15 @@ describe(`Nested Properties Types`, () => {
 
     const results = collection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        score: number | undefined // Optional because profile is optional
-        lat: number | undefined // Optional because address?.coordinates is optional
-        rating: number | undefined // Optional because profile?.stats is optional
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          score: number | undefined // Optional because profile is optional
+          lat: number | undefined // Optional because address?.coordinates is optional
+          rating: number | undefined // Optional because profile?.stats is optional
+        }>
+      >
     >()
   })
 
@@ -221,10 +235,12 @@ describe(`Nested Properties Types`, () => {
 
     const results = collection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+        }>
+      >
     >()
   })
 
@@ -261,19 +277,21 @@ describe(`Nested Properties Types`, () => {
 
     const results = collection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        team: string
-        bio: string | undefined
-        score: number | undefined
-        tasksCompleted: number | undefined
-        rating: number | undefined
-        city: string | undefined
-        country: string | undefined
-        lat: number | undefined
-        lng: number | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          team: string
+          bio: string | undefined
+          score: number | undefined
+          tasksCompleted: number | undefined
+          rating: number | undefined
+          city: string | undefined
+          country: string | undefined
+          lat: number | undefined
+          lng: number | undefined
+        }>
+      >
     >()
   })
 
@@ -292,35 +310,37 @@ describe(`Nested Properties Types`, () => {
 
     const results = collection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        profileExists:
-          | {
-              bio: string
-              score: number
-              stats: {
-                tasksCompleted: number
-                rating: number
+      Array<
+        OutputWithVirtual<{
+          profileExists:
+            | {
+                bio: string
+                score: number
+                stats: {
+                  tasksCompleted: number
+                  rating: number
+                }
               }
-            }
-          | undefined
-        addressExists:
-          | {
-              city: string
-              country: string
-              coordinates: {
+            | undefined
+          addressExists:
+            | {
+                city: string
+                country: string
+                coordinates: {
+                  lat: number
+                  lng: number
+                }
+              }
+            | undefined
+          score: number | undefined
+          coordinates:
+            | {
                 lat: number
                 lng: number
               }
-            }
-          | undefined
-        score: number | undefined
-        coordinates:
-          | {
-              lat: number
-              lng: number
-            }
-          | undefined
-      }>
+            | undefined
+        }>
+      >
     >()
   })
 
@@ -337,11 +357,13 @@ describe(`Nested Properties Types`, () => {
 
     const results = collection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        profileScore: number | undefined
-        coordinatesLat: number | undefined
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          profileScore: number | undefined
+          coordinatesLat: number | undefined
+        }>
+      >
     >()
   })
 })

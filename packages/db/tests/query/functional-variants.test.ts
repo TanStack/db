@@ -8,6 +8,18 @@ import {
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
+const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value as Record<string, unknown>
+  return rest as T
+}
+
 // Sample user type for tests
 type User = {
   id: number
@@ -259,7 +271,7 @@ describe(`Functional Variants Query`, () => {
       usersCollection.utils.commit()
 
       expect(liveCollection.size).toBe(3)
-      expect(liveCollection.get(6)).toEqual(newUser)
+      expect(stripVirtualProps(liveCollection.get(6))).toEqual(newUser)
 
       // Insert user that doesn't meet criteria (too young)
       const youngUser = {
@@ -285,7 +297,7 @@ describe(`Functional Variants Query`, () => {
       usersCollection.utils.commit()
 
       expect(liveCollection.size).toBe(4) // Now includes Grace
-      expect(liveCollection.get(7)).toEqual(olderGrace)
+      expect(stripVirtualProps(liveCollection.get(7))).toEqual(olderGrace)
 
       // Clean up
       usersCollection.utils.begin()
@@ -459,7 +471,7 @@ describe(`Functional Variants Query`, () => {
       usersCollection.utils.commit()
 
       expect(liveCollection.size).toBe(2)
-      expect(liveCollection.get(6)).toEqual(newUser)
+      expect(stripVirtualProps(liveCollection.get(6))).toEqual(newUser)
 
       // Update to not meet criteria (too old)
       const olderFrank = { ...newUser, age: 35 }

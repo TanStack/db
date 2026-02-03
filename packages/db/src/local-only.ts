@@ -312,6 +312,7 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
       syncWrite = write
       syncCommit = commit
       collection = params.collection
+      params.collection._state.isLocalOnly = true
 
       // Apply initial data if provided
       if (initialData && initialData.length > 0) {

@@ -9,7 +9,7 @@ import type {
   Value,
 } from '../ir.js'
 import type { QueryBuilder } from './index.js'
-import type { VirtualOrigin } from '../../virtual-props.js'
+import type { VirtualOrigin, WithVirtualProps } from '../../virtual-props.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -84,7 +84,9 @@ export type Source = {
  * This can be an explicit type passed by the user or the schema output type.
  */
 export type InferCollectionType<T> =
-  T extends CollectionImpl<infer TOutput, any, any, any, any> ? TOutput : never
+  T extends CollectionImpl<infer TOutput, infer TKey, any, any, any>
+    ? WithVirtualProps<TOutput, TKey>
+    : never
 
 /**
  * SchemaFromSource - Converts a Source definition into a ContextSchema

@@ -21,6 +21,41 @@ import type {
   Select,
 } from '../ir.js'
 import type { NamespacedAndKeyedStream, NamespacedRow } from '../../types.js'
+import type { VirtualOrigin } from '../../virtual-props.js'
+
+const VIRTUAL_SYNCED_KEY = `__virtual_synced__`
+const VIRTUAL_HAS_LOCAL_KEY = `__virtual_has_local__`
+
+type RowVirtualMetadata = {
+  synced: boolean
+  hasLocal: boolean
+}
+
+function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
+  let found = false
+  let allSynced = true
+  let hasLocal = false
+
+  for (const [alias, value] of Object.entries(row)) {
+    if (alias === `$selected`) continue
+    const asRecord = value
+    if (!(`$synced` in asRecord) && !(`$origin` in asRecord)) {
+      continue
+    }
+    found = true
+    if (asRecord.$synced === false) {
+      allSynced = false
+    }
+    if (asRecord.$origin === `local`) {
+      hasLocal = true
+    }
+  }
+
+  return {
+    synced: found ? allSynced : true,
+    hasLocal,
+  }
+}
 
 const { sum, count, avg, min, max } = groupByOperators
 
@@ -80,11 +115,41 @@ export function processGroupBy(
   havingClauses?: Array<Having>,
   selectClause?: Select,
   fnHavingClauses?: Array<(row: any) => any>,
+  aggregateCollectionId?: string,
 ): NamespacedAndKeyedStream {
+  const virtualAggregates: Record<string, any> = {
+    [VIRTUAL_SYNCED_KEY]: {
+      preMap: ([, row]: [string, NamespacedRow]) =>
+        getRowVirtualMetadata(row).synced,
+      reduce: (values: Array<[boolean, number]>) => {
+        let unsyncedCount = 0
+        for (const [isSynced, multiplicity] of values) {
+          if (!isSynced) {
+            unsyncedCount += multiplicity
+          }
+        }
+        return unsyncedCount <= 0
+      },
+    },
+    [VIRTUAL_HAS_LOCAL_KEY]: {
+      preMap: ([, row]: [string, NamespacedRow]) =>
+        getRowVirtualMetadata(row).hasLocal,
+      reduce: (values: Array<[boolean, number]>) => {
+        let localCount = 0
+        for (const [isLocal, multiplicity] of values) {
+          if (isLocal) {
+            localCount += multiplicity
+          }
+        }
+        return localCount > 0
+      },
+    },
+  }
+
   // Handle empty GROUP BY (single-group aggregation)
   if (groupByClause.length === 0) {
     // For single-group aggregation, create a single group with all data
-    const aggregates: Record<string, any> = {}
+    const aggregates: Record<string, any> = { ...virtualAggregates }
 
     if (selectClause) {
       // Scan the SELECT clause for aggregate functions
@@ -122,11 +187,23 @@ export function processGroupBy(
         }
 
         // Use a single key for the result and update $selected
+        const {
+          [VIRTUAL_SYNCED_KEY]: groupSynced,
+          [VIRTUAL_HAS_LOCAL_KEY]: groupHasLocal,
+          ...rest
+        } = aggregatedRow as Record<string, any>
+
+        const origin: VirtualOrigin = groupHasLocal ? `local` : `remote`
+
         return [
           `single_group`,
           {
-            ...aggregatedRow,
+            ...rest,
             $selected: finalResults,
+            $synced: groupSynced ?? true,
+            $origin: origin,
+            $key: `single_group`,
+            $collectionId: aggregateCollectionId ?? rest.$collectionId,
           },
         ] as [unknown, Record<string, any>]
       }),
@@ -200,7 +277,7 @@ export function processGroupBy(
   }
 
   // Create aggregate functions for any aggregated columns in the SELECT clause
-  const aggregates: Record<string, any> = {}
+  const aggregates: Record<string, any> = { ...virtualAggregates }
 
   if (selectClause) {
     // Scan the SELECT clause for aggregate functions
@@ -258,11 +335,23 @@ export function processGroupBy(
         finalKey = serializeValue(keyParts)
       }
 
+      const {
+        [VIRTUAL_SYNCED_KEY]: groupSynced,
+        [VIRTUAL_HAS_LOCAL_KEY]: groupHasLocal,
+        ...rest
+      } = aggregatedRow as Record<string, any>
+
+      const origin: VirtualOrigin = groupHasLocal ? `local` : `remote`
+
       return [
         finalKey,
         {
-          ...aggregatedRow,
+          ...rest,
           $selected: finalResults,
+          $synced: groupSynced ?? true,
+          $origin: origin,
+          $key: finalKey,
+          $collectionId: aggregateCollectionId ?? rest.$collectionId,
         },
       ] as [unknown, Record<string, any>]
     }),

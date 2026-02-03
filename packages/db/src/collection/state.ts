@@ -91,6 +91,7 @@ export class CollectionStateManager<
   public recentlySyncedKeys = new Set<TKey>()
   public hasReceivedFirstCommit = false
   public isCommittingSyncTransactions = false
+  public isLocalOnly = false
 
   /**
    * Creates a new CollectionState manager
@@ -125,6 +126,9 @@ export class CollectionStateManager<
    * Used to compute the $synced virtual property.
    */
   public isRowSynced(key: TKey): boolean {
+    if (this.isLocalOnly) {
+      return true
+    }
     return !this.optimisticUpserts.has(key) && !this.optimisticDeletes.has(key)
   }
 
@@ -134,6 +138,9 @@ export class CollectionStateManager<
    * Used to compute the $origin virtual property.
    */
   public getRowOrigin(key: TKey): VirtualOrigin {
+    if (this.isLocalOnly) {
+      return 'local'
+    }
     // If there are optimistic changes, they're local
     if (this.optimisticUpserts.has(key) || this.optimisticDeletes.has(key)) {
       return 'local'
@@ -178,6 +185,19 @@ export class CollectionStateManager<
       value: enrichedValue,
       previousValue: enrichedPreviousValue,
     } as ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
+  }
+
+  /**
+   * Get the current value for a key enriched with virtual properties.
+   */
+  public getWithVirtualProps(
+    key: TKey,
+  ): WithVirtualProps<TOutput, TKey> | undefined {
+    const value = this.get(key)
+    if (value === undefined) {
+      return undefined
+    }
+    return this.enrichWithVirtualProps(value, key)
   }
 
   /**
@@ -330,6 +350,7 @@ export class CollectionStateManager<
     // Clear current optimistic state
     this.optimisticUpserts.clear()
     this.optimisticDeletes.clear()
+    this.pendingLocalChanges.clear()
 
     const activeTransactions: Array<Transaction<any>> = []
 
@@ -342,10 +363,14 @@ export class CollectionStateManager<
     // Apply active transactions only (completed transactions are handled by sync operations)
     for (const transaction of activeTransactions) {
       for (const mutation of transaction.mutations) {
-        if (this.isThisCollection(mutation.collection) && mutation.optimistic) {
-          // Track that this key has pending local changes for $origin tracking
-          this.pendingLocalChanges.add(mutation.key)
+        if (!this.isThisCollection(mutation.collection)) {
+          continue
+        }
 
+        // Track that this key has pending local changes for $origin tracking
+        this.pendingLocalChanges.add(mutation.key)
+
+        if (mutation.optimistic) {
           switch (mutation.type) {
             case `insert`:
             case `update`:
@@ -669,10 +694,11 @@ export class CollectionStateManager<
               break
           }
 
-          // Determine origin: 'local' if this key had pending local changes, 'remote' otherwise
-          const origin: VirtualOrigin = this.pendingLocalChanges.has(key)
-            ? 'local'
-            : 'remote'
+          // Determine origin: 'local' for local-only collections or pending local changes
+          const origin: VirtualOrigin =
+            this.isLocalOnly || this.pendingLocalChanges.has(key)
+              ? 'local'
+              : 'remote'
 
           // Update synced data
           switch (operation.type) {
@@ -1011,6 +1037,7 @@ export class CollectionStateManager<
     this.optimisticDeletes.clear()
     this.rowOrigins.clear()
     this.pendingLocalChanges.clear()
+    this.isLocalOnly = false
     this.size = 0
     this.pendingSyncedTransactions = []
     this.syncedKeys.clear()

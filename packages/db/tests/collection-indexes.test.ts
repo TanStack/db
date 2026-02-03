@@ -18,6 +18,18 @@ import { expectIndexUsage, withIndexTracking } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
 
+const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value as Record<string, unknown>
+  return rest as T
+}
+
 interface TestItem {
   id: string
   name: string
@@ -212,7 +224,7 @@ describe(`Collection Indexes`, () => {
 
       // Item should be in collection state
       expect(collection.size).toBe(6)
-      expect(collection.get(`6`)).toEqual(newItem)
+      expect(stripVirtualProps(collection.get(`6`))).toEqual(newItem)
 
       // Should trigger subscription
       expect(changes).toHaveLength(1)

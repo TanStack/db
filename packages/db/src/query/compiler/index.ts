@@ -264,6 +264,7 @@ export function compileQuery(
       query.having,
       query.select,
       query.fnHaving,
+      mainCollectionId,
     )
   } else if (query.select) {
     // Check if SELECT contains aggregates but no GROUP BY (implicit single-group aggregation)
@@ -278,6 +279,7 @@ export function compileQuery(
         query.having,
         query.select,
         query.fnHaving,
+        mainCollectionId,
       )
     }
   }
