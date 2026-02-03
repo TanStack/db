@@ -26,10 +26,11 @@ Status: draft plan
 - Plan file location is repo root (this file).
 
 ## Testing infrastructure (existing)
+
 - Test runner: Vitest (see packages/db/vite.config.ts).
 - Default test dir: packages/db/tests (configured in vitest test.dir).
-- Runtime tests: *.test.ts under packages/db/tests (jsdom env).
-- Type tests: *.test-d.ts under packages/db/tests using expectTypeOf.
+- Runtime tests: \*.test.ts under packages/db/tests (jsdom env).
+- Type tests: \*.test-d.ts under packages/db/tests using expectTypeOf.
 - Shared helpers: packages/db/tests/utils.ts and tests/test-setup.ts.
 - Prefer colocating new hierarchical-projections tests under
   packages/db/tests/query/ (new files).
