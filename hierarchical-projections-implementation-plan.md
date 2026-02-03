@@ -25,6 +25,15 @@ Status: draft plan
 - Child joins are deferred to a post-v1 phase (see Post-v1 section).
 - Plan file location is repo root (this file).
 
+## Testing infrastructure (existing)
+- Test runner: Vitest (see packages/db/vite.config.ts).
+- Default test dir: packages/db/tests (configured in vitest test.dir).
+- Runtime tests: *.test.ts under packages/db/tests (jsdom env).
+- Type tests: *.test-d.ts under packages/db/tests using expectTypeOf.
+- Shared helpers: packages/db/tests/utils.ts and tests/test-setup.ts.
+- Prefer colocating new hierarchical-projections tests under
+  packages/db/tests/query/ (new files).
+
 ## Stage 0: Foundation and IR plumbing
 
 Objective: establish types, IR nodes, and error types without behavior changes.
@@ -84,6 +93,7 @@ Tests
 - Join key missing throws MissingJoinKeyError.
 - Child query missing FROM throws SubQueryMustHaveFromClauseError.
 - Child field usage in parent WHERE/HAVING throws ChildCollectionAccessError.
+  (Add in packages/db/tests/query/hierarchical-projections.test.ts)
 
 Exit criteria
 
@@ -111,6 +121,7 @@ Tests
 - Two parents with interleaved child inserts maintain independent order.
 - limit/offset edge cases (0, 1, undefined).
 - Mixed orderBy direction and nulls behavior matches normal query.
+  (Extend packages/db/tests/query/hierarchical-projections-order-by.test.ts)
 
 Exit criteria
 
@@ -134,6 +145,7 @@ Tests
 
 - Child query with groupBy + aggregate select and orderBy aggregate.
 - orderBy referencing $selected alias.
+  (Add in packages/db/tests/query/hierarchical-projections-aggregates.test.ts)
 
 Exit criteria
 
@@ -157,6 +169,7 @@ Tests
 
 - 2-level nesting with inserts/deletes at each level.
 - Parent removal cleans up child and grandchild collections.
+  (Add in packages/db/tests/query/hierarchical-projections-nested.test.ts)
 
 Exit criteria
 
