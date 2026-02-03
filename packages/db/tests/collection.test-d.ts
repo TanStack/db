@@ -59,11 +59,11 @@ describe(`Collection type resolution tests`, () => {
   })
 
   type SchemaType = StandardSchemaV1.InferOutput<typeof testSchema>
-type ItemOf<T> = T extends Array<infer U> ? U : T
-type OutputWithVirtual<T, TKey extends string | number = string> = WithVirtualProps<
-  T,
-  TKey
->
+  type ItemOf<T> = T extends Array<infer U> ? U : T
+  type OutputWithVirtual<
+    T,
+    TKey extends string | number = string,
+  > = WithVirtualProps<T, TKey>
 
   it(`should use explicit type when provided without schema`, () => {
     const _collection = createCollection<ExplicitType, string>({

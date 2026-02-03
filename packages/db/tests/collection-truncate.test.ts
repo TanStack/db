@@ -851,8 +851,14 @@ describe(`Collection truncate operations`, () => {
 
     // Verify final state is correct
     expect(collection.state.size).toBe(2)
-    expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `refetched-1` })
-    expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `refetched-2` })
+    expect(getStateValue(collection, 1)).toEqual({
+      id: 1,
+      value: `refetched-1`,
+    })
+    expect(getStateValue(collection, 2)).toEqual({
+      id: 2,
+      value: `refetched-2`,
+    })
 
     subscription.unsubscribe()
   })
@@ -1156,8 +1162,14 @@ describe(`Collection truncate operations`, () => {
 
     // Verify collection state is correct
     expect(collection.state.size).toBe(2)
-    expect(getStateValue(collection, 1)).toEqual({ id: 1, value: `sync-item-1` })
-    expect(getStateValue(collection, 2)).toEqual({ id: 2, value: `sync-item-2` })
+    expect(getStateValue(collection, 1)).toEqual({
+      id: 1,
+      value: `sync-item-1`,
+    })
+    expect(getStateValue(collection, 2)).toEqual({
+      id: 2,
+      value: `sync-item-2`,
+    })
 
     subscription.unsubscribe()
   })

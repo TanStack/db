@@ -17,7 +17,9 @@ import type {
 // Helper function to wait for changes to be processed
 const waitForChanges = () => new Promise((resolve) => setTimeout(resolve, 10))
 
-const stripVirtualProps = <T extends Record<string, any> | undefined>(value: T) => {
+const stripVirtualProps = <T extends Record<string, any> | undefined>(
+  value: T,
+) => {
   if (!value || typeof value !== `object`) return value
   const {
     $synced: _synced,
@@ -35,7 +37,7 @@ const normalizeChange = <T extends Record<string, any>>(
   ...change,
   value: stripVirtualProps(change.value),
   previousValue: change.previousValue
-    ? (stripVirtualProps(change.previousValue))
+    ? stripVirtualProps(change.previousValue)
     : undefined,
 })
 
@@ -2420,9 +2422,9 @@ describe(`Virtual properties`, () => {
     source.insert({ id: `optimistic-1`, value: `pending` })
     await waitForChanges()
 
-    expect(liveChanges.some((change) => change.value.id === `optimistic-1`)).toBe(
-      false,
-    )
+    expect(
+      liveChanges.some((change) => change.value.id === `optimistic-1`),
+    ).toBe(false)
 
     liveSub.unsubscribe()
     await source.cleanup()
@@ -2494,10 +2496,12 @@ describe(`Virtual properties`, () => {
   })
 
   it(`should mark local-only collections as synced with local origin`, async () => {
-    const collection = createLocalOnlyCollection<{ id: string; value: string }>({
-      id: `virtual-props-local-only`,
-      getKey: (item) => item.id,
-    })
+    const collection = createLocalOnlyCollection<{ id: string; value: string }>(
+      {
+        id: `virtual-props-local-only`,
+        getKey: (item) => item.id,
+      },
+    )
 
     const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
     const subscription = collection.subscribeChanges(

@@ -314,9 +314,13 @@ describe(`Collection`, () => {
     tx3.mutate(() => collection.insert(bulkData))
     const keys = Array.from(collection.state.keys())
     // @ts-expect-error possibly undefined is ok in test
-    expect(stripVirtualProps(collection.state.get(keys[2]))).toEqual(bulkData[0])
+    expect(stripVirtualProps(collection.state.get(keys[2]))).toEqual(
+      bulkData[0],
+    )
     // @ts-expect-error possibly undefined is ok in test
-    expect(stripVirtualProps(collection.state.get(keys[3]))).toEqual(bulkData[1])
+    expect(stripVirtualProps(collection.state.get(keys[3]))).toEqual(
+      bulkData[1],
+    )
     await tx3.isPersisted.promise
 
     const tx4 = createTransaction({ mutationFn })
