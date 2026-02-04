@@ -261,6 +261,27 @@ todoCollection.update(todo.id, (draft) => {
 
 If the handler throws an error during persistence, the optimistic state is automatically rolled back.
 
+### Multiple Pending Transactions
+
+When you make multiple mutations to the same item before earlier ones have synced back, each mutation creates a separate transaction. These transactions are **layered**, with the most recent transaction's state taking priority for display.
+
+```tsx
+// User rapidly updates a document's content: A → B → C
+docCollection.update(docId, (draft) => { draft.content = "A" }) // tx1
+docCollection.update(docId, (draft) => { draft.content = "B" }) // tx2
+docCollection.update(docId, (draft) => { draft.content = "C" }) // tx3
+
+// Visible state = "C" (latest transaction wins)
+```
+
+As each transaction syncs back from the server, the optimistic state is **recomputed** from the remaining pending transactions. This means your latest changes are preserved:
+
+- When tx1 syncs back → tx2 and tx3 still pending → visible state remains "C"
+- When tx2 syncs back → tx3 still pending → visible state remains "C"
+- When tx3 syncs back → no pending transactions → visible state = synced server state
+
+This layering ensures that rapid sequential updates feel instant and consistent, without earlier sync confirmations disrupting the user's most recent changes.
+
 ## Collection Write Operations
 
 Collections support three core write operations: `insert`, `update`, and `delete`. Each operation applies optimistic state immediately and triggers the corresponding operation handler.
