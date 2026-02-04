@@ -232,6 +232,235 @@ describe(`useLiveInfiniteQuery`, () => {
     expect(result.current.hasNextPage).toBe(false)
   })
 
+  it(`should update data when inserting into an empty collection with pageSize > 1`, async () => {
+    // This test reproduces the issue where inserting into an empty collection
+    // with pageSize > 1 causes the data to not update
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `empty-insert-test`,
+        getKey: (post: Post) => post.id,
+        initialData: [],
+      }),
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`),
+        {
+          pageSize: 20, // pageSize > 1
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 20 ? lastPage.length : undefined,
+        },
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    // Start with empty collection
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(0)
+    expect(result.current.data).toHaveLength(0)
+
+    // Insert a new item into the empty collection
+    act(() => {
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `new-1`,
+          title: `New Post`,
+          content: `New Content`,
+          createdAt: Date.now(),
+          category: `tech`,
+        },
+      })
+      collection.utils.commit()
+    })
+
+    // The new item should appear in the data
+    await waitFor(() => {
+      expect(result.current.data).toHaveLength(1)
+    })
+
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(1)
+    expect(result.current.pages[0]![0]).toMatchObject({
+      id: `new-1`,
+      title: `New Post`,
+    })
+    expect(result.current.hasNextPage).toBe(false)
+  })
+
+  it(`should update data when inserting into an empty eager sync collection with pageSize > 1`, async () => {
+    // Test that eager sync with empty initial data works correctly
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `empty-eager-insert-test`,
+        getKey: (post: Post) => post.id,
+        initialData: [], // Start with empty collection
+      }),
+    )
+
+    const { result } = renderHook(() => {
+      return useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`),
+        {
+          pageSize: 20, // pageSize > 1
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 20 ? lastPage.length : undefined,
+        },
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    // Start with empty collection
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(0)
+    expect(result.current.data).toHaveLength(0)
+
+    // Insert a new item into the empty collection via sync layer
+    act(() => {
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `new-1`,
+          title: `New Post`,
+          content: `New Content`,
+          createdAt: Date.now(),
+          category: `tech`,
+        },
+      })
+      collection.utils.commit()
+    })
+
+    // The new item should appear in the data
+    await waitFor(
+      () => {
+        expect(result.current.data).toHaveLength(1)
+      },
+      { timeout: 1000 },
+    )
+
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(1)
+    expect(result.current.pages[0]![0]).toMatchObject({
+      id: `new-1`,
+      title: `New Post`,
+    })
+    expect(result.current.hasNextPage).toBe(false)
+  })
+
+  it(`should update data when inserting into an empty on-demand collection with async loadSubset`, async () => {
+    // This test reproduces the issue where inserting into an empty on-demand collection
+    // with pageSize > 1 and async loadSubset causes the data to not update
+    let syncBegin: () => void
+    let syncWrite: (change: { type: `insert`; value: Post }) => void
+    let syncCommit: () => void
+
+    const collection = createCollection<Post>({
+      id: `empty-ondemand-async-test`,
+      getKey: (post: Post) => post.id,
+      syncMode: `on-demand`,
+      startSync: true,
+      sync: {
+        sync: ({ markReady, begin, write, commit }) => {
+          syncBegin = begin
+          syncWrite = write
+          syncCommit = commit
+
+          // Start with no initial data
+          begin()
+          commit()
+          markReady()
+
+          return {
+            loadSubset: () => {
+              // Return a promise that resolves immediately (simulating fast async load)
+              // This is similar to what queryCollectionOptions does
+              return new Promise<void>((resolve) => {
+                // Resolve immediately - no data to load for empty collection
+                resolve()
+              })
+            },
+          }
+        },
+      },
+    })
+
+    const { result } = renderHook(() => {
+      return useLiveInfiniteQuery(
+        (q) =>
+          q
+            .from({ posts: collection })
+            .orderBy(({ posts: p }) => p.createdAt, `desc`),
+        {
+          pageSize: 20, // pageSize > 1
+          getNextPageParam: (lastPage) =>
+            lastPage.length === 20 ? lastPage.length : undefined,
+        },
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.isReady).toBe(true)
+    })
+
+    // Wait for initial loading to complete
+    await waitFor(() => {
+      expect(result.current.isFetchingNextPage).toBe(false)
+    })
+
+    // Start with empty collection
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(0)
+    expect(result.current.data).toHaveLength(0)
+
+    // Insert a new item into the collection via sync layer
+    // This simulates what happens when data arrives from the server
+    act(() => {
+      syncBegin()
+      syncWrite({
+        type: `insert`,
+        value: {
+          id: `new-1`,
+          title: `New Post`,
+          content: `New Content`,
+          createdAt: Date.now(),
+          category: `tech`,
+        },
+      })
+      syncCommit()
+    })
+
+    // The new item should appear in the data
+    await waitFor(
+      () => {
+        expect(result.current.data).toHaveLength(1)
+      },
+      { timeout: 1000 },
+    )
+
+    expect(result.current.pages).toHaveLength(1)
+    expect(result.current.pages[0]).toHaveLength(1)
+    expect(result.current.pages[0]![0]).toMatchObject({
+      id: `new-1`,
+      title: `New Post`,
+    })
+    expect(result.current.hasNextPage).toBe(false)
+  }, 10000)
+
   it(`should update pages when underlying data changes`, async () => {
     const posts = createMockPosts(30)
     const collection = createCollection(
