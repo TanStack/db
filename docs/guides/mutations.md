@@ -263,7 +263,7 @@ If the handler throws an error during persistence, the optimistic state is autom
 
 ### Multiple Pending Transactions
 
-When you make multiple mutations to the same item before earlier ones have synced back, each mutation creates a separate transaction. These transactions are **layered**, with the most recent transaction's state taking priority for display.
+When you make multiple mutations to the same item before earlier ones have synced back, each mutation creates a separate transaction. These transactions are **layered**, with the most recent transaction's state taking priority for display. Layering operates at the item level—the entire item is overlaid, not individual fields within it.
 
 ```tsx
 // User rapidly updates a document's content: A → B → C
@@ -281,6 +281,28 @@ As each transaction syncs back from the server, the optimistic state is **recomp
 - When tx3 syncs back → no pending transactions → visible state = synced server state
 
 This layering ensures that rapid sequential updates feel instant and consistent, without earlier sync confirmations disrupting the user's most recent changes.
+
+When you call `update()`, the draft reflects the **current visible state**, which includes optimistic changes from all pending transactions—not just your own. This means mutations build on top of each other:
+
+```tsx
+const tx1 = createTransaction({ mutationFn, autoCommit: false })
+const tx2 = createTransaction({ mutationFn, autoCommit: false })
+
+tx1.mutate(() => {
+  itemCollection.update("A", (draft) => { draft.value = 1 })
+})
+
+tx2.mutate(() => {
+  itemCollection.update("B", (draft) => { draft.value = 2 })
+})
+
+tx1.mutate(() => {
+  // draft.value here is 2 (from tx2), not the original synced value
+  itemCollection.update("B", (draft) => { draft.value = draft.value + 10 })
+})
+
+// Visible state: A=1, B=12
+```
 
 ## Collection Write Operations
 
