@@ -628,7 +628,10 @@ export class CollectionStateManager<
       const events: Array<ChangeMessage<TOutput, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
       const completedLocalKeys = new Set<TKey>()
-      const completedOptimisticOps = new Map<TKey, { type: string; value: TOutput }>()
+      const completedOptimisticOps = new Map<
+        TKey,
+        { type: string; value: TOutput }
+      >()
 
       for (const transaction of this.transactions.values()) {
         if (transaction.state === `completed`) {
@@ -659,7 +662,7 @@ export class CollectionStateManager<
         }
         return {
           synced: true,
-          origin: (previousRowOrigins.get(key) ?? 'remote'),
+          origin: previousRowOrigins.get(key) ?? 'remote',
         }
       }
 
