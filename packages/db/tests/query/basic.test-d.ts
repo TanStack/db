@@ -4,6 +4,7 @@ import { type } from 'arktype'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -13,6 +14,8 @@ type User = {
   email: string
   active: boolean
 }
+
+type OutputWithVirtualString<T extends object> = OutputWithVirtual<T, string>
 
 // Sample data for tests
 const sampleUsers: Array<User> = [
@@ -47,13 +50,15 @@ describe(`Query Basic Types`, () => {
 
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: number
-        name: string
-        age: number
-        email: string
-        active: boolean
-      }>
+      Array<
+        OutputWithVirtualString<{
+          id: number
+          name: string
+          age: number
+          email: string
+          active: boolean
+        }>
+      >
     >()
   })
 
@@ -70,13 +75,15 @@ describe(`Query Basic Types`, () => {
 
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: number
-        name: string
-        age: number
-        email: string
-        active: boolean
-      }>
+      Array<
+        OutputWithVirtualString<{
+          id: number
+          name: string
+          age: number
+          email: string
+          active: boolean
+        }>
+      >
     >()
   })
 
@@ -95,11 +102,13 @@ describe(`Query Basic Types`, () => {
 
     const results = activeLiveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: number
-        name: string
-        active: boolean
-      }>
+      Array<
+        OutputWithVirtualString<{
+          id: number
+          name: string
+          active: boolean
+        }>
+      >
     >()
   })
 
@@ -120,13 +129,15 @@ describe(`Query Basic Types`, () => {
 
     const results = projectedLiveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: number
-        name: string
-        isAdult: number
-        literalConst: `one`
-        literal: string
-      }>
+      Array<
+        OutputWithVirtualString<{
+          id: number
+          name: string
+          isAdult: number
+          literalConst: `one`
+          literal: string
+        }>
+      >
     >()
   })
 
@@ -143,10 +154,12 @@ describe(`Query Basic Types`, () => {
 
     const results = customKeyCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        userId: number
-        userName: string
-      }>
+      Array<
+        OutputWithVirtualString<{
+          userId: number
+          userName: string
+        }>
+      >
     >()
   })
 
@@ -172,18 +185,22 @@ describe(`Query Basic Types`, () => {
 
     const results1 = collection1.toArray
     expectTypeOf(results1).toEqualTypeOf<
-      Array<{
-        id: number
-        name: string
-      }>
+      Array<
+        OutputWithVirtualString<{
+          id: number
+          name: string
+        }>
+      >
     >()
 
     const results2 = collection2.toArray
     expectTypeOf(results2).toEqualTypeOf<
-      Array<{
-        id: number
-        name: string
-      }>
+      Array<
+        OutputWithVirtualString<{
+          id: number
+          name: string
+        }>
+      >
     >()
   })
 
@@ -194,7 +211,7 @@ describe(`Query Basic Types`, () => {
 
     const results = liveCollection.toArray
     // Should return the original User type, not namespaced
-    expectTypeOf(results).toEqualTypeOf<Array<User>>()
+    expectTypeOf(results).toEqualTypeOf<Array<OutputWithVirtualString<User>>>()
   })
 
   test(`no select with WHERE returns original collection type`, () => {
@@ -207,7 +224,7 @@ describe(`Query Basic Types`, () => {
 
     const results = activeLiveCollection.toArray
     // Should return the original User type, not namespaced
-    expectTypeOf(results).toEqualTypeOf<Array<User>>()
+    expectTypeOf(results).toEqualTypeOf<Array<OutputWithVirtualString<User>>>()
   })
 
   test(`query function syntax with no select returns original type`, () => {
@@ -217,7 +234,7 @@ describe(`Query Basic Types`, () => {
 
     const results = liveCollection.toArray
     // Should return the original User type, not namespaced
-    expectTypeOf(results).toEqualTypeOf<Array<User>>()
+    expectTypeOf(results).toEqualTypeOf<Array<OutputWithVirtualString<User>>>()
   })
 
   test(`selecting optional field should work`, () => {
@@ -245,9 +262,11 @@ describe(`Query Basic Types`, () => {
 
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        inserted_at: Date | undefined
-      }>
+      Array<
+        OutputWithVirtualString<{
+          inserted_at: Date | undefined
+        }>
+      >
     >()
   })
 
@@ -280,9 +299,11 @@ describe(`Query Basic Types`, () => {
 
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        inserted_at: Date | undefined
-      }>
+      Array<
+        OutputWithVirtualString<{
+          inserted_at: Date | undefined
+        }>
+      >
     >()
   })
 
@@ -316,10 +337,12 @@ describe(`Query Basic Types`, () => {
 
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        status: `active` | `inactive` | undefined
-        name: string
-      }>
+      Array<
+        OutputWithVirtualString<{
+          status: `active` | `inactive` | undefined
+          name: string
+        }>
+      >
     >()
   })
 })
@@ -354,9 +377,11 @@ describe(`Query Basic Types with ArkType Schemas`, () => {
 
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        inserted_at: Date | undefined
-      }>
+      Array<
+        OutputWithVirtualString<{
+          inserted_at: Date | undefined
+        }>
+      >
     >()
   })
 
@@ -390,10 +415,12 @@ describe(`Query Basic Types with ArkType Schemas`, () => {
 
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        status: `active` | `inactive` | undefined
-        name: string
-      }>
+      Array<
+        OutputWithVirtualString<{
+          status: `active` | `inactive` | undefined
+          name: string
+        }>
+      >
     >()
   })
 
@@ -427,10 +454,12 @@ describe(`Query Basic Types with ArkType Schemas`, () => {
 
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        tags: Array<string> | undefined
-        name: string
-      }>
+      Array<
+        OutputWithVirtualString<{
+          tags: Array<string> | undefined
+          name: string
+        }>
+      >
     >()
   })
 
@@ -470,12 +499,14 @@ describe(`Query Basic Types with ArkType Schemas`, () => {
 
     const results = liveCollection.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: number
-        name: string
-        age: number
-        email: string | undefined
-      }>
+      Array<
+        OutputWithVirtualString<{
+          id: number
+          name: string
+          age: number
+          email: string | undefined
+        }>
+      >
     >()
   })
 })
