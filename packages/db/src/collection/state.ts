@@ -627,6 +627,27 @@ export class CollectionStateManager<
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
+      const completedLocalKeys = new Set<TKey>()
+      const completedOptimisticOps = new Map<TKey, { type: string; value: TOutput }>()
+
+      for (const transaction of this.transactions.values()) {
+        if (transaction.state === `completed`) {
+          for (const mutation of transaction.mutations) {
+            if (
+              this.isThisCollection(mutation.collection) &&
+              changedKeys.has(mutation.key)
+            ) {
+              completedLocalKeys.add(mutation.key)
+              if (mutation.optimistic) {
+                completedOptimisticOps.set(mutation.key, {
+                  type: mutation.type,
+                  value: mutation.modified as TOutput,
+                })
+              }
+            }
+          }
+        }
+      }
 
       const getPreviousVirtualProps = (key: TKey) => {
         if (this.isLocalOnly) {
@@ -634,13 +655,14 @@ export class CollectionStateManager<
         }
         if (
           previousOptimisticUpserts.has(key) ||
-          previousOptimisticDeletes.has(key)
+          previousOptimisticDeletes.has(key) ||
+          completedOptimisticOps.has(key)
         ) {
           return { synced: false, origin: 'local' as const }
         }
         return {
           synced: true,
-          origin: (previousRowOrigins.get(key) ?? 'remote') as VirtualOrigin,
+          origin: (previousRowOrigins.get(key) ?? 'remote'),
         }
       }
 
@@ -717,7 +739,9 @@ export class CollectionStateManager<
 
           // Determine origin: 'local' for local-only collections or pending local changes
           const origin: VirtualOrigin =
-            this.isLocalOnly || this.pendingLocalChanges.has(key)
+            this.isLocalOnly ||
+            this.pendingLocalChanges.has(key) ||
+            completedLocalKeys.has(key)
               ? 'local'
               : 'remote'
 
@@ -864,26 +888,6 @@ export class CollectionStateManager<
                   this.optimisticDeletes.add(mutation.key)
                   break
               }
-            }
-          }
-        }
-      }
-
-      // Check for redundant sync operations that match completed optimistic operations
-      const completedOptimisticOps = new Map<TKey, any>()
-
-      for (const transaction of this.transactions.values()) {
-        if (transaction.state === `completed`) {
-          for (const mutation of transaction.mutations) {
-            if (
-              mutation.optimistic &&
-              this.isThisCollection(mutation.collection) &&
-              changedKeys.has(mutation.key)
-            ) {
-              completedOptimisticOps.set(mutation.key, {
-                type: mutation.type,
-                value: mutation.modified,
-              })
             }
           }
         }

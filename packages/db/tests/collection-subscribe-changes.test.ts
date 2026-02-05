@@ -2509,6 +2509,7 @@ describe(`Virtual properties`, () => {
     const source = createCollection<{ id: string; group: string }, string>({
       id: `virtual-props-aggregate-source`,
       getKey: (item) => item.id,
+      startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {
           syncFns = {
