@@ -2,11 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import mitt from 'mitt'
 import { createCollection } from '../src/collection/index.js'
 import { createLiveQueryCollection } from '../src/query/live-query-collection.js'
-import { createLocalOnlyCollection } from '../src/local-only.js'
+import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createTransaction } from '../src/transactions'
 import { and, count, eq, gt } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
 import { stripVirtualProps } from './utils'
+import type { OutputWithVirtual } from './utils'
 import type {
   ChangeMessage,
   ChangesPayload,
@@ -2201,7 +2202,9 @@ describe(`Virtual properties`, () => {
   })
 
   it(`should emit an update when $synced flips on confirmation`, async () => {
-    const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
+    const changes: Array<
+      ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
+    > = []
     let syncFns:
       | {
           begin: () => void
@@ -2228,7 +2231,11 @@ describe(`Virtual properties`, () => {
     })
 
     const subscription = collection.subscribeChanges(
-      (events) => changes.push(...events),
+      (
+        events: Array<
+          ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
+        >,
+      ) => changes.push(...events),
       { includeInitialState: false },
     )
 
@@ -2548,16 +2555,22 @@ describe(`Virtual properties`, () => {
   })
 
   it(`should mark local-only collections as synced with local origin`, async () => {
-    const collection = createLocalOnlyCollection<{ id: string; value: string }>(
-      {
+    const collection = createCollection<{ id: string; value: string }, string>(
+      localOnlyCollectionOptions({
         id: `virtual-props-local-only`,
-        getKey: (item) => item.id,
-      },
+        getKey: (item: { id: string; value: string }) => item.id,
+      }),
     )
 
-    const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
+    const changes: Array<
+      ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
+    > = []
     const subscription = collection.subscribeChanges(
-      (events) => changes.push(...events),
+      (
+        events: Array<
+          ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
+        >,
+      ) => changes.push(...events),
       { includeInitialState: false },
     )
 

@@ -20,7 +20,7 @@ interface User {
   name: string
 }
 
-type UserWithVirtual = OutputWithVirtual<User, number>
+type UserWithVirtual = OutputWithVirtual<User, string | number>
 
 interface Task {
   id: number

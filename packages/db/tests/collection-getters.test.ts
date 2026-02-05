@@ -1,20 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createTransaction } from '../src/transactions'
 import { createCollection } from '../src/collection/index.js'
+import { stripVirtualProps } from './utils'
 import type { CollectionImpl } from '../src/collection/index.js'
 import type { SyncConfig } from '../src/types'
-import { stripVirtualProps } from './utils'
 
 type Item = { id: string; name: string }
 
-const stripValues = <T extends Record<string, unknown>>(
+const stripValues = <T extends object>(
   values: Array<T>,
 ): Array<T> => values.map((value) => stripVirtualProps(value))
 
-const stripEntries = <
-  TKey extends string | number,
-  T extends Record<string, any>,
->(
+const stripEntries = <TKey extends string | number, T extends object>(
   entries: Array<[TKey, T]>,
 ): Array<[TKey, T]> =>
   entries.map(([key, value]) => [key, stripVirtualProps(value)])
