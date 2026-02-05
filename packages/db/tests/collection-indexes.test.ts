@@ -25,14 +25,12 @@ const normalizeChange = (change: any) => ({
 })
 
 const stripVirtualOnlyUpdates = (changes: Array<any>) =>
-  changes
-    .map(normalizeChange)
-    .filter((change) => {
-      if (change.type !== `update`) {
-        return true
-      }
-      return JSON.stringify(change.value) !== JSON.stringify(change.previousValue)
-    })
+  changes.map(normalizeChange).filter((change) => {
+    if (change.type !== `update`) {
+      return true
+    }
+    return JSON.stringify(change.value) !== JSON.stringify(change.previousValue)
+  })
 
 interface TestItem {
   id: string
