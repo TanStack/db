@@ -36,7 +36,6 @@ type Person = {
   }
 }
 
-
 // Sample data
 const samplePersons: Array<Person> = [
   {

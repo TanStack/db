@@ -16,7 +16,6 @@ type TodoOption = {
   optionText: string
 }
 
-
 const todoCollection = createCollection(
   mockSyncCollectionOptions<Todo>({
     id: `test-todos-findone-joins`,

@@ -19,7 +19,6 @@ type Department = {
   budget: number
 }
 
-
 function createUsersCollection() {
   return createCollection(
     mockSyncCollectionOptions<UserWithOptional>({

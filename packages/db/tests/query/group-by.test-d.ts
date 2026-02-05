@@ -31,7 +31,6 @@ type Order = {
   sales_rep_id: number | null
 }
 
-
 // Sample order data
 const sampleOrders: Array<Order> = [
   {
