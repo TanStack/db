@@ -17,7 +17,7 @@ interface Issue {
   createdAt: string
 }
 
-type IssueWithVirtual = OutputWithVirtual<Issue, string>
+type IssueWithVirtual = OutputWithVirtual<Issue, number>
 
 interface User {
   id: number

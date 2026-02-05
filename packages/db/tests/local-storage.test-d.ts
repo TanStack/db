@@ -317,11 +317,11 @@ describe(`LocalStorage collection type resolution tests`, () => {
     type ExpectedInput = z.input<typeof testSchemaWithSchema>
 
     const collection = createCollection(
-      localStorageCollectionOptions({
+      localStorageCollectionOptions<typeof testSchemaWithSchema, string>({
         storageKey: `test-with-schema`,
         storage: mockStorage,
         storageEventApi: mockStorageEventApi,
-        getKey: (item: any) => item.id,
+        getKey: (item: ExpectedType) => item.id,
         schema: testSchemaWithSchema,
         onInsert: (params) => {
           expectTypeOf(
@@ -373,11 +373,11 @@ describe(`LocalStorage collection type resolution tests`, () => {
       createdAt: Date
     }
 
-    const options = localStorageCollectionOptions<SelectUrlType>({
+    const options = localStorageCollectionOptions<SelectUrlType, string>({
       storageKey: `test-with-url-type`,
       storage: mockStorage,
       storageEventApi: mockStorageEventApi,
-      getKey: (url) => url.id,
+      getKey: (url: SelectUrlType) => url.id,
     })
 
     const collection = createCollection(options)

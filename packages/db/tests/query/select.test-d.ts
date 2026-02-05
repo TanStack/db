@@ -26,6 +26,8 @@ type User = {
   }
 }
 
+type OutputWithVirtualNumber<T extends object> = OutputWithVirtual<T, number>
+
 function createUsers() {
   return createCollection(
     mockSyncCollectionOptions<User>({
@@ -53,7 +55,7 @@ describe(`select types`, () => {
 
     const results = col.toArray[0]!
 
-    expectTypeOf(results).toEqualTypeOf<OutputWithVirtual<Expected>>()
+    expectTypeOf(results).toEqualTypeOf<OutputWithVirtualNumber<Expected>>()
   })
 
   test(`works with js built-ins objects`, () => {
@@ -76,7 +78,7 @@ describe(`select types`, () => {
 
     const results = col.toArray[0]!
 
-    expectTypeOf(results).toEqualTypeOf<OutputWithVirtual<Expected>>()
+    expectTypeOf(results).toEqualTypeOf<OutputWithVirtualNumber<Expected>>()
   })
 
   test(`nested object selection infers nested result type`, () => {
@@ -101,7 +103,7 @@ describe(`select types`, () => {
 
     const results = col.toArray[0]!
 
-    expectTypeOf(results).toEqualTypeOf<OutputWithVirtual<Expected>>()
+    expectTypeOf(results).toEqualTypeOf<OutputWithVirtualNumber<Expected>>()
   })
 
   test(`nested spread preserves object structure types`, () => {
@@ -134,6 +136,6 @@ describe(`select types`, () => {
 
     const results = col.toArray[0]!
 
-    expectTypeOf(results).toEqualTypeOf<OutputWithVirtual<Expected>>()
+    expectTypeOf(results).toEqualTypeOf<OutputWithVirtualNumber<Expected>>()
   })
 })
