@@ -148,11 +148,17 @@ describe(`LocalOnly Collection`, () => {
 
     // The change handler should have been called
     expect(changeHandler).toHaveBeenCalledTimes(1)
-    expect(changeHandler).toHaveBeenCalledWith([
+    const [changes] = changeHandler.mock.calls[0] as [Array<any>]
+    const normalizedChanges = changes.map((change) => ({
+      ...change,
+      value: stripVirtualProps(change.value),
+    }))
+    expect(normalizedChanges).toEqual([
       {
         type: `insert`,
         key: 1,
         value: { id: 1, name: `Test Item` },
+        previousValue: undefined,
       },
     ])
 

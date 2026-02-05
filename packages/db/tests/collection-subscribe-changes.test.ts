@@ -1689,6 +1689,7 @@ describe(`Collection.subscribeChanges`, () => {
       expect(insertEvents.length).toBe(2)
       expect(updateEvents.length).toBe(2)
     } finally {
+      vi.useRealTimers()
       vi.restoreAllMocks()
     }
   })
@@ -1751,6 +1752,7 @@ describe(`Collection.subscribeChanges`, () => {
         value: { id: `x`, n: 1, foo: `abc` },
       })
     } finally {
+      vi.useRealTimers()
       vi.restoreAllMocks()
     }
   })

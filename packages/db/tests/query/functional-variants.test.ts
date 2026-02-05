@@ -153,7 +153,7 @@ describe(`Functional Variants Query`, () => {
 
       expect(liveCollection.size).toBe(6)
       const frank = liveCollection.get(6)
-      expect(frank).toEqual({
+      expect(stripVirtualProps(frank)).toEqual({
         displayName: `Frank (6)`,
         salaryTier: `senior`,
         emailDomain: `company.com`,
@@ -166,7 +166,7 @@ describe(`Functional Variants Query`, () => {
       usersCollection.utils.commit()
 
       const franklin = liveCollection.get(6)
-      expect(franklin).toEqual({
+      expect(stripVirtualProps(franklin)).toEqual({
         displayName: `Franklin (6)`,
         salaryTier: `junior`, // Changed due to salary update
         emailDomain: `company.com`,
@@ -423,7 +423,10 @@ describe(`Functional Variants Query`, () => {
 
         expect(liveCollection.size).toBe(2) // Still 2 departments (dept 1 has Alice+Frank, dept 2 has Charlie+Dave)
         const dept1After = liveCollection.get(1)
-        expect(dept1After).toEqual({ department_id: 1, employee_count: 2 }) // Alice + Frank = 2 employees
+        expect(stripVirtualProps(dept1After)).toEqual({
+          department_id: 1,
+          employee_count: 2,
+        }) // Alice + Frank = 2 employees
 
         // Clean up
         usersCollection.utils.begin()

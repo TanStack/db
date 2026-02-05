@@ -529,7 +529,10 @@ describe(`Collection getters`, () => {
       // Now the promise should resolve
       const array = await arrayPromise
       expect(Array.isArray(array)).toBe(true)
-      expect(array).toContainEqual({ id: `delayed-item`, name: `Delayed Item` })
+      expect(array.map((row) => stripVirtualProps(row))).toContainEqual({
+        id: `delayed-item`,
+        name: `Delayed Item`,
+      })
     })
   })
 })
