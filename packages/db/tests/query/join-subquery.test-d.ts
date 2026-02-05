@@ -62,7 +62,6 @@ const sampleUsers: Array<User> = [
   },
 ]
 
-
 function createIssuesCollection() {
   return createCollection(
     mockSyncCollectionOptions<Issue>({

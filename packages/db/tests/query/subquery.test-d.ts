@@ -56,7 +56,6 @@ function createIssuesCollection() {
   )
 }
 
-
 describe(`Subquery Types`, () => {
   const issuesCollection = createIssuesCollection()
 
