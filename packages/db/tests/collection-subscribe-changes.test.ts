@@ -619,8 +619,11 @@ describe(`Collection.subscribeChanges`, () => {
     // Wait for changes to propagate
     await waitForChanges()
 
-    // Verify no changes were emitted as the sync should match the optimistic state
-    expect(callback).toHaveBeenCalledTimes(0)
+    // Sync confirmation should only change virtual props ($synced/$origin)
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(
+      normalizeChangesWithoutVirtualUpdates(callback.mock.calls[0]![0]),
+    ).toEqual([])
     callback.mockReset()
 
     // Update one item only
@@ -1340,6 +1343,7 @@ describe(`Collection.subscribeChanges`, () => {
       },
       onDelete: ({ transaction }) => {
         emitter.emit(`sync`, transaction.mutations)
+        return Promise.resolve()
       },
     })
 
@@ -2150,7 +2154,9 @@ describe(`Collection.subscribeChanges`, () => {
 
 describe(`Virtual properties`, () => {
   it(`should include virtual properties in change messages`, async () => {
-    const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
+    const changes: Array<
+      ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
+    > = []
 
     const collection = createCollection<{ id: string; value: string }, string>({
       id: `virtual-props-change-test`,
@@ -2332,6 +2338,7 @@ describe(`Virtual properties`, () => {
           })
         })
         syncFns.commit()
+        return Promise.resolve()
       },
     })
 
@@ -2379,9 +2386,7 @@ describe(`Virtual properties`, () => {
           markReady()
         },
       },
-      onInsert: () => {
-        throw new Error(`insert failed`)
-      },
+      onInsert: () => Promise.reject(new Error(`insert failed`)),
     })
 
     const subscription = collection.subscribeChanges(

@@ -59,6 +59,8 @@ export class CollectionStateManager<
   // Optimistic state tracking - make public for testing
   public optimisticUpserts = new Map<TKey, TOutput>()
   public optimisticDeletes = new Set<TKey>()
+  public pendingOptimisticUpserts = new Map<TKey, TOutput>()
+  public pendingOptimisticDeletes = new Set<TKey>()
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -343,10 +345,56 @@ export class CollectionStateManager<
     const previousState = new Map(this.optimisticUpserts)
     const previousDeletes = new Set(this.optimisticDeletes)
 
+    // Update pending optimistic state for completed/failed transactions
+    for (const transaction of this.transactions.values()) {
+      if (transaction.state === `completed`) {
+        for (const mutation of transaction.mutations) {
+          if (!this.isThisCollection(mutation.collection)) {
+            continue
+          }
+          if (!mutation.optimistic) {
+            continue
+          }
+          switch (mutation.type) {
+            case `insert`:
+            case `update`:
+              this.pendingOptimisticUpserts.set(
+                mutation.key,
+                mutation.modified as TOutput,
+              )
+              this.pendingOptimisticDeletes.delete(mutation.key)
+              break
+            case `delete`:
+              this.pendingOptimisticUpserts.delete(mutation.key)
+              this.pendingOptimisticDeletes.add(mutation.key)
+              break
+          }
+        }
+      } else if (transaction.state === `failed`) {
+        for (const mutation of transaction.mutations) {
+          if (!this.isThisCollection(mutation.collection)) {
+            continue
+          }
+          if (mutation.optimistic) {
+            this.pendingOptimisticUpserts.delete(mutation.key)
+            this.pendingOptimisticDeletes.delete(mutation.key)
+          }
+        }
+      }
+    }
+
     // Clear current optimistic state
     this.optimisticUpserts.clear()
     this.optimisticDeletes.clear()
     this.pendingLocalChanges.clear()
+
+    // Seed optimistic state with pending optimistic mutations
+    for (const [key, value] of this.pendingOptimisticUpserts) {
+      this.optimisticUpserts.set(key, value)
+    }
+    for (const key of this.pendingOptimisticDeletes) {
+      this.optimisticDeletes.add(key)
+    }
 
     const activeTransactions: Array<Transaction<any>> = []
 
@@ -752,6 +800,8 @@ export class CollectionStateManager<
               this.rowOrigins.set(key, origin)
               // Clear pending local changes now that sync has confirmed
               this.pendingLocalChanges.delete(key)
+              this.pendingOptimisticUpserts.delete(key)
+              this.pendingOptimisticDeletes.delete(key)
               break
             case `update`: {
               if (rowUpdateMode === `partial`) {
@@ -767,6 +817,8 @@ export class CollectionStateManager<
               this.rowOrigins.set(key, origin)
               // Clear pending local changes now that sync has confirmed
               this.pendingLocalChanges.delete(key)
+              this.pendingOptimisticUpserts.delete(key)
+              this.pendingOptimisticDeletes.delete(key)
               break
             }
             case `delete`:
@@ -774,6 +826,8 @@ export class CollectionStateManager<
               // Clean up origin and pending tracking for deleted rows
               this.rowOrigins.delete(key)
               this.pendingLocalChanges.delete(key)
+              this.pendingOptimisticUpserts.delete(key)
+              this.pendingOptimisticDeletes.delete(key)
               break
           }
         }
@@ -1103,6 +1157,8 @@ export class CollectionStateManager<
     this.syncedMetadata.clear()
     this.optimisticUpserts.clear()
     this.optimisticDeletes.clear()
+    this.pendingOptimisticUpserts.clear()
+    this.pendingOptimisticDeletes.clear()
     this.rowOrigins.clear()
     this.pendingLocalChanges.clear()
     this.isLocalOnly = false
