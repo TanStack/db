@@ -1787,7 +1787,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .orderBy(({ $selected }) => $selected.latestActivity),
         })
 
-        expect(sessionStats.toArray.map((row) => stripVirtualProps(row))).toEqual([
+        expect(
+          sessionStats.toArray.map((row) => stripVirtualProps(row)),
+        ).toEqual([
           {
             taskId: 2,
             latestActivity: new Date(`2023-02-01`),
@@ -1819,7 +1821,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               }),
         })
 
-        expect(sessionStats.toArray.map((row) => stripVirtualProps(row))).toEqual([
+        expect(
+          sessionStats.toArray.map((row) => stripVirtualProps(row)),
+        ).toEqual([
           {
             taskId: 2,
             latestActivity: new Date(`2023-02-01`),
@@ -1849,7 +1853,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .having(({ $selected }) => gt($selected.sessionCount, 2)),
         })
 
-        expect(sessionStats.toArray.map((row) => stripVirtualProps(row))).toEqual([
+        expect(
+          sessionStats.toArray.map((row) => stripVirtualProps(row)),
+        ).toEqual([
           {
             taskId: 1,
             latestActivity: new Date(`2023-03-01`),
