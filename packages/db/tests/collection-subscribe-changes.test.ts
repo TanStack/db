@@ -2233,7 +2233,9 @@ describe(`Virtual properties`, () => {
     const subscription = collection.subscribeChanges(
       (
         events: Array<
-          ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
+          ChangeMessage<
+            OutputWithVirtual<{ id: string; value: string }, string>
+          >
         >,
       ) => changes.push(...events),
       { includeInitialState: false },
@@ -2568,7 +2570,9 @@ describe(`Virtual properties`, () => {
     const subscription = collection.subscribeChanges(
       (
         events: Array<
-          ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
+          ChangeMessage<
+            OutputWithVirtual<{ id: string; value: string }, string>
+          >
         >,
       ) => changes.push(...events),
       { includeInitialState: false },

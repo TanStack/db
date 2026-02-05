@@ -7,9 +7,8 @@ import type { SyncConfig } from '../src/types'
 
 type Item = { id: string; name: string }
 
-const stripValues = <T extends object>(
-  values: Array<T>,
-): Array<T> => values.map((value) => stripVirtualProps(value))
+const stripValues = <T extends object>(values: Array<T>): Array<T> =>
+  values.map((value) => stripVirtualProps(value))
 
 const stripEntries = <TKey extends string | number, T extends object>(
   entries: Array<[TKey, T]>,
