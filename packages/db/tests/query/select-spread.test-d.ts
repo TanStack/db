@@ -134,8 +134,6 @@ describe(`Select spread typing`, () => {
     const results = collection.toArray
     expectTypeOf(results).toMatchTypeOf<
       Array<OutputWithVirtualKeyed<Expected>>
-    >(
-      undefined as any,
-    )
+    >(undefined as any)
   })
 })
