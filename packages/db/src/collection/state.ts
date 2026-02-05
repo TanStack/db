@@ -1,6 +1,7 @@
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
+import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type { VirtualOrigin, WithVirtualProps } from '../virtual-props.js'
 import type { Transaction } from '../transactions'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
@@ -61,6 +62,8 @@ export class CollectionStateManager<
   public optimisticDeletes = new Set<TKey>()
   public pendingOptimisticUpserts = new Map<TKey, TOutput>()
   public pendingOptimisticDeletes = new Set<TKey>()
+  public pendingOptimisticDirectUpserts = new Set<TKey>()
+  public pendingOptimisticDirectDeletes = new Set<TKey>()
 
   /**
    * Tracks the origin of confirmed changes for each row.
@@ -348,6 +351,8 @@ export class CollectionStateManager<
 
     // Update pending optimistic state for completed/failed transactions
     for (const transaction of this.transactions.values()) {
+      const isDirectTransaction =
+        transaction.metadata[DIRECT_TRANSACTION_METADATA_KEY] === true
       if (transaction.state === `completed`) {
         for (const mutation of transaction.mutations) {
           if (!this.isThisCollection(mutation.collection)) {
@@ -365,10 +370,24 @@ export class CollectionStateManager<
                 mutation.modified as TOutput,
               )
               this.pendingOptimisticDeletes.delete(mutation.key)
+              if (isDirectTransaction) {
+                this.pendingOptimisticDirectUpserts.add(mutation.key)
+                this.pendingOptimisticDirectDeletes.delete(mutation.key)
+              } else {
+                this.pendingOptimisticDirectUpserts.delete(mutation.key)
+                this.pendingOptimisticDirectDeletes.delete(mutation.key)
+              }
               break
             case `delete`:
               this.pendingOptimisticUpserts.delete(mutation.key)
               this.pendingOptimisticDeletes.add(mutation.key)
+              if (isDirectTransaction) {
+                this.pendingOptimisticDirectUpserts.delete(mutation.key)
+                this.pendingOptimisticDirectDeletes.add(mutation.key)
+              } else {
+                this.pendingOptimisticDirectUpserts.delete(mutation.key)
+                this.pendingOptimisticDirectDeletes.delete(mutation.key)
+              }
               break
           }
         }
@@ -381,6 +400,8 @@ export class CollectionStateManager<
           if (mutation.optimistic) {
             this.pendingOptimisticUpserts.delete(mutation.key)
             this.pendingOptimisticDeletes.delete(mutation.key)
+            this.pendingOptimisticDirectUpserts.delete(mutation.key)
+            this.pendingOptimisticDirectDeletes.delete(mutation.key)
           }
         }
       }
@@ -398,15 +419,35 @@ export class CollectionStateManager<
         pendingSyncKeys.add(operation.key as TKey)
       }
     }
+    const staleOptimisticUpserts: Array<TKey> = []
     for (const [key, value] of this.pendingOptimisticUpserts) {
-      if (pendingSyncKeys.has(key)) {
+      if (
+        pendingSyncKeys.has(key) ||
+        this.pendingOptimisticDirectUpserts.has(key)
+      ) {
         this.optimisticUpserts.set(key, value)
+      } else {
+        staleOptimisticUpserts.push(key)
       }
     }
+    for (const key of staleOptimisticUpserts) {
+      this.pendingOptimisticUpserts.delete(key)
+      this.pendingLocalOrigins.delete(key)
+    }
+    const staleOptimisticDeletes: Array<TKey> = []
     for (const key of this.pendingOptimisticDeletes) {
-      if (pendingSyncKeys.has(key)) {
+      if (
+        pendingSyncKeys.has(key) ||
+        this.pendingOptimisticDirectDeletes.has(key)
+      ) {
         this.optimisticDeletes.add(key)
+      } else {
+        staleOptimisticDeletes.push(key)
       }
+    }
+    for (const key of staleOptimisticDeletes) {
+      this.pendingOptimisticDeletes.delete(key)
+      this.pendingLocalOrigins.delete(key)
     }
 
     const activeTransactions: Array<Transaction<any>> = []
@@ -474,12 +515,12 @@ export class CollectionStateManager<
     // that will immediately restore the same data, but only for completed transactions
     // IMPORTANT: Skip complex filtering for user-triggered actions to prevent UI blocking
     if (this.pendingSyncedTransactions.length > 0 && !triggeredByUserAction) {
-      const pendingSyncKeys = new Set<TKey>()
+      const pendingSyncKeysForFilter = new Set<TKey>()
 
       // Collect keys from pending sync operations
       for (const transaction of this.pendingSyncedTransactions) {
         for (const operation of transaction.operations) {
-          pendingSyncKeys.add(operation.key as TKey)
+          pendingSyncKeysForFilter.add(operation.key as TKey)
         }
       }
 
@@ -487,7 +528,10 @@ export class CollectionStateManager<
       // 1. Have pending sync operations AND
       // 2. Are from completed transactions (being cleaned up)
       const filteredEvents = filteredEventsBySyncStatus.filter((event) => {
-        if (event.type === `delete` && pendingSyncKeys.has(event.key)) {
+        if (
+          event.type === `delete` &&
+          pendingSyncKeysForFilter.has(event.key)
+        ) {
           // Check if this delete is from clearing optimistic state of completed transactions
           // We can infer this by checking if we have no remaining optimistic mutations for this key
           const hasActiveOptimisticMutation = activeTransactions.some((tx) =>
@@ -814,6 +858,8 @@ export class CollectionStateManager<
               this.pendingLocalOrigins.delete(key)
               this.pendingOptimisticUpserts.delete(key)
               this.pendingOptimisticDeletes.delete(key)
+              this.pendingOptimisticDirectUpserts.delete(key)
+              this.pendingOptimisticDirectDeletes.delete(key)
               break
             case `update`: {
               if (rowUpdateMode === `partial`) {
@@ -832,6 +878,8 @@ export class CollectionStateManager<
               this.pendingLocalOrigins.delete(key)
               this.pendingOptimisticUpserts.delete(key)
               this.pendingOptimisticDeletes.delete(key)
+              this.pendingOptimisticDirectUpserts.delete(key)
+              this.pendingOptimisticDirectDeletes.delete(key)
               break
             }
             case `delete`:
@@ -842,6 +890,8 @@ export class CollectionStateManager<
               this.pendingLocalOrigins.delete(key)
               this.pendingOptimisticUpserts.delete(key)
               this.pendingOptimisticDeletes.delete(key)
+              this.pendingOptimisticDirectUpserts.delete(key)
+              this.pendingOptimisticDirectDeletes.delete(key)
               break
           }
         }
@@ -1173,6 +1223,8 @@ export class CollectionStateManager<
     this.optimisticDeletes.clear()
     this.pendingOptimisticUpserts.clear()
     this.pendingOptimisticDeletes.clear()
+    this.pendingOptimisticDirectUpserts.clear()
+    this.pendingOptimisticDirectDeletes.clear()
     this.rowOrigins.clear()
     this.pendingLocalChanges.clear()
     this.pendingLocalOrigins.clear()
