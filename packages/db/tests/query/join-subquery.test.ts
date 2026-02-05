@@ -460,7 +460,11 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
-        const results = joinSubquery.toArray
+        const results = joinSubquery.toArray.map((row) => ({
+          ...stripVirtualProps(row),
+          product: stripVirtualProps(row.product),
+          tried: stripVirtualProps(row.tried),
+        }))
         expect(results).toHaveLength(1)
         expect(results[0]!.product.id).toBe(1)
         expect(results[0]!.tried).toBeDefined()
@@ -534,7 +538,10 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
-        const results = joinSubquery.toArray
+        const results = joinSubquery.toArray.map((row) => ({
+          ...stripVirtualProps(row),
+          issue: stripVirtualProps(row.issue),
+        }))
         expect(results).toEqual([
           {
             issue: {

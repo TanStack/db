@@ -8,6 +8,14 @@ const getStateValue = <T extends object, TKey extends string | number>(
   key: TKey,
 ) => stripVirtualProps(collection.state.get(key))
 
+const stripChange = (change: any) => ({
+  ...change,
+  value: stripVirtualProps(change?.value),
+  previousValue: stripVirtualProps(change?.previousValue),
+})
+
+const stripChanges = (changes: Array<any>) => changes.map(stripChange)
+
 describe(`Collection truncate operations`, () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -62,7 +70,7 @@ describe(`Collection truncate operations`, () => {
     const tx = collection.insert({ id: 3, value: `new-item` })
 
     expect(changeEvents.length).toBe(1)
-    expect(changeEvents[0]).toEqual({
+    expect(stripChange(changeEvents[0])).toEqual({
       type: `insert`,
       key: 3,
       value: { id: 3, value: `new-item` },
@@ -184,7 +192,7 @@ describe(`Collection truncate operations`, () => {
     const tx = collection.insert({ id: 1, value: `user-item` })
 
     expect(changeEvents.length).toBe(1)
-    expect(changeEvents[0]).toEqual({
+    expect(stripChange(changeEvents[0])).toEqual({
       type: `insert`,
       key: 1,
       value: { id: 1, value: `user-item` },
@@ -244,7 +252,7 @@ describe(`Collection truncate operations`, () => {
 
     expect(collection.state.size).toBe(1)
     expect(changeEvents.length).toBe(1)
-    expect(changeEvents[0]).toEqual({
+    expect(stripChange(changeEvents[0])).toEqual({
       type: `insert`,
       key: 1,
       value: { id: 1, value: `optimistic-only` },
@@ -795,7 +803,7 @@ describe(`Collection truncate operations`, () => {
     await vi.waitFor(() => expect(changeEvents.length).toBe(2))
 
     // Verify initial data arrived
-    expect(changeEvents).toEqual([
+    expect(stripChanges(changeEvents)).toEqual([
       { type: `insert`, key: 1, value: { id: 1, value: `refetched-1` } },
       { type: `insert`, key: 2, value: { id: 2, value: `refetched-2` } },
     ])

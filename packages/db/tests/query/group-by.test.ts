@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import {
   and,
   avg,
@@ -1787,7 +1787,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .orderBy(({ $selected }) => $selected.latestActivity),
         })
 
-        expect(sessionStats.toArray).toEqual([
+        expect(sessionStats.toArray.map((row) => stripVirtualProps(row))).toEqual([
           {
             taskId: 2,
             latestActivity: new Date(`2023-02-01`),
@@ -1819,7 +1819,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               }),
         })
 
-        expect(sessionStats.toArray).toEqual([
+        expect(sessionStats.toArray.map((row) => stripVirtualProps(row))).toEqual([
           {
             taskId: 2,
             latestActivity: new Date(`2023-02-01`),
@@ -1849,7 +1849,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               .having(({ $selected }) => gt($selected.sessionCount, 2)),
         })
 
-        expect(sessionStats.toArray).toEqual([
+        expect(sessionStats.toArray.map((row) => stripVirtualProps(row))).toEqual([
           {
             taskId: 1,
             latestActivity: new Date(`2023-03-01`),
