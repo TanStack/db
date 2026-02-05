@@ -5,20 +5,7 @@ import type {
   Transaction,
   TransactionWithMutations,
 } from '../src'
-
-const stripVirtualProps = <T extends Record<string, any> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value as Record<string, unknown>
-  return rest as T
-}
+import { stripVirtualProps } from './utils'
 
 describe(`createOptimisticAction`, () => {
   // Runtime tests

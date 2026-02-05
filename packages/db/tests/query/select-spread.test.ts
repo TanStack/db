@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { add, eq, upper } from '../../src/query/builder/functions.js'
 
 // Base type used in bug report
@@ -15,20 +15,6 @@ const initialMessages: Array<Message> = [
   { id: 1, text: `hello`, user: `sam` },
   { id: 2, text: `world`, user: `kim` },
 ]
-
-const stripVirtualProps = <T extends Record<string, unknown> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value
-  return rest as T
-}
 
 function createMessagesCollection() {
   return createCollection(

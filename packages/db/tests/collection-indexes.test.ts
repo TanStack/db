@@ -14,23 +14,9 @@ import {
   or,
 } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
-import { expectIndexUsage, withIndexTracking } from './utils'
+import { expectIndexUsage, stripVirtualProps, withIndexTracking } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
-
-const stripVirtualProps = <T extends Record<string, any> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value as Record<string, unknown>
-  return rest as T
-}
 
 interface TestItem {
   id: string

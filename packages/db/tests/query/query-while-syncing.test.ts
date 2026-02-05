@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { createTransaction } from '../../src/transactions.js'
+import { stripVirtualProps } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -30,20 +31,6 @@ const sampleDepartments: Array<Department> = [
   { id: 2, name: `Sales`, budget: 80000 },
   { id: 3, name: `Marketing`, budget: 60000 },
 ]
-
-const stripVirtualProps = <T extends Record<string, unknown> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value
-  return rest as T
-}
 
 describe(`Query while syncing`, () => {
   beforeEach(() => {

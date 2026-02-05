@@ -5,26 +5,13 @@ import { localOnlyCollectionOptions } from '../src/local-only'
 import { createTransaction } from '../src/transactions'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
+import { stripVirtualProps } from './utils'
 
 interface TestItem extends Record<string, unknown> {
   id: number
   name: string
   completed?: boolean
   number?: number
-}
-
-const stripVirtualProps = <T extends Record<string, any> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value as Record<string, unknown>
-  return rest as T
 }
 
 describe(`LocalOnly Collection`, () => {

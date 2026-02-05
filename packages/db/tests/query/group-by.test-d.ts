@@ -2,6 +2,7 @@ import { describe, expectTypeOf, test } from 'vitest'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { OutputWithVirtual } from '../utils.js'
 import {
   and,
   avg,
@@ -15,7 +16,6 @@ import {
   or,
   sum,
 } from '../../src/query/builder/functions.js'
-import type { WithVirtualProps } from '../../src/virtual-props.js'
 
 // Sample data types for comprehensive GROUP BY testing
 type Order = {
@@ -31,10 +31,6 @@ type Order = {
   sales_rep_id: number | null
 }
 
-type OutputWithVirtual<
-  T,
-  TKey extends string | number = string,
-> = WithVirtualProps<T, TKey>
 
 // Sample order data
 const sampleOrders: Array<Order> = [

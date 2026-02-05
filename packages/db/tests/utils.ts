@@ -5,6 +5,26 @@ import type {
   StringCollationConfig,
   SyncConfig,
 } from '../src/index.js'
+import type { WithVirtualProps } from '../src/virtual-props.js'
+
+export type OutputWithVirtual<
+  T,
+  TKey extends string | number = string,
+> = WithVirtualProps<T, TKey>
+
+export const stripVirtualProps = <T extends Record<string, any> | undefined>(
+  value: T,
+) => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value as Record<string, unknown>
+  return rest as T
+}
 
 // Index usage tracking utilities
 export interface IndexUsageStats {

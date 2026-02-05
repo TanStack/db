@@ -7,7 +7,7 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
-import type { WithVirtualProps } from '../../src/virtual-props.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -25,10 +25,6 @@ type Department = {
   name: string
 }
 
-type OutputWithVirtual<
-  T,
-  TKey extends string | number = string,
-> = WithVirtualProps<T, TKey>
 type UserRow = OutputWithVirtual<User>
 type DepartmentRow = OutputWithVirtual<Department>
 

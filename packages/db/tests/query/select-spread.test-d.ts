@@ -3,7 +3,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import { add, length, upper } from '../../src/query/builder/functions.js'
-import type { WithVirtualProps } from '../../src/virtual-props.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 // Base type used in bug report
 type Message = {
@@ -12,10 +12,6 @@ type Message = {
   user: string
 }
 
-type OutputWithVirtual<
-  T,
-  TKey extends string | number = string,
-> = WithVirtualProps<T, TKey>
 type MessageWithVirtual = OutputWithVirtual<Message>
 
 const initialMessages: Array<Message> = [

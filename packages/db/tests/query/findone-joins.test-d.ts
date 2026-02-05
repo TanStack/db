@@ -2,7 +2,7 @@ import { describe, expectTypeOf, test } from 'vitest'
 import { createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
-import type { WithVirtualProps } from '../../src/virtual-props.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 type Todo = {
   id: string
@@ -16,10 +16,6 @@ type TodoOption = {
   optionText: string
 }
 
-type OutputWithVirtual<
-  T,
-  TKey extends string | number = string,
-> = WithVirtualProps<T, TKey>
 
 const todoCollection = createCollection(
   mockSyncCollectionOptions<Todo>({

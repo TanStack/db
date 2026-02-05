@@ -3,22 +3,9 @@ import { createTransaction } from '../src/transactions'
 import { createCollection } from '../src/collection/index.js'
 import type { CollectionImpl } from '../src/collection/index.js'
 import type { SyncConfig } from '../src/types'
+import { stripVirtualProps } from './utils'
 
 type Item = { id: string; name: string }
-
-const stripVirtualProps = <T extends Record<string, unknown> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value
-  return rest as T
-}
 
 const stripValues = <T extends Record<string, unknown>>(
   values: Array<T>,

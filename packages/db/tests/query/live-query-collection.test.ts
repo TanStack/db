@@ -13,6 +13,7 @@ import {
   flushPromises,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
+  stripVirtualProps,
 } from '../utils.js'
 import { createDeferred } from '../../src/deferred'
 import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
@@ -30,20 +31,6 @@ const sampleUsers: Array<User> = [
   { id: 2, name: `Bob`, active: true },
   { id: 3, name: `Charlie`, active: false },
 ]
-
-const stripVirtualProps = <T extends Record<string, unknown> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value
-  return rest as T
-}
 
 function createUsersCollection() {
   return createCollection(

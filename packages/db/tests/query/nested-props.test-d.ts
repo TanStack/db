@@ -8,7 +8,7 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
-import type { WithVirtualProps } from '../../src/virtual-props.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 // Complex nested type for testing with optional properties
 type Person = {
@@ -36,10 +36,6 @@ type Person = {
   }
 }
 
-type OutputWithVirtual<
-  T,
-  TKey extends string | number = string,
-> = WithVirtualProps<T, TKey>
 
 // Sample data
 const samplePersons: Array<Person> = [

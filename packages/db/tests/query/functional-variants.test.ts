@@ -6,21 +6,7 @@ import {
   gt,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
-
-const stripVirtualProps = <T extends Record<string, any> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value as Record<string, unknown>
-  return rest as T
-}
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample user type for tests
 type User = {

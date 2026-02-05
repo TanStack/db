@@ -593,6 +593,10 @@ export class CollectionStateManager<
       // Set flag to prevent redundant optimistic state recalculations
       this.isCommittingSyncTransactions = true
 
+      const previousRowOrigins = new Map(this.rowOrigins)
+      const previousOptimisticUpserts = new Map(this.optimisticUpserts)
+      const previousOptimisticDeletes = new Set(this.optimisticDeletes)
+
       // Get the optimistic snapshot from the truncate transaction (captured when truncate() was called)
       const truncateOptimisticSnapshot = hasTruncateSync
         ? committedSyncedTransactions.find((t) => t.truncate)
@@ -623,6 +627,27 @@ export class CollectionStateManager<
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
+
+      const getPreviousVirtualProps = (key: TKey) => {
+        if (this.isLocalOnly) {
+          return { synced: true, origin: 'local' as const }
+        }
+        if (
+          previousOptimisticUpserts.has(key) ||
+          previousOptimisticDeletes.has(key)
+        ) {
+          return { synced: false, origin: 'local' as const }
+        }
+        return {
+          synced: true,
+          origin: (previousRowOrigins.get(key) ?? 'remote') as VirtualOrigin,
+        }
+      }
+
+      const getNextVirtualProps = (key: TKey) => ({
+        synced: this.isRowSynced(key),
+        origin: this.getRowOrigin(key),
+      })
 
       for (const transaction of committedSyncedTransactions) {
         // Handle truncate operations first
@@ -868,6 +893,21 @@ export class CollectionStateManager<
       for (const key of changedKeys) {
         const previousVisibleValue = currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
+        const previousVirtualProps = getPreviousVirtualProps(key)
+        const nextVirtualProps = getNextVirtualProps(key)
+        const virtualChanged =
+          previousVirtualProps.synced !== nextVirtualProps.synced ||
+          previousVirtualProps.origin !== nextVirtualProps.origin
+        const previousValueWithVirtual =
+          previousVisibleValue !== undefined
+            ? enrichRowWithVirtualProps(
+                previousVisibleValue,
+                key,
+                this.collection.id,
+                () => previousVirtualProps.synced,
+                () => previousVirtualProps.origin,
+              )
+            : undefined
 
         // Check if this sync operation is redundant with a completed optimistic operation
         const completedOp = completedOptimisticOps.get(key)
@@ -889,37 +929,46 @@ export class CollectionStateManager<
           }
         }
 
-        if (!isRedundantSync) {
-          if (
-            previousVisibleValue === undefined &&
-            newVisibleValue !== undefined
-          ) {
-            events.push({
-              type: `insert`,
-              key,
-              value: newVisibleValue,
-            })
-          } else if (
-            previousVisibleValue !== undefined &&
-            newVisibleValue === undefined
-          ) {
-            events.push({
-              type: `delete`,
-              key,
-              value: previousVisibleValue,
-            })
-          } else if (
-            previousVisibleValue !== undefined &&
-            newVisibleValue !== undefined &&
-            !deepEquals(previousVisibleValue, newVisibleValue)
-          ) {
-            events.push({
-              type: `update`,
-              key,
-              value: newVisibleValue,
-              previousValue: previousVisibleValue,
-            })
-          }
+        const shouldEmitVirtualUpdate =
+          virtualChanged &&
+          previousVisibleValue !== undefined &&
+          newVisibleValue !== undefined &&
+          deepEquals(previousVisibleValue, newVisibleValue)
+
+        if (isRedundantSync && !shouldEmitVirtualUpdate) {
+          continue
+        }
+
+        if (
+          previousVisibleValue === undefined &&
+          newVisibleValue !== undefined
+        ) {
+          events.push({
+            type: `insert`,
+            key,
+            value: newVisibleValue,
+          })
+        } else if (
+          previousVisibleValue !== undefined &&
+          newVisibleValue === undefined
+        ) {
+          events.push({
+            type: `delete`,
+            key,
+            value: previousValueWithVirtual ?? previousVisibleValue,
+          })
+        } else if (
+          previousVisibleValue !== undefined &&
+          newVisibleValue !== undefined &&
+          (!deepEquals(previousVisibleValue, newVisibleValue) ||
+            shouldEmitVirtualUpdate)
+        ) {
+          events.push({
+            type: `update`,
+            key,
+            value: newVisibleValue,
+            previousValue: previousValueWithVirtual ?? previousVisibleValue,
+          })
         }
       }
 

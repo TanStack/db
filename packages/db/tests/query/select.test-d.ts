@@ -3,7 +3,7 @@ import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import { upper } from '../../src/query/builder/functions.js'
-import type { WithVirtualProps } from '../../src/virtual-props.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 type User = {
   id: number
@@ -25,11 +25,6 @@ type User = {
     }
   }
 }
-
-type OutputWithVirtual<
-  T,
-  TKey extends string | number = string,
-> = WithVirtualProps<T, TKey>
 
 function createUsers() {
   return createCollection(

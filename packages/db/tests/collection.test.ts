@@ -14,23 +14,10 @@ import { createTransaction } from '../src/transactions'
 import {
   flushPromises,
   mockSyncCollectionOptionsNoInitialState,
+  stripVirtualProps,
   withExpectedRejection,
 } from './utils'
 import type { ChangeMessage, MutationFn, PendingMutation } from '../src/types'
-
-const stripVirtualProps = <T extends Record<string, unknown> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value
-  return rest as T
-}
 
 const getStateValue = <
   T extends Record<string, unknown>,

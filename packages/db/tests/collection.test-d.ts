@@ -1,7 +1,7 @@
 import { assertType, describe, expectTypeOf, it } from 'vitest'
 import { z } from 'zod'
 import { createCollection } from '../src/collection/index.js'
-import type { WithVirtualProps } from '../src/virtual-props.js'
+import type { OutputWithVirtual } from './utils'
 import type { OperationConfig } from '../src/types'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 
@@ -60,11 +60,6 @@ describe(`Collection type resolution tests`, () => {
 
   type SchemaType = StandardSchemaV1.InferOutput<typeof testSchema>
   type ItemOf<T> = T extends Array<infer U> ? U : T
-  type OutputWithVirtual<
-    T,
-    TKey extends string | number = string,
-  > = WithVirtualProps<T, TKey>
-
   it(`should use explicit type when provided without schema`, () => {
     const _collection = createCollection<ExplicitType, string>({
       getKey: (item) => {

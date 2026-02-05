@@ -6,6 +6,7 @@ import { createLocalOnlyCollection } from '../src/local-only.js'
 import { createTransaction } from '../src/transactions'
 import { and, count, eq, gt } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
+import { stripVirtualProps } from './utils'
 import type {
   ChangeMessage,
   ChangesPayload,
@@ -16,20 +17,6 @@ import type {
 
 // Helper function to wait for changes to be processed
 const waitForChanges = () => new Promise((resolve) => setTimeout(resolve, 10))
-
-const stripVirtualProps = <T extends Record<string, any> | undefined>(
-  value: T,
-) => {
-  if (!value || typeof value !== `object`) return value
-  const {
-    $synced: _synced,
-    $origin: _origin,
-    $key: _key,
-    $collectionId: _collectionId,
-    ...rest
-  } = value as Record<string, unknown>
-  return rest as T
-}
 
 const normalizeChange = <T extends Record<string, any>>(
   change: ChangeMessage<T>,
@@ -2209,6 +2196,71 @@ describe(`Virtual properties`, () => {
     const value = insertChange!.value as Record<string, any>
     expect(value.$synced).toBe(false)
     expect(value.$origin).toBe(`local`)
+
+    subscription.unsubscribe()
+  })
+
+  it(`should emit an update when $synced flips on confirmation`, async () => {
+    const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `insert`
+            value: { id: string; value: string }
+          }) => void
+          commit: () => void
+        }
+      | undefined
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-confirmed-sync`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncFns = { begin, write, commit }
+          markReady()
+        },
+      },
+      onInsert: async () => {
+        await waitForChanges()
+      },
+    })
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    collection.insert({ id: `row-1`, value: `optimistic` })
+    await waitForChanges()
+
+    const optimisticInsert = changes.find(
+      (change) => change.type === `insert` && change.key === `row-1`,
+    )
+    expect(optimisticInsert).toBeDefined()
+    expect(optimisticInsert!.value.$synced).toBe(false)
+
+    changes.length = 0
+
+    if (!syncFns) {
+      throw new Error(`Sync not ready`)
+    }
+    syncFns.begin()
+    syncFns.write({
+      type: `insert`,
+      value: { id: `row-1`, value: `optimistic` },
+    })
+    syncFns.commit()
+
+    await waitForChanges()
+
+    const confirmedUpdate = changes.find(
+      (change) => change.type === `update` && change.key === `row-1`,
+    )
+    expect(confirmedUpdate).toBeDefined()
+    expect(confirmedUpdate!.value.$synced).toBe(true)
+    expect(confirmedUpdate!.previousValue?.$synced).toBe(false)
 
     subscription.unsubscribe()
   })
