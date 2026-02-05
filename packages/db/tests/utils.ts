@@ -9,7 +9,7 @@ import type { WithVirtualProps } from '../src/virtual-props.js'
 
 export type OutputWithVirtual<
   T extends object,
-  TKey extends string | number = string,
+  TKey extends string | number = string | number,
 > = WithVirtualProps<T, TKey>
 
 export const stripVirtualProps = <T extends Record<string, any> | undefined>(
