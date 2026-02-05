@@ -316,7 +316,9 @@ describe(`live query scheduler`, () => {
       })
     })
 
-    expect(liveQueryJoin.toArray).toEqual([{ left: `A1b`, right: `B1b` }])
+    expect(liveQueryJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A1b`, right: `B1b` },
+    ])
     expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 2)
     tx.rollback()
   })
@@ -401,7 +403,9 @@ describe(`live query scheduler`, () => {
       })
     })
 
-    expect(hybridJoin.toArray).toEqual([{ left: `A7b`, right: `B7b` }])
+    expect(hybridJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A7b`, right: `B7b` },
+    ])
     expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 2)
     tx.rollback()
   })

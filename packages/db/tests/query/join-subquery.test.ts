@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample data types for join-subquery testing
 type Issue = {
@@ -493,7 +493,10 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
-        const results = joinSubquery.toArray
+        const results = joinSubquery.toArray.map((row) => ({
+          ...stripVirtualProps(row),
+          issue: stripVirtualProps(row.issue),
+        }))
         expect(results).toEqual([
           {
             issue: {
@@ -609,7 +612,9 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           expect(typeof result.is_high_priority).toBe(`boolean`)
         })
 
-        const sortedResults = results.sort((a, b) => a.id - b.id)
+        const sortedResults = results
+          .map((result) => stripVirtualProps(result))
+          .sort((a, b) => a.id - b.id)
         expect(sortedResults).toEqual([
           {
             id: 1,
