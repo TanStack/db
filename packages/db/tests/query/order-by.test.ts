@@ -2550,9 +2550,9 @@ describe(`OrderBy with duplicate values`, () => {
         await collection.preload()
 
         // First page should return items 1-5
-        let results = Array.from(collection.values()).sort(
-          (a, b) => a.id - b.id,
-        )
+        let results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 1, a: 1, keep: true },
           { id: 2, a: 2, keep: true },
@@ -2765,9 +2765,9 @@ describe(`OrderBy with duplicate values`, () => {
         await collection.preload()
 
         // First page should return items 1-5 (all local data)
-        let results = Array.from(collection.values()).sort(
-          (a, b) => a.id - b.id,
-        )
+        let results = Array.from(collection.values())
+          .map((value) => stripVirtualProps(value))
+          .sort((a, b) => a.id - b.id)
         expect(results).toEqual([
           { id: 1, a: 1, keep: true },
           { id: 2, a: 2, keep: true },

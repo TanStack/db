@@ -5,7 +5,7 @@ import { createTransaction } from '../../src/transactions.js'
 import { createOptimisticAction } from '../../src/optimistic-action.js'
 import { transactionScopedScheduler } from '../../src/scheduler.js'
 import { CollectionConfigBuilder } from '../../src/query/live/collection-config-builder.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import type { OutputWithVirtual } from '../utils.js'
 import type { FullSyncState } from '../../src/query/live/types.js'
 import type { SyncConfig } from '../../src/types.js'
@@ -302,7 +302,9 @@ describe(`live query scheduler`, () => {
       collectionB.insert({ id: 1, value: `B1` })
     })
 
-    expect(liveQueryJoin.toArray).toEqual([{ left: `A1`, right: `B1` }])
+    expect(liveQueryJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A1`, right: `B1` },
+    ])
     expect(liveQueryJoin.utils.getRunCount()).toBe(baseRunCount + 1)
 
     tx.mutate(() => {
@@ -385,7 +387,9 @@ describe(`live query scheduler`, () => {
       collectionB.insert({ id: 7, value: `B7` })
     })
 
-    expect(hybridJoin.toArray).toEqual([{ left: `A7`, right: `B7` }])
+    expect(hybridJoin.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `A7`, right: `B7` },
+    ])
     expect(hybridJoin.utils.getRunCount()).toBe(baseRunCount + 1)
 
     tx.mutate(() => {
@@ -468,7 +472,9 @@ describe(`live query scheduler`, () => {
       collectionA.insert({ id: 42, value: `left-later` })
     })
 
-    expect(join.toArray).toEqual([{ left: `left-later`, right: `right-first` }])
+    expect(join.toArray.map((row) => stripVirtualProps(row))).toEqual([
+      { left: `left-later`, right: `right-first` },
+    ])
     expect(join.utils.getRunCount()).toBe(baseRunCount + 1)
     tx.rollback()
   })

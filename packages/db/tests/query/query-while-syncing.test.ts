@@ -241,9 +241,9 @@ describe(`Query while syncing`, () => {
         syncCommit!()
 
         const result = liveQuery.get(1)
-        expect(result).toEqual({ id: 1, name: `Alice` })
-        expect(result).not.toHaveProperty(`age`)
-        expect(result).not.toHaveProperty(`active`)
+        expect(stripVirtualProps(result)).toEqual({ id: 1, name: `Alice` })
+        expect(stripVirtualProps(result)).not.toHaveProperty(`age`)
+        expect(stripVirtualProps(result)).not.toHaveProperty(`active`)
         expect(liveQuery.status).toBe(`loading`)
 
         syncMarkReady!()

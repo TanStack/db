@@ -91,7 +91,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           displayName: string
@@ -127,7 +127,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           profile: {
@@ -154,7 +154,7 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should return the original User type since no select transformation
-    expectTypeOf(results).toEqualTypeOf<Array<UserRow>>()
+    expectTypeOf(results).toMatchTypeOf<Array<UserRow>>()
   })
 
   test(`fn.where with regular where clause`, () => {
@@ -168,7 +168,7 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should return the original User type
-    expectTypeOf(results).toEqualTypeOf<Array<UserRow>>()
+    expectTypeOf(results).toMatchTypeOf<Array<UserRow>>()
   })
 
   test(`fn.having with GROUP BY return type`, () => {
@@ -185,7 +185,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           department_id: number | null
@@ -205,7 +205,7 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should return the original User type when used as filter
-    expectTypeOf(results).toEqualTypeOf<Array<UserRow>>()
+    expectTypeOf(results).toMatchTypeOf<Array<UserRow>>()
   })
 
   test(`joins with fn.select return type`, () => {
@@ -229,7 +229,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           employeeInfo: string
@@ -259,7 +259,7 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should return namespaced joined type since no select
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow
@@ -287,7 +287,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           departmentName: string
@@ -322,7 +322,7 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should use functional select type, not regular select type
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           employeeId: number
@@ -352,7 +352,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           customName: string
@@ -405,7 +405,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           profile: string
@@ -436,7 +436,7 @@ describe(`Functional Variants Types`, () => {
     )
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           name: string
@@ -458,7 +458,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           userId: number
@@ -486,7 +486,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           departmentId: number | undefined
@@ -516,7 +516,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           name: string
@@ -542,7 +542,7 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           displayName: string

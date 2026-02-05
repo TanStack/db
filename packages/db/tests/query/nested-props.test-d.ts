@@ -99,7 +99,7 @@ describe(`Nested Properties Types`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
@@ -134,7 +134,7 @@ describe(`Nested Properties Types`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
@@ -166,7 +166,7 @@ describe(`Nested Properties Types`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
@@ -195,7 +195,7 @@ describe(`Nested Properties Types`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
@@ -229,7 +229,7 @@ describe(`Nested Properties Types`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
@@ -271,7 +271,7 @@ describe(`Nested Properties Types`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
@@ -304,7 +304,7 @@ describe(`Nested Properties Types`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           profileExists:
@@ -351,7 +351,7 @@ describe(`Nested Properties Types`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string

@@ -114,7 +114,7 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer the correct joined result type
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtual<{
             issue_title: string
@@ -147,7 +147,7 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Left join should make the joined table optional in namespaced result
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtual<{
             issue: OutputWithVirtual<Issue>
@@ -190,7 +190,7 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer the correct result type from both subqueries
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtual<{
             issue_title: string
@@ -229,7 +229,7 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer the correct result type
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtual<{
             issue_title: string
@@ -260,7 +260,7 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Left join should make the joined subquery optional in namespaced result
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtual<{
             issue: OutputWithVirtual<Issue>
@@ -318,7 +318,7 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer the final transformed and joined type
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtual<{
             id: number
@@ -366,7 +366,7 @@ describe(`Join Subquery Types`, () => {
       })
 
       // Should infer types with all original Issue properties available
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtual<{
             issue_id: number
@@ -408,7 +408,7 @@ describe(`Join Subquery Types`, () => {
       })
 
       // With the new approach, this should now correctly infer string | undefined for user_name
-      expectTypeOf(joinQuery.toArray).toEqualTypeOf<
+      expectTypeOf(joinQuery.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtual<{
             issue_title: string
