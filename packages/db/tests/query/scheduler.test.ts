@@ -20,6 +20,8 @@ interface User {
   name: string
 }
 
+type UserWithVirtual = OutputWithVirtual<User, number>
+
 interface Task {
   id: number
   userId: number
@@ -493,7 +495,7 @@ describe(`live query scheduler`, () => {
       commit: vi.fn(),
       markReady: vi.fn(),
       truncate: vi.fn(),
-    } as unknown as Parameters<SyncConfig<OutputWithVirtual<User>>[`sync`]>[0]
+    } as unknown as Parameters<SyncConfig<UserWithVirtual>[`sync`]>[0]
 
     const syncState = {
       messagesCount: 0,

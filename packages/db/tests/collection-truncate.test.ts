@@ -1,12 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
-import type { LoadSubsetOptions, SyncConfig } from '../src/types'
 import { stripVirtualProps } from './utils'
+import type { LoadSubsetOptions, SyncConfig } from '../src/types'
 
-const getStateValue = <
-  T extends Record<string, unknown>,
-  TKey extends string | number,
->(
+const getStateValue = <T extends object, TKey extends string | number>(
   collection: { state: Map<TKey, T> },
   key: TKey,
 ) => stripVirtualProps(collection.state.get(key))
