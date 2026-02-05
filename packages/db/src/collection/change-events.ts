@@ -139,7 +139,7 @@ export function currentStateAsChanges<
 
     if (optimizationResult.canOptimize) {
       // Use index optimization
-      const result: Array<ChangeMessage<T>> = []
+      const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
       for (const key of optimizationResult.matchingKeys) {
         const value = collection.get(key)
         if (value !== undefined) {
