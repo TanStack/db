@@ -15,7 +15,10 @@ type Issue = {
   createdAt: string
 }
 
-type OutputWithVirtualNumber<T extends object> = OutputWithVirtual<T, number>
+type OutputWithVirtualKeyed<T extends object> = OutputWithVirtual<
+  T,
+  string | number
+>
 
 // Sample data
 const sampleIssues: Array<Issue> = [
@@ -83,7 +86,7 @@ describe(`Subquery Types`, () => {
       // Should infer the correct result type from the SELECT clause
       expectTypeOf(liveCollection.toArray).toEqualTypeOf<
         Array<
-          OutputWithVirtualNumber<{
+          OutputWithVirtualKeyed<{
             id: number
             title: string
             status: `open` | `in_progress` | `closed`
@@ -106,7 +109,7 @@ describe(`Subquery Types`, () => {
 
       // Should return the original Issue type
       expectTypeOf(liveCollection.toArray).toEqualTypeOf<
-        Array<OutputWithVirtualNumber<Issue>>
+        Array<OutputWithVirtualKeyed<Issue>>
       >()
     })
 
@@ -140,7 +143,7 @@ describe(`Subquery Types`, () => {
       // Should infer the final transformed type
       expectTypeOf(liveCollection.toArray).toEqualTypeOf<
         Array<
-          OutputWithVirtualNumber<{
+          OutputWithVirtualKeyed<{
             key: number
             title: string
             hours: number
@@ -182,7 +185,7 @@ describe(`Subquery Types`, () => {
       // Should infer the final nested transformation type
       expectTypeOf(liveCollection.toArray).toEqualTypeOf<
         Array<
-          OutputWithVirtualNumber<{
+          OutputWithVirtualKeyed<{
             id: number
             name: string
             workHours: number
@@ -211,7 +214,7 @@ describe(`Subquery Types`, () => {
       // Should infer the correct result type
       expectTypeOf(customKeyCollection.toArray).toEqualTypeOf<
         Array<
-          OutputWithVirtualNumber<{
+          OutputWithVirtualKeyed<{
             issueId: number
             issueTitle: string
             durationHours: number
@@ -221,7 +224,7 @@ describe(`Subquery Types`, () => {
 
       // getKey should work with the transformed type
       expectTypeOf(customKeyCollection.get(1)).toEqualTypeOf<
-        | OutputWithVirtualNumber<{
+        | OutputWithVirtualKeyed<{
             issueId: number
             issueTitle: string
             durationHours: number
@@ -246,7 +249,7 @@ describe(`Subquery Types`, () => {
       // Should infer the correct result type
       expectTypeOf(liveCollection.toArray).toEqualTypeOf<
         Array<
-          OutputWithVirtualNumber<{
+          OutputWithVirtualKeyed<{
             id: number
             title: string
             projectId: number
