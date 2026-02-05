@@ -8,7 +8,7 @@ import type {
 import type { WithVirtualProps } from '../src/virtual-props.js'
 
 export type OutputWithVirtual<
-  T,
+  T extends object,
   TKey extends string | number = string,
 > = WithVirtualProps<T, TKey>
 

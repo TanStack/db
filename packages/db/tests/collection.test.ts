@@ -19,10 +19,7 @@ import {
 } from './utils'
 import type { ChangeMessage, MutationFn, PendingMutation } from '../src/types'
 
-const getStateValue = <
-  T extends Record<string, unknown>,
-  TKey extends string | number,
->(
+const getStateValue = <T extends object, TKey extends string | number>(
   collection: { state: Map<TKey, T> },
   key: TKey,
 ) => stripVirtualProps(collection.state.get(key))

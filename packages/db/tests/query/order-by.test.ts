@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { createLiveQueryCollection } from '../../src/query/live-query-collection.js'
 import {
   eq,
@@ -843,7 +843,10 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         })
 
         await liveQuery.stateWhenReady()
-        expect(liveQuery.toArray).toEqual([{ vin: `1` }, { vin: `2` }])
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
+          { vin: `1` },
+          { vin: `2` },
+        ])
 
         // Insert a vehicle document
         vehicleDocumentCollection.utils.begin()
@@ -857,7 +860,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         })
         vehicleDocumentCollection.utils.commit()
 
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { vin: `1` },
           { vin: `2` },
           { vin: `3` },
@@ -902,7 +905,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         })
 
         await liveQuery.stateWhenReady()
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
           { vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
         ])
@@ -919,7 +922,7 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
         })
         vehicleDocumentCollection.utils.commit()
 
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { vin: `1`, updatedAt: new Date(`2023-01-05`).getTime() },
           { vin: `3`, updatedAt: new Date(`2023-01-03`).getTime() },
           { vin: `2`, updatedAt: new Date(`2023-01-02`).getTime() },
