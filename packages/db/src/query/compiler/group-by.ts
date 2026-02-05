@@ -39,7 +39,9 @@ function getRowVirtualMetadata(row: NamespacedRow): RowVirtualMetadata {
   for (const [alias, value] of Object.entries(row)) {
     if (alias === `$selected`) continue
     const asRecord = value
-    if (!(`$synced` in asRecord) && !(`$origin` in asRecord)) {
+    const hasSyncedProp = `$synced` in asRecord
+    const hasOriginProp = `$origin` in asRecord
+    if (!hasSyncedProp && !hasOriginProp) {
       continue
     }
     found = true
@@ -122,26 +124,24 @@ export function processGroupBy(
       preMap: ([, row]: [string, NamespacedRow]) =>
         getRowVirtualMetadata(row).synced,
       reduce: (values: Array<[boolean, number]>) => {
-        let unsyncedCount = 0
         for (const [isSynced, multiplicity] of values) {
-          if (!isSynced) {
-            unsyncedCount += multiplicity
+          if (!isSynced && multiplicity > 0) {
+            return false
           }
         }
-        return unsyncedCount <= 0
+        return true
       },
     },
     [VIRTUAL_HAS_LOCAL_KEY]: {
       preMap: ([, row]: [string, NamespacedRow]) =>
         getRowVirtualMetadata(row).hasLocal,
       reduce: (values: Array<[boolean, number]>) => {
-        let localCount = 0
         for (const [isLocal, multiplicity] of values) {
-          if (isLocal) {
-            localCount += multiplicity
+          if (isLocal && multiplicity > 0) {
+            return true
           }
         }
-        return localCount > 0
+        return false
       },
     },
   }

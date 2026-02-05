@@ -289,3 +289,11 @@ export const VIRTUAL_PROP_NAMES = [
 export function isVirtualPropName(name: string): boolean {
   return VIRTUAL_PROP_NAMES.includes(name as any)
 }
+
+/**
+ * Checks whether a property path references a virtual property.
+ * @internal
+ */
+export function hasVirtualPropPath(path: Array<string>): boolean {
+  return path.some((segment) => isVirtualPropName(segment))
+}

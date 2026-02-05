@@ -1,4 +1,5 @@
 import { DEFAULT_COMPARE_OPTIONS } from '../utils'
+import { hasVirtualPropPath } from '../virtual-props'
 import { BTreeIndex } from './btree-index'
 import type { CompareOptions } from '../query/builder/types'
 import type { BasicExpression } from '../query/ir'
@@ -27,6 +28,9 @@ export function ensureIndexForField<
   compareOptions?: CompareOptions,
   compareFn?: (a: any, b: any) => number,
 ) {
+  if (hasVirtualPropPath(fieldPath)) {
+    return
+  }
   if (!shouldAutoIndex(collection)) {
     return
   }
