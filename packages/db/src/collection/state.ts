@@ -79,6 +79,7 @@ export class CollectionStateManager<
    * When sync confirms data for a key with pending local changes, it keeps 'local' origin.
    */
   public pendingLocalChanges = new Set<TKey>()
+  public pendingLocalOrigins = new Set<TKey>()
 
   // Cached size for performance
   public size = 0
@@ -352,6 +353,7 @@ export class CollectionStateManager<
           if (!this.isThisCollection(mutation.collection)) {
             continue
           }
+          this.pendingLocalOrigins.add(mutation.key)
           if (!mutation.optimistic) {
             continue
           }
@@ -375,6 +377,7 @@ export class CollectionStateManager<
           if (!this.isThisCollection(mutation.collection)) {
             continue
           }
+          this.pendingLocalOrigins.delete(mutation.key)
           if (mutation.optimistic) {
             this.pendingOptimisticUpserts.delete(mutation.key)
             this.pendingOptimisticDeletes.delete(mutation.key)
@@ -388,12 +391,22 @@ export class CollectionStateManager<
     this.optimisticDeletes.clear()
     this.pendingLocalChanges.clear()
 
-    // Seed optimistic state with pending optimistic mutations
+    // Seed optimistic state with pending optimistic mutations only when a sync is pending
+    const pendingSyncKeys = new Set<TKey>()
+    for (const transaction of this.pendingSyncedTransactions) {
+      for (const operation of transaction.operations) {
+        pendingSyncKeys.add(operation.key as TKey)
+      }
+    }
     for (const [key, value] of this.pendingOptimisticUpserts) {
-      this.optimisticUpserts.set(key, value)
+      if (pendingSyncKeys.has(key)) {
+        this.optimisticUpserts.set(key, value)
+      }
     }
     for (const key of this.pendingOptimisticDeletes) {
-      this.optimisticDeletes.add(key)
+      if (pendingSyncKeys.has(key)) {
+        this.optimisticDeletes.add(key)
+      }
     }
 
     const activeTransactions: Array<Transaction<any>> = []
@@ -675,7 +688,6 @@ export class CollectionStateManager<
 
       const events: Array<ChangeMessage<TOutput, TKey>> = []
       const rowUpdateMode = this.config.sync.rowUpdateMode || `partial`
-      const completedLocalKeys = new Set<TKey>()
       const completedOptimisticOps = new Map<
         TKey,
         { type: string; value: TOutput }
@@ -685,7 +697,6 @@ export class CollectionStateManager<
         if (transaction.state === `completed`) {
           for (const mutation of transaction.mutations) {
             if (this.isThisCollection(mutation.collection)) {
-              completedLocalKeys.add(mutation.key)
               if (mutation.optimistic) {
                 completedOptimisticOps.set(mutation.key, {
                   type: mutation.type,
@@ -789,7 +800,7 @@ export class CollectionStateManager<
           const origin: VirtualOrigin =
             this.isLocalOnly ||
             this.pendingLocalChanges.has(key) ||
-            completedLocalKeys.has(key)
+            this.pendingLocalOrigins.has(key)
               ? 'local'
               : 'remote'
 
@@ -800,6 +811,7 @@ export class CollectionStateManager<
               this.rowOrigins.set(key, origin)
               // Clear pending local changes now that sync has confirmed
               this.pendingLocalChanges.delete(key)
+              this.pendingLocalOrigins.delete(key)
               this.pendingOptimisticUpserts.delete(key)
               this.pendingOptimisticDeletes.delete(key)
               break
@@ -817,6 +829,7 @@ export class CollectionStateManager<
               this.rowOrigins.set(key, origin)
               // Clear pending local changes now that sync has confirmed
               this.pendingLocalChanges.delete(key)
+              this.pendingLocalOrigins.delete(key)
               this.pendingOptimisticUpserts.delete(key)
               this.pendingOptimisticDeletes.delete(key)
               break
@@ -826,6 +839,7 @@ export class CollectionStateManager<
               // Clean up origin and pending tracking for deleted rows
               this.rowOrigins.delete(key)
               this.pendingLocalChanges.delete(key)
+              this.pendingLocalOrigins.delete(key)
               this.pendingOptimisticUpserts.delete(key)
               this.pendingOptimisticDeletes.delete(key)
               break
@@ -1161,6 +1175,7 @@ export class CollectionStateManager<
     this.pendingOptimisticDeletes.clear()
     this.rowOrigins.clear()
     this.pendingLocalChanges.clear()
+    this.pendingLocalOrigins.clear()
     this.isLocalOnly = false
     this.size = 0
     this.pendingSyncedTransactions = []
