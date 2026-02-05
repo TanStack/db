@@ -9,7 +9,9 @@ export interface QueryOnceConfig<TContext extends Context> {
   /**
    * Query builder function that defines the query
    */
-  query: (q: InitialQueryBuilder) => QueryBuilder<TContext>
+  query:
+    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
+    | QueryBuilder<TContext>
   // Future: timeout, signal, etc.
 }
 

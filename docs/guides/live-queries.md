@@ -122,7 +122,7 @@ creates a live query collection, preloads it, extracts the results, and cleans
 up automatically so you do not have to remember to call `cleanup()`.
 
 ```ts
-import { queryOnce } from '@tanstack/db'
+import { eq, queryOnce } from '@tanstack/db'
 
 // Basic one-shot query
 const activeUsers = await queryOnce((q) =>

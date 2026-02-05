@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { createCollection } from '../../src/collection/index.js'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { CollectionImpl, createCollection } from '../../src/collection/index.js'
 import { eq, queryOnce } from '../../src/query/index.js'
+import { Query } from '../../src/query/builder/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
 // Sample user type for tests
@@ -60,6 +61,19 @@ describe(`queryOnce`, () => {
       })
 
       expect(users.length).toBe(5)
+    })
+
+    it(`should accept a QueryBuilder instance via config`, async () => {
+      const queryBuilder = new Query()
+        .from({ user: usersCollection })
+        .where(({ user }) => eq(user.active, true))
+
+      const users = await queryOnce({
+        query: queryBuilder,
+      })
+
+      expect(users.length).toBe(3)
+      expect(users.every((u) => u.active)).toBe(true)
     })
   })
 
@@ -265,23 +279,23 @@ describe(`queryOnce`, () => {
       // but if cleanup doesn't happen, memory would leak over time)
     })
 
-    it(`should cleanup even if an error occurs during query`, async () => {
-      // Create a collection that will error
-      const errorCollection = createCollection<User>({
-        id: `error-collection-query-once`,
-        getKey: (user) => user.id,
-        sync: {
-          sync: ({ begin, commit, markReady }) => {
-            begin()
-            commit()
-            markReady()
-          },
-        },
-      })
+    it(`should cleanup even if preload rejects`, async () => {
+      const preloadError = new Error(`preload failed`)
+      const preloadSpy = vi
+        .spyOn(CollectionImpl.prototype, `preload`)
+        .mockRejectedValueOnce(preloadError)
+      const cleanupSpy = vi.spyOn(CollectionImpl.prototype, `cleanup`)
 
-      // Should not throw (empty results, but cleanup should still happen)
-      const result = await queryOnce((q) => q.from({ user: errorCollection }))
-      expect(result).toEqual([])
+      try {
+        await expect(
+          queryOnce((q) => q.from({ user: usersCollection })),
+        ).rejects.toThrow(`preload failed`)
+
+        expect(cleanupSpy).toHaveBeenCalled()
+      } finally {
+        preloadSpy.mockRestore()
+        cleanupSpy.mockRestore()
+      }
     })
   })
 
