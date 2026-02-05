@@ -270,7 +270,7 @@ describe(`Collection truncate operations`, () => {
 
     // Should emit delete event for the optimistic item
     expect(deleteEvents.length).toBe(1)
-    expect(deleteEvents[0]).toEqual({
+    expect(stripChange(deleteEvents[0])).toEqual({
       type: `delete`,
       key: 1,
       value: { id: 1, value: `optimistic-only` },
@@ -278,7 +278,7 @@ describe(`Collection truncate operations`, () => {
 
     // Then re-insert the preserved optimistic item
     expect(insertEvents.length).toBe(1)
-    expect(insertEvents[0]).toEqual({
+    expect(stripChange(insertEvents[0])).toEqual({
       type: `insert`,
       key: 1,
       value: { id: 1, value: `optimistic-only` },

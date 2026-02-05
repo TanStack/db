@@ -124,14 +124,14 @@ describe(`Functional Variants Query`, () => {
 
       // Verify transformations
       const alice = results.find((u) => u.displayName.includes(`Alice`))
-      expect(alice).toEqual({
+      expect(stripVirtualProps(alice)).toEqual({
         displayName: `Alice (1)`,
         salaryTier: `senior`,
         emailDomain: `example.com`,
       })
 
       const bob = results.find((u) => u.displayName.includes(`Bob`))
-      expect(bob).toEqual({
+      expect(stripVirtualProps(bob)).toEqual({
         displayName: `Bob (2)`,
         salaryTier: `junior`,
         emailDomain: `example.com`,
@@ -206,14 +206,14 @@ describe(`Functional Variants Query`, () => {
       expect(results).toHaveLength(5) // All 5 users included with left join
 
       const alice = results.find((r) => r.employeeInfo.includes(`Alice`))
-      expect(alice).toEqual({
+      expect(stripVirtualProps(alice)).toEqual({
         employeeInfo: `Alice works in Engineering`,
         isHighEarner: true,
         yearsToRetirement: 40,
       })
 
       const eve = results.find((r) => r.employeeInfo.includes(`Eve`))
-      expect(eve).toEqual({
+      expect(stripVirtualProps(eve)).toEqual({
         employeeInfo: `Eve works in Unknown`,
         isHighEarner: false,
         yearsToRetirement: 37,
@@ -384,8 +384,14 @@ describe(`Functional Variants Query`, () => {
       const dept1 = results.find((r) => r.department_id === 1)
       const dept2 = results.find((r) => r.department_id === 2)
 
-      expect(dept1).toEqual({ department_id: 1, employee_count: 2 })
-      expect(dept2).toEqual({ department_id: 2, employee_count: 2 })
+      expect(stripVirtualProps(dept1)).toEqual({
+        department_id: 1,
+        employee_count: 2,
+      })
+      expect(stripVirtualProps(dept2)).toEqual({
+        department_id: 2,
+        employee_count: 2,
+      })
 
       // Add another user to department 1
       const newUser = {
@@ -403,7 +409,10 @@ describe(`Functional Variants Query`, () => {
 
       expect(liveCollection.size).toBe(2) // Still 2 departments
       const updatedDept1 = liveCollection.get(1)
-      expect(updatedDept1).toEqual({ department_id: 1, employee_count: 3 }) // Now 3 employees
+      expect(stripVirtualProps(updatedDept1)).toEqual({
+        department_id: 1,
+        employee_count: 3,
+      }) // Now 3 employees
 
       // Remove one user from department 1
       const bobUser = sampleUsers.find((u) => u.name === `Bob`)
@@ -725,14 +734,14 @@ describe(`Functional Variants Query`, () => {
       expect(results).toHaveLength(2)
 
       const alice = results.find((r) => r.employeeName === `Alice`)
-      expect(alice).toEqual({
+      expect(stripVirtualProps(alice)).toEqual({
         departmentName: `Engineering`,
         employeeName: `Alice`,
         salary: 75000,
       })
 
       const dave = results.find((r) => r.employeeName === `Dave`)
-      expect(dave).toEqual({
+      expect(stripVirtualProps(dave)).toEqual({
         departmentName: `Marketing`,
         employeeName: `Dave`,
         salary: 65000,
@@ -776,7 +785,7 @@ describe(`Functional Variants Query`, () => {
       })
 
       const alice = results.find((r) => r.displayName.includes(`Alice`))
-      expect(alice).toEqual({
+      expect(stripVirtualProps(alice)).toEqual({
         employeeId: 1,
         displayName: `Employee: Alice`,
         status: `Active`,
@@ -833,7 +842,7 @@ describe(`Functional Variants Query`, () => {
       expect(results).toHaveLength(2)
 
       const alice = results.find((r) => r.profile.includes(`Alice`))
-      expect(alice).toEqual({
+      expect(stripVirtualProps(alice)).toEqual({
         profile: `Alice (Mid)`,
         compensation: {
           salary: 75000,
@@ -848,7 +857,7 @@ describe(`Functional Variants Query`, () => {
       })
 
       const eve = results.find((r) => r.profile.includes(`Eve`))
-      expect(eve).toEqual({
+      expect(stripVirtualProps(eve)).toEqual({
         profile: `Eve (Mid)`,
         compensation: {
           salary: 55000,

@@ -24,6 +24,14 @@ const getStateValue = <T extends object, TKey extends string | number>(
   key: TKey,
 ) => stripVirtualProps(collection.state.get(key))
 
+const getStateEntries = <T extends object, TKey extends string | number>(
+  collection: { state: Map<TKey, T> },
+) =>
+  Array.from(collection.state.entries()).map(([key, value]) => [
+    key,
+    stripVirtualProps(value),
+  ])
+
 describe(`Collection`, () => {
   it(`should throw if there's no sync config`, () => {
     // @ts-expect-error we're testing for throwing when there's no config passed in
@@ -145,7 +153,11 @@ describe(`Collection`, () => {
 
           // Now the data should be visible
           const expectedData = [{ name: `Alice` }, { name: `Bob` }]
-          expect(Array.from(collection.state.values())).toEqual(expectedData)
+          expect(
+            Array.from(collection.state.values()).map((value) =>
+              stripVirtualProps(value),
+            ),
+          ).toEqual(expectedData)
         },
       },
     })
@@ -275,9 +287,9 @@ describe(`Collection`, () => {
     // after mutationFn returns, check that the transaction is cleaned up,
     // optimistic update is gone & synced data & combined state are all updated.
     expect(collection._state.transactions.size).toEqual(0) // Transaction should be cleaned up
-    expect(collection.state).toEqual(
-      new Map([[insertedKey, { id: 1, value: `bar` }]]),
-    )
+    expect(getStateEntries(collection)).toEqual([
+      [insertedKey, { id: 1, value: `bar` }],
+    ])
     expect(collection._state.optimisticUpserts.size).toEqual(0)
 
     // Test insert with provided key
@@ -475,7 +487,9 @@ describe(`Collection`, () => {
         // This update is ignored because the optimistic update overrides it.
         { type: `insert`, changes: { id: 2, bar: `value2` } },
       ])
-      expect(collection.state).toEqual(new Map([[1, { id: 1, value: `bar` }]]))
+      expect(getStateEntries(collection)).toEqual([
+        [1, { id: 1, value: `bar` }],
+      ])
       // Remove it so we don't have to assert against it below
       emitter.emit(`update`, [{ changes: { id: 2 }, type: `delete` }])
 
@@ -494,7 +508,7 @@ describe(`Collection`, () => {
     )
 
     // The merged value should immediately contain the new insert
-    expect(collection.state).toEqual(new Map([[1, { id: 1, value: `bar` }]]))
+    expect(getStateEntries(collection)).toEqual([[1, { id: 1, value: `bar` }]])
 
     // check there's a transaction in peristing state
     expect(
@@ -516,7 +530,7 @@ describe(`Collection`, () => {
 
     await tx1.isPersisted.promise
 
-    expect(collection.state).toEqual(new Map([[1, { id: 1, value: `bar` }]]))
+    expect(getStateEntries(collection)).toEqual([[1, { id: 1, value: `bar` }]])
   })
 
   it(`should throw errors when deleting items not in the collection`, () => {

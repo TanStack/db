@@ -546,7 +546,9 @@ function createBasicTests(autoIndex: `off` | `eager`) {
       expect(results[0]).toHaveProperty(`active`)
 
       // Verify the data matches exactly
-      expect(results).toEqual(expect.arrayContaining(sampleUsers))
+      expect(results.map((row) => stripVirtualProps(row))).toEqual(
+        expect.arrayContaining(sampleUsers),
+      )
 
       // Insert a new user
       const newUser = {

@@ -3,9 +3,9 @@ import { createCollection, liveQueryCollectionOptions } from '../src/index'
 import { sum } from '../src/query/builder/functions'
 import { localOnlyCollectionOptions } from '../src/local-only'
 import { createTransaction } from '../src/transactions'
+import { stripVirtualProps } from './utils'
 import type { LocalOnlyCollectionUtils } from '../src/local-only'
 import type { Collection } from '../src/index'
-import { stripVirtualProps } from './utils'
 
 interface TestItem extends Record<string, unknown> {
   id: number
@@ -168,7 +168,7 @@ describe(`LocalOnly Collection`, () => {
       { id: 2, name: `Item 2` },
     ])
 
-    const array = collection.toArray
+    const array = collection.toArray.map((row) => stripVirtualProps(row))
 
     // Should contain all items
     expect(array).toHaveLength(3)
@@ -189,7 +189,10 @@ describe(`LocalOnly Collection`, () => {
     ])
 
     // Test entries
-    const entries = Array.from(collection.entries())
+    const entries = Array.from(collection.entries()).map(([key, value]) => [
+      key,
+      stripVirtualProps(value),
+    ])
     expect(entries).toHaveLength(2)
     expect(entries).toEqual(
       expect.arrayContaining([
@@ -525,7 +528,9 @@ describe(`LocalOnly Collection`, () => {
 
       await new Promise((resolve) => setTimeout(resolve, 10))
 
-      expect(query.toArray).toEqual([{ totalNumber: 30 }])
+      expect(query.toArray.map((row) => stripVirtualProps(row))).toEqual([
+        { totalNumber: 30 },
+      ])
     })
   })
 
