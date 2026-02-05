@@ -24,9 +24,12 @@ const getStateValue = <T extends object, TKey extends string | number>(
   key: TKey,
 ) => stripVirtualProps(collection.state.get(key))
 
-const getStateEntries = <T extends object, TKey extends string | number>(
-  collection: { state: Map<TKey, T> },
-) =>
+const getStateEntries = <
+  T extends object,
+  TKey extends string | number,
+>(collection: {
+  state: Map<TKey, T>
+}) =>
   Array.from(collection.state.entries()).map(([key, value]) => [
     key,
     stripVirtualProps(value),
