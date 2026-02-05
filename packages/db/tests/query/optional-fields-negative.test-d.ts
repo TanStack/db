@@ -19,6 +19,11 @@ type Department = {
   budget: number
 }
 
+type OutputWithVirtualKeyed<T extends object> = OutputWithVirtual<
+  T,
+  string | number
+>
+
 function createUsersCollection() {
   return createCollection(
     mockSyncCollectionOptions<UserWithOptional>({
@@ -53,7 +58,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
 
     // The query should be typed correctly
     expectTypeOf(query.toArray).toMatchTypeOf<
-      Array<OutputWithVirtual<UserWithOptional>>
+      Array<OutputWithVirtualKeyed<UserWithOptional>>
     >()
   })
 
@@ -69,7 +74,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
     })
 
     expectTypeOf(query.toArray).toMatchTypeOf<
-      Array<OutputWithVirtual<UserWithOptional>>
+      Array<OutputWithVirtualKeyed<UserWithOptional>>
     >()
   })
 
@@ -91,9 +96,9 @@ describe(`Optional Fields - Type Safety Tests`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
-          user: OutputWithVirtual<UserWithOptional>
-          dept: OutputWithVirtual<Department>
+        OutputWithVirtualKeyed<{
+          user: OutputWithVirtualKeyed<UserWithOptional>
+          dept: OutputWithVirtualKeyed<Department>
         }>
       >
     >()
@@ -114,7 +119,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
+        OutputWithVirtualKeyed<{
           id: string
           name: string
           email: string | undefined
@@ -142,7 +147,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
+        OutputWithVirtualKeyed<{
           name: string
         }>
       >
@@ -171,7 +176,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
+        OutputWithVirtualKeyed<{
           user_name: string
           dept_name: string | undefined
         }>

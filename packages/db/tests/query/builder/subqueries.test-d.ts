@@ -46,9 +46,9 @@ describe(`Subquery Types`, () => {
         .where(({ issue }) => eq(issue.projectId, 1))
 
       // Check that the baseQuery has the correct result type
-      expectTypeOf<
-        GetResult<ExtractContext<typeof _baseQuery>>
-      >().toEqualTypeOf<IssueWithVirtual>()
+      expectTypeOf(
+        {} as GetResult<ExtractContext<typeof _baseQuery>>,
+      ).toMatchTypeOf<IssueWithVirtual>()
     })
 
     test(`subquery in from clause without any cast`, () => {

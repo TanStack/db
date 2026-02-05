@@ -12,7 +12,11 @@ type Message = {
   user: string
 }
 
-type MessageWithVirtual = OutputWithVirtual<Message>
+type OutputWithVirtualKeyed<T extends object> = OutputWithVirtual<
+  T,
+  string | number
+>
+type MessageWithVirtual = OutputWithVirtualKeyed<Message>
 
 const initialMessages: Array<Message> = [
   { id: 1, text: `hello`, user: `sam` },
@@ -43,13 +47,13 @@ describe(`Select spread typing`, () => {
 
     const results = collection.toArray
     expectTypeOf(results).toMatchTypeOf<
-      Array<OutputWithVirtual<MessageWithVirtual>>
+      Array<OutputWithVirtualKeyed<MessageWithVirtual>>
     >()
 
     // Accessors should also be correctly typed
     const first = collection.get(1)
     expectTypeOf(first).toMatchTypeOf<
-      OutputWithVirtual<MessageWithVirtual> | undefined
+      OutputWithVirtualKeyed<MessageWithVirtual> | undefined
     >()
   })
 
@@ -69,7 +73,7 @@ describe(`Select spread typing`, () => {
     const results = collection.toArray
     expectTypeOf(results).toMatchTypeOf<
       Array<
-        OutputWithVirtual<
+        OutputWithVirtualKeyed<
           MessageWithVirtual & { idPlusOne: number; upperText: string }
         >
       >
@@ -92,7 +96,9 @@ describe(`Select spread typing`, () => {
     const results = collection.toArray
     expectTypeOf(results).toMatchTypeOf<
       Array<
-        OutputWithVirtual<Omit<MessageWithVirtual, `user`> & { user: number }>
+        OutputWithVirtualKeyed<
+          Omit<MessageWithVirtual, `user`> & { user: number }
+        >
       >
     >(undefined as any)
   })
@@ -126,7 +132,9 @@ describe(`Select spread typing`, () => {
     }
 
     const results = collection.toArray
-    expectTypeOf(results).toMatchTypeOf<Array<OutputWithVirtual<Expected>>>(
+    expectTypeOf(results).toMatchTypeOf<
+      Array<OutputWithVirtualKeyed<Expected>>
+    >(
       undefined as any,
     )
   })

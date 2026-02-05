@@ -16,6 +16,11 @@ type TodoOption = {
   optionText: string
 }
 
+type OutputWithVirtualKeyed<T extends object> = OutputWithVirtual<
+  T,
+  string | number
+>
+
 const todoCollection = createCollection(
   mockSyncCollectionOptions<Todo>({
     id: `test-todos-findone-joins`,
@@ -49,9 +54,9 @@ describe(`findOne() with joins`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
-          todo: OutputWithVirtual<Todo>
-          todoOptions: OutputWithVirtual<TodoOption> | undefined
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
         }>
       >
     >()
@@ -72,9 +77,9 @@ describe(`findOne() with joins`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
-          todo: OutputWithVirtual<Todo>
-          todoOptions: OutputWithVirtual<TodoOption>
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption>
         }>
       >
     >()
@@ -95,9 +100,9 @@ describe(`findOne() with joins`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
-          todo: OutputWithVirtual<Todo>
-          todoOptions: OutputWithVirtual<TodoOption> | undefined
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
         }>
       >
     >()
@@ -118,9 +123,9 @@ describe(`findOne() with joins`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
-          todo: OutputWithVirtual<Todo> | undefined
-          todoOptions: OutputWithVirtual<TodoOption>
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo> | undefined
+          todoOptions: OutputWithVirtualKeyed<TodoOption>
         }>
       >
     >()
@@ -141,9 +146,9 @@ describe(`findOne() with joins`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
-          todo: OutputWithVirtual<Todo> | undefined
-          todoOptions: OutputWithVirtual<TodoOption> | undefined
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo> | undefined
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
         }>
       >
     >()
@@ -180,10 +185,10 @@ describe(`findOne() with joins`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
-          todo: OutputWithVirtual<Todo>
-          todoOptions: OutputWithVirtual<TodoOption> | undefined
-          tag: OutputWithVirtual<TodoTag>
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
+          tag: OutputWithVirtualKeyed<TodoTag>
         }>
       >
     >()
@@ -207,7 +212,7 @@ describe(`findOne() with joins`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
+        OutputWithVirtualKeyed<{
           todoText: string
           optionText: string | undefined
         }>
@@ -233,7 +238,7 @@ describe(`findOne() with joins`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
+        OutputWithVirtualKeyed<{
           todoText: string
           optionText: string | undefined
         }>
@@ -257,9 +262,9 @@ describe(`findOne() with joins`, () => {
 
     expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
-        OutputWithVirtual<{
-          todo: OutputWithVirtual<Todo>
-          todoOptions: OutputWithVirtual<TodoOption> | undefined
+        OutputWithVirtualKeyed<{
+          todo: OutputWithVirtualKeyed<Todo>
+          todoOptions: OutputWithVirtualKeyed<TodoOption> | undefined
         }>
       >
     >()
