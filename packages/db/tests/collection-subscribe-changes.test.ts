@@ -33,6 +33,18 @@ const normalizeChanges = <T extends Record<string, any>>(
   changes: Array<ChangeMessage<T>>,
 ) => changes.map(normalizeChange)
 
+const normalizeChangesWithoutVirtualUpdates = <T extends Record<string, any>>(
+  changes: Array<ChangeMessage<T>>,
+) =>
+  normalizeChanges(changes).filter((change) => {
+    if (change.type !== `update`) {
+      return true
+    }
+    const value = stripVirtualProps(change.value)
+    const previousValue = stripVirtualProps(change.previousValue)
+    return JSON.stringify(value) !== JSON.stringify(previousValue)
+  })
+
 describe(`Collection.subscribeChanges`, () => {
   it(`should emit initial collection state as insert changes`, () => {
     const callback = vi.fn()
@@ -449,8 +461,11 @@ describe(`Collection.subscribeChanges`, () => {
 
     await tx.isPersisted.promise
 
-    // Verify no changes were emitted as the sync should match the optimistic state
-    expect(callback).toHaveBeenCalledTimes(0)
+    // Sync confirmation should only change virtual props ($synced/$origin)
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(
+      normalizeChangesWithoutVirtualUpdates(callback.mock.calls[0]![0]),
+    ).toEqual([])
     callback.mockReset()
 
     // Update both items in optimistic and synced ways
@@ -484,8 +499,11 @@ describe(`Collection.subscribeChanges`, () => {
 
     await updateTx.isPersisted.promise
 
-    // Verify no redundant sync events were emitted
-    expect(callback).toHaveBeenCalledTimes(0)
+    // Sync confirmation should only change virtual props ($synced/$origin)
+    expect(callback).toHaveBeenCalledTimes(1)
+    expect(
+      normalizeChangesWithoutVirtualUpdates(callback.mock.calls[0]![0]),
+    ).toEqual([])
     callback.mockReset()
 
     // Then update the synced item with a synced update
@@ -1320,7 +1338,7 @@ describe(`Collection.subscribeChanges`, () => {
           commit()
         },
       },
-      onDelete: async ({ transaction }) => {
+      onDelete: ({ transaction }) => {
         emitter.emit(`sync`, transaction.mutations)
       },
     })
@@ -2302,7 +2320,7 @@ describe(`Virtual properties`, () => {
           markReady()
         },
       },
-      onInsert: async ({ transaction }) => {
+      onInsert: ({ transaction }) => {
         if (!syncFns) {
           throw new Error(`Sync not ready`)
         }
@@ -2361,7 +2379,7 @@ describe(`Virtual properties`, () => {
           markReady()
         },
       },
-      onInsert: async () => {
+      onInsert: () => {
         throw new Error(`insert failed`)
       },
     })
@@ -2476,6 +2494,7 @@ describe(`Virtual properties`, () => {
       { includeInitialState: true },
     )
 
+    await syncedOnly.stateWhenReady()
     await waitForChanges()
 
     expect(liveChanges.some((change) => change.value.id === `synced-1`)).toBe(
@@ -2536,6 +2555,8 @@ describe(`Virtual properties`, () => {
             total: count(item.id),
           })),
     })
+
+    await grouped.stateWhenReady()
 
     if (!syncFns) {
       throw new Error(`Sync not ready`)

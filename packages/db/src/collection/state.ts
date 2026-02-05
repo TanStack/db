@@ -633,10 +633,7 @@ export class CollectionStateManager<
       for (const transaction of this.transactions.values()) {
         if (transaction.state === `completed`) {
           for (const mutation of transaction.mutations) {
-            if (
-              this.isThisCollection(mutation.collection) &&
-              changedKeys.has(mutation.key)
-            ) {
+            if (this.isThisCollection(mutation.collection)) {
               completedLocalKeys.add(mutation.key)
               if (mutation.optimistic) {
                 completedOptimisticOps.set(mutation.key, {
@@ -947,11 +944,30 @@ export class CollectionStateManager<
           previousVisibleValue === undefined &&
           newVisibleValue !== undefined
         ) {
-          events.push({
-            type: `insert`,
-            key,
-            value: newVisibleValue,
-          })
+          const completedOptimisticOp = completedOptimisticOps.get(key)
+          if (completedOptimisticOp) {
+            const previousValueFromCompleted = completedOptimisticOp.value
+            const previousValueWithVirtualFromCompleted =
+              enrichRowWithVirtualProps(
+                previousValueFromCompleted,
+                key,
+                this.collection.id,
+                () => previousVirtualProps.synced,
+                () => previousVirtualProps.origin,
+              )
+            events.push({
+              type: `update`,
+              key,
+              value: newVisibleValue,
+              previousValue: previousValueWithVirtualFromCompleted,
+            })
+          } else {
+            events.push({
+              type: `insert`,
+              key,
+              value: newVisibleValue,
+            })
+          }
         } else if (
           previousVisibleValue !== undefined &&
           newVisibleValue === undefined
