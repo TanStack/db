@@ -22,6 +22,7 @@ import type {
 import type { CollectionImpl } from './index.js'
 import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { BasicExpression, OrderBy } from '../query/ir.js'
+import type { WithVirtualProps } from '../virtual-props.js'
 
 /**
  * Returns the current state of the collection as an array of changes
@@ -58,14 +59,14 @@ export function currentStateAsChanges<
   T extends object,
   TKey extends string | number,
 >(
-  collection: CollectionLike<T, TKey>,
+  collection: CollectionLike<WithVirtualProps<T, TKey>, TKey>,
   options: CurrentStateAsChangesOptions = {},
-): Array<ChangeMessage<T>> | void {
+): Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> | void {
   // Helper function to collect filtered results
   const collectFilteredResults = (
-    filterFn?: (value: T) => boolean,
-  ): Array<ChangeMessage<T>> => {
-    const result: Array<ChangeMessage<T>> = []
+    filterFn?: (value: WithVirtualProps<T, TKey>) => boolean,
+  ): Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> => {
+    const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
     for (const [key, value] of collection.entries()) {
       // If no filter function is provided, include all items
       if (filterFn?.(value) ?? true) {
@@ -106,7 +107,7 @@ export function currentStateAsChanges<
     }
 
     // Convert keys to change messages
-    const result: Array<ChangeMessage<T>> = []
+    const result: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>> = []
     for (const key of orderedKeys) {
       const value = collection.get(key)
       if (value !== undefined) {

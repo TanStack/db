@@ -4,6 +4,7 @@ import { CollectionImpl } from '../../../src/collection/index.js'
 import { avg, count, eq } from '../../../src/query/builder/functions.js'
 import type { ExtractContext } from '../../../src/query/builder/index.js'
 import type { GetResult } from '../../../src/query/builder/types.js'
+import type { OutputWithVirtual } from '../../utils.js'
 
 // Test schema types
 interface Issue {
@@ -15,6 +16,8 @@ interface Issue {
   duration: number
   createdAt: string
 }
+
+type IssueWithVirtual = OutputWithVirtual<Issue, number>
 
 interface User {
   id: number
@@ -45,7 +48,7 @@ describe(`Subquery Types`, () => {
       // Check that the baseQuery has the correct result type
       expectTypeOf<
         GetResult<ExtractContext<typeof _baseQuery>>
-      >().toEqualTypeOf<Issue>()
+      >().toEqualTypeOf<IssueWithVirtual>()
     })
 
     test(`subquery in from clause without any cast`, () => {
