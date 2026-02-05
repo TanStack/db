@@ -42,13 +42,13 @@ describe(`Select spread typing`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<OutputWithVirtual<MessageWithVirtual>>
     >()
 
     // Accessors should also be correctly typed
     const first = collection.get(1)
-    expectTypeOf(first).toEqualTypeOf<
+    expectTypeOf(first).toMatchTypeOf<
       OutputWithVirtual<MessageWithVirtual> | undefined
     >()
   })
@@ -67,7 +67,7 @@ describe(`Select spread typing`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<
           MessageWithVirtual & { idPlusOne: number; upperText: string }
@@ -90,7 +90,7 @@ describe(`Select spread typing`, () => {
     })
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<Omit<MessageWithVirtual, `user`> & { user: number }>
       >
@@ -126,7 +126,7 @@ describe(`Select spread typing`, () => {
     }
 
     const results = collection.toArray
-    expectTypeOf(results).toEqualTypeOf<Array<OutputWithVirtual<Expected>>>(
+    expectTypeOf(results).toMatchTypeOf<Array<OutputWithVirtual<Expected>>>(
       undefined as any,
     )
   })

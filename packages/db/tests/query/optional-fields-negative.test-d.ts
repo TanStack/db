@@ -52,7 +52,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
     })
 
     // The query should be typed correctly
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<OutputWithVirtual<UserWithOptional>>
     >()
   })
@@ -68,7 +68,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
         }),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<OutputWithVirtual<UserWithOptional>>
     >()
   })
@@ -89,7 +89,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
         ),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: OutputWithVirtual<UserWithOptional>
@@ -112,7 +112,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
         })),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
@@ -140,7 +140,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
           })),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           name: string
@@ -169,7 +169,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
           })),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user_name: string

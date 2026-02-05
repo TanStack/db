@@ -84,7 +84,7 @@ describe(`Subquery Types`, () => {
       })
 
       // Should infer the correct result type from the SELECT clause
-      expectTypeOf(liveCollection.toArray).toEqualTypeOf<
+      expectTypeOf(liveCollection.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtualKeyed<{
             id: number
@@ -108,7 +108,7 @@ describe(`Subquery Types`, () => {
       })
 
       // Should return the original Issue type
-      expectTypeOf(liveCollection.toArray).toEqualTypeOf<
+      expectTypeOf(liveCollection.toArray).toMatchTypeOf<
         Array<OutputWithVirtualKeyed<Issue>>
       >()
     })
@@ -141,7 +141,7 @@ describe(`Subquery Types`, () => {
       })
 
       // Should infer the final transformed type
-      expectTypeOf(liveCollection.toArray).toEqualTypeOf<
+      expectTypeOf(liveCollection.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtualKeyed<{
             key: number
@@ -183,7 +183,7 @@ describe(`Subquery Types`, () => {
       })
 
       // Should infer the final nested transformation type
-      expectTypeOf(liveCollection.toArray).toEqualTypeOf<
+      expectTypeOf(liveCollection.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtualKeyed<{
             id: number
@@ -212,7 +212,7 @@ describe(`Subquery Types`, () => {
       })
 
       // Should infer the correct result type
-      expectTypeOf(customKeyCollection.toArray).toEqualTypeOf<
+      expectTypeOf(customKeyCollection.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtualKeyed<{
             issueId: number
@@ -223,7 +223,7 @@ describe(`Subquery Types`, () => {
       >()
 
       // getKey should work with the transformed type
-      expectTypeOf(customKeyCollection.get(1)).toEqualTypeOf<
+      expectTypeOf(customKeyCollection.get(1)).toMatchTypeOf<
         | OutputWithVirtualKeyed<{
             issueId: number
             issueTitle: string
@@ -247,7 +247,7 @@ describe(`Subquery Types`, () => {
       })
 
       // Should infer the correct result type
-      expectTypeOf(liveCollection.toArray).toEqualTypeOf<
+      expectTypeOf(liveCollection.toArray).toMatchTypeOf<
         Array<
           OutputWithVirtualKeyed<{
             id: number

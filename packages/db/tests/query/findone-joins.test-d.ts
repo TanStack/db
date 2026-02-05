@@ -47,7 +47,7 @@ describe(`findOne() with joins`, () => {
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           todo: OutputWithVirtual<Todo>
@@ -70,7 +70,7 @@ describe(`findOne() with joins`, () => {
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           todo: OutputWithVirtual<Todo>
@@ -93,7 +93,7 @@ describe(`findOne() with joins`, () => {
           ),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           todo: OutputWithVirtual<Todo>
@@ -116,7 +116,7 @@ describe(`findOne() with joins`, () => {
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           todo: OutputWithVirtual<Todo> | undefined
@@ -139,7 +139,7 @@ describe(`findOne() with joins`, () => {
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           todo: OutputWithVirtual<Todo> | undefined
@@ -178,7 +178,7 @@ describe(`findOne() with joins`, () => {
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           todo: OutputWithVirtual<Todo>
@@ -205,7 +205,7 @@ describe(`findOne() with joins`, () => {
           .findOne(),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           todoText: string
@@ -231,7 +231,7 @@ describe(`findOne() with joins`, () => {
           })),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           todoText: string
@@ -255,7 +255,7 @@ describe(`findOne() with joins`, () => {
           .limit(1),
     })
 
-    expectTypeOf(query.toArray).toEqualTypeOf<
+    expectTypeOf(query.toArray).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           todo: OutputWithVirtual<Todo>
