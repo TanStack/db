@@ -215,6 +215,97 @@ tx.mutate(() => {
 await tx.commit()
 ```
 
+## Tracking Submission Status
+
+A common need in offline-first apps is knowing whether locally-created data has been submitted to the server. TanStack DB already provides everything you need through the transaction object returned from mutation operations.
+
+### Using the Transaction Object
+
+Every `insert()`, `update()`, and `delete()` returns a `Transaction` with built-in status tracking:
+
+```typescript
+const tx = todoCollection.insert({ id: '1', text: 'Buy milk', completed: false })
+
+// Check current state
+tx.state // "pending" → "persisting" → "completed" or "failed"
+
+// Wait for server confirmation
+await tx.isPersisted.promise
+console.log('Submitted successfully!')
+
+// Or handle failures
+try {
+  await tx.isPersisted.promise
+} catch (error) {
+  console.log('Submission failed:', error)
+}
+```
+
+### Tracking Per-Item Status
+
+To show sync indicators in your UI, maintain a map of pending transactions:
+
+```typescript
+const pendingItems = new Map<string, Transaction>()
+
+function insertWithTracking(item: Todo) {
+  const tx = todoCollection.insert(item)
+  pendingItems.set(item.id, tx)
+
+  tx.isPersisted.promise
+    .then(() => pendingItems.delete(item.id))
+    .catch(() => pendingItems.delete(item.id))
+
+  return tx
+}
+
+// Check if a specific item is pending
+function isPending(id: string): boolean {
+  const tx = pendingItems.get(id)
+  return tx != null && tx.state !== 'completed' && tx.state !== 'failed'
+}
+```
+
+### Monitoring the Offline Outbox
+
+For offline transactions, the executor provides outbox visibility:
+
+```typescript
+const executor = startOfflineExecutor({ /* config */ })
+
+// How many transactions are queued?
+executor.getPendingCount()
+executor.getRunningCount()
+
+// Inspect the full outbox (includes retry info)
+const outbox = await executor.peekOutbox()
+outbox.forEach(tx => {
+  console.log(`${tx.id}: ${tx.retryCount} retries, keys: ${tx.keys}`)
+  if (tx.lastError) {
+    console.log(`  Last error: ${tx.lastError.message}`)
+  }
+})
+```
+
+### Using Inside mutationFns
+
+The `mutationFn` receives the full transaction with all mutations. The transaction lifecycle handles status automatically — when your function resolves, the transaction moves to `completed`; if it throws, it moves to `failed` and optimistic state is rolled back:
+
+```typescript
+mutationFns: {
+  syncTodos: async ({ transaction, idempotencyKey }) => {
+    // transaction.mutations contains all pending mutations
+    for (const mutation of transaction.mutations) {
+      console.log(mutation.type, mutation.key, mutation.modified)
+    }
+
+    // When this resolves → transaction.state becomes "completed"
+    // When this throws  → transaction.state becomes "failed" + rollback
+    await api.saveBatch(transaction.mutations, { idempotencyKey })
+  }
+}
+```
+
 ## Migration from TanStack DB
 
 This package uses explicit offline transactions to provide offline capabilities:
