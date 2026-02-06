@@ -157,29 +157,28 @@ describe(`sql-compiler`, () => {
     })
 
     describe(`null/undefined value handling`, () => {
-      it(`should throw error for eq(col, null)`, () => {
-        // Users should use isNull() instead of eq(col, null)
-        expect(() =>
-          compileSQL({
-            where: func(`eq`, [ref(`deletedAt`), val(null)]),
-          }),
-        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      it(`should convert eq(col, null) to IS NULL`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [ref(`deletedAt`), val(null)]),
+        })
+        expect(result.where).toBe(`"deletedAt" IS NULL`)
+        expect(result.params).toEqual({})
       })
 
-      it(`should throw error for eq(col, undefined)`, () => {
-        expect(() =>
-          compileSQL({
-            where: func(`eq`, [ref(`deletedAt`), val(undefined)]),
-          }),
-        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      it(`should convert eq(col, undefined) to IS NULL`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [ref(`deletedAt`), val(undefined)]),
+        })
+        expect(result.where).toBe(`"deletedAt" IS NULL`)
+        expect(result.params).toEqual({})
       })
 
-      it(`should throw error for eq(null, col) (reversed order)`, () => {
-        expect(() =>
-          compileSQL({
-            where: func(`eq`, [val(null), ref(`name`)]),
-          }),
-        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      it(`should convert eq(null, col) to IS NULL (reversed order)`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [val(null), ref(`name`)]),
+        })
+        expect(result.where).toBe(`"name" IS NULL`)
+        expect(result.params).toEqual({})
       })
 
       it(`should throw error for gt with null value`, () => {
@@ -230,27 +229,31 @@ describe(`sql-compiler`, () => {
         ).toThrow(`Cannot use null/undefined value with 'ilike' operator`)
       })
 
-      it(`should throw error for eq(col, null) in AND clause`, () => {
-        expect(() =>
-          compileSQL({
-            where: func(`and`, [
-              func(`eq`, [ref(`projectId`), val(`uuid-123`)]),
-              func(`eq`, [ref(`deletedAt`), val(null)]),
-            ]),
-          }),
-        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      it(`should convert eq(col, null) to IS NULL in AND clause`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`eq`, [ref(`projectId`), val(`uuid-123`)]),
+            func(`eq`, [ref(`deletedAt`), val(null)]),
+          ]),
+        })
+        expect(result.where).toBe(
+          `"projectId" = $1 AND "deletedAt" IS NULL`,
+        )
+        expect(result.params).toEqual({ '1': `uuid-123` })
       })
 
-      it(`should throw error for eq(col, null) in mixed conditions`, () => {
-        expect(() =>
-          compileSQL({
-            where: func(`and`, [
-              func(`eq`, [ref(`status`), val(`active`)]),
-              func(`eq`, [ref(`archivedAt`), val(null)]),
-              func(`gt`, [ref(`createdAt`), val(`2024-01-01`)]),
-            ]),
-          }),
-        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      it(`should convert eq(col, null) to IS NULL in mixed conditions`, () => {
+        const result = compileSQL({
+          where: func(`and`, [
+            func(`eq`, [ref(`status`), val(`active`)]),
+            func(`eq`, [ref(`archivedAt`), val(null)]),
+            func(`gt`, [ref(`createdAt`), val(`2024-01-01`)]),
+          ]),
+        })
+        expect(result.where).toBe(
+          `("status" = $1) AND ("archivedAt" IS NULL) AND ("createdAt" > $2)`,
+        )
+        expect(result.params).toEqual({ '1': `active`, '2': `2024-01-01` })
       })
 
       it(`should not include params for null values in complex queries`, () => {
@@ -269,34 +272,33 @@ describe(`sql-compiler`, () => {
         ).toThrow(`Cannot use null/undefined value with 'gt' operator`)
       })
 
-      it(`should throw error for eq(null, null)`, () => {
-        // Both args are null - this is nonsensical and would cause missing params
-        expect(() =>
-          compileSQL({
-            where: func(`eq`, [val(null), val(null)]),
-          }),
-        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      it(`should convert eq(null, null) to true`, () => {
+        // Both args are null - this is nonsensical but shouldn't crash
+        // NULL IS NULL is always true in SQL
+        const result = compileSQL({
+          where: func(`eq`, [val(null), val(null)]),
+        })
+        expect(result.where).toBe(`true`)
+        expect(result.params).toEqual({})
       })
 
-      it(`should throw error for eq(null, literal)`, () => {
-        // Comparing null to a literal is nonsensical (always evaluates to UNKNOWN)
-        expect(() =>
-          compileSQL({
-            where: func(`eq`, [val(null), val(42)]),
-          }),
-        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      it(`should convert eq(null, literal) to IS NULL`, () => {
+        const result = compileSQL({
+          where: func(`eq`, [val(null), val(42)]),
+        })
+        expect(result.where).toBe(`$1 IS NULL`)
+        expect(result.params).toEqual({ '1': `42` })
       })
 
-      it(`should throw error for eq(col, null) - use isNull(col) instead`, () => {
-        // eq(col, null) should throw an error
-        // Users should use isNull(col) which works correctly
-        expect(() =>
-          compileSQL({
-            where: func(`eq`, [ref(`email`), val(null)]),
-          }),
-        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      it(`should convert eq(col, null) to IS NULL - same as isNull(col)`, () => {
+        // eq(col, null) auto-converts to IS NULL
+        const eqResult = compileSQL({
+          where: func(`eq`, [ref(`email`), val(null)]),
+        })
+        expect(eqResult.where).toBe(`"email" IS NULL`)
+        expect(eqResult.params).toEqual({})
 
-        // isNull(col) should work correctly
+        // isNull(col) produces the same result
         const isNullResult = compileSQL({
           where: func(`isNull`, [ref(`email`)]),
         })
@@ -304,15 +306,17 @@ describe(`sql-compiler`, () => {
         expect(isNullResult.params).toEqual({})
       })
 
-      it(`should throw error for eq(col, null) in OR clause`, () => {
-        expect(() =>
-          compileSQL({
-            where: func(`or`, [
-              func(`eq`, [ref(`deletedAt`), val(null)]),
-              func(`eq`, [ref(`status`), val(`active`)]),
-            ]),
-          }),
-        ).toThrow(`Cannot use null/undefined value with 'eq' operator`)
+      it(`should convert eq(col, null) to IS NULL in OR clause`, () => {
+        const result = compileSQL({
+          where: func(`or`, [
+            func(`eq`, [ref(`deletedAt`), val(null)]),
+            func(`eq`, [ref(`status`), val(`active`)]),
+          ]),
+        })
+        expect(result.where).toBe(
+          `"deletedAt" IS NULL OR "status" = $1`,
+        )
+        expect(result.params).toEqual({ '1': `active` })
       })
     })
 

@@ -13,6 +13,8 @@ import {
   gt,
   gte,
   ilike,
+  isNull,
+  isUndefined,
   length,
   like,
   lower,
@@ -250,7 +252,7 @@ describe(`Query Builder Callback Types`, () => {
         return and(
           eq(user.active, true),
           or(gt(user.age, 30), gte(user.salary, 75000)),
-          not(eq(user.department_id, null)),
+          not(isNull(user.department_id)),
         )
       })
     })
@@ -772,6 +774,38 @@ describe(`Query Builder Callback Types`, () => {
 
           return $selected.stats.user_count > 2
         })
+    })
+  })
+
+  describe(`Null handling in comparison operators`, () => {
+    test(`eq with null should type-check (auto-converts to isNull at runtime)`, () => {
+      new Query().from({ user: usersCollection }).where(({ user }) => {
+        // eq(field, null) auto-converts to isNull(field) at runtime
+        expectTypeOf(eq(user.department_id, null)).toEqualTypeOf<
+          BasicExpression<boolean>
+        >()
+
+        // isNull/isUndefined are the explicit alternatives
+        expectTypeOf(isNull(user.department_id)).toEqualTypeOf<
+          BasicExpression<boolean>
+        >()
+        expectTypeOf(isUndefined(user.department_id)).toEqualTypeOf<
+          BasicExpression<boolean>
+        >()
+
+        return eq(user.department_id, null)
+      })
+    })
+
+    test(`nullable column refs are allowed in comparisons`, () => {
+      new Query().from({ user: usersCollection }).where(({ user }) => {
+        // Nullable column references work in all comparison operators
+        eq(user.department_id, 42)
+        gt(user.department_id, 0)
+        isNull(user.department_id)
+
+        return eq(user.active, true)
+      })
     })
   })
 })

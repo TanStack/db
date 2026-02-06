@@ -130,7 +130,7 @@ describe(`QueryBuilder.where`, () => {
     expect((builtQuery.where as any)[0]?.name).toBe(`eq`)
   })
 
-  it(`supports null comparisons`, () => {
+  it(`supports null comparisons by auto-converting eq to isNull`, () => {
     const builder = new Query()
     const query = builder
       .from({ employees: employeesCollection })
@@ -138,6 +138,8 @@ describe(`QueryBuilder.where`, () => {
 
     const builtQuery = getQueryIR(query)
     expect(builtQuery.where).toBeDefined()
+    // eq(field, null) should auto-convert to isNull(field)
+    expect((builtQuery.where as any)[0]?.name).toBe(`isNull`)
   })
 
   it(`creates complex nested conditions`, () => {

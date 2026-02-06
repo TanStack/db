@@ -122,6 +122,15 @@ export function eq<T extends string | number | boolean>(
 ): BasicExpression<boolean>
 export function eq<T>(left: Aggregate<T>, right: any): BasicExpression<boolean>
 export function eq(left: any, right: any): BasicExpression<boolean> {
+  // Auto-convert eq(field, null/undefined) to isNull(field)
+  // In SQL, `col = NULL` always evaluates to UNKNOWN, but users intuitively
+  // expect it to mean IS NULL. Convert automatically instead of throwing.
+  if (right === null || right === undefined) {
+    return new Func(`isNull`, [toExpression(left)])
+  }
+  if (left === null || left === undefined) {
+    return new Func(`isNull`, [toExpression(right)])
+  }
   return new Func(`eq`, [toExpression(left), toExpression(right)])
 }
 
