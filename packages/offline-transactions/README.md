@@ -224,7 +224,11 @@ A common need in offline-first apps is knowing whether locally-created data has 
 Every `insert()`, `update()`, and `delete()` returns a `Transaction` with built-in status tracking:
 
 ```typescript
-const tx = todoCollection.insert({ id: '1', text: 'Buy milk', completed: false })
+const tx = todoCollection.insert({
+  id: '1',
+  text: 'Buy milk',
+  completed: false,
+})
 
 // Check current state
 tx.state // "pending" → "persisting" → "completed" or "failed"
@@ -271,7 +275,9 @@ function isPending(id: string): boolean {
 For offline transactions, the executor provides outbox visibility:
 
 ```typescript
-const executor = startOfflineExecutor({ /* config */ })
+const executor = startOfflineExecutor({
+  /* config */
+})
 
 // How many transactions are queued?
 executor.getPendingCount()
@@ -279,7 +285,7 @@ executor.getRunningCount()
 
 // Inspect the full outbox (includes retry info)
 const outbox = await executor.peekOutbox()
-outbox.forEach(tx => {
+outbox.forEach((tx) => {
   console.log(`${tx.id}: ${tx.retryCount} retries, keys: ${tx.keys}`)
   if (tx.lastError) {
     console.log(`  Last error: ${tx.lastError.message}`)
