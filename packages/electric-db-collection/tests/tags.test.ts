@@ -80,7 +80,10 @@ describe(`Electric Tag Tracking and GC`, () => {
     if (stateGetter) {
       Object.defineProperty(collection, `state`, {
         get: () => {
-          const state = stateGetter.call(collection) as Map<string | number, Row>
+          const state = stateGetter.call(collection) as Map<
+            string | number,
+            Row
+          >
           return new Map(
             Array.from(state.entries(), ([key, value]) => [
               key,
