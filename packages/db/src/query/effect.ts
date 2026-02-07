@@ -1,14 +1,18 @@
-import { D2, output } from '@tanstack/db-ivm'
+import { D2, output, serializeValue } from '@tanstack/db-ivm'
 import { transactionScopedScheduler } from '../scheduler.js'
 import { getActiveTransaction } from '../transactions.js'
 import { compileQuery } from './compiler/index.js'
-import { normalizeExpressionPaths } from './compiler/expressions.js'
+import {
+  normalizeExpressionPaths,
+  normalizeOrderByPaths,
+} from './compiler/expressions.js'
 import { getCollectionBuilder } from './live/collection-registry.js'
 import {
   buildQueryFromConfig,
   extractCollectionAliases,
   extractCollectionsFromQuery,
   sendChangesToInput,
+  splitUpdates,
 } from './live/utils.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../collection/index.js'
@@ -16,6 +20,7 @@ import type { CollectionSubscription } from '../collection/subscription.js'
 import type { InitialQueryBuilder, QueryBuilder } from './builder/index.js'
 import type { Context } from './builder/types.js'
 import type { BasicExpression, QueryIR } from './ir.js'
+import type { OrderByOptimizationInfo } from './compiler/order-by.js'
 import type { ChangeMessage, KeyedStream, ResultStream } from '../types.js'
 
 // ---------------------------------------------------------------------------
@@ -286,6 +291,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private readonly subscriptions: Record<string, CollectionSubscription> = {}
   private readonly lazySourcesCallbacks: Record<string, any> = {}
   private readonly lazySources = new Set<string>()
+  // OrderBy optimization info populated by the compiler when limit is present
+  private readonly optimizableOrderByCollections: Record<
+    string,
+    OrderByOptimizationInfo
+  > = {}
+
+  // Ordered subscription state for cursor-based loading
+  private readonly biggestSentValue = new Map<string, any>()
+  private readonly lastLoadRequestKey = new Map<string, string>()
+  private pendingOrderedLoadPromise: Promise<void> | undefined
 
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
@@ -359,8 +374,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       this.subscriptions,
       this.lazySourcesCallbacks,
       this.lazySources,
-      {}, // optimizableOrderByCollections (not needed for effects)
-      () => {}, // setWindowFn (no-op — effects don't support windowing)
+      this.optimizableOrderByCollections,
+      () => {}, // setWindowFn (no-op — effects don't paginate)
     )
 
     this.pipeline = compilation.pipeline
@@ -437,27 +452,53 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       // eagerly — the join tap operator will load exactly the rows it needs on demand.
       // For on-demand collections, eager loading would trigger a full server fetch
       // for data that should be lazily loaded based on join keys.
-      const includeInitialState = !this.lazySources.has(alias)
+      const isLazy = this.lazySources.has(alias)
 
-      // Subscribe to source changes — buffer during setup, process directly after
-      const subscription = collection.subscribeChanges(
-        (changes: Array<ChangeMessage<any, string | number>>) => {
-          if (pendingBuffers.has(alias)) {
-            // Still setting up subscriptions — buffer changes
-            pendingBuffers.get(alias)!.push(changes)
-          } else {
-            // All subscriptions ready — process directly
-            this.handleSourceChanges(alias, changes)
+      // Check if this alias has orderBy optimization (cursor-based loading)
+      const orderByInfo = this.getOrderByInfoForAlias(alias)
+
+      // Build the change callback — for ordered aliases, split updates into
+      // delete+insert and track the biggest sent value for cursor positioning.
+      const changeCallback = orderByInfo
+        ? (changes: Array<ChangeMessage<any, string | number>>) => {
+            if (pendingBuffers.has(alias)) {
+              pendingBuffers.get(alias)!.push(changes)
+            } else {
+              this.trackSentValues(alias, changes, orderByInfo.comparator)
+              const split = [...splitUpdates(changes)]
+              this.handleSourceChanges(alias, split)
+            }
           }
-        },
-        {
-          includeInitialState,
-          whereExpression,
-        },
+        : (changes: Array<ChangeMessage<any, string | number>>) => {
+            if (pendingBuffers.has(alias)) {
+              pendingBuffers.get(alias)!.push(changes)
+            } else {
+              this.handleSourceChanges(alias, changes)
+            }
+          }
+
+      // Determine subscription options based on ordered vs unordered path
+      const subscriptionOptions = this.buildSubscriptionOptions(
+        alias,
+        isLazy,
+        orderByInfo,
+        whereExpression,
+      )
+
+      // Subscribe to source changes
+      const subscription = collection.subscribeChanges(
+        changeCallback,
+        subscriptionOptions,
       )
 
       // Store subscription immediately so the join compiler can find it
       this.subscriptions[alias] = subscription
+
+      // For ordered aliases with an index, trigger the initial limited snapshot.
+      // This loads only the top N rows rather than the entire collection.
+      if (orderByInfo) {
+        this.requestInitialOrderedSnapshot(alias, orderByInfo, subscription)
+      }
 
       this.unsubscribeCallbacks.add(() => {
         subscription.unsubscribe()
@@ -625,6 +666,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       while (this.graph.pendingWork()) {
         this.graph.run()
         this.flushPendingChanges()
+        // After each step, check if ordered queries need more data.
+        // loadMoreIfNeeded may send data to D2 inputs (via requestLimitedSnapshot),
+        // causing pendingWork() to return true for the next iteration.
+        this.loadMoreIfNeeded()
       }
     } finally {
       this.isGraphRunning = false
@@ -664,6 +709,210 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     )
   }
 
+  /**
+   * Build subscription options for an alias based on whether it uses ordered
+   * loading, is lazy, or should pass orderBy/limit hints.
+   */
+  private buildSubscriptionOptions(
+    alias: string,
+    isLazy: boolean,
+    orderByInfo: OrderByOptimizationInfo | undefined,
+    whereExpression: BasicExpression<boolean> | undefined,
+  ): {
+    includeInitialState?: boolean
+    whereExpression?: BasicExpression<boolean>
+    orderBy?: any
+    limit?: number
+  } {
+    // Ordered aliases don't use includeInitialState — initial data is loaded
+    // via requestLimitedSnapshot/requestSnapshot after subscription setup.
+    if (orderByInfo) {
+      return { whereExpression }
+    }
+
+    const includeInitialState = !isLazy
+
+    // For unordered subscriptions, pass orderBy/limit hints so on-demand
+    // collections can optimise server-side fetching.
+    const { orderBy, limit, offset } = this.query
+    const effectiveLimit =
+      limit !== undefined && offset !== undefined ? limit + offset : limit
+
+    // Only pass orderBy if scoped to this alias and uses simple refs
+    const normalizedOrderBy = orderBy
+      ? normalizeOrderByPaths(orderBy, alias)
+      : undefined
+    const canPassOrderBy =
+      normalizedOrderBy?.every((clause) => {
+        const exp = clause.expression
+        if (exp.type !== `ref`) return false
+        const path = exp.path
+        return Array.isArray(path) && path.length === 1
+      }) ?? false
+
+    return {
+      includeInitialState,
+      whereExpression,
+      ...(canPassOrderBy && normalizedOrderBy
+        ? { orderBy: normalizedOrderBy }
+        : {}),
+      ...(canPassOrderBy && effectiveLimit !== undefined
+        ? { limit: effectiveLimit }
+        : {}),
+    }
+  }
+
+  /**
+   * Request the initial ordered snapshot for an alias.
+   * Uses requestLimitedSnapshot (index-based cursor) or requestSnapshot
+   * (full load with limit) depending on whether an index is available.
+   */
+  private requestInitialOrderedSnapshot(
+    alias: string,
+    orderByInfo: OrderByOptimizationInfo,
+    subscription: CollectionSubscription,
+  ): void {
+    const { orderBy, offset, limit, index } = orderByInfo
+    const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
+
+    if (index) {
+      subscription.setOrderByIndex(index)
+      subscription.requestLimitedSnapshot({
+        limit: offset + limit,
+        orderBy: normalizedOrderBy,
+        trackLoadSubsetPromise: false,
+      })
+    } else {
+      subscription.requestSnapshot({
+        orderBy: normalizedOrderBy,
+        limit: offset + limit,
+        trackLoadSubsetPromise: false,
+      })
+    }
+  }
+
+  /**
+   * Get orderBy optimization info for a given alias.
+   * Returns undefined if no optimization exists for this alias.
+   */
+  private getOrderByInfoForAlias(
+    alias: string,
+  ): OrderByOptimizationInfo | undefined {
+    // optimizableOrderByCollections is keyed by collection ID
+    const collectionId = this.compiledAliasToCollectionId[alias]
+    if (!collectionId) return undefined
+
+    const info = this.optimizableOrderByCollections[collectionId]
+    if (info && info.alias === alias) {
+      return info
+    }
+    return undefined
+  }
+
+  /**
+   * After each graph run step, check if any ordered query's topK operator
+   * needs more data. If so, load more rows via requestLimitedSnapshot.
+   */
+  private loadMoreIfNeeded(): void {
+    for (const [, orderByInfo] of Object.entries(
+      this.optimizableOrderByCollections,
+    )) {
+      if (!orderByInfo.dataNeeded) continue
+
+      if (this.pendingOrderedLoadPromise) {
+        // Wait for in-flight loads to complete before requesting more
+        continue
+      }
+
+      const n = orderByInfo.dataNeeded()
+      if (n > 0) {
+        this.loadNextItems(orderByInfo, n)
+      }
+    }
+  }
+
+  /**
+   * Load n more items from the source collection, starting from the cursor
+   * position (the biggest value sent so far).
+   */
+  private loadNextItems(orderByInfo: OrderByOptimizationInfo, n: number): void {
+    const { alias, orderBy, valueExtractorForRawRow, offset } = orderByInfo
+    const subscription = this.subscriptions[alias]
+    if (!subscription) return
+
+    const biggestRow = this.biggestSentValue.get(alias)
+    const extractedValues = biggestRow
+      ? valueExtractorForRawRow(biggestRow)
+      : undefined
+
+    let minValues: Array<unknown> | undefined
+    if (extractedValues !== undefined) {
+      minValues = Array.isArray(extractedValues)
+        ? extractedValues
+        : [extractedValues]
+    }
+
+    // Deduplicate: skip if we already issued an identical load request
+    const loadRequestKey = serializeValue({
+      minValues: minValues ?? null,
+      offset,
+      limit: n,
+    })
+    if (this.lastLoadRequestKey.get(alias) === loadRequestKey) {
+      return
+    }
+    this.lastLoadRequestKey.set(alias, loadRequestKey)
+
+    const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
+
+    subscription.requestLimitedSnapshot({
+      orderBy: normalizedOrderBy,
+      limit: n,
+      minValues,
+      trackLoadSubsetPromise: false,
+      onLoadSubsetResult: (loadResult: Promise<void> | true) => {
+        // Track in-flight load to prevent redundant concurrent requests
+        if (loadResult instanceof Promise) {
+          this.pendingOrderedLoadPromise = loadResult
+          loadResult.finally(() => {
+            if (this.pendingOrderedLoadPromise === loadResult) {
+              this.pendingOrderedLoadPromise = undefined
+            }
+          })
+        }
+      },
+    })
+  }
+
+  /**
+   * Track the biggest value sent for a given ordered alias.
+   * Used for cursor-based pagination in loadNextItems.
+   */
+  private trackSentValues(
+    alias: string,
+    changes: Array<ChangeMessage<any, string | number>>,
+    comparator: (a: any, b: any) => number,
+  ): void {
+    for (const change of changes) {
+      if (change.type === `delete`) continue
+
+      const sentKeys = this.sentToD2KeysByAlias.get(alias)
+      const isNewKey = sentKeys ? !sentKeys.has(change.key) : true
+
+      const current = this.biggestSentValue.get(alias)
+      if (!current) {
+        this.biggestSentValue.set(alias, change.value)
+        this.lastLoadRequestKey.delete(alias)
+      } else if (comparator(current, change.value) < 0) {
+        this.biggestSentValue.set(alias, change.value)
+        this.lastLoadRequestKey.delete(alias)
+      } else if (isNewKey) {
+        // New key at same sort position — allow another load if needed
+        this.lastLoadRequestKey.delete(alias)
+      }
+    }
+  }
+
   /** Tear down subscriptions and clear state */
   dispose(): void {
     this.disposed = true
@@ -674,6 +923,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     this.pendingChanges.clear()
     this.lazySources.clear()
     this.builderDependencies.clear()
+    this.biggestSentValue.clear()
+    this.lastLoadRequestKey.clear()
+    this.pendingOrderedLoadPromise = undefined
 
     // Clear mutable objects
     for (const key of Object.keys(this.lazySourcesCallbacks)) {
@@ -681,6 +933,9 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     }
     for (const key of Object.keys(this.aliasDependencies)) {
       delete this.aliasDependencies[key]
+    }
+    for (const key of Object.keys(this.optimizableOrderByCollections)) {
+      delete this.optimizableOrderByCollections[key]
     }
 
     // Clear graph references

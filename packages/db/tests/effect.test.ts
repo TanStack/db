@@ -1310,6 +1310,145 @@ describe(`createEffect`, () => {
     })
   })
 
+  describe(`orderBy with limit and lazy loading`, () => {
+    // These tests verify that when a where clause filters items out of the
+    // initial orderBy window, the loadMoreIfNeeded mechanism requests more
+    // data from the source collection to fill the window.
+
+    function createUsersCollectionWithIndex(initialData: Array<User>) {
+      return createCollection(
+        mockSyncCollectionOptions<User>({
+          id: `test-users-indexed`,
+          getKey: (user) => user.id,
+          initialData,
+          autoIndex: `eager`,
+        }),
+      )
+    }
+
+    it(`should load more data when pipeline filters items from the orderBy window`, async () => {
+      // 6 users, ordered by name asc, limit 3
+      // But we filter on active=true, and Bob/Dave are inactive
+      // Initial load gets top 3 by name: Alice, Bob, Charlie
+      // Bob is filtered → topK has only 2 items, needs 1 more
+      // loadMoreIfNeeded loads Dave → filtered → needs 1 more
+      // Loads Eve → active → topK has Alice, Charlie, Eve
+      const users = createUsersCollectionWithIndex([
+        { id: 1, name: `Alice`, active: true },
+        { id: 2, name: `Bob`, active: false },
+        { id: 3, name: `Charlie`, active: true },
+        { id: 4, name: `Dave`, active: false },
+        { id: 5, name: `Eve`, active: true },
+        { id: 6, name: `Frank`, active: true },
+      ])
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.name, `asc`)
+            .limit(3),
+        on: `enter`,
+        handler: (event) => {
+          events.push(event)
+        },
+      })
+
+      await flushPromises()
+
+      // Should get exactly 3 active users: Alice, Charlie, Eve
+      expect(events.length).toBe(3)
+      const names = events.map((e) => e.value.name).sort()
+      expect(names).toEqual([`Alice`, `Charlie`, `Eve`])
+
+      await effect.dispose()
+    })
+
+    it(`should pass orderBy/limit hints for unordered subscriptions`, async () => {
+      // This test verifies the unordered path also gets orderBy/limit hints.
+      // With a simple orderBy + limit, the effect should still show correct results.
+      const users = createUsersCollection([
+        { id: 1, name: `Charlie`, active: true },
+        { id: 2, name: `Alice`, active: true },
+        { id: 3, name: `Bob`, active: true },
+        { id: 4, name: `Dave`, active: true },
+      ])
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .orderBy(({ user }) => user.name, `asc`)
+            .limit(2),
+        on: `enter`,
+        handler: (event) => {
+          events.push(event)
+        },
+      })
+
+      await flushPromises()
+
+      // Top 2 alphabetically: Alice, Bob
+      expect(events.length).toBe(2)
+      const names = events.map((e) => e.value.name).sort()
+      expect(names).toEqual([`Alice`, `Bob`])
+
+      await effect.dispose()
+    })
+
+    it(`should load more data when an exit reduces the window below the limit`, async () => {
+      const users = createUsersCollectionWithIndex([
+        { id: 1, name: `Alice`, active: true },
+        { id: 2, name: `Bob`, active: true },
+        { id: 3, name: `Charlie`, active: true },
+        { id: 4, name: `Dave`, active: true },
+      ])
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) =>
+          q
+            .from({ user: users })
+            .where(({ user }) => eq(user.active, true))
+            .orderBy(({ user }) => user.name, `asc`)
+            .limit(3),
+        on: `delta`,
+        skipInitial: true,
+        handler: (event) => {
+          events.push(event)
+        },
+      })
+
+      await flushPromises()
+      expect(events.length).toBe(0)
+
+      // Deactivate Alice — she exits the window, Dave should enter
+      users.utils.begin()
+      users.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Alice`, active: false },
+        previousValue: { id: 1, name: `Alice`, active: true },
+      })
+      users.utils.commit()
+
+      await flushPromises()
+
+      const exits = events.filter((e) => e.type === `exit`)
+      const enters = events.filter((e) => e.type === `enter`)
+
+      expect(exits.length).toBe(1)
+      expect(exits[0]!.value.name).toBe(`Alice`)
+
+      expect(enters.length).toBe(1)
+      expect(enters[0]!.value.name).toBe(`Dave`)
+
+      await effect.dispose()
+    })
+  })
+
   describe(`source error handling`, () => {
     it(`should auto-dispose when source collection is cleaned up`, async () => {
       const users = createUsersCollection()
