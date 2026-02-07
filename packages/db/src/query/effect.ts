@@ -43,7 +43,7 @@ export interface DeltaEvent<
   key: TKey
   /** Current value (new value for enter/update, exiting value for exit) */
   value: TRow
-  /** Previous value (for update and exit events) */
+  /** Previous value before the batch (only present for update events) */
   previousValue?: TRow
   metadata?: Record<string, unknown>
 }
@@ -91,6 +91,13 @@ export interface EffectConfig<
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void
 
   /**
+   * Called when a source collection enters an error or cleaned-up state.
+   * The effect is automatically disposed after this callback fires.
+   * If not provided, the error is logged to console.error.
+   */
+  onSourceError?: (error: Error) => void
+
+  /**
    * Skip deltas during initial collection load.
    * Defaults to false (process all deltas including initial sync).
    * Set to true for effects that should only process new changes.
@@ -114,9 +121,9 @@ export interface Effect {
 interface EffectChanges<T> {
   deletes: number
   inserts: number
-  /** Value from the most recent insert (the new/current value) */
+  /** Value from the latest insert (the newest/current value) */
   insertValue?: T
-  /** Value from the most recent delete (the previous/old value) */
+  /** Value from the first delete (the oldest/previous value before the batch) */
   deleteValue?: T
 }
 
@@ -184,7 +191,10 @@ export function createEffect<
       try {
         const result = config.batchHandler(filtered, ctx)
         if (result instanceof Promise) {
-          trackPromise(result, inFlightHandlers)
+          const tracked = result.catch((error) => {
+            reportError(error, filtered[0]!, config.onError)
+          })
+          trackPromise(tracked, inFlightHandlers)
         }
       } catch (error) {
         // For batch handler errors, report with first event as context
@@ -237,7 +247,11 @@ export function createEffect<
     onSourceError: (error: Error) => {
       if (disposed) return
 
-      console.error(`[Effect '${id}'] ${error.message}. Disposing effect.`)
+      if (config.onSourceError) {
+        config.onSourceError(error)
+      } else {
+        console.error(`[Effect '${id}'] ${error.message}. Disposing effect.`)
+      }
 
       // Auto-dispose — the effect can no longer function
       dispose()
@@ -326,6 +340,8 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   // Reentrance guard
   private isGraphRunning = false
   private disposed = false
+  // When dispose() is called mid-graph-run, defer heavy cleanup until the run completes
+  private deferredCleanup = false
 
   private readonly onBatchProcessed: (
     events: Array<DeltaEvent<TRow, TKey>>,
@@ -553,12 +569,30 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     // All subscriptions are now in place. Flush buffered changes by sending
     // data to D2 inputs first (without running the graph), then run the graph
     // once. This prevents intermediate join states from producing duplicates.
-    for (const [alias, buffer] of pendingBuffers) {
+    //
+    // We remove each alias from pendingBuffers *before* draining, which
+    // switches that alias to direct-processing mode. Any new callbacks that
+    // fire during the drain (e.g. from requestLimitedSnapshot) will go
+    // through handleSourceChanges directly instead of being lost.
+    for (const [alias] of pendingBuffers) {
+      const buffer = pendingBuffers.get(alias)!
+      pendingBuffers.delete(alias)
+
+      const orderByInfo = this.getOrderByInfoForAlias(alias)
+
+      // Drain all buffered batches. Since we deleted the alias from
+      // pendingBuffers above, any new changes arriving during drain go
+      // through handleSourceChanges directly (not back into this buffer).
       for (const changes of buffer) {
-        this.sendChangesToD2(alias, changes)
+        if (orderByInfo) {
+          this.trackSentValues(alias, changes, orderByInfo.comparator)
+          const split = [...splitUpdates(changes)]
+          this.sendChangesToD2(alias, split)
+        } else {
+          this.sendChangesToD2(alias, changes)
+        }
       }
     }
-    pendingBuffers.clear()
 
     // Initial graph run to process any synchronously-available data.
     // For skipInitial, this run's output is discarded (initialLoadComplete is still false).
@@ -661,7 +695,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     return sendChangesToInput(input, filtered, collection.config.getKey)
   }
 
-  /** Run the D2 graph and flush accumulated output */
+  /**
+   * Run the D2 graph until quiescence, then emit accumulated events once.
+   *
+   * All output across the entire while-loop is accumulated into a single
+   * batch so that users see one `onBatchProcessed` invocation per scheduler
+   * run, even when ordered loading causes multiple graph steps.
+   */
   private runGraph(): void {
     if (this.isGraphRunning || this.disposed || !this.graph) return
 
@@ -669,14 +709,28 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     try {
       while (this.graph.pendingWork()) {
         this.graph.run()
-        this.flushPendingChanges()
+        // A handler (via onBatchProcessed) or source error callback may have
+        // called dispose() during graph.run(). Stop early to avoid operating
+        // on stale state. TS narrows disposed to false from the guard above
+        // but it can change during graph.run() via callbacks.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (this.disposed) break
         // After each step, check if ordered queries need more data.
         // loadMoreIfNeeded may send data to D2 inputs (via requestLimitedSnapshot),
         // causing pendingWork() to return true for the next iteration.
         this.loadMoreIfNeeded()
       }
+      // Emit all accumulated events once the graph reaches quiescence
+      this.flushPendingChanges()
     } finally {
       this.isGraphRunning = false
+      // If dispose() was called during this graph run, it deferred the heavy
+      // cleanup (clearing graph/inputs/pipeline) to avoid nulling references
+      // mid-loop. Complete that cleanup now.
+      if (this.deferredCleanup) {
+        this.deferredCleanup = false
+        this.finalCleanup()
+      }
     }
   }
 
@@ -728,10 +782,10 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     orderBy?: any
     limit?: number
   } {
-    // Ordered aliases don't use includeInitialState — initial data is loaded
+    // Ordered aliases explicitly disable initial state — data is loaded
     // via requestLimitedSnapshot/requestSnapshot after subscription setup.
     if (orderByInfo) {
-      return { whereExpression }
+      return { includeInitialState: false, whereExpression }
     }
 
     const includeInitialState = !isLazy
@@ -880,8 +934,11 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
   /** Tear down subscriptions and clear state */
   dispose(): void {
+    if (this.disposed) return
     this.disposed = true
     this.subscribedToAllCollections = false
+
+    // Immediately unsubscribe from sources and clear cheap state
     this.unsubscribeCallbacks.forEach((fn) => fn())
     this.unsubscribeCallbacks.clear()
     this.sentToD2KeysByAlias.clear()
@@ -903,7 +960,17 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       delete this.optimizableOrderByCollections[key]
     }
 
-    // Clear graph references
+    // If the graph is currently running, defer clearing graph/inputs/pipeline
+    // until runGraph() completes — otherwise we'd null references mid-loop.
+    if (this.isGraphRunning) {
+      this.deferredCleanup = true
+    } else {
+      this.finalCleanup()
+    }
+  }
+
+  /** Clear graph references — called after graph run completes or immediately from dispose */
+  private finalCleanup(): void {
     this.graph = undefined
     this.inputs = undefined
     this.pipeline = undefined
@@ -949,9 +1016,11 @@ function accumulateEffectChanges<T>(
 
   if (multiplicity < 0) {
     changes.deletes += Math.abs(multiplicity)
-    changes.deleteValue = value
+    // Keep only the first delete value — this is the pre-batch state
+    changes.deleteValue ??= value
   } else if (multiplicity > 0) {
     changes.inserts += multiplicity
+    // Always overwrite with the latest insert — this is the post-batch state
     changes.insertValue = value
   }
 
@@ -972,13 +1041,9 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
   }
 
   if (deletes > 0 && inserts === 0) {
-    // Row exited the query result
-    return {
-      type: `exit`,
-      key,
-      value: deleteValue!,
-      previousValue: deleteValue,
-    }
+    // Row exited the query result — value is the exiting value,
+    // previousValue is omitted (it would be identical to value)
+    return { type: `exit`, key, value: deleteValue! }
   }
 
   if (inserts > 0 && deletes > 0) {

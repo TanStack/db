@@ -1510,5 +1510,169 @@ describe(`createEffect`, () => {
 
       vi.restoreAllMocks()
     })
+
+    it(`should call onSourceError callback instead of console.error when provided`, async () => {
+      const users = createUsersCollection()
+      const sourceErrors: Array<Error> = []
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        on: `delta`,
+        handler: () => {},
+        onSourceError: (error) => {
+          sourceErrors.push(error)
+        },
+      })
+
+      await flushPromises()
+
+      await users.cleanup()
+      await flushPromises()
+
+      expect(effect.disposed).toBe(true)
+      expect(sourceErrors.length).toBe(1)
+      expect(sourceErrors[0]!.message).toContain(`cleaned up`)
+      // Should NOT have called console.error
+      expect(consoleErrorSpy).not.toHaveBeenCalled()
+
+      consoleErrorSpy.mockRestore()
+    })
+  })
+
+  describe(`correctness edge cases`, () => {
+    it(`batchHandler rejecting should trigger onError and not produce unhandled rejection`, async () => {
+      const users = createUsersCollection()
+      const errors: Array<Error> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        on: `enter`,
+        batchHandler: () => Promise.reject(new Error(`batch boom`)),
+        onError: (error) => {
+          errors.push(error)
+        },
+      })
+
+      await flushPromises()
+
+      expect(errors.length).toBe(1)
+      expect(errors[0]!.message).toBe(`batch boom`)
+
+      await effect.dispose()
+    })
+
+    it(`disposing inside handler should not throw and should stop further events`, async () => {
+      const users = createUsersCollection()
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effectHandle = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        on: `enter`,
+        skipInitial: true,
+        handler: (event) => {
+          events.push(event)
+          // Dispose inside the handler — should not crash
+          effectHandle.dispose()
+        },
+      })
+
+      await flushPromises()
+      expect(effectHandle.disposed).toBe(false)
+
+      // Insert a row — handler will fire and call dispose() mid-graph-run
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 10, name: `NewUser`, active: true },
+      })
+      users.utils.commit()
+
+      await flushPromises()
+
+      expect(effectHandle.disposed).toBe(true)
+      // Should have received the event that triggered disposal
+      expect(events.length).toBe(1)
+      expect(events[0]!.value.name).toBe(`NewUser`)
+    })
+
+    it(`previousValue should reflect the value before the batch for multi-step updates`, async () => {
+      const users = createUsersCollection([
+        { id: 1, name: `Alice`, active: true },
+      ])
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        on: `update`,
+        skipInitial: true,
+        handler: (event) => {
+          events.push(event)
+        },
+      })
+
+      await flushPromises()
+
+      // Perform multi-step update in a single transaction: Alice → Bob → Charlie
+      users.utils.begin()
+      users.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Bob`, active: true },
+        previousValue: { id: 1, name: `Alice`, active: true },
+      })
+      users.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Charlie`, active: true },
+        previousValue: { id: 1, name: `Bob`, active: true },
+      })
+      users.utils.commit()
+
+      await flushPromises()
+
+      expect(events.length).toBe(1)
+      // previousValue should be the original value (Alice), not the intermediate (Bob)
+      expect(events[0]!.previousValue?.name).toBe(`Alice`)
+      // value should be the final value (Charlie)
+      expect(events[0]!.value.name).toBe(`Charlie`)
+
+      await effect.dispose()
+    })
+
+    it(`exit events should not have previousValue`, async () => {
+      const users = createUsersCollection([
+        { id: 1, name: `Alice`, active: true },
+      ])
+      const events: Array<DeltaEvent<User, number>> = []
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        on: `exit`,
+        skipInitial: true,
+        handler: (event) => {
+          events.push(event)
+        },
+      })
+
+      await flushPromises()
+
+      users.utils.begin()
+      users.utils.write({
+        type: `delete`,
+        value: { id: 1, name: `Alice`, active: true },
+      })
+      users.utils.commit()
+
+      await flushPromises()
+
+      expect(events.length).toBe(1)
+      expect(events[0]!.type).toBe(`exit`)
+      expect(events[0]!.value.name).toBe(`Alice`)
+      // previousValue should be undefined for exit events
+      expect(events[0]!.previousValue).toBeUndefined()
+
+      await effect.dispose()
+    })
   })
 })
