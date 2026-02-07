@@ -718,7 +718,7 @@ describe(`createEffect`, () => {
             .select(({ issue, user }) => ({
               issueId: issue.id,
               title: issue.title,
-              userName: user.name,
+              userName: user!.name,
             })),
         on: `enter`,
         handler: collectEvents(events),
