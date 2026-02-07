@@ -173,7 +173,7 @@ export class CollectionStateManager<
     const existingRow = row as Partial<WithVirtualProps<TOutput, TKey>>
     const synced = existingRow.$synced ?? this.isRowSynced(key)
     const origin = existingRow.$origin ?? this.getRowOrigin(key)
-    const resolvedKey = (existingRow.$key ?? key)
+    const resolvedKey = existingRow.$key ?? key
     const collectionId = existingRow.$collectionId ?? this.collection.id
 
     const cached = this.virtualPropsCache.get(row as object)
