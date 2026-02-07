@@ -1,5 +1,6 @@
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
+import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type { VirtualOrigin, WithVirtualProps } from '../virtual-props.js'
 import type { Transaction } from '../transactions'
