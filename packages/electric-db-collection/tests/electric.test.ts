@@ -46,6 +46,14 @@ describe(`Electric Integration`, () => {
   >
   let subscriber: (messages: Array<Message<Row>>) => void
 
+  const stripCollectionState = (state: Map<string | number, Row>) =>
+    new Map(
+      Array.from(state.entries(), ([key, value]) => [
+        key,
+        stripVirtualProps(value),
+      ]),
+    )
+
   beforeEach(() => {
     vi.clearAllMocks()
 
@@ -116,7 +124,7 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.state).toEqual(
+    expect(stripCollectionState(collection.state)).toEqual(
       new Map([[1, { id: 1, name: `Test User` }]]),
     )
   })
@@ -151,7 +159,7 @@ describe(`Electric Integration`, () => {
     ])
     expect(collection.status).toEqual(`ready`)
 
-    expect(collection.state).toEqual(
+    expect(stripCollectionState(collection.state)).toEqual(
       new Map([
         [1, { id: 1, name: `Test User` }],
         [2, { id: 2, name: `Another User` }],
@@ -185,7 +193,7 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.state).toEqual(
+    expect(stripCollectionState(collection.state)).toEqual(
       new Map([[1, { id: 1, name: `Updated User` }]]),
     )
   })
