@@ -2011,7 +2011,9 @@ describe(`QueryCollection`, () => {
 
       // Verify cache and collection are in sync
       expect(cacheAfterBatch.length).toBe(collection.size)
-      expect(new Set(cacheAfterBatch)).toEqual(new Set(collection.toArray))
+      expect(new Set(cacheAfterBatch)).toEqual(
+        new Set(collection.toArray.map((item) => stripVirtualProps(item))),
+      )
     })
 
     it(`should maintain cache consistency during error scenarios`, async () => {
@@ -2550,9 +2552,9 @@ describe(`QueryCollection`, () => {
     )
     expect(collection.status).toBe(`ready`)
     expect(collection.size).toBe(2)
-    expect(Array.from(collection.values())).toEqual(
-      expect.arrayContaining(initialItems),
-    )
+    expect(
+      Array.from(collection.values()).map((item) => stripVirtualProps(item)),
+    ).toEqual(expect.arrayContaining(initialItems))
   })
 
   describe(`subscriber count tracking and auto-subscription`, () => {
