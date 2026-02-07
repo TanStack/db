@@ -13,6 +13,7 @@ import {
   flushPromises,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
+  stripVirtualProps,
 } from '../utils.js'
 import { createDeferred } from '../../src/deferred'
 import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
@@ -417,8 +418,16 @@ describe(`createLiveQueryCollection`, () => {
 
     // The live query should be ready and have the initial data
     expect(liveQuery.size).toBe(2) // Alice and Charlie are active
-    expect(liveQuery.get(1)).toEqual({ id: 1, name: `Alice`, active: true })
-    expect(liveQuery.get(3)).toEqual({ id: 3, name: `Charlie`, active: true })
+    expect(stripVirtualProps(liveQuery.get(1))).toEqual({
+      id: 1,
+      name: `Alice`,
+      active: true,
+    })
+    expect(stripVirtualProps(liveQuery.get(3))).toEqual({
+      id: 3,
+      name: `Charlie`,
+      active: true,
+    })
     expect(liveQuery.get(2)).toBeUndefined() // Bob is not active
     expect(liveQuery.status).toBe(`ready`)
 
@@ -430,7 +439,11 @@ describe(`createLiveQueryCollection`, () => {
 
     // The live query should update to include the new data
     expect(liveQuery.size).toBe(3) // Alice, Charlie, and David are active
-    expect(liveQuery.get(4)).toEqual({ id: 4, name: `David`, active: true })
+    expect(stripVirtualProps(liveQuery.get(4))).toEqual({
+      id: 4,
+      name: `David`,
+      active: true,
+    })
   })
 
   it(`should not reuse finalized graph after GC cleanup (resubscribe is safe)`, async () => {

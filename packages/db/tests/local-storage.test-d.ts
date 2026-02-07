@@ -7,8 +7,10 @@ import type {
   StorageApi,
   StorageEventApi,
 } from '../src/local-storage'
+import type { OutputWithVirtual } from './utils'
 
 type ItemOf<T> = T extends Array<infer U> ? U : T
+type OutputWithVirtualString<T extends object> = OutputWithVirtual<T, string>
 
 describe(`LocalStorage collection type resolution tests`, () => {
   // Define test types
@@ -315,11 +317,11 @@ describe(`LocalStorage collection type resolution tests`, () => {
     type ExpectedInput = z.input<typeof testSchemaWithSchema>
 
     const collection = createCollection(
-      localStorageCollectionOptions({
+      localStorageCollectionOptions<typeof testSchemaWithSchema, string>({
         storageKey: `test-with-schema`,
         storage: mockStorage,
         storageEventApi: mockStorageEventApi,
-        getKey: (item: any) => item.id,
+        getKey: (item: ExpectedType) => item.id,
         schema: testSchemaWithSchema,
         onInsert: (params) => {
           expectTypeOf(
@@ -358,7 +360,9 @@ describe(`LocalStorage collection type resolution tests`, () => {
     })
 
     // Test that the collection has the correct inferred type from schema
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<ExpectedType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtualString<ExpectedType>>
+    >()
   })
 
   it(`should work with explicit type for URL scenario`, () => {
@@ -369,11 +373,11 @@ describe(`LocalStorage collection type resolution tests`, () => {
       createdAt: Date
     }
 
-    const options = localStorageCollectionOptions<SelectUrlType>({
+    const options = localStorageCollectionOptions<SelectUrlType, string>({
       storageKey: `test-with-url-type`,
       storage: mockStorage,
       storageEventApi: mockStorageEventApi,
-      getKey: (url) => url.id,
+      getKey: (url: SelectUrlType) => url.id,
     })
 
     const collection = createCollection(options)
@@ -381,9 +385,11 @@ describe(`LocalStorage collection type resolution tests`, () => {
     // Test that the collection has the expected methods
     expectTypeOf(collection.insert).toBeFunction()
     expectTypeOf(collection.get).returns.toEqualTypeOf<
-      SelectUrlType | undefined
+      OutputWithVirtualString<SelectUrlType> | undefined
     >()
-    expectTypeOf(collection.toArray).toEqualTypeOf<Array<SelectUrlType>>()
+    expectTypeOf(collection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtualString<SelectUrlType>>
+    >()
 
     // Test insert parameter type
     type InsertParam = Parameters<typeof collection.insert>[0]

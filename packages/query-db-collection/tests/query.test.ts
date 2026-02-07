@@ -7,6 +7,7 @@ import {
   ilike,
   or,
 } from '@tanstack/db'
+import { stripVirtualProps } from '../../db/tests/utils'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
@@ -95,8 +96,8 @@ describe(`QueryCollection`, () => {
 
     // Verify the collection state contains our items
     expect(collection.size).toBe(initialItems.length)
-    expect(collection.get(`1`)).toEqual(initialItems[0])
-    expect(collection.get(`2`)).toEqual(initialItems[1])
+    expect(stripVirtualProps(collection.get(`1`))).toEqual(initialItems[0])
+    expect(stripVirtualProps(collection.get(`2`))).toEqual(initialItems[1])
 
     // Verify the synced data
     expect(collection._state.syncedData.size).toBe(initialItems.length)
@@ -138,8 +139,8 @@ describe(`QueryCollection`, () => {
 
     // Verify initial state
     expect(collection.size).toBe(initialItems.length)
-    expect(collection.get(`1`)).toEqual(initialItems[0])
-    expect(collection.get(`2`)).toEqual(initialItems[1])
+    expect(stripVirtualProps(collection.get(`1`))).toEqual(initialItems[0])
+    expect(stripVirtualProps(collection.get(`2`))).toEqual(initialItems[1])
 
     // Now update the data that will be returned by queryFn
     // 1. Modify an existing item
@@ -164,9 +165,9 @@ describe(`QueryCollection`, () => {
     expect(collection.has(`2`)).toBe(false)
 
     // Verify the final state more thoroughly
-    expect(collection.get(`1`)).toEqual(updatedItem)
-    expect(collection.get(`3`)).toEqual(newItem)
-    expect(collection.get(`2`)).toBeUndefined()
+    expect(stripVirtualProps(collection.get(`1`))).toEqual(updatedItem)
+    expect(stripVirtualProps(collection.get(`3`))).toEqual(newItem)
+    expect(stripVirtualProps(collection.get(`2`))).toBeUndefined()
 
     // Now update the data again.
     const item4 = { id: `4`, name: `Item 4` }
@@ -178,7 +179,7 @@ describe(`QueryCollection`, () => {
     // Verify expected.
     expect(queryFn).toHaveBeenCalledTimes(3)
     expect(collection.size).toBe(3)
-    expect(collection.get(`4`)).toEqual(item4)
+    expect(stripVirtualProps(collection.get(`4`))).toEqual(item4)
   })
 
   it(`should handle query errors gracefully`, async () => {
@@ -213,7 +214,7 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.size).toBe(1)
-      expect(collection.get(`1`)).toEqual(initialItem)
+      expect(stripVirtualProps(collection.get(`1`))).toEqual(initialItem)
     })
 
     // Trigger an error by refetching
@@ -232,7 +233,7 @@ describe(`QueryCollection`, () => {
 
     // The collection should maintain its previous state
     expect(collection.size).toBe(1)
-    expect(collection.get(`1`)).toEqual(initialItem)
+    expect(stripVirtualProps(collection.get(`1`))).toEqual(initialItem)
 
     // Clean up the spy
     consoleErrorSpy.mockRestore()
@@ -315,7 +316,7 @@ describe(`QueryCollection`, () => {
     await vi.waitFor(() => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.size).toBe(1)
-      expect(collection.get(`1`)).toEqual(initialItem)
+      expect(stripVirtualProps(collection.get(`1`))).toEqual(initialItem)
     })
 
     // Store the initial state object reference to check if it changes
@@ -341,7 +342,11 @@ describe(`QueryCollection`, () => {
     // Now the state should be updated with the new value
     const updatedItem = collection.get(`1`)
     expect(updatedItem).not.toBe(initialStateRef) // Different reference
-    expect(updatedItem).toEqual({ id: `1`, name: `Test Item`, count: 43 }) // Updated value
+    expect(stripVirtualProps(updatedItem)).toEqual({
+      id: `1`,
+      name: `Test Item`,
+      count: 43,
+    }) // Updated value
 
     consoleSpy.mockRestore()
   })
@@ -385,8 +390,8 @@ describe(`QueryCollection`, () => {
     // Verify items are stored with the custom keys
     expect(collection.has(`item1`)).toBe(true)
     expect(collection.has(`item2`)).toBe(true)
-    expect(collection.get(`item1`)).toEqual(items[0])
-    expect(collection.get(`item2`)).toEqual(items[1])
+    expect(stripVirtualProps(collection.get(`item1`))).toEqual(items[0])
+    expect(stripVirtualProps(collection.get(`item2`))).toEqual(items[1])
 
     // Now update an item and add a new one
     const updatedItems = [
@@ -416,8 +421,8 @@ describe(`QueryCollection`, () => {
     expect(collection.has(`item1`)).toBe(true)
     expect(collection.has(`item2`)).toBe(false) // Removed
     expect(collection.has(`item3`)).toBe(true) // Added
-    expect(collection.get(`item1`)).toEqual(updatedItems[0])
-    expect(collection.get(`item3`)).toEqual(updatedItems[1])
+    expect(stripVirtualProps(collection.get(`item1`))).toEqual(updatedItems[0])
+    expect(stripVirtualProps(collection.get(`item3`))).toEqual(updatedItems[1])
   })
 
   it(`should pass meta property to queryFn context`, async () => {
@@ -617,8 +622,12 @@ describe(`QueryCollection`, () => {
       })
 
       expect(collection.size).toBe(initialMetaData.data.length)
-      expect(collection.get(`1`)).toEqual(initialMetaData.data[0])
-      expect(collection.get(`2`)).toEqual(initialMetaData.data[1])
+      expect(stripVirtualProps(collection.get(`1`))).toEqual(
+        initialMetaData.data[0],
+      )
+      expect(stripVirtualProps(collection.get(`2`))).toEqual(
+        initialMetaData.data[1],
+      )
     })
 
     it(`Throws error if select returns non array`, async () => {
@@ -725,7 +734,7 @@ describe(`QueryCollection`, () => {
 
       // Verify the item was inserted
       expect(collection.size).toBe(3)
-      expect(collection.get(`3`)).toEqual(newItem)
+      expect(stripVirtualProps(collection.get(`3`))).toEqual(newItem)
 
       // Wait a tick to allow any async error handlers to run
       await flushPromises()
@@ -774,7 +783,7 @@ describe(`QueryCollection`, () => {
 
       // Verify the item was inserted
       expect(collection.size).toBe(3)
-      expect(collection.get(`3`)).toEqual(newItem)
+      expect(stripVirtualProps(collection.get(`3`))).toEqual(newItem)
 
       // Test upsert for existing item
       collection.utils.writeUpsert({ id: `1`, name: `Updated First Item` })
@@ -1391,8 +1400,14 @@ describe(`QueryCollection`, () => {
         expect(collection.size).toBe(2)
       })
 
-      expect(collection.get(`1`)).toEqual({ id: `1`, name: `Updated Item 1` })
-      expect(collection.get(`2`)).toEqual({ id: `2`, name: `Item 2` })
+      expect(stripVirtualProps(collection.get(`1`))).toEqual({
+        id: `1`,
+        name: `Updated Item 1`,
+      })
+      expect(stripVirtualProps(collection.get(`2`))).toEqual({
+        id: `2`,
+        name: `Item 2`,
+      })
     })
 
     it(`should handle concurrent query operations`, async () => {
@@ -1429,7 +1444,10 @@ describe(`QueryCollection`, () => {
 
       // Collection should remain in a consistent state
       expect(collection.size).toBe(1)
-      expect(collection.get(`1`)).toEqual({ id: `1`, name: `Item 1` })
+      expect(stripVirtualProps(collection.get(`1`))).toEqual({
+        id: `1`,
+        name: `Item 1`,
+      })
     })
 
     it(`should handle query state transitions properly`, async () => {
@@ -1719,7 +1737,7 @@ describe(`QueryCollection`, () => {
       collection.utils.writeInsert(newItem)
 
       expect(collection.size).toBe(3)
-      expect(collection.get(`3`)).toEqual(newItem)
+      expect(stripVirtualProps(collection.get(`3`))).toEqual(newItem)
 
       // Test writeUpdate
       collection.utils.writeUpdate({ id: `1`, name: `Updated Item 1` })
@@ -1743,7 +1761,7 @@ describe(`QueryCollection`, () => {
       collection.utils.writeUpsert({ id: `4`, name: `New Item 4`, value: 40 })
 
       expect(collection.size).toBe(4)
-      expect(collection.get(`4`)).toEqual({
+      expect(stripVirtualProps(collection.get(`4`))).toEqual({
         id: `4`,
         name: `New Item 4`,
         value: 40,
@@ -1993,7 +2011,9 @@ describe(`QueryCollection`, () => {
 
       // Verify cache and collection are in sync
       expect(cacheAfterBatch.length).toBe(collection.size)
-      expect(new Set(cacheAfterBatch)).toEqual(new Set(collection.toArray))
+      expect(new Set(cacheAfterBatch)).toEqual(
+        new Set(collection.toArray.map((item) => stripVirtualProps(item))),
+      )
     })
 
     it(`should maintain cache consistency during error scenarios`, async () => {
@@ -2532,9 +2552,9 @@ describe(`QueryCollection`, () => {
     )
     expect(collection.status).toBe(`ready`)
     expect(collection.size).toBe(2)
-    expect(Array.from(collection.values())).toEqual(
-      expect.arrayContaining(initialItems),
-    )
+    expect(
+      Array.from(collection.values()).map((item) => stripVirtualProps(item)),
+    ).toEqual(expect.arrayContaining(initialItems))
   })
 
   describe(`subscriber count tracking and auto-subscription`, () => {
@@ -2957,7 +2977,7 @@ describe(`QueryCollection`, () => {
         expect(collection.utils.lastError).toBeUndefined()
         expect(collection.utils.isError).toBe(false)
         expect(collection.utils.errorCount).toBe(0)
-        expect(collection.get(`1`)).toEqual(updatedData[0])
+        expect(stripVirtualProps(collection.get(`1`))).toEqual(updatedData[0])
       })
     })
 
@@ -2990,7 +3010,7 @@ describe(`QueryCollection`, () => {
       expect(collection.utils.errorCount).toBe(0)
 
       await vi.waitFor(() => {
-        expect(collection.get(`1`)).toEqual(recoveryData[0])
+        expect(stripVirtualProps(collection.get(`1`))).toEqual(recoveryData[0])
       })
 
       // Refetch on rejection should throw an error
@@ -3031,14 +3051,14 @@ describe(`QueryCollection`, () => {
 
       // Collection operations still work with cached data
       expect(collection.size).toBe(2)
-      expect(collection.get(`1`)).toEqual(initialData[0])
-      expect(collection.get(`2`)).toEqual(initialData[1])
+      expect(stripVirtualProps(collection.get(`1`))).toEqual(initialData[0])
+      expect(stripVirtualProps(collection.get(`2`))).toEqual(initialData[1])
 
       // Manual write operations work and clear error state
       const newItem = { id: `3`, name: `Manual Item` }
       collection.utils.writeInsert(newItem)
       expect(collection.size).toBe(3)
-      expect(collection.get(`3`)).toEqual(newItem)
+      expect(stripVirtualProps(collection.get(`3`))).toEqual(newItem)
 
       await flushPromises()
 
@@ -3237,8 +3257,8 @@ describe(`QueryCollection`, () => {
       expect(collection.status).toBe(`ready`)
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.size).toBe(items.length)
-      expect(collection.get(`1`)).toEqual(items[0])
-      expect(collection.get(`2`)).toEqual(items[1])
+      expect(stripVirtualProps(collection.get(`1`))).toEqual(items[0])
+      expect(stripVirtualProps(collection.get(`2`))).toEqual(items[1])
     })
 
     it(`should not call queryFn multiple times if preload() is called concurrently`, async () => {
@@ -3360,8 +3380,8 @@ describe(`QueryCollection`, () => {
       })
 
       expect(queryFn).toHaveBeenCalledTimes(1)
-      expect(collection.get(`1`)).toEqual(items[0])
-      expect(collection.get(`2`)).toEqual(items[1])
+      expect(stripVirtualProps(collection.get(`1`))).toEqual(items[0])
+      expect(stripVirtualProps(collection.get(`2`))).toEqual(items[1])
     })
   })
 
@@ -3538,9 +3558,9 @@ describe(`QueryCollection`, () => {
       // Wait for initial data to load
       await vi.waitFor(() => {
         expect(collection.size).toBe(3)
-        expect(collection.get(`1`)).toEqual(items[0])
-        expect(collection.get(`2`)).toEqual(items[1])
-        expect(collection.get(`3`)).toEqual(items[2])
+        expect(stripVirtualProps(collection.get(`1`))).toEqual(items[0])
+        expect(stripVirtualProps(collection.get(`2`))).toEqual(items[1])
+        expect(stripVirtualProps(collection.get(`3`))).toEqual(items[2])
       })
 
       // Verify all items are in the collection
