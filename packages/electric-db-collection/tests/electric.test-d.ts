@@ -17,6 +17,7 @@ import type {
   InsertMutationFnParams,
   UpdateMutationFnParams,
 } from '@tanstack/db'
+import type { OutputWithVirtual } from '../../db/tests/utils'
 
 describe(`Electric collection type resolution tests`, () => {
   // Define test types
@@ -334,17 +335,21 @@ describe(`Electric collection type resolution tests`, () => {
     // Test that the query results have the correct inferred types
     const results = activeUsersQuery.toArray
     expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-        email: string
-        isActive: boolean
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+          email: string
+          isActive: boolean
+        }, string>
+      >
     >()
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<UserType, string>>
+    >()
 
     // Test that we can access schema-inferred fields in the query with WHERE conditions
     const ageFilterQuery = createLiveQueryCollection({
@@ -361,11 +366,13 @@ describe(`Electric collection type resolution tests`, () => {
 
     const ageFilterResults = ageFilterQuery.toArray
     expectTypeOf(ageFilterResults).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+        }, string>
+      >
     >()
 
     // Test that the getKey function has the correct parameter type
@@ -422,15 +429,19 @@ describe(`Electric collection type resolution tests`, () => {
 
     const electricResults = electricQuery.toArray
     expectTypeOf(electricResults).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-      }>
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+        }, string>
+      >
     >()
 
     // Test that direct collection has the correct type
-    expectTypeOf(directCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(directCollection.toArray).toEqualTypeOf<
+      Array<OutputWithVirtual<UserType, string>>
+    >()
 
     // The key insight: electric collection options properly resolve schema types
     // while direct createCollection with schema doesn't work in query builder
