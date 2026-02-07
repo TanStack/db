@@ -317,11 +317,13 @@ export function computeOrderedLoadCursor(
   lastLoadRequestKey: string | undefined,
   alias: string,
   limit: number,
-): {
-  minValues: Array<unknown> | undefined
-  normalizedOrderBy: OrderBy
-  loadRequestKey: string
-} | undefined {
+):
+  | {
+      minValues: Array<unknown> | undefined
+      normalizedOrderBy: OrderBy
+      loadRequestKey: string
+    }
+  | undefined {
   const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
 
   // Extract all orderBy column values from the biggest sent row

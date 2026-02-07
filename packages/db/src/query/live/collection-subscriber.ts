@@ -467,5 +467,4 @@ export class CollectionSubscriber<
       promise,
     )
   }
-
 }
