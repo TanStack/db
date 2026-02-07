@@ -693,10 +693,12 @@ type ExtractContextKey<TContext extends Context> =
       : string | number
     : string | number
 
-type WithVirtualPropsIfObject<TContext extends Context, TResult> =
-  TResult extends object
-    ? WithVirtualProps<TResult, ExtractContextKey<TContext>>
-    : TResult
+type WithVirtualPropsIfObject<
+  TContext extends Context,
+  TResult,
+> = TResult extends object
+  ? WithVirtualProps<TResult, ExtractContextKey<TContext>>
+  : TResult
 
 /**
  * GetResult - Determines the final result type of a query
