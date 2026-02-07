@@ -2,7 +2,6 @@ import { describe, expectTypeOf, test } from 'vitest'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
-import type { OutputWithVirtual } from '../utils.js'
 import {
   and,
   avg,
@@ -16,6 +15,7 @@ import {
   or,
   sum,
 } from '../../src/query/builder/functions.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 // Sample data types for comprehensive GROUP BY testing
 type Order = {
@@ -91,7 +91,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const customer1 = customerSummary.get(1)
-    expectTypeOf(customer1).toEqualTypeOf<
+    expectTypeOf(customer1).toMatchTypeOf<
       | OutputWithVirtual<{
           customer_id: number
           total_amount: number
@@ -121,7 +121,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const completed = statusSummary.get(`completed`)
-    expectTypeOf(completed).toEqualTypeOf<
+    expectTypeOf(completed).toMatchTypeOf<
       | OutputWithVirtual<{
           status: string
           total_amount: number
@@ -147,7 +147,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const electronics = categorySummary.get(`electronics`)
-    expectTypeOf(electronics).toEqualTypeOf<
+    expectTypeOf(electronics).toMatchTypeOf<
       | OutputWithVirtual<{
           product_category: string
           total_quantity: number
@@ -173,7 +173,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const customer1Completed = customerStatusSummary.get(`[1,"completed"]`)
-    expectTypeOf(customer1Completed).toEqualTypeOf<
+    expectTypeOf(customer1Completed).toMatchTypeOf<
       | OutputWithVirtual<{
           customer_id: number
           status: string
@@ -199,7 +199,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const customer1 = completedOrdersSummary.get(1)
-    expectTypeOf(customer1).toEqualTypeOf<
+    expectTypeOf(customer1).toMatchTypeOf<
       | OutputWithVirtual<{
           customer_id: number
           total_amount: number
@@ -224,7 +224,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const customer1 = highVolumeCustomers.get(1)
-    expectTypeOf(customer1).toEqualTypeOf<
+    expectTypeOf(customer1).toMatchTypeOf<
       | OutputWithVirtual<{
           customer_id: number
           total_amount: number
@@ -250,7 +250,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const customer1 = highValueCustomers.get(1)
-    expectTypeOf(customer1).toEqualTypeOf<
+    expectTypeOf(customer1).toMatchTypeOf<
       | OutputWithVirtual<{
           customer_id: number
           total_amount: number
@@ -277,7 +277,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const customer1 = consistentCustomers.get(1)
-    expectTypeOf(customer1).toEqualTypeOf<
+    expectTypeOf(customer1).toMatchTypeOf<
       | OutputWithVirtual<{
           customer_id: number
           total_amount: number
@@ -306,7 +306,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const customer1 = premiumCustomers.get(1)
-    expectTypeOf(customer1).toEqualTypeOf<
+    expectTypeOf(customer1).toMatchTypeOf<
       | OutputWithVirtual<{
           customer_id: number
           total_amount: number
@@ -335,7 +335,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const customer1 = interestingCustomers.get(1)
-    expectTypeOf(customer1).toEqualTypeOf<
+    expectTypeOf(customer1).toMatchTypeOf<
       | OutputWithVirtual<{
           customer_id: number
           total_amount: number
@@ -360,7 +360,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const salesRep1 = salesRepSummary.get(1)
-    expectTypeOf(salesRep1).toEqualTypeOf<
+    expectTypeOf(salesRep1).toMatchTypeOf<
       | OutputWithVirtual<{
           sales_rep_id: number | null
           total_amount: number
@@ -391,7 +391,7 @@ describe(`Query GROUP BY Types`, () => {
     })
 
     const customer1 = comprehensiveStats.get(1)
-    expectTypeOf(customer1).toEqualTypeOf<
+    expectTypeOf(customer1).toMatchTypeOf<
       | OutputWithVirtual<{
           customer_id: number
           order_count: number

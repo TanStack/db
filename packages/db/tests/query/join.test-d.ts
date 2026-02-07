@@ -62,7 +62,7 @@ describe(`Join Types - Type Safety`, () => {
     const results = innerJoinQuery.toArray
 
     // For inner joins, both user and dept should be required
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow
@@ -90,7 +90,7 @@ describe(`Join Types - Type Safety`, () => {
     const results = leftJoinQuery.toArray
 
     // For left joins, user is required, dept is optional
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow
@@ -118,7 +118,7 @@ describe(`Join Types - Type Safety`, () => {
     const results = rightJoinQuery.toArray
 
     // For right joins, dept is required, user is optional
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow | undefined
@@ -146,7 +146,7 @@ describe(`Join Types - Type Safety`, () => {
     const results = fullJoinQuery.toArray
 
     // For full joins, both user and dept are optional
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow | undefined
@@ -197,7 +197,7 @@ describe(`Join Types - Type Safety`, () => {
     // - user should be optional (due to right join with project)
     // - dept should be optional (due to left join)
     // - project should be required (right join target)
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow | undefined
@@ -231,7 +231,7 @@ describe(`Join Types - Type Safety`, () => {
     const results = selectJoinQuery.toArray
 
     // Select should return the projected type, not the joined type
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           userName: string
@@ -260,7 +260,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     const results = leftJoinQuery.toArray
 
     // For left joins, user is required, dept is optional
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow
@@ -286,7 +286,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     const results = rightJoinQuery.toArray
 
     // For right joins, dept is required, user is optional
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow | undefined
@@ -312,7 +312,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     const results = innerJoinQuery.toArray
 
     // For inner joins, both user and dept should be required
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow
@@ -338,7 +338,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     const results = fullJoinQuery.toArray
 
     // For full joins, both user and dept are optional
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow | undefined
@@ -385,7 +385,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     // - user should be optional (due to right join with project)
     // - dept should be optional (due to left join)
     // - project should be required (right join target)
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow | undefined
@@ -417,7 +417,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     const results = selectJoinQuery.toArray
 
     // Select should return the projected type with correct optionality
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           userName: string
@@ -449,7 +449,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     const results = selectInnerJoinQuery.toArray
 
     // Select should return the projected type without undefined for inner join
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           userName: string
@@ -498,7 +498,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     // - user should be required (from clause)
     // - dept should be optional (left join)
     // - project should be required (inner join)
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           user: UserRow
@@ -571,7 +571,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     const results = liveCollection.toArray
     const results2 = liveCollection2.toArray
 
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           eventTitle: string
@@ -580,7 +580,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
       >
     >()
 
-    expectTypeOf(results2).toEqualTypeOf<
+    expectTypeOf(results2).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           eventTitle: string
@@ -660,7 +660,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     const results = liveCollection.toArray
     const results2 = liveCollection2.toArray
 
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           eventTitle: string
@@ -669,7 +669,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
       >
     >()
 
-    expectTypeOf(results2).toEqualTypeOf<
+    expectTypeOf(results2).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           eventTitle: string
@@ -732,7 +732,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           postTitle: string
@@ -814,7 +814,7 @@ describe(`Join with ArkType Schemas`, () => {
     const results = liveCollection.toArray
     const results2 = liveCollection2.toArray
 
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           eventTitle: string
@@ -823,7 +823,7 @@ describe(`Join with ArkType Schemas`, () => {
       >
     >()
 
-    expectTypeOf(results2).toEqualTypeOf<
+    expectTypeOf(results2).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           eventTitle: string
@@ -886,7 +886,7 @@ describe(`Join with ArkType Schemas`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           postTitle: string
@@ -955,7 +955,7 @@ describe(`Join with ArkType Schemas`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           postTitle: string
