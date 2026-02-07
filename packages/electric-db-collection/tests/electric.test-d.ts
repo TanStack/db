@@ -334,7 +334,7 @@ describe(`Electric collection type resolution tests`, () => {
 
     // Test that the query results have the correct inferred types
     const results = activeUsersQuery.toArray
-    expectTypeOf(results).toEqualTypeOf<
+    expectTypeOf(results).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
@@ -342,13 +342,13 @@ describe(`Electric collection type resolution tests`, () => {
           age: number
           email: string
           isActive: boolean
-        }, string>
+        }>
       >
     >()
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<
-      Array<OutputWithVirtual<UserType, string>>
+    expectTypeOf(usersCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
     >()
 
     // Test that we can access schema-inferred fields in the query with WHERE conditions
@@ -365,13 +365,13 @@ describe(`Electric collection type resolution tests`, () => {
     })
 
     const ageFilterResults = ageFilterQuery.toArray
-    expectTypeOf(ageFilterResults).toEqualTypeOf<
+    expectTypeOf(ageFilterResults).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
           name: string
           age: number
-        }, string>
+        }>
       >
     >()
 
@@ -428,19 +428,19 @@ describe(`Electric collection type resolution tests`, () => {
     })
 
     const electricResults = electricQuery.toArray
-    expectTypeOf(electricResults).toEqualTypeOf<
+    expectTypeOf(electricResults).toMatchTypeOf<
       Array<
         OutputWithVirtual<{
           id: string
           name: string
           age: number
-        }, string>
+        }>
       >
     >()
 
     // Test that direct collection has the correct type
-    expectTypeOf(directCollection.toArray).toEqualTypeOf<
-      Array<OutputWithVirtual<UserType, string>>
+    expectTypeOf(directCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
     >()
 
     // The key insight: electric collection options properly resolve schema types

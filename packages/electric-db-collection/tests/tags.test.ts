@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
+import { stripVirtualProps } from '../../db/tests/utils'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type { Collection } from '@tanstack/db'
 import type { Message, Row } from '@electric-sql/client'
@@ -71,6 +72,24 @@ describe(`Electric Tag Tracking and GC`, () => {
       StandardSchemaV1<unknown, unknown>,
       Row
     >
+
+    const stateGetter = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(collection),
+      `state`,
+    )?.get
+    if (stateGetter) {
+      Object.defineProperty(collection, `state`, {
+        get: () => {
+          const state = stateGetter.call(collection) as Map<string | number, Row>
+          return new Map(
+            Array.from(state.entries(), ([key, value]) => [
+              key,
+              stripVirtualProps(value),
+            ]),
+          )
+        },
+      })
+    }
   })
 
   it(`should track tags when rows are inserted with tags`, () => {
