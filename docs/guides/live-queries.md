@@ -142,7 +142,8 @@ const user = await queryOnce((q) =>
 ```
 
 Use `queryOnce` for scripts, background tasks, data export, or AI/LLM context
-building. For UI bindings and reactive updates, use live queries instead.
+building. `findOne()` resolves to `undefined` when no rows match. For UI
+bindings and reactive updates, use live queries instead.
 
 ### Using with Frameworks
 

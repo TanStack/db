@@ -81,10 +81,14 @@ export async function queryOnce<TContext extends Context>(
       ? { query: configOrQuery }
       : configOrQuery
 
-  // Create collection with minimal GC time and start sync immediately
+  const query =
+    typeof config.query === `function`
+      ? config.query
+      : () => config.query
+
+  // Create collection with minimal GC time; preload handles sync start
   const collection = createLiveQueryCollection({
-    query: config.query,
-    startSync: true,
+    query,
     gcTime: 1, // Cleanup in next tick when no subscribers (0 disables GC)
   })
 
@@ -93,13 +97,15 @@ export async function queryOnce<TContext extends Context>(
     await collection.preload()
 
     // Check if this is a single-result query (findOne was called)
-    const isSingleResult = (collection.config as { singleResult?: boolean })
-      .singleResult
+    const isSingleResult =
+      (collection.config as { singleResult?: boolean }).singleResult === true
 
     // Extract and return results
     if (isSingleResult) {
-      const entries = Array.from(collection.values())
-      return entries[0] as InferResultType<TContext>
+      const first = collection.values().next().value as
+        | InferResultType<TContext>
+        | undefined
+      return (first ?? undefined) as InferResultType<TContext>
     }
     return collection.toArray as InferResultType<TContext>
   } finally {
