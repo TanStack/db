@@ -1,4 +1,4 @@
-import { D2, output, serializeValue } from '@tanstack/db-ivm'
+import { D2, output } from '@tanstack/db-ivm'
 import { transactionScopedScheduler } from '../scheduler.js'
 import { getActiveTransaction } from '../transactions.js'
 import { compileQuery } from './compiler/index.js'
@@ -9,10 +9,14 @@ import {
 import { getCollectionBuilder } from './live/collection-registry.js'
 import {
   buildQueryFromConfig,
+  computeOrderedLoadCursor,
+  computeSubscriptionOrderByHints,
   extractCollectionAliases,
   extractCollectionsFromQuery,
+  filterDuplicateInserts,
   sendChangesToInput,
   splitUpdates,
+  trackBiggestSentValue,
 } from './live/utils.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from '../collection/index.js'
@@ -734,31 +738,13 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 
     // For unordered subscriptions, pass orderBy/limit hints so on-demand
     // collections can optimise server-side fetching.
-    const { orderBy, limit, offset } = this.query
-    const effectiveLimit =
-      limit !== undefined && offset !== undefined ? limit + offset : limit
-
-    // Only pass orderBy if scoped to this alias and uses simple refs
-    const normalizedOrderBy = orderBy
-      ? normalizeOrderByPaths(orderBy, alias)
-      : undefined
-    const canPassOrderBy =
-      normalizedOrderBy?.every((clause) => {
-        const exp = clause.expression
-        if (exp.type !== `ref`) return false
-        const path = exp.path
-        return Array.isArray(path) && path.length === 1
-      }) ?? false
+    const hints = computeSubscriptionOrderByHints(this.query, alias)
 
     return {
       includeInitialState,
       whereExpression,
-      ...(canPassOrderBy && normalizedOrderBy
-        ? { orderBy: normalizedOrderBy }
-        : {}),
-      ...(canPassOrderBy && effectiveLimit !== undefined
-        ? { limit: effectiveLimit }
-        : {}),
+      ...(hints.orderBy ? { orderBy: hints.orderBy } : {}),
+      ...(hints.limit !== undefined ? { limit: hints.limit } : {}),
     }
   }
 
@@ -836,39 +822,25 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
    * position (the biggest value sent so far).
    */
   private loadNextItems(orderByInfo: OrderByOptimizationInfo, n: number): void {
-    const { alias, orderBy, valueExtractorForRawRow, offset } = orderByInfo
+    const { alias } = orderByInfo
     const subscription = this.subscriptions[alias]
     if (!subscription) return
 
-    const biggestRow = this.biggestSentValue.get(alias)
-    const extractedValues = biggestRow
-      ? valueExtractorForRawRow(biggestRow)
-      : undefined
+    const cursor = computeOrderedLoadCursor(
+      orderByInfo,
+      this.biggestSentValue.get(alias),
+      this.lastLoadRequestKey.get(alias),
+      alias,
+      n,
+    )
+    if (!cursor) return // Duplicate request — skip
 
-    let minValues: Array<unknown> | undefined
-    if (extractedValues !== undefined) {
-      minValues = Array.isArray(extractedValues)
-        ? extractedValues
-        : [extractedValues]
-    }
-
-    // Deduplicate: skip if we already issued an identical load request
-    const loadRequestKey = serializeValue({
-      minValues: minValues ?? null,
-      offset,
-      limit: n,
-    })
-    if (this.lastLoadRequestKey.get(alias) === loadRequestKey) {
-      return
-    }
-    this.lastLoadRequestKey.set(alias, loadRequestKey)
-
-    const normalizedOrderBy = normalizeOrderByPaths(orderBy, alias)
+    this.lastLoadRequestKey.set(alias, cursor.loadRequestKey)
 
     subscription.requestLimitedSnapshot({
-      orderBy: normalizedOrderBy,
+      orderBy: cursor.normalizedOrderBy,
       limit: n,
-      minValues,
+      minValues: cursor.minValues,
       trackLoadSubsetPromise: false,
       onLoadSubsetResult: (loadResult: Promise<void> | true) => {
         // Track in-flight load to prevent redundant concurrent requests
@@ -893,23 +865,16 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
     changes: Array<ChangeMessage<any, string | number>>,
     comparator: (a: any, b: any) => number,
   ): void {
-    for (const change of changes) {
-      if (change.type === `delete`) continue
-
-      const sentKeys = this.sentToD2KeysByAlias.get(alias)
-      const isNewKey = sentKeys ? !sentKeys.has(change.key) : true
-
-      const current = this.biggestSentValue.get(alias)
-      if (!current) {
-        this.biggestSentValue.set(alias, change.value)
-        this.lastLoadRequestKey.delete(alias)
-      } else if (comparator(current, change.value) < 0) {
-        this.biggestSentValue.set(alias, change.value)
-        this.lastLoadRequestKey.delete(alias)
-      } else if (isNewKey) {
-        // New key at same sort position — allow another load if needed
-        this.lastLoadRequestKey.delete(alias)
-      }
+    const sentKeys = this.sentToD2KeysByAlias.get(alias) ?? new Set()
+    const result = trackBiggestSentValue(
+      changes,
+      this.biggestSentValue.get(alias),
+      sentKeys,
+      comparator,
+    )
+    this.biggestSentValue.set(alias, result.biggest)
+    if (result.shouldResetLoadKey) {
+      this.lastLoadRequestKey.delete(alias)
     }
   }
 
@@ -1028,30 +993,6 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
 
   // inserts === 0 && deletes === 0 — no net change (should not happen)
   return undefined
-}
-
-/**
- * Filter changes to prevent duplicate inserts to the D2 pipeline.
- * Maintains D2 multiplicity at 1 for visible items so that deletes
- * properly reduce multiplicity to 0.
- */
-function filterDuplicateInserts(
-  changes: Array<ChangeMessage<any, string | number>>,
-  sentKeys: Set<string | number>,
-): Array<ChangeMessage<any, string | number>> {
-  const filtered: Array<ChangeMessage<any, string | number>> = []
-  for (const change of changes) {
-    if (change.type === `insert`) {
-      if (sentKeys.has(change.key)) {
-        continue // Skip duplicate
-      }
-      sentKeys.add(change.key)
-    } else if (change.type === `delete`) {
-      sentKeys.delete(change.key)
-    }
-    filtered.push(change)
-  }
-  return filtered
 }
 
 /** Track a promise in the in-flight set, automatically removing on settlement */
