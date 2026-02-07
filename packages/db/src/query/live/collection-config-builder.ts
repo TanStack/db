@@ -1,6 +1,5 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { compileQuery } from '../compiler/index.js'
-import { buildQuery, getQueryIR } from '../builder/index.js'
 import {
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
@@ -10,6 +9,12 @@ import { getActiveTransaction } from '../../transactions.js'
 import { CollectionSubscriber } from './collection-subscriber.js'
 import { getCollectionBuilder } from './collection-registry.js'
 import { LIVE_QUERY_INTERNAL } from './internal.js'
+import {
+  buildQueryFromConfig,
+  extractCollectionAliases,
+  extractCollectionFromSource,
+  extractCollectionsFromQuery,
+} from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
 import type { WindowOptions } from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
@@ -946,16 +951,6 @@ export class CollectionConfigBuilder<
   }
 }
 
-function buildQueryFromConfig<TContext extends Context>(
-  config: LiveQueryCollectionConfig<any, any>,
-) {
-  // Build the query using the provided query builder function or instance
-  if (typeof config.query === `function`) {
-    return buildQuery<TContext>(config.query)
-  }
-  return getQueryIR(config.query)
-}
-
 function createOrderByComparator<T extends object>(
   orderByIndices: WeakMap<object, string>,
 ) {
@@ -980,126 +975,6 @@ function createOrderByComparator<T extends object>(
   }
 }
 
-/**
- * Helper function to extract collections from a compiled query
- * Traverses the query IR to find all collection references
- * Maps collections by their ID (not alias) as expected by the compiler
- */
-function extractCollectionsFromQuery(
-  query: any,
-): Record<string, Collection<any, any, any>> {
-  const collections: Record<string, any> = {}
-
-  // Helper function to recursively extract collections from a query or source
-  function extractFromSource(source: any) {
-    if (source.type === `collectionRef`) {
-      collections[source.collection.id] = source.collection
-    } else if (source.type === `queryRef`) {
-      // Recursively extract from subquery
-      extractFromQuery(source.query)
-    }
-  }
-
-  // Helper function to recursively extract collections from a query
-  function extractFromQuery(q: any) {
-    // Extract from FROM clause
-    if (q.from) {
-      extractFromSource(q.from)
-    }
-
-    // Extract from JOIN clauses
-    if (q.join && Array.isArray(q.join)) {
-      for (const joinClause of q.join) {
-        if (joinClause.from) {
-          extractFromSource(joinClause.from)
-        }
-      }
-    }
-  }
-
-  // Start extraction from the root query
-  extractFromQuery(query)
-
-  return collections
-}
-
-/**
- * Helper function to extract the collection that is referenced in the query's FROM clause.
- * The FROM clause may refer directly to a collection or indirectly to a subquery.
- */
-function extractCollectionFromSource(query: any): Collection<any, any, any> {
-  const from = query.from
-
-  if (from.type === `collectionRef`) {
-    return from.collection
-  } else if (from.type === `queryRef`) {
-    // Recursively extract from subquery
-    return extractCollectionFromSource(from.query)
-  }
-
-  throw new Error(
-    `Failed to extract collection. Invalid FROM clause: ${JSON.stringify(query)}`,
-  )
-}
-
-/**
- * Extracts all aliases used for each collection across the entire query tree.
- *
- * Traverses the QueryIR recursively to build a map from collection ID to all aliases
- * that reference that collection. This is essential for self-join support, where the
- * same collection may be referenced multiple times with different aliases.
- *
- * For example, given a query like:
- * ```ts
- * q.from({ employee: employeesCollection })
- *   .join({ manager: employeesCollection }, ({ employee, manager }) =>
- *     eq(employee.managerId, manager.id)
- *   )
- * ```
- *
- * This function would return:
- * ```
- * Map { "employees" => Set { "employee", "manager" } }
- * ```
- *
- * @param query - The query IR to extract aliases from
- * @returns A map from collection ID to the set of all aliases referencing that collection
- */
-function extractCollectionAliases(query: QueryIR): Map<string, Set<string>> {
-  const aliasesById = new Map<string, Set<string>>()
-
-  function recordAlias(source: any) {
-    if (!source) return
-
-    if (source.type === `collectionRef`) {
-      const { id } = source.collection
-      const existing = aliasesById.get(id)
-      if (existing) {
-        existing.add(source.alias)
-      } else {
-        aliasesById.set(id, new Set([source.alias]))
-      }
-    } else if (source.type === `queryRef`) {
-      traverse(source.query)
-    }
-  }
-
-  function traverse(q?: QueryIR) {
-    if (!q) return
-
-    recordAlias(q.from)
-
-    if (q.join) {
-      for (const joinClause of q.join) {
-        recordAlias(joinClause.from)
-      }
-    }
-  }
-
-  traverse(query)
-
-  return aliasesById
-}
 
 function accumulateChanges<T>(
   acc: Map<unknown, Changes<T>>,

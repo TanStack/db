@@ -1,9 +1,9 @@
-import { MultiSet, serializeValue } from '@tanstack/db-ivm'
+import { serializeValue } from '@tanstack/db-ivm'
 import {
   normalizeExpressionPaths,
   normalizeOrderByPaths,
 } from '../compiler/expressions.js'
-import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
+import { sendChangesToInput, splitUpdates } from './utils.js'
 import type { Collection } from '../../collection/index.js'
 import type {
   ChangeMessage,
@@ -539,48 +539,3 @@ export class CollectionSubscriber<
   }
 }
 
-/**
- * Helper function to send changes to a D2 input stream
- */
-function sendChangesToInput(
-  input: RootStreamBuilder<unknown>,
-  changes: Iterable<ChangeMessage>,
-  getKey: (item: ChangeMessage[`value`]) => any,
-): number {
-  const multiSetArray: MultiSetArray<unknown> = []
-  for (const change of changes) {
-    const key = getKey(change.value)
-    if (change.type === `insert`) {
-      multiSetArray.push([[key, change.value], 1])
-    } else if (change.type === `update`) {
-      multiSetArray.push([[key, change.previousValue], -1])
-      multiSetArray.push([[key, change.value], 1])
-    } else {
-      // change.type === `delete`
-      multiSetArray.push([[key, change.value], -1])
-    }
-  }
-
-  if (multiSetArray.length !== 0) {
-    input.sendData(new MultiSet(multiSetArray))
-  }
-
-  return multiSetArray.length
-}
-
-/** Splits updates into a delete of the old value and an insert of the new value */
-function* splitUpdates<
-  T extends object = Record<string, unknown>,
-  TKey extends string | number = string | number,
->(
-  changes: Iterable<ChangeMessage<T, TKey>>,
-): Generator<ChangeMessage<T, TKey>> {
-  for (const change of changes) {
-    if (change.type === `update`) {
-      yield { type: `delete`, key: change.key, value: change.previousValue! }
-      yield { type: `insert`, key: change.key, value: change.value }
-    } else {
-      yield change
-    }
-  }
-}
