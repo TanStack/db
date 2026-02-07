@@ -9,6 +9,18 @@ Defined in: [packages/db/src/query/live/types.ts:55](https://github.com/TanStack
 
 Configuration interface for live query collection options
 
+## Virtual properties
+
+Live query results include computed, read-only virtual properties on every row:
+
+- `$synced`: `true` when the row is confirmed by sync; `false` when it is still optimistic.
+- `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
+- `$key`: the row key for the result.
+- `$collectionId`: the source collection ID.
+
+These props can be used in `where`, `select`, and `orderBy` clauses. They are added to
+query outputs automatically and should not be persisted back to storage.
+
 ## Example
 
 ```typescript
