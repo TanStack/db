@@ -433,6 +433,12 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
       const buffer: Array<Array<ChangeMessage<any, string | number>>> = []
       pendingBuffers.set(alias, buffer)
 
+      // Lazy aliases (marked by the join compiler) should NOT load initial state
+      // eagerly — the join tap operator will load exactly the rows it needs on demand.
+      // For on-demand collections, eager loading would trigger a full server fetch
+      // for data that should be lazily loaded based on join keys.
+      const includeInitialState = !this.lazySources.has(alias)
+
       // Subscribe to source changes — buffer during setup, process directly after
       const subscription = collection.subscribeChanges(
         (changes: Array<ChangeMessage<any, string | number>>) => {
@@ -445,7 +451,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
           }
         },
         {
-          includeInitialState: true,
+          includeInitialState,
           whereExpression,
         },
       )
