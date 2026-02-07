@@ -81,8 +81,10 @@ export async function queryOnce<TContext extends Context>(
       ? { query: configOrQuery }
       : configOrQuery
 
-  const query =
-    typeof config.query === `function` ? config.query : () => config.query
+  const query = (q: InitialQueryBuilder) => {
+    const queryConfig = config.query
+    return typeof queryConfig === `function` ? queryConfig(q) : queryConfig
+  }
 
   // Create collection with minimal GC time; preload handles sync start
   const collection = createLiveQueryCollection({
