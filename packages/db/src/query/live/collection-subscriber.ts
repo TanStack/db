@@ -538,4 +538,3 @@ export class CollectionSubscriber<
     })
   }
 }
-

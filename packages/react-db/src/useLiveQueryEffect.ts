@@ -31,10 +31,7 @@ import type { Effect, EffectConfig } from '@tanstack/db'
 export function useLiveQueryEffect<
   TRow extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
->(
-  config: EffectConfig<TRow, TKey>,
-  deps: React.DependencyList = [],
-): void {
+>(config: EffectConfig<TRow, TKey>, deps: React.DependencyList = []): void {
   const effectRef = useRef<Effect | null>(null)
 
   useEffect(() => {

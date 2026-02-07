@@ -136,13 +136,11 @@ export function extractCollectionAliases(
  * Builds a query IR from a config object that contains either a query builder
  * function or a QueryBuilder instance.
  */
-export function buildQueryFromConfig<TContext extends Context>(
-  config: {
-    query:
-      | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
-      | QueryBuilder<TContext>
-  },
-): QueryIR {
+export function buildQueryFromConfig<TContext extends Context>(config: {
+  query:
+    | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
+    | QueryBuilder<TContext>
+}): QueryIR {
   // Build the query using the provided query builder function or instance
   if (typeof config.query === `function`) {
     return buildQuery<TContext>(config.query)

@@ -60,7 +60,10 @@ describe(`useLiveQueryEffect`, () => {
 
     // Insert after unmount
     users.utils.begin()
-    users.utils.write({ type: `insert`, value: { id: 3, name: `Charlie`, active: true } })
+    users.utils.write({
+      type: `insert`,
+      value: { id: 3, name: `Charlie`, active: true },
+    })
     users.utils.commit()
 
     await act(async () => {
@@ -119,9 +122,7 @@ describe(`useLiveQueryEffect`, () => {
       useLiveQueryEffect<User, number>(
         {
           query: (q) =>
-            q
-              .from({ user: users })
-              .where(({ user }) => eq(user.active, true)),
+            q.from({ user: users }).where(({ user }) => eq(user.active, true)),
           on: `delta`,
           skipInitial: true,
           handler: (event) => {
@@ -142,7 +143,10 @@ describe(`useLiveQueryEffect`, () => {
     // Insert a new active user
     await act(async () => {
       users.utils.begin()
-      users.utils.write({ type: `insert`, value: { id: 3, name: `Charlie`, active: true } })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 3, name: `Charlie`, active: true },
+      })
       users.utils.commit()
       await flushPromises()
     })
@@ -154,7 +158,10 @@ describe(`useLiveQueryEffect`, () => {
     // Delete a user
     await act(async () => {
       users.utils.begin()
-      users.utils.write({ type: `delete`, value: { id: 1, name: `Alice`, active: true } })
+      users.utils.write({
+        type: `delete`,
+        value: { id: 1, name: `Alice`, active: true },
+      })
       users.utils.commit()
       await flushPromises()
     })

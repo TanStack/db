@@ -111,7 +111,10 @@ describe(`createEffect`, () => {
 
       // Insert a new user via sync
       users.utils.begin()
-      users.utils.write({ type: `insert`, value: { id: 4, name: `Diana`, active: true } })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 4, name: `Diana`, active: true },
+      })
       users.utils.commit()
 
       await flushPromises()
@@ -140,7 +143,10 @@ describe(`createEffect`, () => {
 
       // Delete a user via sync
       users.utils.begin()
-      users.utils.write({ type: `delete`, value: { id: 1, name: `Alice`, active: true } })
+      users.utils.write({
+        type: `delete`,
+        value: { id: 1, name: `Alice`, active: true },
+      })
       users.utils.commit()
 
       await flushPromises()
@@ -195,9 +201,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) =>
-          q
-            .from({ user: users })
-            .where(({ user }) => eq(user.active, true)),
+          q.from({ user: users }).where(({ user }) => eq(user.active, true)),
         on: `enter`,
         handler: collectEvents(events),
       })
@@ -217,9 +221,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) =>
-          q
-            .from({ user: users })
-            .where(({ user }) => eq(user.active, true)),
+          q.from({ user: users }).where(({ user }) => eq(user.active, true)),
         on: `delta`,
         handler: collectEvents(events),
       })
@@ -251,9 +253,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) =>
-          q
-            .from({ user: users })
-            .where(({ user }) => eq(user.active, true)),
+          q.from({ user: users }).where(({ user }) => eq(user.active, true)),
         on: `delta`,
         handler: collectEvents(events),
       })
@@ -309,7 +309,10 @@ describe(`createEffect`, () => {
 
       // Delete
       users.utils.begin()
-      users.utils.write({ type: `delete`, value: { id: 2, name: `Bob`, active: true } })
+      users.utils.write({
+        type: `delete`,
+        value: { id: 2, name: `Bob`, active: true },
+      })
       users.utils.commit()
       await flushPromises()
 
@@ -346,7 +349,10 @@ describe(`createEffect`, () => {
 
       // Delete SHOULD fire
       users.utils.begin()
-      users.utils.write({ type: `delete`, value: { id: 2, name: `Bob`, active: true } })
+      users.utils.write({
+        type: `delete`,
+        value: { id: 2, name: `Bob`, active: true },
+      })
       users.utils.commit()
       await flushPromises()
 
@@ -374,8 +380,14 @@ describe(`createEffect`, () => {
 
       // Insert multiple users in one sync transaction
       users.utils.begin()
-      users.utils.write({ type: `insert`, value: { id: 1, name: `Alice`, active: true } })
-      users.utils.write({ type: `insert`, value: { id: 2, name: `Bob`, active: true } })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 1, name: `Alice`, active: true },
+      })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 2, name: `Bob`, active: true },
+      })
       users.utils.commit()
 
       await flushPromises()
@@ -406,7 +418,10 @@ describe(`createEffect`, () => {
 
       // New insert should fire
       users.utils.begin()
-      users.utils.write({ type: `insert`, value: { id: 4, name: `Diana`, active: true } })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 4, name: `Diana`, active: true },
+      })
       users.utils.commit()
 
       await flushPromises()
@@ -439,7 +454,8 @@ describe(`createEffect`, () => {
   describe(`error handling`, () => {
     it(`should route sync handler errors to onError`, async () => {
       const users = createUsersCollection()
-      const errors: Array<{ error: Error; event: DeltaEvent<User, number> }> = []
+      const errors: Array<{ error: Error; event: DeltaEvent<User, number> }> =
+        []
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
@@ -463,7 +479,8 @@ describe(`createEffect`, () => {
 
     it(`should route async handler errors to onError`, async () => {
       const users = createUsersCollection([sampleUsers[0]!])
-      const errors: Array<{ error: Error; event: DeltaEvent<User, number> }> = []
+      const errors: Array<{ error: Error; event: DeltaEvent<User, number> }> =
+        []
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
@@ -525,7 +542,10 @@ describe(`createEffect`, () => {
 
       // Insert after disposal
       users.utils.begin()
-      users.utils.write({ type: `insert`, value: { id: 4, name: `Diana`, active: true } })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 4, name: `Diana`, active: true },
+      })
       users.utils.commit()
 
       await flushPromises()
@@ -692,9 +712,8 @@ describe(`createEffect`, () => {
         query: (q) =>
           q
             .from({ issue: issues })
-            .join(
-              { user: users },
-              ({ issue, user }) => eq(issue.userId, user.id),
+            .join({ user: users }, ({ issue, user }) =>
+              eq(issue.userId, user.id),
             )
             .select(({ issue, user }) => ({
               issueId: issue.id,
@@ -734,7 +753,10 @@ describe(`createEffect`, () => {
 
       // Insert
       users.utils.begin()
-      users.utils.write({ type: `insert`, value: { id: 10, name: `Eve`, active: true } })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 10, name: `Eve`, active: true },
+      })
       users.utils.commit()
       await flushPromises()
 
@@ -744,7 +766,10 @@ describe(`createEffect`, () => {
 
       // Delete
       users.utils.begin()
-      users.utils.write({ type: `delete`, value: { id: 10, name: `Eve`, active: true } })
+      users.utils.write({
+        type: `delete`,
+        value: { id: 10, name: `Eve`, active: true },
+      })
       users.utils.commit()
       await flushPromises()
 
@@ -810,15 +835,24 @@ describe(`createEffect`, () => {
       })
       tx.mutate(() => {
         users.utils.begin()
-        users.utils.write({ type: `insert`, value: { id: 10, name: `Eve`, active: true } })
+        users.utils.write({
+          type: `insert`,
+          value: { id: 10, name: `Eve`, active: true },
+        })
         users.utils.commit()
 
         users.utils.begin()
-        users.utils.write({ type: `insert`, value: { id: 11, name: `Frank`, active: true } })
+        users.utils.write({
+          type: `insert`,
+          value: { id: 11, name: `Frank`, active: true },
+        })
         users.utils.commit()
 
         users.utils.begin()
-        users.utils.write({ type: `insert`, value: { id: 12, name: `Grace`, active: true } })
+        users.utils.write({
+          type: `insert`,
+          value: { id: 12, name: `Grace`, active: true },
+        })
         users.utils.commit()
       })
 
@@ -853,13 +887,19 @@ describe(`createEffect`, () => {
 
       // Without a transaction, each change runs the graph immediately
       users.utils.begin()
-      users.utils.write({ type: `insert`, value: { id: 10, name: `Eve`, active: true } })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 10, name: `Eve`, active: true },
+      })
       users.utils.commit()
 
       await flushPromises()
 
       users.utils.begin()
-      users.utils.write({ type: `insert`, value: { id: 11, name: `Frank`, active: true } })
+      users.utils.write({
+        type: `insert`,
+        value: { id: 11, name: `Frank`, active: true },
+      })
       users.utils.commit()
 
       await flushPromises()
@@ -1274,7 +1314,9 @@ describe(`createEffect`, () => {
     it(`should auto-dispose when source collection is cleaned up`, async () => {
       const users = createUsersCollection()
       const events: Array<DeltaEvent<User, number>> = []
-      const consoleErrorSpy = vi.spyOn(console, `error`).mockImplementation(() => {})
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),

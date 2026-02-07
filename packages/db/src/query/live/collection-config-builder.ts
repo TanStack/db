@@ -975,7 +975,6 @@ function createOrderByComparator<T extends object>(
   }
 }
 
-
 function accumulateChanges<T>(
   acc: Map<unknown, Changes<T>>,
   [[key, tupleData], multiplicity]: [

@@ -269,16 +269,10 @@ interface EffectPipelineRunnerConfig<
  * - Create or write to a collection (no materialisation)
  * - Manage ordering, windowing, or lazy loading
  */
-class EffectPipelineRunner<
-  TRow extends object,
-  TKey extends string | number,
-> {
+class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
   private readonly query: QueryIR
   private readonly collections: Record<string, Collection<any, any, any>>
-  private readonly collectionByAlias: Record<
-    string,
-    Collection<any, any, any>
-  >
+  private readonly collectionByAlias: Record<string, Collection<any, any, any>>
 
   private graph: D2 | undefined
   private inputs: Record<string, RootStreamBuilder<unknown>> | undefined
@@ -296,10 +290,7 @@ class EffectPipelineRunner<
   // Subscription management
   private readonly unsubscribeCallbacks = new Set<() => void>()
   // Duplicate insert prevention per alias
-  private readonly sentToD2KeysByAlias = new Map<
-    string,
-    Set<string | number>
-  >()
+  private readonly sentToD2KeysByAlias = new Map<string, Set<string | number>>()
 
   // Output accumulator
   private pendingChanges: Map<unknown, EffectChanges<TRow>> = new Map()
@@ -380,10 +371,7 @@ class EffectPipelineRunner<
     this.pipeline.pipe(
       output((data) => {
         const messages = data.getInner()
-        messages.reduce(
-          accumulateEffectChanges<TRow>,
-          this.pendingChanges,
-        )
+        messages.reduce(accumulateEffectChanges<TRow>, this.pendingChanges)
       }),
     )
 
@@ -413,7 +401,10 @@ class EffectPipelineRunner<
     // After all subscriptions are in place, flush the buffers and switch to
     // direct processing mode.
 
-    const pendingBuffers = new Map<string, Array<Array<ChangeMessage<any, string | number>>>>()
+    const pendingBuffers = new Map<
+      string,
+      Array<Array<ChangeMessage<any, string | number>>>
+    >()
 
     for (const [alias, collectionId] of compiledAliases) {
       const collection =
@@ -616,11 +607,7 @@ class EffectPipelineRunner<
     const sentKeys = this.sentToD2KeysByAlias.get(alias)!
     const filtered = filterDuplicateInserts(changes, sentKeys)
 
-    return sendChangesToInput(
-      input,
-      filtered,
-      collection.config.getKey,
-    )
+    return sendChangesToInput(input, filtered, collection.config.getKey)
   }
 
   /** Run the D2 graph and flush accumulated output */
@@ -747,10 +734,7 @@ function accumulateEffectChanges<T>(
 }
 
 /** Classify accumulated per-key changes into a DeltaEvent */
-function classifyDelta<
-  TRow extends object,
-  TKey extends string | number,
->(
+function classifyDelta<TRow extends object, TKey extends string | number>(
   key: TKey,
   changes: EffectChanges<TRow>,
 ): DeltaEvent<TRow, TKey> | undefined {
@@ -763,7 +747,12 @@ function classifyDelta<
 
   if (deletes > 0 && inserts === 0) {
     // Row exited the query result
-    return { type: `exit`, key, value: deleteValue!, previousValue: deleteValue }
+    return {
+      type: `exit`,
+      key,
+      value: deleteValue!,
+      previousValue: deleteValue,
+    }
   }
 
   if (inserts > 0 && deletes > 0) {
@@ -821,8 +810,7 @@ function reportError<TRow extends object, TKey extends string | number>(
   event: DeltaEvent<TRow, TKey>,
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void,
 ): void {
-  const normalised =
-    error instanceof Error ? error : new Error(String(error))
+  const normalised = error instanceof Error ? error : new Error(String(error))
   if (onError) {
     try {
       onError(normalised, event)
