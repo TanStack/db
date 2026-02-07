@@ -1,6 +1,5 @@
 import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
-import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type { VirtualOrigin, WithVirtualProps } from '../virtual-props.js'
 import type { Transaction } from '../transactions'
@@ -84,6 +83,17 @@ export class CollectionStateManager<
   public pendingLocalChanges = new Set<TKey>()
   public pendingLocalOrigins = new Set<TKey>()
 
+  private virtualPropsCache = new WeakMap<
+    object,
+    {
+      synced: boolean
+      origin: VirtualOrigin
+      key: TKey
+      collectionId: string
+      enriched: WithVirtualProps<TOutput, TKey>
+    }
+  >()
+
   // Cached size for performance
   public size = 0
 
@@ -160,13 +170,40 @@ export class CollectionStateManager<
     row: TOutput,
     key: TKey,
   ): WithVirtualProps<TOutput, TKey> {
-    return enrichRowWithVirtualProps(
-      row,
-      key,
-      this.collection.id,
-      () => this.isRowSynced(key),
-      () => this.getRowOrigin(key),
-    )
+    const existingRow = row as Partial<WithVirtualProps<TOutput, TKey>>
+    const synced = existingRow.$synced ?? this.isRowSynced(key)
+    const origin = existingRow.$origin ?? this.getRowOrigin(key)
+    const resolvedKey = (existingRow.$key ?? key)
+    const collectionId = existingRow.$collectionId ?? this.collection.id
+
+    const cached = this.virtualPropsCache.get(row as object)
+    if (
+      cached &&
+      cached.synced === synced &&
+      cached.origin === origin &&
+      cached.key === resolvedKey &&
+      cached.collectionId === collectionId
+    ) {
+      return cached.enriched
+    }
+
+    const enriched = {
+      ...row,
+      $synced: synced,
+      $origin: origin,
+      $key: resolvedKey,
+      $collectionId: collectionId,
+    } as WithVirtualProps<TOutput, TKey>
+
+    this.virtualPropsCache.set(row as object, {
+      synced,
+      origin,
+      key: resolvedKey,
+      collectionId,
+      enriched,
+    })
+
+    return enriched
   }
 
   /**
