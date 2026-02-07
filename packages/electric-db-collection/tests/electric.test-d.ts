@@ -336,13 +336,16 @@ describe(`Electric collection type resolution tests`, () => {
     const results = activeUsersQuery.toArray
     expectTypeOf(results).toEqualTypeOf<
       Array<
-        OutputWithVirtual<{
-          id: string
-          name: string
-          age: number
-          email: string
-          isActive: boolean
-        }, string>
+        OutputWithVirtual<
+          {
+            id: string
+            name: string
+            age: number
+            email: string
+            isActive: boolean
+          },
+          string
+        >
       >
     >()
 
@@ -367,11 +370,14 @@ describe(`Electric collection type resolution tests`, () => {
     const ageFilterResults = ageFilterQuery.toArray
     expectTypeOf(ageFilterResults).toEqualTypeOf<
       Array<
-        OutputWithVirtual<{
-          id: string
-          name: string
-          age: number
-        }, string>
+        OutputWithVirtual<
+          {
+            id: string
+            name: string
+            age: number
+          },
+          string
+        >
       >
     >()
 
@@ -430,11 +436,14 @@ describe(`Electric collection type resolution tests`, () => {
     const electricResults = electricQuery.toArray
     expectTypeOf(electricResults).toEqualTypeOf<
       Array<
-        OutputWithVirtual<{
-          id: string
-          name: string
-          age: number
-        }, string>
+        OutputWithVirtual<
+          {
+            id: string
+            name: string
+            age: number
+          },
+          string
+        >
       >
     >()
 
