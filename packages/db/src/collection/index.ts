@@ -903,7 +903,7 @@ export class CollectionImpl<
     callback: (
       changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
     ) => void,
-    options: SubscribeChangesOptions<TOutput> = {},
+    options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
     return this._changes.subscribeChanges(callback, options)
   }

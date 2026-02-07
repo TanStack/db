@@ -242,9 +242,12 @@ export function createFilterFunctionFromExpression<T extends object>(
  * @param options - The subscription options containing the where clause
  * @returns A filtered callback function
  */
-export function createFilteredCallback<T extends object>(
+export function createFilteredCallback<
+  T extends object,
+  TKey extends string | number = string | number,
+>(
   originalCallback: (changes: Array<ChangeMessage<T>>) => void,
-  options: SubscribeChangesOptions,
+  options: SubscribeChangesOptions<T, TKey>,
 ): (changes: Array<ChangeMessage<T>>) => void {
   const filterFn = createFilterFunctionFromExpression(options.whereExpression!)
 

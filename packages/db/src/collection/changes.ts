@@ -85,20 +85,20 @@ export class CollectionChangesManager<
     }
 
     // Either we're not batching, or we're forcing emission (user action or ending batch cycle)
-    let eventsToEmit = changes
+    let rawEvents = changes
 
     if (forceEmit) {
       // Force emit is used to end a batch (e.g. after a sync commit). Combine any
       // buffered optimistic events with the final changes so subscribers see the
       // whole picture, even if the sync diff is empty.
       if (this.batchedEvents.length > 0) {
-        eventsToEmit = [...this.batchedEvents, ...changes]
+        rawEvents = [...this.batchedEvents, ...changes]
       }
       this.batchedEvents = []
       this.shouldBatchEvents = false
     }
 
-    if (eventsToEmit.length === 0) {
+    if (rawEvents.length === 0) {
       return
     }
 
@@ -106,7 +106,7 @@ export class CollectionChangesManager<
     // This uses the "add-if-missing" pattern to preserve pass-through semantics
     const enrichedEvents: Array<
       ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
-    > = eventsToEmit.map((change) => this.enrichChangeWithVirtualProps(change))
+    > = rawEvents.map((change) => this.enrichChangeWithVirtualProps(change))
 
     // Emit to all listeners
     for (const subscription of this.changeSubscriptions) {
@@ -121,7 +121,7 @@ export class CollectionChangesManager<
     callback: (
       changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
     ) => void,
-    options: SubscribeChangesOptions<TOutput> = {},
+    options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
     // Start sync and track subscriber
     this.addSubscriber()
@@ -136,7 +136,7 @@ export class CollectionChangesManager<
     const { where, ...opts } = options
     let whereExpression = opts.whereExpression
     if (where) {
-      const proxy = createSingleRowRefProxy<TOutput>()
+      const proxy = createSingleRowRefProxy<WithVirtualProps<TOutput, TKey>>()
       const result = where(proxy)
       whereExpression = toExpression(result)
     }

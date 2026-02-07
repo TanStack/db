@@ -785,6 +785,7 @@ export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
  */
 export interface SubscribeChangesOptions<
   T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
 > {
   /** Whether to include the current state as initial changes */
   includeInitialState?: boolean
@@ -802,7 +803,7 @@ export interface SubscribeChangesOptions<
    * })
    * ```
    */
-  where?: (row: SingleRowRefProxy<T>) => any
+  where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /**
@@ -831,7 +832,8 @@ export interface SubscribeChangesOptions<
 
 export interface SubscribeChangesSnapshotOptions<
   T extends object = Record<string, unknown>,
-> extends Omit<SubscribeChangesOptions<T>, `includeInitialState`> {
+  TKey extends string | number = string | number,
+> extends Omit<SubscribeChangesOptions<T, TKey>, `includeInitialState`> {
   orderBy?: OrderBy
   limit?: number
 }
