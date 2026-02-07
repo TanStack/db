@@ -684,6 +684,20 @@ export type InferResultType<TContext extends Context> =
     ? GetResult<TContext> | undefined
     : Array<GetResult<TContext>>
 
+type ExtractContextKey<TContext extends Context> =
+  TContext[`schema`][TContext[`fromSourceName`]] extends {
+    $key: infer TKey
+  }
+    ? TKey extends string | number
+      ? TKey
+      : string | number
+    : string | number
+
+type WithVirtualPropsIfObject<TContext extends Context, TResult> =
+  TResult extends object
+    ? WithVirtualProps<TResult, ExtractContextKey<TContext>>
+    : TResult
+
 /**
  * GetResult - Determines the final result type of a query
  *
@@ -711,7 +725,7 @@ export type InferResultType<TContext extends Context> =
  */
 export type GetResult<TContext extends Context> = Prettify<
   TContext[`result`] extends object
-    ? TContext[`result`]
+    ? WithVirtualPropsIfObject<TContext, TContext[`result`]>
     : TContext[`hasJoins`] extends true
       ? // Optionality is already applied in the schema, just return it
         TContext[`schema`]
