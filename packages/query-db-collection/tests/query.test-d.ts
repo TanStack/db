@@ -15,14 +15,9 @@ import type {
   InsertMutationFnParams,
   LoadSubsetOptions,
   UpdateMutationFnParams,
-  WithVirtualProps,
 } from '@tanstack/db'
+import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
-
-type OutputWithVirtual<
-  T,
-  TKey extends string | number = string,
-> = WithVirtualProps<T, TKey>
 
 describe(`Query collection type resolution tests`, () => {
   // Define test types
