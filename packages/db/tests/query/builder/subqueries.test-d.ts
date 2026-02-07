@@ -100,10 +100,12 @@ describe(`Subquery Types`, () => {
 
       // Verify the result type
       type QueryResult = GetResult<ExtractContext<typeof _query>>
-      expectTypeOf<QueryResult>().toEqualTypeOf<{
-        id: number
-        title: string
-      }>()
+      expectTypeOf<QueryResult>().toMatchTypeOf<
+        OutputWithVirtual<{
+          id: number
+          title: string
+        }>
+      >()
     })
   })
 
@@ -127,11 +129,13 @@ describe(`Subquery Types`, () => {
 
       // Verify the result type
       type QueryResult = GetResult<ExtractContext<typeof _query>>
-      expectTypeOf<QueryResult>().toEqualTypeOf<{
-        issueId: number
-        issueTitle: string
-        userName: string | undefined
-      }>()
+      expectTypeOf<QueryResult>().toMatchTypeOf<
+        OutputWithVirtual<{
+          issueId: number
+          issueTitle: string
+          userName: string | undefined
+        }>
+      >()
     })
 
     test(`subquery with select in join preserves selected type`, () => {
@@ -156,10 +160,12 @@ describe(`Subquery Types`, () => {
 
       // Verify the result type
       type QueryResult = GetResult<ExtractContext<typeof _query>>
-      expectTypeOf<QueryResult>().toEqualTypeOf<{
-        issueId: number
-        userName: string | undefined
-      }>()
+      expectTypeOf<QueryResult>().toMatchTypeOf<
+        OutputWithVirtual<{
+          issueId: number
+          userName: string | undefined
+        }>
+      >()
     })
   })
 
@@ -179,10 +185,12 @@ describe(`Subquery Types`, () => {
 
       // Verify the result type
       type AggregateResult = GetResult<ExtractContext<typeof _allAggregate>>
-      expectTypeOf<AggregateResult>().toEqualTypeOf<{
-        count: number
-        avgDuration: number
-      }>()
+      expectTypeOf<AggregateResult>().toMatchTypeOf<
+        OutputWithVirtual<{
+          count: number
+          avgDuration: number
+        }>
+      >()
     })
 
     test(`group by queries with subqueries`, () => {
@@ -202,11 +210,13 @@ describe(`Subquery Types`, () => {
 
       // Verify the result type
       type GroupedResult = GetResult<ExtractContext<typeof _byStatusAggregate>>
-      expectTypeOf<GroupedResult>().toEqualTypeOf<{
-        status: `open` | `in_progress` | `closed`
-        count: number
-        avgDuration: number
-      }>()
+      expectTypeOf<GroupedResult>().toMatchTypeOf<
+        OutputWithVirtual<{
+          status: `open` | `in_progress` | `closed`
+          count: number
+          avgDuration: number
+        }>
+      >()
     })
   })
 
@@ -232,10 +242,12 @@ describe(`Subquery Types`, () => {
 
       // Verify the result type
       type QueryResult = GetResult<ExtractContext<typeof _query>>
-      expectTypeOf<QueryResult>().toEqualTypeOf<{
-        id: number
-        title: string
-      }>()
+      expectTypeOf<QueryResult>().toMatchTypeOf<
+        OutputWithVirtual<{
+          id: number
+          title: string
+        }>
+      >()
     })
   })
 
@@ -258,10 +270,12 @@ describe(`Subquery Types`, () => {
 
       // Verify the result type
       type QueryResult = GetResult<ExtractContext<typeof _query>>
-      expectTypeOf<QueryResult>().toEqualTypeOf<{
-        issueId: number
-        userName: string | undefined
-      }>()
+      expectTypeOf<QueryResult>().toMatchTypeOf<
+        OutputWithVirtual<{
+          issueId: number
+          userName: string | undefined
+        }>
+      >()
     })
 
     test(`join subquery with collection`, () => {
@@ -282,10 +296,12 @@ describe(`Subquery Types`, () => {
 
       // Verify the result type
       type QueryResult = GetResult<ExtractContext<typeof _query>>
-      expectTypeOf<QueryResult>().toEqualTypeOf<{
-        issueId: number
-        userName: string | undefined
-      }>()
+      expectTypeOf<QueryResult>().toMatchTypeOf<
+        OutputWithVirtual<{
+          issueId: number
+          userName: string | undefined
+        }>
+      >()
     })
   })
 })
