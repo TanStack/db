@@ -202,30 +202,42 @@ export function createEffect<
     }
   }
 
+  // The dispose function is referenced by both the returned Effect object
+  // and the onSourceError callback, so we define it first.
+  const dispose = async () => {
+    if (disposed) return
+    disposed = true
+
+    // Abort signal for in-flight handlers
+    abortController.abort()
+
+    // Tear down the pipeline (unsubscribe from sources, etc.)
+    runner.dispose()
+
+    // Wait for any in-flight async handlers to settle
+    if (inFlightHandlers.size > 0) {
+      await Promise.allSettled([...inFlightHandlers])
+    }
+  }
+
   // Create and start the pipeline
   const runner = new EffectPipelineRunner<TRow, TKey>({
     query: config.query,
     skipInitial: config.skipInitial ?? false,
     onBatchProcessed,
+    onSourceError: (error: Error) => {
+      if (disposed) return
+
+      console.error(`[Effect '${id}'] ${error.message}. Disposing effect.`)
+
+      // Auto-dispose — the effect can no longer function
+      dispose()
+    },
   })
   runner.start()
 
   return {
-    async dispose() {
-      if (disposed) return
-      disposed = true
-
-      // Abort signal for in-flight handlers
-      abortController.abort()
-
-      // Tear down the pipeline (unsubscribe from sources, etc.)
-      runner.dispose()
-
-      // Wait for any in-flight async handlers to settle
-      if (inFlightHandlers.size > 0) {
-        await Promise.allSettled([...inFlightHandlers])
-      }
-    },
+    dispose,
     get disposed() {
       return disposed
     },
@@ -243,6 +255,8 @@ interface EffectPipelineRunnerConfig<
   query: EffectQueryInput<any>
   skipInitial: boolean
   onBatchProcessed: (events: Array<DeltaEvent<TRow, TKey>>) => void
+  /** Called when a source collection enters error or cleaned-up state */
+  onSourceError: (error: Error) => void
 }
 
 /**
@@ -298,7 +312,6 @@ class EffectPipelineRunner<
   private subscribedToAllCollections = false
   private readonly builderDependencies = new Set<unknown>()
   private readonly aliasDependencies: Record<string, Array<unknown>> = {}
-  private unsubscribeFromSchedulerClears?: () => void
 
   // Reentrance guard
   private isGraphRunning = false
@@ -307,10 +320,12 @@ class EffectPipelineRunner<
   private readonly onBatchProcessed: (
     events: Array<DeltaEvent<TRow, TKey>>,
   ) => void
+  private readonly onSourceError: (error: Error) => void
 
   constructor(config: EffectPipelineRunnerConfig<TRow, TKey>) {
     this.skipInitial = config.skipInitial
     this.onBatchProcessed = config.onBatchProcessed
+    this.onSourceError = config.onSourceError
 
     // Parse query
     this.query = buildQueryFromConfig({ query: config.query })
@@ -389,15 +404,6 @@ class EffectPipelineRunner<
       this.initialLoadComplete = true
     }
 
-    // Listen for scheduler context clears to prevent memory leaks
-    // from in-flight transactions that are aborted/rolled back.
-    this.unsubscribeFromSchedulerClears = transactionScopedScheduler.onClear(
-      () => {
-        // No pending state to clear for effects (unlike CollectionConfigBuilder
-        // which accumulates load callbacks). The scheduler handles its own cleanup.
-      },
-    )
-
     // We need to defer initial data processing until ALL subscriptions are
     // created, because join pipelines look up subscriptions by alias during
     // the graph run. If we run the graph while some aliases are still missing,
@@ -461,15 +467,42 @@ class EffectPipelineRunner<
         delete this.subscriptions[alias]
       })
 
-      // Track source readiness for skipInitial
-      if (this.skipInitial) {
-        const statusUnsubscribe = collection.on(`status:change`, () => {
-          if (!this.initialLoadComplete && this.checkAllCollectionsReady()) {
-            this.initialLoadComplete = true
-          }
-        })
-        this.unsubscribeCallbacks.add(statusUnsubscribe)
-      }
+      // Listen for status changes on source collections
+      const statusUnsubscribe = collection.on(`status:change`, (event) => {
+        if (this.disposed) return
+
+        const { status } = event
+
+        // Source entered error state — effect can no longer function
+        if (status === `error`) {
+          this.onSourceError(
+            new Error(
+              `Source collection '${collectionId}' entered error state`,
+            ),
+          )
+          return
+        }
+
+        // Source was manually cleaned up — effect can no longer function
+        if (status === `cleaned-up`) {
+          this.onSourceError(
+            new Error(
+              `Source collection '${collectionId}' was cleaned up while effect depends on it`,
+            ),
+          )
+          return
+        }
+
+        // Track source readiness for skipInitial
+        if (
+          this.skipInitial &&
+          !this.initialLoadComplete &&
+          this.checkAllCollectionsReady()
+        ) {
+          this.initialLoadComplete = true
+        }
+      })
+      this.unsubscribeCallbacks.add(statusUnsubscribe)
     }
 
     // Mark as subscribed so the graph can start running
@@ -648,10 +681,6 @@ class EffectPipelineRunner<
     this.pendingChanges.clear()
     this.lazySources.clear()
     this.builderDependencies.clear()
-
-    // Unregister from scheduler's onClear listener to prevent memory leaks
-    this.unsubscribeFromSchedulerClears?.()
-    this.unsubscribeFromSchedulerClears = undefined
 
     // Clear mutable objects
     for (const key of Object.keys(this.lazySourcesCallbacks)) {
