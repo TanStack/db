@@ -15,7 +15,7 @@ prd_version: "2.0"
 
 ## Summary
 
-AI applications need durable, collaborative state—but current solutions like `useChat` manage ephemeral client state that's lost on refresh. This RFC proposes `@tanstack/ai-db`, a package that connects TanStack AI to TanStack DB collections via reactive effects, enabling AI state that persists, syncs across devices, and supports multi-agent collaboration. The package is progressively layered: schema-agnostic composable primitives (Phase 1), agent abstractions with option factories (Phase 2), and production hardening (Phase 3). Distributed coordination is explicitly deferred to future work (Phase 4).
+AI applications need durable, collaborative state—but current solutions like `useChat` manage ephemeral client state that's lost on refresh. This RFC proposes `@tanstack/ai-db`, a package that connects TanStack AI to TanStack DB collections via reactive effects, enabling AI state that persists, syncs across devices, and supports multi-agent collaboration. The package is progressively layered: schema-agnostic composable primitives (Phase 1, including protocol-agnostic runner lifecycle primitives), agent abstractions with option factories (Phase 2), and production hardening (Phase 3). Distributed coordination is explicitly deferred to future work (Phase 4).
 
 **Quick-start with `durableAgent` factory (Phase 2):**
 
@@ -38,9 +38,16 @@ const researcher = createAgent(durableAgent({
   streamUrl: 'https://streams.example.com/sessions/session-123',
 }))
 
-// Agent is live — send it a message
-researcher.send('What are the latest advances in quantum computing?', {
-  from: 'user-123',
+// Agent is live — write a user message to the messages stream/collection
+// (full insert shape shown once; later examples use defaults)
+researcher.collections.messages.insert({
+  id: crypto.randomUUID(),
+  role: 'user',
+  actorId: 'user-123',
+  targetAgent: researcher.name,
+  content: 'What are the latest advances in quantum computing?',
+  processed: false,
+  createdAt: new Date().toISOString(),
 })
 ```
 
@@ -152,6 +159,7 @@ Developers building AI applications face:
 - **G9**: Support human-in-the-loop approvals with durable state
 - **G10**: Enable recovery from interrupted operations
 - **G11**: Support persistent agent sleep/wake lifecycle for resource-efficient deployment
+- **G12**: Provide protocol-agnostic runner lifecycle primitives (wake claim, heartbeat, checkpoints, completion) for serverless runtimes
 
 ### Non-Goals
 
@@ -161,6 +169,7 @@ Developers building AI applications face:
 - **NG4**: Build a full workflow engine—provide primitives, not framework
 - **NG5**: Framework-specific hooks initially—evaluate if `useLiveQuery` suffices
 - **NG6**: Implement authorization—defer to sync backend ACLs
+- **NG7**: Tie core `createAgent` APIs to any specific transport protocol (webhooks, queues, alarms)
 
 ## Proposal
 
@@ -172,6 +181,7 @@ Developers building AI applications face:
 ├── Phase 2: Agent abstractions + default schemas
 ├── Phase 3: Production hardening (approvals, recovery)
 ├── Phase 4: Advanced patterns (future)
+├── Optional protocol adapters (built from Phase 1 primitives)
 └── Re-exports from @tanstack/ai for convenience
 ```
 
@@ -189,6 +199,8 @@ The composable primitives are **decoupled by design**—they communicate through
 - Tool execution in another (e.g., client, worker, different server)
 - Communication via synced collections
 - Single-consumer model per environment — each `createToolExecutionEffect` watches its own query and assumes it is the sole consumer of matching rows
+
+Core primitives in this phase are intentionally **transport-neutral**. Durable Streams, webhook callbacks, queue leases, and platform alarms are implemented as adapters on top — not as requirements of the base APIs.
 
 ```
 ┌─────────────────────────────┐       ┌───────────────────────────────┐
@@ -985,6 +997,108 @@ createToolExecutionEffect({
 
 For backends without `$synced`, use server-side effects or explicit confirmation fields.
 
+#### Runner Lifecycle Primitives (Protocol-Agnostic)
+
+Persistent agents are backend-agnostic, but serverless runtimes often need explicit lifecycle handshakes around each wake-up:
+
+- claim a wake atomically (fencing)
+- keep the wake alive while work is running (heartbeat)
+- checkpoint source progress (cursor/offset)
+- mark completion (done) so the runtime can return to idle
+
+These requirements are not unique to Durable Streams webhooks. The same shape appears in queue workers, cron-triggered drains, alarm-based Durable Objects, and job runners. Phase 1 adds protocol-agnostic primitives for this lifecycle so integrations stay composable.
+
+```typescript
+type CheckpointContract = {
+  source: string   // Logical source (stream path, queue topic+partition, etc.)
+  cursor: string   // Opaque progress token for that source
+}
+
+interface RunnerLifecycleAdapter<TWake = unknown> {
+  // Acquire the wake/lease. Should reject on stale or already-claimed wake.
+  claimWake(wake: TWake, ctx: { signal: AbortSignal }): Promise<{ fenceToken?: string }>
+  // Optional keepalive while work is in progress.
+  heartbeat?(state: { wake: TWake; fenceToken?: string }): Promise<void>
+  // Optional progress checkpoint(s), expected to be monotonic per source.
+  checkpoint?(
+    checkpoints: CheckpointContract[],
+    state: { wake: TWake; fenceToken?: string }
+  ): Promise<void>
+  // Mark completion for this wake. done=false means "more work exists".
+  complete?(state: { wake: TWake; fenceToken?: string }, result: { done: boolean }): Promise<void>
+  // Optional terminal failure callback.
+  fail?(state: { wake: TWake; fenceToken?: string }, error: Error): Promise<void>
+}
+```
+
+`runWithLifecycle()` wraps a unit of work with this handshake:
+
+```typescript
+await runWithLifecycle(wakePayload, lifecycleAdapter, async (session) => {
+  const drained = await drainUntilIdle({
+    hasPendingWork: async () => hasPendingRows(),
+    runCycle: async () => runAgentCycle(),
+    maxDurationMs: 25_000,     // fit serverless request budget
+    maxIterations: 50,         // safety against runaway loops
+    lifecycle: {
+      heartbeat: () => session.heartbeat(),
+      checkpoint: (rows) => session.checkpoint(rows),
+    },
+    buildCheckpoint: async () => getCurrentCheckpoints(),
+  })
+
+  await session.complete({ done: drained.completed })
+})
+```
+
+`drainUntilIdle()` is intentionally transport-agnostic. It runs generation cycles until there is no pending work or limits are reached, returning `completed: true|false` so the caller/runtime can decide whether to re-wake immediately.
+
+**Durable Streams Webhooks mapping (example adapter):**
+
+- `claimWake` ↔ callback claim with `epoch` + `wake_id`
+- `heartbeat` ↔ empty callback `{}` to reset liveness timer
+- `checkpoint` ↔ callback `acks: [{ path, offset }]`
+- `complete({ done })` ↔ callback `{ done: true }` when drain finishes
+
+`durableStreamsWebhookAdapter()` packages this mapping as an optional helper. This keeps Durable Streams-specific semantics out of core agent APIs while still making them first-class through composition.
+
+**Callback sequencing requirements (Durable Streams helper):**
+
+- First callback must claim wake (`epoch` + `wake_id`)
+- Subsequent callbacks rotate token from latest response
+- Long-running work sends periodic heartbeat callbacks even when no new acks are emitted
+- `checkpoint()` batches monotonic acks per source path
+- `complete({ done: true })` marks consumer idle; `complete({ done: false })` allows immediate re-wake
+
+#### Durable Streams Webhook Runtime Modes
+
+Durable Streams webhook consumers must support **two execution modes**:
+
+1. **Request-bound drain**: claim wake + run generation/drain during the webhook request lifetime, then respond when the cycle is done (or request budget is exhausted).
+2. **Immediate-ack wake**: respond immediately to webhook delivery, then continue processing out-of-band using callback claim + heartbeat + checkpoint + done.
+
+Both modes use the same lifecycle primitives; only request/response timing differs.
+
+```typescript
+type WebhookExecutionMode =
+  | { type: 'request-bound'; maxRequestMs?: number }
+  | { type: 'ack-immediate'; status?: 200 | 202 }
+```
+
+**Mode behavior:**
+
+- **Request-bound drain**
+- Webhook handler may keep request open while running `drainUntilIdle()`
+- Must still use callback claim/checkpoint/complete when work spans multiple cycles or approaches timeout
+- Recommended for Durable Objects / long-lived isolates that can safely run for the request duration
+
+- **Immediate-ack wake**
+- Webhook handler returns immediately (`200` or `202`)
+- Background runner calls `runWithLifecycle()` to claim wake, send heartbeats, checkpoint offsets, and `complete({ done })`
+- Required for short-lived edge workers where request lifetime is too short for full drain
+
+In both modes, callback mechanics (`claimWake`, `heartbeat`, `checkpoint`, `complete`) are identical and required for correctness under retries and liveness timeouts.
+
 #### Convenience Wrapper: durableChat()
 
 For common use cases, `durableChat()` combines `chat()`, `makeDurableTools()`, and `streamToCollection()`:
@@ -1099,7 +1213,7 @@ createCollection(queryCollectionOptions({...}))
 
 // Agent pattern — same idiom
 createAgent(durableAgent({...}))     // Factory: batteries-included
-createAgent({ pendingWork, ... })    // Raw AgentConfig: full control
+createAgent({ pendingWork, generate, ... })    // Raw AgentConfig: full control
 ```
 
 `createAgent` accepts an `AgentConfig` — the standard interface. Option factories like `durableAgent()` produce `AgentConfig` from simpler, specialized inputs. Users can also construct `AgentConfig` manually for full control.
@@ -1115,14 +1229,14 @@ Phase 2 provides two distinct agent abstractions for multi-agent coordination: *
 | Trigger | Reactive (watches collections for pending work) | Called directly via `.run()` or used as a tool |
 | Context | Full conversation history | Only what's passed as input |
 | Memory | Remembers past interactions | Stateless between calls |
-| Usage | `agent.send()` | `worker.run(input)` or placed in another agent's tool list |
+| Usage | Insert message rows into collections/streams | `worker.run(input)` or placed in another agent's tool list |
 | After call | Still alive, waiting for next work | Context discarded |
 | Crash recovery | Resumes where it left off (pending work still in collection) | Re-run from start (idempotent) |
 | Analogy | A colleague you message | A contractor you hire for one job |
 
 **v1 Execution Model — Single Active Runner:**
 
-In v1, each `(session, agent)` pair has at most **one active runner**. If an agent is instantiated on multiple devices/servers, only one should be actively processing the generation loop. This is enforced by convention — the agent's effect fires on one instance, and the collection's sync layer ensures all instances see the same state.
+In v1, each `(session, agent)` pair has at most **one active runner**. If an agent is instantiated on multiple devices/servers, only one should be actively processing the generation loop. Base `createAgent()` stays transport-agnostic; deployments that need explicit wake fencing (webhooks/queues) should use Phase 1 runner lifecycle primitives (`runWithLifecycle` + `RunnerLifecycleAdapter`) to enforce this at runtime boundaries.
 
 Applications requiring multiple concurrent runners per agent (e.g., horizontal scaling) should implement coordination at the application or sync-backend layer. Distributed coordination is deferred to future work (Phase 4).
 
@@ -1133,6 +1247,16 @@ Applications requiring multiple concurrent runners per agent (e.g., horizontal s
 **Path 1: Collection-Based** — Agent reads/writes a messages collection directly. The collection must conform to `AgentMessage` schema. This is what option factories like `durableAgent()` produce.
 
 ```typescript
+type AgentGenerate<TRow extends object> = (input: {
+  pending: TRow[]
+  messages: ModelMessage[]
+  adapter: AnyTextAdapter
+  tools: Tool[]
+  instructions: string
+  signal: AbortSignal
+  context: AgentContext
+}) => Promise<string>
+
 interface CollectionAgentConfig {
   name: string
   instructions: string
@@ -1144,6 +1268,10 @@ interface CollectionAgentConfig {
   collections: {
     messages: Collection<AgentMessage>
   }
+
+  // Required in raw createAgent() configs.
+  // durableAgent() provides a default implementation.
+  generate: AgentGenerate<AgentMessage>
 
   // Optional overrides (agent provides built-in defaults for these)
   pendingWork?: EffectQueryInput<any>  // Override which rows drive the loop
@@ -1170,15 +1298,19 @@ interface QueryAgentConfig<TRow extends object = Record<string, unknown>> {
   pendingWork: EffectQueryInput<any>  // Drives the reactive effect loop
   buildMessages: (pending: TRow[], ctx: AgentContext) => Promise<ModelMessage[]>  // Builds LLM context
 
+  // Generation path (required)
+  generate: AgentGenerate<TRow>
+
   // Write paths (required) — user-controlled mutations
   onResponse: (response: string, pending: TRow[], ctx: AgentContext) => Promise<void>
 
   // Optional
-  send?: (content: string, opts: { from: string; requestId?: string; inReplyTo?: string }) => Promise<void>
   watchForResponse?: (requestId: string, opts: { timeout: number; callerName: string }) => Promise<{ content: string }>
   onError?: (error: Error, pending: TRow[], ctx: AgentContext) => Promise<void>
 }
 ```
+
+In raw `createAgent({...})` usage, `generate` is always required so generation behavior is explicit. Option factories like `durableAgent(...)` fill it in with a default `chat()` implementation.
 
 **When to use each path:**
 
@@ -1248,6 +1380,14 @@ interface AgentReference {
   inputSchema?: SchemaInput   // Default: z.object({ message: z.string() })
   outputSchema?: SchemaInput  // Default: z.object({ response: z.string() })
   timeout?: number            // Max wait for response (default: 120_000ms)
+  // Required when the target agent does not expose collections.messages
+  // (for example query/mutation path with custom schema).
+  insertMessage?: (message: {
+    content: string
+    actorId: string
+    requestId?: string
+    inReplyTo?: string
+  }) => Promise<void>
   // Future extension points:
   // async?: boolean           // fire-and-forget vs wait-for-response
   // retryPolicy?: ...
@@ -1278,9 +1418,13 @@ const agent = createAgent(durableAgent({
 
 **Generation tracking** — The `durableAgent()` factory records generation metadata in an internal collection. In the raw path, users can track this in `onResponse` or omit it.
 
+**Runner lifecycle integration** — `durableAgent()` can compose `runWithLifecycle()` + `drainUntilIdle()` with an optional runtime adapter. This enables protocol-specific wake/ack behavior (for example Durable Streams webhooks in either request-bound or immediate-ack mode) without coupling `createAgent()` to transport semantics.
+
 ##### `createAgent()` — Persistent Reactive Agent
 
 A persistent agent is a **live reactive entity** backed by collections. It has an identity, accumulates history across interactions, and runs its own generation loop driven by reactive effects. When there is pending work in its inbox, it generates. When its inbox is empty, it goes idle. When new work arrives—even while mid-generation—it picks it up in the next loop iteration.
+
+The returned `Agent` instance exposes loop controls for runtime integration: `hasPendingWork()`, `runGenerationCycle()`, and `drainUntilIdle(...)`.
 
 **The Generation Loop as a State Machine:**
 
@@ -1303,8 +1447,8 @@ A persistent agent is a **live reactive entity** backed by collections. It has a
               ┌──────────┐                    │
               │GENERATING│ ← chat() w/ tools  │
               │          │   (tool calls      │
-              │          │    handled          │
-              │          │    internally)      │
+              │          │    handled         │
+              │          │    internally)     │
               └────┬─────┘                    │
                    │ writes response          │
                    ▼                          │
@@ -1326,7 +1470,7 @@ import { createAgent, durableAgent } from '@tanstack/ai-db'
 import { openaiText } from '@tanstack/ai'
 
 // Batteries-included: factory creates messages collection with Durable Streams sync,
-// provides default pendingWork, buildMessages, onResponse, and
+// provides default pendingWork, buildMessages, generate, onResponse, and
 // composes chunk streaming + generation tracking internally.
 const researcher = createAgent(durableAgent({
   name: 'researcher',
@@ -1337,13 +1481,19 @@ const researcher = createAgent(durableAgent({
 }))
 
 // The agent is now LIVE — watching for work.
-researcher.send('What are the latest advances in quantum computing?', {
-  from: 'user-123',
+researcher.collections.messages.insert({
+  role: 'user',
+  actorId: 'user-123',
+  targetAgent: researcher.name,
+  content: 'What are the latest advances in quantum computing?',
 })
 
 // Send another while it's thinking — this just queues
-researcher.send('Also check the ArXiv papers from this week', {
-  from: 'user-123',
+researcher.collections.messages.insert({
+  role: 'user',
+  actorId: 'user-123',
+  targetAgent: researcher.name,
+  content: 'Also check the ArXiv papers from this week',
 })
 // This message lands in the collection.
 // When current generation finishes → effect re-evaluates →
@@ -1357,7 +1507,7 @@ researcher.dispose()
 
 ```typescript
 import { createAgent, makeDurableTools } from '@tanstack/ai-db'
-import { openaiText } from '@tanstack/ai'
+import { chat, openaiText } from '@tanstack/ai'
 import { createCollection, eq, and, or, queryOnce } from '@tanstack/db'
 
 // Messages collection conforming to AgentMessage schema
@@ -1379,7 +1529,8 @@ const researcher = createAgent({
   // Collection-based path: just messages
   collections: { messages },
 
-  // Optional overrides (agent has built-in defaults for AgentMessage schema)
+  // Optional overrides (agent has built-in defaults for AgentMessage schema).
+  // `generate` is still required in raw createAgent() usage.
   buildMessages: async (pending, ctx) => {
     const history = await queryOnce((q) =>
       q.from({ m: ctx.collections.messages })
@@ -1392,10 +1543,27 @@ const researcher = createAgent({
     )
     return history.map(m => ({ role: m.role, content: m.content }))
   },
+
+  // Required in raw createAgent() configs
+  generate: async ({ messages, tools, adapter, instructions, signal }) => {
+    const abortController = new AbortController()
+    signal.addEventListener('abort', () => abortController.abort())
+    return chat({
+      adapter,
+      systemPrompts: [instructions],
+      messages,
+      tools,
+      abortController,
+      stream: false,
+    })
+  },
 })
 
-researcher.send('What are the latest advances in quantum computing?', {
-  from: 'user-123',
+messages.insert({
+  role: 'user',
+  actorId: 'user-123',
+  targetAgent: researcher.name,
+  content: 'What are the latest advances in quantum computing?',
 })
 researcher.dispose()
 ```
@@ -1435,6 +1603,19 @@ const researcher = createAgent({
     return history.map(m => ({ role: m.type, content: m.body }))
   },
 
+  generate: async ({ messages, tools, adapter, instructions, signal }) => {
+    const abortController = new AbortController()
+    signal.addEventListener('abort', () => abortController.abort())
+    return chat({
+      adapter,
+      systemPrompts: [instructions],
+      messages,
+      tools,
+      abortController,
+      stream: false,
+    })
+  },
+
   // Write: mutation callbacks use user's own collection API
   onResponse: async (response, pending, ctx) => {
     for (const msg of pending) {
@@ -1450,19 +1631,6 @@ const researcher = createAgent({
       ts: new Date().toISOString(),
     })
   },
-
-  // Optional: power agent.send() in query/mutation path
-  send: async (content, opts) => {
-    await messages.insert({
-      id: crypto.randomUUID(),
-      type: 'user',
-      body: content,
-      sender: opts.from,
-      recipient: 'researcher',
-      handled: false,
-      ts: new Date().toISOString(),
-    })
-  },
 })
 ```
 
@@ -1470,13 +1638,27 @@ const researcher = createAgent({
 
 ```typescript
 function createAgent(options: AgentConfig): Agent {
-  const { name, instructions, adapter, tools = [], agents = [], description } = options
+  const {
+    name,
+    instructions,
+    adapter,
+    tools = [],
+    agents = [],
+    description,
+    generate,
+  } = options
 
   // Resolve data interface: collection-based or query/mutation-based
   const hasCollections = 'collections' in options && options.collections
-  const pendingWork = options.pendingWork ?? defaultPendingWork(name, options.collections.messages)
-  const buildMessages = options.buildMessages ?? defaultBuildMessages(name, options.collections.messages)
-  const onResponse = options.onResponse ?? defaultOnResponse(name, options.collections.messages)
+  const pendingWork = hasCollections
+    ? options.pendingWork ?? defaultPendingWork(name, options.collections.messages)
+    : options.pendingWork
+  const buildMessages = hasCollections
+    ? options.buildMessages ?? defaultBuildMessages(name, options.collections.messages)
+    : options.buildMessages
+  const onResponse = hasCollections
+    ? options.onResponse ?? defaultOnResponse(name, options.collections.messages)
+    : options.onResponse
   const onError = options.onError
 
   // Convert agent references into tool definitions.
@@ -1486,6 +1668,52 @@ function createAgent(options: AgentConfig): Agent {
   // Combine external tools + agent tools for the LLM
   const allTools = [...tools, ...agentTools]
 
+  const runGenerationCycleInternal = async (
+    pendingRows: unknown[],
+    signal: AbortSignal,
+  ) => {
+    if (pendingRows.length === 0) {
+      return
+    }
+
+    const agentCtx: AgentContext = {
+      agentName: name,
+      collections: hasCollections ? options.collections : undefined,
+      signal,
+    }
+
+    try {
+      const llmMessages = await buildMessages(pendingRows, agentCtx)
+      const response = await generate({
+        pending: pendingRows,
+        messages: llmMessages,
+        adapter,
+        tools: allTools,
+        instructions,
+        signal,
+        context: agentCtx,
+      })
+
+      await onResponse(response, pendingRows, agentCtx)
+    } catch (error) {
+      if (onError) {
+        await onError(error as Error, pendingRows, agentCtx)
+      } else {
+        console.error(`Agent ${name} generation failed:`, error)
+      }
+    }
+  }
+
+  const hasPendingWork = async () => {
+    const rows = await queryOnce((q) => pendingWork(q).limit(1))
+    return rows.length > 0
+  }
+
+  const runGenerationCycle = async () => {
+    const pendingRows = await queryOnce((q) => pendingWork(q).limit(50))
+    await runGenerationCycleInternal(pendingRows, new AbortController().signal)
+  }
+
   // Create the reactive effect that drives the generation loop.
   // The effect fires when rows enter the pendingWork query result set.
   // batchHandler receives all new pending rows at once per graph run.
@@ -1493,77 +1721,34 @@ function createAgent(options: AgentConfig): Agent {
     query: pendingWork,
     on: 'enter',
     batchHandler: async (events, ctx) => {
-      const pendingRows = events.map(e => e.value)
-
-      const agentCtx: AgentContext = {
-        agentName: name,
-        collections: hasCollections ? options.collections : undefined,
-        signal: ctx.signal,
-      }
-
-      try {
-        // Build LLM messages from agent's context
-        const llmMessages = await buildMessages(pendingRows, agentCtx)
-
-        // Bridge effect signal → AbortController for chat()
-        const abortController = new AbortController()
-        ctx.signal.addEventListener('abort', () => abortController.abort())
-
-        // Run chat() with tools (external + agent tools)
-        const response = await chat({
-          adapter,
-          systemPrompts: [instructions],
-          messages: llmMessages,
-          tools: allTools,
-          abortController,
-          stream: false,
-        })
-
-        // Write response via user callback (or default)
-        await onResponse(response, pendingRows, agentCtx)
-      } catch (error) {
-        if (onError) {
-          await onError(error as Error, pendingRows, agentCtx)
-        } else {
-          // On error, the pending work remains unprocessed.
-          // The effect will re-fire on next relevant change,
-          // or recovery (Phase 3) can detect orphaned state.
-          console.error(`Agent ${name} generation failed:`, error)
-        }
-      }
-
-      // Effect system automatically re-evaluates pendingWork query.
-      // If new rows entered during generation, batchHandler fires again.
+      await runGenerationCycleInternal(
+        events.map((e) => e.value),
+        ctx.signal,
+      )
     },
   })
+
+  const drainAgent = (options?: {
+    maxIterations?: number
+    maxDurationMs?: number
+    lifecycle?: {
+      heartbeat?: () => Promise<void>
+      checkpoint?: (checkpoints: CheckpointContract[]) => Promise<void>
+    }
+    buildCheckpoint?: () => Promise<CheckpointContract[]>
+  }) =>
+    drainUntilIdle({
+      hasPendingWork,
+      runCycle: runGenerationCycle,
+      ...options,
+    })
 
   return {
     name,
     collections: hasCollections ? options.collections : undefined,
-    send: async (content, opts) => {
-      if (hasCollections) {
-        // Collection path: insert directly with known field names
-        options.collections.messages.insert({
-          id: crypto.randomUUID(),
-          targetAgent: name,
-          role: 'user',
-          content,
-          actorId: opts.from,
-          processed: false,
-          createdAt: new Date().toISOString(),
-          requestId: opts.requestId,     // Correlation ID (for agent-to-agent calls)
-          inReplyTo: opts.inReplyTo,     // Response correlation (for agent-to-agent replies)
-        })
-      } else if (options.send) {
-        // Query/mutation path: delegate to user-provided send callback
-        await options.send(content, opts)
-      } else {
-        throw new Error(
-          `Agent "${name}" has no send() callback. ` +
-          `In query/mutation mode, provide a send callback or insert into your collection directly.`
-        )
-      }
-    },
+    hasPendingWork,
+    runGenerationCycle,
+    drainUntilIdle: drainAgent,
     watchForResponse: (requestId, opts) => {
       if (hasCollections) {
         // Collection-based: use default implementation that queries messages collection
@@ -1594,12 +1779,30 @@ function agentRefToTool(ref: AgentReference, callerOptions: AgentConfig): Tool {
     inputSchema,
     outputSchema,
     execute: async (args) => {
-      // 1. Send message to target agent's inbox with a requestId for correlation
+      // 1. Write message to target agent's inbox with a requestId for correlation
       const requestId = crypto.randomUUID()
-      await ref.agent.send(args.message ?? JSON.stringify(args), {
-        from: callerOptions.name,
-        requestId,
-      })
+      const content = args.message ?? JSON.stringify(args)
+
+      if (ref.agent.collections?.messages) {
+        await ref.agent.collections.messages.insert({
+          targetAgent: ref.agent.name,
+          role: 'user',
+          content,
+          actorId: callerOptions.name,
+          requestId,
+        })
+      } else if (ref.insertMessage) {
+        await ref.insertMessage({
+          content,
+          actorId: callerOptions.name,
+          requestId,
+        })
+      } else {
+        throw new Error(
+          `Agent reference '${ref.agent.name}' cannot accept message writes. ` +
+          `Provide AgentReference.insertMessage for custom-schema/query-mutation targets.`
+        )
+      }
 
       // 2. Watch for a response message with inReplyTo === requestId
       // Uses the agent's watchForResponse method, which:
@@ -1648,10 +1851,10 @@ function defaultWatchForResponse(
 }
 ```
 
-**Note on agent-to-agent coordination:** When a persistent agent uses another agent (via the `agents` config), coordination happens through **messages**, not through a `toolCalls` collection. The calling agent's LLM produces a tool call; internally, `agentRefToTool` translates this into a message to the target agent's inbox with a unique `requestId`. The target agent processes it through its own generation loop and writes a response with `inReplyTo` set to the `requestId`. The caller uses `agent.watchForResponse()` to observe the response.
+**Note on agent-to-agent coordination:** When a persistent agent uses another agent (via the `agents` config), coordination happens through **messages**, not through a `toolCalls` collection. The calling agent's LLM produces a tool call; internally, `agentRefToTool` writes a message row to the target agent's inbox with a unique `requestId`. The target agent processes it through its own generation loop and writes a response with `inReplyTo` set to the `requestId`. The caller uses `agent.watchForResponse()` to observe the response.
 
 - **Collection-based agents:** `watchForResponse` uses a live query effect on `collections.messages` (provided by `defaultWatchForResponse`).
-- **Query/mutation-based agents:** Users must provide a `watchForResponse` callback in their config to support agent-to-agent calls. This callback can query any collection or data source the agent writes responses to.
+- **Query/mutation-based agents:** Users must provide a `watchForResponse` callback in config and an `AgentReference.insertMessage` callback when wiring collaborators, so agent-to-agent calls can write inbox rows and observe replies with custom schemas.
 
 This means agent-to-agent durability comes for free from the messaging layer — no `makeDurableTools` wrapping is needed, and there is no double-wrapping of persistence.
 
@@ -1665,6 +1868,19 @@ const messages = createCollection(electricCollectionOptions({
   shapeOptions: { url: '...', params: { table: 'messages' } },
   getKey: (m) => m.id,
 }))
+
+const generateWithChat = async ({ messages, tools, adapter, instructions, signal }) => {
+  const abortController = new AbortController()
+  signal.addEventListener('abort', () => abortController.abort())
+  return chat({
+    adapter,
+    systemPrompts: [instructions],
+    messages,
+    tools,
+    abortController,
+    stream: false,
+  })
+}
 
 // Each agent gets a different query view over the same collection
 const researcher = createAgent({
@@ -1692,6 +1908,7 @@ const researcher = createAgent({
     )
     return history.map(m => ({ role: m.role, content: m.content }))
   },
+  generate: generateWithChat,
   onResponse: async (response, pending, ctx) => {
     for (const msg of pending) messages.update(msg.id, (draft) => { draft.processed = true })
     await messages.insert({
@@ -1726,6 +1943,7 @@ const writer = createAgent({
     )
     return relevant.map(m => ({ role: m.role, content: m.content }))
   },
+  generate: generateWithChat,
   onResponse: async (response, pending, ctx) => { /* ... */ },
 })
 
@@ -1752,6 +1970,7 @@ const planner = createAgent({
       eq(m.$synced, true),
     )),
   buildMessages: async (pending, ctx) => { /* ... */ },
+  generate: generateWithChat,
   onResponse: async (response, pending, ctx) => { /* ... */ },
 })
 ```
@@ -1761,7 +1980,9 @@ const planner = createAgent({
 - The agent is live from creation — no `.start()` needed. The effect begins watching immediately, matching how `createEffect()` works in the reactive effects system.
 - `pendingWork` is a user-defined query — users control their schema and what constitutes "work" for each agent.
 - `buildMessages` gives the agent full control over its context window — it can see the entire conversation, filter by relevance, apply summarization, or anything else.
+- `generate` is explicit in raw `createAgent({...})` configs, so the generation strategy is always intentional. `durableAgent(...)` supplies a default chat-based implementation.
 - `tools` and `agents` are separate config properties — tools go through the tool execution path (optionally durable via `makeDurableTools`), agents coordinate through messages (inherently durable). No double-wrapping risk.
+- Runtime integrations can use `agent.hasPendingWork()`, `agent.runGenerationCycle()`, or `agent.drainUntilIdle(...)` directly instead of wiring external helper functions.
 - The generation loop is entirely event-driven via reactive effects — no polling, no `while(true)` loop.
 
 **Effect Batching and Loop Semantics:**
@@ -1785,6 +2006,18 @@ When generation fails (LLM error, network timeout, `buildMessages` throws):
 ```typescript
 createAgent({
   // ...
+  generate: async ({ messages, tools, adapter, instructions, signal }) => {
+    const abortController = new AbortController()
+    signal.addEventListener('abort', () => abortController.abort())
+    return chat({
+      adapter,
+      systemPrompts: [instructions],
+      messages,
+      tools,
+      abortController,
+      stream: false,
+    })
+  },
   onError: async (error, pending, ctx) => {
     // Custom: mark pending work as failed, notify user, etc.
     console.error(`Agent ${ctx.agentName} failed:`, error)
@@ -1827,6 +2060,88 @@ export class AgentDO extends DurableObject {
     this.agent?.dispose()
     this.agent = undefined
   }
+}
+```
+
+For webhook-driven serverless consumers, pair the agent with a lifecycle adapter. The agent remains the same; only wake/ack mechanics change:
+
+```typescript
+const wakeAdapter = durableStreamsWebhookAdapter({
+  verifySignature: async (req) => verifyWebhookSignature(req, env.WEBHOOK_SECRET),
+  mode: { type: 'ack-immediate', status: 202 },
+  heartbeatIntervalMs: 10_000,
+  postCallback: (wake, body, token) =>
+    postToDurableStreamsCallback(wake.callback, body, token),
+})
+
+const agent = createAgent(durableAgent({
+  name: 'researcher',
+  instructions: '...',
+  adapter: openaiText('gpt-4o'),
+  streamUrl: env.STREAM_URL,
+  runtime: {
+    wakeAdapter,
+    drain: { maxDurationMs: 25_000, maxIterations: 50 },
+  },
+}))
+
+// Mode 1: request-bound drain (do work during webhook request lifetime)
+async function handleWebhookRequestBound(webhookWakePayload: DurableStreamsWakePayload) {
+  const checkpointState = new Map(
+    webhookWakePayload.streams.map((s) => [s.path, s.offset] as const),
+  )
+
+  const result = await runWithLifecycle(webhookWakePayload, wakeAdapter, async (session) => {
+    const drained = await agent.drainUntilIdle({
+      maxDurationMs: 25_000,
+      lifecycle: {
+        heartbeat: () => session.heartbeat(),
+        checkpoint: async (cp) => {
+          await session.checkpoint(cp)
+          for (const item of cp) checkpointState.set(item.source, item.cursor)
+        },
+      },
+      buildCheckpoint: async () =>
+        [...checkpointState.entries()].map(([source, cursor]) => ({ source, cursor })),
+    })
+    await session.complete({ done: drained.completed })
+    return drained
+  })
+
+  return new Response(
+    JSON.stringify({ done: result.completed }),
+    { status: 200, headers: { 'content-type': 'application/json' } },
+  )
+}
+
+// Mode 2: immediate-ack wake (respond now, process out-of-band)
+async function handleWebhookAckImmediate(webhookWakePayload: DurableStreamsWakePayload) {
+  const checkpointState = new Map(
+    webhookWakePayload.streams.map((s) => [s.path, s.offset] as const),
+  )
+
+  queueMicrotask(async () => {
+    await runWithLifecycle(webhookWakePayload, wakeAdapter, async (session) => {
+      const drained = await agent.drainUntilIdle({
+        maxDurationMs: 25_000,
+        lifecycle: {
+          heartbeat: () => session.heartbeat(),
+          checkpoint: async (cp) => {
+            await session.checkpoint(cp)
+            for (const item of cp) checkpointState.set(item.source, item.cursor)
+          },
+        },
+        buildCheckpoint: async () =>
+          [...checkpointState.entries()].map(([source, cursor]) => ({ source, cursor })),
+      })
+      await session.complete({ done: drained.completed })
+    })
+  })
+
+  return new Response(
+    JSON.stringify({ accepted: true }),
+    { status: 202, headers: { 'content-type': 'application/json' } },
+  )
 }
 ```
 
@@ -1879,6 +2194,7 @@ export class ResearcherAgent extends DurableObject {
 
 Key aspects of sleep/wake:
 - The wake mechanism is environment-specific — platforms use webhooks, DO alarms, queue triggers, or any event source
+- Phase 1 lifecycle primitives provide a common handshake surface (claim/heartbeat/checkpoint/complete) across those wake mechanisms
 - On wake, the agent rehydrates from collections (since all state is persisted in the sync layer)
 - The sleep/wake cycle is transparent to callers — sending a message to a sleeping agent's inbox triggers a wake
 - This enables cost-efficient deployment where agents only consume compute when there is work to do
@@ -1928,6 +2244,18 @@ const researcher = createAgent({
     searchTool,
     factChecker,  // Sits alongside regular tools
   ],
+  generate: async ({ messages, tools, adapter, instructions, signal }) => {
+    const abortController = new AbortController()
+    signal.addEventListener('abort', () => abortController.abort())
+    return chat({
+      adapter,
+      systemPrompts: [instructions],
+      messages,
+      tools,
+      abortController,
+      stream: false,
+    })
+  },
   // ...
 })
 ```
@@ -2236,6 +2564,15 @@ interface SummaryRecord {
   coveringUpTo: string      // Timestamp of last summarized message
   content: string
 }
+
+// Optional: runner lifecycle checkpoints (used by protocol adapters)
+interface RunnerCheckpointRecord {
+  id: string
+  runnerId: string          // Consumer/runner identity in your runtime
+  source: string            // Stream path / queue partition / topic, etc.
+  cursor: string            // Opaque offset token, monotonic per source
+  updatedAt: string
+}
 ```
 
 **Stream Size Trade-off:**
@@ -2270,6 +2607,18 @@ const researcher = createAgent({
       ...sums.map(s => ({ role: 'user' as const, content: `[Summary] ${s.content}` })),
       ...recent.reverse().map(m => ({ role: m.role, content: m.content })),
     ]
+  },
+  generate: async ({ messages, tools, adapter, instructions, signal }) => {
+    const abortController = new AbortController()
+    signal.addEventListener('abort', () => abortController.abort())
+    return chat({
+      adapter,
+      systemPrompts: [instructions],
+      messages,
+      tools,
+      abortController,
+      stream: false,
+    })
   },
 })
 ```
@@ -2411,7 +2760,14 @@ function ChatView({ agent }) {
     <div>
       {messages.map(msg => <Message key={msg.id} message={msg} />)}
       <MessageInput 
-        onSend={(content) => agent.send(content, { from: userId })}
+        onSend={(content) =>
+          agent.collections.messages.insert({
+            targetAgent: agent.name,
+            role: 'user',
+            content,
+            actorId: userId,
+          })
+        }
       />
     </div>
   )
@@ -2440,7 +2796,14 @@ function MultiAgentChatView({ agents, messagesCollection }) {
         onSelect={setTargetAgent}
       />
       <MessageInput 
-        onSend={(content) => agent.send(content, { from: userId })}
+        onSend={(content) =>
+          messagesCollection.insert({
+            targetAgent: agent.name,
+            role: 'user',
+            content,
+            actorId: userId,
+          })
+        }
       />
     </div>
   )
@@ -2645,14 +3008,15 @@ For Phase 1 (composable primitives): Yes — we compose with existing systems ra
 - **TanStack AI's `chat()` loop is unchanged** — we wrap tools, not the loop
 - **Reactive effects** handle the watching/triggering
 - **Collections** serve as the communication layer between environments
-- **Durable Streams** handles persistence
+- **Runner lifecycle primitives** are protocol-agnostic (wake/claim/checkpoint/complete)
+- **Durable Streams** is an optional adapter layer, not a core requirement
 
 The key insight is that `makeDurableTool()` provides an async `execute()` function that:
 1. Inserts a pending row
 2. Waits for completion via collection subscription
 3. Returns the result — TanStack AI's loop handles the rest
 
-Phase 2 (agent abstractions) adds complexity by introducing a generation loop driven by reactive effects. This is intentional: `createAgent` builds on Phase 1 primitives (`makeDurableTools`, `durableChat`, `createEffect`) to provide a higher-level abstraction. Users who don't need the agent abstraction can use Phase 1 directly. Option factories like `durableAgent()` minimize the cognitive cost of Phase 2 — users provide name, instructions, adapter (with model baked in), tools, and a stream URL; everything else is handled.
+Phase 2 (agent abstractions) adds complexity by introducing a generation loop driven by reactive effects. This is intentional: `createAgent` builds on Phase 1 primitives (`makeDurableTools`, `durableChat`, `createEffect`) to provide a higher-level abstraction. Users who don't need the agent abstraction can use Phase 1 directly. Option factories like `durableAgent()` minimize the cognitive cost of Phase 2 — users provide name, instructions, adapter (with model baked in), tools, and a stream URL; runtime lifecycle adapters are optional and only needed in serverless wake/ack environments.
 
 **What could we cut?**
 
@@ -2780,6 +3144,99 @@ function createGenerationEffect<TRow extends GenerationContract>(options: {
   onError?: (row: TRow, error: Error) => Promise<void>
 }): Effect
 
+// --------------------------------------------
+// Runner lifecycle primitives (protocol-agnostic)
+// --------------------------------------------
+
+type CheckpointContract = {
+  source: string
+  cursor: string
+}
+
+interface RunnerLifecycleAdapter<TWake = unknown> {
+  claimWake(
+    wake: TWake,
+    ctx: { signal: AbortSignal }
+  ): Promise<{ fenceToken?: string }>
+  heartbeat?(
+    state: { wake: TWake; fenceToken?: string }
+  ): Promise<void>
+  checkpoint?(
+    checkpoints: CheckpointContract[],
+    state: { wake: TWake; fenceToken?: string }
+  ): Promise<void>
+  complete?(
+    state: { wake: TWake; fenceToken?: string },
+    result: { done: boolean }
+  ): Promise<void>
+  fail?(
+    state: { wake: TWake; fenceToken?: string },
+    error: Error
+  ): Promise<void>
+}
+
+interface RunnerSession<TWake = unknown> {
+  wake: TWake
+  fenceToken?: string
+  signal: AbortSignal
+  heartbeat(): Promise<void>
+  checkpoint(checkpoints: CheckpointContract[]): Promise<void>
+  complete(result: { done: boolean }): Promise<void>
+  fail(error: Error): Promise<void>
+}
+
+function runWithLifecycle<TWake, TResult>(
+  wake: TWake,
+  adapter: RunnerLifecycleAdapter<TWake>,
+  handler: (session: RunnerSession<TWake>) => Promise<TResult>,
+  options?: { signal?: AbortSignal }
+): Promise<TResult>
+
+function drainUntilIdle(options: {
+  hasPendingWork: () => Promise<boolean>
+  runCycle: () => Promise<void>
+  maxIterations?: number
+  maxDurationMs?: number
+  lifecycle?: {
+    heartbeat?: () => Promise<void>
+    checkpoint?: (checkpoints: CheckpointContract[]) => Promise<void>
+  }
+  buildCheckpoint?: () => Promise<CheckpointContract[]>
+}): Promise<{ completed: boolean; cycles: number }>
+
+// Optional Durable Streams helper (adapter built on generic lifecycle primitives)
+type DurableStreamsWakePayload = {
+  consumer_id: string
+  epoch: number
+  wake_id: string
+  callback: string
+  token: string
+  streams: Array<{ path: string; offset: string }>
+}
+
+type WebhookExecutionMode =
+  | { type: 'request-bound'; maxRequestMs?: number }
+  | { type: 'ack-immediate'; status?: 200 | 202 }
+
+function durableStreamsWebhookAdapter(options: {
+  verifySignature: (req: Request) => Promise<void>
+  mode: WebhookExecutionMode
+  postCallback: (
+    wake: DurableStreamsWakePayload,
+    body: unknown,
+    token: string
+  ) => Promise<{ token: string }>
+  // Optional keepalive policy for long runs (heartbeat callback cadence)
+  heartbeatIntervalMs?: number
+}): RunnerLifecycleAdapter<DurableStreamsWakePayload>
+
+function handleDurableStreamsWake(options: {
+  request: Request
+  adapter: RunnerLifecycleAdapter<DurableStreamsWakePayload>
+  mode: WebhookExecutionMode
+  run: (wake: DurableStreamsWakePayload) => Promise<void>
+}): Promise<Response>
+
 // Stream AG-UI chunks to a collection
 import type { StreamChunk } from '@tanstack/ai'
 
@@ -2829,6 +3286,16 @@ function createAgent(options: AgentConfig): Agent
 // AgentConfig — discriminated by presence of `collections`
 type AgentConfig = CollectionAgentConfig | QueryAgentConfig
 
+type AgentGenerate<TRow extends object> = (input: {
+  pending: TRow[]
+  messages: ModelMessage[]
+  adapter: AnyTextAdapter
+  tools: Tool[]
+  instructions: string
+  signal: AbortSignal
+  context: AgentContext
+}) => Promise<string>
+
 interface CollectionAgentConfig {
   name: string
   description?: string
@@ -2837,6 +3304,7 @@ interface CollectionAgentConfig {
   tools?: Tool[]                        // External tools (optionally durable)
   agents?: AgentReference[]             // Agent collaborators (coordination via messages)
   collections: { messages: Collection<AgentMessage> }
+  generate: AgentGenerate<AgentMessage> // Required in raw createAgent(); provided by durableAgent()
   pendingWork?: EffectQueryInput<any>  // Optional override
   buildMessages?: (pending: AgentMessage[], ctx: AgentContext) => Promise<ModelMessage[]>
   onResponse?: (response: string, pending: AgentMessage[], ctx: AgentContext) => Promise<void>
@@ -2853,8 +3321,8 @@ interface QueryAgentConfig<TRow extends object = Record<string, unknown>> {
   // No collections — read/write via queries + mutations
   pendingWork: EffectQueryInput<any>  // Required
   buildMessages: (pending: TRow[], ctx: AgentContext) => Promise<ModelMessage[]>  // Required
+  generate: AgentGenerate<TRow>  // Required
   onResponse: (response: string, pending: TRow[], ctx: AgentContext) => Promise<void>  // Required
-  send?: (content: string, opts: { from: string; requestId?: string; inReplyTo?: string }) => Promise<void>
   watchForResponse?: (requestId: string, opts: { timeout: number; callerName: string }) => Promise<{ content: string }>
   onError?: (error: Error, pending: TRow[], ctx: AgentContext) => Promise<void>
 }
@@ -2862,7 +3330,17 @@ interface QueryAgentConfig<TRow extends object = Record<string, unknown>> {
 interface Agent {
   name: string
   collections?: { messages: Collection<AgentMessage> }  // Only in collection path
-  send(content: string, options: { from: string; requestId?: string; inReplyTo?: string }): Promise<void>
+  hasPendingWork(): Promise<boolean>
+  runGenerationCycle(): Promise<void>
+  drainUntilIdle(options?: {
+    maxIterations?: number
+    maxDurationMs?: number
+    lifecycle?: {
+      heartbeat?: () => Promise<void>
+      checkpoint?: (checkpoints: CheckpointContract[]) => Promise<void>
+    }
+    buildCheckpoint?: () => Promise<CheckpointContract[]>
+  }): Promise<{ completed: boolean; cycles: number }>
   watchForResponse(requestId: string, opts: { timeout: number; callerName: string }): Promise<{ content: string }>
   dispose(): Promise<void>  // Resolves when in-flight handlers complete (matches Effect.dispose)
 }
@@ -2874,6 +3352,12 @@ interface AgentReference {
   inputSchema?: SchemaInput
   outputSchema?: SchemaInput
   timeout?: number            // Max wait for response (default: 120_000ms)
+  insertMessage?: (message: {
+    content: string
+    actorId: string
+    requestId?: string
+    inReplyTo?: string
+  }) => Promise<void>
 }
 
 interface AgentContext {
@@ -2895,7 +3379,12 @@ function durableAgent(options: {
   streamUrl: string
   description?: string
   buildMessages?: (pending: AgentMessage[], ctx: AgentContext) => Promise<ModelMessage[]>
+  generate?: AgentGenerate<AgentMessage>  // Optional override of factory default
   onResponse?: (response: string, pending: AgentMessage[], ctx: AgentContext) => Promise<void>
+  runtime?: {
+    wakeAdapter?: RunnerLifecycleAdapter<any>   // Optional protocol adapter (webhooks/queue/alarm)
+    drain?: { maxIterations?: number; maxDurationMs?: number }
+  }
   autoSummarize?: { threshold: number; windowSize: number; adapter: AnyTextAdapter }
 }): CollectionAgentConfig
 
@@ -2965,9 +3454,17 @@ These invariants define the behavioral guarantees that all implementations of `@
 
 4. **Late-result policy.** If a tool call result arrives after the parent generation has been cancelled, the default behavior is to **discard** the result (mark the tool call as `'cancelled'`). The generation's status determines whether a result is actionable. This is configurable via the `onComplete` callback.
 
-5. **Agent-call correlation.** Every agent-to-agent message carries a `requestId` (set by the caller) or `inReplyTo` (set by the responder). The correlation chain is: caller generates `requestId` → sends message with `requestId` → target agent processes and responds with `inReplyTo: requestId` → caller matches response via `watchForResponse`. Unmatched responses (no `inReplyTo`) are treated as spontaneous messages.
+5. **Agent-call correlation.** Every agent-to-agent message carries a `requestId` (set by the caller) or `inReplyTo` (set by the responder). The correlation chain is: caller generates `requestId` → writes message row with `requestId` → target agent processes and responds with `inReplyTo: requestId` → caller matches response via `watchForResponse`. Unmatched responses (no `inReplyTo`) are treated as spontaneous messages.
 
 6. **Single-runner guarantee.** In v1, each `(session, agent)` pair has at most one active generation loop. The effect system ensures that only one instance processes pending work at a time. Multi-runner deployments should implement coordination at the application or sync-backend layer — this is deferred to future work (Phase 4).
+
+7. **Lifecycle fencing is adapter-enforced.** `runWithLifecycle()` requires `claimWake()` before work begins. If the adapter reports stale/already-claimed wake state, the run is aborted and no generation cycle is executed.
+
+8. **Checkpoint monotonicity.** Checkpoints emitted through `session.checkpoint()` must be monotonic per `source`. Adapters that reject non-monotonic checkpoints should surface a deterministic failure.
+
+9. **Done semantics are explicit.** `drainUntilIdle()` returns `completed: true` only when `hasPendingWork()` is false at loop end. Adapters receive this via `complete({ done })`, preventing false-idle acknowledgements.
+
+10. **Keepalive responsibility is explicit.** When runtime mode is `ack-immediate`, the runner must send periodic `heartbeat()` callbacks while work is active; missing keepalives must be treated as liveness loss and retried wake by the transport.
 
 ## Type-Safe Tool APIs (Design Rationale)
 
@@ -3202,6 +3699,8 @@ createToolExecutionEffect({
 | **Late result reconciliation** | Discard vs store-with-flag | Default discard; configurable |
 | **Approval audit trail** | Same collection vs separate | Separate collection for immutability |
 | **Recovery timeout duration** | Fixed vs configurable | Configurable with sensible default (5 min) |
+| **Lifecycle adapter packaging** | Built into core vs optional helper export | Keep core protocol-agnostic; ship `durableStreamsWebhookAdapter` as helper |
+| **Webhook execution mode default** | request-bound vs ack-immediate | Default to ack-immediate for edge/serverless safety; allow request-bound for long-lived runtimes |
 | **Type-safe tool implementations** | Approach 1-3 above | Prototype Approach 2 |
 | **Persistent agent pending work batching** | Batch all pending into one generation vs process sequentially | Batch preferred (one generation sees all pending); validate with prototyping |
 | **Persistent agent data interface** | Collection-based (AgentMessage) vs query/mutation-based (custom schema) | Both supported via AgentConfig overloads; query/mutation path for shared collections |
@@ -3235,6 +3734,8 @@ createToolExecutionEffect({
 | Generation effects | Effect fires on query match, calls user's generate function |
 | Chunk streaming | Chunks persist with ordering guarantees, deterministic reassembly |
 | Tool execution effects | Effect fires on query match, executes tool, writes result |
+| Runner lifecycle primitives | `runWithLifecycle()` + `drainUntilIdle()` provide protocol-agnostic wake/heartbeat/checkpoint/complete composition |
+| Webhook runtime modes | Durable Streams helper supports both request-bound drain and immediate-ack wake modes |
 | Persistent agents | `createAgent` creates live reactive entity; watches inbox, generates, loops until idle |
 | Worker agents | `createWorkerAgent` creates tool with internal agent loop; fresh context each call |
 | Agent composition | `agents` config property enables agent-to-agent coordination via messages; separate from `tools` to prevent double-wrapping |
@@ -3247,6 +3748,7 @@ createToolExecutionEffect({
 | Approvals | Durable approval state, sync across devices |
 | Recovery | Orphaned operations detected and recoverable on startup |
 | Option factories | `durableAgent()` and future factories enable minimal-config agent creation; progressively customizable |
+| Durable Streams webhook integration | Implemented via `durableAgent().runtime.wakeAdapter` composition (not core `createAgent` coupling), including callback claim/heartbeat/checkpoint/done |
 | Agent sleep/wake | Persistent agents can be suspended and resumed; state rehydrated from collections |
 
 ### Learning Goals
@@ -3340,6 +3842,10 @@ By providing an async `execute()` function via `makeDurableTool()`, we compose w
 | 1.0 | 2026-02-01 | samwillis | Initial version. Composable primitives (`makeDurableTool`, `createToolExecutionEffect`, `streamToCollection`), shape contracts, chunk ordering, cancellation/late-result handling, idempotency, human-in-the-loop approvals, resumability, backend capability matrix, type-safe tool APIs (Approach 2). |
 | 1.5 | 2026-02-01 | samwillis | Full type safety pass. Proper generics and type annotations throughout all examples. Added constraint types (`ToolCallContract`, etc.) to API summary. |
 | 2.0 | 2026-02-08 | samwillis | Major revision. Added agent abstractions: `createAgent(durableAgent({...}))` composition pattern with collection-based and query/mutation-based data interfaces, `createWorkerAgent` for ephemeral task agents, agent-to-agent correlation via `requestId`/`inReplyTo`. Reorganised into phases: 1 (Composable Primitives), 2 (Agent Abstractions), 3 (Production Hardening), 4 (Advanced Patterns/Future). Aligned all examples with current TanStack DB effect API (`createEffect({ query, on, handler }}`) and TanStack AI `chat()` API (adapter-based model, `abortController`, `systemPrompts`, AG-UI chunk events). Removed distributed tool execution (deferred to Phase 4) — v1 assumes single-consumer per tool execution effect. Added implementation invariants. |
+| 2.1 | 2026-02-08 | samwillis | Added protocol-agnostic runner lifecycle primitives (`runWithLifecycle`, `drainUntilIdle`, `RunnerLifecycleAdapter`, `CheckpointContract`) to support serverless wake/ack/checkpoint flows without coupling core agents to any transport. Clarified that `createAgent` remains backend-agnostic and `durableAgent` composes optional runtime adapters (including Durable Streams webhook lifecycle behavior) from Phase 1 primitives. Added lifecycle invariants and updated functional requirements/open questions accordingly. |
+| 2.2 | 2026-02-08 | samwillis | Clarified Durable Streams webhook runtime behavior with two explicit modes: request-bound drain and immediate-ack wake. Added mode types/API surface (`WebhookExecutionMode`, `handleDurableStreamsWake`), callback sequencing requirements (claim, token rotation, heartbeat, checkpoint, done), and requirement/invariant updates for keepalive and callback-driven completion semantics. |
+| 2.3 | 2026-02-08 | samwillis | Removed `agent.send(...)` as a user-facing interaction pattern. Updated examples and API summary so user messaging is modeled as direct writes to message streams/collections. Updated agent collaboration wiring to write inbox rows directly (or via `AgentReference.insertMessage` for custom-schema/query-mutation targets). |
+| 2.4 | 2026-02-08 | samwillis | Updated `createAgent` contract so raw configs require an explicit `generate` function, while `durableAgent` provides a default chat-based generator. Added agent-instance loop APIs (`hasPendingWork`, `runGenerationCycle`, `drainUntilIdle`) and updated webhook integration examples to use these methods directly (removing external helper stubs). |
 
 ---
 
