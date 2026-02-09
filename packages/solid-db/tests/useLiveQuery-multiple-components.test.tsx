@@ -1,11 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { render, renderHook, waitFor } from '@solidjs/testing-library'
-import {
-  and,
-  createCollection,
-  gte,
-  lte,
-} from '@tanstack/db'
+import { and, createCollection, gte, lte } from '@tanstack/db'
 import { For, createEffect } from 'solid-js'
 import { useLiveQuery } from '../src/useLiveQuery'
 import { mockSyncCollectionOptions } from '../../db/tests/utils'
@@ -40,7 +35,9 @@ describe(`Multiple useLiveQuery instances with where + orderBy`, () => {
     )
 
     // Track state snapshots from multiple hooks
-    const stateSnapshots: Array<Array<{ id: string; index: number; name: string }>> = []
+    const stateSnapshots: Array<
+      Array<{ id: string; index: number; name: string }>
+    > = []
 
     // Create 4 query hooks with where + orderBy + limit (as in the issue)
     const queries = [1, 2, 3, 4].map(() =>
@@ -98,13 +95,20 @@ describe(`Multiple useLiveQuery instances with where + orderBy`, () => {
 
     // All queries should now show items b, c, d, e (indices 1, 2, 3, 4)
     for (const query of queries) {
-      const ids = query.result().map((item) => item.id).sort()
+      const ids = query
+        .result()
+        .map((item) => item.id)
+        .sort()
       expect(ids).toEqual([`b`, `c`, `d`, `e`])
     }
 
     // Verify all 4 queries show identical data (the core assertion for this bug)
     const allResults = queries.map((q) =>
-      q.result().map((item) => `${item.id}:${item.index}`).sort().join(','),
+      q
+        .result()
+        .map((item) => `${item.id}:${item.index}`)
+        .sort()
+        .join(','),
     )
     const uniqueResults = [...new Set(allResults)]
     expect(uniqueResults.length).toBe(1) // All queries should show the same result
@@ -128,7 +132,11 @@ describe(`Multiple useLiveQuery instances with where + orderBy`, () => {
 
     // Verify all queries show the same updated names
     const allNames = queries.map((q) =>
-      q.result().map((item) => item.name).sort().join(','),
+      q
+        .result()
+        .map((item) => item.name)
+        .sort()
+        .join(','),
     )
     const uniqueNames = [...new Set(allNames)]
     expect(uniqueNames.length).toBe(1)
@@ -219,7 +227,10 @@ describe(`Multiple useLiveQuery instances with where + orderBy`, () => {
 
     // Verify all queries show the same initial data
     const getItemIds = (query: typeof query1) =>
-      query.result().map((item) => item.id).sort()
+      query
+        .result()
+        .map((item) => item.id)
+        .sort()
 
     expect(getItemIds(query1)).toEqual([`a`, `b`, `c`, `d`])
     expect(getItemIds(query2)).toEqual([`a`, `b`, `c`, `d`])
@@ -288,10 +299,22 @@ describe(`Multiple useLiveQuery instances with where + orderBy`, () => {
 
     // Wait for name updates and verify all queries are consistent
     await waitFor(() => {
-      const names1 = query1.result().map((item) => item.name).sort()
-      const names2 = query2.result().map((item) => item.name).sort()
-      const names3 = query3.result().map((item) => item.name).sort()
-      const names4 = query4.result().map((item) => item.name).sort()
+      const names1 = query1
+        .result()
+        .map((item) => item.name)
+        .sort()
+      const names2 = query2
+        .result()
+        .map((item) => item.name)
+        .sort()
+      const names3 = query3
+        .result()
+        .map((item) => item.name)
+        .sort()
+      const names4 = query4
+        .result()
+        .map((item) => item.name)
+        .sort()
 
       expect(names1).toEqual([`Item B+`, `Item C+`, `Item D+`, `Item E+`])
       expect(names2).toEqual([`Item B+`, `Item C+`, `Item D+`, `Item E+`])
@@ -344,7 +367,10 @@ describe(`Multiple useLiveQuery instances with where + orderBy`, () => {
 
     const getAllIds = () =>
       queries.map((q) =>
-        q.result().map((item) => item.id).sort(),
+        q
+          .result()
+          .map((item) => item.id)
+          .sort(),
       )
 
     // Verify initial state
@@ -437,7 +463,10 @@ describe(`Multiple useLiveQuery instances with where + orderBy`, () => {
     // Only d(1) and e(2) should be in range [1, 4]
     await waitFor(() => {
       for (const query of queries) {
-        const ids = query.result().map((item) => item.id).sort()
+        const ids = query
+          .result()
+          .map((item) => item.id)
+          .sort()
         expect(ids).toEqual([`d`, `e`])
       }
     })
@@ -462,23 +491,26 @@ describe(`Multiple useLiveQuery instances with where + orderBy`, () => {
     const renderedData: Array<Array<string>> = [[], [], [], []]
 
     function ListComponent(props: { index: number }) {
-      const query = useLiveQuery((q) =>
-        q
-          .from({ items: collection })
-          .where(({ items }) => and(gte(items.index, 1), lte(items.index, 4)))
-          .select(({ items }) => ({
-            id: items.id,
-            index: items.index,
-            name: items.name,
-          }))
-          .orderBy(({ items }) => items.index, `asc`)
-          .limit(10), // Adding limit to match the user's reproduction case
+      const query = useLiveQuery(
+        (q) =>
+          q
+            .from({ items: collection })
+            .where(({ items }) => and(gte(items.index, 1), lte(items.index, 4)))
+            .select(({ items }) => ({
+              id: items.id,
+              index: items.index,
+              name: items.name,
+            }))
+            .orderBy(({ items }) => items.index, `asc`)
+            .limit(10), // Adding limit to match the user's reproduction case
       )
 
       // Track what this component renders
       createEffect(() => {
         const data = query()
-        renderedData[props.index] = data.map((item) => `${item.id}:${item.index}:${item.name}`)
+        renderedData[props.index] = data.map(
+          (item) => `${item.id}:${item.index}:${item.name}`,
+        )
       })
 
       return (
@@ -651,7 +683,11 @@ describe(`Multiple useLiveQuery instances with where + orderBy`, () => {
 
     // All queries should show identical data
     const allResultsData = queries.map((q) =>
-      q.result().map((item) => JSON.stringify(item)).sort().join('|'),
+      q
+        .result()
+        .map((item) => JSON.stringify(item))
+        .sort()
+        .join('|'),
     )
     const uniqueResults = [...new Set(allResultsData)]
 
