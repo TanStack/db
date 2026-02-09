@@ -57,8 +57,8 @@ export {
   liveQueryCollectionOptions,
 } from './live-query-collection.js'
 
-export { type LiveQueryCollectionConfig } from './live/types.js'
-export { type LiveQueryCollectionUtils } from './live/collection-config-builder.js'
+export type { LiveQueryCollectionConfig } from './live/types.js'
+export type { LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 
 // Predicate utilities for predicate push-down
 export {
@@ -72,3 +72,8 @@ export {
 } from './predicate-utils.js'
 
 export { DeduplicatedLoadSubset } from './subset-dedupe.js'
+
+export {
+  withQueryableFields,
+  type QueryableFieldsConfig,
+} from './queryable-fields.js'

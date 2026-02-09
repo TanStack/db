@@ -70,6 +70,15 @@ export interface LiveQueryCollectionConfig<
     | QueryBuilder<TContext>
 
   /**
+   * Optional compile-time queryability hints for constrained `where`/`orderBy` refs.
+   * Runtime behavior is unchanged.
+   */
+  queryable?: {
+    filterable?: ReadonlyArray<string>
+    sortable?: ReadonlyArray<string>
+  }
+
+  /**
    * Function to extract the key from result items
    * If not provided, defaults to using the key from the D2 stream
    */
