@@ -15,6 +15,7 @@ import {
 } from '../../../dist/esm/main.js'
 
 const E2E_RESULT_PREFIX = `__TANSTACK_DB_E2E_RESULT__:`
+const E2E_RESULT_BASE64_PREFIX = `__TANSTACK_DB_E2E_RESULT_BASE64__:`
 const E2E_INPUT_ENV_VAR = `TANSTACK_DB_E2E_INPUT`
 const E2E_INPUT_BASE64_ENV_VAR = `TANSTACK_DB_E2E_INPUT_BASE64`
 const execFileAsync = promisify(execFile)
@@ -183,7 +184,14 @@ function parseInputFromEnv() {
 }
 
 function printProcessResult(result) {
-  process.stdout.write(`${E2E_RESULT_PREFIX}${JSON.stringify(result)}\n`)
+  try {
+    const serializedResult = Buffer.from(serialize(result)).toString(`base64`)
+    process.stdout.write(
+      `${E2E_RESULT_BASE64_PREFIX}${serializedResult}\n`,
+    )
+  } catch {
+    process.stdout.write(`${E2E_RESULT_PREFIX}${JSON.stringify(result)}\n`)
+  }
 }
 
 function getPreloadPath() {
