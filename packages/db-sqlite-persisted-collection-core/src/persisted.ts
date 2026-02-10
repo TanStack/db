@@ -464,10 +464,7 @@ function isValidSyncConfig(value: unknown): value is SyncConfig<object> {
 
 type PersistedMode = `sync-present` | `sync-absent`
 
-type NormalizedSyncOperation<
-  T extends object,
-  TKey extends string | number,
-> =
+type NormalizedSyncOperation<T extends object, TKey extends string | number> =
   | {
       type: `update`
       key: TKey
@@ -485,10 +482,12 @@ type BufferedSyncTransaction<T extends object, TKey extends string | number> = {
   internal: boolean
 }
 
-type OpenSyncTransaction<T extends object, TKey extends string | number> =
-  BufferedSyncTransaction<T, TKey> & {
-    queuedBecauseHydrating: boolean
-  }
+type OpenSyncTransaction<
+  T extends object,
+  TKey extends string | number,
+> = BufferedSyncTransaction<T, TKey> & {
+  queuedBecauseHydrating: boolean
+}
 
 type SyncWriteNormalization<T extends object, TKey extends string | number> = {
   forwardMessage:
@@ -643,7 +642,9 @@ function isTxCommittedPayload(payload: unknown): payload is TxCommitted {
   )
 }
 
-function isCollectionResetPayload(payload: unknown): payload is CollectionReset {
+function isCollectionResetPayload(
+  payload: unknown,
+): payload is CollectionReset {
   return (
     isRecord(payload) &&
     payload.type === `collection:reset` &&
@@ -659,7 +660,7 @@ function toPersistedMutationEnvelope(
   const value =
     mutation.type === `delete`
       ? (mutation.original as Record<string, unknown>)
-      : (mutation.modified)
+      : mutation.modified
 
   return {
     mutationId: mutation.mutationId,
@@ -675,14 +676,18 @@ class PersistedCollectionRuntime<
 > {
   private readonly applyMutex = new ApplyMutex()
   private readonly activeSubsets = new Map<string, LoadSubsetOptions>()
-  private readonly pendingRemoteSubsetEnsures = new Map<string, LoadSubsetOptions>()
+  private readonly pendingRemoteSubsetEnsures = new Map<
+    string,
+    LoadSubsetOptions
+  >()
   private readonly queuedHydrationTransactions: Array<
     BufferedSyncTransaction<T, TKey>
   > = []
   private readonly queuedTxCommitted: Array<TxCommitted> = []
   private readonly subscriptionIds = new WeakMap<object, string>()
 
-  private collection: Collection<T, TKey, PersistedCollectionUtils> | null = null
+  private collection: Collection<T, TKey, PersistedCollectionUtils> | null =
+    null
   private syncControls: SyncControlFns<T, TKey> = {
     begin: null,
     write: null,
@@ -734,7 +739,9 @@ class PersistedCollectionRuntime<
     return this.internalApplyDepth > 0
   }
 
-  setCollection(collection: Collection<T, TKey, PersistedCollectionUtils>): void {
+  setCollection(
+    collection: Collection<T, TKey, PersistedCollectionUtils>,
+  ): void {
     if (this.collection === collection) {
       return
     }
@@ -797,7 +804,10 @@ class PersistedCollectionRuntime<
               `Failed to load remote subset in persisted wrapper:`,
               error,
             )
-            this.pendingRemoteSubsetEnsures.set(this.getSubsetKey(options), options)
+            this.pendingRemoteSubsetEnsures.set(
+              this.getSubsetKey(options),
+              options,
+            )
           })
         }
       } catch (error) {
@@ -934,7 +944,9 @@ class PersistedCollectionRuntime<
       return []
     }
 
-    return this.collection.getIndexMetadata().map((metadata) => metadata.signature)
+    return this.collection
+      .getIndexMetadata()
+      .map((metadata) => metadata.signature)
   }
 
   private async hydrateSubsetUnsafe(
@@ -968,7 +980,11 @@ class PersistedCollectionRuntime<
   }
 
   private applyRowsToCollection(rows: Array<{ key: TKey; value: T }>): void {
-    if (!this.syncControls.begin || !this.syncControls.write || !this.syncControls.commit) {
+    if (
+      !this.syncControls.begin ||
+      !this.syncControls.write ||
+      !this.syncControls.commit
+    ) {
       return
     }
 
@@ -999,7 +1015,11 @@ class PersistedCollectionRuntime<
   private async applyBufferedSyncTransactionUnsafe(
     transaction: BufferedSyncTransaction<T, TKey>,
   ): Promise<void> {
-    if (!this.syncControls.begin || !this.syncControls.write || !this.syncControls.commit) {
+    if (
+      !this.syncControls.begin ||
+      !this.syncControls.write ||
+      !this.syncControls.commit
+    ) {
       return
     }
 
@@ -1142,8 +1162,14 @@ class PersistedCollectionRuntime<
     }
   }
 
-  private confirmMutationsSyncUnsafe(mutations: Array<PendingMutation<T>>): void {
-    if (!this.syncControls.begin || !this.syncControls.write || !this.syncControls.commit) {
+  private confirmMutationsSyncUnsafe(
+    mutations: Array<PendingMutation<T>>,
+  ): void {
+    if (
+      !this.syncControls.begin ||
+      !this.syncControls.write ||
+      !this.syncControls.commit
+    ) {
       return
     }
 
@@ -1205,7 +1231,11 @@ class PersistedCollectionRuntime<
         )
       }
 
-      this.observeStreamPosition(response.term, response.seq, response.latestRowVersion)
+      this.observeStreamPosition(
+        response.term,
+        response.seq,
+        response.latestRowVersion,
+      )
       return
     }
 
@@ -1256,7 +1286,10 @@ class PersistedCollectionRuntime<
     seq: number,
     rowVersion: number,
   ): void {
-    if (term > this.latestTerm || (term === this.latestTerm && seq > this.latestSeq)) {
+    if (
+      term > this.latestTerm ||
+      (term === this.latestTerm && seq > this.latestSeq)
+    ) {
       this.latestTerm = term
       this.latestSeq = seq
     }
@@ -1282,7 +1315,8 @@ class PersistedCollectionRuntime<
   } {
     this.localTerm = Math.max(this.localTerm, this.latestTerm || 1)
     this.localSeq = Math.max(this.localSeq, this.latestSeq) + 1
-    this.localRowVersion = Math.max(this.localRowVersion, this.latestRowVersion) + 1
+    this.localRowVersion =
+      Math.max(this.localRowVersion, this.latestRowVersion) + 1
 
     return {
       term: this.localTerm,
@@ -1366,9 +1400,11 @@ class PersistedCollectionRuntime<
     }
 
     if (isCollectionResetPayload(message.payload)) {
-      void this.applyMutex.run(() => this.truncateAndReloadUnsafe()).catch((error) => {
-        console.warn(`Failed to process collection reset message:`, error)
-      })
+      void this.applyMutex
+        .run(() => this.truncateAndReloadUnsafe())
+        .catch((error) => {
+          console.warn(`Failed to process collection reset message:`, error)
+        })
     }
   }
 
@@ -1382,12 +1418,17 @@ class PersistedCollectionRuntime<
     }
   }
 
-  private async processCommittedTxUnsafe(txCommitted: TxCommitted): Promise<void> {
+  private async processCommittedTxUnsafe(
+    txCommitted: TxCommitted,
+  ): Promise<void> {
     if (txCommitted.term < this.latestTerm) {
       return
     }
 
-    if (txCommitted.term === this.latestTerm && txCommitted.seq <= this.latestSeq) {
+    if (
+      txCommitted.term === this.latestTerm &&
+      txCommitted.seq <= this.latestSeq
+    ) {
       return
     }
 
@@ -1475,7 +1516,9 @@ class PersistedCollectionRuntime<
 
   private async reloadActiveSubsetsUnsafe(): Promise<void> {
     const activeSubsetOptions =
-      this.activeSubsets.size > 0 ? Array.from(this.activeSubsets.values()) : [{}]
+      this.activeSubsets.size > 0
+        ? Array.from(this.activeSubsets.values())
+        : [{}]
 
     for (const options of activeSubsetOptions) {
       await this.hydrateSubsetUnsafe(options, { requestRemoteEnsure: false })
@@ -1483,16 +1526,23 @@ class PersistedCollectionRuntime<
   }
 
   private attachIndexLifecycleListeners(): void {
-    if (!this.collection || this.indexAddedUnsubscribe || this.indexRemovedUnsubscribe) {
+    if (
+      !this.collection ||
+      this.indexAddedUnsubscribe ||
+      this.indexRemovedUnsubscribe
+    ) {
       return
     }
 
     this.indexAddedUnsubscribe = this.collection.on(`index:added`, (event) => {
       void this.ensurePersistedIndex(event.index)
     })
-    this.indexRemovedUnsubscribe = this.collection.on(`index:removed`, (event) => {
-      void this.markIndexRemoved(event.index)
-    })
+    this.indexRemovedUnsubscribe = this.collection.on(
+      `index:removed`,
+      (event) => {
+        void this.markIndexRemoved(event.index)
+      },
+    )
   }
 
   private async bootstrapPersistedIndexes(): Promise<void> {
@@ -1506,7 +1556,9 @@ class PersistedCollectionRuntime<
     }
   }
 
-  private buildPersistedIndexSpec(index: CollectionIndexMetadata): PersistedIndexSpec {
+  private buildPersistedIndexSpec(
+    index: CollectionIndexMetadata,
+  ): PersistedIndexSpec {
     return {
       expressionSql: [stableSerialize(index.expression)],
       metadata: {
@@ -1539,7 +1591,10 @@ class PersistedCollectionRuntime<
         spec,
       )
     } catch (error) {
-      console.warn(`Failed to ensure persisted index through coordinator:`, error)
+      console.warn(
+        `Failed to ensure persisted index through coordinator:`,
+        error,
+      )
     }
   }
 
@@ -1591,7 +1646,10 @@ function createWrappedSyncConfig<
               params.markReady()
             })
             .catch((error) => {
-              console.warn(`Failed persisted sync startup before markReady:`, error)
+              console.warn(
+                `Failed persisted sync startup before markReady:`,
+                error,
+              )
               params.markReady()
             })
         },
@@ -1660,13 +1718,18 @@ function createWrappedSyncConfig<
                 internal: false,
               })
               .catch((error) => {
-                console.warn(`Failed to persist wrapped sync transaction:`, error)
+                console.warn(
+                  `Failed to persist wrapped sync transaction:`,
+                  error,
+                )
               })
           }
         },
       }
 
-      const sourceResult = normalizeSyncFnResult(sourceSyncConfig.sync(wrappedParams))
+      const sourceResult = normalizeSyncFnResult(
+        sourceSyncConfig.sync(wrappedParams),
+      )
       void runtime.ensureStarted()
 
       return {
@@ -1687,9 +1750,7 @@ function createWrappedSyncConfig<
 function createLoopbackSyncConfig<
   T extends object,
   TKey extends string | number,
->(
-  runtime: PersistedCollectionRuntime<T, TKey>,
-): SyncConfig<T, TKey> {
+>(runtime: PersistedCollectionRuntime<T, TKey>): SyncConfig<T, TKey> {
   return {
     sync: (params) => {
       runtime.setSyncControls({
@@ -1718,7 +1779,8 @@ function createLoopbackSyncConfig<
           runtime.clearSyncControls()
         },
         loadSubset: (options: LoadSubsetOptions) => runtime.loadSubset(options),
-        unloadSubset: (options: LoadSubsetOptions) => runtime.unloadSubset(options),
+        unloadSubset: (options: LoadSubsetOptions) =>
+          runtime.unloadSubset(options),
       }
     },
     getSyncMetadata: () => ({
@@ -1782,10 +1844,7 @@ export function persistedCollectionOptions<
 
     return {
       ...options,
-      sync: createWrappedSyncConfig(
-        options.sync,
-        runtime,
-      ),
+      sync: createWrappedSyncConfig(options.sync, runtime),
       persistence,
     }
   }

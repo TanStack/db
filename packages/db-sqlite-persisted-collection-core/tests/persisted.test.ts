@@ -46,7 +46,9 @@ type RecordingAdapter = PersistenceAdapter<Todo, string> & {
   rows: Map<string, Todo>
 }
 
-function createRecordingAdapter(initialRows: Array<Todo> = []): RecordingAdapter {
+function createRecordingAdapter(
+  initialRows: Array<Todo> = [],
+): RecordingAdapter {
   const rows = new Map(initialRows.map((row) => [row.id, row]))
 
   const adapter: RecordingAdapter = {
@@ -119,9 +121,8 @@ type CoordinatorHarness = PersistedCollectionCoordinator & {
 }
 
 function createCoordinatorHarness(): CoordinatorHarness {
-  let subscriber:
-    | ((message: ProtocolEnvelope<unknown>) => void)
-    | undefined = undefined
+  let subscriber: ((message: ProtocolEnvelope<unknown>) => void) | undefined =
+    undefined
   let pullSinceResponse: PullSinceResponse = {
     type: `rpc:pullSince:res`,
     rpcId: `pull-0`,
@@ -199,7 +200,9 @@ describe(`persistedCollectionOptions`, () => {
       title: `Phase 0`,
     })
     expect(adapter.applyCommittedTxCalls).toHaveLength(1)
-    expect(adapter.applyCommittedTxCalls[0]?.tx.mutations[0]?.type).toBe(`insert`)
+    expect(adapter.applyCommittedTxCalls[0]?.tx.mutations[0]?.type).toBe(
+      `insert`,
+    )
     expect(typeof collection.utils.acceptMutations).toBe(`function`)
     expect(collection.utils.getLeadershipState?.().isLeader).toBe(true)
   })
@@ -340,7 +343,9 @@ describe(`persistedCollectionOptions`, () => {
       title: `From remote`,
     })
     expect(adapter.applyCommittedTxCalls).toHaveLength(1)
-    expect(adapter.applyCommittedTxCalls[0]?.tx.mutations[0]?.type).toBe(`update`)
+    expect(adapter.applyCommittedTxCalls[0]?.tx.mutations[0]?.type).toBe(
+      `update`,
+    )
   })
 
   it(`bootstraps and tracks persisted index lifecycle in sync-present mode`, async () => {
@@ -369,7 +374,11 @@ describe(`persistedCollectionOptions`, () => {
     await flushAsyncWork()
 
     expect(expectedPreSyncSignature).toBeDefined()
-    expect(adapter.ensureIndexCalls.some((call) => call.signature === expectedPreSyncSignature)).toBe(true)
+    expect(
+      adapter.ensureIndexCalls.some(
+        (call) => call.signature === expectedPreSyncSignature,
+      ),
+    ).toBe(true)
 
     const runtimeIndex = collection.createIndex((row) => row.id, {
       name: `runtime-id`,
@@ -380,11 +389,19 @@ describe(`persistedCollectionOptions`, () => {
       .getIndexMetadata()
       .find((index) => index.indexId === runtimeIndex.id)?.signature
     expect(runtimeSignature).toBeDefined()
-    expect(adapter.ensureIndexCalls.some((call) => call.signature === runtimeSignature)).toBe(true)
+    expect(
+      adapter.ensureIndexCalls.some(
+        (call) => call.signature === runtimeSignature,
+      ),
+    ).toBe(true)
 
     collection.removeIndex(preSyncIndex)
     await flushAsyncWork()
-    expect(adapter.markIndexRemovedCalls.some((call) => call.signature === expectedPreSyncSignature)).toBe(true)
+    expect(
+      adapter.markIndexRemovedCalls.some(
+        (call) => call.signature === expectedPreSyncSignature,
+      ),
+    ).toBe(true)
   })
 
   it(`queues remote sync writes that arrive during hydration`, async () => {
@@ -424,7 +441,10 @@ describe(`persistedCollectionOptions`, () => {
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
             remoteBegin = begin
-            remoteWrite = write as (message: { type: `insert`; value: Todo }) => void
+            remoteWrite = write as (message: {
+              type: `insert`
+              value: Todo
+            }) => void
             remoteCommit = commit
             markReady()
             return {}
