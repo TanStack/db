@@ -313,7 +313,9 @@ afterAll(async () => {
 
 function getConfig(): Promise<ElectronPersistedCollectionTestConfig> {
   if (!config) {
-    throw new Error(`Electron persisted collection conformance is not initialized`)
+    throw new Error(
+      `Electron persisted collection conformance is not initialized`,
+    )
   }
   return Promise.resolve(config)
 }
