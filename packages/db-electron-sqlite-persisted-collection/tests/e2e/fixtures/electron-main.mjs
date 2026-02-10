@@ -227,6 +227,21 @@ async function run() {
       },
     })
 
+    const rendererDiagnostics = []
+    window.webContents.on(
+      `console-message`,
+      (_event, level, message, line, sourceId) => {
+        rendererDiagnostics.push(
+          `[console:${String(level)}] ${sourceId}:${String(line)} ${message}`,
+        )
+      },
+    )
+    window.webContents.on(`preload-error`, (_event, path, error) => {
+      rendererDiagnostics.push(
+        `[preload-error] ${path}: ${error?.message ?? `unknown preload error`}`,
+      )
+    })
+
     await window.loadFile(getRendererPagePath())
 
     const scenarioExpression = JSON.stringify({
@@ -236,10 +251,28 @@ async function run() {
       scenario: input.scenario,
     })
 
-    const result = await window.webContents.executeJavaScript(
-      `window.__tanstackDbRuntimeBridge__.runScenario(${scenarioExpression})`,
+    const hasBridgeApi = await window.webContents.executeJavaScript(
+      `typeof window.__tanstackDbRuntimeBridge__ === 'object'`,
       true,
     )
+    if (!hasBridgeApi) {
+      throw new Error(
+        `Renderer preload bridge is unavailable.\n${rendererDiagnostics.join(`\n`)}`,
+      )
+    }
+
+    let result
+    try {
+      result = await window.webContents.executeJavaScript(
+        `window.__tanstackDbRuntimeBridge__.runScenario(${scenarioExpression})`,
+        true,
+      )
+    } catch (error) {
+      const message = error instanceof Error ? error.message : `Unknown error`
+      throw new Error(
+        `Renderer scenario execution failed: ${message}\n${rendererDiagnostics.join(`\n`)}`,
+      )
+    }
 
     return {
       ok: true,
