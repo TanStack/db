@@ -1,4 +1,5 @@
 const { contextBridge, ipcRenderer } = require(`electron`)
+const { deserialize } = require(`node:v8`)
 const rendererModulePath = `${__dirname}/../../../dist/cjs/renderer.cjs`
 const protocolModulePath = `${__dirname}/../../../dist/cjs/protocol.cjs`
 const {
@@ -106,6 +107,13 @@ async function runScenario(input) {
   }
 }
 
+function runScenarioFromBase64(serializedInputBase64) {
+  const serializedInputBuffer = Buffer.from(serializedInputBase64, `base64`)
+  const input = deserialize(serializedInputBuffer)
+  return runScenario(input)
+}
+
 contextBridge.exposeInMainWorld(`__tanstackDbRuntimeBridge__`, {
   runScenario,
+  runScenarioFromBase64,
 })

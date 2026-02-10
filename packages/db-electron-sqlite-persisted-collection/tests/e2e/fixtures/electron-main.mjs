@@ -5,7 +5,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { deserialize } from 'node:v8'
+import { deserialize, serialize } from 'node:v8'
 import { BrowserWindow, app, ipcMain } from 'electron'
 import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
@@ -291,7 +291,8 @@ async function run() {
 
     await window.loadFile(getRendererPagePath())
 
-    const scenarioExpression = JSON.stringify({
+    const scenarioInputBase64 = Buffer.from(
+      serialize({
       collectionId: input.collectionId,
       allowAnyCollectionId: input.allowAnyCollectionId,
       hostKind: input.hostKind,
@@ -299,7 +300,8 @@ async function run() {
       channel: input.channel,
       timeoutMs: input.timeoutMs,
       scenario: input.scenario,
-    })
+      }),
+    ).toString(`base64`)
 
     const hasBridgeApi = await window.webContents.executeJavaScript(
       `typeof window.__tanstackDbRuntimeBridge__ === 'object'`,
@@ -314,7 +316,7 @@ async function run() {
     let result
     try {
       result = await window.webContents.executeJavaScript(
-        `window.__tanstackDbRuntimeBridge__.runScenario(${scenarioExpression})`,
+        `window.__tanstackDbRuntimeBridge__.runScenarioFromBase64('${scenarioInputBase64}')`,
         true,
       )
     } catch (error) {
