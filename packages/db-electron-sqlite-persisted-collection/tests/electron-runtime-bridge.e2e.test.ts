@@ -25,7 +25,7 @@ const electronRunnerPath = join(
   `tests`,
   `e2e`,
   `fixtures`,
-  `electron-main.ts`,
+  `electron-main.mjs`,
 )
 
 function resolveElectronBinaryPath(): string {
@@ -67,14 +67,11 @@ async function runElectronScenario(
   input: ElectronRuntimeBridgeInput,
 ): Promise<ElectronRuntimeBridgeScenarioResult> {
   const electronBinaryPath = resolveElectronBinaryPath()
-  const tsconfigPath = join(packageRoot, `tsconfig.json`)
   const xvfbRunPath = `/usr/bin/xvfb-run`
   const hasXvfbRun = existsSync(xvfbRunPath)
   const electronArgs = [
     `--disable-gpu`,
     `--headless=new`,
-    `--require`,
-    `tsx/cjs`,
     electronRunnerPath,
   ]
   const command = hasXvfbRun ? xvfbRunPath : electronBinaryPath
@@ -94,12 +91,16 @@ async function runElectronScenario(
         env: {
           ...process.env,
           TANSTACK_DB_E2E_INPUT: JSON.stringify(input),
-          TSX_TSCONFIG_PATH: tsconfigPath,
           ELECTRON_DISABLE_SECURITY_WARNINGS: `true`,
         },
         stdio: [`ignore`, `pipe`, `pipe`],
       })
+      const timeout = setTimeout(() => {
+        child.kill(`SIGKILL`)
+        reject(new Error(`Electron e2e scenario timed out after 20s`))
+      }, 20_000)
       child.on(`error`, (error) => {
+        clearTimeout(timeout)
         reject(error)
       })
 
@@ -114,6 +115,7 @@ async function runElectronScenario(
       })
 
       child.on(`close`, (exitCode) => {
+        clearTimeout(timeout)
         try {
           const parsedResult = parseScenarioResult(
             stdoutBuffer,
