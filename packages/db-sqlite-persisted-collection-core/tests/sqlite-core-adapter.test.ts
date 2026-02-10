@@ -1,5 +1,6 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { execFile } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -14,6 +15,8 @@ type Todo = {
   createdAt: string
   score: number
 }
+
+export type SQLiteCoreAdapterContractTodo = Todo
 
 type MixedKeyTodo = {
   id: string | number
@@ -70,36 +73,102 @@ function interpolateSql(sql: string, params: ReadonlyArray<unknown>): string {
 }
 
 class SqliteCliDriver implements SQLiteDriver {
+  private readonly transactionDbPath = new AsyncLocalStorage<string>()
+  private queue: Promise<void> = Promise.resolve()
+
   constructor(private readonly dbPath: string) {}
 
   async exec(sql: string): Promise<void> {
-    await execFileAsync(`sqlite3`, [this.dbPath, sql])
+    const activeDbPath = this.transactionDbPath.getStore()
+    if (activeDbPath) {
+      await execFileAsync(`sqlite3`, [activeDbPath, sql])
+      return
+    }
+
+    await this.enqueue(async () => {
+      await execFileAsync(`sqlite3`, [this.dbPath, sql])
+    })
   }
 
   async query<T>(
     sql: string,
     params?: ReadonlyArray<unknown>,
   ): Promise<ReadonlyArray<T>> {
+    const activeDbPath = this.transactionDbPath.getStore()
     const renderedSql = interpolateSql(sql, params ?? [])
-    const { stdout } = await execFileAsync(`sqlite3`, [
-      `-json`,
-      this.dbPath,
-      renderedSql,
-    ])
-    const trimmedOutput = stdout.trim()
-    if (!trimmedOutput) {
-      return []
+    const queryActiveDbPath = activeDbPath ?? this.dbPath
+
+    const runQuery = async () => {
+      const { stdout } = await execFileAsync(`sqlite3`, [
+        `-json`,
+        queryActiveDbPath,
+        renderedSql,
+      ])
+      const trimmedOutput = stdout.trim()
+      if (!trimmedOutput) {
+        return []
+      }
+      return JSON.parse(trimmedOutput) as Array<T>
     }
-    return JSON.parse(trimmedOutput) as Array<T>
+
+    if (activeDbPath) {
+      return runQuery()
+    }
+
+    return this.enqueue(async () => runQuery())
   }
 
   async run(sql: string, params?: ReadonlyArray<unknown>): Promise<void> {
+    const activeDbPath = this.transactionDbPath.getStore()
     const renderedSql = interpolateSql(sql, params ?? [])
-    await execFileAsync(`sqlite3`, [this.dbPath, renderedSql])
+    const runActiveDbPath = activeDbPath ?? this.dbPath
+
+    if (activeDbPath) {
+      await execFileAsync(`sqlite3`, [runActiveDbPath, renderedSql])
+      return
+    }
+
+    await this.enqueue(async () => {
+      await execFileAsync(`sqlite3`, [runActiveDbPath, renderedSql])
+    })
   }
 
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
-    return fn()
+    const activeDbPath = this.transactionDbPath.getStore()
+    if (activeDbPath) {
+      return fn()
+    }
+
+    return this.enqueue(async () => {
+      const txDirectory = mkdtempSync(join(tmpdir(), `db-sqlite-core-tx-`))
+      const txDbPath = join(txDirectory, `state.sqlite`)
+
+      if (existsSync(this.dbPath)) {
+        copyFileSync(this.dbPath, txDbPath)
+      }
+
+      try {
+        const txResult = await this.transactionDbPath.run(txDbPath, async () =>
+          fn(),
+        )
+
+        if (existsSync(txDbPath)) {
+          copyFileSync(txDbPath, this.dbPath)
+        }
+        return txResult
+      } finally {
+        rmSync(txDirectory, { recursive: true, force: true })
+      }
+    })
+  }
+
+  private enqueue<T>(operation: () => Promise<T>): Promise<T> {
+    const queuedOperation = this.queue.then(operation, operation)
+    this.queue = queuedOperation.then(
+      () => undefined,
+      () => undefined,
+    )
+    return queuedOperation
   }
 }
 
@@ -107,6 +176,12 @@ type AdapterHarness = {
   adapter: SQLiteCorePersistenceAdapter<Todo, string>
   driver: SqliteCliDriver
   dbPath: string
+  cleanup: () => void
+}
+
+export type SQLiteCoreAdapterContractHarness = {
+  adapter: SQLiteCorePersistenceAdapter<Todo, string>
+  driver: SQLiteDriver
   cleanup: () => void
 }
 
@@ -154,7 +229,20 @@ function registerHarness(
   return harness
 }
 
-describe(`SQLiteCorePersistenceAdapter`, () => {
+export type SQLiteCoreAdapterHarnessFactory = (
+  options?: Omit<
+    ConstructorParameters<typeof SQLiteCorePersistenceAdapter<Todo, string>>[0],
+    `driver`
+  >,
+) => SQLiteCoreAdapterContractHarness
+
+export function runSQLiteCoreAdapterContractSuite(
+  suiteName: string = `SQLiteCorePersistenceAdapter`,
+  harnessFactory: SQLiteCoreAdapterHarnessFactory = registerHarness,
+): void {
+  const registerHarness = harnessFactory
+
+  describe(suiteName, () => {
   it(`applies transactions idempotently with row versions and tombstones`, async () => {
     const { adapter, driver } = registerHarness()
     const collectionId = `todos`
@@ -267,6 +355,55 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
     }>(`SELECT key, row_version FROM "${tombstoneTable}"`)
     expect(tombstoneRows).toHaveLength(1)
     expect(tombstoneRows[0]?.row_version).toBe(3)
+  })
+
+  it(`rolls back partially applied mutations when transaction fails`, async () => {
+    const { adapter, driver } = registerHarness()
+    const collectionId = `atomicity`
+
+    await expect(
+      adapter.applyCommittedTx(collectionId, {
+        txId: `atomicity-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `First`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+          },
+          {
+            type: `insert`,
+            key: `2`,
+            value: {
+              id: `2`,
+              title: `Second`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 2,
+              // Trigger JSON.stringify failure after the first mutation executes.
+              unsafe: 1n,
+            } as unknown as Todo,
+          },
+        ],
+      }),
+    ).rejects.toThrow()
+
+    const rows = await adapter.loadSubset(collectionId, {})
+    expect(rows).toEqual([])
+
+    const txRows = await driver.query<{ count: number }>(
+      `SELECT COUNT(*) AS count
+       FROM applied_tx
+       WHERE collection_id = ?`,
+      [collectionId],
+    )
+    expect(txRows[0]?.count).toBe(0)
   })
 
   it(`supports pushdown operators with correctness-preserving fallback`, async () => {
@@ -1026,4 +1163,5 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
       }),
     ).rejects.toThrow(/Invalid persisted index SQL fragment/)
   })
-})
+  })
+}
