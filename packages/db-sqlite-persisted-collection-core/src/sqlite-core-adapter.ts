@@ -500,15 +500,18 @@ function evaluateExpressionOnRow(
       return evaluatedArgs.find((value) => !isNullish(value)) ?? null
     case `add`:
       return (
-        (Number(evaluatedArgs[0] ?? 0) || 0) + (Number(evaluatedArgs[1] ?? 0) || 0)
+        (Number(evaluatedArgs[0] ?? 0) || 0) +
+        (Number(evaluatedArgs[1] ?? 0) || 0)
       )
     case `subtract`:
       return (
-        (Number(evaluatedArgs[0] ?? 0) || 0) - (Number(evaluatedArgs[1] ?? 0) || 0)
+        (Number(evaluatedArgs[0] ?? 0) || 0) -
+        (Number(evaluatedArgs[1] ?? 0) || 0)
       )
     case `multiply`:
       return (
-        (Number(evaluatedArgs[0] ?? 0) || 0) * (Number(evaluatedArgs[1] ?? 0) || 0)
+        (Number(evaluatedArgs[0] ?? 0) || 0) *
+        (Number(evaluatedArgs[1] ?? 0) || 0)
       )
     case `divide`: {
       const denominator = Number(evaluatedArgs[1] ?? 0) || 0

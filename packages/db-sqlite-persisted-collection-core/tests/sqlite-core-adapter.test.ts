@@ -646,11 +646,12 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
 
   it(`keeps numeric and string keys distinct in storage`, async () => {
     const { driver } = registerHarness()
-    const adapter = new SQLiteCorePersistenceAdapter<MixedKeyTodo, string | number>(
-      {
-        driver,
-      },
-    )
+    const adapter = new SQLiteCorePersistenceAdapter<
+      MixedKeyTodo,
+      string | number
+    >({
+      driver,
+    })
     const collectionId = `mixed-keys`
 
     await adapter.applyCommittedTx(collectionId, {
@@ -795,12 +796,18 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
       ],
     })
 
-    const largeIds = Array.from({ length: 1200 }, (_value, index) => `miss-${index}`)
+    const largeIds = Array.from(
+      { length: 1200 },
+      (_value, index) => `miss-${index}`,
+    )
     largeIds[100] = `2`
     largeIds[1100] = `4`
 
     const rows = await adapter.loadSubset(collectionId, {
-      where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value(largeIds)]),
+      where: new IR.Func(`in`, [
+        new IR.PropRef([`id`]),
+        new IR.Value(largeIds),
+      ]),
       orderBy: [
         {
           expression: new IR.PropRef([`id`]),
@@ -901,7 +908,9 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
 
     await expect(
       adapter.ensureIndex(`unsafe-index`, `unsafe`, {
-        expressionSql: [`json_extract(value, '$.title'); DROP TABLE applied_tx`],
+        expressionSql: [
+          `json_extract(value, '$.title'); DROP TABLE applied_tx`,
+        ],
       }),
     ).rejects.toThrow(/Invalid persisted index SQL fragment/)
   })
