@@ -224,6 +224,10 @@ function encodeInputForEnv(input: ElectronRuntimeBridgeInput): string {
 export async function runElectronRuntimeBridgeScenario(
   input: ElectronRuntimeBridgeInput,
 ): Promise<ElectronRuntimeBridgeScenarioResult> {
+  const scenarioTimeoutMs = Math.max(
+    ELECTRON_SCENARIO_TIMEOUT_MS,
+    (input.timeoutMs ?? 0) + 8_000,
+  )
   const electronBinaryPath = resolveElectronBinaryPath()
   const xvfbRunPath = `/usr/bin/xvfb-run`
   const hasXvfbRun = existsSync(xvfbRunPath)
@@ -294,13 +298,13 @@ export async function runElectronRuntimeBridgeScenario(
         rejectOnce(
           new Error(
             [
-              `Electron e2e scenario timed out after ${String(ELECTRON_SCENARIO_TIMEOUT_MS)}ms`,
+              `Electron e2e scenario timed out after ${String(scenarioTimeoutMs)}ms`,
               `stderr=${stderrBuffer}`,
               `stdout=${stdoutBuffer}`,
             ].join(`\n`),
           ),
         )
-      }, ELECTRON_SCENARIO_TIMEOUT_MS)
+      }, scenarioTimeoutMs)
 
       child.on(`error`, (error) => {
         rejectOnce(error)
