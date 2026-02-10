@@ -96,9 +96,8 @@ export type ElectronPersistenceResponse<
   | ElectronPersistenceSuccessResponseByMethod[TMethod]
   | ElectronPersistenceErrorResponseByMethod[TMethod]
 
-export type ElectronPersistenceResponseEnvelope = ElectronPersistenceResponse<
-  ElectronPersistenceMethod
->
+export type ElectronPersistenceResponseEnvelope =
+  ElectronPersistenceResponse<ElectronPersistenceMethod>
 
 export type ElectronPersistenceRequestHandler = (
   request: ElectronPersistenceRequestEnvelope,

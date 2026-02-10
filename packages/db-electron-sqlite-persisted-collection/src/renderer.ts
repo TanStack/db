@@ -99,7 +99,9 @@ type RendererAdapterRequestExecutor = <
   method: TMethod,
   collectionId: string,
   payload: ElectronPersistenceRequest<TMethod>[`payload`],
-) => Promise<Extract<ElectronPersistenceResponse<TMethod>, { ok: true }>[`result`]>
+) => Promise<
+  Extract<ElectronPersistenceResponse<TMethod>, { ok: true }>[`result`]
+>
 
 function createRendererRequestExecutor(
   options: ElectronRendererPersistenceAdapterOptions,

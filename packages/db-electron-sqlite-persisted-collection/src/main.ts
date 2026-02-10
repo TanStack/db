@@ -170,7 +170,6 @@ async function executeRequestAgainstAdapter(
         result,
       }
     }
-
   }
 }
 
