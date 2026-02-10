@@ -667,7 +667,7 @@ importers:
         version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -861,6 +861,22 @@ importers:
       temporal-polyfill:
         specifier: ^0.3.0
         version: 0.3.0
+
+  packages/db-node-sqlite-persisted-collection:
+    dependencies:
+      '@tanstack/db-sqlite-persisted-collection-core':
+        specifier: workspace:*
+        version: link:../db-sqlite-persisted-collection-core
+      better-sqlite3:
+        specifier: ^12.6.2
+        version: 12.8.0
+      typescript:
+        specifier: '>=4.7'
+        version: 5.9.3
+    devDependencies:
+      '@vitest/coverage-istanbul':
+        specifier: ^3.2.4
+        version: 3.2.4(vitest@3.2.4)
 
   packages/db-sqlite-persisted-collection-core:
     dependencies:
@@ -16244,11 +16260,6 @@ snapshots:
       kysely: 0.28.11
       pg: 8.19.0
       postgres: 3.4.8
-
-  drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76):
-    dependencies:
-      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
-      zod: 3.25.76
 
   drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.8.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6):
     dependencies:
