@@ -36,7 +36,7 @@
     "@tanstack/typedoc-config": "0.3.3",
     "@tanstack/vite-config": "0.4.3",
     "@testing-library/jest-dom": "^6.9.1",
-    "@types/node": "^24.10.12",
+    "@types/node": "^25.2.2",
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
     "@types/use-sync-external-store": "^1.5.0",
