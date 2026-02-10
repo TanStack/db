@@ -1,4 +1,8 @@
-import { IR, compileSingleRowExpression, toBooleanPredicate } from '@tanstack/db'
+import {
+  IR,
+  compileSingleRowExpression,
+  toBooleanPredicate,
+} from '@tanstack/db'
 import {
   InvalidPersistedCollectionConfigError,
   InvalidPersistedStorageKeyEncodingError,
@@ -207,7 +211,10 @@ function compileRowExpressionEvaluator(
     return (row) => baseEvaluator(row)
   }
 
-  const proxyCache = new WeakMap<Record<string, unknown>, Record<string, unknown>>()
+  const proxyCache = new WeakMap<
+    Record<string, unknown>,
+    Record<string, unknown>
+  >()
   return (row) => {
     let proxy = proxyCache.get(row)
     if (!proxy) {
@@ -1121,7 +1128,9 @@ export class SQLiteCorePersistenceAdapter<
     const ordered = [...rows]
     ordered.sort((left, right) => {
       for (const clause of compiledClauses) {
-        const leftValue = clause.evaluator(left.value as Record<string, unknown>)
+        const leftValue = clause.evaluator(
+          left.value as Record<string, unknown>,
+        )
         const rightValue = clause.evaluator(
           right.value as Record<string, unknown>,
         )
