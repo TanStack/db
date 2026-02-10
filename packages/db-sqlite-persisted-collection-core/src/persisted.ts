@@ -1709,7 +1709,8 @@ class PersistedCollectionRuntime<
       return
     }
 
-    const indexMetadata = indexMetadataSnapshot ?? collection?.getIndexMetadata() ?? []
+    const indexMetadata =
+      indexMetadataSnapshot ?? collection?.getIndexMetadata() ?? []
     for (const metadata of indexMetadata) {
       await this.ensurePersistedIndex(metadata)
     }
@@ -1993,7 +1994,8 @@ export function persistedCollectionOptions<
       )
     }
 
-    const collectionId = options.id ?? `persisted-collection:${crypto.randomUUID()}`
+    const collectionId =
+      options.id ?? `persisted-collection:${crypto.randomUUID()}`
     const runtime = new PersistedCollectionRuntime<T, TKey>(
       `sync-present`,
       collectionId,
