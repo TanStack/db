@@ -49,7 +49,9 @@ type PersistedTransactionHandle = {
   }
 }
 
-async function waitForPersisted(transaction: PersistedTransactionHandle): Promise<void> {
+async function waitForPersisted(
+  transaction: PersistedTransactionHandle,
+): Promise<void> {
   await transaction.isPersisted.promise
 }
 
