@@ -186,9 +186,7 @@ function parseInputFromEnv() {
 function printProcessResult(result) {
   try {
     const serializedResult = Buffer.from(serialize(result)).toString(`base64`)
-    process.stdout.write(
-      `${E2E_RESULT_BASE64_PREFIX}${serializedResult}\n`,
-    )
+    process.stdout.write(`${E2E_RESULT_BASE64_PREFIX}${serializedResult}\n`)
   } catch {
     process.stdout.write(`${E2E_RESULT_PREFIX}${JSON.stringify(result)}\n`)
   }
