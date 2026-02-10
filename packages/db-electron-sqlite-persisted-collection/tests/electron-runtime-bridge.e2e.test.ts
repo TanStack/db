@@ -79,7 +79,12 @@ async function runElectronScenario(
   ]
   const command = hasXvfbRun ? xvfbRunPath : electronBinaryPath
   const args = hasXvfbRun
-    ? [`-a`, `--server-args=-screen 0 1280x720x24`, electronBinaryPath, ...electronArgs]
+    ? [
+        `-a`,
+        `--server-args=-screen 0 1280x720x24`,
+        electronBinaryPath,
+        ...electronArgs,
+      ]
     : electronArgs
 
   const processResult = await new Promise<ElectronRuntimeBridgeProcessResult>(
