@@ -335,6 +335,7 @@ const REQUIRED_ADAPTER_METHODS: ReadonlyArray<
 
 const TARGETED_INVALIDATION_KEY_LIMIT = 128
 const DEFAULT_DB_NAME = `tanstack-db`
+const REMOTE_ENSURE_RETRY_DELAY_MS = 50
 
 type SyncControlFns<T extends object, TKey extends string | number> = {
   begin: ((options?: { immediate?: boolean }) => void) | null
@@ -701,6 +702,7 @@ class PersistedCollectionRuntime<
   private coordinatorUnsubscribe: (() => void) | null = null
   private indexAddedUnsubscribe: (() => void) | null = null
   private indexRemovedUnsubscribe: (() => void) | null = null
+  private remoteEnsureRetryTimer: ReturnType<typeof setTimeout> | null = null
   private nextSubscriptionId = 0
 
   private latestTerm = 0
@@ -748,7 +750,6 @@ class PersistedCollectionRuntime<
 
     this.collection = collection
     this.attachCoordinatorSubscription()
-    this.attachIndexLifecycleListeners()
   }
 
   getLeadershipState(): PersistedCollectionLeadershipState {
@@ -773,7 +774,9 @@ class PersistedCollectionRuntime<
     }
 
     this.started = true
-    await this.bootstrapPersistedIndexes()
+    const indexBootstrapSnapshot = this.collection?.getIndexMetadata() ?? []
+    this.attachIndexLifecycleListeners()
+    await this.bootstrapPersistedIndexes(indexBootstrapSnapshot)
 
     if (this.syncMode !== `on-demand`) {
       this.activeSubsets.set(this.getSubsetKey({}), {})
@@ -804,15 +807,12 @@ class PersistedCollectionRuntime<
               `Failed to load remote subset in persisted wrapper:`,
               error,
             )
-            this.pendingRemoteSubsetEnsures.set(
-              this.getSubsetKey(options),
-              options,
-            )
+            this.queueRemoteSubsetEnsure(options)
           })
         }
       } catch (error) {
         console.warn(`Failed to trigger remote subset load:`, error)
-        this.pendingRemoteSubsetEnsures.set(this.getSubsetKey(options), options)
+        this.queueRemoteSubsetEnsure(options)
       }
     }
   }
@@ -894,8 +894,20 @@ class PersistedCollectionRuntime<
     }
 
     await this.applyMutex.run(async () => {
-      await this.persistCollectionMutationsUnsafe(mutations)
-      this.confirmMutationsSyncUnsafe(mutations)
+      const acceptedMutationIds =
+        await this.persistCollectionMutationsUnsafe(mutations)
+      const acceptedMutationIdSet = new Set(acceptedMutationIds)
+      const acceptedMutations = mutations.filter((mutation) =>
+        acceptedMutationIdSet.has(mutation.mutationId),
+      )
+
+      if (acceptedMutations.length !== mutations.length) {
+        throw new Error(
+          `persistence coordinator accepted ${acceptedMutations.length} of ${mutations.length} mutations; partial acceptance is not supported`,
+        )
+      }
+
+      this.confirmMutationsSyncUnsafe(acceptedMutations)
     })
   }
 
@@ -923,6 +935,11 @@ class PersistedCollectionRuntime<
     this.indexRemovedUnsubscribe?.()
     this.indexRemovedUnsubscribe = null
 
+    if (this.remoteEnsureRetryTimer !== null) {
+      clearTimeout(this.remoteEnsureRetryTimer)
+      this.remoteEnsureRetryTimer = null
+    }
+
     this.pendingRemoteSubsetEnsures.clear()
     this.activeSubsets.clear()
     this.queuedHydrationTransactions.length = 0
@@ -949,6 +966,14 @@ class PersistedCollectionRuntime<
       .map((metadata) => metadata.signature)
   }
 
+  private loadSubsetRowsUnsafe(
+    options: LoadSubsetOptions,
+  ): Promise<Array<{ key: TKey; value: T }>> {
+    return this.persistence.adapter.loadSubset(this.collectionId, options, {
+      requiredIndexSignatures: this.getRequiredIndexSignatures(),
+    })
+  }
+
   private async hydrateSubsetUnsafe(
     options: LoadSubsetOptions,
     config: {
@@ -957,13 +982,7 @@ class PersistedCollectionRuntime<
   ): Promise<void> {
     this.isHydrating = true
     try {
-      const rows = await this.persistence.adapter.loadSubset(
-        this.collectionId,
-        options,
-        {
-          requiredIndexSignatures: this.getRequiredIndexSignatures(),
-        },
-      )
+      const rows = await this.loadSubsetRowsUnsafe(options)
 
       this.applyRowsToCollection(rows)
     } finally {
@@ -974,8 +993,7 @@ class PersistedCollectionRuntime<
     await this.flushQueuedTxCommittedUnsafe()
 
     if (config.requestRemoteEnsure) {
-      this.pendingRemoteSubsetEnsures.set(this.getSubsetKey(options), options)
-      void this.flushPendingRemoteSubsetEnsures()
+      this.queueRemoteSubsetEnsure(options)
     }
   }
 
@@ -990,6 +1008,30 @@ class PersistedCollectionRuntime<
 
     this.withInternalApply(() => {
       this.syncControls.begin?.({ immediate: true })
+
+      for (const row of rows) {
+        this.syncControls.write?.({
+          type: `update`,
+          value: row.value,
+        })
+      }
+
+      this.syncControls.commit?.()
+    })
+  }
+
+  private replaceCollectionRows(rows: Array<{ key: TKey; value: T }>): void {
+    if (
+      !this.syncControls.begin ||
+      !this.syncControls.write ||
+      !this.syncControls.commit
+    ) {
+      return
+    }
+
+    this.withInternalApply(() => {
+      this.syncControls.begin?.({ immediate: true })
+      this.syncControls.truncate?.()
 
       for (const row of rows) {
         this.syncControls.write?.({
@@ -1208,7 +1250,7 @@ class PersistedCollectionRuntime<
 
   private async persistCollectionMutationsUnsafe(
     mutations: Array<PendingMutation<T>>,
-  ): Promise<void> {
+  ): Promise<Array<string>> {
     if (
       this.persistence.coordinator.requestApplyLocalMutations &&
       !this.persistence.coordinator.isLeader(this.collectionId)
@@ -1236,7 +1278,24 @@ class PersistedCollectionRuntime<
         response.seq,
         response.latestRowVersion,
       )
-      return
+
+      const uniqueAcceptedMutationIds = Array.from(
+        new Set(response.acceptedMutationIds),
+      )
+      const submittedMutationIds = new Set(
+        mutations.map((mutation) => mutation.mutationId),
+      )
+      const hasUnknownAcceptedMutationId = uniqueAcceptedMutationIds.some(
+        (mutationId) => !submittedMutationIds.has(mutationId),
+      )
+
+      if (hasUnknownAcceptedMutationId) {
+        throw new Error(
+          `persistence coordinator returned unknown mutation ids in applyLocalMutations response`,
+        )
+      }
+
+      return uniqueAcceptedMutationIds
     }
 
     const streamPosition = this.nextLocalStreamPosition()
@@ -1257,6 +1316,8 @@ class PersistedCollectionRuntime<
           .map((mutation) => mutation.key as TKey),
       }),
     )
+
+    return mutations.map((mutation) => mutation.mutationId)
   }
 
   private createTxCommittedPayload(args: {
@@ -1375,12 +1436,50 @@ class PersistedCollectionRuntime<
     return `opts:${stableSerialize(normalizeSubsetOptionsForKey(options))}`
   }
 
+  private queueRemoteSubsetEnsure(options: LoadSubsetOptions): void {
+    if (
+      this.mode !== `sync-present` ||
+      !this.persistence.coordinator.requestEnsureRemoteSubset
+    ) {
+      return
+    }
+
+    this.pendingRemoteSubsetEnsures.set(this.getSubsetKey(options), options)
+    void this.flushPendingRemoteSubsetEnsures()
+  }
+
+  private scheduleRemoteEnsureRetry(): void {
+    if (
+      this.mode !== `sync-present` ||
+      !this.persistence.coordinator.requestEnsureRemoteSubset
+    ) {
+      return
+    }
+
+    if (
+      this.pendingRemoteSubsetEnsures.size === 0 ||
+      this.remoteEnsureRetryTimer !== null
+    ) {
+      return
+    }
+
+    this.remoteEnsureRetryTimer = setTimeout(() => {
+      this.remoteEnsureRetryTimer = null
+      void this.flushPendingRemoteSubsetEnsures()
+    }, REMOTE_ENSURE_RETRY_DELAY_MS)
+  }
+
   private async flushPendingRemoteSubsetEnsures(): Promise<void> {
     if (
       this.mode !== `sync-present` ||
       !this.persistence.coordinator.requestEnsureRemoteSubset
     ) {
       return
+    }
+
+    if (this.remoteEnsureRetryTimer !== null) {
+      clearTimeout(this.remoteEnsureRetryTimer)
+      this.remoteEnsureRetryTimer = null
     }
 
     for (const [subsetKey, options] of this.pendingRemoteSubsetEnsures) {
@@ -1394,6 +1493,8 @@ class PersistedCollectionRuntime<
         console.warn(`Failed to ensure remote subset:`, error)
       }
     }
+
+    this.scheduleRemoteEnsureRetry()
   }
 
   private attachCoordinatorSubscription(): void {
@@ -1467,10 +1568,12 @@ class PersistedCollectionRuntime<
       return
     }
 
-    const hasGap =
+    const hasGapInCurrentTerm =
       txCommitted.term === this.latestTerm &&
-      this.latestSeq > 0 &&
       txCommitted.seq > this.latestSeq + 1
+    const hasGapAcrossTerms =
+      txCommitted.term > this.latestTerm && txCommitted.seq > 1
+    const hasGap = hasGapInCurrentTerm || hasGapAcrossTerms
 
     if (hasGap) {
       await this.recoverFromSeqGapUnsafe()
@@ -1510,10 +1613,9 @@ class PersistedCollectionRuntime<
     await this.truncateAndReloadUnsafe()
 
     if (this.mode === `sync-present`) {
-      for (const [subsetKey, options] of this.activeSubsets) {
-        this.pendingRemoteSubsetEnsures.set(subsetKey, options)
+      for (const options of this.activeSubsets.values()) {
+        this.queueRemoteSubsetEnsure(options)
       }
-      void this.flushPendingRemoteSubsetEnsures()
     }
   }
 
@@ -1555,9 +1657,28 @@ class PersistedCollectionRuntime<
         ? Array.from(this.activeSubsets.values())
         : [{}]
 
-    for (const options of activeSubsetOptions) {
-      await this.hydrateSubsetUnsafe(options, { requestRemoteEnsure: false })
+    this.isHydrating = true
+    try {
+      const mergedRows = new Map<TKey, T>()
+      for (const options of activeSubsetOptions) {
+        const subsetRows = await this.loadSubsetRowsUnsafe(options)
+        for (const row of subsetRows) {
+          mergedRows.set(row.key, row.value)
+        }
+      }
+
+      this.replaceCollectionRows(
+        Array.from(mergedRows.entries()).map(([key, value]) => ({
+          key,
+          value,
+        })),
+      )
+    } finally {
+      this.isHydrating = false
     }
+
+    await this.flushQueuedHydrationTransactionsUnsafe()
+    await this.flushQueuedTxCommittedUnsafe()
   }
 
   private attachIndexLifecycleListeners(): void {
@@ -1580,12 +1701,15 @@ class PersistedCollectionRuntime<
     )
   }
 
-  private async bootstrapPersistedIndexes(): Promise<void> {
-    if (!this.collection) {
+  private async bootstrapPersistedIndexes(
+    indexMetadataSnapshot?: Array<CollectionIndexMetadata>,
+  ): Promise<void> {
+    const collection = this.collection
+    if (!collection && !indexMetadataSnapshot) {
       return
     }
 
-    const indexMetadata = this.collection.getIndexMetadata()
+    const indexMetadata = indexMetadataSnapshot ?? collection?.getIndexMetadata() ?? []
     for (const metadata of indexMetadata) {
       await this.ensurePersistedIndex(metadata)
     }
@@ -1869,16 +1993,18 @@ export function persistedCollectionOptions<
       )
     }
 
+    const collectionId = options.id ?? `persisted-collection:${crypto.randomUUID()}`
     const runtime = new PersistedCollectionRuntime<T, TKey>(
       `sync-present`,
-      options.id ?? `persisted-collection:${crypto.randomUUID()}`,
+      collectionId,
       persistence,
       options.syncMode ?? `eager`,
-      options.id ?? DEFAULT_DB_NAME,
+      collectionId,
     )
 
     return {
       ...options,
+      id: collectionId,
       sync: createWrappedSyncConfig(options.sync, runtime),
       persistence,
     }
