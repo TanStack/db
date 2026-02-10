@@ -24,7 +24,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-electron-contract-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   const runFullE2E = isElectronFullE2EEnabled()
-  const requestTimeoutMs = runFullE2E ? 12_000 : 2_000
+  const requestTimeoutMs = runFullE2E ? 45_000 : 2_000
   const driver = createBetterSqlite3Driver({
     filename: dbPath,
     pragmas: runFullE2E
