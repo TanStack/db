@@ -5,10 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { IR } from '@tanstack/db'
-import {
-  SQLiteCorePersistenceAdapter,
-  createPersistedTableName,
-} from '../src'
+import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
 import type { SQLiteDriver } from '../src'
 
 type Todo = {
@@ -250,9 +247,10 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
     expect(remainingRows).toEqual([])
 
     const tombstoneTable = createPersistedTableName(collectionId, `t`)
-    const tombstoneRows = await driver.query<{ key: string; row_version: number }>(
-      `SELECT key, row_version FROM "${tombstoneTable}"`,
-    )
+    const tombstoneRows = await driver.query<{
+      key: string
+      row_version: number
+    }>(`SELECT key, row_version FROM "${tombstoneTable}"`)
     expect(tombstoneRows).toHaveLength(1)
     expect(tombstoneRows[0]?.row_version).toBe(3)
   })
@@ -356,10 +354,46 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
       seq: 1,
       rowVersion: 1,
       mutations: [
-        { type: `insert`, key: `a`, value: { id: `a`, title: `A`, createdAt: `2026-01-01T00:00:00.000Z`, score: 10 } },
-        { type: `insert`, key: `b`, value: { id: `b`, title: `B`, createdAt: `2026-01-02T00:00:00.000Z`, score: 10 } },
-        { type: `insert`, key: `c`, value: { id: `c`, title: `C`, createdAt: `2026-01-03T00:00:00.000Z`, score: 12 } },
-        { type: `insert`, key: `d`, value: { id: `d`, title: `D`, createdAt: `2026-01-04T00:00:00.000Z`, score: 13 } },
+        {
+          type: `insert`,
+          key: `a`,
+          value: {
+            id: `a`,
+            title: `A`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 10,
+          },
+        },
+        {
+          type: `insert`,
+          key: `b`,
+          value: {
+            id: `b`,
+            title: `B`,
+            createdAt: `2026-01-02T00:00:00.000Z`,
+            score: 10,
+          },
+        },
+        {
+          type: `insert`,
+          key: `c`,
+          value: {
+            id: `c`,
+            title: `C`,
+            createdAt: `2026-01-03T00:00:00.000Z`,
+            score: 12,
+          },
+        },
+        {
+          type: `insert`,
+          key: `d`,
+          value: {
+            id: `d`,
+            title: `D`,
+            createdAt: `2026-01-04T00:00:00.000Z`,
+            score: 13,
+          },
+        },
       ],
     })
 
@@ -401,7 +435,10 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
       expressionSql: [`json_extract(value, '$.title')`],
     })
 
-    const registryRows = await driver.query<{ removed: number; index_name: string }>(
+    const registryRows = await driver.query<{
+      removed: number
+      index_name: string
+    }>(
       `SELECT removed, index_name
        FROM persisted_index_registry
        WHERE collection_id = ? AND signature = ?`,

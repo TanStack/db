@@ -1,4 +1,4 @@
-import { IR  } from '@tanstack/db'
+import { IR } from '@tanstack/db'
 import {
   InvalidPersistedCollectionConfigError,
   InvalidPersistedStorageKeyEncodingError,
@@ -8,7 +8,7 @@ import {
   decodePersistedStorageKey,
   encodePersistedStorageKey,
 } from './persisted'
-import type {LoadSubsetOptions} from '@tanstack/db';
+import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
   PersistedIndexSpec,
   PersistedTx,
@@ -385,7 +385,10 @@ function evaluateExpressionOnRow(
     case `coalesce`:
       return evaluatedArgs.find((value) => !isNullish(value)) ?? null
     case `add`:
-      return (Number(evaluatedArgs[0] ?? 0) || 0) + (Number(evaluatedArgs[1] ?? 0) || 0)
+      return (
+        (Number(evaluatedArgs[0] ?? 0) || 0) +
+        (Number(evaluatedArgs[1] ?? 0) || 0)
+      )
     case `date`: {
       const dateValue = toDateValue(evaluatedArgs[0])
       return dateValue ? dateValue.toISOString().slice(0, 10) : null
@@ -428,7 +431,9 @@ type InMemoryRow<TKey extends string | number, T extends object> = {
   rowVersion: number
 }
 
-function compileSqlExpression(expression: IR.BasicExpression): CompiledSqlFragment {
+function compileSqlExpression(
+  expression: IR.BasicExpression,
+): CompiledSqlFragment {
   if (expression.type === `val`) {
     return {
       supported: true,
@@ -532,7 +537,11 @@ function compileSqlExpression(expression: IR.BasicExpression): CompiledSqlFragme
       }
     }
     case `like`:
-      return { supported: true, sql: `(${argSql[0]} LIKE ${argSql[1]})`, params }
+      return {
+        supported: true,
+        sql: `(${argSql[0]} LIKE ${argSql[1]})`,
+        params,
+      }
     case `ilike`:
       return {
         supported: true,
@@ -573,7 +582,9 @@ function compileSqlExpression(expression: IR.BasicExpression): CompiledSqlFragme
   }
 }
 
-function compileOrderByClauses(orderBy: IR.OrderBy | undefined): CompiledSqlFragment {
+function compileOrderByClauses(
+  orderBy: IR.OrderBy | undefined,
+): CompiledSqlFragment {
   if (!orderBy || orderBy.length === 0) {
     return {
       supported: true,
@@ -597,8 +608,10 @@ function compileOrderByClauses(orderBy: IR.OrderBy | undefined): CompiledSqlFrag
 
     params.push(...compiledExpression.params)
 
-    const direction = clause.compareOptions.direction === `desc` ? `DESC` : `ASC`
-    const nulls = clause.compareOptions.nulls === `first` ? `NULLS FIRST` : `NULLS LAST`
+    const direction =
+      clause.compareOptions.direction === `desc` ? `DESC` : `ASC`
+    const nulls =
+      clause.compareOptions.nulls === `first` ? `NULLS FIRST` : `NULLS LAST`
     parts.push(`${compiledExpression.sql} ${direction} ${nulls}`)
   }
 
@@ -639,7 +652,10 @@ export class SQLiteCorePersistenceAdapter<
   private readonly pullSinceReloadThreshold: number
 
   private initialized = false
-  private readonly collectionTableCache = new Map<string, CollectionTableMapping>()
+  private readonly collectionTableCache = new Map<
+    string,
+    CollectionTableMapping
+  >()
 
   constructor(options: SQLiteCoreAdapterOptions) {
     this.driver = options.driver
@@ -724,7 +740,9 @@ export class SQLiteCorePersistenceAdapter<
         return
       }
 
-      const versionRows = await this.driver.query<{ latest_row_version: number }>(
+      const versionRows = await this.driver.query<{
+        latest_row_version: number
+      }>(
         `SELECT latest_row_version
          FROM collection_version
          WHERE collection_id = ?
@@ -909,7 +927,9 @@ export class SQLiteCorePersistenceAdapter<
     )
 
     if (indexName) {
-      await this.driver.exec(`DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`)
+      await this.driver.exec(
+        `DROP INDEX IF EXISTS ${quoteIdentifier(indexName)}`,
+      )
     }
   }
 
@@ -994,7 +1014,10 @@ export class SQLiteCorePersistenceAdapter<
       queryParams.push(...orderByCompiled.params)
     }
 
-    const storedRows = await this.driver.query<StoredSqliteRow>(sql, queryParams)
+    const storedRows = await this.driver.query<StoredSqliteRow>(
+      sql,
+      queryParams,
+    )
     const parsedRows = storedRows.map((row) => {
       const key = decodePersistedStorageKey(row.key) as TKey
       const value = JSON.parse(row.value) as T
@@ -1023,7 +1046,9 @@ export class SQLiteCorePersistenceAdapter<
     }
 
     return rows.filter((row) =>
-      toBooleanPredicate(evaluateExpressionOnRow(where, row.value as Record<string, unknown>)),
+      toBooleanPredicate(
+        evaluateExpressionOnRow(where, row.value as Record<string, unknown>),
+      ),
     )
   }
 
