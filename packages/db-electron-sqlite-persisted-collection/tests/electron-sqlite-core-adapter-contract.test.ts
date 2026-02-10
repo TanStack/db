@@ -23,8 +23,17 @@ import type { ElectronPersistenceInvoke } from '../src'
 const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-electron-contract-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
-  const driver = createBetterSqlite3Driver({ filename: dbPath })
   const runFullE2E = isElectronFullE2EEnabled()
+  const driver = createBetterSqlite3Driver({
+    filename: dbPath,
+    pragmas: runFullE2E
+      ? [
+          `journal_mode = DELETE`,
+          `synchronous = NORMAL`,
+          `foreign_keys = ON`,
+        ]
+      : undefined,
+  })
 
   let invoke: ElectronPersistenceInvoke
   let cleanupInvoke: () => void = () => {}
