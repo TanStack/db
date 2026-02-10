@@ -11,6 +11,7 @@ import {
   UnsupportedJoinSourceTypeError,
   UnsupportedJoinTypeError,
 } from '../../errors.js'
+import { normalizeValue } from '../../utils/comparison.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
 import { PropRef, followRef } from '../ir.js'
 import { inArray } from '../builder/functions.js'
@@ -188,7 +189,7 @@ function processJoin(
   let mainPipeline = pipeline.pipe(
     map(([currentKey, namespacedRow]) => {
       // Extract the join key from the main source expression
-      const mainKey = compiledMainExpr(namespacedRow)
+      const mainKey = normalizeValue(compiledMainExpr(namespacedRow))
 
       // Return [joinKey, [originalKey, namespacedRow]]
       return [mainKey, [currentKey, namespacedRow]] as [
@@ -205,7 +206,7 @@ function processJoin(
       const namespacedRow: NamespacedRow = { [joinedSource]: row }
 
       // Extract the join key from the joined source expression
-      const joinedKey = compiledJoinedExpr(namespacedRow)
+      const joinedKey = normalizeValue(compiledJoinedExpr(namespacedRow))
 
       // Return [joinKey, [originalKey, namespacedRow]]
       return [joinedKey, [currentKey, namespacedRow]] as [
