@@ -65,6 +65,133 @@ describe(`Collection Events System`, () => {
     })
   })
 
+  describe(`Index Lifecycle Events`, () => {
+    it(`should emit index:added with stable serializable metadata`, () => {
+      const indexAddedListener = vi.fn()
+      collection.on(`index:added`, indexAddedListener)
+
+      function customCompare(a: any, b: any) {
+        return Number(a) - Number(b)
+      }
+
+      const index = collection.createIndex((row: any) => row.id, {
+        name: `by-id`,
+        options: {
+          compareFn: customCompare,
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+        },
+      })
+
+      expect(indexAddedListener).toHaveBeenCalledTimes(1)
+      const event = indexAddedListener.mock.calls[0]?.[0]
+
+      expect(event).toMatchObject({
+        type: `index:added`,
+        collection,
+        index: {
+          signatureVersion: 1,
+          indexId: index.id,
+          name: `by-id`,
+          resolver: {
+            kind: `constructor`,
+          },
+        },
+      })
+      expect(event.index.expression.type).toBe(`ref`)
+      expect(event.index.signature).toEqual(expect.any(String))
+      expect(event.index.options).toMatchObject({
+        compareFn: {
+          __type: `function`,
+          name: `customCompare`,
+        },
+      })
+      expect(() => JSON.stringify(event.index)).not.toThrow()
+    })
+
+    it(`should emit index:removed once and return false for duplicate removals`, () => {
+      const removedListener = vi.fn()
+      collection.on(`index:removed`, removedListener)
+
+      const index = collection.createIndex((row: any) => row.id, {
+        name: `by-id`,
+      })
+
+      expect(collection.removeIndex(index)).toBe(true)
+      expect(collection.removeIndex(index)).toBe(false)
+
+      expect(removedListener).toHaveBeenCalledTimes(1)
+      expect(removedListener).toHaveBeenCalledWith({
+        type: `index:removed`,
+        collection,
+        index: expect.objectContaining({
+          indexId: index.id,
+          name: `by-id`,
+          signatureVersion: 1,
+        }),
+      })
+    })
+
+    it(`should keep signatures stable for equivalent index definitions`, () => {
+      const signatures: Array<string> = []
+      collection.on(`index:added`, (event) => {
+        signatures.push(event.index.signature)
+      })
+
+      const firstIndex = collection.createIndex((row: any) => row.id, {
+        options: {
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+        },
+      })
+      collection.removeIndex(firstIndex)
+
+      collection.createIndex((row: any) => row.id, {
+        options: {
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+        },
+      })
+
+      expect(signatures).toHaveLength(2)
+      expect(signatures[0]).toBe(signatures[1])
+    })
+
+    it(`should preserve deterministic event ordering during rapid create/remove`, () => {
+      const orderedEvents: Array<string> = []
+
+      collection.on(`index:added`, (event) => {
+        orderedEvents.push(`added:${event.index.indexId}`)
+      })
+      collection.on(`index:removed`, (event) => {
+        orderedEvents.push(`removed:${event.index.indexId}`)
+      })
+
+      const indexA = collection.createIndex((row: any) => row.id, {
+        name: `a`,
+      })
+      const indexB = collection.createIndex((row: any) => row.id, {
+        name: `b`,
+      })
+
+      expect(collection.removeIndex(indexA)).toBe(true)
+      expect(collection.removeIndex(indexB.id)).toBe(true)
+
+      expect(orderedEvents).toEqual([
+        `added:${indexA.id}`,
+        `added:${indexB.id}`,
+        `removed:${indexA.id}`,
+        `removed:${indexB.id}`,
+      ])
+    })
+  })
+
   describe(`Event Subscription Management`, () => {
     it(`should support on(), once(), and off() methods`, () => {
       const listener = vi.fn()
