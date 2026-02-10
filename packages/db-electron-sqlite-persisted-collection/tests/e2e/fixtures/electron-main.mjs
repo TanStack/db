@@ -293,13 +293,13 @@ async function run() {
 
     const scenarioInputBase64 = Buffer.from(
       serialize({
-      collectionId: input.collectionId,
-      allowAnyCollectionId: input.allowAnyCollectionId,
-      hostKind: input.hostKind,
-      adapterOptions: input.adapterOptions,
-      channel: input.channel,
-      timeoutMs: input.timeoutMs,
-      scenario: input.scenario,
+        collectionId: input.collectionId,
+        allowAnyCollectionId: input.allowAnyCollectionId,
+        hostKind: input.hostKind,
+        adapterOptions: input.adapterOptions,
+        channel: input.channel,
+        timeoutMs: input.timeoutMs,
+        scenario: input.scenario,
       }),
     ).toString(`base64`)
 
