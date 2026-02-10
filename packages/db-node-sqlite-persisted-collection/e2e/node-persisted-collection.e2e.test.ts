@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll } from 'vitest'
+import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import {
   createBetterSqlite3Driver,
@@ -23,6 +23,10 @@ type PersistableRow = {
 }
 
 type NodePersistedCollectionTestConfig = E2ETestConfig
+type PersistedCollectionHarness<T extends PersistableRow> = {
+  collection: Collection<T, string | number>
+  seedPersisted: (rows: Array<T>) => Promise<void>
+}
 
 let config: NodePersistedCollectionTestConfig
 
@@ -30,17 +34,42 @@ function createPersistedCollection<T extends PersistableRow>(
   driver: ReturnType<typeof createBetterSqlite3Driver>,
   id: string,
   syncMode: `eager` | `on-demand`,
-): Collection<T, string | number> {
-  return createCollection(
+): PersistedCollectionHarness<T> {
+  const persistence = createNodeSQLitePersistence<T, string | number>({
+    driver,
+  })
+  let seedTxSequence = 0
+  const seedPersisted = async (rows: Array<T>): Promise<void> => {
+    if (rows.length === 0) {
+      return
+    }
+    seedTxSequence++
+    await persistence.adapter.applyCommittedTx(id, {
+      txId: `seed-${id}-${seedTxSequence}`,
+      term: 1,
+      seq: seedTxSequence,
+      rowVersion: seedTxSequence,
+      mutations: rows.map((row) => ({
+        type: `insert` as const,
+        key: row.id,
+        value: row,
+      })),
+    })
+  }
+
+  const collection = createCollection(
     persistedCollectionOptions<T, string | number>({
       id,
       syncMode,
       getKey: (item) => item.id,
-      persistence: createNodeSQLitePersistence<T, string | number>({
-        driver,
-      }),
+      persistence,
     }),
   )
+
+  return {
+    collection,
+    seedPersisted,
+  }
 }
 
 type PersistedTransactionHandle = {
@@ -144,54 +173,84 @@ beforeAll(async () => {
   )
 
   await Promise.all([
-    eagerUsers.preload(),
-    eagerPosts.preload(),
-    eagerComments.preload(),
+    eagerUsers.collection.preload(),
+    eagerPosts.collection.preload(),
+    eagerComments.collection.preload(),
   ])
 
-  await seedCollection(eagerUsers, seedData.users)
-  await seedCollection(eagerPosts, seedData.posts)
-  await seedCollection(eagerComments, seedData.comments)
-  await seedCollection(onDemandUsers, seedData.users)
-  await seedCollection(onDemandPosts, seedData.posts)
-  await seedCollection(onDemandComments, seedData.comments)
+  await seedCollection(eagerUsers.collection, seedData.users)
+  await seedCollection(eagerPosts.collection, seedData.posts)
+  await seedCollection(eagerComments.collection, seedData.comments)
+  await onDemandUsers.seedPersisted(seedData.users)
+  await onDemandPosts.seedPersisted(seedData.posts)
+  await onDemandComments.seedPersisted(seedData.comments)
 
   config = {
     collections: {
       eager: {
-        users: eagerUsers,
-        posts: eagerPosts,
-        comments: eagerComments,
+        users: eagerUsers.collection,
+        posts: eagerPosts.collection,
+        comments: eagerComments.collection,
       },
       onDemand: {
-        users: onDemandUsers,
-        posts: onDemandPosts,
-        comments: onDemandComments,
+        users: onDemandUsers.collection,
+        posts: onDemandPosts.collection,
+        comments: onDemandComments.collection,
       },
     },
     mutations: {
       insertUser: async (user) =>
-        insertRowIntoCollections([eagerUsers, onDemandUsers], user),
+        insertRowIntoCollections(
+          [eagerUsers.collection, onDemandUsers.collection],
+          user,
+        ),
       updateUser: async (id, updates) =>
-        updateRowAcrossCollections([eagerUsers, onDemandUsers], id, updates),
+        updateRowAcrossCollections(
+          [eagerUsers.collection, onDemandUsers.collection],
+          id,
+          updates,
+        ),
       deleteUser: async (id) =>
-        deleteRowAcrossCollections([eagerUsers, onDemandUsers], id),
+        deleteRowAcrossCollections(
+          [eagerUsers.collection, onDemandUsers.collection],
+          id,
+        ),
       insertPost: async (post) =>
-        insertRowIntoCollections([eagerPosts, onDemandPosts], post),
+        insertRowIntoCollections(
+          [eagerPosts.collection, onDemandPosts.collection],
+          post,
+        ),
     },
     setup: async () => {},
+    afterEach: async () => {
+      await Promise.all([
+        onDemandUsers.collection.cleanup(),
+        onDemandPosts.collection.cleanup(),
+        onDemandComments.collection.cleanup(),
+      ])
+
+      onDemandUsers.collection.startSyncImmediate()
+      onDemandPosts.collection.startSyncImmediate()
+      onDemandComments.collection.startSyncImmediate()
+    },
     teardown: async () => {
       await Promise.all([
-        eagerUsers.cleanup(),
-        eagerPosts.cleanup(),
-        eagerComments.cleanup(),
-        onDemandUsers.cleanup(),
-        onDemandPosts.cleanup(),
-        onDemandComments.cleanup(),
+        eagerUsers.collection.cleanup(),
+        eagerPosts.collection.cleanup(),
+        eagerComments.collection.cleanup(),
+        onDemandUsers.collection.cleanup(),
+        onDemandPosts.collection.cleanup(),
+        onDemandComments.collection.cleanup(),
       ])
       driver.close()
       rmSync(tempDirectory, { recursive: true, force: true })
     },
+  }
+})
+
+afterEach(async () => {
+  if (config.afterEach) {
+    await config.afterEach()
   }
 })
 
