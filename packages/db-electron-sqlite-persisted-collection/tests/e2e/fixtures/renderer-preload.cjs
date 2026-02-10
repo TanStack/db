@@ -1,8 +1,8 @@
-import { contextBridge, ipcRenderer } from 'electron'
-import {
+const { contextBridge, ipcRenderer } = require(`electron`)
+const {
   createElectronPersistenceInvoke,
   createElectronRendererPersistenceAdapter,
-} from '../../../dist/esm/renderer.js'
+} = require(`../../../dist/cjs/renderer.cjs`)
 
 async function runScenario(input) {
   const adapter = createElectronRendererPersistenceAdapter({
@@ -30,7 +30,6 @@ async function runScenario(input) {
           },
         ],
       })
-
       return { type: `writeTodo` }
     }
 

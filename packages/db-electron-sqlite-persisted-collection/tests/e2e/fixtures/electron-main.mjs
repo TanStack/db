@@ -172,7 +172,7 @@ function printProcessResult(result) {
 
 function getPreloadPath() {
   const currentFile = fileURLToPath(import.meta.url)
-  return join(dirname(currentFile), `renderer-preload.mjs`)
+  return join(dirname(currentFile), `renderer-preload.cjs`)
 }
 
 function getRendererPagePath() {
