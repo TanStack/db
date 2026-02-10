@@ -252,7 +252,9 @@ describe(`Collection Indexes`, () => {
       subscription.unsubscribe()
 
       expect(activeItems).toHaveLength(3)
-      expect(addedEvents.filter((name) => name === `auto:status`)).toHaveLength(1)
+      expect(addedEvents.filter((name) => name === `auto:status`)).toHaveLength(
+        1,
+      )
     })
   })
 
