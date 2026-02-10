@@ -89,7 +89,10 @@ function parseScenarioResult(
   return JSON.parse(rawResult) as ElectronRuntimeBridgeProcessResult
 }
 
-function encodeTransportValue(value: unknown): unknown {
+function encodeTransportValue(
+  value: unknown,
+  seen: WeakSet<object> = new WeakSet<object>(),
+): unknown {
   if (value === null) {
     return null
   }
@@ -141,8 +144,12 @@ function encodeTransportValue(value: unknown): unknown {
   }
 
   if (Array.isArray(value)) {
+    if (seen.has(value)) {
+      return undefined
+    }
+    seen.add(value)
     return value.map((item) => {
-      const encodedItem = encodeTransportValue(item)
+      const encodedItem = encodeTransportValue(item, seen)
       return encodedItem === undefined ? null : encodedItem
     })
   }
@@ -156,11 +163,15 @@ function encodeTransportValue(value: unknown): unknown {
   }
 
   if (typeof value === `object`) {
+    if (seen.has(value)) {
+      return undefined
+    }
+    seen.add(value)
     const encodedObject: Record<string, unknown> = {}
     for (const [key, objectValue] of Object.entries(
       value as Record<string, unknown>,
     )) {
-      const encodedObjectValue = encodeTransportValue(objectValue)
+      const encodedObjectValue = encodeTransportValue(objectValue, seen)
       if (encodedObjectValue !== undefined) {
         encodedObject[key] = encodedObjectValue
       }
