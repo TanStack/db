@@ -197,6 +197,7 @@ function serializeError(error) {
 
 async function run() {
   app.commandLine.appendSwitch(`disable-gpu`)
+  app.commandLine.appendSwitch(`disable-dev-shm-usage`)
   app.commandLine.appendSwitch(`no-sandbox`)
 
   const input = parseInputFromEnv()
