@@ -93,10 +93,38 @@ async function runElectronScenario(
       })
       let stdoutBuffer = ``
       let stderrBuffer = ``
+      let isSettled = false
+
+      const settle = (
+        callback: (result: ElectronRuntimeBridgeProcessResult) => void,
+        result: ElectronRuntimeBridgeProcessResult,
+      ) => {
+        if (isSettled) {
+          return
+        }
+        isSettled = true
+        clearTimeout(timeout)
+        callback(result)
+
+        if (!child.killed) {
+          child.kill(`SIGKILL`)
+        }
+      }
+
+      const rejectOnce = (error: unknown) => {
+        if (isSettled) {
+          return
+        }
+        isSettled = true
+        clearTimeout(timeout)
+        reject(error)
+        if (!child.killed) {
+          child.kill(`SIGKILL`)
+        }
+      }
 
       const timeout = setTimeout(() => {
-        child.kill(`SIGKILL`)
-        reject(
+        rejectOnce(
           new Error(
             [
               `Electron e2e scenario timed out after 20s`,
@@ -107,28 +135,36 @@ async function runElectronScenario(
         )
       }, 20_000)
       child.on(`error`, (error) => {
-        clearTimeout(timeout)
-        reject(error)
+        rejectOnce(error)
       })
 
       child.stdout.on(`data`, (chunk: Buffer) => {
         stdoutBuffer += chunk.toString()
+
+        try {
+          const parsedResult = parseScenarioResult(stdoutBuffer, stderrBuffer, null)
+          settle(resolve, parsedResult)
+        } catch {
+          // result line may not be fully available yet; continue collecting output
+        }
       })
       child.stderr.on(`data`, (chunk: Buffer) => {
         stderrBuffer += chunk.toString()
       })
 
       child.on(`close`, (exitCode) => {
-        clearTimeout(timeout)
+        if (isSettled) {
+          return
+        }
         try {
           const parsedResult = parseScenarioResult(
             stdoutBuffer,
             stderrBuffer,
             exitCode,
           )
-          resolve(parsedResult)
+          settle(resolve, parsedResult)
         } catch (error) {
-          reject(error)
+          rejectOnce(error)
         }
       })
     },

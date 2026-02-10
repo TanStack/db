@@ -1,4 +1,4 @@
-import { createNodeSQLitePersistenceAdapter } from '@tanstack/db-node-sqlite-persisted-collection'
+import { createRequire } from 'node:module'
 import {
   ElectronPersistenceProtocolError,
   UnknownElectronPersistenceCollectionError,
@@ -21,6 +21,8 @@ import type {
   ElectronPersistenceResponseEnvelope,
   ElectronSerializedError,
 } from './protocol'
+
+const require = createRequire(import.meta.url)
 
 type ElectronMainPersistenceAdapter = PersistenceAdapter<
   ElectronPersistedRow,
@@ -246,17 +248,34 @@ export type ElectronNodeSQLiteMainCollectionConfig = {
   adapterOptions: NodeSQLitePersistenceAdapterOptions
 }
 
+type NodeSQLitePersistenceModule = {
+  createNodeSQLitePersistenceAdapter: <
+    T extends object,
+    TKey extends string | number = string | number,
+  >(
+    options: NodeSQLitePersistenceAdapterOptions,
+  ) => PersistenceAdapter<T, TKey>
+}
+
+function getCreateNodeSQLitePersistenceAdapter(): NodeSQLitePersistenceModule[`createNodeSQLitePersistenceAdapter`] {
+  const runtimeModule = require(
+    `@tanstack/db-node-sqlite-persisted-collection`,
+  ) as NodeSQLitePersistenceModule
+
+  return runtimeModule.createNodeSQLitePersistenceAdapter
+}
+
 export function createElectronNodeSQLiteMainRegistry(
   collections: ReadonlyArray<ElectronNodeSQLiteMainCollectionConfig>,
 ): ElectronPersistenceMainRegistry {
+  const createNodeAdapter = getCreateNodeSQLitePersistenceAdapter()
   const registry = new ElectronPersistenceMainRegistry()
   for (const collection of collections) {
     registry.registerCollection(
       collection.collectionId,
-      createNodeSQLitePersistenceAdapter<
-        ElectronPersistedRow,
-        ElectronPersistedKey
-      >(collection.adapterOptions),
+      createNodeAdapter<ElectronPersistedRow, ElectronPersistedKey>(
+        collection.adapterOptions,
+      ),
     )
   }
   return registry
