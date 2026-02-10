@@ -1,7 +1,6 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { test } from 'vitest'
 import {
   createBetterSqlite3Driver,
   createNodeSQLitePersistenceAdapter,
@@ -20,10 +19,6 @@ import type {
   SQLiteCoreAdapterHarnessFactory,
 } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
 import type { ElectronPersistenceInvoke } from '../src'
-
-if (isElectronFullE2EEnabled()) {
-  test.setTimeout(30_000)
-}
 
 const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-electron-contract-`))
