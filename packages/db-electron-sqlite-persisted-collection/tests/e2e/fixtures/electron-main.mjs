@@ -223,6 +223,7 @@ async function run() {
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
+        sandbox: false,
         preload: getPreloadPath(),
       },
     })
