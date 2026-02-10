@@ -171,13 +171,6 @@ async function executeRequestAgainstAdapter(
       }
     }
 
-    default: {
-      const unreachableMethod: never = request.method
-      throw new UnsupportedElectronPersistenceMethodError(
-        unreachableMethod,
-        request.collectionId,
-      )
-    }
   }
 }
 
