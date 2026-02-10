@@ -91,17 +91,25 @@ async function runElectronScenario(
         },
         stdio: [`ignore`, `pipe`, `pipe`],
       })
+      let stdoutBuffer = ``
+      let stderrBuffer = ``
+
       const timeout = setTimeout(() => {
         child.kill(`SIGKILL`)
-        reject(new Error(`Electron e2e scenario timed out after 20s`))
+        reject(
+          new Error(
+            [
+              `Electron e2e scenario timed out after 20s`,
+              `stderr=${stderrBuffer}`,
+              `stdout=${stdoutBuffer}`,
+            ].join(`\n`),
+          ),
+        )
       }, 20_000)
       child.on(`error`, (error) => {
         clearTimeout(timeout)
         reject(error)
       })
-
-      let stdoutBuffer = ``
-      let stderrBuffer = ``
 
       child.stdout.on(`data`, (chunk: Buffer) => {
         stdoutBuffer += chunk.toString()
