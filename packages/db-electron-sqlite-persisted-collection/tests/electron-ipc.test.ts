@@ -41,9 +41,7 @@ type MainRuntime = {
 const electronRuntimeBridgeTimeoutMs = isElectronFullE2EEnabled()
   ? 12_000
   : 4_000
-const rendererRequestTimeoutMs = isElectronFullE2EEnabled()
-  ? 12_000
-  : undefined
+const rendererRequestTimeoutMs = isElectronFullE2EEnabled() ? 12_000 : undefined
 
 function createRendererAdapter<T extends object, TKey extends string | number>(
   invoke: ElectronPersistenceInvoke,
