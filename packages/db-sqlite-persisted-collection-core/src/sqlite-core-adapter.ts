@@ -518,7 +518,7 @@ function compileSqlExpression(expression: IR.BasicExpression): CompiledSqlFragme
       }
 
       if (listValue.length === 0) {
-        return { supported: true, sql: `(0 = 1)`, params: compiledArgs[0]?.params ?? [] }
+        return { supported: true, sql: `(0 = 1)`, params: [] }
       }
 
       const listPlaceholders = listValue.map(() => `?`).join(`, `)
