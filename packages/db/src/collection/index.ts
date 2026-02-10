@@ -45,6 +45,8 @@ import type { WithVirtualProps } from '../virtual-props.js'
 
 export type { CollectionIndexMetadata } from './events.js'
 
+export type { CollectionIndexMetadata } from './events.js'
+
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
  * @template T - The type of items in the collection
