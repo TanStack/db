@@ -31,6 +31,7 @@ export function isElectronFullE2EEnabled(): boolean {
 type CreateElectronRuntimeBridgeInvokeOptions = {
   dbPath: string
   collectionId: string
+  allowAnyCollectionId?: boolean
   timeoutMs?: number
   hostKind?: ElectronRuntimeBridgeHostKind
   adapterOptions?: ElectronRuntimeBridgeAdapterOptions
@@ -205,6 +206,7 @@ export function createElectronRuntimeBridgeInvoke(
     const result = await runElectronRuntimeBridgeScenario({
       dbPath: options.dbPath,
       collectionId: options.collectionId,
+      allowAnyCollectionId: options.allowAnyCollectionId,
       hostKind: options.hostKind,
       adapterOptions: options.adapterOptions,
       channel,

@@ -224,7 +224,9 @@ function createMainHost(input, driver) {
   return {
     host: createElectronPersistenceMainHost({
       getAdapter: (collectionId) =>
-        collectionId === input.collectionId ? adapter : undefined,
+        input.allowAnyCollectionId || collectionId === input.collectionId
+          ? adapter
+          : undefined,
     }),
     cleanup: () => {},
   }
@@ -276,6 +278,7 @@ async function run() {
 
     const scenarioExpression = JSON.stringify({
       collectionId: input.collectionId,
+      allowAnyCollectionId: input.allowAnyCollectionId,
       hostKind: input.hostKind,
       adapterOptions: input.adapterOptions,
       channel: input.channel,
