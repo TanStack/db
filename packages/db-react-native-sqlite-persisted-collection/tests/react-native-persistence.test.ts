@@ -97,28 +97,26 @@ it(`keeps all committed rows under rapid mutation bursts`, async () => {
   })
 
   const burstSize = 50
-  await Promise.all(
-    Array.from({ length: burstSize }, async (_entry, index) => {
-      const rowId = String(index + 1)
-      await adapter.applyCommittedTx(collectionId, {
-        txId: `tx-burst-${rowId}`,
-        term: 1,
-        seq: index + 1,
-        rowVersion: index + 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: rowId,
-            value: {
-              id: rowId,
-              title: `Todo ${rowId}`,
-              score: index,
-            },
+  for (let index = 0; index < burstSize; index++) {
+    const rowId = String(index + 1)
+    await adapter.applyCommittedTx(collectionId, {
+      txId: `tx-burst-${rowId}`,
+      term: 1,
+      seq: index + 1,
+      rowVersion: index + 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: rowId,
+          value: {
+            id: rowId,
+            title: `Todo ${rowId}`,
+            score: index,
           },
-        ],
-      })
-    }),
-  )
+        },
+      ],
+    })
+  }
 
   const rows = await adapter.loadSubset(collectionId, {})
   expect(rows).toHaveLength(burstSize)

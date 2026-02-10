@@ -9,6 +9,7 @@ import type {
   PersistenceAdapter,
   SQLiteCoreAdapterOptions,
   SQLiteDriver,
+  SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persisted-collection-core'
 import type { OpSQLiteDriverOptions } from './op-sqlite-driver'
 
@@ -25,6 +26,16 @@ export type MobileSQLitePersistenceOptions =
   MobileSQLitePersistenceAdapterOptions & {
     coordinator?: PersistedCollectionCoordinator
   }
+
+export type MobileSQLitePersistenceAdapter<
+  T extends object,
+  TKey extends string | number = string | number,
+> = PersistenceAdapter<T, TKey> & {
+  pullSince: (
+    collectionId: string,
+    fromRowVersion: number,
+  ) => Promise<SQLitePullSinceResult<TKey>>
+}
 
 function isSQLiteDriver(
   candidate: MobileSQLiteDriverInput,
@@ -54,14 +65,16 @@ function resolveSQLiteDriver(
 export function createMobileSQLitePersistenceAdapter<
   T extends object,
   TKey extends string | number = string | number,
->(options: MobileSQLitePersistenceAdapterOptions): PersistenceAdapter<T, TKey> {
+>(
+  options: MobileSQLitePersistenceAdapterOptions,
+): MobileSQLitePersistenceAdapter<T, TKey> {
   const { driver, ...adapterOptions } = options
   const resolvedDriver = resolveSQLiteDriver(driver)
 
   return createSQLiteCorePersistenceAdapter<T, TKey>({
     ...adapterOptions,
     driver: resolvedDriver,
-  })
+  }) as MobileSQLitePersistenceAdapter<T, TKey>
 }
 
 export function createMobileSQLitePersistence<
