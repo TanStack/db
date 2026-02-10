@@ -5,7 +5,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { deserialize, serialize } from 'node:v8'
+import { serialize } from 'node:v8'
 import { BrowserWindow, app, ipcMain } from 'electron'
 import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
@@ -17,7 +17,8 @@ import {
 const E2E_RESULT_PREFIX = `__TANSTACK_DB_E2E_RESULT__:`
 const E2E_RESULT_BASE64_PREFIX = `__TANSTACK_DB_E2E_RESULT_BASE64__:`
 const E2E_INPUT_ENV_VAR = `TANSTACK_DB_E2E_INPUT`
-const E2E_INPUT_BASE64_ENV_VAR = `TANSTACK_DB_E2E_INPUT_BASE64`
+const E2E_TRANSPORT_TYPE_TAG = `__tanstack_db_e2e_transport_type__`
+const E2E_TRANSPORT_VALUE_TAG = `value`
 const execFileAsync = promisify(execFile)
 
 function toSqlLiteral(value) {
@@ -158,29 +159,73 @@ class SqliteCliDriver {
 }
 
 function parseInputFromEnv() {
-  const rawInputBase64 = process.env[E2E_INPUT_BASE64_ENV_VAR]
-  if (rawInputBase64) {
-    const buffer = Buffer.from(rawInputBase64, `base64`)
-    const parsed = deserialize(buffer)
-    if (!parsed || typeof parsed !== `object`) {
-      throw new Error(`Invalid TANSTACK_DB_E2E_INPUT_BASE64 payload`)
-    }
-    return parsed
-  }
-
   const rawInput = process.env[E2E_INPUT_ENV_VAR]
   if (!rawInput) {
-    throw new Error(
-      `Missing ${E2E_INPUT_BASE64_ENV_VAR} (or fallback ${E2E_INPUT_ENV_VAR})`,
-    )
+    throw new Error(`Missing ${E2E_INPUT_ENV_VAR}`)
   }
 
   const parsed = JSON.parse(rawInput)
-  if (!parsed || typeof parsed !== `object`) {
+  const decoded = decodeTransportValue(parsed)
+  if (!decoded || typeof decoded !== `object`) {
     throw new Error(`Invalid ${E2E_INPUT_ENV_VAR} payload`)
   }
 
-  return parsed
+  return decoded
+}
+
+function isEncodedTransportValue(value) {
+  return (
+    value &&
+    typeof value === `object` &&
+    typeof value[E2E_TRANSPORT_TYPE_TAG] === `string`
+  )
+}
+
+function decodeTransportValue(value) {
+  if (value === null) {
+    return null
+  }
+
+  if (
+    typeof value === `string` ||
+    typeof value === `number` ||
+    typeof value === `boolean`
+  ) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => decodeTransportValue(item))
+  }
+
+  if (isEncodedTransportValue(value)) {
+    switch (value[E2E_TRANSPORT_TYPE_TAG]) {
+      case `bigint`:
+        return BigInt(value[E2E_TRANSPORT_VALUE_TAG])
+      case `date`:
+        return new Date(value[E2E_TRANSPORT_VALUE_TAG])
+      case `date_invalid`:
+        return new Date(Number.NaN)
+      case `nan`:
+        return Number.NaN
+      case `infinity`:
+        return Number.POSITIVE_INFINITY
+      case `-infinity`:
+        return Number.NEGATIVE_INFINITY
+      default:
+        break
+    }
+  }
+
+  if (typeof value === `object`) {
+    const decodedObject = {}
+    for (const [key, objectValue] of Object.entries(value)) {
+      decodedObject[key] = decodeTransportValue(objectValue)
+    }
+    return decodedObject
+  }
+
+  return value
 }
 
 function printProcessResult(result) {

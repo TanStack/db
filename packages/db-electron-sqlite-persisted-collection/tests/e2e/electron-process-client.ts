@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { deserialize, serialize } from 'node:v8'
+import { deserialize } from 'node:v8'
 import { DEFAULT_ELECTRON_PERSISTENCE_CHANNEL } from '../../src'
 import {
   E2E_RESULT_BASE64_PREFIX,
@@ -26,7 +26,8 @@ const testsDirectory = dirname(e2eDirectory)
 const packageRoot = dirname(testsDirectory)
 const electronRunnerPath = join(e2eDirectory, `fixtures`, `electron-main.mjs`)
 const E2E_INPUT_ENV_VAR = `TANSTACK_DB_E2E_INPUT`
-const E2E_INPUT_BASE64_ENV_VAR = `TANSTACK_DB_E2E_INPUT_BASE64`
+const E2E_TRANSPORT_TYPE_TAG = `__tanstack_db_e2e_transport_type__`
+const E2E_TRANSPORT_VALUE_TAG = `value`
 
 export const ELECTRON_FULL_E2E_ENV_VAR = `TANSTACK_DB_ELECTRON_E2E_ALL`
 
@@ -88,8 +89,94 @@ function parseScenarioResult(
   return JSON.parse(rawResult) as ElectronRuntimeBridgeProcessResult
 }
 
+function encodeTransportValue(value: unknown): unknown {
+  if (value === null) {
+    return null
+  }
+
+  if (
+    typeof value === `string` ||
+    typeof value === `boolean` ||
+    (typeof value === `number` && Number.isFinite(value))
+  ) {
+    return value
+  }
+
+  if (typeof value === `number`) {
+    if (Number.isNaN(value)) {
+      return {
+        [E2E_TRANSPORT_TYPE_TAG]: `nan`,
+      }
+    }
+    if (value === Number.POSITIVE_INFINITY) {
+      return {
+        [E2E_TRANSPORT_TYPE_TAG]: `infinity`,
+      }
+    }
+    if (value === Number.NEGATIVE_INFINITY) {
+      return {
+        [E2E_TRANSPORT_TYPE_TAG]: `-infinity`,
+      }
+    }
+  }
+
+  if (typeof value === `bigint`) {
+    return {
+      [E2E_TRANSPORT_TYPE_TAG]: `bigint`,
+      [E2E_TRANSPORT_VALUE_TAG]: value.toString(),
+    }
+  }
+
+  if (value instanceof Date) {
+    const timestamp = value.getTime()
+    if (Number.isNaN(timestamp)) {
+      return {
+        [E2E_TRANSPORT_TYPE_TAG]: `date_invalid`,
+      }
+    }
+    return {
+      [E2E_TRANSPORT_TYPE_TAG]: `date`,
+      [E2E_TRANSPORT_VALUE_TAG]: value.toISOString(),
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      const encodedItem = encodeTransportValue(item)
+      return encodedItem === undefined ? null : encodedItem
+    })
+  }
+
+  if (
+    typeof value === `undefined` ||
+    typeof value === `function` ||
+    typeof value === `symbol`
+  ) {
+    return undefined
+  }
+
+  if (typeof value === `object`) {
+    const encodedObject: Record<string, unknown> = {}
+    for (const [key, objectValue] of Object.entries(
+      value as Record<string, unknown>,
+    )) {
+      const encodedObjectValue = encodeTransportValue(objectValue)
+      if (encodedObjectValue !== undefined) {
+        encodedObject[key] = encodedObjectValue
+      }
+    }
+    return encodedObject
+  }
+
+  return undefined
+}
+
 function encodeInputForEnv(input: ElectronRuntimeBridgeInput): string {
-  return Buffer.from(serialize(input)).toString(`base64`)
+  const encodedInput = encodeTransportValue(input)
+  if (!encodedInput || typeof encodedInput !== `object`) {
+    throw new Error(`Failed to encode e2e runtime input`)
+  }
+  return JSON.stringify(encodedInput)
 }
 
 export async function runElectronRuntimeBridgeScenario(
@@ -120,10 +207,7 @@ export async function runElectronRuntimeBridgeScenario(
         cwd: packageRoot,
         env: {
           ...process.env,
-          [E2E_INPUT_BASE64_ENV_VAR]: encodeInputForEnv(input),
-          [E2E_INPUT_ENV_VAR]: JSON.stringify(input, (_key, value) =>
-            typeof value === `bigint` ? value.toString() : value,
-          ),
+          [E2E_INPUT_ENV_VAR]: encodeInputForEnv(input),
           ELECTRON_DISABLE_SECURITY_WARNINGS: `true`,
         },
         stdio: [`ignore`, `pipe`, `pipe`],
