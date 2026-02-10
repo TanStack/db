@@ -62,8 +62,11 @@ export type SQLitePullSinceResult<TKey extends string | number> =
 
 const DEFAULT_SCHEMA_VERSION = 1
 const DEFAULT_PULL_SINCE_RELOAD_THRESHOLD = 128
+const SQLITE_MAX_IN_BATCH_SIZE = 900
 const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
+const orderByObjectIds = new WeakMap<object, number>()
+let nextOrderByObjectId = 1
 
 function quoteIdentifier(identifier: string): string {
   if (!SAFE_IDENTIFIER_PATTERN.test(identifier)) {
@@ -101,6 +104,38 @@ function toSqliteParameterValue(value: unknown): SqliteSupportedValue {
   return JSON.stringify(value)
 }
 
+function toSqliteLiteral(value: SqliteSupportedValue): string {
+  if (value === null) {
+    return `NULL`
+  }
+
+  if (typeof value === `number`) {
+    return Number.isFinite(value) ? String(value) : `NULL`
+  }
+
+  return `'${value.replace(/'/g, `''`)}'`
+}
+
+function inlineSqlParams(
+  sql: string,
+  params: ReadonlyArray<SqliteSupportedValue>,
+): string {
+  let index = 0
+  const inlinedSql = sql.replace(/\?/g, () => {
+    const paramValue = params[index]
+    index++
+    return toSqliteLiteral(paramValue ?? null)
+  })
+
+  if (index !== params.length) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Unable to inline SQL params; placeholder count did not match provided params`,
+    )
+  }
+
+  return inlinedSql
+}
+
 function isNullish(value: unknown): boolean {
   return value === null || value === undefined
 }
@@ -112,64 +147,121 @@ function normalizeSortableValue(value: unknown): unknown {
   return value
 }
 
-function compareUnknownValues(left: unknown, right: unknown): number {
-  const normalizedLeft = normalizeSortableValue(left)
-  const normalizedRight = normalizeSortableValue(right)
+function isUint8ArrayLike(value: unknown): value is Uint8Array {
+  return (
+    ((typeof Buffer !== `undefined` && value instanceof Buffer) ||
+      value instanceof Uint8Array) === true
+  )
+}
 
-  if (normalizedLeft === normalizedRight) {
+function areUint8ArraysEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) {
+    return false
+  }
+
+  for (let index = 0; index < left.byteLength; index++) {
+    if (left[index] !== right[index]) {
+      return false
+    }
+  }
+
+  return true
+}
+
+function getOrderByObjectId(value: object): number {
+  const existing = orderByObjectIds.get(value)
+  if (existing !== undefined) {
+    return existing
+  }
+
+  const nextId = nextOrderByObjectId
+  nextOrderByObjectId++
+  orderByObjectIds.set(value, nextId)
+  return nextId
+}
+
+function compareOrderByValues(
+  left: unknown,
+  right: unknown,
+  compareOptions: IR.OrderByClause[`compareOptions`],
+): number {
+  if (left == null && right == null) {
+    return 0
+  }
+  if (left == null) {
+    return compareOptions.nulls === `first` ? -1 : 1
+  }
+  if (right == null) {
+    return compareOptions.nulls === `first` ? 1 : -1
+  }
+
+  if (typeof left === `string` && typeof right === `string`) {
+    if (compareOptions.stringSort === `locale`) {
+      return left.localeCompare(
+        right,
+        compareOptions.locale,
+        compareOptions.localeOptions,
+      )
+    }
+    if (left < right) {
+      return -1
+    }
+    if (left > right) {
+      return 1
+    }
     return 0
   }
 
-  if (
-    typeof normalizedLeft === `number` &&
-    typeof normalizedRight === `number`
-  ) {
-    return normalizedLeft < normalizedRight ? -1 : 1
+  if (Array.isArray(left) && Array.isArray(right)) {
+    const maxIndex = Math.min(left.length, right.length)
+    for (let index = 0; index < maxIndex; index++) {
+      const comparison = compareOrderByValues(
+        left[index],
+        right[index],
+        compareOptions,
+      )
+      if (comparison !== 0) {
+        return comparison
+      }
+    }
+    return left.length - right.length
   }
 
-  if (
-    typeof normalizedLeft === `string` &&
-    typeof normalizedRight === `string`
-  ) {
-    return normalizedLeft < normalizedRight ? -1 : 1
+  if (left instanceof Date && right instanceof Date) {
+    return left.getTime() - right.getTime()
   }
 
-  if (
-    typeof normalizedLeft === `boolean` &&
-    typeof normalizedRight === `boolean`
-  ) {
-    return normalizedLeft === false ? -1 : 1
+  const leftIsObject = typeof left === `object`
+  const rightIsObject = typeof right === `object`
+  if (leftIsObject || rightIsObject) {
+    if (leftIsObject && rightIsObject) {
+      return getOrderByObjectId(left) - getOrderByObjectId(right)
+    }
+    return leftIsObject ? 1 : -1
   }
 
-  const leftString =
-    typeof normalizedLeft === `string`
-      ? normalizedLeft
-      : JSON.stringify(normalizedLeft)
-  const rightString =
-    typeof normalizedRight === `string`
-      ? normalizedRight
-      : JSON.stringify(normalizedRight)
-
-  if (leftString === rightString) {
-    return 0
+  if (left < right) {
+    return -1
   }
-  return leftString < rightString ? -1 : 1
+  if (left > right) {
+    return 1
+  }
+  return 0
 }
 
 function valuesEqual(left: unknown, right: unknown): boolean {
-  if (left instanceof Date && right instanceof Date) {
-    return left.getTime() === right.getTime()
+  const normalizedLeft = normalizeSortableValue(left)
+  const normalizedRight = normalizeSortableValue(right)
+
+  if (Object.is(normalizedLeft, normalizedRight)) {
+    return true
   }
 
-  if (typeof left === `object` && left !== null) {
-    return JSON.stringify(left) === JSON.stringify(right)
+  if (isUint8ArrayLike(left) && isUint8ArrayLike(right)) {
+    return areUint8ArraysEqual(left, right)
   }
 
-  if (typeof right === `object` && right !== null) {
-    return JSON.stringify(left) === JSON.stringify(right)
-  }
-
-  return Object.is(left, right)
+  return false
 }
 
 function createJsonPath(path: Array<string>): string | null {
@@ -212,24 +304,16 @@ function resolveRowValueByPath(
   row: Record<string, unknown>,
   path: Array<string>,
 ): unknown {
-  const resolvePath = (candidatePath: Array<string>): unknown => {
-    let current: unknown = row
-    for (const segment of candidatePath) {
-      if (typeof current !== `object` || current === null) {
-        return undefined
-      }
-
-      current = (current as Record<string, unknown>)[segment]
+  let current: unknown = row
+  for (const segment of path) {
+    if (typeof current !== `object` || current === null) {
+      return undefined
     }
-    return current
+
+    current = (current as Record<string, unknown>)[segment]
   }
 
-  const directValue = resolvePath(path)
-  if (directValue !== undefined || path.length <= 1) {
-    return directValue
-  }
-
-  return resolvePath(path.slice(1))
+  return current
 }
 
 function evaluateLikePattern(
@@ -294,28 +378,28 @@ function evaluateExpressionOnRow(
       if (isNullish(left) || isNullish(right)) {
         return null
       }
-      return compareUnknownValues(left, right) > 0
+      return left > right
     }
     case `gte`: {
       const [left, right] = evaluatedArgs
       if (isNullish(left) || isNullish(right)) {
         return null
       }
-      return compareUnknownValues(left, right) >= 0
+      return left >= right
     }
     case `lt`: {
       const [left, right] = evaluatedArgs
       if (isNullish(left) || isNullish(right)) {
         return null
       }
-      return compareUnknownValues(left, right) < 0
+      return left < right
     }
     case `lte`: {
       const [left, right] = evaluatedArgs
       if (isNullish(left) || isNullish(right)) {
         return null
       }
-      return compareUnknownValues(left, right) <= 0
+      return left <= right
     }
     case `and`: {
       let hasUnknown = false
@@ -386,9 +470,23 @@ function evaluateExpressionOnRow(
       return evaluatedArgs.find((value) => !isNullish(value)) ?? null
     case `add`:
       return (
-        (Number(evaluatedArgs[0] ?? 0) || 0) +
-        (Number(evaluatedArgs[1] ?? 0) || 0)
+        (Number(evaluatedArgs[0] ?? 0) || 0) + (Number(evaluatedArgs[1] ?? 0) || 0)
       )
+    case `subtract`:
+      return (
+        (Number(evaluatedArgs[0] ?? 0) || 0) - (Number(evaluatedArgs[1] ?? 0) || 0)
+      )
+    case `multiply`:
+      return (
+        (Number(evaluatedArgs[0] ?? 0) || 0) * (Number(evaluatedArgs[1] ?? 0) || 0)
+      )
+    case `divide`: {
+      const denominator = Number(evaluatedArgs[1] ?? 0) || 0
+      if (denominator === 0) {
+        return null
+      }
+      return (Number(evaluatedArgs[0] ?? 0) || 0) / denominator
+    }
     case `date`: {
       const dateValue = toDateValue(evaluatedArgs[0])
       return dateValue ? dateValue.toISOString().slice(0, 10) : null
@@ -526,12 +624,47 @@ function compileSqlExpression(
         return { supported: true, sql: `(0 = 1)`, params: [] }
       }
 
+      const leftSql = argSql[0]
+      const leftParams = compiledArgs[0]?.params ?? []
+      if (!leftSql) {
+        return { supported: false, sql: ``, params: [] }
+      }
+
+      if (listValue.length > SQLITE_MAX_IN_BATCH_SIZE) {
+        const chunkClauses: Array<string> = []
+        const batchedParams: Array<SqliteSupportedValue> = []
+
+        for (
+          let startIndex = 0;
+          startIndex < listValue.length;
+          startIndex += SQLITE_MAX_IN_BATCH_SIZE
+        ) {
+          const chunkValues = listValue.slice(
+            startIndex,
+            startIndex + SQLITE_MAX_IN_BATCH_SIZE,
+          )
+          chunkClauses.push(
+            `(${leftSql} IN (${chunkValues.map(() => `?`).join(`, `)}))`,
+          )
+          batchedParams.push(...leftParams)
+          batchedParams.push(
+            ...chunkValues.map((value) => toSqliteParameterValue(value)),
+          )
+        }
+
+        return {
+          supported: true,
+          sql: `(${chunkClauses.join(` OR `)})`,
+          params: batchedParams,
+        }
+      }
+
       const listPlaceholders = listValue.map(() => `?`).join(`, `)
       return {
         supported: true,
-        sql: `(${argSql[0]} IN (${listPlaceholders}))`,
+        sql: `(${leftSql} IN (${listPlaceholders}))`,
         params: [
-          ...(compiledArgs[0]?.params ?? []),
+          ...leftParams,
           ...listValue.map((value) => toSqliteParameterValue(value)),
         ],
       }
@@ -563,6 +696,12 @@ function compileSqlExpression(
       return { supported: true, sql: `COALESCE(${argSql.join(`, `)})`, params }
     case `add`:
       return { supported: true, sql: `(${argSql[0]} + ${argSql[1]})`, params }
+    case `subtract`:
+      return { supported: true, sql: `(${argSql[0]} - ${argSql[1]})`, params }
+    case `multiply`:
+      return { supported: true, sql: `(${argSql[0]} * ${argSql[1]})`, params }
+    case `divide`:
+      return { supported: true, sql: `(${argSql[0]} / ${argSql[1]})`, params }
     case `date`:
       return { supported: true, sql: `date(${argSql[0]})`, params }
     case `datetime`:
@@ -622,6 +761,67 @@ function compileOrderByClauses(
   }
 }
 
+function isExpressionLikeShape(value: unknown): value is IR.BasicExpression {
+  if (typeof value !== `object` || value === null) {
+    return false
+  }
+
+  const candidate = value as {
+    type?: unknown
+    value?: unknown
+    path?: unknown
+    name?: unknown
+    args?: unknown
+  }
+
+  if (candidate.type === `val`) {
+    return Object.prototype.hasOwnProperty.call(candidate, `value`)
+  }
+
+  if (candidate.type === `ref`) {
+    return Array.isArray(candidate.path)
+  }
+
+  if (candidate.type === `func`) {
+    if (typeof candidate.name !== `string` || !Array.isArray(candidate.args)) {
+      return false
+    }
+    return candidate.args.every((arg) => isExpressionLikeShape(arg))
+  }
+
+  return false
+}
+
+function normalizeIndexSqlFragment(fragment: string): string {
+  const trimmed = fragment.trim()
+  if (trimmed.length === 0) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Index SQL fragment cannot be empty`,
+    )
+  }
+
+  let parsedJson: unknown
+  let hasParsedJson = false
+  try {
+    parsedJson = JSON.parse(trimmed) as unknown
+    hasParsedJson = true
+  } catch {
+    // Non-JSON strings are treated as raw SQL fragments below.
+  }
+
+  if (hasParsedJson && isExpressionLikeShape(parsedJson)) {
+    const compiled = compileSqlExpression(parsedJson)
+    if (!compiled.supported) {
+      throw new InvalidPersistedCollectionConfigError(
+        `Persisted index expression is not supported by the SQLite compiler`,
+      )
+    }
+    return inlineSqlParams(compiled.sql, compiled.params)
+  }
+
+  return sanitizeExpressionSqlFragment(fragment)
+}
+
 function mergeObjectRows<T extends object>(existing: unknown, incoming: T): T {
   if (typeof existing === `object` && existing !== null) {
     return Object.assign({}, existing as Record<string, unknown>, incoming) as T
@@ -658,13 +858,40 @@ export class SQLiteCorePersistenceAdapter<
   >()
 
   constructor(options: SQLiteCoreAdapterOptions) {
+    const schemaVersion = options.schemaVersion ?? DEFAULT_SCHEMA_VERSION
+    if (!Number.isInteger(schemaVersion) || schemaVersion < 0) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SQLite adapter schemaVersion must be a non-negative integer`,
+      )
+    }
+
+    if (
+      options.appliedTxPruneMaxRows !== undefined &&
+      (!Number.isInteger(options.appliedTxPruneMaxRows) ||
+        options.appliedTxPruneMaxRows < 0)
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SQLite adapter appliedTxPruneMaxRows must be a non-negative integer when provided`,
+      )
+    }
+
+    const pullSinceReloadThreshold =
+      options.pullSinceReloadThreshold ?? DEFAULT_PULL_SINCE_RELOAD_THRESHOLD
+    if (
+      !Number.isInteger(pullSinceReloadThreshold) ||
+      pullSinceReloadThreshold < 0
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SQLite adapter pullSinceReloadThreshold must be a non-negative integer`,
+      )
+    }
+
     this.driver = options.driver
-    this.schemaVersion = options.schemaVersion ?? DEFAULT_SCHEMA_VERSION
+    this.schemaVersion = schemaVersion
     this.schemaMismatchPolicy =
       options.schemaMismatchPolicy ?? `sync-present-reset`
     this.appliedTxPruneMaxRows = options.appliedTxPruneMaxRows
-    this.pullSinceReloadThreshold =
-      options.pullSinceReloadThreshold ?? DEFAULT_PULL_SINCE_RELOAD_THRESHOLD
+    this.pullSinceReloadThreshold = pullSinceReloadThreshold
   }
 
   async loadSubset(
@@ -853,11 +1080,12 @@ export class SQLiteCorePersistenceAdapter<
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const indexName = buildIndexName(collectionId, signature)
     const indexNameSql = quoteIdentifier(indexName)
-    const expressionSql = spec.expressionSql
-      .map((fragment) => sanitizeExpressionSqlFragment(fragment))
-      .join(`, `)
+    const normalizedExpressionSql = spec.expressionSql.map((fragment) =>
+      normalizeIndexSqlFragment(fragment),
+    )
+    const expressionSql = normalizedExpressionSql.join(`, `)
     const whereSql = spec.whereSql
-      ? sanitizeExpressionSqlFragment(spec.whereSql)
+      ? normalizeIndexSqlFragment(spec.whereSql)
       : undefined
 
     await this.driver.transaction(async () => {
@@ -888,7 +1116,7 @@ export class SQLiteCorePersistenceAdapter<
           collectionId,
           signature,
           indexName,
-          JSON.stringify(spec.expressionSql),
+          JSON.stringify(normalizedExpressionSql),
           whereSql ?? null,
         ],
       )
@@ -1072,32 +1300,11 @@ export class SQLiteCorePersistenceAdapter<
           right.value as Record<string, unknown>,
         )
 
-        if (isNullish(leftValue) || isNullish(rightValue)) {
-          if (isNullish(leftValue) && isNullish(rightValue)) {
-            continue
-          }
-
-          if (isNullish(leftValue)) {
-            return clause.compareOptions.nulls === `first` ? -1 : 1
-          }
-
-          return clause.compareOptions.nulls === `first` ? 1 : -1
-        }
-
-        let comparison = 0
-        if (
-          clause.compareOptions.stringSort === `locale` &&
-          typeof leftValue === `string` &&
-          typeof rightValue === `string`
-        ) {
-          comparison = leftValue.localeCompare(
-            rightValue,
-            clause.compareOptions.locale,
-            clause.compareOptions.localeOptions,
-          )
-        } else {
-          comparison = compareUnknownValues(leftValue, rightValue)
-        }
+        const comparison = compareOrderByValues(
+          leftValue,
+          rightValue,
+          clause.compareOptions,
+        )
 
         if (comparison !== 0) {
           return clause.compareOptions.direction === `desc`
@@ -1295,6 +1502,18 @@ export class SQLiteCorePersistenceAdapter<
     const tombstoneTableSql = quoteIdentifier(tombstoneTableName)
 
     await this.driver.transaction(async () => {
+      const persistedIndexes = await this.driver.query<{ index_name: string }>(
+        `SELECT index_name
+         FROM persisted_index_registry
+         WHERE collection_id = ?`,
+        [collectionId],
+      )
+      for (const row of persistedIndexes) {
+        await this.driver.exec(
+          `DROP INDEX IF EXISTS ${quoteIdentifier(row.index_name)}`,
+        )
+      }
+
       await this.driver.run(`DELETE FROM ${collectionTableSql}`)
       await this.driver.run(`DELETE FROM ${tombstoneTableSql}`)
       await this.driver.run(
@@ -1390,12 +1609,13 @@ export class SQLiteCorePersistenceAdapter<
          updated_at INTEGER NOT NULL
        )`,
     )
-    await this.driver.exec(
+    await this.driver.run(
       `INSERT INTO schema_version (scope, version, updated_at)
-       VALUES ('global', ${this.schemaVersion}, CAST(strftime('%s', 'now') AS INTEGER))
+       VALUES ('global', ?, CAST(strftime('%s', 'now') AS INTEGER))
        ON CONFLICT(scope) DO UPDATE SET
          version = excluded.version,
          updated_at = excluded.updated_at`,
+      [this.schemaVersion],
     )
     await this.driver.exec(
       `CREATE TABLE IF NOT EXISTS collection_reset_epoch (

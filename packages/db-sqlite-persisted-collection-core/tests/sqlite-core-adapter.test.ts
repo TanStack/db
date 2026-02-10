@@ -15,6 +15,13 @@ type Todo = {
   score: number
 }
 
+type MixedKeyTodo = {
+  id: string | number
+  title: string
+  createdAt: string
+  score: number
+}
+
 const execFileAsync = promisify(execFile)
 
 function toSqlLiteral(value: unknown): string {
@@ -576,5 +583,219 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
 
     const fullReload = await adapter.pullSince(collectionId, 0)
     expect(fullReload.requiresFullReload).toBe(true)
+  })
+
+  it(`keeps numeric and string keys distinct in storage`, async () => {
+    const { driver } = registerHarness()
+    const adapter = new SQLiteCorePersistenceAdapter<MixedKeyTodo, string | number>(
+      {
+        driver,
+      },
+    )
+    const collectionId = `mixed-keys`
+
+    await adapter.applyCommittedTx(collectionId, {
+      txId: `mixed-1`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: 1,
+          value: {
+            id: 1,
+            title: `Numeric`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 1,
+          },
+        },
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `String`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 2,
+          },
+        },
+      ],
+    })
+
+    const rows = await adapter.loadSubset(collectionId, {})
+    expect(rows).toHaveLength(2)
+    expect(rows.some((row) => row.key === 1)).toBe(true)
+    expect(rows.some((row) => row.key === `1`)).toBe(true)
+  })
+
+  it(`stores hostile collection ids safely via deterministic table mapping`, async () => {
+    const { adapter, driver } = registerHarness()
+    const hostileCollectionId = `todos"; DROP TABLE applied_tx; --`
+
+    await adapter.applyCommittedTx(hostileCollectionId, {
+      txId: `hostile-1`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `safe`,
+          value: {
+            id: `safe`,
+            title: `Safe`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 1,
+          },
+        },
+      ],
+    })
+
+    const registryRows = await driver.query<{ table_name: string }>(
+      `SELECT table_name
+       FROM collection_registry
+       WHERE collection_id = ?`,
+      [hostileCollectionId],
+    )
+    expect(registryRows).toHaveLength(1)
+    expect(registryRows[0]?.table_name).toMatch(/^c_[a-z2-7]+_[0-9a-z]+$/)
+
+    const loadedRows = await adapter.loadSubset(hostileCollectionId, {})
+    expect(loadedRows).toHaveLength(1)
+    expect(loadedRows[0]?.key).toBe(`safe`)
+  })
+
+  it(`prunes applied_tx rows by sequence threshold`, async () => {
+    const { adapter, driver } = registerHarness({
+      appliedTxPruneMaxRows: 2,
+    })
+    const collectionId = `pruning`
+
+    for (let seq = 1; seq <= 4; seq++) {
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `prune-${seq}`,
+        term: 1,
+        seq,
+        rowVersion: seq,
+        mutations: [
+          {
+            type: `insert`,
+            key: `k-${seq}`,
+            value: {
+              id: `k-${seq}`,
+              title: `Row ${seq}`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: seq,
+            },
+          },
+        ],
+      })
+    }
+
+    const appliedRows = await driver.query<{ seq: number }>(
+      `SELECT seq
+       FROM applied_tx
+       WHERE collection_id = ?
+       ORDER BY seq ASC`,
+      [collectionId],
+    )
+    expect(appliedRows.map((row) => row.seq)).toEqual([3, 4])
+  })
+
+  it(`supports large IN lists via batching`, async () => {
+    const { adapter } = registerHarness()
+    const collectionId = `large-in`
+
+    await adapter.applyCommittedTx(collectionId, {
+      txId: `seed-large-in`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `2`,
+          value: {
+            id: `2`,
+            title: `Two`,
+            createdAt: `2026-01-02T00:00:00.000Z`,
+            score: 2,
+          },
+        },
+        {
+          type: `insert`,
+          key: `4`,
+          value: {
+            id: `4`,
+            title: `Four`,
+            createdAt: `2026-01-04T00:00:00.000Z`,
+            score: 4,
+          },
+        },
+      ],
+    })
+
+    const largeIds = Array.from({ length: 1200 }, (_value, index) => `miss-${index}`)
+    largeIds[100] = `2`
+    largeIds[1100] = `4`
+
+    const rows = await adapter.loadSubset(collectionId, {
+      where: new IR.Func(`in`, [new IR.PropRef([`id`]), new IR.Value(largeIds)]),
+      orderBy: [
+        {
+          expression: new IR.PropRef([`id`]),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+        },
+      ],
+    })
+
+    expect(rows.map((row) => row.key)).toEqual([`2`, `4`])
+  })
+
+  it(`compiles serialized expression index specs used by phase-2 metadata`, async () => {
+    const { adapter, driver } = registerHarness()
+    const collectionId = `serialized-index`
+    const signature = `serialized-title`
+
+    await adapter.ensureIndex(collectionId, signature, {
+      expressionSql: [
+        JSON.stringify({
+          type: `ref`,
+          path: [`title`],
+        }),
+      ],
+    })
+
+    const registryRows = await driver.query<{ index_name: string }>(
+      `SELECT index_name
+       FROM persisted_index_registry
+       WHERE collection_id = ? AND signature = ?`,
+      [collectionId, signature],
+    )
+    const indexName = registryRows[0]?.index_name
+    expect(indexName).toBeTruthy()
+
+    const sqliteMasterRows = await driver.query<{ sql: string }>(
+      `SELECT sql
+       FROM sqlite_master
+       WHERE type = 'index' AND name = ?`,
+      [indexName],
+    )
+    expect(sqliteMasterRows).toHaveLength(1)
+    expect(sqliteMasterRows[0]?.sql).toContain(`json_extract(value, '$.title')`)
+  })
+
+  it(`rejects unsafe raw SQL fragments in index specs`, async () => {
+    const { adapter } = registerHarness()
+
+    await expect(
+      adapter.ensureIndex(`unsafe-index`, `unsafe`, {
+        expressionSql: [`json_extract(value, '$.title'); DROP TABLE applied_tx`],
+      }),
+    ).rejects.toThrow(/Invalid persisted index SQL fragment/)
   })
 })
