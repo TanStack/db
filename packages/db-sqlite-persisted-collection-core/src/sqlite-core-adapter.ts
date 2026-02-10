@@ -31,6 +31,7 @@ type CompiledSqlFragment = {
   supported: boolean
   sql: string
   params: Array<SqliteSupportedValue>
+  valueKind?: CompiledValueKind
 }
 
 type StoredSqliteRow = {
@@ -70,6 +71,24 @@ const DEFAULT_PULL_SINCE_RELOAD_THRESHOLD = 128
 const SQLITE_MAX_IN_BATCH_SIZE = 900
 const SAFE_IDENTIFIER_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_]*$/
 const FORBIDDEN_SQL_FRAGMENT_PATTERN = /(;|--|\/\*)/
+const PERSISTED_TYPE_TAG = `__tanstack_db_persisted_type__`
+const PERSISTED_VALUE_TAG = `value`
+
+type CompiledValueKind = `unknown` | `bigint` | `date` | `datetime`
+type PersistedTaggedValueType = `bigint` | `date` | `nan` | `infinity` | `-infinity`
+type PersistedTaggedValue = {
+  [PERSISTED_TYPE_TAG]: PersistedTaggedValueType
+  [PERSISTED_VALUE_TAG]: string
+}
+
+const persistedTaggedValueTypes = new Set<PersistedTaggedValueType>([
+  `bigint`,
+  `date`,
+  `nan`,
+  `infinity`,
+  `-infinity`,
+])
+
 const orderByObjectIds = new WeakMap<object, number>()
 let nextOrderByObjectId = 1
 
@@ -80,6 +99,136 @@ function quoteIdentifier(identifier: string): string {
     )
   }
   return `"${identifier}"`
+}
+
+function isPersistedTaggedValue(value: unknown): value is PersistedTaggedValue {
+  if (typeof value !== `object` || value === null) {
+    return false
+  }
+
+  const taggedValue = value as {
+    [PERSISTED_TYPE_TAG]?: unknown
+    [PERSISTED_VALUE_TAG]?: unknown
+  }
+  if (
+    typeof taggedValue[PERSISTED_TYPE_TAG] !== `string` ||
+    typeof taggedValue[PERSISTED_VALUE_TAG] !== `string`
+  ) {
+    return false
+  }
+
+  return persistedTaggedValueTypes.has(
+    taggedValue[PERSISTED_TYPE_TAG] as PersistedTaggedValueType,
+  )
+}
+
+function encodePersistedJsonValue(value: unknown): unknown {
+  if (value === undefined || value === null) {
+    return value
+  }
+
+  if (typeof value === `bigint`) {
+    return {
+      [PERSISTED_TYPE_TAG]: `bigint`,
+      [PERSISTED_VALUE_TAG]: value.toString(),
+    } satisfies PersistedTaggedValue
+  }
+
+  if (value instanceof Date) {
+    return {
+      [PERSISTED_TYPE_TAG]: `date`,
+      [PERSISTED_VALUE_TAG]: value.toISOString(),
+    } satisfies PersistedTaggedValue
+  }
+
+  if (typeof value === `number`) {
+    if (Number.isNaN(value)) {
+      return {
+        [PERSISTED_TYPE_TAG]: `nan`,
+        [PERSISTED_VALUE_TAG]: `NaN`,
+      } satisfies PersistedTaggedValue
+    }
+    if (value === Number.POSITIVE_INFINITY) {
+      return {
+        [PERSISTED_TYPE_TAG]: `infinity`,
+        [PERSISTED_VALUE_TAG]: `Infinity`,
+      } satisfies PersistedTaggedValue
+    }
+    if (value === Number.NEGATIVE_INFINITY) {
+      return {
+        [PERSISTED_TYPE_TAG]: `-infinity`,
+        [PERSISTED_VALUE_TAG]: `-Infinity`,
+      } satisfies PersistedTaggedValue
+    }
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => encodePersistedJsonValue(entry))
+  }
+
+  if (typeof value === `object`) {
+    const encodedRecord: Record<string, unknown> = {}
+    const recordValue = value as Record<string, unknown>
+    for (const [key, entryValue] of Object.entries(recordValue)) {
+      const encodedValue = encodePersistedJsonValue(entryValue)
+      if (encodedValue !== undefined) {
+        encodedRecord[key] = encodedValue
+      }
+    }
+    return encodedRecord
+  }
+
+  return value
+}
+
+function decodePersistedJsonValue(value: unknown): unknown {
+  if (value === undefined || value === null) {
+    return value
+  }
+
+  if (isPersistedTaggedValue(value)) {
+    switch (value[PERSISTED_TYPE_TAG]) {
+      case `bigint`:
+        return BigInt(value[PERSISTED_VALUE_TAG])
+      case `date`: {
+        const parsedDate = new Date(value[PERSISTED_VALUE_TAG])
+        return Number.isNaN(parsedDate.getTime()) ? null : parsedDate
+      }
+      case `nan`:
+        return Number.NaN
+      case `infinity`:
+        return Number.POSITIVE_INFINITY
+      case `-infinity`:
+        return Number.NEGATIVE_INFINITY
+      default:
+        return value
+    }
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => decodePersistedJsonValue(entry))
+  }
+
+  if (typeof value === `object`) {
+    const decodedRecord: Record<string, unknown> = {}
+    const recordValue = value as Record<string, unknown>
+    for (const [key, entryValue] of Object.entries(recordValue)) {
+      decodedRecord[key] = decodePersistedJsonValue(entryValue)
+    }
+    return decodedRecord
+  }
+
+  return value
+}
+
+function serializePersistedRowValue(value: unknown): string {
+  return JSON.stringify(encodePersistedJsonValue(value))
+}
+
+function deserializePersistedRowValue<T>(value: string): T {
+  const parsedJson = JSON.parse(value) as unknown
+  return decodePersistedJsonValue(parsedJson) as T
 }
 
 function toSqliteParameterValue(value: unknown): SqliteSupportedValue {
@@ -94,6 +243,10 @@ function toSqliteParameterValue(value: unknown): SqliteSupportedValue {
     return value
   }
 
+  if (typeof value === `bigint`) {
+    return value.toString()
+  }
+
   if (typeof value === `boolean`) {
     return value ? 1 : 0
   }
@@ -106,7 +259,7 @@ function toSqliteParameterValue(value: unknown): SqliteSupportedValue {
     return value.toISOString()
   }
 
-  return JSON.stringify(value)
+  return serializePersistedRowValue(value)
 }
 
 function toSqliteLiteral(value: SqliteSupportedValue): string {
@@ -329,6 +482,91 @@ function createJsonPath(path: Array<string>): string | null {
   return jsonPath
 }
 
+function getLiteralValueKind(value: unknown): CompiledValueKind {
+  if (typeof value === `bigint`) {
+    return `bigint`
+  }
+  if (value instanceof Date) {
+    return `datetime`
+  }
+  return `unknown`
+}
+
+function getCompiledValueKind(fragment: CompiledSqlFragment): CompiledValueKind {
+  return fragment.valueKind ?? `unknown`
+}
+
+function resolveComparisonValueKind(
+  leftExpression: IR.BasicExpression,
+  rightExpression: IR.BasicExpression,
+  leftCompiled: CompiledSqlFragment,
+  rightCompiled: CompiledSqlFragment,
+): CompiledValueKind {
+  const leftKind = getCompiledValueKind(leftCompiled)
+  const rightKind = getCompiledValueKind(rightCompiled)
+
+  const hasBigIntLiteral =
+    (leftExpression.type === `val` && typeof leftExpression.value === `bigint`) ||
+    (rightExpression.type === `val` && typeof rightExpression.value === `bigint`)
+  if (hasBigIntLiteral || leftKind === `bigint` || rightKind === `bigint`) {
+    return `bigint`
+  }
+
+  const hasDateLiteral =
+    (leftExpression.type === `val` && leftExpression.value instanceof Date) ||
+    (rightExpression.type === `val` && rightExpression.value instanceof Date)
+  if (
+    hasDateLiteral ||
+    leftKind === `datetime` ||
+    rightKind === `datetime`
+  ) {
+    return `datetime`
+  }
+
+  if (leftKind === `date` || rightKind === `date`) {
+    return `date`
+  }
+
+  return `unknown`
+}
+
+function compileComparisonSql(
+  operator: `=` | `>` | `>=` | `<` | `<=`,
+  leftSql: string,
+  rightSql: string,
+  valueKind: CompiledValueKind,
+): string {
+  if (valueKind === `bigint`) {
+    return `(CAST(${leftSql} AS NUMERIC) ${operator} CAST(${rightSql} AS NUMERIC))`
+  }
+  if (valueKind === `date`) {
+    return `(date(${leftSql}) ${operator} date(${rightSql}))`
+  }
+  if (valueKind === `datetime`) {
+    return `(datetime(${leftSql}) ${operator} datetime(${rightSql}))`
+  }
+  return `(${leftSql} ${operator} ${rightSql})`
+}
+
+function compileRefExpressionSql(jsonPath: string): CompiledSqlFragment {
+  const typePath = `${jsonPath}.${PERSISTED_TYPE_TAG}`
+  const taggedValuePath = `${jsonPath}.${PERSISTED_VALUE_TAG}`
+
+  return {
+    supported: true,
+    sql: `(CASE json_extract(value, ?)
+      WHEN 'bigint' THEN CAST(json_extract(value, ?) AS NUMERIC)
+      WHEN 'date' THEN json_extract(value, ?)
+      WHEN 'nan' THEN NULL
+      WHEN 'infinity' THEN NULL
+      WHEN '-infinity' THEN NULL
+      ELSE json_extract(value, ?)
+    END)`,
+    params: [typePath, taggedValuePath, taggedValuePath, jsonPath],
+    valueKind: `unknown`,
+  }
+}
+
 function sanitizeExpressionSqlFragment(fragment: string): string {
   if (
     fragment.trim().length === 0 ||
@@ -352,10 +590,12 @@ function compileSqlExpression(
   expression: IR.BasicExpression,
 ): CompiledSqlFragment {
   if (expression.type === `val`) {
+    const valueKind = getLiteralValueKind(expression.value)
     return {
       supported: true,
       sql: `?`,
       params: [toSqliteParameterValue(expression.value)],
+      valueKind,
     }
   }
 
@@ -369,11 +609,7 @@ function compileSqlExpression(
       }
     }
 
-    return {
-      supported: true,
-      sql: `json_extract(value, ?)`,
-      params: [jsonPath],
-    }
+    return compileRefExpressionSql(jsonPath)
   }
 
   const compiledArgs = expression.args.map((arg) => compileSqlExpression(arg))
@@ -390,15 +626,48 @@ function compileSqlExpression(
 
   switch (expression.name) {
     case `eq`:
-      return { supported: true, sql: `(${argSql[0]} = ${argSql[1]})`, params }
     case `gt`:
-      return { supported: true, sql: `(${argSql[0]} > ${argSql[1]})`, params }
     case `gte`:
-      return { supported: true, sql: `(${argSql[0]} >= ${argSql[1]})`, params }
     case `lt`:
-      return { supported: true, sql: `(${argSql[0]} < ${argSql[1]})`, params }
-    case `lte`:
-      return { supported: true, sql: `(${argSql[0]} <= ${argSql[1]})`, params }
+    case `lte`: {
+      if (
+        expression.args.length !== 2 ||
+        !argSql[0] ||
+        !argSql[1] ||
+        !compiledArgs[0] ||
+        !compiledArgs[1]
+      ) {
+        return { supported: false, sql: ``, params: [] }
+      }
+
+      const valueKind = resolveComparisonValueKind(
+        expression.args[0],
+        expression.args[1],
+        compiledArgs[0],
+        compiledArgs[1],
+      )
+      const operatorByName: Record<
+        `eq` | `gt` | `gte` | `lt` | `lte`,
+        `=` | `>` | `>=` | `<` | `<=`
+      > = {
+        eq: `=`,
+        gt: `>`,
+        gte: `>=`,
+        lt: `<`,
+        lte: `<=`,
+      }
+
+      return {
+        supported: true,
+        sql: compileComparisonSql(
+          operatorByName[expression.name],
+          argSql[0],
+          argSql[1],
+          valueKind,
+        ),
+        params,
+      }
+    }
     case `and`: {
       if (argSql.length < 2) {
         return { supported: false, sql: ``, params: [] }
@@ -450,6 +719,10 @@ function compileSqlExpression(
       }
 
       if (listValue.length > SQLITE_MAX_IN_BATCH_SIZE) {
+        const hasBigIntValues = listValue.some((value) => typeof value === `bigint`)
+        const inLeftSql = hasBigIntValues
+          ? `CAST(${leftSql} AS NUMERIC)`
+          : leftSql
         const chunkClauses: Array<string> = []
         const batchedParams: Array<SqliteSupportedValue> = []
 
@@ -463,7 +736,7 @@ function compileSqlExpression(
             startIndex + SQLITE_MAX_IN_BATCH_SIZE,
           )
           chunkClauses.push(
-            `(${leftSql} IN (${chunkValues.map(() => `?`).join(`, `)}))`,
+            `(${inLeftSql} IN (${chunkValues.map(() => `?`).join(`, `)}))`,
           )
           batchedParams.push(...leftParams)
           batchedParams.push(
@@ -478,10 +751,14 @@ function compileSqlExpression(
         }
       }
 
+      const hasBigIntValues = listValue.some((value) => typeof value === `bigint`)
+      const inLeftSql = hasBigIntValues
+        ? `CAST(${leftSql} AS NUMERIC)`
+        : leftSql
       const listPlaceholders = listValue.map(() => `?`).join(`, `)
       return {
         supported: true,
-        sql: `(${leftSql} IN (${listPlaceholders}))`,
+        sql: `(${inLeftSql} IN (${listPlaceholders}))`,
         params: [
           ...leftParams,
           ...listValue.map((value) => toSqliteParameterValue(value)),
@@ -522,9 +799,19 @@ function compileSqlExpression(
     case `divide`:
       return { supported: true, sql: `(${argSql[0]} / ${argSql[1]})`, params }
     case `date`:
-      return { supported: true, sql: `date(${argSql[0]})`, params }
+      return {
+        supported: true,
+        sql: `date(${argSql[0]})`,
+        params,
+        valueKind: `date`,
+      }
     case `datetime`:
-      return { supported: true, sql: `datetime(${argSql[0]})`, params }
+      return {
+        supported: true,
+        sql: `datetime(${argSql[0]})`,
+        params,
+        valueKind: `datetime`,
+      }
     case `strftime`:
       return {
         supported: true,
@@ -827,7 +1114,7 @@ export class SQLiteCorePersistenceAdapter<
                deleted_at = excluded.deleted_at`,
             [
               encodedKey,
-              JSON.stringify(mutation.value),
+              serializePersistedRowValue(mutation.value),
               nextRowVersion,
               new Date().toISOString(),
             ],
@@ -843,7 +1130,7 @@ export class SQLiteCorePersistenceAdapter<
           [encodedKey],
         )
         const existingValue = existingRows[0]?.value
-          ? (JSON.parse(existingRows[0].value) as unknown)
+          ? (deserializePersistedRowValue(existingRows[0].value))
           : undefined
         const mergedValue =
           mutation.type === `update`
@@ -856,7 +1143,7 @@ export class SQLiteCorePersistenceAdapter<
            ON CONFLICT(key) DO UPDATE SET
              value = excluded.value,
              row_version = excluded.row_version`,
-          [encodedKey, JSON.stringify(mergedValue), nextRowVersion],
+          [encodedKey, serializePersistedRowValue(mergedValue), nextRowVersion],
         )
         await this.driver.run(
           `DELETE FROM ${tombstoneTableSql}
@@ -1079,7 +1366,7 @@ export class SQLiteCorePersistenceAdapter<
     )
     const parsedRows = storedRows.map((row) => {
       const key = decodePersistedStorageKey(row.key) as TKey
-      const value = JSON.parse(row.value) as T
+      const value = deserializePersistedRowValue<T>(row.value)
       return {
         key,
         value,
