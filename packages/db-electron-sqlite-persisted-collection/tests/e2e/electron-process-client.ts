@@ -91,7 +91,7 @@ function parseScenarioResult(
 
 function encodeTransportValue(
   value: unknown,
-  seen: WeakSet<object> = new WeakSet<object>(),
+  ancestors: WeakSet<object> = new WeakSet<object>(),
 ): unknown {
   if (value === null) {
     return null
@@ -144,14 +144,18 @@ function encodeTransportValue(
   }
 
   if (Array.isArray(value)) {
-    if (seen.has(value)) {
+    if (ancestors.has(value)) {
       return undefined
     }
-    seen.add(value)
-    return value.map((item) => {
-      const encodedItem = encodeTransportValue(item, seen)
-      return encodedItem === undefined ? null : encodedItem
-    })
+    ancestors.add(value)
+    try {
+      return value.map((item) => {
+        const encodedItem = encodeTransportValue(item, ancestors)
+        return encodedItem === undefined ? null : encodedItem
+      })
+    } finally {
+      ancestors.delete(value)
+    }
   }
 
   if (
@@ -163,20 +167,24 @@ function encodeTransportValue(
   }
 
   if (typeof value === `object`) {
-    if (seen.has(value)) {
+    if (ancestors.has(value)) {
       return undefined
     }
-    seen.add(value)
-    const encodedObject: Record<string, unknown> = {}
-    for (const [key, objectValue] of Object.entries(
-      value as Record<string, unknown>,
-    )) {
-      const encodedObjectValue = encodeTransportValue(objectValue, seen)
-      if (encodedObjectValue !== undefined) {
-        encodedObject[key] = encodedObjectValue
+    ancestors.add(value)
+    try {
+      const encodedObject: Record<string, unknown> = {}
+      for (const [key, objectValue] of Object.entries(
+        value as Record<string, unknown>,
+      )) {
+        const encodedObjectValue = encodeTransportValue(objectValue, ancestors)
+        if (encodedObjectValue !== undefined) {
+          encodedObject[key] = encodedObjectValue
+        }
       }
+      return encodedObject
+    } finally {
+      ancestors.delete(value)
     }
-    return encodedObject
   }
 
   return undefined
