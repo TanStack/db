@@ -22,6 +22,13 @@ type MixedKeyTodo = {
   score: number
 }
 
+type FlexibleTodoRow = Record<string, unknown> & {
+  id: string
+  title: string
+  createdAt: string
+  score: number
+}
+
 const execFileAsync = promisify(execFile)
 
 function toSqlLiteral(value: unknown): string {
@@ -349,6 +356,58 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
       ]),
     })
     expect(withInEmpty).toEqual([])
+  })
+
+  it(`supports datetime/strftime predicate compilation for ISO date fields`, async () => {
+    const { adapter } = registerHarness()
+    const collectionId = `date-pushdown`
+
+    await adapter.applyCommittedTx(collectionId, {
+      txId: `seed-date`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Start`,
+            createdAt: `2026-01-02T00:00:00.000Z`,
+            score: 1,
+          },
+        },
+        {
+          type: `insert`,
+          key: `2`,
+          value: {
+            id: `2`,
+            title: `Other`,
+            createdAt: `2026-01-03T00:00:00.000Z`,
+            score: 2,
+          },
+        },
+      ],
+    })
+
+    const rows = await adapter.loadSubset(collectionId, {
+      where: new IR.Func(`and`, [
+        new IR.Func(`eq`, [
+          new IR.Func(`strftime`, [
+            new IR.Value(`%Y-%m-%d`),
+            new IR.Func(`datetime`, [new IR.PropRef([`createdAt`])]),
+          ]),
+          new IR.Value(`2026-01-02`),
+        ]),
+        new IR.Func(`eq`, [
+          new IR.Func(`date`, [new IR.PropRef([`createdAt`])]),
+          new IR.Value(`2026-01-02`),
+        ]),
+      ]),
+    })
+
+    expect(rows.map((row) => row.key)).toEqual([`1`])
   })
 
   it(`handles cursor whereCurrent/whereFrom requests`, async () => {
@@ -754,6 +813,54 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
     })
 
     expect(rows.map((row) => row.key)).toEqual([`2`, `4`])
+  })
+
+  it(`falls back to in-memory filtering when SQL json path pushdown is unsupported`, async () => {
+    const { driver } = registerHarness()
+    const adapter = new SQLiteCorePersistenceAdapter<FlexibleTodoRow, string>({
+      driver,
+    })
+    const collectionId = `fallback-where`
+
+    await adapter.applyCommittedTx(collectionId, {
+      txId: `seed-fallback`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Keep`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 1,
+            [`meta-field`]: `alpha`,
+          },
+        },
+        {
+          type: `insert`,
+          key: `2`,
+          value: {
+            id: `2`,
+            title: `Drop`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 2,
+            [`meta-field`]: `beta`,
+          },
+        },
+      ],
+    })
+
+    const rows = await adapter.loadSubset(collectionId, {
+      where: new IR.Func(`eq`, [
+        new IR.PropRef([`meta-field`]),
+        new IR.Value(`alpha`),
+      ]),
+    })
+
+    expect(rows.map((row) => row.key)).toEqual([`1`])
   })
 
   it(`compiles serialized expression index specs used by phase-2 metadata`, async () => {
