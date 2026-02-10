@@ -436,7 +436,6 @@ describe(`persistedCollectionOptions`, () => {
     const collection = createCollection(
       persistedCollectionOptions<Todo, string>({
         id: `sync-present`,
-        syncMode: `on-demand`,
         getKey: (item) => item.id,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
@@ -456,12 +455,13 @@ describe(`persistedCollectionOptions`, () => {
       }),
     )
 
-    collection.startSyncImmediate()
-    await flushAsyncWork()
+    const readyPromise = collection.stateWhenReady()
+    for (let attempt = 0; attempt < 20 && !resolveLoadSubset; attempt++) {
+      await flushAsyncWork()
+    }
 
-    const loadPromise = (collection as any)._sync.loadSubset({
-      limit: 10,
-    }) as Promise<void>
+    expect(resolveLoadSubset).toBeDefined()
+    expect(remoteBegin).toBeDefined()
 
     remoteBegin?.()
     remoteWrite?.({
@@ -474,7 +474,7 @@ describe(`persistedCollectionOptions`, () => {
     remoteCommit?.()
 
     resolveLoadSubset?.()
-    await loadPromise
+    await readyPromise
     await flushAsyncWork()
 
     expect(collection.get(`cached-1`)).toEqual({
