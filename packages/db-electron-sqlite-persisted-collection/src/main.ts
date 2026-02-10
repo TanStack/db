@@ -22,7 +22,11 @@ import type {
   ElectronSerializedError,
 } from './protocol'
 
-const runtimeRequire = createRequire(import.meta.url)
+const runtimeRequireBasePath =
+  typeof __filename !== `undefined`
+    ? __filename
+    : process.argv[1] || `${process.cwd()}/package.json`
+const runtimeRequire = createRequire(runtimeRequireBasePath)
 
 type ElectronMainPersistenceAdapter = PersistenceAdapter<
   ElectronPersistedRow,
