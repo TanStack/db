@@ -22,7 +22,7 @@ import type {
   ElectronSerializedError,
 } from './protocol'
 
-const require = createRequire(import.meta.url)
+const runtimeRequire = createRequire(`${process.cwd()}/package.json`)
 
 type ElectronMainPersistenceAdapter = PersistenceAdapter<
   ElectronPersistedRow,
@@ -258,7 +258,7 @@ type NodeSQLitePersistenceModule = {
 }
 
 function getCreateNodeSQLitePersistenceAdapter(): NodeSQLitePersistenceModule[`createNodeSQLitePersistenceAdapter`] {
-  const runtimeModule = require(
+  const runtimeModule = runtimeRequire(
     `@tanstack/db-node-sqlite-persisted-collection`,
   ) as NodeSQLitePersistenceModule
 
