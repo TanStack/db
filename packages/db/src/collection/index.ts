@@ -347,6 +347,7 @@ export class CollectionImpl<
     this._indexes.setDeps({
       state: this._state,
       lifecycle: this._lifecycle,
+      events: this._events,
     })
     this._lifecycle.setDeps({
       changes: this._changes,
@@ -557,6 +558,14 @@ export class CollectionImpl<
     config: IndexOptions<TResolver> = {},
   ): IndexProxy<TKey> {
     return this._indexes.createIndex(indexCallback, config)
+  }
+
+  /**
+   * Removes an index created with createIndex.
+   * Returns true when an index existed and was removed.
+   */
+  public removeIndex(indexOrId: IndexProxy<TKey> | number): boolean {
+    return this._indexes.removeIndex(indexOrId)
   }
 
   /**

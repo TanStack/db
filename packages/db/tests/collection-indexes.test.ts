@@ -184,6 +184,64 @@ describe(`Collection Indexes`, () => {
     })
   })
 
+  describe(`Index Removal`, () => {
+    it(`should remove indexes by proxy and by id`, () => {
+      const ageIndex = collection.createIndex((row) => row.age)
+      const statusIndex = collection.createIndex((row) => row.status)
+
+      expect(collection.removeIndex(ageIndex)).toBe(true)
+      expect(collection.removeIndex(statusIndex.id)).toBe(true)
+      expect(collection.removeIndex(ageIndex.id)).toBe(false)
+    })
+
+    it(`should ignore removeIndex calls from other collections`, async () => {
+      const otherCollection = createCollection<TestItem, string>({
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: testData[0]!,
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await otherCollection.stateWhenReady()
+
+      const otherIndex = otherCollection.createIndex((row) => row.status)
+
+      collection.createIndex((row) => row.status)
+      expect(collection.removeIndex(otherIndex)).toBe(false)
+      expect(collection.indexes.size).toBe(1)
+    })
+
+    it(`should emit one auto-index lifecycle event per auto-created index`, () => {
+      const addedEvents: Array<string | undefined> = []
+      collection.on(`index:added`, (event) => {
+        addedEvents.push(event.index.name)
+      })
+
+      const activeItems: Array<any> = []
+      const subscription = collection.subscribeChanges(
+        (items) => {
+          activeItems.push(...items)
+        },
+        {
+          includeInitialState: true,
+          whereExpression: eq(new PropRef([`status`]), `active`),
+        },
+      )
+      subscription.unsubscribe()
+
+      expect(activeItems).toHaveLength(3)
+      expect(addedEvents.filter((name) => name === `auto:status`)).toHaveLength(1)
+    })
+  })
+
   describe(`Index Maintenance`, () => {
     beforeEach(() => {
       collection.createIndex((row) => row.status)
