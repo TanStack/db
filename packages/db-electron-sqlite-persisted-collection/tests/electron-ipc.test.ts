@@ -38,6 +38,22 @@ type MainRuntime = {
   close: () => void
 }
 
+const electronRuntimeBridgeTimeoutMs = isElectronFullE2EEnabled()
+  ? 12_000
+  : 4_000
+const rendererRequestTimeoutMs = isElectronFullE2EEnabled()
+  ? 12_000
+  : undefined
+
+function createRendererAdapter<T extends object, TKey extends string | number>(
+  invoke: ElectronPersistenceInvoke,
+) {
+  return createElectronRendererPersistenceAdapter<T, TKey>({
+    invoke,
+    timeoutMs: rendererRequestTimeoutMs,
+  })
+}
+
 function createMainRuntime(dbPath: string, collectionId: string): MainRuntime {
   const driver = createBetterSqlite3Driver({ filename: dbPath })
   const adapter = createNodeSQLitePersistenceAdapter<
@@ -74,7 +90,7 @@ function createInvokeHarness(
       invoke: createElectronRuntimeBridgeInvoke({
         dbPath,
         collectionId,
-        timeoutMs: 4_000,
+        timeoutMs: electronRuntimeBridgeTimeoutMs,
         hostKind: options?.hostKind,
       }),
       close: () => {},
@@ -117,12 +133,7 @@ describe(`electron sqlite persistence bridge`, () => {
       return invokeHarness.invoke(channel, request)
     }
 
-    const rendererAdapter = createElectronRendererPersistenceAdapter<
-      Todo,
-      string
-    >({
-      invoke,
-    })
+    const rendererAdapter = createRendererAdapter<Todo, string>(invoke)
 
     await rendererAdapter.applyCommittedTx(`todos`, {
       txId: `tx-1`,
@@ -162,14 +173,9 @@ describe(`electron sqlite persistence bridge`, () => {
       const invoke = createElectronRuntimeBridgeInvoke({
         dbPath,
         collectionId: `todos`,
-        timeoutMs: 4_000,
+        timeoutMs: electronRuntimeBridgeTimeoutMs,
       })
-      const rendererAdapterA = createElectronRendererPersistenceAdapter<
-        Todo,
-        string
-      >({
-        invoke,
-      })
+      const rendererAdapterA = createRendererAdapter<Todo, string>(invoke)
 
       await rendererAdapterA.applyCommittedTx(`todos`, {
         txId: `tx-restart-1`,
@@ -189,12 +195,7 @@ describe(`electron sqlite persistence bridge`, () => {
         ],
       })
 
-      const rendererAdapterB = createElectronRendererPersistenceAdapter<
-        Todo,
-        string
-      >({
-        invoke,
-      })
+      const rendererAdapterB = createRendererAdapter<Todo, string>(invoke)
 
       const rows = await rendererAdapterB.loadSubset(`todos`, {})
       expect(rows.map((row) => row.key)).toEqual([`persisted`])
@@ -205,12 +206,7 @@ describe(`electron sqlite persistence bridge`, () => {
     const runtimeA = createMainRuntime(dbPath, `todos`)
     const invokeA: ElectronPersistenceInvoke = (_channel, request) =>
       runtimeA.host.handleRequest(request)
-    const rendererAdapterA = createElectronRendererPersistenceAdapter<
-      Todo,
-      string
-    >({
-      invoke: invokeA,
-    })
+    const rendererAdapterA = createRendererAdapter<Todo, string>(invokeA)
 
     await rendererAdapterA.applyCommittedTx(`todos`, {
       txId: `tx-restart-1`,
@@ -235,12 +231,7 @@ describe(`electron sqlite persistence bridge`, () => {
     activeCleanupFns.push(() => runtimeB.close())
     const invokeB: ElectronPersistenceInvoke = (_channel, request) =>
       runtimeB.host.handleRequest(request)
-    const rendererAdapterB = createElectronRendererPersistenceAdapter<
-      Todo,
-      string
-    >({
-      invoke: invokeB,
-    })
+    const rendererAdapterB = createRendererAdapter<Todo, string>(invokeB)
 
     const rows = await rendererAdapterB.loadSubset(`todos`, {})
     expect(rows.map((row) => row.key)).toEqual([`persisted`])
@@ -271,12 +262,7 @@ describe(`electron sqlite persistence bridge`, () => {
 
     const invoke: ElectronPersistenceInvoke = async (channel, request) =>
       invokeHarness.invoke(channel, request)
-    const rendererAdapter = createElectronRendererPersistenceAdapter<
-      Todo,
-      string
-    >({
-      invoke,
-    })
+    const rendererAdapter = createRendererAdapter<Todo, string>(invoke)
 
     await expect(
       rendererAdapter.loadSubset(`missing`, {}),
@@ -412,15 +398,10 @@ describe(`electron sqlite persistence bridge`, () => {
       const invoke = createElectronRuntimeBridgeInvoke({
         dbPath,
         collectionId: `todos`,
-        timeoutMs: 4_000,
+        timeoutMs: electronRuntimeBridgeTimeoutMs,
         hostKind: `node-registry`,
       })
-      const rendererAdapter = createElectronRendererPersistenceAdapter<
-        Todo,
-        string
-      >({
-        invoke,
-      })
+      const rendererAdapter = createRendererAdapter<Todo, string>(invoke)
 
       await rendererAdapter.applyCommittedTx(`todos`, {
         txId: `tx-helper-1`,
@@ -467,12 +448,7 @@ describe(`electron sqlite persistence bridge`, () => {
 
     const invoke: ElectronPersistenceInvoke = (_channel, request) =>
       host.handleRequest(request)
-    const rendererAdapter = createElectronRendererPersistenceAdapter<
-      Todo,
-      string
-    >({
-      invoke,
-    })
+    const rendererAdapter = createRendererAdapter<Todo, string>(invoke)
 
     await rendererAdapter.applyCommittedTx(`todos`, {
       txId: `tx-helper-1`,

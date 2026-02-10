@@ -10,6 +10,7 @@ const config = defineConfig({
     include: [`tests/**/*.test.ts`],
     exclude: [`tests/**/*.e2e.test.ts`],
     environment: `node`,
+    fileParallelism: !runElectronFullE2E,
     testTimeout: runElectronFullE2E ? 30_000 : undefined,
     hookTimeout: runElectronFullE2E ? 60_000 : undefined,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
