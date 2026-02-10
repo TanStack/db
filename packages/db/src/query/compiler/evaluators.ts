@@ -14,6 +14,31 @@ function isUnknown(value: any): boolean {
   return value === null || value === undefined
 }
 
+function toDateValue(value: any): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value
+  }
+
+  if (typeof value === `string` || typeof value === `number`) {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  return null
+}
+
+function evaluateStrftime(format: string, date: Date): string {
+  if (format === `%Y-%m-%d`) {
+    return date.toISOString().slice(0, 10)
+  }
+
+  if (format === `%Y-%m-%dT%H:%M:%fZ`) {
+    return date.toISOString()
+  }
+
+  return date.toISOString()
+}
+
 /**
  * Converts a 3-valued logic result to a boolean for use in WHERE/HAVING filters.
  * In SQL, UNKNOWN (null) values in WHERE clauses exclude rows, matching false behavior.
@@ -469,6 +494,38 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         const b = argB(data)
         const divisor = b ?? 0
         return divisor !== 0 ? (a ?? 0) / divisor : null
+      }
+    }
+    case `date`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        const dateValue = toDateValue(value)
+        return dateValue ? dateValue.toISOString().slice(0, 10) : null
+      }
+    }
+    case `datetime`: {
+      const arg = compiledArgs[0]!
+      return (data) => {
+        const value = arg(data)
+        const dateValue = toDateValue(value)
+        return dateValue ? dateValue.toISOString() : null
+      }
+    }
+    case `strftime`: {
+      const formatArg = compiledArgs[0]!
+      const sourceArg = compiledArgs[1]!
+      return (data) => {
+        const format = formatArg(data)
+        if (typeof format !== `string`) {
+          return null
+        }
+        const sourceValue = sourceArg(data)
+        const dateValue = toDateValue(sourceValue)
+        if (!dateValue) {
+          return null
+        }
+        return evaluateStrftime(format, dateValue)
       }
     }
 

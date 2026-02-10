@@ -931,6 +931,57 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
     expect(rows.map((row) => row.key)).toEqual([`1`])
   })
 
+  it(`supports alias-qualified refs during in-memory fallback filtering`, async () => {
+    const { driver } = registerHarness()
+    const adapter = new SQLiteCorePersistenceAdapter<FlexibleTodoRow, string>({
+      driver,
+    })
+    const collectionId = `fallback-alias-qualified-ref`
+
+    await adapter.applyCommittedTx(collectionId, {
+      txId: `seed-alias-fallback`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `Keep`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 1,
+            [`meta-field`]: `alpha`,
+          },
+        },
+        {
+          type: `insert`,
+          key: `2`,
+          value: {
+            id: `2`,
+            title: `Drop`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 2,
+            [`meta-field`]: `beta`,
+          },
+        },
+      ],
+    })
+
+    // `meta-field` makes SQL pushdown unsupported, so filter correctness comes
+    // from the in-memory evaluator. The leading `todos` segment simulates
+    // alias-qualified refs emitted by higher-level query builders.
+    const rows = await adapter.loadSubset(collectionId, {
+      where: new IR.Func(`eq`, [
+        new IR.PropRef([`todos`, `meta-field`]),
+        new IR.Value(`alpha`),
+      ]),
+    })
+
+    expect(rows.map((row) => row.key)).toEqual([`1`])
+  })
+
   it(`compiles serialized expression index specs used by phase-2 metadata`, async () => {
     const { adapter, driver } = registerHarness()
     const collectionId = `serialized-index`
