@@ -2,11 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 import {
   createElectronPersistenceInvoke,
   createElectronRendererPersistenceAdapter,
-} from '../../../src/renderer'
+} from '../../../src/renderer.ts'
 import type {
   ElectronRuntimeBridgeInput,
   ElectronRuntimeBridgeScenarioResult,
-} from './runtime-bridge-types'
+} from './runtime-bridge-types.ts'
 
 async function runScenario(
   input: Pick<

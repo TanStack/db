@@ -8,17 +8,16 @@ import {
 import {
   createElectronPersistenceMainHost,
   registerElectronPersistenceMainIpcHandler,
-} from '../../../src/main'
-import { E2E_RESULT_PREFIX } from './runtime-bridge-types'
+} from '../../../src/main.ts'
+import { E2E_RESULT_PREFIX } from './runtime-bridge-types.ts'
 import type {
   ElectronRuntimeBridgeInput,
+  ElectronRuntimeBridgeProcessError,
   ElectronRuntimeBridgeProcessResult,
   ElectronRuntimeBridgeScenarioResult,
-} from './runtime-bridge-types'
+} from './runtime-bridge-types.ts'
 
-function serializeError(
-  error: unknown,
-): ElectronRuntimeBridgeProcessResult[`error`] {
+function serializeError(error: unknown): ElectronRuntimeBridgeProcessError {
   if (error instanceof Error) {
     return {
       name: error.name,
@@ -82,7 +81,7 @@ async function run(): Promise<ElectronRuntimeBridgeProcessResult> {
 
   const adapter = createNodeSQLitePersistenceAdapter<
     Record<string, unknown>,
-    string
+    string | number
   >({
     driver,
   })

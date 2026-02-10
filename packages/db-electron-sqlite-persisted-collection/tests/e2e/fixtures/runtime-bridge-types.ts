@@ -52,6 +52,12 @@ export type ElectronRuntimeBridgeScenarioResult =
       error: RuntimeBridgeE2EContractError
     }
 
+export type ElectronRuntimeBridgeProcessError = {
+  name: string
+  message: string
+  stack?: string
+}
+
 export type ElectronRuntimeBridgeProcessResult =
   | {
       ok: true
@@ -59,9 +65,5 @@ export type ElectronRuntimeBridgeProcessResult =
     }
   | {
       ok: false
-      error: {
-        name: string
-        message: string
-        stack?: string
-      }
+      error: ElectronRuntimeBridgeProcessError
     }

@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { spawn } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -68,23 +68,35 @@ async function runElectronScenario(
 ): Promise<ElectronRuntimeBridgeScenarioResult> {
   const electronBinaryPath = resolveElectronBinaryPath()
   const tsconfigPath = join(packageRoot, `tsconfig.json`)
+  const xvfbRunPath = `/usr/bin/xvfb-run`
+  const hasXvfbRun = existsSync(xvfbRunPath)
+  const electronArgs = [
+    `--disable-gpu`,
+    `--headless=new`,
+    `--require`,
+    `tsx/cjs`,
+    electronRunnerPath,
+  ]
+  const command = hasXvfbRun ? xvfbRunPath : electronBinaryPath
+  const args = hasXvfbRun
+    ? [`-a`, `--server-args=-screen 0 1280x720x24`, electronBinaryPath, ...electronArgs]
+    : electronArgs
 
   const processResult = await new Promise<ElectronRuntimeBridgeProcessResult>(
     (resolve, reject) => {
-      const child = spawn(
-        electronBinaryPath,
-        [`--require`, `tsx/cjs`, electronRunnerPath],
-        {
-          cwd: packageRoot,
-          env: {
-            ...process.env,
-            TANSTACK_DB_E2E_INPUT: JSON.stringify(input),
-            TSX_TSCONFIG_PATH: tsconfigPath,
-            ELECTRON_DISABLE_SECURITY_WARNINGS: `true`,
-          },
-          stdio: [`ignore`, `pipe`, `pipe`],
+      const child = spawn(command, args, {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          TANSTACK_DB_E2E_INPUT: JSON.stringify(input),
+          TSX_TSCONFIG_PATH: tsconfigPath,
+          ELECTRON_DISABLE_SECURITY_WARNINGS: `true`,
         },
-      )
+        stdio: [`ignore`, `pipe`, `pipe`],
+      })
+      child.on(`error`, (error) => {
+        reject(error)
+      })
 
       let stdoutBuffer = ``
       let stderrBuffer = ``
@@ -96,9 +108,6 @@ async function runElectronScenario(
         stderrBuffer += chunk.toString()
       })
 
-      child.on(`error`, (error) => {
-        reject(error)
-      })
       child.on(`close`, (exitCode) => {
         try {
           const parsedResult = parseScenarioResult(
