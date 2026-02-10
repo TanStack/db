@@ -1,4 +1,4 @@
-import { IR } from '@tanstack/db'
+import { IR, compileSingleRowExpression, toBooleanPredicate } from '@tanstack/db'
 import {
   InvalidPersistedCollectionConfigError,
   InvalidPersistedStorageKeyEncodingError,
@@ -137,66 +137,85 @@ function inlineSqlParams(
   return inlinedSql
 }
 
-function isNullish(value: unknown): boolean {
-  return value === null || value === undefined
-}
+type CompiledRowExpressionEvaluator = (row: Record<string, unknown>) => unknown
 
-function normalizeSortableValue(value: unknown): unknown {
-  if (value instanceof Date) {
-    return value.getTime()
-  }
-  return value
-}
-
-type RelationalComparable = boolean | bigint | number | string
-
-function toRelationalComparable(value: unknown): RelationalComparable {
-  const normalized = normalizeSortableValue(value)
-  if (
-    typeof normalized === `number` ||
-    typeof normalized === `string` ||
-    typeof normalized === `bigint` ||
-    typeof normalized === `boolean`
-  ) {
-    return normalized
+function collectAliasQualifiedRefSegments(
+  expression: IR.BasicExpression,
+  segments: Set<string> = new Set<string>(),
+): Set<string> {
+  if (expression.type === `ref`) {
+    if (expression.path.length > 1) {
+      const rootSegment = String(expression.path[0])
+      if (rootSegment.length > 0) {
+        segments.add(rootSegment)
+      }
+    }
+    return segments
   }
 
-  return String(normalized)
-}
-
-function compareRelationalValues(left: unknown, right: unknown): number {
-  const leftComparable = toRelationalComparable(left)
-  const rightComparable = toRelationalComparable(right)
-
-  if (leftComparable < rightComparable) {
-    return -1
-  }
-  if (leftComparable > rightComparable) {
-    return 1
-  }
-
-  return 0
-}
-
-function isUint8ArrayLike(value: unknown): value is Uint8Array {
-  return (
-    ((typeof Buffer !== `undefined` && value instanceof Buffer) ||
-      value instanceof Uint8Array) === true
-  )
-}
-
-function areUint8ArraysEqual(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.byteLength !== right.byteLength) {
-    return false
-  }
-
-  for (let index = 0; index < left.byteLength; index++) {
-    if (left[index] !== right[index]) {
-      return false
+  if (expression.type === `func`) {
+    for (const arg of expression.args) {
+      collectAliasQualifiedRefSegments(arg, segments)
     }
   }
 
-  return true
+  return segments
+}
+
+function createAliasAwareRowProxy(
+  row: Record<string, unknown>,
+  aliasSegments: ReadonlySet<string>,
+): Record<string, unknown> {
+  return new Proxy(row, {
+    get(target, prop, receiver) {
+      if (typeof prop !== `string`) {
+        return Reflect.get(target, prop, receiver)
+      }
+
+      if (Object.prototype.hasOwnProperty.call(target, prop)) {
+        const value = Reflect.get(target, prop, receiver)
+        if (value !== undefined || !aliasSegments.has(prop)) {
+          return value
+        }
+
+        return target
+      }
+
+      if (aliasSegments.has(prop)) {
+        return target
+      }
+
+      return undefined
+    },
+  })
+}
+
+function compileRowExpressionEvaluator(
+  expression: IR.BasicExpression,
+): CompiledRowExpressionEvaluator {
+  let baseEvaluator: ReturnType<typeof compileSingleRowExpression>
+  try {
+    baseEvaluator = compileSingleRowExpression(expression)
+  } catch (error) {
+    throw new InvalidPersistedCollectionConfigError(
+      `Unsupported expression for SQLite adapter fallback evaluator: ${(error as Error).message}`,
+    )
+  }
+
+  const aliasSegments = collectAliasQualifiedRefSegments(expression)
+  if (aliasSegments.size === 0) {
+    return (row) => baseEvaluator(row)
+  }
+
+  const proxyCache = new WeakMap<Record<string, unknown>, Record<string, unknown>>()
+  return (row) => {
+    let proxy = proxyCache.get(row)
+    if (!proxy) {
+      proxy = createAliasAwareRowProxy(row, aliasSegments)
+      proxyCache.set(row, proxy)
+    }
+    return baseEvaluator(proxy)
+  }
 }
 
 function getOrderByObjectId(value: object): number {
@@ -280,21 +299,6 @@ function compareOrderByValues(
   return 0
 }
 
-function valuesEqual(left: unknown, right: unknown): boolean {
-  const normalizedLeft = normalizeSortableValue(left)
-  const normalizedRight = normalizeSortableValue(right)
-
-  if (normalizedLeft === normalizedRight) {
-    return true
-  }
-
-  if (isUint8ArrayLike(left) && isUint8ArrayLike(right)) {
-    return areUint8ArraysEqual(left, right)
-  }
-
-  return false
-}
-
 function createJsonPath(path: Array<string>): string | null {
   if (path.length === 0) {
     return null
@@ -329,243 +333,6 @@ function sanitizeExpressionSqlFragment(fragment: string): string {
   }
 
   return fragment
-}
-
-function resolveRowValueByPath(
-  row: Record<string, unknown>,
-  path: Array<string>,
-): unknown {
-  const resolve = (candidatePath: Array<string>): unknown => {
-    let current: unknown = row
-    for (const segment of candidatePath) {
-      if (typeof current !== `object` || current === null) {
-        return undefined
-      }
-
-      current = (current as Record<string, unknown>)[segment]
-    }
-
-    return current
-  }
-
-  const directValue = resolve(path)
-  if (directValue !== undefined || path.length <= 1) {
-    return directValue
-  }
-
-  // Some query builders may preserve alias-qualified refs (e.g. ['todos', 'id'])
-  // while stored row payloads are unqualified; fallback to alias-stripped lookup.
-  return resolve(path.slice(1))
-}
-
-function evaluateLikePattern(
-  value: unknown,
-  pattern: unknown,
-  caseInsensitive: boolean,
-): boolean | null {
-  if (isNullish(value) || isNullish(pattern)) {
-    return null
-  }
-
-  if (typeof value !== `string` || typeof pattern !== `string`) {
-    return false
-  }
-
-  const candidateValue = caseInsensitive ? value.toLowerCase() : value
-  const candidatePattern = caseInsensitive ? pattern.toLowerCase() : pattern
-  let regexPattern = candidatePattern.replace(/[.*+?^${}()|[\]\\]/g, `\\$&`)
-  regexPattern = regexPattern.replace(/%/g, `.*`).replace(/_/g, `.`)
-  return new RegExp(`^${regexPattern}$`).test(candidateValue)
-}
-
-function toDateValue(value: unknown): Date | null {
-  if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value
-  }
-
-  if (typeof value === `string` || typeof value === `number`) {
-    const parsed = new Date(value)
-    return Number.isNaN(parsed.getTime()) ? null : parsed
-  }
-
-  return null
-}
-
-function evaluateExpressionOnRow(
-  expression: IR.BasicExpression,
-  row: Record<string, unknown>,
-): unknown {
-  if (expression.type === `val`) {
-    return expression.value
-  }
-
-  if (expression.type === `ref`) {
-    return resolveRowValueByPath(row, expression.path.map(String))
-  }
-
-  const evaluatedArgs = expression.args.map((arg) =>
-    evaluateExpressionOnRow(arg, row),
-  )
-
-  switch (expression.name) {
-    case `eq`: {
-      const [left, right] = evaluatedArgs
-      if (isNullish(left) || isNullish(right)) {
-        return null
-      }
-      return valuesEqual(left, right)
-    }
-    case `gt`: {
-      const [left, right] = evaluatedArgs
-      if (isNullish(left) || isNullish(right)) {
-        return null
-      }
-      return compareRelationalValues(left, right) > 0
-    }
-    case `gte`: {
-      const [left, right] = evaluatedArgs
-      if (isNullish(left) || isNullish(right)) {
-        return null
-      }
-      return compareRelationalValues(left, right) >= 0
-    }
-    case `lt`: {
-      const [left, right] = evaluatedArgs
-      if (isNullish(left) || isNullish(right)) {
-        return null
-      }
-      return compareRelationalValues(left, right) < 0
-    }
-    case `lte`: {
-      const [left, right] = evaluatedArgs
-      if (isNullish(left) || isNullish(right)) {
-        return null
-      }
-      return compareRelationalValues(left, right) <= 0
-    }
-    case `and`: {
-      let hasUnknown = false
-      for (const value of evaluatedArgs) {
-        if (value === false) {
-          return false
-        }
-        if (isNullish(value)) {
-          hasUnknown = true
-        }
-      }
-      return hasUnknown ? null : true
-    }
-    case `or`: {
-      let hasUnknown = false
-      for (const value of evaluatedArgs) {
-        if (value === true) {
-          return true
-        }
-        if (isNullish(value)) {
-          hasUnknown = true
-        }
-      }
-      return hasUnknown ? null : false
-    }
-    case `not`: {
-      const [value] = evaluatedArgs
-      if (isNullish(value)) {
-        return null
-      }
-      return !value
-    }
-    case `in`: {
-      const [value, list] = evaluatedArgs
-      if (isNullish(value)) {
-        return null
-      }
-      if (!Array.isArray(list)) {
-        return false
-      }
-      return list.some((entry) => valuesEqual(entry, value))
-    }
-    case `like`:
-      return evaluateLikePattern(evaluatedArgs[0], evaluatedArgs[1], false)
-    case `ilike`:
-      return evaluateLikePattern(evaluatedArgs[0], evaluatedArgs[1], true)
-    case `isNull`:
-    case `isUndefined`:
-      return isNullish(evaluatedArgs[0])
-    case `upper`: {
-      const [value] = evaluatedArgs
-      return typeof value === `string` ? value.toUpperCase() : value
-    }
-    case `lower`: {
-      const [value] = evaluatedArgs
-      return typeof value === `string` ? value.toLowerCase() : value
-    }
-    case `length`: {
-      const [value] = evaluatedArgs
-      if (typeof value === `string` || Array.isArray(value)) {
-        return value.length
-      }
-      return 0
-    }
-    case `concat`:
-      return evaluatedArgs.map((value) => String(value ?? ``)).join(``)
-    case `coalesce`:
-      return evaluatedArgs.find((value) => !isNullish(value)) ?? null
-    case `add`:
-      return (
-        (Number(evaluatedArgs[0] ?? 0) || 0) +
-        (Number(evaluatedArgs[1] ?? 0) || 0)
-      )
-    case `subtract`:
-      return (
-        (Number(evaluatedArgs[0] ?? 0) || 0) -
-        (Number(evaluatedArgs[1] ?? 0) || 0)
-      )
-    case `multiply`:
-      return (
-        (Number(evaluatedArgs[0] ?? 0) || 0) *
-        (Number(evaluatedArgs[1] ?? 0) || 0)
-      )
-    case `divide`: {
-      const denominator = Number(evaluatedArgs[1] ?? 0) || 0
-      if (denominator === 0) {
-        return null
-      }
-      return (Number(evaluatedArgs[0] ?? 0) || 0) / denominator
-    }
-    case `date`: {
-      const dateValue = toDateValue(evaluatedArgs[0])
-      return dateValue ? dateValue.toISOString().slice(0, 10) : null
-    }
-    case `datetime`: {
-      const dateValue = toDateValue(evaluatedArgs[0])
-      return dateValue ? dateValue.toISOString() : null
-    }
-    case `strftime`: {
-      const [format, source] = evaluatedArgs
-      if (typeof format !== `string`) {
-        return null
-      }
-      const dateValue = toDateValue(source)
-      if (!dateValue) {
-        return null
-      }
-      if (format === `%Y-%m-%d`) {
-        return dateValue.toISOString().slice(0, 10)
-      }
-      if (format === `%Y-%m-%dT%H:%M:%fZ`) {
-        return dateValue.toISOString()
-      }
-      return dateValue.toISOString()
-    }
-    default:
-      throw new InvalidPersistedCollectionConfigError(
-        `Unsupported expression function "${expression.name}" in SQLite adapter fallback evaluator`,
-      )
-  }
-}
-
-function toBooleanPredicate(value: unknown): boolean {
-  return value === true
 }
 
 type InMemoryRow<TKey extends string | number, T extends object> = {
@@ -1330,9 +1097,10 @@ export class SQLiteCorePersistenceAdapter<
       return rows
     }
 
+    const evaluator = compileRowExpressionEvaluator(where)
     return rows.filter((row) =>
       toBooleanPredicate(
-        evaluateExpressionOnRow(where, row.value as Record<string, unknown>),
+        evaluator(row.value as Record<string, unknown>) as boolean | null,
       ),
     )
   }
@@ -1345,15 +1113,16 @@ export class SQLiteCorePersistenceAdapter<
       return rows
     }
 
+    const compiledClauses = orderBy.map((clause) => ({
+      evaluator: compileRowExpressionEvaluator(clause.expression),
+      compareOptions: clause.compareOptions,
+    }))
+
     const ordered = [...rows]
     ordered.sort((left, right) => {
-      for (const clause of orderBy) {
-        const leftValue = evaluateExpressionOnRow(
-          clause.expression,
-          left.value as Record<string, unknown>,
-        )
-        const rightValue = evaluateExpressionOnRow(
-          clause.expression,
+      for (const clause of compiledClauses) {
+        const leftValue = clause.evaluator(left.value as Record<string, unknown>)
+        const rightValue = clause.evaluator(
           right.value as Record<string, unknown>,
         )
 
