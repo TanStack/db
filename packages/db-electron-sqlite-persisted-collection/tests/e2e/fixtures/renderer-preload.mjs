@@ -2,22 +2,10 @@ import { contextBridge, ipcRenderer } from 'electron'
 import {
   createElectronPersistenceInvoke,
   createElectronRendererPersistenceAdapter,
-} from '../../../src/renderer.ts'
-import type {
-  ElectronRuntimeBridgeInput,
-  ElectronRuntimeBridgeScenarioResult,
-} from './runtime-bridge-types.ts'
+} from '../../../dist/esm/renderer.js'
 
-async function runScenario(
-  input: Pick<
-    ElectronRuntimeBridgeInput,
-    `collectionId` | `channel` | `timeoutMs` | `scenario`
-  >,
-): Promise<ElectronRuntimeBridgeScenarioResult> {
-  const adapter = createElectronRendererPersistenceAdapter<
-    Record<string, unknown>,
-    string
-  >({
+async function runScenario(input) {
+  const adapter = createElectronRendererPersistenceAdapter({
     invoke: createElectronPersistenceInvoke(ipcRenderer),
     channel: input.channel,
     timeoutMs: input.timeoutMs,
@@ -56,9 +44,9 @@ async function runScenario(
         rows: rows.map((row) => ({
           key: String(row.key),
           value: {
-            id: String((row.value as { id?: unknown }).id ?? ``),
-            title: String((row.value as { title?: unknown }).title ?? ``),
-            score: Number((row.value as { score?: unknown }).score ?? 0),
+            id: String(row.value?.id ?? ``),
+            title: String(row.value?.title ?? ``),
+            score: Number(row.value?.score ?? 0),
           },
         })),
       }
@@ -76,17 +64,15 @@ async function runScenario(
         }
       } catch (error) {
         if (error instanceof Error) {
-          const code =
-            `code` in error && typeof error.code === `string`
-              ? error.code
-              : undefined
-
           return {
             type: `loadUnknownCollectionError`,
             error: {
               name: error.name,
               message: error.message,
-              code,
+              code:
+                `code` in error && typeof error.code === `string`
+                  ? error.code
+                  : undefined,
             },
           }
         }
@@ -101,35 +87,11 @@ async function runScenario(
       }
     }
 
-    default: {
-      const unsupportedScenario: never = scenario
-      throw new Error(
-        `Unsupported electron bridge scenario: ${JSON.stringify(unsupportedScenario)}`,
-      )
-    }
+    default:
+      throw new Error(`Unsupported electron runtime bridge scenario`)
   }
 }
 
-type RuntimeBridgePreloadApi = {
-  runScenario: (
-    input: Pick<
-      ElectronRuntimeBridgeInput,
-      `collectionId` | `channel` | `timeoutMs` | `scenario`
-    >,
-  ) => Promise<ElectronRuntimeBridgeScenarioResult>
-}
-
-const runtimeBridgePreloadApi: RuntimeBridgePreloadApi = {
+contextBridge.exposeInMainWorld(`__tanstackDbRuntimeBridge__`, {
   runScenario,
-}
-
-contextBridge.exposeInMainWorld(
-  `__tanstackDbRuntimeBridge__`,
-  runtimeBridgePreloadApi,
-)
-
-declare global {
-  interface Window {
-    __tanstackDbRuntimeBridge__: RuntimeBridgePreloadApi
-  }
-}
+})

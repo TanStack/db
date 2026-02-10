@@ -858,9 +858,6 @@ importers:
       electron:
         specifier: ^40.2.1
         version: 40.2.1
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
 
   packages/db-ivm:
     dependencies:
