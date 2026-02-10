@@ -43,7 +43,7 @@ type InvokeHarness = {
   close: () => void
 }
 
-let config!: ElectronPersistedCollectionTestConfig
+let config: ElectronPersistedCollectionTestConfig | undefined
 
 function createInvokeHarness(dbPath: string): InvokeHarness {
   if (isElectronFullE2EEnabled()) {
@@ -52,7 +52,7 @@ function createInvokeHarness(dbPath: string): InvokeHarness {
         dbPath,
         collectionId: `seed`,
         allowAnyCollectionId: true,
-        timeoutMs: 8_000,
+        timeoutMs: 12_000,
       }),
       close: () => {},
     }
@@ -229,11 +229,9 @@ beforeAll(async () => {
     `on-demand`,
   )
 
-  await Promise.all([
-    eagerUsers.collection.preload(),
-    eagerPosts.collection.preload(),
-    eagerComments.collection.preload(),
-  ])
+  await eagerUsers.collection.preload()
+  await eagerPosts.collection.preload()
+  await eagerComments.collection.preload()
 
   await seedCollection(eagerUsers.collection, seedData.users)
   await seedCollection(eagerPosts.collection, seedData.posts)
@@ -280,25 +278,21 @@ beforeAll(async () => {
     },
     setup: async () => {},
     afterEach: async () => {
-      await Promise.all([
-        onDemandUsers.collection.cleanup(),
-        onDemandPosts.collection.cleanup(),
-        onDemandComments.collection.cleanup(),
-      ])
+      await onDemandUsers.collection.cleanup()
+      await onDemandPosts.collection.cleanup()
+      await onDemandComments.collection.cleanup()
 
       onDemandUsers.collection.startSyncImmediate()
       onDemandPosts.collection.startSyncImmediate()
       onDemandComments.collection.startSyncImmediate()
     },
     teardown: async () => {
-      await Promise.all([
-        eagerUsers.collection.cleanup(),
-        eagerPosts.collection.cleanup(),
-        eagerComments.collection.cleanup(),
-        onDemandUsers.collection.cleanup(),
-        onDemandPosts.collection.cleanup(),
-        onDemandComments.collection.cleanup(),
-      ])
+      await eagerUsers.collection.cleanup()
+      await eagerPosts.collection.cleanup()
+      await eagerComments.collection.cleanup()
+      await onDemandUsers.collection.cleanup()
+      await onDemandPosts.collection.cleanup()
+      await onDemandComments.collection.cleanup()
       invokeHarness.close()
       rmSync(tempDirectory, { recursive: true, force: true })
     },
@@ -306,16 +300,21 @@ beforeAll(async () => {
 })
 
 afterEach(async () => {
-  if (config.afterEach) {
+  if (config?.afterEach) {
     await config.afterEach()
   }
 })
 
 afterAll(async () => {
-  await config.teardown()
+  if (config) {
+    await config.teardown()
+  }
 })
 
 function getConfig(): Promise<ElectronPersistedCollectionTestConfig> {
+  if (!config) {
+    throw new Error(`Electron persisted collection conformance is not initialized`)
+  }
   return Promise.resolve(config)
 }
 

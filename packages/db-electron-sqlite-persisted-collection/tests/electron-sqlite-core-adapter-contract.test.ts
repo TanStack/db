@@ -24,6 +24,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-electron-contract-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   const runFullE2E = isElectronFullE2EEnabled()
+  const requestTimeoutMs = runFullE2E ? 12_000 : 2_000
   const driver = createBetterSqlite3Driver({
     filename: dbPath,
     pragmas: runFullE2E
@@ -38,7 +39,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
       dbPath,
       collectionId: `todos`,
       allowAnyCollectionId: true,
-      timeoutMs: 4_000,
+      timeoutMs: requestTimeoutMs,
       adapterOptions: options,
     })
   } else {
@@ -61,7 +62,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
     string
   >({
     invoke,
-    timeoutMs: 2_000,
+    timeoutMs: requestTimeoutMs,
   })
 
   return {

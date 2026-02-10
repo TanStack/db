@@ -23,7 +23,7 @@
     "lint": "eslint . --fix",
     "test": "vitest --run",
     "test:e2e": "pnpm --filter @tanstack/db-ivm build && pnpm --filter @tanstack/db build && pnpm --filter @tanstack/db-sqlite-persisted-collection-core build && pnpm --filter @tanstack/db-node-sqlite-persisted-collection build && pnpm --filter @tanstack/db-electron-sqlite-persisted-collection build && vitest --config vitest.e2e.config.ts --run",
-    "test:e2e:all": "pnpm --filter @tanstack/db-ivm build && pnpm --filter @tanstack/db build && pnpm --filter @tanstack/db-sqlite-persisted-collection-core build && pnpm --filter @tanstack/db-node-sqlite-persisted-collection build && pnpm --filter @tanstack/db-electron-sqlite-persisted-collection build && TANSTACK_DB_ELECTRON_E2E_ALL=1 vitest --run && vitest --config vitest.e2e.config.ts --run"
+    "test:e2e:all": "pnpm --filter @tanstack/db-ivm build && pnpm --filter @tanstack/db build && pnpm --filter @tanstack/db-sqlite-persisted-collection-core build && pnpm --filter @tanstack/db-node-sqlite-persisted-collection build && pnpm --filter @tanstack/db-electron-sqlite-persisted-collection build && TANSTACK_DB_ELECTRON_E2E_ALL=1 vitest --run && TANSTACK_DB_ELECTRON_E2E_ALL=1 vitest --config vitest.e2e.config.ts --run"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

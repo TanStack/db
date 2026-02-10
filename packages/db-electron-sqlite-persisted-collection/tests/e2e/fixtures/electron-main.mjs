@@ -5,6 +5,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { deserialize } from 'node:v8'
 import { BrowserWindow, app, ipcMain } from 'electron'
 import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
@@ -14,6 +15,8 @@ import {
 } from '../../../dist/esm/main.js'
 
 const E2E_RESULT_PREFIX = `__TANSTACK_DB_E2E_RESULT__:`
+const E2E_INPUT_ENV_VAR = `TANSTACK_DB_E2E_INPUT`
+const E2E_INPUT_BASE64_ENV_VAR = `TANSTACK_DB_E2E_INPUT_BASE64`
 const execFileAsync = promisify(execFile)
 
 function toSqlLiteral(value) {
@@ -154,14 +157,26 @@ class SqliteCliDriver {
 }
 
 function parseInputFromEnv() {
-  const rawInput = process.env.TANSTACK_DB_E2E_INPUT
+  const rawInputBase64 = process.env[E2E_INPUT_BASE64_ENV_VAR]
+  if (rawInputBase64) {
+    const buffer = Buffer.from(rawInputBase64, `base64`)
+    const parsed = deserialize(buffer)
+    if (!parsed || typeof parsed !== `object`) {
+      throw new Error(`Invalid TANSTACK_DB_E2E_INPUT_BASE64 payload`)
+    }
+    return parsed
+  }
+
+  const rawInput = process.env[E2E_INPUT_ENV_VAR]
   if (!rawInput) {
-    throw new Error(`Missing TANSTACK_DB_E2E_INPUT`)
+    throw new Error(
+      `Missing ${E2E_INPUT_BASE64_ENV_VAR} (or fallback ${E2E_INPUT_ENV_VAR})`,
+    )
   }
 
   const parsed = JSON.parse(rawInput)
   if (!parsed || typeof parsed !== `object`) {
-    throw new Error(`Invalid TANSTACK_DB_E2E_INPUT payload`)
+    throw new Error(`Invalid ${E2E_INPUT_ENV_VAR} payload`)
   }
 
   return parsed
