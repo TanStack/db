@@ -859,6 +859,22 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
 
+  packages/db-sqlite-persisted-collection-core:
+    dependencies:
+      '@standard-schema/spec':
+        specifier: ^1.1.0
+        version: 1.1.0
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../db
+      typescript:
+        specifier: '>=4.7'
+        version: 5.9.3
+    devDependencies:
+      '@vitest/coverage-istanbul':
+        specifier: ^3.2.4
+        version: 3.2.4(vitest@3.2.4)
+
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
