@@ -556,6 +556,69 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(rows.map((row) => row.key)).toEqual([`1`])
     })
 
+    it(`persists bigint/date values and evaluates typed predicates`, async () => {
+      const { adapter } = registerContractHarness()
+      const typedAdapter = adapter as PersistenceAdapter<Record<string, unknown>, string>
+      const collectionId = `typed-values`
+      const firstBigInt = BigInt(`9007199254740992`)
+      const secondBigInt = BigInt(`9007199254740997`)
+
+      await typedAdapter.applyCommittedTx(collectionId, {
+        txId: `seed-typed-values`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `Alpha`,
+              createdAt: new Date(`2026-01-02T00:00:00.000Z`),
+              largeViewCount: firstBigInt,
+            },
+          },
+          {
+            type: `insert`,
+            key: `2`,
+            value: {
+              id: `2`,
+              title: `Beta`,
+              createdAt: new Date(`2026-01-03T00:00:00.000Z`),
+              largeViewCount: secondBigInt,
+            },
+          },
+        ],
+      })
+
+      const bigintRows = await typedAdapter.loadSubset(collectionId, {
+        where: new IR.Func(`gt`, [
+          new IR.PropRef([`largeViewCount`]),
+          new IR.Value(BigInt(`9007199254740993`)),
+        ]),
+      })
+      expect(bigintRows.map((row) => row.key)).toEqual([`2`])
+
+      const dateRows = await typedAdapter.loadSubset(collectionId, {
+        where: new IR.Func(`gt`, [
+          new IR.PropRef([`createdAt`]),
+          new IR.Value(new Date(`2026-01-02T12:00:00.000Z`)),
+        ]),
+      })
+      expect(dateRows.map((row) => row.key)).toEqual([`2`])
+
+      const restoredRows = await typedAdapter.loadSubset(collectionId, {
+        where: new IR.Func(`eq`, [
+          new IR.Func(`date`, [new IR.PropRef([`createdAt`])]),
+          new IR.Value(`2026-01-02`),
+        ]),
+      })
+      const firstRow = restoredRows[0]?.value
+      expect(firstRow?.createdAt).toBeInstanceOf(Date)
+      expect(firstRow?.largeViewCount).toBe(firstBigInt)
+    })
+
     it(`handles cursor whereCurrent/whereFrom requests`, async () => {
       const { adapter } = registerContractHarness()
       const collectionId = `todos`
