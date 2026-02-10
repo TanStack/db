@@ -108,6 +108,8 @@ export async function runElectronRuntimeBridgeScenario(
       let stdoutBuffer = ``
       let stderrBuffer = ``
       let isSettled = false
+      let resultFromStdout: ElectronRuntimeBridgeProcessResult | undefined
+      let gracefulCloseTimeout: ReturnType<typeof setTimeout> | undefined
 
       const settle = (
         callback: (result: ElectronRuntimeBridgeProcessResult) => void,
@@ -118,6 +120,9 @@ export async function runElectronRuntimeBridgeScenario(
         }
         isSettled = true
         clearTimeout(timeout)
+        if (gracefulCloseTimeout) {
+          clearTimeout(gracefulCloseTimeout)
+        }
         callback(result)
 
         if (!child.killed) {
@@ -131,6 +136,9 @@ export async function runElectronRuntimeBridgeScenario(
         }
         isSettled = true
         clearTimeout(timeout)
+        if (gracefulCloseTimeout) {
+          clearTimeout(gracefulCloseTimeout)
+        }
         reject(error)
         if (!child.killed) {
           child.kill(`SIGKILL`)
@@ -162,7 +170,12 @@ export async function runElectronRuntimeBridgeScenario(
             stderrBuffer,
             null,
           )
-          settle(resolve, parsedResult)
+          if (!resultFromStdout) {
+            resultFromStdout = parsedResult
+            gracefulCloseTimeout = setTimeout(() => {
+              settle(resolve, parsedResult)
+            }, 1_000)
+          }
         } catch {
           // Result line might not be complete yet.
         }
@@ -177,6 +190,11 @@ export async function runElectronRuntimeBridgeScenario(
         }
 
         try {
+          if (resultFromStdout) {
+            settle(resolve, resultFromStdout)
+            return
+          }
+
           const parsedResult = parseScenarioResult(
             stdoutBuffer,
             stderrBuffer,
