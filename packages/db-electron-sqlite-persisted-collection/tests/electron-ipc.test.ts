@@ -264,14 +264,37 @@ describe(`electron sqlite persistence bridge`, () => {
     const host = {
       handleRequest: (
         request: ElectronPersistenceRequest,
-      ): Promise<ElectronPersistenceResponse> =>
-        Promise.resolve({
-          v: 1,
-          requestId: request.requestId,
-          method: request.method,
-          ok: true,
-          result: null,
-        }),
+      ): Promise<ElectronPersistenceResponse> => {
+        switch (request.method) {
+          case `loadSubset`:
+            return Promise.resolve({
+              v: 1,
+              requestId: request.requestId,
+              method: request.method,
+              ok: true,
+              result: [],
+            })
+          case `pullSince`:
+            return Promise.resolve({
+              v: 1,
+              requestId: request.requestId,
+              method: request.method,
+              ok: true,
+              result: {
+                latestRowVersion: 0,
+                requiresFullReload: true,
+              },
+            })
+          default:
+            return Promise.resolve({
+              v: 1,
+              requestId: request.requestId,
+              method: request.method,
+              ok: true,
+              result: null,
+            })
+        }
+      },
     }
 
     const dispose = registerElectronPersistenceMainIpcHandler({

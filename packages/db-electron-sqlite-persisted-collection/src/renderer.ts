@@ -21,10 +21,11 @@ import type {
   ElectronPersistedRow,
   ElectronPersistenceInvoke,
   ElectronPersistenceMethod,
+  ElectronPersistencePayloadMap,
   ElectronPersistenceRequest,
   ElectronPersistenceRequestEnvelope,
-  ElectronPersistenceResponse,
   ElectronPersistenceResponseEnvelope,
+  ElectronPersistenceResultMap,
 } from './protocol'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
@@ -98,10 +99,8 @@ type RendererAdapterRequestExecutor = <
 >(
   method: TMethod,
   collectionId: string,
-  payload: ElectronPersistenceRequest<TMethod>[`payload`],
-) => Promise<
-  Extract<ElectronPersistenceResponse<TMethod>, { ok: true }>[`result`]
->
+  payload: ElectronPersistencePayloadMap[TMethod],
+) => Promise<ElectronPersistenceResultMap[TMethod]>
 
 function createRendererRequestExecutor(
   options: ElectronRendererPersistenceAdapterOptions,
@@ -112,18 +111,18 @@ function createRendererRequestExecutor(
   return async <TMethod extends ElectronPersistenceMethod>(
     method: TMethod,
     collectionId: string,
-    payload: ElectronPersistenceRequest<TMethod>[`payload`],
+    payload: ElectronPersistencePayloadMap[TMethod],
   ) => {
-    const request: ElectronPersistenceRequest<TMethod> = {
+    const request = {
       v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: createRequestId(),
       collectionId,
       method,
       payload,
-    }
+    } as ElectronPersistenceRequest
 
     const response = await withTimeout(
-      options.invoke(channel, request) as Promise<ElectronPersistenceResponse>,
+      options.invoke(channel, request),
       timeoutMs,
       `Electron persistence request timed out (method=${method}, collection=${collectionId}, timeoutMs=${timeoutMs})`,
     )
@@ -138,10 +137,7 @@ function createRendererRequestExecutor(
       )
     }
 
-    return response.result as Extract<
-      ElectronPersistenceResponse<TMethod>,
-      { ok: true }
-    >[`result`]
+    return response.result as ElectronPersistenceResultMap[TMethod]
   }
 }
 
