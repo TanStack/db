@@ -3,9 +3,12 @@ import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { serialize } from 'node:v8'
+import { deserialize, serialize } from 'node:v8'
 import { DEFAULT_ELECTRON_PERSISTENCE_CHANNEL } from '../../src'
-import { E2E_RESULT_PREFIX } from './fixtures/runtime-bridge-types'
+import {
+  E2E_RESULT_BASE64_PREFIX,
+  E2E_RESULT_PREFIX,
+} from './fixtures/runtime-bridge-types'
 import type { ElectronPersistenceInvoke } from '../../src'
 import type {
   ElectronRuntimeBridgeAdapterOptions,
@@ -56,11 +59,21 @@ function parseScenarioResult(
   stderrBuffer: string,
   exitCode: number | null,
 ): ElectronRuntimeBridgeProcessResult {
-  const resultLine = stdoutBuffer
-    .split(/\r?\n/u)
-    .find((line) => line.startsWith(E2E_RESULT_PREFIX))
+  const outputLines = stdoutBuffer.split(/\r?\n/u)
+  const base64ResultLine = outputLines.find((line) =>
+    line.startsWith(E2E_RESULT_BASE64_PREFIX),
+  )
+  if (base64ResultLine) {
+    const rawResult = base64ResultLine.slice(E2E_RESULT_BASE64_PREFIX.length)
+    const serializedResult = Buffer.from(rawResult, `base64`)
+    return deserialize(serializedResult) as ElectronRuntimeBridgeProcessResult
+  }
 
-  if (!resultLine) {
+  const jsonResultLine = outputLines.find((line) =>
+    line.startsWith(E2E_RESULT_PREFIX),
+  )
+
+  if (!jsonResultLine) {
     throw new Error(
       [
         `Electron e2e runner did not emit a result line`,
@@ -71,7 +84,7 @@ function parseScenarioResult(
     )
   }
 
-  const rawResult = resultLine.slice(E2E_RESULT_PREFIX.length)
+  const rawResult = jsonResultLine.slice(E2E_RESULT_PREFIX.length)
   return JSON.parse(rawResult) as ElectronRuntimeBridgeProcessResult
 }
 

@@ -9,6 +9,7 @@ import type {
 } from '../../../src/protocol'
 
 export const E2E_RESULT_PREFIX = `__TANSTACK_DB_E2E_RESULT__:`
+export const E2E_RESULT_BASE64_PREFIX = `__TANSTACK_DB_E2E_RESULT_BASE64__:`
 
 export type ElectronRuntimeBridgeHostKind = `core-host` | `node-registry`
 
