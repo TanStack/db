@@ -1435,9 +1435,11 @@ class PersistedCollectionRuntime<
     }
 
     if (isCollectionResetPayload(payload)) {
-      void this.applyMutex.run(() => this.truncateAndReloadUnsafe()).catch((error) => {
-        console.warn(`Failed to process collection reset message:`, error)
-      })
+      void this.applyMutex
+        .run(() => this.truncateAndReloadUnsafe())
+        .catch((error) => {
+          console.warn(`Failed to process collection reset message:`, error)
+        })
     }
   }
 
