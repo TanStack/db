@@ -3,20 +3,16 @@ import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import {
-  DEFAULT_ELECTRON_PERSISTENCE_CHANNEL
-  
-} from '../../src'
-import {
-  E2E_RESULT_PREFIX
-  
-  
-  
-  
-  
+import { DEFAULT_ELECTRON_PERSISTENCE_CHANNEL } from '../../src'
+import { E2E_RESULT_PREFIX } from './fixtures/runtime-bridge-types'
+import type { ElectronPersistenceInvoke } from '../../src'
+import type {
+  ElectronRuntimeBridgeAdapterOptions,
+  ElectronRuntimeBridgeHostKind,
+  ElectronRuntimeBridgeInput,
+  ElectronRuntimeBridgeProcessResult,
+  ElectronRuntimeBridgeScenarioResult,
 } from './fixtures/runtime-bridge-types'
-import type {ElectronPersistenceInvoke} from '../../src';
-import type {ElectronRuntimeBridgeAdapterOptions, ElectronRuntimeBridgeHostKind, ElectronRuntimeBridgeInput, ElectronRuntimeBridgeProcessResult, ElectronRuntimeBridgeScenarioResult} from './fixtures/runtime-bridge-types';
 
 const ELECTRON_SCENARIO_TIMEOUT_MS = 20_000
 const require = createRequire(import.meta.url)
