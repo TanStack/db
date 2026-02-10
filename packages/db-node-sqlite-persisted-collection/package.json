@@ -53,6 +53,7 @@
     "typescript": ">=4.7"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@vitest/coverage-istanbul": "^3.2.4"
   }
 }
