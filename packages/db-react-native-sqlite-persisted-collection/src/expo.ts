@@ -7,9 +7,7 @@ import type {
   MobileSQLitePersistenceAdapterOptions,
   MobileSQLitePersistenceOptions,
 } from './mobile-persistence'
-import type {
-  PersistedCollectionPersistence,
-} from '@tanstack/db-sqlite-persisted-collection-core'
+import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persisted-collection-core'
 
 export type ExpoSQLitePersistenceAdapterOptions =
   MobileSQLitePersistenceAdapterOptions
