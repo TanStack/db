@@ -21,7 +21,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "test:e2e": "vitest --config vitest.e2e.config.ts --run"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
