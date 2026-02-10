@@ -8,15 +8,15 @@ import {
   createNodeSQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
-import { generateSeedData } from '../../db-collection-e2e/src'
+import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/persisted-collection-conformance-contract'
-import type { Collection, Transaction } from '@tanstack/db'
+import type { Collection } from '@tanstack/db'
 import type {
   Comment,
   E2ETestConfig,
   Post,
   User,
-} from '../../db-collection-e2e/src'
+} from '../../db-collection-e2e/src/types'
 
 type PersistableRow = {
   id: string
@@ -30,27 +30,31 @@ function createPersistedCollection<T extends PersistableRow>(
   driver: ReturnType<typeof createBetterSqlite3Driver>,
   id: string,
   syncMode: `eager` | `on-demand`,
-): Collection<T, string> {
+): Collection<T, string | number> {
   return createCollection(
-    persistedCollectionOptions<T, string>({
+    persistedCollectionOptions<T, string | number>({
       id,
       syncMode,
       getKey: (item) => item.id,
-      persistence: createNodeSQLitePersistence<T, string>({
+      persistence: createNodeSQLitePersistence<T, string | number>({
         driver,
       }),
     }),
   )
 }
 
-async function waitForPersisted(
-  transaction: Transaction<unknown>,
-): Promise<void> {
+type PersistedTransactionHandle = {
+  isPersisted: {
+    promise: Promise<unknown>
+  }
+}
+
+async function waitForPersisted(transaction: PersistedTransactionHandle): Promise<void> {
   await transaction.isPersisted.promise
 }
 
 async function seedCollection<T extends PersistableRow>(
-  collection: Collection<T, string>,
+  collection: Collection<T, string | number>,
   rows: Array<T>,
 ): Promise<void> {
   const tx = collection.insert(rows)
@@ -58,7 +62,7 @@ async function seedCollection<T extends PersistableRow>(
 }
 
 async function insertRowIntoCollections<T extends PersistableRow>(
-  collections: ReadonlyArray<Collection<T, string>>,
+  collections: ReadonlyArray<Collection<T, string | number>>,
   row: T,
 ): Promise<void> {
   for (const collection of collections) {
@@ -68,7 +72,7 @@ async function insertRowIntoCollections<T extends PersistableRow>(
 }
 
 async function updateRowAcrossCollections<T extends PersistableRow>(
-  collections: ReadonlyArray<Collection<T, string>>,
+  collections: ReadonlyArray<Collection<T, string | number>>,
   id: string,
   updates: Partial<T>,
 ): Promise<void> {
@@ -84,7 +88,7 @@ async function updateRowAcrossCollections<T extends PersistableRow>(
 }
 
 async function deleteRowAcrossCollections<T extends PersistableRow>(
-  collections: ReadonlyArray<Collection<T, string>>,
+  collections: ReadonlyArray<Collection<T, string | number>>,
   id: string,
 ): Promise<void> {
   for (const collection of collections) {

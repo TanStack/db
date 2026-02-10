@@ -395,8 +395,8 @@ export function runSQLiteCoreAdapterContractSuite(
                 title: `Second`,
                 createdAt: `2026-01-01T00:00:00.000Z`,
                 score: 2,
-                // Trigger JSON.stringify failure after the first mutation executes.
-                unsafe: 1n,
+                // Trigger serialization failure after the first mutation executes.
+                unsafeDate: new Date(Number.NaN),
               } as unknown as Todo,
             },
           ],
@@ -558,7 +558,7 @@ export function runSQLiteCoreAdapterContractSuite(
 
     it(`persists bigint/date values and evaluates typed predicates`, async () => {
       const { adapter } = registerContractHarness()
-      const typedAdapter = adapter as PersistenceAdapter<
+      const typedAdapter = adapter as unknown as PersistenceAdapter<
         Record<string, unknown>,
         string
       >

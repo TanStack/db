@@ -1,16 +1,12 @@
 import { describe } from 'vitest'
-import {
-  createCollationTestSuite,
-  createDeduplicationTestSuite,
-  createJoinsTestSuite,
-  createLiveUpdatesTestSuite,
-  createMovesTestSuite,
-  createMutationsTestSuite,
-  createPaginationTestSuite,
-  createPredicatesTestSuite,
-  createProgressiveTestSuite,
-} from '../../../db-collection-e2e/src'
-import type { E2ETestConfig } from '../../../db-collection-e2e/src'
+import { createCollationTestSuite } from '../../../db-collection-e2e/src/suites/collation.suite'
+import { createDeduplicationTestSuite } from '../../../db-collection-e2e/src/suites/deduplication.suite'
+import { createJoinsTestSuite } from '../../../db-collection-e2e/src/suites/joins.suite'
+import { createLiveUpdatesTestSuite } from '../../../db-collection-e2e/src/suites/live-updates.suite'
+import { createMutationsTestSuite } from '../../../db-collection-e2e/src/suites/mutations.suite'
+import { createPaginationTestSuite } from '../../../db-collection-e2e/src/suites/pagination.suite'
+import { createPredicatesTestSuite } from '../../../db-collection-e2e/src/suites/predicates.suite'
+import type { E2ETestConfig } from '../../../db-collection-e2e/src/types'
 
 export type PersistedCollectionConformanceGetConfig =
   () => Promise<E2ETestConfig>
@@ -23,8 +19,6 @@ export type PersistedCollectionConformanceSuiteOptions = {
   includeCollation?: boolean
   includeMutations?: boolean
   includeLiveUpdates?: boolean
-  includeProgressive?: boolean
-  includeMoves?: boolean
 }
 
 export function runPersistedCollectionConformanceSuite(
@@ -39,8 +33,6 @@ export function runPersistedCollectionConformanceSuite(
   const includeCollation = options.includeCollation ?? true
   const includeMutations = options.includeMutations ?? true
   const includeLiveUpdates = options.includeLiveUpdates ?? true
-  const includeProgressive = options.includeProgressive ?? false
-  const includeMoves = options.includeMoves ?? false
 
   describe(suiteName, () => {
     if (includePredicates) {
@@ -63,12 +55,6 @@ export function runPersistedCollectionConformanceSuite(
     }
     if (includeLiveUpdates) {
       createLiveUpdatesTestSuite(getConfig)
-    }
-    if (includeProgressive) {
-      createProgressiveTestSuite(getConfig)
-    }
-    if (includeMoves) {
-      createMovesTestSuite(getConfig as never)
     }
   })
 }
