@@ -1,7 +1,10 @@
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BrowserWindow, app, ipcMain } from 'electron'
-import { createBetterSqlite3Driver, createNodeSQLitePersistenceAdapter  } from '@tanstack/db-node-sqlite-persisted-collection'
+import {
+  createBetterSqlite3Driver,
+  createNodeSQLitePersistenceAdapter,
+} from '@tanstack/db-node-sqlite-persisted-collection'
 import {
   createElectronPersistenceMainHost,
   registerElectronPersistenceMainIpcHandler,
@@ -13,7 +16,9 @@ import type {
   ElectronRuntimeBridgeScenarioResult,
 } from './runtime-bridge-types'
 
-function serializeError(error: unknown): ElectronRuntimeBridgeProcessResult[`error`] {
+function serializeError(
+  error: unknown,
+): ElectronRuntimeBridgeProcessResult[`error`] {
   if (error instanceof Error) {
     return {
       name: error.name,
@@ -40,7 +45,10 @@ function parseInputFromEnv(): ElectronRuntimeBridgeInput {
   }
 
   const candidate = parsed as Partial<ElectronRuntimeBridgeInput>
-  if (typeof candidate.collectionId !== `string` || candidate.collectionId === ``) {
+  if (
+    typeof candidate.collectionId !== `string` ||
+    candidate.collectionId === ``
+  ) {
     throw new Error(`Missing collectionId in TANSTACK_DB_E2E_INPUT`)
   }
   if (typeof candidate.dbPath !== `string` || candidate.dbPath === ``) {
@@ -72,11 +80,12 @@ async function run(): Promise<ElectronRuntimeBridgeProcessResult> {
     filename: input.dbPath,
   })
 
-  const adapter = createNodeSQLitePersistenceAdapter<Record<string, unknown>, string>(
-    {
-      driver,
-    },
-  )
+  const adapter = createNodeSQLitePersistenceAdapter<
+    Record<string, unknown>,
+    string
+  >({
+    driver,
+  })
   const host = createElectronPersistenceMainHost({
     getAdapter: (collectionId) =>
       collectionId === input.collectionId ? adapter : undefined,
@@ -100,7 +109,9 @@ async function run(): Promise<ElectronRuntimeBridgeProcessResult> {
       },
     })
 
-    await window.loadURL(`data:text/html,<html><body>runtime-bridge</body></html>`)
+    await window.loadURL(
+      `data:text/html,<html><body>runtime-bridge</body></html>`,
+    )
 
     const scenarioExpression = JSON.stringify({
       collectionId: input.collectionId,
