@@ -185,7 +185,6 @@ type AdapterHarness = {
 
 export type SQLiteCoreAdapterContractHarness = {
   adapter: PersistenceAdapter<Todo, string> & {
-    markIndexRemoved: (collectionId: string, signature: string) => Promise<void>
     pullSince: (
       collectionId: string,
       fromRowVersion: number,
@@ -667,6 +666,11 @@ export function runSQLiteCoreAdapterContractSuite(
       )
       expect(sqliteMasterBefore).toHaveLength(1)
 
+      if (!adapter.markIndexRemoved) {
+        throw new Error(
+          `Adapter must implement markIndexRemoved for this contract suite`,
+        )
+      }
       await adapter.markIndexRemoved(collectionId, signature)
 
       const registryRowsAfter = await driver.query<{ removed: number }>(

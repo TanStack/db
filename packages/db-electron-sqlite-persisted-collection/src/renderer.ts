@@ -21,7 +21,9 @@ import type {
   ElectronPersistedRow,
   ElectronPersistenceInvoke,
   ElectronPersistenceMethod,
+  ElectronPersistenceRequest,
   ElectronPersistenceRequestEnvelope,
+  ElectronPersistenceResponse,
   ElectronPersistenceResponseEnvelope,
 } from './protocol'
 import type { LoadSubsetOptions } from '@tanstack/db'
@@ -96,10 +98,8 @@ type RendererAdapterRequestExecutor = <
 >(
   method: TMethod,
   collectionId: string,
-  payload: ElectronPersistenceRequestEnvelope<TMethod>[`payload`],
-) => Promise<
-  Extract<ElectronPersistenceResponseEnvelope<TMethod>, { ok: true }>[`result`]
->
+  payload: ElectronPersistenceRequest<TMethod>[`payload`],
+) => Promise<Extract<ElectronPersistenceResponse<TMethod>, { ok: true }>[`result`]>
 
 function createRendererRequestExecutor(
   options: ElectronRendererPersistenceAdapterOptions,
@@ -110,9 +110,9 @@ function createRendererRequestExecutor(
   return async <TMethod extends ElectronPersistenceMethod>(
     method: TMethod,
     collectionId: string,
-    payload: ElectronPersistenceRequestEnvelope<TMethod>[`payload`],
+    payload: ElectronPersistenceRequest<TMethod>[`payload`],
   ) => {
-    const request: ElectronPersistenceRequestEnvelope<TMethod> = {
+    const request: ElectronPersistenceRequest<TMethod> = {
       v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: createRequestId(),
       collectionId,
@@ -121,9 +121,7 @@ function createRendererRequestExecutor(
     }
 
     const response = await withTimeout(
-      options.invoke(channel, request) as Promise<
-        ElectronPersistenceResponseEnvelope<TMethod>
-      >,
+      options.invoke(channel, request) as Promise<ElectronPersistenceResponse>,
       timeoutMs,
       `Electron persistence request timed out (method=${method}, collection=${collectionId}, timeoutMs=${timeoutMs})`,
     )
@@ -138,7 +136,10 @@ function createRendererRequestExecutor(
       )
     }
 
-    return response.result
+    return response.result as Extract<
+      ElectronPersistenceResponse<TMethod>,
+      { ok: true }
+    >[`result`]
   }
 }
 
