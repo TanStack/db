@@ -12,7 +12,8 @@ import {
 } from '../../../db-collection-e2e/src'
 import type { E2ETestConfig } from '../../../db-collection-e2e/src'
 
-export type PersistedCollectionConformanceGetConfig = () => Promise<E2ETestConfig>
+export type PersistedCollectionConformanceGetConfig =
+  () => Promise<E2ETestConfig>
 
 export type PersistedCollectionConformanceSuiteOptions = {
   includePredicates?: boolean

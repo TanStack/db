@@ -558,7 +558,10 @@ export function runSQLiteCoreAdapterContractSuite(
 
     it(`persists bigint/date values and evaluates typed predicates`, async () => {
       const { adapter } = registerContractHarness()
-      const typedAdapter = adapter as PersistenceAdapter<Record<string, unknown>, string>
+      const typedAdapter = adapter as PersistenceAdapter<
+        Record<string, unknown>,
+        string
+      >
       const collectionId = `typed-values`
       const firstBigInt = BigInt(`9007199254740992`)
       const secondBigInt = BigInt(`9007199254740997`)
