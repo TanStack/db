@@ -75,7 +75,10 @@ function toRowArray(rowsValue: unknown): Array<unknown> | null {
     return rowsObject._array
   }
 
-  if (typeof rowsObject.length === `number` && typeof rowsObject.item === `function`) {
+  if (
+    typeof rowsObject.length === `number` &&
+    typeof rowsObject.item === `function`
+  ) {
     const item = rowsObject.item as (index: number) => unknown
     const rows: Array<unknown> = []
     for (let index = 0; index < rowsObject.length; index++) {
@@ -160,7 +163,9 @@ function hasExistingDatabase(
   return `database` in options
 }
 
-function resolveExecuteMethod(database: OpSQLiteDatabaseLike): OpSQLiteExecuteFn {
+function resolveExecuteMethod(
+  database: OpSQLiteDatabaseLike,
+): OpSQLiteExecuteFn {
   const executeCandidates: Array<unknown> = [
     database.executeAsync,
     database.execute,
@@ -260,7 +265,9 @@ export class OpSQLiteDriver implements SQLiteDriver {
     params: ReadonlyArray<unknown> = [],
   ): Promise<unknown> {
     const normalizedParams =
-      params.length > 0 ? [...params] : (undefined as ReadonlyArray<unknown> | undefined)
+      params.length > 0
+        ? [...params]
+        : (undefined as ReadonlyArray<unknown> | undefined)
     const result = this.executeMethod.call(this.database, sql, normalizedParams)
     return Promise.resolve(result)
   }
@@ -302,6 +309,8 @@ export class OpSQLiteDriver implements SQLiteDriver {
   }
 }
 
-export function createOpSQLiteDriver(options: OpSQLiteDriverOptions): OpSQLiteDriver {
+export function createOpSQLiteDriver(
+  options: OpSQLiteDriverOptions,
+): OpSQLiteDriver {
   return new OpSQLiteDriver(options)
 }

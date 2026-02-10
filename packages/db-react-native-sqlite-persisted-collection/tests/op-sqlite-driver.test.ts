@@ -26,12 +26,7 @@ function createTempSqlitePath(): string {
   return dbPath
 }
 
-it.each([
-  `rows-array`,
-  `rows-object`,
-  `rows-list`,
-  `statement-array`,
-] as const)(
+it.each([`rows-array`, `rows-object`, `rows-list`, `statement-array`] as const)(
   `reads query rows across result shape: %s`,
   async (resultShape) => {
     const dbPath = createTempSqlitePath()
@@ -47,10 +42,11 @@ it.each([
     await driver.exec(
       `CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL, score INTEGER NOT NULL)`,
     )
-    await driver.run(
-      `INSERT INTO todos (id, title, score) VALUES (?, ?, ?)`,
-      [`1`, `From test`, 7],
-    )
+    await driver.run(`INSERT INTO todos (id, title, score) VALUES (?, ?, ?)`, [
+      `1`,
+      `From test`,
+      7,
+    ])
 
     const rows = await driver.query<{
       id: string
@@ -139,7 +135,7 @@ it(`supports nested savepoint rollback without losing outer transaction`, async 
 })
 
 it(`throws config error when db execute methods are missing`, () => {
-  expect(() =>
-    createOpSQLiteDriver({ database: {} as never }),
-  ).toThrowError(InvalidPersistedCollectionConfigError)
+  expect(() => createOpSQLiteDriver({ database: {} as never })).toThrowError(
+    InvalidPersistedCollectionConfigError,
+  )
 })

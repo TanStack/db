@@ -65,9 +65,11 @@ it(`persists data across app restart (close and reopen)`, async () => {
   activeCleanupFns.push(() => {
     secondDatabase.close()
   })
-  const secondAdapter = createReactNativeSQLitePersistenceAdapter<Todo, string>({
-    driver: { database: secondDatabase },
-  })
+  const secondAdapter = createReactNativeSQLitePersistenceAdapter<Todo, string>(
+    {
+      driver: { database: secondDatabase },
+    },
+  )
 
   const rows = await secondAdapter.loadSubset(collectionId, {})
   expect(rows).toEqual([
@@ -130,7 +132,10 @@ it(`exposes parity wrappers for react-native and expo entrypoints`, async () => 
     database.close()
   })
 
-  const reactNativePersistence = createReactNativeSQLitePersistence<Todo, string>({
+  const reactNativePersistence = createReactNativeSQLitePersistence<
+    Todo,
+    string
+  >({
     driver: { database },
   })
   const expoPersistence = createExpoSQLitePersistence<Todo, string>({
