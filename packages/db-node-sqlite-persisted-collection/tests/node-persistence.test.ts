@@ -9,9 +9,10 @@ import {
 } from '../src'
 import {
   
+  
   runRuntimePersistenceContractSuite
 } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
-import type {RuntimePersistenceDatabaseHarness} from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract';
+import type {RuntimePersistenceContractTodo, RuntimePersistenceDatabaseHarness} from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract';
 
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-persistence-`))
@@ -41,11 +42,11 @@ function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
 runRuntimePersistenceContractSuite(`node runtime persistence helpers`, {
   createDatabaseHarness: createRuntimeDatabaseHarness,
   createAdapter: (driver) =>
-    createNodeSQLitePersistence({
+    createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>({
       driver,
     }).adapter,
   createPersistence: (driver, coordinator) =>
-    createNodeSQLitePersistence({
+    createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>({
       driver,
       coordinator,
     }),
