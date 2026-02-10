@@ -1,11 +1,8 @@
-import { createRequire } from 'node:module'
-import { spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { runRuntimeBridgeE2EContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-bridge-e2e-contract'
-import { E2E_RESULT_PREFIX } from './e2e/fixtures/runtime-bridge-types'
+import { runElectronRuntimeBridgeScenario } from './e2e/electron-process-client'
 import type {
   RuntimeBridgeE2EContractError,
   RuntimeBridgeE2EContractHarness,
@@ -14,179 +11,8 @@ import type {
 } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-bridge-e2e-contract'
 import type {
   ElectronRuntimeBridgeInput,
-  ElectronRuntimeBridgeProcessResult,
   ElectronRuntimeBridgeScenarioResult,
 } from './e2e/fixtures/runtime-bridge-types'
-
-const require = createRequire(import.meta.url)
-const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)))
-const electronRunnerPath = join(
-  packageRoot,
-  `tests`,
-  `e2e`,
-  `fixtures`,
-  `electron-main.mjs`,
-)
-
-function resolveElectronBinaryPath(): string {
-  const electronModuleValue: unknown = require(`electron`)
-  if (
-    typeof electronModuleValue !== `string` ||
-    electronModuleValue.length === 0
-  ) {
-    throw new Error(`Failed to resolve electron binary path`)
-  }
-  return electronModuleValue
-}
-
-function parseScenarioResult(
-  stdoutBuffer: string,
-  stderrBuffer: string,
-  exitCode: number | null,
-): ElectronRuntimeBridgeProcessResult {
-  const resultLine = stdoutBuffer
-    .split(/\r?\n/u)
-    .find((line) => line.startsWith(E2E_RESULT_PREFIX))
-
-  if (!resultLine) {
-    throw new Error(
-      [
-        `Electron e2e runner did not emit a result line`,
-        `exitCode=${String(exitCode)}`,
-        `stderr=${stderrBuffer}`,
-        `stdout=${stdoutBuffer}`,
-      ].join(`\n`),
-    )
-  }
-
-  const rawResult = resultLine.slice(E2E_RESULT_PREFIX.length)
-  return JSON.parse(rawResult) as ElectronRuntimeBridgeProcessResult
-}
-
-async function runElectronScenario(
-  input: ElectronRuntimeBridgeInput,
-): Promise<ElectronRuntimeBridgeScenarioResult> {
-  const electronBinaryPath = resolveElectronBinaryPath()
-  const xvfbRunPath = `/usr/bin/xvfb-run`
-  const hasXvfbRun = existsSync(xvfbRunPath)
-  const electronArgs = [
-    `--disable-gpu`,
-    `--disable-dev-shm-usage`,
-    `--no-sandbox`,
-    electronRunnerPath,
-  ]
-  const command = hasXvfbRun ? xvfbRunPath : electronBinaryPath
-  const args = hasXvfbRun
-    ? [
-        `-a`,
-        `--server-args=-screen 0 1280x720x24`,
-        electronBinaryPath,
-        ...electronArgs,
-      ]
-    : electronArgs
-
-  const processResult = await new Promise<ElectronRuntimeBridgeProcessResult>(
-    (resolve, reject) => {
-      const child = spawn(command, args, {
-        cwd: packageRoot,
-        env: {
-          ...process.env,
-          TANSTACK_DB_E2E_INPUT: JSON.stringify(input),
-          ELECTRON_DISABLE_SECURITY_WARNINGS: `true`,
-        },
-        stdio: [`ignore`, `pipe`, `pipe`],
-      })
-      let stdoutBuffer = ``
-      let stderrBuffer = ``
-      let isSettled = false
-
-      const settle = (
-        callback: (result: ElectronRuntimeBridgeProcessResult) => void,
-        result: ElectronRuntimeBridgeProcessResult,
-      ) => {
-        if (isSettled) {
-          return
-        }
-        isSettled = true
-        clearTimeout(timeout)
-        callback(result)
-
-        if (!child.killed) {
-          child.kill(`SIGKILL`)
-        }
-      }
-
-      const rejectOnce = (error: unknown) => {
-        if (isSettled) {
-          return
-        }
-        isSettled = true
-        clearTimeout(timeout)
-        reject(error)
-        if (!child.killed) {
-          child.kill(`SIGKILL`)
-        }
-      }
-
-      const timeout = setTimeout(() => {
-        rejectOnce(
-          new Error(
-            [
-              `Electron e2e scenario timed out after 20s`,
-              `stderr=${stderrBuffer}`,
-              `stdout=${stdoutBuffer}`,
-            ].join(`\n`),
-          ),
-        )
-      }, 20_000)
-      child.on(`error`, (error) => {
-        rejectOnce(error)
-      })
-
-      child.stdout.on(`data`, (chunk: Buffer) => {
-        stdoutBuffer += chunk.toString()
-
-        try {
-          const parsedResult = parseScenarioResult(
-            stdoutBuffer,
-            stderrBuffer,
-            null,
-          )
-          settle(resolve, parsedResult)
-        } catch {
-          // result line may not be fully available yet; continue collecting output
-        }
-      })
-      child.stderr.on(`data`, (chunk: Buffer) => {
-        stderrBuffer += chunk.toString()
-      })
-
-      child.on(`close`, (exitCode) => {
-        if (isSettled) {
-          return
-        }
-        try {
-          const parsedResult = parseScenarioResult(
-            stdoutBuffer,
-            stderrBuffer,
-            exitCode,
-          )
-          settle(resolve, parsedResult)
-        } catch (error) {
-          rejectOnce(error)
-        }
-      })
-    },
-  )
-
-  if (!processResult.ok) {
-    throw new Error(
-      `Electron e2e runner failed: ${processResult.error.name}: ${processResult.error.message}`,
-    )
-  }
-
-  return processResult.result
-}
 
 const createHarness: RuntimeBridgeE2EContractHarnessFactory = () => {
   const tempDirectory = mkdtempSync(
@@ -199,7 +25,7 @@ const createHarness: RuntimeBridgeE2EContractHarnessFactory = () => {
   const runScenario = async (
     scenario: ElectronRuntimeBridgeInput[`scenario`],
   ): Promise<ElectronRuntimeBridgeScenarioResult> =>
-    runElectronScenario({
+    runElectronRuntimeBridgeScenario({
       dbPath,
       collectionId,
       timeoutMs: 4_000,

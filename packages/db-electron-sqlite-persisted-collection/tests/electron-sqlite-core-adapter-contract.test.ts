@@ -10,6 +10,10 @@ import {
   createElectronPersistenceMainHost,
   createElectronRendererPersistenceAdapter,
 } from '../src'
+import {
+  createElectronRuntimeBridgeInvoke,
+  isElectronFullE2EEnabled,
+} from './e2e/electron-process-client'
 import type {
   SQLiteCoreAdapterContractTodo,
   SQLiteCoreAdapterHarnessFactory,
@@ -20,19 +24,31 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-electron-contract-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   const driver = createBetterSqlite3Driver({ filename: dbPath })
+  const runFullE2E = isElectronFullE2EEnabled()
 
-  const mainAdapter = createNodeSQLitePersistenceAdapter<
-    Record<string, unknown>,
-    string | number
-  >({
-    driver,
-    ...options,
-  })
-  const host = createElectronPersistenceMainHost({
-    getAdapter: () => mainAdapter,
-  })
-  const invoke: ElectronPersistenceInvoke = async (_channel, request) =>
-    host.handleRequest(request)
+  let invoke: ElectronPersistenceInvoke
+  let cleanupInvoke: () => void = () => {}
+  if (runFullE2E) {
+    invoke = createElectronRuntimeBridgeInvoke({
+      dbPath,
+      collectionId: `todos`,
+      timeoutMs: 4_000,
+      adapterOptions: options,
+    })
+  } else {
+    const mainAdapter = createNodeSQLitePersistenceAdapter<
+      Record<string, unknown>,
+      string | number
+    >({
+      driver,
+      ...options,
+    })
+    const host = createElectronPersistenceMainHost({
+      getAdapter: () => mainAdapter,
+    })
+    invoke = async (_channel, request) => host.handleRequest(request)
+    cleanupInvoke = () => {}
+  }
 
   const rendererAdapter = createElectronRendererPersistenceAdapter<
     SQLiteCoreAdapterContractTodo,
@@ -47,15 +63,23 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
     driver,
     cleanup: () => {
       try {
-        driver.close()
+        cleanupInvoke()
       } finally {
-        rmSync(tempDirectory, { recursive: true, force: true })
+        try {
+          driver.close()
+        } finally {
+          rmSync(tempDirectory, { recursive: true, force: true })
+        }
       }
     },
   }
 }
 
+const electronContractMode = isElectronFullE2EEnabled()
+  ? `real electron e2e invoke`
+  : `in-process invoke`
+
 runSQLiteCoreAdapterContractSuite(
-  `SQLiteCorePersistenceAdapter contract over electron IPC bridge`,
+  `SQLiteCorePersistenceAdapter contract over electron IPC bridge (${electronContractMode})`,
   createHarness,
 )
