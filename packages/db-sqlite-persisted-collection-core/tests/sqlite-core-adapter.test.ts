@@ -100,7 +100,10 @@ type AdapterHarness = {
 }
 
 function createHarness(
-  options?: ConstructorParameters<typeof SQLiteCorePersistenceAdapter<Todo, string>>[0],
+  options?: Omit<
+    ConstructorParameters<typeof SQLiteCorePersistenceAdapter<Todo, string>>[0],
+    `driver`
+  >,
 ): AdapterHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-sqlite-core-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
@@ -130,7 +133,10 @@ afterEach(() => {
 })
 
 function registerHarness(
-  options?: ConstructorParameters<typeof SQLiteCorePersistenceAdapter<Todo, string>>[0],
+  options?: Omit<
+    ConstructorParameters<typeof SQLiteCorePersistenceAdapter<Todo, string>>[0],
+    `driver`
+  >,
 ): AdapterHarness {
   const harness = createHarness(options)
   activeCleanupFns.push(harness.cleanup)
@@ -473,7 +479,7 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
 
   it(`returns pullSince deltas and requiresFullReload when threshold is exceeded`, async () => {
     const { adapter } = registerHarness({
-      pullSinceReloadThreshold: 2,
+      pullSinceReloadThreshold: 1,
     })
     const collectionId = `todos`
 
