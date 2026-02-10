@@ -63,6 +63,18 @@ export type ElectronPersistenceRequest<
   payload: ElectronPersistencePayloadMap[TMethod]
 }
 
+export type ElectronPersistenceRequestEnvelope<
+  TMethod extends ElectronPersistenceMethod = ElectronPersistenceMethod,
+> = {
+  [Method in TMethod]: {
+    v: number
+    requestId: string
+    collectionId: string
+    method: Method
+    payload: ElectronPersistencePayloadMap[Method]
+  }
+}[TMethod]
+
 type ElectronPersistenceSuccessResponse<
   TMethod extends ElectronPersistenceMethod = ElectronPersistenceMethod,
 > = {
@@ -89,11 +101,19 @@ export type ElectronPersistenceResponse<
   | ElectronPersistenceSuccessResponse<TMethod>
   | ElectronPersistenceErrorResponse<TMethod>
 
+export type ElectronPersistenceResponseEnvelope<
+  TMethod extends ElectronPersistenceMethod = ElectronPersistenceMethod,
+> = {
+  [Method in TMethod]:
+    | ElectronPersistenceSuccessResponse<Method>
+    | ElectronPersistenceErrorResponse<Method>
+}[TMethod]
+
 export type ElectronPersistenceRequestHandler = (
-  request: ElectronPersistenceRequest,
-) => Promise<ElectronPersistenceResponse>
+  request: ElectronPersistenceRequestEnvelope,
+) => Promise<ElectronPersistenceResponseEnvelope>
 
 export type ElectronPersistenceInvoke = (
   channel: string,
-  request: ElectronPersistenceRequest,
-) => Promise<ElectronPersistenceResponse>
+  request: ElectronPersistenceRequestEnvelope,
+) => Promise<ElectronPersistenceResponseEnvelope>
