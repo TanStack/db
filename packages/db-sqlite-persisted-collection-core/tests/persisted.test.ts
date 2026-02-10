@@ -171,8 +171,8 @@ function createCoordinatorHarness(): CoordinatorHarness {
   return harness
 }
 
-async function flushAsyncWork(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0))
+async function flushAsyncWork(delayMs: number = 0): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, delayMs))
 }
 
 describe(`persistedCollectionOptions`, () => {
@@ -346,6 +346,30 @@ describe(`persistedCollectionOptions`, () => {
     expect(adapter.applyCommittedTxCalls[0]?.tx.mutations[0]?.type).toBe(
       `update`,
     )
+  })
+
+  it(`uses a stable generated collection id in sync-present mode when id is omitted`, async () => {
+    const adapter = createRecordingAdapter()
+    const options = persistedCollectionOptions<Todo, string>({
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+      persistence: {
+        adapter,
+      },
+    })
+
+    expect(options.id).toBeDefined()
+
+    const collection = createCollection(options)
+    await collection.preload()
+    await flushAsyncWork()
+
+    expect(collection.id).toBe(options.id)
+    expect(adapter.loadSubsetCalls[0]?.collectionId).toBe(collection.id)
   })
 
   it(`bootstraps and tracks persisted index lifecycle in sync-present mode`, async () => {
@@ -560,6 +584,140 @@ describe(`persistedCollectionOptions`, () => {
       id: `2`,
       title: `Recovered`,
     })
+  })
+
+  it(`removes deleted rows after tx:committed invalidation reload`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Keep` },
+      { id: `2`, title: `Delete` },
+    ])
+    const coordinator = createCoordinatorHarness()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+    expect(collection.get(`2`)).toEqual({ id: `2`, title: `Delete` })
+
+    adapter.rows.delete(`2`)
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-delete`,
+      latestRowVersion: 1,
+      requiresFullReload: false,
+      changedKeys: [],
+      deletedKeys: [`2`],
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    expect(collection.get(`2`)).toBeUndefined()
+  })
+
+  it(`retries queued remote subset ensure after transient failures`, async () => {
+    const adapter = createRecordingAdapter()
+    let ensureCalls = 0
+
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `retry-node`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => true,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestEnsureRemoteSubset: async () => {
+        ensureCalls++
+        if (ensureCalls === 1) {
+          throw new Error(`offline`)
+        }
+      },
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present-retry`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+            return {}
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await flushAsyncWork()
+
+    await (collection as any)._sync.loadSubset({ limit: 1 })
+    await flushAsyncWork(120)
+
+    expect(ensureCalls).toBeGreaterThanOrEqual(2)
+  })
+
+  it(`fails sync-absent persistence when follower ack omits mutation ids`, async () => {
+    const adapter = createRecordingAdapter()
+    const coordinator: PersistedCollectionCoordinator = {
+      getNodeId: () => `follower-node`,
+      subscribe: () => () => {},
+      publish: () => {},
+      isLeader: () => false,
+      ensureLeadership: async () => {},
+      requestEnsurePersistedIndex: async () => {},
+      requestApplyLocalMutations: async () => ({
+        type: `rpc:applyLocalMutations:res`,
+        rpcId: `ack-1`,
+        ok: true,
+        term: 1,
+        seq: 1,
+        latestRowVersion: 1,
+        acceptedMutationIds: [],
+      }),
+    }
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-absent-ack`,
+        getKey: (item) => item.id,
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    const tx = collection.insert({
+      id: `ack-mismatch`,
+      title: `Ack mismatch`,
+    })
+
+    await expect(tx.isPersisted.promise).rejects.toThrow(
+      /partial acceptance is not supported/,
+    )
+    expect(collection.get(`ack-mismatch`)).toBeUndefined()
   })
 })
 
