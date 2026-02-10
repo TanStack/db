@@ -75,7 +75,12 @@ const PERSISTED_TYPE_TAG = `__tanstack_db_persisted_type__`
 const PERSISTED_VALUE_TAG = `value`
 
 type CompiledValueKind = `unknown` | `bigint` | `date` | `datetime`
-type PersistedTaggedValueType = `bigint` | `date` | `nan` | `infinity` | `-infinity`
+type PersistedTaggedValueType =
+  | `bigint`
+  | `date`
+  | `nan`
+  | `infinity`
+  | `-infinity`
 type PersistedTaggedValue = {
   [PERSISTED_TYPE_TAG]: PersistedTaggedValueType
   [PERSISTED_VALUE_TAG]: string
@@ -492,7 +497,9 @@ function getLiteralValueKind(value: unknown): CompiledValueKind {
   return `unknown`
 }
 
-function getCompiledValueKind(fragment: CompiledSqlFragment): CompiledValueKind {
+function getCompiledValueKind(
+  fragment: CompiledSqlFragment,
+): CompiledValueKind {
   return fragment.valueKind ?? `unknown`
 }
 
@@ -506,8 +513,10 @@ function resolveComparisonValueKind(
   const rightKind = getCompiledValueKind(rightCompiled)
 
   const hasBigIntLiteral =
-    (leftExpression.type === `val` && typeof leftExpression.value === `bigint`) ||
-    (rightExpression.type === `val` && typeof rightExpression.value === `bigint`)
+    (leftExpression.type === `val` &&
+      typeof leftExpression.value === `bigint`) ||
+    (rightExpression.type === `val` &&
+      typeof rightExpression.value === `bigint`)
   if (hasBigIntLiteral || leftKind === `bigint` || rightKind === `bigint`) {
     return `bigint`
   }
@@ -515,11 +524,7 @@ function resolveComparisonValueKind(
   const hasDateLiteral =
     (leftExpression.type === `val` && leftExpression.value instanceof Date) ||
     (rightExpression.type === `val` && rightExpression.value instanceof Date)
-  if (
-    hasDateLiteral ||
-    leftKind === `datetime` ||
-    rightKind === `datetime`
-  ) {
+  if (hasDateLiteral || leftKind === `datetime` || rightKind === `datetime`) {
     return `datetime`
   }
 
@@ -719,7 +724,9 @@ function compileSqlExpression(
       }
 
       if (listValue.length > SQLITE_MAX_IN_BATCH_SIZE) {
-        const hasBigIntValues = listValue.some((value) => typeof value === `bigint`)
+        const hasBigIntValues = listValue.some(
+          (value) => typeof value === `bigint`,
+        )
         const inLeftSql = hasBigIntValues
           ? `CAST(${leftSql} AS NUMERIC)`
           : leftSql
@@ -751,7 +758,9 @@ function compileSqlExpression(
         }
       }
 
-      const hasBigIntValues = listValue.some((value) => typeof value === `bigint`)
+      const hasBigIntValues = listValue.some(
+        (value) => typeof value === `bigint`,
+      )
       const inLeftSql = hasBigIntValues
         ? `CAST(${leftSql} AS NUMERIC)`
         : leftSql
@@ -1130,7 +1139,7 @@ export class SQLiteCorePersistenceAdapter<
           [encodedKey],
         )
         const existingValue = existingRows[0]?.value
-          ? (deserializePersistedRowValue(existingRows[0].value))
+          ? deserializePersistedRowValue(existingRows[0].value)
           : undefined
         const mergedValue =
           mutation.type === `update`
