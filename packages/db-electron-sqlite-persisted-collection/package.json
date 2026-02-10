@@ -1,0 +1,78 @@
+{
+  "name": "@tanstack/db-electron-sqlite-persisted-collection",
+  "version": "0.1.0",
+  "description": "Electron SQLite persisted collection bridge for TanStack DB",
+  "author": "TanStack Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanStack/db.git",
+    "directory": "packages/db-electron-sqlite-persisted-collection"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "sqlite",
+    "electron",
+    "ipc",
+    "persistence",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch",
+    "lint": "eslint . --fix",
+    "test": "vitest --run"
+  },
+  "type": "module",
+  "main": "dist/cjs/index.cjs",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.cts",
+        "default": "./dist/cjs/index.cjs"
+      }
+    },
+    "./main": {
+      "import": {
+        "types": "./dist/esm/main.d.ts",
+        "default": "./dist/esm/main.js"
+      },
+      "require": {
+        "types": "./dist/cjs/main.d.cts",
+        "default": "./dist/cjs/main.cjs"
+      }
+    },
+    "./renderer": {
+      "import": {
+        "types": "./dist/esm/renderer.d.ts",
+        "default": "./dist/esm/renderer.js"
+      },
+      "require": {
+        "types": "./dist/cjs/renderer.d.cts",
+        "default": "./dist/cjs/renderer.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "@tanstack/db-node-sqlite-persisted-collection": "workspace:*",
+    "@tanstack/db-sqlite-persisted-collection-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "typescript": ">=4.7"
+  },
+  "devDependencies": {
+    "@vitest/coverage-istanbul": "^3.2.4"
+  }
+}
