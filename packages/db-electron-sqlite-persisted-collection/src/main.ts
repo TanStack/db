@@ -1,7 +1,4 @@
-import {
-  
-  createNodeSQLitePersistenceAdapter
-} from '@tanstack/db-node-sqlite-persisted-collection'
+import { createNodeSQLitePersistenceAdapter } from '@tanstack/db-node-sqlite-persisted-collection'
 import {
   ElectronPersistenceProtocolError,
   UnknownElectronPersistenceCollectionError,
@@ -11,7 +8,7 @@ import {
   DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
   ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
 } from './protocol'
-import type {NodeSQLitePersistenceAdapterOptions} from '@tanstack/db-node-sqlite-persisted-collection';
+import type { NodeSQLitePersistenceAdapterOptions } from '@tanstack/db-node-sqlite-persisted-collection'
 import type {
   PersistenceAdapter,
   SQLitePullSinceResult,
@@ -189,7 +186,9 @@ export type ElectronPersistenceMainHost = {
 }
 
 export function createElectronPersistenceMainHost(options: {
-  getAdapter: (collectionId: string) => ElectronMainPersistenceAdapter | undefined
+  getAdapter: (
+    collectionId: string,
+  ) => ElectronMainPersistenceAdapter | undefined
 }): ElectronPersistenceMainHost {
   return {
     handleRequest: async (
@@ -200,7 +199,9 @@ export function createElectronPersistenceMainHost(options: {
 
         const adapter = options.getAdapter(request.collectionId)
         if (!adapter) {
-          throw new UnknownElectronPersistenceCollectionError(request.collectionId)
+          throw new UnknownElectronPersistenceCollectionError(
+            request.collectionId,
+          )
         }
 
         return executeRequestAgainstAdapter(request, adapter)
@@ -260,9 +261,10 @@ export function createElectronNodeSQLiteMainRegistry(
   for (const collection of collections) {
     registry.registerCollection(
       collection.collectionId,
-      createNodeSQLitePersistenceAdapter<ElectronPersistedRow, ElectronPersistedKey>(
-        collection.adapterOptions,
-      ),
+      createNodeSQLitePersistenceAdapter<
+        ElectronPersistedRow,
+        ElectronPersistedKey
+      >(collection.adapterOptions),
     )
   }
   return registry

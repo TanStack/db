@@ -1,18 +1,16 @@
 import {
-  
-  
-  
-  
-  
   SingleProcessCoordinator,
-  createSQLiteCorePersistenceAdapter
+  createSQLiteCorePersistenceAdapter,
 } from '@tanstack/db-sqlite-persisted-collection-core'
-import {
-  
-  createBetterSqlite3Driver
-} from './node-driver'
-import type {PersistedCollectionCoordinator, PersistedCollectionPersistence, PersistenceAdapter, SQLiteCoreAdapterOptions, SQLiteDriver} from '@tanstack/db-sqlite-persisted-collection-core';
-import type {BetterSqlite3DriverOptions} from './node-driver';
+import { createBetterSqlite3Driver } from './node-driver'
+import type {
+  PersistedCollectionCoordinator,
+  PersistedCollectionPersistence,
+  PersistenceAdapter,
+  SQLiteCoreAdapterOptions,
+  SQLiteDriver,
+} from '@tanstack/db-sqlite-persisted-collection-core'
+import type { BetterSqlite3DriverOptions } from './node-driver'
 
 type NodeSQLiteDriverInput = SQLiteDriver | BetterSqlite3DriverOptions
 
@@ -23,11 +21,14 @@ export type NodeSQLitePersistenceAdapterOptions = Omit<
   driver: NodeSQLiteDriverInput
 }
 
-export type NodeSQLitePersistenceOptions = NodeSQLitePersistenceAdapterOptions & {
-  coordinator?: PersistedCollectionCoordinator
-}
+export type NodeSQLitePersistenceOptions =
+  NodeSQLitePersistenceAdapterOptions & {
+    coordinator?: PersistedCollectionCoordinator
+  }
 
-function isSQLiteDriver(candidate: NodeSQLiteDriverInput): candidate is SQLiteDriver {
+function isSQLiteDriver(
+  candidate: NodeSQLiteDriverInput,
+): candidate is SQLiteDriver {
   return (
     `exec` in candidate &&
     `query` in candidate &&
@@ -51,9 +52,7 @@ function resolveSQLiteDriver(driverInput: NodeSQLiteDriverInput): SQLiteDriver {
 export function createNodeSQLitePersistenceAdapter<
   T extends object,
   TKey extends string | number = string | number,
->(
-  options: NodeSQLitePersistenceAdapterOptions,
-): PersistenceAdapter<T, TKey> {
+>(options: NodeSQLitePersistenceAdapterOptions): PersistenceAdapter<T, TKey> {
   const { driver, ...adapterOptions } = options
   const resolvedDriver = resolveSQLiteDriver(driver)
 

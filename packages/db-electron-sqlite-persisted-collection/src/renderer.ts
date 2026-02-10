@@ -1,12 +1,4 @@
-import {
-  
-  
-  
-  
-  
-  
-  SingleProcessCoordinator
-} from '@tanstack/db-sqlite-persisted-collection-core'
+import { SingleProcessCoordinator } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
   ElectronPersistenceProtocolError,
   ElectronPersistenceRpcError,
@@ -16,7 +8,14 @@ import {
   DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
   ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
 } from './protocol'
-import type {PersistedCollectionCoordinator, PersistedCollectionPersistence, PersistedIndexSpec, PersistedTx, PersistenceAdapter, SQLitePullSinceResult} from '@tanstack/db-sqlite-persisted-collection-core';
+import type {
+  PersistedCollectionCoordinator,
+  PersistedCollectionPersistence,
+  PersistedIndexSpec,
+  PersistedTx,
+  PersistenceAdapter,
+  SQLitePullSinceResult,
+} from '@tanstack/db-sqlite-persisted-collection-core'
 import type {
   ElectronPersistedKey,
   ElectronPersistedRow,
@@ -92,7 +91,9 @@ export type ElectronRendererPersistenceAdapterOptions = {
   timeoutMs?: number
 }
 
-type RendererAdapterRequestExecutor = <TMethod extends ElectronPersistenceMethod>(
+type RendererAdapterRequestExecutor = <
+  TMethod extends ElectronPersistenceMethod,
+>(
   method: TMethod,
   collectionId: string,
   payload: ElectronPersistenceRequest<TMethod>[`payload`],
@@ -120,7 +121,9 @@ function createRendererRequestExecutor(
     }
 
     const response = await withTimeout(
-      options.invoke(channel, request) as Promise<ElectronPersistenceResponse<TMethod>>,
+      options.invoke(channel, request) as Promise<
+        ElectronPersistenceResponse<TMethod>
+      >,
       timeoutMs,
       `Electron persistence request timed out (method=${method}, collection=${collectionId}, timeoutMs=${timeoutMs})`,
     )

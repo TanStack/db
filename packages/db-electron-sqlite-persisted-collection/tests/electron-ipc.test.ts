@@ -8,18 +8,19 @@ import {
 } from '@tanstack/db-node-sqlite-persisted-collection'
 import {
   DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
-  
   ElectronPersistenceMainRegistry,
-  
-  
   ElectronPersistenceRpcError,
   ElectronPersistenceTimeoutError,
   createElectronNodeSQLiteMainRegistry,
   createElectronRendererPersistence,
   createElectronRendererPersistenceAdapter,
-  registerElectronPersistenceMainIpcHandler
+  registerElectronPersistenceMainIpcHandler,
 } from '../src'
-import type {ElectronPersistenceInvoke, ElectronPersistenceRequest, ElectronPersistenceResponse} from '../src';
+import type {
+  ElectronPersistenceInvoke,
+  ElectronPersistenceRequest,
+  ElectronPersistenceResponse,
+} from '../src'
 
 type Todo = {
   id: string
@@ -82,11 +83,12 @@ describe(`electron sqlite persistence bridge`, () => {
       return runtime.host.handleRequest(request)
     }
 
-    const rendererAdapter = createElectronRendererPersistenceAdapter<Todo, string>(
-      {
-        invoke,
-      },
-    )
+    const rendererAdapter = createElectronRendererPersistenceAdapter<
+      Todo,
+      string
+    >({
+      invoke,
+    })
 
     await rendererAdapter.applyCommittedTx(`todos`, {
       txId: `tx-1`,
@@ -125,11 +127,12 @@ describe(`electron sqlite persistence bridge`, () => {
     const runtimeA = createMainRuntime(dbPath, `todos`)
     const invokeA: ElectronPersistenceInvoke = (_channel, request) =>
       runtimeA.host.handleRequest(request)
-    const rendererAdapterA = createElectronRendererPersistenceAdapter<Todo, string>(
-      {
-        invoke: invokeA,
-      },
-    )
+    const rendererAdapterA = createElectronRendererPersistenceAdapter<
+      Todo,
+      string
+    >({
+      invoke: invokeA,
+    })
 
     await rendererAdapterA.applyCommittedTx(`todos`, {
       txId: `tx-restart-1`,
@@ -154,11 +157,12 @@ describe(`electron sqlite persistence bridge`, () => {
     activeCleanupFns.push(() => runtimeB.close())
     const invokeB: ElectronPersistenceInvoke = (_channel, request) =>
       runtimeB.host.handleRequest(request)
-    const rendererAdapterB = createElectronRendererPersistenceAdapter<Todo, string>(
-      {
-        invoke: invokeB,
-      },
-    )
+    const rendererAdapterB = createElectronRendererPersistenceAdapter<
+      Todo,
+      string
+    >({
+      invoke: invokeB,
+    })
 
     const rows = await rendererAdapterB.loadSubset(`todos`, {})
     expect(rows.map((row) => row.key)).toEqual([`persisted`])
@@ -169,16 +173,17 @@ describe(`electron sqlite persistence bridge`, () => {
     const neverInvoke: ElectronPersistenceInvoke = async () =>
       await new Promise<ElectronPersistenceResponse>(() => {})
 
-    const rendererAdapter = createElectronRendererPersistenceAdapter<Todo, string>(
-      {
-        invoke: neverInvoke,
-        timeoutMs: 5,
-      },
-    )
+    const rendererAdapter = createElectronRendererPersistenceAdapter<
+      Todo,
+      string
+    >({
+      invoke: neverInvoke,
+      timeoutMs: 5,
+    })
 
-    await expect(rendererAdapter.loadSubset(`todos`, {})).rejects.toBeInstanceOf(
-      ElectronPersistenceTimeoutError,
-    )
+    await expect(
+      rendererAdapter.loadSubset(`todos`, {}),
+    ).rejects.toBeInstanceOf(ElectronPersistenceTimeoutError)
   })
 
   it(`returns structured remote errors for unknown collections`, async () => {
@@ -188,20 +193,23 @@ describe(`electron sqlite persistence bridge`, () => {
 
     const invoke: ElectronPersistenceInvoke = (_channel, request) =>
       runtime.host.handleRequest(request)
-    const rendererAdapter = createElectronRendererPersistenceAdapter<Todo, string>(
-      {
-        invoke,
-      },
-    )
+    const rendererAdapter = createElectronRendererPersistenceAdapter<
+      Todo,
+      string
+    >({
+      invoke,
+    })
 
-    await expect(rendererAdapter.loadSubset(`missing`, {})).rejects.toMatchObject({
+    await expect(
+      rendererAdapter.loadSubset(`missing`, {}),
+    ).rejects.toMatchObject({
       name: `ElectronPersistenceRpcError`,
       code: `UNKNOWN_COLLECTION`,
     })
 
-    await expect(rendererAdapter.loadSubset(`missing`, {})).rejects.toBeInstanceOf(
-      ElectronPersistenceRpcError,
-    )
+    await expect(
+      rendererAdapter.loadSubset(`missing`, {}),
+    ).rejects.toBeInstanceOf(ElectronPersistenceRpcError)
   })
 
   it(`wires renderer persistence helper with default and custom coordinator`, () => {
@@ -319,11 +327,12 @@ describe(`electron sqlite persistence bridge`, () => {
 
     const invoke: ElectronPersistenceInvoke = (_channel, request) =>
       host.handleRequest(request)
-    const rendererAdapter = createElectronRendererPersistenceAdapter<Todo, string>(
-      {
-        invoke,
-      },
-    )
+    const rendererAdapter = createElectronRendererPersistenceAdapter<
+      Todo,
+      string
+    >({
+      invoke,
+    })
 
     await rendererAdapter.applyCommittedTx(`todos`, {
       txId: `tx-helper-1`,

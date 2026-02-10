@@ -6,7 +6,8 @@ export type SQLiteDriverContractHarness = {
   cleanup: () => void
 }
 
-export type SQLiteDriverContractHarnessFactory = () => SQLiteDriverContractHarness
+export type SQLiteDriverContractHarnessFactory =
+  () => SQLiteDriverContractHarness
 
 async function withHarness<T>(
   createHarness: SQLiteDriverContractHarnessFactory,
@@ -136,9 +137,10 @@ export function runSQLiteDriverContractSuite(
 
           await expect(
             driver.transaction(async () => {
-              await driver.run(`INSERT INTO nested_events (value) VALUES (?)`, [
-                2,
-              ])
+              await driver.run(
+                `INSERT INTO nested_events (value) VALUES (?)`,
+                [2],
+              )
               throw new Error(`inner failure`)
             }),
           ).rejects.toThrow(`inner failure`)
