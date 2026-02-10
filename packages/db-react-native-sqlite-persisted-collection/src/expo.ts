@@ -18,9 +18,7 @@ export type ExpoSQLitePersistenceOptions = MobileSQLitePersistenceOptions
 export function createExpoSQLitePersistenceAdapter<
   T extends object,
   TKey extends string | number = string | number,
->(
-  options: ExpoSQLitePersistenceAdapterOptions,
-): PersistenceAdapter<T, TKey> {
+>(options: ExpoSQLitePersistenceAdapterOptions): PersistenceAdapter<T, TKey> {
   return createMobileSQLitePersistenceAdapter<T, TKey>(options)
 }
 

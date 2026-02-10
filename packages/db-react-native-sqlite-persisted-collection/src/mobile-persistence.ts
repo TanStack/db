@@ -21,9 +21,10 @@ export type MobileSQLitePersistenceAdapterOptions = Omit<
   driver: MobileSQLiteDriverInput
 }
 
-export type MobileSQLitePersistenceOptions = MobileSQLitePersistenceAdapterOptions & {
-  coordinator?: PersistedCollectionCoordinator
-}
+export type MobileSQLitePersistenceOptions =
+  MobileSQLitePersistenceAdapterOptions & {
+    coordinator?: PersistedCollectionCoordinator
+  }
 
 function isSQLiteDriver(
   candidate: MobileSQLiteDriverInput,
@@ -40,7 +41,9 @@ function isSQLiteDriver(
   )
 }
 
-function resolveSQLiteDriver(driverInput: MobileSQLiteDriverInput): SQLiteDriver {
+function resolveSQLiteDriver(
+  driverInput: MobileSQLiteDriverInput,
+): SQLiteDriver {
   if (isSQLiteDriver(driverInput)) {
     return driverInput
   }
@@ -51,9 +54,7 @@ function resolveSQLiteDriver(driverInput: MobileSQLiteDriverInput): SQLiteDriver
 export function createMobileSQLitePersistenceAdapter<
   T extends object,
   TKey extends string | number = string | number,
->(
-  options: MobileSQLitePersistenceAdapterOptions,
-): PersistenceAdapter<T, TKey> {
+>(options: MobileSQLitePersistenceAdapterOptions): PersistenceAdapter<T, TKey> {
   const { driver, ...adapterOptions } = options
   const resolvedDriver = resolveSQLiteDriver(driver)
 
