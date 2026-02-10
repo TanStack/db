@@ -646,8 +646,8 @@ function compileSqlExpression(
       }
 
       const valueKind = resolveComparisonValueKind(
-        expression.args[0],
-        expression.args[1],
+        expression.args[0]!,
+        expression.args[1]!,
         compiledArgs[0],
         compiledArgs[1],
       )
