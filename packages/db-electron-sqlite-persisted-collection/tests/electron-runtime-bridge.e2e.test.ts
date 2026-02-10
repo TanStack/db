@@ -69,7 +69,7 @@ async function runElectronScenario(
   const electronBinaryPath = resolveElectronBinaryPath()
   const xvfbRunPath = `/usr/bin/xvfb-run`
   const hasXvfbRun = existsSync(xvfbRunPath)
-  const electronArgs = [`--disable-gpu`, `--headless=new`, electronRunnerPath]
+  const electronArgs = [`--disable-gpu`, electronRunnerPath]
   const command = hasXvfbRun ? xvfbRunPath : electronBinaryPath
   const args = hasXvfbRun
     ? [

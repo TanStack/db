@@ -196,7 +196,6 @@ function serializeError(error) {
 }
 
 async function run() {
-  app.commandLine.appendSwitch(`headless`)
   app.commandLine.appendSwitch(`disable-gpu`)
   app.commandLine.appendSwitch(`no-sandbox`)
 
