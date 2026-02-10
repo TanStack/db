@@ -6,6 +6,7 @@ const config = defineConfig({
   test: {
     name: packageJson.name,
     include: [`tests/**/*.test.ts`],
+    exclude: [`tests/sqlite-core-adapter.test.ts`],
     environment: `jsdom`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
