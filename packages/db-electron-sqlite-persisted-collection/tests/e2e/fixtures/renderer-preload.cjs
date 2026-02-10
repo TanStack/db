@@ -1,8 +1,18 @@
+const { join } = require(`node:path`)
 const { contextBridge, ipcRenderer } = require(`electron`)
+const rendererModulePath = join(
+  __dirname,
+  `..`,
+  `..`,
+  `..`,
+  `dist`,
+  `cjs`,
+  `renderer.cjs`,
+)
 const {
   createElectronPersistenceInvoke,
   createElectronRendererPersistenceAdapter,
-} = require(`../../../dist/cjs/renderer.cjs`)
+} = require(rendererModulePath)
 
 async function runScenario(input) {
   const adapter = createElectronRendererPersistenceAdapter({
