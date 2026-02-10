@@ -763,6 +763,67 @@ describe(`SQLiteCorePersistenceAdapter`, () => {
     expect(appliedRows.map((row) => row.seq)).toEqual([3, 4])
   })
 
+  it(`prunes applied_tx rows by age threshold when configured`, async () => {
+    const { adapter, driver } = registerHarness({
+      appliedTxPruneMaxAgeSeconds: 1,
+    })
+    const collectionId = `pruning-by-age`
+
+    await adapter.applyCommittedTx(collectionId, {
+      txId: `age-1`,
+      term: 1,
+      seq: 1,
+      rowVersion: 1,
+      mutations: [
+        {
+          type: `insert`,
+          key: `old`,
+          value: {
+            id: `old`,
+            title: `Old`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 1,
+          },
+        },
+      ],
+    })
+
+    await driver.run(
+      `UPDATE applied_tx
+       SET applied_at = 0
+       WHERE collection_id = ? AND seq = 1`,
+      [collectionId],
+    )
+
+    await adapter.applyCommittedTx(collectionId, {
+      txId: `age-2`,
+      term: 1,
+      seq: 2,
+      rowVersion: 2,
+      mutations: [
+        {
+          type: `insert`,
+          key: `new`,
+          value: {
+            id: `new`,
+            title: `New`,
+            createdAt: `2026-01-01T00:00:00.000Z`,
+            score: 2,
+          },
+        },
+      ],
+    })
+
+    const appliedRows = await driver.query<{ seq: number }>(
+      `SELECT seq
+       FROM applied_tx
+       WHERE collection_id = ?
+       ORDER BY seq ASC`,
+      [collectionId],
+    )
+    expect(appliedRows.map((row) => row.seq)).toEqual([2])
+  })
+
   it(`supports large IN lists via batching`, async () => {
     const { adapter } = registerHarness()
     const collectionId = `large-in`

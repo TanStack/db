@@ -45,6 +45,7 @@ export type SQLiteCoreAdapterOptions = {
   schemaVersion?: number
   schemaMismatchPolicy?: SQLiteCoreAdapterSchemaMismatchPolicy
   appliedTxPruneMaxRows?: number
+  appliedTxPruneMaxAgeSeconds?: number
   pullSinceReloadThreshold?: number
 }
 
@@ -882,6 +883,7 @@ export class SQLiteCorePersistenceAdapter<
   private readonly schemaVersion: number
   private readonly schemaMismatchPolicy: SQLiteCoreAdapterSchemaMismatchPolicy
   private readonly appliedTxPruneMaxRows: number | undefined
+  private readonly appliedTxPruneMaxAgeSeconds: number | undefined
   private readonly pullSinceReloadThreshold: number
 
   private initialized = false
@@ -908,6 +910,16 @@ export class SQLiteCorePersistenceAdapter<
       )
     }
 
+    if (
+      options.appliedTxPruneMaxAgeSeconds !== undefined &&
+      (!Number.isInteger(options.appliedTxPruneMaxAgeSeconds) ||
+        options.appliedTxPruneMaxAgeSeconds < 0)
+    ) {
+      throw new InvalidPersistedCollectionConfigError(
+        `SQLite adapter appliedTxPruneMaxAgeSeconds must be a non-negative integer when provided`,
+      )
+    }
+
     const pullSinceReloadThreshold =
       options.pullSinceReloadThreshold ?? DEFAULT_PULL_SINCE_RELOAD_THRESHOLD
     if (
@@ -924,6 +936,7 @@ export class SQLiteCorePersistenceAdapter<
     this.schemaMismatchPolicy =
       options.schemaMismatchPolicy ?? `sync-present-reset`
     this.appliedTxPruneMaxRows = options.appliedTxPruneMaxRows
+    this.appliedTxPruneMaxAgeSeconds = options.appliedTxPruneMaxAgeSeconds
     this.pullSinceReloadThreshold = pullSinceReloadThreshold
   }
 
@@ -1384,6 +1397,18 @@ export class SQLiteCorePersistenceAdapter<
   }
 
   private async pruneAppliedTxRows(collectionId: string): Promise<void> {
+    if (
+      this.appliedTxPruneMaxAgeSeconds !== undefined &&
+      this.appliedTxPruneMaxAgeSeconds > 0
+    ) {
+      await this.driver.run(
+        `DELETE FROM applied_tx
+         WHERE collection_id = ?
+           AND applied_at < (CAST(strftime('%s', 'now') AS INTEGER) - ?)`,
+        [collectionId, this.appliedTxPruneMaxAgeSeconds],
+      )
+    }
+
     if (
       this.appliedTxPruneMaxRows === undefined ||
       this.appliedTxPruneMaxRows <= 0
