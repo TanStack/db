@@ -1042,7 +1042,6 @@ export class SQLiteCorePersistenceAdapter<
           : options.cursor.whereFrom,
         orderBy: options.orderBy,
         limit: options.limit,
-        offset: options.offset,
       }
 
       const [whereCurrentRows, whereFromRows] = await Promise.all([
@@ -1365,7 +1364,7 @@ export class SQLiteCorePersistenceAdapter<
     }
 
     if (options.orderBy && orderByCompiled.supported) {
-      sql = `${sql} ORDER BY ${orderByCompiled.sql}`
+      sql = `${sql} ORDER BY ${orderByCompiled.sql}, key ASC`
       queryParams.push(...orderByCompiled.params)
     }
 
@@ -1444,6 +1443,14 @@ export class SQLiteCorePersistenceAdapter<
         }
       }
 
+      const leftKey = encodePersistedStorageKey(left.key)
+      const rightKey = encodePersistedStorageKey(right.key)
+      if (leftKey < rightKey) {
+        return -1
+      }
+      if (leftKey > rightKey) {
+        return 1
+      }
       return 0
     })
 
