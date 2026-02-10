@@ -335,16 +335,27 @@ function resolveRowValueByPath(
   row: Record<string, unknown>,
   path: Array<string>,
 ): unknown {
-  let current: unknown = row
-  for (const segment of path) {
-    if (typeof current !== `object` || current === null) {
-      return undefined
+  const resolve = (candidatePath: Array<string>): unknown => {
+    let current: unknown = row
+    for (const segment of candidatePath) {
+      if (typeof current !== `object` || current === null) {
+        return undefined
+      }
+
+      current = (current as Record<string, unknown>)[segment]
     }
 
-    current = (current as Record<string, unknown>)[segment]
+    return current
   }
 
-  return current
+  const directValue = resolve(path)
+  if (directValue !== undefined || path.length <= 1) {
+    return directValue
+  }
+
+  // Some query builders may preserve alias-qualified refs (e.g. ['todos', 'id'])
+  // while stored row payloads are unqualified; fallback to alias-stripped lookup.
+  return resolve(path.slice(1))
 }
 
 function evaluateLikePattern(
