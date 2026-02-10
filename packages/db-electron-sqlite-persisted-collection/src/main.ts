@@ -16,9 +16,9 @@ import type {
 import type {
   ElectronPersistedKey,
   ElectronPersistedRow,
-  ElectronPersistenceRequest,
+  ElectronPersistenceRequestEnvelope,
   ElectronPersistenceRequestHandler,
-  ElectronPersistenceResponse,
+  ElectronPersistenceResponseEnvelope,
   ElectronSerializedError,
 } from './protocol'
 
@@ -53,9 +53,9 @@ function serializeError(error: unknown): ElectronSerializedError {
 }
 
 function createErrorResponse(
-  request: ElectronPersistenceRequest,
+  request: ElectronPersistenceRequestEnvelope,
   error: unknown,
-): ElectronPersistenceResponse {
+): ElectronPersistenceResponseEnvelope {
   return {
     v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
     requestId: request.requestId,
@@ -65,7 +65,7 @@ function createErrorResponse(
   }
 }
 
-function assertValidRequest(request: ElectronPersistenceRequest): void {
+function assertValidRequest(request: ElectronPersistenceRequestEnvelope): void {
   if (request.v !== ELECTRON_PERSISTENCE_PROTOCOL_VERSION) {
     throw new ElectronPersistenceProtocolError(
       `Unsupported electron persistence protocol version "${request.v}"`,
@@ -86,9 +86,9 @@ function assertValidRequest(request: ElectronPersistenceRequest): void {
 }
 
 async function executeRequestAgainstAdapter(
-  request: ElectronPersistenceRequest,
+  request: ElectronPersistenceRequestEnvelope,
   adapter: ElectronMainPersistenceAdapter,
-): Promise<ElectronPersistenceResponse> {
+): Promise<ElectronPersistenceResponseEnvelope> {
   switch (request.method) {
     case `loadSubset`: {
       const result = await adapter.loadSubset(
@@ -192,8 +192,8 @@ export function createElectronPersistenceMainHost(options: {
 }): ElectronPersistenceMainHost {
   return {
     handleRequest: async (
-      request: ElectronPersistenceRequest,
-    ): Promise<ElectronPersistenceResponse> => {
+      request: ElectronPersistenceRequestEnvelope,
+    ): Promise<ElectronPersistenceResponseEnvelope> => {
       try {
         assertValidRequest(request)
 
@@ -275,8 +275,8 @@ export type ElectronIpcMainLike = {
     channel: string,
     listener: (
       event: unknown,
-      request: ElectronPersistenceRequest,
-    ) => Promise<ElectronPersistenceResponse>,
+      request: ElectronPersistenceRequestEnvelope,
+    ) => Promise<ElectronPersistenceResponseEnvelope>,
   ) => void
   removeHandler?: (channel: string) => void
 }

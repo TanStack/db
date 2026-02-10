@@ -7,7 +7,11 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { IR } from '@tanstack/db'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
-import type { PersistenceAdapter, SQLiteDriver } from '../src'
+import type {
+  PersistenceAdapter,
+  SQLiteDriver,
+  SQLitePullSinceResult,
+} from '../src'
 
 type Todo = {
   id: string
@@ -180,7 +184,13 @@ type AdapterHarness = {
 }
 
 export type SQLiteCoreAdapterContractHarness = {
-  adapter: PersistenceAdapter<Todo, string>
+  adapter: PersistenceAdapter<Todo, string> & {
+    markIndexRemoved: (collectionId: string, signature: string) => Promise<void>
+    pullSince: (
+      collectionId: string,
+      fromRowVersion: number,
+    ) => Promise<SQLitePullSinceResult<string>>
+  }
   driver: SQLiteDriver
   cleanup: () => void
 }

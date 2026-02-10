@@ -21,8 +21,8 @@ import type {
   ElectronPersistedRow,
   ElectronPersistenceInvoke,
   ElectronPersistenceMethod,
-  ElectronPersistenceRequest,
-  ElectronPersistenceResponse,
+  ElectronPersistenceRequestEnvelope,
+  ElectronPersistenceResponseEnvelope,
 } from './protocol'
 import type { LoadSubsetOptions } from '@tanstack/db'
 
@@ -63,8 +63,8 @@ function withTimeout<T>(
 }
 
 function assertValidResponse(
-  response: ElectronPersistenceResponse,
-  request: ElectronPersistenceRequest,
+  response: ElectronPersistenceResponseEnvelope,
+  request: ElectronPersistenceRequestEnvelope,
 ): void {
   if (response.v !== ELECTRON_PERSISTENCE_PROTOCOL_VERSION) {
     throw new ElectronPersistenceProtocolError(
@@ -96,9 +96,9 @@ type RendererAdapterRequestExecutor = <
 >(
   method: TMethod,
   collectionId: string,
-  payload: ElectronPersistenceRequest<TMethod>[`payload`],
+  payload: ElectronPersistenceRequestEnvelope<TMethod>[`payload`],
 ) => Promise<
-  Extract<ElectronPersistenceResponse<TMethod>, { ok: true }>[`result`]
+  Extract<ElectronPersistenceResponseEnvelope<TMethod>, { ok: true }>[`result`]
 >
 
 function createRendererRequestExecutor(
@@ -110,9 +110,9 @@ function createRendererRequestExecutor(
   return async <TMethod extends ElectronPersistenceMethod>(
     method: TMethod,
     collectionId: string,
-    payload: ElectronPersistenceRequest<TMethod>[`payload`],
+    payload: ElectronPersistenceRequestEnvelope<TMethod>[`payload`],
   ) => {
-    const request: ElectronPersistenceRequest<TMethod> = {
+    const request: ElectronPersistenceRequestEnvelope<TMethod> = {
       v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: createRequestId(),
       collectionId,
@@ -122,7 +122,7 @@ function createRendererRequestExecutor(
 
     const response = await withTimeout(
       options.invoke(channel, request) as Promise<
-        ElectronPersistenceResponse<TMethod>
+        ElectronPersistenceResponseEnvelope<TMethod>
       >,
       timeoutMs,
       `Electron persistence request timed out (method=${method}, collection=${collectionId}, timeoutMs=${timeoutMs})`,
@@ -236,8 +236,8 @@ export function createElectronRendererPersistence<
 export type ElectronIpcRendererLike = {
   invoke: (
     channel: string,
-    request: ElectronPersistenceRequest,
-  ) => Promise<ElectronPersistenceResponse>
+    request: ElectronPersistenceRequestEnvelope,
+  ) => Promise<ElectronPersistenceResponseEnvelope>
 }
 
 export function createElectronPersistenceInvoke(

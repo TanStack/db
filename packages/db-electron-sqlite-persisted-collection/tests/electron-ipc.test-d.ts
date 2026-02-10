@@ -41,9 +41,9 @@ test(`renderer adapter requires ipc invoke transport`, () => {
 
   expectTypeOf(adapter).toHaveProperty(`loadSubset`)
 
-  // @ts-expect-error renderer-side persistence must use invoke transport, not a direct driver
   createElectronRendererPersistenceAdapter({
     invoke,
+    // @ts-expect-error renderer-side persistence must use invoke transport, not a direct driver
     driver: {},
   })
 })
