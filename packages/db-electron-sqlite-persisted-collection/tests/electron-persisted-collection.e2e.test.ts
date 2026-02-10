@@ -3,10 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import {
-  
-  persistedCollectionOptions
-} from '@tanstack/db-sqlite-persisted-collection-core'
+import { persistedCollectionOptions } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
   createBetterSqlite3Driver,
   createNodeSQLitePersistenceAdapter,
@@ -21,7 +18,7 @@ import {
   createElectronRuntimeBridgeInvoke,
   isElectronFullE2EEnabled,
 } from './e2e/electron-process-client'
-import type {PersistedTx} from '@tanstack/db-sqlite-persisted-collection-core';
+import type { PersistedTx } from '@tanstack/db-sqlite-persisted-collection-core'
 import type { Collection } from '@tanstack/db'
 import type { ElectronPersistenceInvoke } from '../src'
 import type {
@@ -62,7 +59,10 @@ function createInvokeHarness(dbPath: string): InvokeHarness {
   }
 
   const driver = createBetterSqlite3Driver({ filename: dbPath })
-  const adapter = createNodeSQLitePersistenceAdapter<Record<string, unknown>, string | number>({
+  const adapter = createNodeSQLitePersistenceAdapter<
+    Record<string, unknown>,
+    string | number
+  >({
     driver,
   })
   const host = createElectronPersistenceMainHost({
@@ -190,7 +190,9 @@ async function deleteRowAcrossCollections<T extends PersistableRow>(
 }
 
 beforeAll(async () => {
-  const tempDirectory = mkdtempSync(join(tmpdir(), `db-electron-persisted-e2e-`))
+  const tempDirectory = mkdtempSync(
+    join(tmpdir(), `db-electron-persisted-e2e-`),
+  )
   const dbPath = join(tempDirectory, `state.sqlite`)
   const suiteId = Date.now().toString(36)
   const invokeHarness = createInvokeHarness(dbPath)
