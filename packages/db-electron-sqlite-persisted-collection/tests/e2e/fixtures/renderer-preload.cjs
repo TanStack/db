@@ -1,13 +1,16 @@
 const { contextBridge, ipcRenderer } = require(`electron`)
 const rendererModulePath = `${__dirname}/../../../dist/cjs/renderer.cjs`
+const protocolModulePath = `${__dirname}/../../../dist/cjs/protocol.cjs`
 const {
   createElectronPersistenceInvoke,
   createElectronRendererPersistenceAdapter,
 } = require(rendererModulePath)
+const { DEFAULT_ELECTRON_PERSISTENCE_CHANNEL } = require(protocolModulePath)
 
 async function runScenario(input) {
+  const invokeBridge = createElectronPersistenceInvoke(ipcRenderer)
   const adapter = createElectronRendererPersistenceAdapter({
-    invoke: createElectronPersistenceInvoke(ipcRenderer),
+    invoke: invokeBridge,
     channel: input.channel,
     timeoutMs: input.timeoutMs,
   })
@@ -84,6 +87,17 @@ async function runScenario(input) {
             message: `Unknown error type`,
           },
         }
+      }
+    }
+
+    case `invokeRequest`: {
+      const response = await invokeBridge(
+        input.channel ?? DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
+        scenario.request,
+      )
+      return {
+        type: `invokeRequest`,
+        response,
       }
     }
 

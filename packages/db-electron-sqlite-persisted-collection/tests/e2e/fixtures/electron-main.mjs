@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { BrowserWindow, app, ipcMain } from 'electron'
 import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
+  createElectronNodeSQLiteMainRegistry,
   createElectronPersistenceMainHost,
   registerElectronPersistenceMainIpcHandler,
 } from '../../../dist/esm/main.js'
@@ -195,6 +196,40 @@ function serializeError(error) {
   }
 }
 
+function createMainHost(input, driver) {
+  if (input.hostKind === `node-registry`) {
+    const registry = createElectronNodeSQLiteMainRegistry([
+      {
+        collectionId: input.collectionId,
+        adapterOptions: {
+          driver,
+          ...(input.adapterOptions ?? {}),
+        },
+      },
+    ])
+
+    return {
+      host: registry.createHost(),
+      cleanup: () => {
+        registry.clear()
+      },
+    }
+  }
+
+  const adapter = createSQLiteCorePersistenceAdapter({
+    driver,
+    ...(input.adapterOptions ?? {}),
+  })
+
+  return {
+    host: createElectronPersistenceMainHost({
+      getAdapter: (collectionId) =>
+        collectionId === input.collectionId ? adapter : undefined,
+    }),
+    cleanup: () => {},
+  }
+}
+
 async function run() {
   app.commandLine.appendSwitch(`disable-gpu`)
   app.commandLine.appendSwitch(`disable-dev-shm-usage`)
@@ -202,16 +237,10 @@ async function run() {
 
   const input = parseInputFromEnv()
   const driver = new SqliteCliDriver(input.dbPath)
-  const adapter = createSQLiteCorePersistenceAdapter({
-    driver,
-  })
-  const host = createElectronPersistenceMainHost({
-    getAdapter: (collectionId) =>
-      collectionId === input.collectionId ? adapter : undefined,
-  })
+  const hostRuntime = createMainHost(input, driver)
   const disposeIpc = registerElectronPersistenceMainIpcHandler({
     ipcMain,
-    host,
+    host: hostRuntime.host,
     channel: input.channel,
   })
 
@@ -247,6 +276,8 @@ async function run() {
 
     const scenarioExpression = JSON.stringify({
       collectionId: input.collectionId,
+      hostKind: input.hostKind,
+      adapterOptions: input.adapterOptions,
       channel: input.channel,
       timeoutMs: input.timeoutMs,
       scenario: input.scenario,
@@ -284,6 +315,7 @@ async function run() {
       window.destroy()
     }
     disposeIpc()
+    hostRuntime.cleanup()
     await app.quit()
   }
 }

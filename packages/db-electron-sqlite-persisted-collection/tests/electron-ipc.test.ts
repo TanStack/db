@@ -16,11 +16,16 @@ import {
   createElectronRendererPersistenceAdapter,
   registerElectronPersistenceMainIpcHandler,
 } from '../src'
+import {
+  createElectronRuntimeBridgeInvoke,
+  isElectronFullE2EEnabled,
+} from './e2e/electron-process-client'
 import type {
   ElectronPersistenceInvoke,
   ElectronPersistenceRequest,
   ElectronPersistenceResponse,
 } from '../src'
+import type { ElectronRuntimeBridgeHostKind } from './e2e/fixtures/runtime-bridge-types'
 
 type Todo = {
   id: string
@@ -54,6 +59,35 @@ function createMainRuntime(dbPath: string, collectionId: string): MainRuntime {
   }
 }
 
+type InvokeHarness = {
+  invoke: ElectronPersistenceInvoke
+  close: () => void
+}
+
+function createInvokeHarness(
+  dbPath: string,
+  collectionId: string,
+  options?: { hostKind?: ElectronRuntimeBridgeHostKind },
+): InvokeHarness {
+  if (isElectronFullE2EEnabled()) {
+    return {
+      invoke: createElectronRuntimeBridgeInvoke({
+        dbPath,
+        collectionId,
+        timeoutMs: 4_000,
+        hostKind: options?.hostKind,
+      }),
+      close: () => {},
+    }
+  }
+
+  const runtime = createMainRuntime(dbPath, collectionId)
+  return {
+    invoke: async (_channel, request) => runtime.host.handleRequest(request),
+    close: () => runtime.close(),
+  }
+}
+
 const activeCleanupFns: Array<() => void> = []
 
 afterEach(() => {
@@ -75,12 +109,12 @@ function createTempDbPath(): string {
 describe(`electron sqlite persistence bridge`, () => {
   it(`round-trips reads and writes through main-process host`, async () => {
     const dbPath = createTempDbPath()
-    const runtime = createMainRuntime(dbPath, `todos`)
-    activeCleanupFns.push(() => runtime.close())
+    const invokeHarness = createInvokeHarness(dbPath, `todos`)
+    activeCleanupFns.push(() => invokeHarness.close())
 
     const invoke: ElectronPersistenceInvoke = async (channel, request) => {
       expect(channel).toBe(DEFAULT_ELECTRON_PERSISTENCE_CHANNEL)
-      return runtime.host.handleRequest(request)
+      return invokeHarness.invoke(channel, request)
     }
 
     const rendererAdapter = createElectronRendererPersistenceAdapter<
@@ -123,6 +157,50 @@ describe(`electron sqlite persistence bridge`, () => {
 
   it(`persists data across main-process restarts`, async () => {
     const dbPath = createTempDbPath()
+
+    if (isElectronFullE2EEnabled()) {
+      const invoke = createElectronRuntimeBridgeInvoke({
+        dbPath,
+        collectionId: `todos`,
+        timeoutMs: 4_000,
+      })
+      const rendererAdapterA = createElectronRendererPersistenceAdapter<
+        Todo,
+        string
+      >({
+        invoke,
+      })
+
+      await rendererAdapterA.applyCommittedTx(`todos`, {
+        txId: `tx-restart-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `persisted`,
+            value: {
+              id: `persisted`,
+              title: `Survives restart`,
+              score: 42,
+            },
+          },
+        ],
+      })
+
+      const rendererAdapterB = createElectronRendererPersistenceAdapter<
+        Todo,
+        string
+      >({
+        invoke,
+      })
+
+      const rows = await rendererAdapterB.loadSubset(`todos`, {})
+      expect(rows.map((row) => row.key)).toEqual([`persisted`])
+      expect(rows[0]?.value.title).toBe(`Survives restart`)
+      return
+    }
 
     const runtimeA = createMainRuntime(dbPath, `todos`)
     const invokeA: ElectronPersistenceInvoke = (_channel, request) =>
@@ -188,11 +266,11 @@ describe(`electron sqlite persistence bridge`, () => {
 
   it(`returns structured remote errors for unknown collections`, async () => {
     const dbPath = createTempDbPath()
-    const runtime = createMainRuntime(dbPath, `known`)
-    activeCleanupFns.push(() => runtime.close())
+    const invokeHarness = createInvokeHarness(dbPath, `known`)
+    activeCleanupFns.push(() => invokeHarness.close())
 
-    const invoke: ElectronPersistenceInvoke = (_channel, request) =>
-      runtime.host.handleRequest(request)
+    const invoke: ElectronPersistenceInvoke = async (channel, request) =>
+      invokeHarness.invoke(channel, request)
     const rendererAdapter = createElectronRendererPersistenceAdapter<
       Todo,
       string
@@ -329,6 +407,45 @@ describe(`electron sqlite persistence bridge`, () => {
   })
 
   it(`reuses node adapter logic through helper registry`, async () => {
+    if (isElectronFullE2EEnabled()) {
+      const dbPath = createTempDbPath()
+      const invoke = createElectronRuntimeBridgeInvoke({
+        dbPath,
+        collectionId: `todos`,
+        timeoutMs: 4_000,
+        hostKind: `node-registry`,
+      })
+      const rendererAdapter = createElectronRendererPersistenceAdapter<
+        Todo,
+        string
+      >({
+        invoke,
+      })
+
+      await rendererAdapter.applyCommittedTx(`todos`, {
+        txId: `tx-helper-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `helper`,
+            value: {
+              id: `helper`,
+              title: `Node helper`,
+              score: 9,
+            },
+          },
+        ],
+      })
+
+      const rows = await rendererAdapter.loadSubset(`todos`, {})
+      expect(rows).toHaveLength(1)
+      expect(rows[0]?.key).toBe(`helper`)
+      return
+    }
+
     const dbPath = createTempDbPath()
     const driver = createBetterSqlite3Driver({ filename: dbPath })
     activeCleanupFns.push(() => {
