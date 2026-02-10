@@ -22,7 +22,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
-    "test:e2e": "pnpm --filter @tanstack/db-sqlite-persisted-collection-core build && pnpm --filter @tanstack/db-node-sqlite-persisted-collection build && pnpm --filter @tanstack/db-electron-sqlite-persisted-collection build && vitest --run tests/electron-runtime-bridge.e2e.test.ts"
+    "test:e2e": "pnpm --filter @tanstack/db-sqlite-persisted-collection-core build && pnpm --filter @tanstack/db-node-sqlite-persisted-collection build && pnpm --filter @tanstack/db-electron-sqlite-persisted-collection build && vitest --config vitest.e2e.config.ts --run"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
