@@ -175,6 +175,11 @@ function getPreloadPath() {
   return join(dirname(currentFile), `renderer-preload.mjs`)
 }
 
+function getRendererPagePath() {
+  const currentFile = fileURLToPath(import.meta.url)
+  return join(dirname(currentFile), `renderer-page.html`)
+}
+
 function serializeError(error) {
   if (error instanceof Error) {
     return {
@@ -222,9 +227,7 @@ async function run() {
       },
     })
 
-    await window.loadURL(
-      `data:text/html,<html><body>runtime-bridge-e2e</body></html>`,
-    )
+    await window.loadFile(getRendererPagePath())
 
     const scenarioExpression = JSON.stringify({
       collectionId: input.collectionId,
