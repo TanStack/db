@@ -32,6 +32,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
     invoke = createElectronRuntimeBridgeInvoke({
       dbPath,
       collectionId: `todos`,
+      allowAnyCollectionId: true,
       timeoutMs: 4_000,
       adapterOptions: options,
     })

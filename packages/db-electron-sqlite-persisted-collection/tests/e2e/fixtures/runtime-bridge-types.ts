@@ -44,6 +44,7 @@ export type ElectronRuntimeBridgeScenario =
 export type ElectronRuntimeBridgeInput = {
   dbPath: string
   collectionId: string
+  allowAnyCollectionId?: boolean
   hostKind?: ElectronRuntimeBridgeHostKind
   adapterOptions?: ElectronRuntimeBridgeAdapterOptions
   channel?: string
