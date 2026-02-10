@@ -855,7 +855,7 @@ class PersistedCollectionRuntime<
       )
     }
 
-    if (message.type === `delete`) {
+    if (`key` in message) {
       const key = message.key
       const previousValue = this.collection.get(key) ?? ({} as T)
 
@@ -1066,13 +1066,17 @@ class PersistedCollectionRuntime<
     const streamPosition = this.nextLocalStreamPosition()
 
     if (transaction.truncate || transaction.operations.length === 0) {
-      this.publishTxCommittedEvent({
-        term: streamPosition.term,
-        seq: streamPosition.seq,
-        txId: crypto.randomUUID(),
-        latestRowVersion: streamPosition.rowVersion,
-        requiresFullReload: true,
-      })
+      this.publishTxCommittedEvent(
+        this.createTxCommittedPayload({
+          term: streamPosition.term,
+          seq: streamPosition.seq,
+          txId: crypto.randomUUID(),
+          latestRowVersion: streamPosition.rowVersion,
+          changedKeys: [],
+          deletedKeys: [],
+          requiresFullReload: true,
+        }),
+      )
       return
     }
 
@@ -1082,24 +1086,20 @@ class PersistedCollectionRuntime<
     )
 
     await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
-    this.publishTxCommittedEvent({
-      term: tx.term,
-      seq: tx.seq,
-      txId: tx.txId,
-      latestRowVersion: tx.rowVersion,
-      requiresFullReload:
-        transaction.operations.length > TARGETED_INVALIDATION_KEY_LIMIT,
-      ...(transaction.operations.length > TARGETED_INVALIDATION_KEY_LIMIT
-        ? {}
-        : {
-            changedKeys: transaction.operations
-              .filter((operation) => operation.type === `update`)
-              .map((operation) => operation.key),
-            deletedKeys: transaction.operations
-              .filter((operation) => operation.type === `delete`)
-              .map((operation) => operation.key),
-          }),
-    })
+    this.publishTxCommittedEvent(
+      this.createTxCommittedPayload({
+        term: tx.term,
+        seq: tx.seq,
+        txId: tx.txId,
+        latestRowVersion: tx.rowVersion,
+        changedKeys: transaction.operations
+          .filter((operation) => operation.type === `update`)
+          .map((operation) => operation.key),
+        deletedKeys: transaction.operations
+          .filter((operation) => operation.type === `delete`)
+          .map((operation) => operation.key),
+      }),
+    )
   }
 
   private createPersistedTxFromOperations(
@@ -1243,24 +1243,57 @@ class PersistedCollectionRuntime<
     const tx = this.createPersistedTxFromMutations(mutations, streamPosition)
     await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
 
-    this.publishTxCommittedEvent({
+    this.publishTxCommittedEvent(
+      this.createTxCommittedPayload({
+        term: tx.term,
+        seq: tx.seq,
+        txId: tx.txId,
+        latestRowVersion: tx.rowVersion,
+        changedKeys: mutations
+          .filter((mutation) => mutation.type !== `delete`)
+          .map((mutation) => mutation.key as TKey),
+        deletedKeys: mutations
+          .filter((mutation) => mutation.type === `delete`)
+          .map((mutation) => mutation.key as TKey),
+      }),
+    )
+  }
+
+  private createTxCommittedPayload(args: {
+    term: number
+    seq: number
+    txId: string
+    latestRowVersion: number
+    changedKeys: Array<TKey>
+    deletedKeys: Array<TKey>
+    requiresFullReload?: boolean
+  }): TxCommitted {
+    const requiresFullReload =
+      args.requiresFullReload === true ||
+      args.changedKeys.length + args.deletedKeys.length >
+        TARGETED_INVALIDATION_KEY_LIMIT
+
+    if (requiresFullReload) {
+      return {
+        type: `tx:committed`,
+        term: args.term,
+        seq: args.seq,
+        txId: args.txId,
+        latestRowVersion: args.latestRowVersion,
+        requiresFullReload: true,
+      }
+    }
+
+    return {
       type: `tx:committed`,
-      term: tx.term,
-      seq: tx.seq,
-      txId: tx.txId,
-      latestRowVersion: tx.rowVersion,
-      requiresFullReload: mutations.length > TARGETED_INVALIDATION_KEY_LIMIT,
-      ...(mutations.length > TARGETED_INVALIDATION_KEY_LIMIT
-        ? {}
-        : {
-            changedKeys: mutations
-              .filter((mutation) => mutation.type !== `delete`)
-              .map((mutation) => mutation.key as TKey),
-            deletedKeys: mutations
-              .filter((mutation) => mutation.type === `delete`)
-              .map((mutation) => mutation.key as TKey),
-          }),
-    })
+      term: args.term,
+      seq: args.seq,
+      txId: args.txId,
+      latestRowVersion: args.latestRowVersion,
+      requiresFullReload: false,
+      changedKeys: args.changedKeys,
+      deletedKeys: args.deletedKeys,
+    }
   }
 
   private publishTxCommittedEvent(txCommitted: TxCommitted): void {
@@ -1385,26 +1418,26 @@ class PersistedCollectionRuntime<
       return
     }
 
-    if (isTxCommittedPayload(message.payload)) {
+    const { payload } = message
+
+    if (isTxCommittedPayload(payload)) {
       if (this.isHydrating) {
-        this.queuedTxCommitted.push(message.payload)
+        this.queuedTxCommitted.push(payload)
         return
       }
 
       void this.applyMutex
-        .run(() => this.processCommittedTxUnsafe(message.payload))
+        .run(() => this.processCommittedTxUnsafe(payload))
         .catch((error) => {
           console.warn(`Failed to process tx:committed message:`, error)
         })
       return
     }
 
-    if (isCollectionResetPayload(message.payload)) {
-      void this.applyMutex
-        .run(() => this.truncateAndReloadUnsafe())
-        .catch((error) => {
-          console.warn(`Failed to process collection reset message:`, error)
-        })
+    if (isCollectionResetPayload(payload)) {
+      void this.applyMutex.run(() => this.truncateAndReloadUnsafe()).catch((error) => {
+        console.warn(`Failed to process collection reset message:`, error)
+      })
     }
   }
 
