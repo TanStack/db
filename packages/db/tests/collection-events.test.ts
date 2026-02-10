@@ -163,6 +163,40 @@ describe(`Collection Events System`, () => {
       expect(signatures[0]).toBe(signatures[1])
     })
 
+    it(`should canonicalize signatures for option key order and function identity`, () => {
+      const signatures: Array<string> = []
+      collection.on(`index:added`, (event) => {
+        signatures.push(event.index.signature)
+      })
+
+      collection.createIndex((row: any) => row.id, {
+        options: {
+          compareFn: function firstComparator(a: any, b: any) {
+            return Number(a) - Number(b)
+          },
+          compareOptions: {
+            nulls: `last`,
+            direction: `asc`,
+          },
+        },
+      })
+
+      collection.createIndex((row: any) => row.id, {
+        options: {
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+          },
+          compareFn: function secondComparator(a: any, b: any) {
+            return Number(a) - Number(b)
+          },
+        },
+      })
+
+      expect(signatures).toHaveLength(2)
+      expect(signatures[0]).toBe(signatures[1])
+    })
+
     it(`should preserve deterministic event ordering during rapid create/remove`, () => {
       const orderedEvents: Array<string> = []
 

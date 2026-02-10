@@ -1,4 +1,8 @@
-import { IndexProxy, LazyIndexWrapper } from '../indexes/lazy-index'
+import {
+  IndexProxy,
+  IndexRemovedError,
+  LazyIndexWrapper,
+} from '../indexes/lazy-index'
 import {
   createSingleRowRefProxy,
   toExpression,
@@ -20,6 +24,14 @@ import type {
 } from './events'
 
 const INDEX_SIGNATURE_VERSION = 1 as const
+
+function compareStringsCodePoint(left: string, right: string): number {
+  if (left === right) {
+    return 0
+  }
+
+  return left < right ? -1 : 1
+}
 
 function isConstructorResolver<TKey extends string | number>(
   resolver: IndexResolver<TKey>,
@@ -58,15 +70,10 @@ function toSerializableIndexValue(
     case `bigint`:
       return { __type: `bigint`, value: value.toString() }
     case `function`:
-      return {
-        __type: `function`,
-        name: value.name || `anonymous`,
-      }
     case `symbol`:
-      return {
-        __type: `symbol`,
-        value: value.description ?? ``,
-      }
+      // Function and symbol identity are process-local and not stable across runtimes.
+      // Dropping them keeps signatures deterministic; we may skip index reuse, which is acceptable.
+      return undefined
     case `undefined`:
       return undefined
   }
@@ -86,7 +93,8 @@ function toSerializableIndexValue(
     const serializedValues = Array.from(value)
       .map((entry) => toSerializableIndexValue(entry) ?? null)
       .sort((a, b) =>
-        stableStringifyCollectionIndexValue(a).localeCompare(
+        compareStringsCodePoint(
+          stableStringifyCollectionIndexValue(a),
           stableStringifyCollectionIndexValue(b),
         ),
       )
@@ -103,7 +111,8 @@ function toSerializableIndexValue(
         value: toSerializableIndexValue(mapValue) ?? null,
       }))
       .sort((a, b) =>
-        stableStringifyCollectionIndexValue(a.key).localeCompare(
+        compareStringsCodePoint(
+          stableStringifyCollectionIndexValue(a.key),
           stableStringifyCollectionIndexValue(b.key),
         ),
       )
@@ -123,7 +132,7 @@ function toSerializableIndexValue(
 
   const serializedObject: Record<string, CollectionIndexSerializableValue> = {}
   const entries = Object.entries(value as Record<string, unknown>).sort(
-    ([leftKey], [rightKey]) => leftKey.localeCompare(rightKey),
+    ([leftKey], [rightKey]) => compareStringsCodePoint(leftKey, rightKey),
   )
 
   for (const [key, entryValue] of entries) {
@@ -152,7 +161,7 @@ function stableStringifyCollectionIndexValue(
   }
 
   const sortedKeys = Object.keys(value).sort((left, right) =>
-    left.localeCompare(right),
+    compareStringsCodePoint(left, right),
   )
   const serializedEntries = sortedKeys.map(
     (key) =>
@@ -174,7 +183,6 @@ function createCollectionIndexMetadata<TKey extends string | number>(
   const signatureInput = toSerializableIndexValue({
     signatureVersion: INDEX_SIGNATURE_VERSION,
     expression: serializedExpression,
-    resolver: resolverMetadata,
     options: serializedOptions ?? null,
   })
   const normalizedSignatureInput = signatureInput ?? null
@@ -191,6 +199,32 @@ function createCollectionIndexMetadata<TKey extends string | number>(
     resolver: resolverMetadata,
     ...(serializedOptions === undefined ? {} : { options: serializedOptions }),
   }
+}
+
+function cloneSerializableIndexValue(
+  value: CollectionIndexSerializableValue,
+): CollectionIndexSerializableValue {
+  if (value === null || typeof value !== `object`) {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry) => cloneSerializableIndexValue(entry))
+  }
+
+  const cloned: Record<string, CollectionIndexSerializableValue> = {}
+  for (const [key, entryValue] of Object.entries(value)) {
+    cloned[key] = cloneSerializableIndexValue(entryValue)
+  }
+  return cloned
+}
+
+function cloneExpression(expression: BasicExpression): BasicExpression {
+  return JSON.parse(JSON.stringify(expression)) as BasicExpression
+}
+
+function isIndexRemovedError(error: unknown): boolean {
+  return error instanceof IndexRemovedError
 }
 
 export class CollectionIndexesManager<
@@ -274,12 +308,18 @@ export class CollectionIndexesManager<
       } catch {
         // Fallback to async resolution
         this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+          if (isIndexRemovedError(error)) {
+            return
+          }
           console.warn(`Failed to resolve single index:`, error)
         })
       }
     } else if (this.isIndexesResolved) {
       // Async loader but indexes are already resolved - resolve this one
       this.resolveSingleIndex(indexId, lazyIndex).catch((error) => {
+        if (isIndexRemovedError(error)) {
+          return
+        }
         console.warn(`Failed to resolve single index:`, error)
       })
     }
@@ -310,6 +350,7 @@ export class CollectionIndexesManager<
       return false
     }
 
+    lazyIndex.markRemoved()
     this.lazyIndexes.delete(indexId)
     this.resolvedIndexes.delete(indexId)
 
@@ -330,7 +371,16 @@ export class CollectionIndexesManager<
 
     const resolutionPromises = Array.from(this.lazyIndexes.entries()).map(
       async ([indexId, lazyIndex]) => {
-        const resolvedIndex = await lazyIndex.resolve()
+        let resolvedIndex: BaseIndex<TKey>
+        try {
+          resolvedIndex = await lazyIndex.resolve()
+        } catch (error) {
+          if (isIndexRemovedError(error)) {
+            return { indexId, resolvedIndex: undefined }
+          }
+
+          throw error
+        }
 
         // Build index with current data
         resolvedIndex.build(this.state.entries())
@@ -369,6 +419,24 @@ export class CollectionIndexesManager<
   }
 
   /**
+   * Returns a sorted snapshot of index metadata.
+   * This allows persisted wrappers to bootstrap from indexes that were created
+   * before they attached lifecycle listeners.
+   */
+  public getIndexMetadataSnapshot(): Array<CollectionIndexMetadata> {
+    return Array.from(this.indexMetadata.values())
+      .sort((left, right) => left.indexId - right.indexId)
+      .map((metadata) => ({
+        ...metadata,
+        expression: cloneExpression(metadata.expression),
+        resolver: { ...metadata.resolver },
+        ...(metadata.options === undefined
+          ? {}
+          : { options: cloneSerializableIndexValue(metadata.options) }),
+      }))
+  }
+
+  /**
    * Updates all indexes when the collection changes
    */
   public updateIndexes(changes: Array<ChangeMessage<TOutput, TKey>>): void {
@@ -398,6 +466,9 @@ export class CollectionIndexesManager<
    * This can be called manually or automatically by garbage collection
    */
   public cleanup(): void {
+    for (const lazyIndex of this.lazyIndexes.values()) {
+      lazyIndex.markRemoved()
+    }
     this.lazyIndexes.clear()
     this.resolvedIndexes.clear()
     this.indexMetadata.clear()

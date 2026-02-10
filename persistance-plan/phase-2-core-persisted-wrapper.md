@@ -35,6 +35,7 @@ Implement `persistedCollectionOptions(...)` behavior for both runtime-inferred m
 - [ ] Throw `InvalidSyncConfigError` for invalid `sync` shapes.
 - [ ] Default coordinator to `SingleProcessCoordinator` when omitted.
 - [ ] Validate coordinator capabilities based on runtime mode.
+- [ ] Bootstrap persisted index mirror from `collection.getIndexMetadata()` before listening to lifecycle events.
 
 **Acceptance criteria**
 
@@ -47,6 +48,7 @@ Implement `persistedCollectionOptions(...)` behavior for both runtime-inferred m
 - [ ] Ensure tx events received during hydrate are queued.
 - [ ] Flush queued tx in strict order after hydrate completion.
 - [ ] Ensure apply mutex serializes write/apply paths.
+- [ ] Start index lifecycle listeners only after bootstrap snapshot is applied to avoid missing pre-sync indexes.
 
 **Acceptance criteria**
 
