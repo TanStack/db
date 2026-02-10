@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { serialize } from 'node:v8'
 import { DEFAULT_ELECTRON_PERSISTENCE_CHANNEL } from '../../src'
 import { E2E_RESULT_PREFIX } from './fixtures/runtime-bridge-types'
 import type { ElectronPersistenceInvoke } from '../../src'
@@ -21,6 +22,8 @@ const e2eDirectory = dirname(currentFilePath)
 const testsDirectory = dirname(e2eDirectory)
 const packageRoot = dirname(testsDirectory)
 const electronRunnerPath = join(e2eDirectory, `fixtures`, `electron-main.mjs`)
+const E2E_INPUT_ENV_VAR = `TANSTACK_DB_E2E_INPUT`
+const E2E_INPUT_BASE64_ENV_VAR = `TANSTACK_DB_E2E_INPUT_BASE64`
 
 export const ELECTRON_FULL_E2E_ENV_VAR = `TANSTACK_DB_ELECTRON_E2E_ALL`
 
@@ -72,6 +75,10 @@ function parseScenarioResult(
   return JSON.parse(rawResult) as ElectronRuntimeBridgeProcessResult
 }
 
+function encodeInputForEnv(input: ElectronRuntimeBridgeInput): string {
+  return Buffer.from(serialize(input)).toString(`base64`)
+}
+
 export async function runElectronRuntimeBridgeScenario(
   input: ElectronRuntimeBridgeInput,
 ): Promise<ElectronRuntimeBridgeScenarioResult> {
@@ -100,7 +107,10 @@ export async function runElectronRuntimeBridgeScenario(
         cwd: packageRoot,
         env: {
           ...process.env,
-          TANSTACK_DB_E2E_INPUT: JSON.stringify(input),
+          [E2E_INPUT_BASE64_ENV_VAR]: encodeInputForEnv(input),
+          [E2E_INPUT_ENV_VAR]: JSON.stringify(input, (_key, value) =>
+            typeof value === `bigint` ? value.toString() : value,
+          ),
           ELECTRON_DISABLE_SECURITY_WARNINGS: `true`,
         },
         stdio: [`ignore`, `pipe`, `pipe`],
@@ -220,20 +230,45 @@ export async function runElectronRuntimeBridgeScenario(
 export function createElectronRuntimeBridgeInvoke(
   options: CreateElectronRuntimeBridgeInvokeOptions,
 ): ElectronPersistenceInvoke {
+  let queue: Promise<void> = Promise.resolve()
+
   return async (channel, request) => {
-    const result = await runElectronRuntimeBridgeScenario({
-      dbPath: options.dbPath,
-      collectionId: options.collectionId,
-      allowAnyCollectionId: options.allowAnyCollectionId,
-      hostKind: options.hostKind,
-      adapterOptions: options.adapterOptions,
-      channel,
-      timeoutMs: options.timeoutMs ?? 4_000,
-      scenario: {
-        type: `invokeRequest`,
-        request,
-      },
-    })
+    const queuedInvoke = queue.then(
+      () =>
+        runElectronRuntimeBridgeScenario({
+          dbPath: options.dbPath,
+          collectionId: options.collectionId,
+          allowAnyCollectionId: options.allowAnyCollectionId,
+          hostKind: options.hostKind,
+          adapterOptions: options.adapterOptions,
+          channel,
+          timeoutMs: options.timeoutMs ?? 4_000,
+          scenario: {
+            type: `invokeRequest`,
+            request,
+          },
+        }),
+      () =>
+        runElectronRuntimeBridgeScenario({
+          dbPath: options.dbPath,
+          collectionId: options.collectionId,
+          allowAnyCollectionId: options.allowAnyCollectionId,
+          hostKind: options.hostKind,
+          adapterOptions: options.adapterOptions,
+          channel,
+          timeoutMs: options.timeoutMs ?? 4_000,
+          scenario: {
+            type: `invokeRequest`,
+            request,
+          },
+        }),
+    )
+    queue = queuedInvoke.then(
+      () => undefined,
+      () => undefined,
+    )
+
+    const result = await queuedInvoke
 
     if (result.type !== `invokeRequest`) {
       throw new Error(`Unexpected invokeRequest result: ${result.type}`)

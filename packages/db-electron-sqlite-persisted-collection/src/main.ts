@@ -22,7 +22,7 @@ import type {
   ElectronSerializedError,
 } from './protocol'
 
-const runtimeRequire = createRequire(`${process.cwd()}/package.json`)
+const runtimeRequire = createRequire(import.meta.url)
 
 type ElectronMainPersistenceAdapter = PersistenceAdapter<
   ElectronPersistedRow,
