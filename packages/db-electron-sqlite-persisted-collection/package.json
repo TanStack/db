@@ -21,7 +21,8 @@
     "build": "vite build",
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "test:e2e": "vitest --run tests/electron-runtime-bridge.e2e.test.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
@@ -73,6 +74,8 @@
     "typescript": ">=4.7"
   },
   "devDependencies": {
-    "@vitest/coverage-istanbul": "^3.2.4"
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "electron": "^40.2.1",
+    "tsx": "^4.21.0"
   }
 }
