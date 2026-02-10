@@ -68,7 +68,14 @@ export interface CollectionIndexResolverMetadata {
 }
 
 export interface CollectionIndexMetadata {
+  /**
+   * Version for the signature serialization contract.
+   */
   signatureVersion: 1
+  /**
+   * Stable signature derived from expression + serializable options.
+   * Non-serializable option fields are intentionally omitted.
+   */
   signature: string
   indexId: number
   name?: string
