@@ -284,7 +284,7 @@ function valuesEqual(left: unknown, right: unknown): boolean {
   const normalizedLeft = normalizeSortableValue(left)
   const normalizedRight = normalizeSortableValue(right)
 
-  if (Object.is(normalizedLeft, normalizedRight)) {
+  if (normalizedLeft === normalizedRight) {
     return true
   }
 
