@@ -141,6 +141,13 @@ function createRendererRequestExecutor(
   }
 }
 
+function createSerializableLoadSubsetOptions(
+  subsetOptions: LoadSubsetOptions,
+): LoadSubsetOptions {
+  const { subscription: _subscription, ...serializableOptions } = subsetOptions
+  return serializableOptions
+}
+
 export type ElectronRendererPersistenceAdapter<
   T extends object,
   TKey extends string | number = string | number,
@@ -166,7 +173,7 @@ export function createElectronRendererPersistenceAdapter<
       ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
     ) => {
       const result = await executeRequest(`loadSubset`, collectionId, {
-        options: subsetOptions,
+        options: createSerializableLoadSubsetOptions(subsetOptions),
         ctx,
       })
 
