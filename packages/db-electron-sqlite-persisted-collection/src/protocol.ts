@@ -6,8 +6,7 @@ import type {
 } from '@tanstack/db-sqlite-persisted-collection-core'
 
 export const ELECTRON_PERSISTENCE_PROTOCOL_VERSION = 1 as const
-export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL =
-  `tanstack-db:sqlite-persistence`
+export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL = `tanstack-db:sqlite-persistence`
 
 export type ElectronPersistedRow = Record<string, unknown>
 export type ElectronPersistedKey = string | number

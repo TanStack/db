@@ -7,12 +7,11 @@ import {
   createBetterSqlite3Driver,
   createNodeSQLitePersistence,
 } from '../src'
-import {
-  
-  
-  runRuntimePersistenceContractSuite
+import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
+import type {
+  RuntimePersistenceContractTodo,
+  RuntimePersistenceDatabaseHarness,
 } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
-import type {RuntimePersistenceContractTodo, RuntimePersistenceDatabaseHarness} from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract';
 
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-persistence-`))

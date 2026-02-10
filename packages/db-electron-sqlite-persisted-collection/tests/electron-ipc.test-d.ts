@@ -1,9 +1,6 @@
 import { expectTypeOf, test } from 'vitest'
-import {
-  
-  createElectronRendererPersistenceAdapter
-} from '../src'
-import type {ElectronPersistenceInvoke} from '../src';
+import { createElectronRendererPersistenceAdapter } from '../src'
+import type { ElectronPersistenceInvoke } from '../src'
 
 test(`renderer adapter requires ipc invoke transport`, () => {
   const invoke: ElectronPersistenceInvoke = (_channel, request) => {

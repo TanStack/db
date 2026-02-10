@@ -1,10 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import BetterSqlite3 from 'better-sqlite3'
-import {
-  InvalidPersistedCollectionConfigError
-  
-} from '@tanstack/db-sqlite-persisted-collection-core'
-import type {SQLiteDriver} from '@tanstack/db-sqlite-persisted-collection-core';
+import { InvalidPersistedCollectionConfigError } from '@tanstack/db-sqlite-persisted-collection-core'
+import type { SQLiteDriver } from '@tanstack/db-sqlite-persisted-collection-core'
 
 const DEFAULT_PRAGMAS = [
   `journal_mode = WAL`,
@@ -15,8 +12,9 @@ const DEFAULT_PRAGMAS = [
 const INVALID_PRAGMA_PATTERN = /(;|--|\/\*)/
 
 export type BetterSqlite3Database = InstanceType<typeof BetterSqlite3>
-export type BetterSqlite3OpenOptions =
-  ConstructorParameters<typeof BetterSqlite3>[1]
+export type BetterSqlite3OpenOptions = ConstructorParameters<
+  typeof BetterSqlite3
+>[1]
 
 type BetterSqlite3ExistingDatabaseOptions = {
   database: BetterSqlite3Database
@@ -46,7 +44,8 @@ function hasExistingDatabase(
 export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
   private readonly database: BetterSqlite3Database
   private readonly ownsDatabase: boolean
-  private readonly transactionContext = new AsyncLocalStorage<TransactionContext>()
+  private readonly transactionContext =
+    new AsyncLocalStorage<TransactionContext>()
   private queue: Promise<void> = Promise.resolve()
   private nextSavepointId = 1
 

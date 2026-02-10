@@ -1,19 +1,20 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createBetterSqlite3Driver, createNodeSQLitePersistenceAdapter  } from '@tanstack/db-node-sqlite-persisted-collection'
 import {
-  
-  
-  runSQLiteCoreAdapterContractSuite
-} from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
+  createBetterSqlite3Driver,
+  createNodeSQLitePersistenceAdapter,
+} from '@tanstack/db-node-sqlite-persisted-collection'
+import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
 import {
-  
   createElectronPersistenceMainHost,
-  createElectronRendererPersistenceAdapter
+  createElectronRendererPersistenceAdapter,
 } from '../src'
-import type {SQLiteCoreAdapterContractTodo, SQLiteCoreAdapterHarnessFactory} from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract';
-import type {ElectronPersistenceInvoke} from '../src';
+import type {
+  SQLiteCoreAdapterContractTodo,
+  SQLiteCoreAdapterHarnessFactory,
+} from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
+import type { ElectronPersistenceInvoke } from '../src'
 
 const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-electron-contract-`))

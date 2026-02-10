@@ -1,13 +1,12 @@
 import { IR, createCollection } from '@tanstack/db'
 import { describe, expect, it } from 'vitest'
-import {
-  
-  
-  
-  
-  persistedCollectionOptions
+import { persistedCollectionOptions } from '../../src'
+import type {
+  PersistedCollectionCoordinator,
+  PersistedCollectionPersistence,
+  PersistenceAdapter,
+  SQLiteDriver,
 } from '../../src'
-import type {PersistedCollectionCoordinator, PersistedCollectionPersistence, PersistenceAdapter, SQLiteDriver} from '../../src';
 
 export type RuntimePersistenceContractTodo = {
   id: string
@@ -76,7 +75,10 @@ export function runRuntimePersistenceContractSuite(
           })
 
           const loadedRows = await adapter.loadSubset(collectionId, {
-            where: new IR.Func(`eq`, [new IR.PropRef([`id`]), new IR.Value(`1`)]),
+            where: new IR.Func(`eq`, [
+              new IR.PropRef([`id`]),
+              new IR.Value(`1`),
+            ]),
           })
           expect(loadedRows).toEqual([
             {
