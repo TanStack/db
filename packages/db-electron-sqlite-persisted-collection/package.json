@@ -22,7 +22,7 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
-    "test:e2e": "vitest --run tests/electron-runtime-bridge.e2e.test.ts"
+    "test:e2e": "pnpm --filter @tanstack/db-sqlite-persisted-collection-core build && pnpm --filter @tanstack/db-node-sqlite-persisted-collection build && pnpm --filter @tanstack/db-electron-sqlite-persisted-collection build && vitest --run tests/electron-runtime-bridge.e2e.test.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",
@@ -75,7 +75,6 @@
   },
   "devDependencies": {
     "@vitest/coverage-istanbul": "^3.2.4",
-    "electron": "^40.2.1",
-    "tsx": "^4.21.0"
+    "electron": "^40.2.1"
   }
 }

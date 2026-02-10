@@ -6,6 +6,7 @@ const config = defineConfig({
   test: {
     name: packageJson.name,
     include: [`tests/**/*.test.ts`],
+    exclude: [`tests/**/*.e2e.test.ts`],
     environment: `node`,
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {

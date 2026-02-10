@@ -8,16 +8,34 @@ import {
 import {
   createElectronPersistenceMainHost,
   registerElectronPersistenceMainIpcHandler,
-} from '../../../src/main.ts'
-import { E2E_RESULT_PREFIX } from './runtime-bridge-types.ts'
-import type {
-  ElectronRuntimeBridgeInput,
-  ElectronRuntimeBridgeProcessError,
-  ElectronRuntimeBridgeProcessResult,
-  ElectronRuntimeBridgeScenarioResult,
-} from './runtime-bridge-types.ts'
+} from '../../../dist/esm/main.js'
 
-function serializeError(error: unknown): ElectronRuntimeBridgeProcessError {
+const E2E_RESULT_PREFIX = `__TANSTACK_DB_E2E_RESULT__:`
+
+function parseInputFromEnv() {
+  const rawInput = process.env.TANSTACK_DB_E2E_INPUT
+  if (!rawInput) {
+    throw new Error(`Missing TANSTACK_DB_E2E_INPUT`)
+  }
+
+  const parsed = JSON.parse(rawInput)
+  if (!parsed || typeof parsed !== `object`) {
+    throw new Error(`Invalid TANSTACK_DB_E2E_INPUT payload`)
+  }
+
+  return parsed
+}
+
+function printProcessResult(result) {
+  process.stdout.write(`${E2E_RESULT_PREFIX}${JSON.stringify(result)}\n`)
+}
+
+function getPreloadPath() {
+  const currentFile = fileURLToPath(import.meta.url)
+  return join(dirname(currentFile), `renderer-preload.mjs`)
+}
+
+function serializeError(error) {
   if (error instanceof Error) {
     return {
       name: error.name,
@@ -32,44 +50,7 @@ function serializeError(error: unknown): ElectronRuntimeBridgeProcessError {
   }
 }
 
-function parseInputFromEnv(): ElectronRuntimeBridgeInput {
-  const rawInput = process.env.TANSTACK_DB_E2E_INPUT
-  if (!rawInput) {
-    throw new Error(`Missing TANSTACK_DB_E2E_INPUT`)
-  }
-
-  const parsed: unknown = JSON.parse(rawInput)
-  if (!parsed || typeof parsed !== `object`) {
-    throw new Error(`Invalid TANSTACK_DB_E2E_INPUT payload`)
-  }
-
-  const candidate = parsed as Partial<ElectronRuntimeBridgeInput>
-  if (
-    typeof candidate.collectionId !== `string` ||
-    candidate.collectionId === ``
-  ) {
-    throw new Error(`Missing collectionId in TANSTACK_DB_E2E_INPUT`)
-  }
-  if (typeof candidate.dbPath !== `string` || candidate.dbPath === ``) {
-    throw new Error(`Missing dbPath in TANSTACK_DB_E2E_INPUT`)
-  }
-  if (!(`scenario` in candidate)) {
-    throw new Error(`Missing scenario in TANSTACK_DB_E2E_INPUT`)
-  }
-
-  return candidate as ElectronRuntimeBridgeInput
-}
-
-function printProcessResult(result: ElectronRuntimeBridgeProcessResult): void {
-  process.stdout.write(`${E2E_RESULT_PREFIX}${JSON.stringify(result)}\n`)
-}
-
-function getPreloadPath(): string {
-  const currentFile = fileURLToPath(import.meta.url)
-  return join(dirname(currentFile), `renderer-preload.ts`)
-}
-
-async function run(): Promise<ElectronRuntimeBridgeProcessResult> {
+async function run() {
   app.commandLine.appendSwitch(`headless`)
   app.commandLine.appendSwitch(`disable-gpu`)
   app.commandLine.appendSwitch(`no-sandbox`)
@@ -79,10 +60,7 @@ async function run(): Promise<ElectronRuntimeBridgeProcessResult> {
     filename: input.dbPath,
   })
 
-  const adapter = createNodeSQLitePersistenceAdapter<
-    Record<string, unknown>,
-    string | number
-  >({
+  const adapter = createNodeSQLitePersistenceAdapter({
     driver,
   })
   const host = createElectronPersistenceMainHost({
@@ -95,10 +73,9 @@ async function run(): Promise<ElectronRuntimeBridgeProcessResult> {
     channel: input.channel,
   })
 
-  let window: BrowserWindow | undefined
+  let window
   try {
     await app.whenReady()
-
     window = new BrowserWindow({
       show: false,
       webPreferences: {
@@ -109,7 +86,7 @@ async function run(): Promise<ElectronRuntimeBridgeProcessResult> {
     })
 
     await window.loadURL(
-      `data:text/html,<html><body>runtime-bridge</body></html>`,
+      `data:text/html,<html><body>runtime-bridge-e2e</body></html>`,
     )
 
     const scenarioExpression = JSON.stringify({
@@ -119,10 +96,10 @@ async function run(): Promise<ElectronRuntimeBridgeProcessResult> {
       scenario: input.scenario,
     })
 
-    const result = (await window.webContents.executeJavaScript(
+    const result = await window.webContents.executeJavaScript(
       `window.__tanstackDbRuntimeBridge__.runScenario(${scenarioExpression})`,
       true,
-    )) as ElectronRuntimeBridgeScenarioResult
+    )
 
     return {
       ok: true,
@@ -143,7 +120,7 @@ void run()
     printProcessResult(result)
     process.exitCode = 0
   })
-  .catch((error: unknown) => {
+  .catch((error) => {
     printProcessResult({
       ok: false,
       error: serializeError(error),
