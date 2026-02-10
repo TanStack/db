@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module'
+import { isAbsolute } from 'node:path'
 import {
   ElectronPersistenceProtocolError,
   UnknownElectronPersistenceCollectionError,
@@ -25,7 +26,9 @@ import type {
 const runtimeRequireBasePath =
   typeof __filename !== `undefined`
     ? __filename
-    : process.argv[1] || `${process.cwd()}/package.json`
+    : process.argv.find(
+        (arg) => isAbsolute(arg) || arg.startsWith(`file://`),
+      ) || `${process.cwd()}/package.json`
 const runtimeRequire = createRequire(runtimeRequireBasePath)
 
 type ElectronMainPersistenceAdapter = PersistenceAdapter<
