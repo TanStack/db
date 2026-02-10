@@ -27,11 +27,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const driver = createBetterSqlite3Driver({
     filename: dbPath,
     pragmas: runFullE2E
-      ? [
-          `journal_mode = DELETE`,
-          `synchronous = NORMAL`,
-          `foreign_keys = ON`,
-        ]
+      ? [`journal_mode = DELETE`, `synchronous = NORMAL`, `foreign_keys = ON`]
       : undefined,
   })
 
