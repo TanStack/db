@@ -123,7 +123,10 @@ const runtimeBridgePreloadApi: RuntimeBridgePreloadApi = {
   runScenario,
 }
 
-contextBridge.exposeInMainWorld(`__tanstackDbRuntimeBridge__`, runtimeBridgePreloadApi)
+contextBridge.exposeInMainWorld(
+  `__tanstackDbRuntimeBridge__`,
+  runtimeBridgePreloadApi,
+)
 
 declare global {
   interface Window {

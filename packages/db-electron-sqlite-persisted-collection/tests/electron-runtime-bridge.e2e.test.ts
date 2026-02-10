@@ -30,7 +30,10 @@ const electronRunnerPath = join(
 
 function resolveElectronBinaryPath(): string {
   const electronModuleValue: unknown = require(`electron`)
-  if (typeof electronModuleValue !== `string` || electronModuleValue.length === 0) {
+  if (
+    typeof electronModuleValue !== `string` ||
+    electronModuleValue.length === 0
+  ) {
     throw new Error(`Failed to resolve electron binary path`)
   }
   return electronModuleValue
@@ -121,7 +124,9 @@ async function runElectronScenario(
 }
 
 const createHarness: RuntimeBridgeE2EContractHarnessFactory = () => {
-  const tempDirectory = mkdtempSync(join(tmpdir(), `db-electron-runtime-bridge-`))
+  const tempDirectory = mkdtempSync(
+    join(tmpdir(), `db-electron-runtime-bridge-`),
+  )
   const dbPath = join(tempDirectory, `state.sqlite`)
   const collectionId = `todos`
   let nextSequence = 1
