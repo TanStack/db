@@ -7,7 +7,7 @@ import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
 import { IR } from '@tanstack/db'
 import { SQLiteCorePersistenceAdapter, createPersistedTableName } from '../src'
-import type { SQLiteDriver } from '../src'
+import type { PersistenceAdapter, SQLiteDriver } from '../src'
 
 type Todo = {
   id: string
@@ -180,7 +180,7 @@ type AdapterHarness = {
 }
 
 export type SQLiteCoreAdapterContractHarness = {
-  adapter: SQLiteCorePersistenceAdapter<Todo, string>
+  adapter: PersistenceAdapter<Todo, string>
   driver: SQLiteDriver
   cleanup: () => void
 }
@@ -240,11 +240,11 @@ export function runSQLiteCoreAdapterContractSuite(
   suiteName: string = `SQLiteCorePersistenceAdapter`,
   harnessFactory: SQLiteCoreAdapterHarnessFactory = registerHarness,
 ): void {
-  const registerHarness = harnessFactory
+  const registerContractHarness = harnessFactory
 
   describe(suiteName, () => {
   it(`applies transactions idempotently with row versions and tombstones`, async () => {
-    const { adapter, driver } = registerHarness()
+    const { adapter, driver } = registerContractHarness()
     const collectionId = `todos`
 
     await adapter.applyCommittedTx(collectionId, {
@@ -358,7 +358,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`rolls back partially applied mutations when transaction fails`, async () => {
-    const { adapter, driver } = registerHarness()
+    const { adapter, driver } = registerContractHarness()
     const collectionId = `atomicity`
 
     await expect(
@@ -407,7 +407,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`supports pushdown operators with correctness-preserving fallback`, async () => {
-    const { adapter } = registerHarness()
+    const { adapter } = registerContractHarness()
     const collectionId = `todos`
 
     const rows: Array<Todo> = [
@@ -496,7 +496,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`supports datetime/strftime predicate compilation for ISO date fields`, async () => {
-    const { adapter } = registerHarness()
+    const { adapter } = registerContractHarness()
     const collectionId = `date-pushdown`
 
     await adapter.applyCommittedTx(collectionId, {
@@ -548,7 +548,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`handles cursor whereCurrent/whereFrom requests`, async () => {
-    const { adapter } = registerHarness()
+    const { adapter } = registerContractHarness()
     const collectionId = `todos`
 
     await adapter.applyCommittedTx(collectionId, {
@@ -627,7 +627,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`ensures and removes persisted indexes with registry tracking`, async () => {
-    const { adapter, driver } = registerHarness()
+    const { adapter, driver } = registerContractHarness()
     const collectionId = `todos`
     const signature = `idx-title`
 
@@ -675,7 +675,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`enforces schema mismatch policies`, async () => {
-    const baseHarness = registerHarness({
+    const baseHarness = registerContractHarness({
       schemaVersion: 1,
       schemaMismatchPolicy: `reset`,
     })
@@ -718,7 +718,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`returns pullSince deltas and requiresFullReload when threshold is exceeded`, async () => {
-    const { adapter } = registerHarness({
+    const { adapter } = registerContractHarness({
       pullSinceReloadThreshold: 1,
     })
     const collectionId = `todos`
@@ -782,7 +782,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`keeps numeric and string keys distinct in storage`, async () => {
-    const { driver } = registerHarness()
+    const { driver } = registerContractHarness()
     const adapter = new SQLiteCorePersistenceAdapter<
       MixedKeyTodo,
       string | number
@@ -827,7 +827,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`stores hostile collection ids safely via deterministic table mapping`, async () => {
-    const { adapter, driver } = registerHarness()
+    const { adapter, driver } = registerContractHarness()
     const hostileCollectionId = `todos"; DROP TABLE applied_tx; --`
 
     await adapter.applyCommittedTx(hostileCollectionId, {
@@ -864,7 +864,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`prunes applied_tx rows by sequence threshold`, async () => {
-    const { adapter, driver } = registerHarness({
+    const { adapter, driver } = registerContractHarness({
       appliedTxPruneMaxRows: 2,
     })
     const collectionId = `pruning`
@@ -901,7 +901,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`prunes applied_tx rows by age threshold when configured`, async () => {
-    const { adapter, driver } = registerHarness({
+    const { adapter, driver } = registerContractHarness({
       appliedTxPruneMaxAgeSeconds: 1,
     })
     const collectionId = `pruning-by-age`
@@ -962,7 +962,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`supports large IN lists via batching`, async () => {
-    const { adapter } = registerHarness()
+    const { adapter } = registerContractHarness()
     const collectionId = `large-in`
 
     await adapter.applyCommittedTx(collectionId, {
@@ -1021,7 +1021,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`falls back to in-memory filtering when SQL json path pushdown is unsupported`, async () => {
-    const { driver } = registerHarness()
+    const { driver } = registerContractHarness()
     const adapter = new SQLiteCorePersistenceAdapter<FlexibleTodoRow, string>({
       driver,
     })
@@ -1069,7 +1069,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`supports alias-qualified refs during in-memory fallback filtering`, async () => {
-    const { driver } = registerHarness()
+    const { driver } = registerContractHarness()
     const adapter = new SQLiteCorePersistenceAdapter<FlexibleTodoRow, string>({
       driver,
     })
@@ -1120,7 +1120,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`compiles serialized expression index specs used by phase-2 metadata`, async () => {
-    const { adapter, driver } = registerHarness()
+    const { adapter, driver } = registerContractHarness()
     const collectionId = `serialized-index`
     const signature = `serialized-title`
 
@@ -1153,7 +1153,7 @@ export function runSQLiteCoreAdapterContractSuite(
   })
 
   it(`rejects unsafe raw SQL fragments in index specs`, async () => {
-    const { adapter } = registerHarness()
+    const { adapter } = registerContractHarness()
 
     await expect(
       adapter.ensureIndex(`unsafe-index`, `unsafe`, {
