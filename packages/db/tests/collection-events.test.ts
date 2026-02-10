@@ -103,11 +103,12 @@ describe(`Collection Events System`, () => {
       expect(event.index.expression.type).toBe(`ref`)
       expect(event.index.signature).toEqual(expect.any(String))
       expect(event.index.options).toMatchObject({
-        compareFn: {
-          __type: `function`,
-          name: `customCompare`,
+        compareOptions: {
+          direction: `asc`,
+          nulls: `last`,
         },
       })
+      expect(event.index.options).not.toHaveProperty(`compareFn`)
       expect(() => JSON.stringify(event.index)).not.toThrow()
     })
 
