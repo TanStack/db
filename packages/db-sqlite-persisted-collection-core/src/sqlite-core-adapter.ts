@@ -147,6 +147,36 @@ function normalizeSortableValue(value: unknown): unknown {
   return value
 }
 
+type RelationalComparable = boolean | bigint | number | string
+
+function toRelationalComparable(value: unknown): RelationalComparable {
+  const normalized = normalizeSortableValue(value)
+  if (
+    typeof normalized === `number` ||
+    typeof normalized === `string` ||
+    typeof normalized === `bigint` ||
+    typeof normalized === `boolean`
+  ) {
+    return normalized
+  }
+
+  return String(normalized)
+}
+
+function compareRelationalValues(left: unknown, right: unknown): number {
+  const leftComparable = toRelationalComparable(left)
+  const rightComparable = toRelationalComparable(right)
+
+  if (leftComparable < rightComparable) {
+    return -1
+  }
+  if (leftComparable > rightComparable) {
+    return 1
+  }
+
+  return 0
+}
+
 function isUint8ArrayLike(value: unknown): value is Uint8Array {
   return (
     ((typeof Buffer !== `undefined` && value instanceof Buffer) ||
@@ -378,28 +408,28 @@ function evaluateExpressionOnRow(
       if (isNullish(left) || isNullish(right)) {
         return null
       }
-      return left > right
+      return compareRelationalValues(left, right) > 0
     }
     case `gte`: {
       const [left, right] = evaluatedArgs
       if (isNullish(left) || isNullish(right)) {
         return null
       }
-      return left >= right
+      return compareRelationalValues(left, right) >= 0
     }
     case `lt`: {
       const [left, right] = evaluatedArgs
       if (isNullish(left) || isNullish(right)) {
         return null
       }
-      return left < right
+      return compareRelationalValues(left, right) < 0
     }
     case `lte`: {
       const [left, right] = evaluatedArgs
       if (isNullish(left) || isNullish(right)) {
         return null
       }
-      return left <= right
+      return compareRelationalValues(left, right) <= 0
     }
     case `and`: {
       let hasUnknown = false
