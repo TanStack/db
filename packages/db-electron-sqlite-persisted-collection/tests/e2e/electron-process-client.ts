@@ -44,6 +44,29 @@ type CreateElectronRuntimeBridgeInvokeOptions = {
   adapterOptions?: ElectronRuntimeBridgeAdapterOptions
 }
 
+function createElectronScenarioEnv(
+  input: ElectronRuntimeBridgeInput,
+): NodeJS.ProcessEnv {
+  const childEnv: NodeJS.ProcessEnv = { ...process.env }
+
+  delete childEnv.NODE_V8_COVERAGE
+
+  for (const envKey of Object.keys(childEnv)) {
+    if (
+      envKey.startsWith(`VITEST_`) ||
+      envKey.startsWith(`__VITEST_`) ||
+      envKey.startsWith(`NYC_`)
+    ) {
+      delete childEnv[envKey]
+    }
+  }
+
+  childEnv[E2E_INPUT_ENV_VAR] = encodeInputForEnv(input)
+  childEnv.ELECTRON_DISABLE_SECURITY_WARNINGS = `true`
+
+  return childEnv
+}
+
 function resolveElectronBinaryPath(): string {
   const electronModuleValue: unknown = require(`electron`)
   if (
@@ -224,11 +247,7 @@ export async function runElectronRuntimeBridgeScenario(
     (resolve, reject) => {
       const child = spawn(command, args, {
         cwd: packageRoot,
-        env: {
-          ...process.env,
-          [E2E_INPUT_ENV_VAR]: encodeInputForEnv(input),
-          ELECTRON_DISABLE_SECURITY_WARNINGS: `true`,
-        },
+        env: createElectronScenarioEnv(input),
         stdio: [`ignore`, `pipe`, `pipe`],
       })
       let stdoutBuffer = ``
