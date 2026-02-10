@@ -6,9 +6,7 @@ import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { BrowserWindow, app, ipcMain } from 'electron'
-import {
-  createSQLiteCorePersistenceAdapter,
-} from '@tanstack/db-sqlite-persisted-collection-core'
+import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
   createElectronPersistenceMainHost,
   registerElectronPersistenceMainIpcHandler,
