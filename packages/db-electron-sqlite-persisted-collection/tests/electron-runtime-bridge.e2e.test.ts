@@ -142,7 +142,11 @@ async function runElectronScenario(
         stdoutBuffer += chunk.toString()
 
         try {
-          const parsedResult = parseScenarioResult(stdoutBuffer, stderrBuffer, null)
+          const parsedResult = parseScenarioResult(
+            stdoutBuffer,
+            stderrBuffer,
+            null,
+          )
           settle(resolve, parsedResult)
         } catch {
           // result line may not be fully available yet; continue collecting output
