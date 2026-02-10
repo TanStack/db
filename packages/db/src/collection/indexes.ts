@@ -178,7 +178,9 @@ function createCollectionIndexMetadata<TKey extends string | number>(
     options: serializedOptions ?? null,
   })
   const normalizedSignatureInput = signatureInput ?? null
-  const signature = stableStringifyCollectionIndexValue(normalizedSignatureInput)
+  const signature = stableStringifyCollectionIndexValue(
+    normalizedSignatureInput,
+  )
 
   return {
     signatureVersion: INDEX_SIGNATURE_VERSION,
