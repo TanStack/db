@@ -2,10 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
-import {
-  createOpSQLiteDriver,
-  createReactNativeSQLitePersistenceAdapter,
-} from '../src'
+import { createExpoSQLitePersistenceAdapter, createOpSQLiteDriver } from '../src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 import type {
   SQLiteCoreAdapterContractTodo,
@@ -13,7 +10,7 @@ import type {
 } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
 
 const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
-  const tempDirectory = mkdtempSync(join(tmpdir(), `db-rn-sqlite-core-`))
+  const tempDirectory = mkdtempSync(join(tmpdir(), `db-expo-sqlite-core-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   const database = createOpSQLiteTestDatabase({
     filename: dbPath,
@@ -21,7 +18,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   })
   const driver = createOpSQLiteDriver({ database })
 
-  const adapter = createReactNativeSQLitePersistenceAdapter<
+  const adapter = createExpoSQLitePersistenceAdapter<
     SQLiteCoreAdapterContractTodo,
     string
   >({
@@ -40,6 +37,6 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
 }
 
 runSQLiteCoreAdapterContractSuite(
-  `SQLiteCorePersistenceAdapter (react-native op-sqlite driver harness)`,
+  `SQLiteCorePersistenceAdapter (expo op-sqlite driver harness)`,
   createHarness,
 )

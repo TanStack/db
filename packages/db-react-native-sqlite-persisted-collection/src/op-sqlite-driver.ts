@@ -190,7 +190,6 @@ export class OpSQLiteDriver implements SQLiteDriver {
   private readonly executeMethod: OpSQLiteExecuteFn
   private readonly ownsDatabase: boolean
   private queue: Promise<void> = Promise.resolve()
-  private transactionDepth = 0
   private nextSavepointId = 1
 
   constructor(options: OpSQLiteDriverOptions) {
@@ -206,7 +205,7 @@ export class OpSQLiteDriver implements SQLiteDriver {
   }
 
   async exec(sql: string): Promise<void> {
-    await this.executeOperation(async () => {
+    await this.enqueue(async () => {
       await this.execute(sql)
     })
   }
@@ -215,28 +214,33 @@ export class OpSQLiteDriver implements SQLiteDriver {
     sql: string,
     params: ReadonlyArray<unknown> = [],
   ): Promise<ReadonlyArray<T>> {
-    return this.executeOperation(async () => {
+    return this.enqueue(async () => {
       const result = await this.execute(sql, params)
       return extractRowsFromExecuteResult(result, sql) as ReadonlyArray<T>
     })
   }
 
   async run(sql: string, params: ReadonlyArray<unknown> = []): Promise<void> {
-    await this.executeOperation(async () => {
+    await this.enqueue(async () => {
       await this.execute(sql, params)
     })
   }
 
   async transaction<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.transactionDepth > 0) {
-      return this.runNestedTransaction(fn)
-    }
+    return this.transactionWithDriver(async (transactionDriver) => {
+      const scopedFn = fn as (driver: SQLiteDriver) => Promise<T>
+      return scopedFn(transactionDriver)
+    })
+  }
 
+  async transactionWithDriver<T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ): Promise<T> {
     return this.enqueue(async () => {
       await this.execute(`BEGIN IMMEDIATE`)
-      this.transactionDepth++
+      const transactionDriver = this.createTransactionDriver()
       try {
-        const result = await fn()
+        const result = await fn(transactionDriver)
         await this.execute(`COMMIT`)
         return result
       } catch (error) {
@@ -246,8 +250,6 @@ export class OpSQLiteDriver implements SQLiteDriver {
           // Keep the original transaction failure as the primary error.
         }
         throw error
-      } finally {
-        this.transactionDepth--
       }
     })
   }
@@ -272,14 +274,6 @@ export class OpSQLiteDriver implements SQLiteDriver {
     return Promise.resolve(result)
   }
 
-  private executeOperation<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.transactionDepth > 0) {
-      return operation()
-    }
-
-    return this.enqueue(operation)
-  }
-
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const queuedOperation = this.queue.then(operation, operation)
     this.queue = queuedOperation.then(
@@ -289,22 +283,51 @@ export class OpSQLiteDriver implements SQLiteDriver {
     return queuedOperation
   }
 
-  private async runNestedTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  private createTransactionDriver(): SQLiteDriver {
+    const transactionDriver: SQLiteDriver = {
+      exec: async (sql) => {
+        await this.execute(sql)
+      },
+      query: async <T>(
+        sql: string,
+        params: ReadonlyArray<unknown> = [],
+      ): Promise<ReadonlyArray<T>> => {
+        const result = await this.execute(sql, params)
+        return extractRowsFromExecuteResult(result, sql) as ReadonlyArray<T>
+      },
+      run: async (sql, params = []) => {
+        await this.execute(sql, params)
+      },
+      transaction: async <T>(fn: () => Promise<T>): Promise<T> => {
+        return this.runNestedTransaction(transactionDriver, async (driver) => {
+          const scopedFn = fn as (transactionDriver: SQLiteDriver) => Promise<T>
+          return scopedFn(driver)
+        })
+      },
+      transactionWithDriver: async <T>(
+        fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+      ): Promise<T> => this.runNestedTransaction(transactionDriver, fn),
+    }
+
+    return transactionDriver
+  }
+
+  private async runNestedTransaction<T>(
+    transactionDriver: SQLiteDriver,
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ): Promise<T> {
     const savepointName = `tsdb_sp_${this.nextSavepointId}`
     this.nextSavepointId++
     await this.execute(`SAVEPOINT ${savepointName}`)
 
-    this.transactionDepth++
     try {
-      const result = await fn()
+      const result = await fn(transactionDriver)
       await this.execute(`RELEASE SAVEPOINT ${savepointName}`)
       return result
     } catch (error) {
       await this.execute(`ROLLBACK TO SAVEPOINT ${savepointName}`)
       await this.execute(`RELEASE SAVEPOINT ${savepointName}`)
       throw error
-    } finally {
-      this.transactionDepth--
     }
   }
 }

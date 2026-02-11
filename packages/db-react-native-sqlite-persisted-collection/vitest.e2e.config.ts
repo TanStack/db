@@ -20,6 +20,7 @@ export default defineConfig({
     fileParallelism: false,
     testTimeout: 60_000,
     environment: `jsdom`,
+    setupFiles: [`./tests/helpers/mobile-runtime-test-setup.ts`],
     typecheck: {
       enabled: false,
     },

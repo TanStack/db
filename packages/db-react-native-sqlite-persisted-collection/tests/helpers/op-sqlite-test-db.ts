@@ -16,8 +16,19 @@ type OpSQLiteRowsListLike<T> = {
 }
 
 export type OpSQLiteTestDatabase = OpSQLiteDatabaseLike & {
-  close: () => void
-  getNativeDatabase: () => InstanceType<typeof BetterSqlite3>
+  close: () => void | Promise<void>
+  getNativeDatabase?: () => InstanceType<typeof BetterSqlite3>
+}
+
+export type MobileSQLiteTestDatabaseFactory = (options: {
+  filename: string
+  resultShape?: OpSQLiteTestResultShape
+}) => OpSQLiteTestDatabase
+
+declare global {
+  var __tanstackDbCreateMobileSQLiteTestDatabase:
+    | MobileSQLiteTestDatabaseFactory
+    | undefined
 }
 
 function createRowsList<T>(rows: Array<T>): OpSQLiteRowsListLike<T> {
@@ -84,6 +95,10 @@ export function createOpSQLiteTestDatabase(options: {
   filename: string
   resultShape?: OpSQLiteTestResultShape
 }): OpSQLiteTestDatabase {
+  if (typeof globalThis.__tanstackDbCreateMobileSQLiteTestDatabase === `function`) {
+    return globalThis.__tanstackDbCreateMobileSQLiteTestDatabase(options)
+  }
+
   const nativeDatabase = new BetterSqlite3(options.filename)
   const resultShape = options.resultShape ?? `rows-object`
 
