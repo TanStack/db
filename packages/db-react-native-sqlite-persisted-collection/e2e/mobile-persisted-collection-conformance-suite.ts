@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import { createOpSQLiteDriver, persistedCollectionOptions } from '../src'
+import { OpSQLiteDriver, persistedCollectionOptions } from '../src'
 import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/persisted-collection-conformance-contract'
 import { createOpSQLiteTestDatabase } from '../tests/helpers/op-sqlite-test-db'
@@ -27,11 +27,11 @@ type PersistedCollectionHarness<T extends PersistableRow> = {
 }
 
 type MobilePersistenceFactory = <T extends PersistableRow>(
-  driver: ReturnType<typeof createOpSQLiteDriver>,
+  driver: OpSQLiteDriver,
 ) => PersistedCollectionPersistence<T, string | number>
 
 function createPersistedCollection<T extends PersistableRow>(
-  driver: ReturnType<typeof createOpSQLiteDriver>,
+  driver: OpSQLiteDriver,
   id: string,
   syncMode: `eager` | `on-demand`,
   createPersistence: MobilePersistenceFactory,
@@ -146,7 +146,7 @@ export function runMobilePersistedCollectionConformanceSuite(
       filename: dbPath,
       resultShape: `statement-array`,
     })
-    const driver = createOpSQLiteDriver({ database })
+    const driver = new OpSQLiteDriver({ database })
     const seedData = generateSeedData()
 
     const eagerUsers = createPersistedCollection<User>(

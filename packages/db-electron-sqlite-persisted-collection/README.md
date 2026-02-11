@@ -1,140 +1,61 @@
 # @tanstack/db-electron-sqlite-persisted-collection
 
-Electron main/renderer bridge for TanStack DB SQLite persistence.
+Thin Electron bridge for TanStack DB SQLite persistence.
 
-## Entrypoints
+## Public API
 
-- `@tanstack/db-electron-sqlite-persisted-collection` (all exports)
-- `@tanstack/db-electron-sqlite-persisted-collection/main`
-- `@tanstack/db-electron-sqlite-persisted-collection/renderer`
+- `exposeElectronSQLitePersistence(...)` (main process)
+- `createElectronSQLitePersistence(...)` (renderer process)
+- `persistedCollectionOptions(...)` (re-exported from core)
 
-## Exported API (complete)
+Use `@tanstack/db-electron-sqlite-persisted-collection/main` and
+`@tanstack/db-electron-sqlite-persisted-collection/renderer` if you prefer
+explicit process-specific entrypoints.
 
-### Root entrypoint (`.`)
-
-#### Error APIs
-
-- `ElectronPersistenceError`
-- `UnknownElectronPersistenceCollectionError`
-- `UnsupportedElectronPersistenceMethodError`
-- `ElectronPersistenceProtocolError`
-- `ElectronPersistenceTimeoutError`
-- `ElectronPersistenceRpcError`
-
-#### Protocol APIs
-
-- `ELECTRON_PERSISTENCE_PROTOCOL_VERSION`
-- `DEFAULT_ELECTRON_PERSISTENCE_CHANNEL`
-- `ElectronPersistedRow`
-- `ElectronPersistedKey`
-- `ElectronPersistenceMethod`
-- `ElectronPersistencePayloadMap`
-- `ElectronPersistenceResultMap`
-- `ElectronSerializedError`
-- `ElectronPersistenceRequestByMethod`
-- `ElectronPersistenceRequest<TMethod>`
-- `ElectronPersistenceRequestEnvelope`
-- `ElectronPersistenceResponse<TMethod>`
-- `ElectronPersistenceResponseEnvelope`
-- `ElectronPersistenceRequestHandler`
-- `ElectronPersistenceInvoke`
-
-#### Main-process APIs
-
-- `ElectronPersistenceMainHost`
-- `createElectronPersistenceMainHost(...)`
-- `ElectronPersistenceMainRegistry`
-- `ElectronNodeSQLiteMainCollectionConfig`
-- `ElectronNodeSQLiteMainRegistryOptions`
-- `createElectronNodeSQLiteMainRegistry(...)`
-- `ElectronIpcMainLike`
-- `registerElectronPersistenceMainIpcHandler(...)`
-
-#### Renderer-process APIs
-
-- `ElectronRendererPersistenceAdapterOptions`
-- `ElectronRendererPersistenceAdapter<T, TKey>`
-- `createElectronRendererPersistenceAdapter<T, TKey>(...)`
-- `ElectronRendererPersistenceOptions`
-- `ElectronRendererPersister`
-- `createElectronRendererPersister(...)`
-- `createElectronRendererPersistence<T, TKey>(...)`
-- `ElectronIpcRendererLike`
-- `createElectronPersistenceInvoke(...)`
-
-### `./main` entrypoint
-
-Exports only main-process APIs:
-
-- `ElectronPersistenceMainHost`
-- `createElectronPersistenceMainHost(...)`
-- `ElectronPersistenceMainRegistry`
-- `ElectronNodeSQLiteMainCollectionConfig`
-- `createElectronNodeSQLiteMainRegistry(...)`
-- `ElectronIpcMainLike`
-- `registerElectronPersistenceMainIpcHandler(...)`
-
-### `./renderer` entrypoint
-
-Exports only renderer-process APIs:
-
-- `ElectronRendererPersistenceAdapterOptions`
-- `ElectronRendererPersistenceAdapter<T, TKey>`
-- `createElectronRendererPersistenceAdapter<T, TKey>(...)`
-- `ElectronRendererPersistenceOptions`
-- `createElectronRendererPersistence<T, TKey>(...)`
-- `ElectronIpcRendererLike`
-- `createElectronPersistenceInvoke(...)`
-
-## Minimal setup
-
-### Main process
+## Main process
 
 ```ts
 import { ipcMain } from 'electron'
-import { createBetterSqlite3Driver } from '@tanstack/db-node-sqlite-persisted-collection'
 import {
-  createElectronNodeSQLiteMainRegistry,
-  registerElectronPersistenceMainIpcHandler,
-} from '@tanstack/db-electron-sqlite-persisted-collection/main'
+  BetterSqlite3SQLiteDriver,
+  createNodeSQLitePersistence,
+} from '@tanstack/db-node-sqlite-persisted-collection'
+import { exposeElectronSQLitePersistence } from '@tanstack/db-electron-sqlite-persisted-collection/main'
 
-const driver = createBetterSqlite3Driver({
+const driver = new BetterSqlite3SQLiteDriver({
   filename: `./tanstack-db.sqlite`,
 })
 
-const registry = createElectronNodeSQLiteMainRegistry({
-  adapterOptions: {
-    driver,
-    schemaVersion: 1,
-  },
-  // Optional allow-list; omit to allow any collection id over this adapter.
-  collectionIds: [`todos`],
+const persistence = createNodeSQLitePersistence({
+  driver,
 })
 
-const unregister = registerElectronPersistenceMainIpcHandler({
+const dispose = exposeElectronSQLitePersistence({
   ipcMain,
-  host: registry.createHost(),
+  persistence,
 })
 
-// Call unregister() during app shutdown if needed.
-// Close driver when your app exits.
+// Call dispose() and driver.close() during shutdown.
 ```
 
-### Renderer process
+## Renderer process
 
 ```ts
 import { createCollection } from '@tanstack/db'
 import { ipcRenderer } from 'electron'
-import { persistedCollectionOptions } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
-  createElectronPersistenceInvoke,
-  createElectronRendererPersistence,
-} from '@tanstack/db-electron-sqlite-persisted-collection/renderer'
+  createElectronSQLitePersistence,
+  persistedCollectionOptions,
+} from '@tanstack/db-electron-sqlite-persisted-collection'
 
-type Todo = { id: string; title: string; completed: boolean }
+type Todo = {
+  id: string
+  title: string
+  completed: boolean
+}
 
-const persistence = createElectronRendererPersistence<Todo, string>({
-  invoke: createElectronPersistenceInvoke(ipcRenderer),
+const persistence = createElectronSQLitePersistence<Todo, string>({
+  ipcRenderer,
 })
 
 export const todosCollection = createCollection(
@@ -142,6 +63,13 @@ export const todosCollection = createCollection(
     id: `todos`,
     getKey: (todo) => todo.id,
     persistence,
+    schemaVersion: 1, // Per-collection schema version
   }),
 )
 ```
+
+## Notes
+
+- The renderer API mirrors other runtimes: one shared `create...Persistence`.
+- Collection mode (`sync-present` vs `sync-absent`) and `schemaVersion` are
+  resolved per collection and forwarded across IPC automatically.

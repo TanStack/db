@@ -1,8 +1,8 @@
 import { expectTypeOf, test } from 'vitest'
-import { createElectronRendererPersistenceAdapter } from '../src'
-import type { ElectronPersistenceInvoke } from '../src'
+import { createElectronSQLitePersistence } from '../src'
+import type { ElectronPersistenceInvoke } from '../src/protocol'
 
-test(`renderer adapter requires ipc invoke transport`, () => {
+test(`renderer persistence requires invoke transport`, () => {
   const invoke: ElectronPersistenceInvoke = (_channel, request) => {
     switch (request.method) {
       case `loadSubset`:
@@ -35,13 +35,13 @@ test(`renderer adapter requires ipc invoke transport`, () => {
     }
   }
 
-  const adapter = createElectronRendererPersistenceAdapter({
+  const persistence = createElectronSQLitePersistence({
     invoke,
   })
 
-  expectTypeOf(adapter).toHaveProperty(`loadSubset`)
+  expectTypeOf(persistence.adapter).toHaveProperty(`loadSubset`)
 
-  createElectronRendererPersistenceAdapter({
+  createElectronSQLitePersistence({
     invoke,
     // @ts-expect-error renderer-side persistence must use invoke transport, not a direct driver
     driver: {},

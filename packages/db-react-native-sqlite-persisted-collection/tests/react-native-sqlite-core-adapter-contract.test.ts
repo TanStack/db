@@ -2,10 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
-import {
-  createOpSQLiteDriver,
-  createReactNativeSQLitePersistenceAdapter,
-} from '../src'
+import { OpSQLiteDriver } from '../src'
+import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persisted-collection-core/src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 import type {
   SQLiteCoreAdapterContractTodo,
@@ -19,9 +17,9 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
     filename: dbPath,
     resultShape: `statement-array`,
   })
-  const driver = createOpSQLiteDriver({ database })
+  const driver = new OpSQLiteDriver({ database })
 
-  const adapter = createReactNativeSQLitePersistenceAdapter<
+  const adapter = new SQLiteCorePersistenceAdapter<
     SQLiteCoreAdapterContractTodo,
     string
   >({

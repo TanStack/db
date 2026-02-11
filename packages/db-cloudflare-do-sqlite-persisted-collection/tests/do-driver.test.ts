@@ -3,10 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-driver-contract'
-import {
-  InvalidPersistedCollectionConfigError,
-  createCloudflareDOSQLiteDriver,
-} from '../src'
+import { CloudflareDOSQLiteDriver } from '../src'
+import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persisted-collection-core/src'
 import { createBetterSqliteDoStorageHarness } from './helpers/better-sqlite-do-storage'
 import type { SQLiteDriverContractHarness } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-driver-contract'
 
@@ -16,7 +14,7 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   const storageHarness = createBetterSqliteDoStorageHarness({
     filename: dbPath,
   })
-  const driver = createCloudflareDOSQLiteDriver({
+  const driver = new CloudflareDOSQLiteDriver({
     sql: storageHarness.sql,
   })
 
@@ -38,7 +36,7 @@ describe(`cloudflare durable object sqlite driver (native transaction mode)`, ()
   it(`uses storage.transaction when available`, async () => {
     const executedSql = new Array<string>()
     let transactionCalls = 0
-    const driver = createCloudflareDOSQLiteDriver({
+    const driver = new CloudflareDOSQLiteDriver({
       storage: {
         sql: {
           exec: (sql) => {
@@ -71,7 +69,7 @@ describe(`cloudflare durable object sqlite driver (native transaction mode)`, ()
   })
 
   it(`throws a clear error for nested transactions in native transaction mode`, async () => {
-    const driver = createCloudflareDOSQLiteDriver({
+    const driver = new CloudflareDOSQLiteDriver({
       storage: {
         sql: {
           exec: () => [],

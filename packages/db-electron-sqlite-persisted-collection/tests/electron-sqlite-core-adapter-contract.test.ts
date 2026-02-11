@@ -1,14 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  createBetterSqlite3Driver,
-  createNodeSQLitePersistenceAdapter,
-} from '@tanstack/db-node-sqlite-persisted-collection'
+import { BetterSqlite3SQLiteDriver } from '@tanstack/db-node-sqlite-persisted-collection'
+import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persisted-collection-core'
 import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
 import {
-  createElectronPersistenceMainHost,
-  createElectronRendererPersistenceAdapter,
+  createElectronSQLitePersistence,
+  exposeElectronSQLitePersistence,
 } from '../src'
 import {
   createElectronRuntimeBridgeInvoke,
@@ -18,14 +16,17 @@ import type {
   SQLiteCoreAdapterContractTodo,
   SQLiteCoreAdapterHarnessFactory,
 } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
-import type { ElectronPersistenceInvoke } from '../src'
+import type {
+  ElectronPersistenceInvoke,
+  ElectronPersistenceResponseEnvelope,
+} from '../src/protocol'
 
 const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-electron-contract-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   const runFullE2E = isElectronFullE2EEnabled()
   const requestTimeoutMs = runFullE2E ? 45_000 : 2_000
-  const driver = createBetterSqlite3Driver({
+  const driver = new BetterSqlite3SQLiteDriver({
     filename: dbPath,
     pragmas: runFullE2E
       ? [`journal_mode = DELETE`, `synchronous = NORMAL`, `foreign_keys = ON`]
@@ -43,27 +44,43 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
       adapterOptions: options,
     })
   } else {
-    const mainAdapter = createNodeSQLitePersistenceAdapter<
+    const mainAdapter = createSQLiteCorePersistenceAdapter<
       Record<string, unknown>,
       string | number
     >({
       driver,
       ...options,
     })
-    const host = createElectronPersistenceMainHost({
-      getAdapter: () => mainAdapter,
+    let handler:
+      | ((event: unknown, request: unknown) => Promise<unknown>)
+      | undefined
+    const dispose = exposeElectronSQLitePersistence({
+      ipcMain: {
+        handle: (_channel, listener) => {
+          handler = listener as (event: unknown, request: unknown) => Promise<unknown>
+        },
+        removeHandler: () => {},
+      },
+      persistence: {
+        adapter: mainAdapter,
+      },
     })
-    invoke = async (_channel, request) => host.handleRequest(request)
-    cleanupInvoke = () => {}
+    invoke = async (_channel, request) => {
+      if (!handler) {
+        throw new Error(`Electron IPC handler not registered`)
+      }
+      return handler(undefined, request) as Promise<ElectronPersistenceResponseEnvelope>
+    }
+    cleanupInvoke = () => dispose()
   }
 
-  const rendererAdapter = createElectronRendererPersistenceAdapter<
+  const rendererAdapter = createElectronSQLitePersistence<
     SQLiteCoreAdapterContractTodo,
     string
   >({
     invoke,
     timeoutMs: requestTimeoutMs,
-  })
+  }).adapter
 
   return {
     adapter: rendererAdapter,

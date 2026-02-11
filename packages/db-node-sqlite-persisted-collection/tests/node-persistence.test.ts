@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  SingleProcessCoordinator,
-  createBetterSqlite3Driver,
+  BetterSqlite3SQLiteDriver,
   createNodeSQLitePersistence,
+  persistedCollectionOptions,
 } from '../src'
+import { SingleProcessCoordinator } from '../../db-sqlite-persisted-collection-core/src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
 import type {
   RuntimePersistenceContractTodo,
@@ -16,11 +17,11 @@ import type {
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-persistence-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
-  const drivers = new Set<ReturnType<typeof createBetterSqlite3Driver>>()
+  const drivers = new Set<BetterSqlite3SQLiteDriver>()
 
   return {
     createDriver: () => {
-      const driver = createBetterSqlite3Driver({ filename: dbPath })
+      const driver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
       drivers.add(driver)
       return driver
     },
@@ -86,16 +87,27 @@ describe(`node persistence helpers`, () => {
     const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-schema-infer-`))
     const dbPath = join(tempDirectory, `state.sqlite`)
     const collectionId = `todos`
-    const firstDriver = createBetterSqlite3Driver({ filename: dbPath })
+    const firstDriver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
 
     try {
       const firstPersistence = createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>(
         {
           driver: firstDriver,
-          schemaVersion: 1,
         },
       )
-      await firstPersistence.adapter.applyCommittedTx(collectionId, {
+      const firstCollectionOptions = persistedCollectionOptions<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        id: collectionId,
+        schemaVersion: 1,
+        getKey: (todo) => todo.id,
+        persistence: firstPersistence,
+      })
+
+      await firstCollectionOptions.persistence.adapter.applyCommittedTx(
+        collectionId,
+        {
         txId: `tx-1`,
         term: 1,
         seq: 1,
@@ -111,31 +123,50 @@ describe(`node persistence helpers`, () => {
             },
           },
         ],
-      })
+      },
+      )
     } finally {
       firstDriver.close()
     }
 
-    const secondDriver = createBetterSqlite3Driver({ filename: dbPath })
+    const secondDriver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
     try {
       const secondPersistence = createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>(
         {
           driver: secondDriver,
-          schemaVersion: 2,
         },
       )
-
-      const syncAbsentPersistence =
-        secondPersistence.resolvePersistenceForMode?.(`sync-absent`) ??
-        secondPersistence
+      const syncAbsentOptions = persistedCollectionOptions<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        id: collectionId,
+        schemaVersion: 2,
+        getKey: (todo) => todo.id,
+        persistence: secondPersistence,
+      })
       await expect(
-        syncAbsentPersistence.adapter.loadSubset(collectionId, {}),
+        syncAbsentOptions.persistence.adapter.loadSubset(collectionId, {}),
       ).rejects.toThrow(`Schema version mismatch`)
 
-      const syncPresentPersistence =
-        secondPersistence.resolvePersistenceForMode?.(`sync-present`) ??
-        secondPersistence
-      const rows = await syncPresentPersistence.adapter.loadSubset(collectionId, {})
+      const syncPresentOptions = persistedCollectionOptions<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        id: collectionId,
+        schemaVersion: 2,
+        getKey: (todo) => todo.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: secondPersistence,
+      })
+      const rows = await syncPresentOptions.persistence.adapter.loadSubset(
+        collectionId,
+        {},
+      )
       expect(rows).toEqual([])
     } finally {
       secondDriver.close()

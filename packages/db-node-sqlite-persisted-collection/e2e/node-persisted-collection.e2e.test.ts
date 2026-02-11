@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import {
-  createBetterSqlite3Driver,
+  BetterSqlite3SQLiteDriver,
   createNodeSQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
@@ -31,7 +31,7 @@ type PersistedCollectionHarness<T extends PersistableRow> = {
 let config: NodePersistedCollectionTestConfig
 
 function createPersistedCollection<T extends PersistableRow>(
-  driver: ReturnType<typeof createBetterSqlite3Driver>,
+  driver: BetterSqlite3SQLiteDriver,
   id: string,
   syncMode: `eager` | `on-demand`,
 ): PersistedCollectionHarness<T> {
@@ -135,7 +135,7 @@ beforeAll(async () => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-persisted-e2e-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   const suiteId = Date.now().toString(36)
-  const driver = createBetterSqlite3Driver({
+  const driver = new BetterSqlite3SQLiteDriver({
     filename: dbPath,
   })
   const seedData = generateSeedData()

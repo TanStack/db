@@ -1,19 +1,17 @@
-import { SingleProcessCoordinator } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
-  ElectronPersistenceProtocolError,
-  ElectronPersistenceRpcError,
-  ElectronPersistenceTimeoutError,
-} from './errors'
+  InvalidPersistedCollectionConfigError,
+  SingleProcessCoordinator,
+} from '@tanstack/db-sqlite-persisted-collection-core'
 import {
   DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
   ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
 } from './protocol'
 import type {
   PersistedCollectionCoordinator,
+  PersistedCollectionMode,
   PersistedCollectionPersistence,
   PersistedIndexSpec,
   PersistedTx,
-  PersistenceAdapter,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persisted-collection-core'
 import type {
@@ -24,6 +22,7 @@ import type {
   ElectronPersistencePayloadMap,
   ElectronPersistenceRequest,
   ElectronPersistenceRequestEnvelope,
+  ElectronPersistenceResolution,
   ElectronPersistenceResponseEnvelope,
   ElectronPersistenceResultMap,
 } from './protocol'
@@ -49,7 +48,7 @@ function withTimeout<T>(
 
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
-      reject(new ElectronPersistenceTimeoutError(timeoutMessage))
+      reject(new InvalidPersistedCollectionConfigError(timeoutMessage))
     }, timeoutMs)
 
     promise.then(
@@ -70,41 +69,43 @@ function assertValidResponse(
   request: ElectronPersistenceRequestEnvelope,
 ): void {
   if (response.v !== ELECTRON_PERSISTENCE_PROTOCOL_VERSION) {
-    throw new ElectronPersistenceProtocolError(
+    throw new InvalidPersistedCollectionConfigError(
       `Unexpected electron persistence protocol version "${response.v}" in response`,
     )
   }
 
   if (response.requestId !== request.requestId) {
-    throw new ElectronPersistenceProtocolError(
+    throw new InvalidPersistedCollectionConfigError(
       `Mismatched electron persistence response request id. Expected "${request.requestId}", received "${response.requestId}"`,
     )
   }
 
   if (response.method !== request.method) {
-    throw new ElectronPersistenceProtocolError(
+    throw new InvalidPersistedCollectionConfigError(
       `Mismatched electron persistence response method. Expected "${request.method}", received "${response.method}"`,
     )
   }
 }
 
-export type ElectronRendererPersistenceAdapterOptions = {
-  invoke: ElectronPersistenceInvoke
-  channel?: string
-  timeoutMs?: number
+function createSerializableLoadSubsetOptions(
+  subsetOptions: LoadSubsetOptions,
+): LoadSubsetOptions {
+  const { subscription: _subscription, ...serializableOptions } = subsetOptions
+  return serializableOptions
 }
 
-type RendererAdapterRequestExecutor = <
-  TMethod extends ElectronPersistenceMethod,
->(
+type RendererRequestExecutor = <TMethod extends ElectronPersistenceMethod>(
   method: TMethod,
   collectionId: string,
   payload: ElectronPersistencePayloadMap[TMethod],
+  resolution?: ElectronPersistenceResolution,
 ) => Promise<ElectronPersistenceResultMap[TMethod]>
 
-function createRendererRequestExecutor(
-  options: ElectronRendererPersistenceAdapterOptions,
-): RendererAdapterRequestExecutor {
+function createRendererRequestExecutor(options: {
+  invoke: ElectronPersistenceInvoke
+  channel?: string
+  timeoutMs?: number
+}): RendererRequestExecutor {
   const channel = options.channel ?? DEFAULT_ELECTRON_PERSISTENCE_CHANNEL
   const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
 
@@ -112,12 +113,14 @@ function createRendererRequestExecutor(
     method: TMethod,
     collectionId: string,
     payload: ElectronPersistencePayloadMap[TMethod],
+    resolution?: ElectronPersistenceResolution,
   ) => {
     const request = {
       v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: createRequestId(),
       collectionId,
       method,
+      resolution,
       payload,
     } as ElectronPersistenceRequest
 
@@ -129,11 +132,8 @@ function createRendererRequestExecutor(
     assertValidResponse(response, request)
 
     if (!response.ok) {
-      throw ElectronPersistenceRpcError.fromSerialized(
-        method,
-        collectionId,
-        request.requestId,
-        response.error,
+      throw new InvalidPersistedCollectionConfigError(
+        `${response.error.name}: ${response.error.message}`,
       )
     }
 
@@ -141,41 +141,38 @@ function createRendererRequestExecutor(
   }
 }
 
-function createSerializableLoadSubsetOptions(
-  subsetOptions: LoadSubsetOptions,
-): LoadSubsetOptions {
-  const { subscription: _subscription, ...serializableOptions } = subsetOptions
-  return serializableOptions
-}
-
-export type ElectronRendererPersistenceAdapter<
+type ElectronRendererResolvedAdapter<
   T extends object,
   TKey extends string | number = string | number,
-> = PersistenceAdapter<T, TKey> & {
+> = PersistedCollectionPersistence<T, TKey>[`adapter`] & {
   pullSince: (
     collectionId: string,
     fromRowVersion: number,
   ) => Promise<SQLitePullSinceResult<TKey>>
 }
 
-export function createElectronRendererPersistenceAdapter<
+function createResolvedRendererAdapter<
   T extends object,
   TKey extends string | number = string | number,
 >(
-  options: ElectronRendererPersistenceAdapterOptions,
-): ElectronRendererPersistenceAdapter<T, TKey> {
-  const executeRequest = createRendererRequestExecutor(options)
-
+  executeRequest: RendererRequestExecutor,
+  resolution?: ElectronPersistenceResolution,
+): ElectronRendererResolvedAdapter<T, TKey> {
   return {
     loadSubset: async (
       collectionId: string,
       subsetOptions: LoadSubsetOptions,
       ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
     ) => {
-      const result = await executeRequest(`loadSubset`, collectionId, {
-        options: createSerializableLoadSubsetOptions(subsetOptions),
-        ctx,
-      })
+      const result = await executeRequest(
+        `loadSubset`,
+        collectionId,
+        {
+          options: createSerializableLoadSubsetOptions(subsetOptions),
+          ctx,
+        },
+        resolution,
+      )
 
       return result as Array<{ key: TKey; value: T }>
     },
@@ -183,105 +180,57 @@ export function createElectronRendererPersistenceAdapter<
       collectionId: string,
       tx: PersistedTx<T, TKey>,
     ): Promise<void> => {
-      await executeRequest(`applyCommittedTx`, collectionId, {
-        tx: tx as PersistedTx<ElectronPersistedRow, ElectronPersistedKey>,
-      })
+      await executeRequest(
+        `applyCommittedTx`,
+        collectionId,
+        {
+          tx: tx as PersistedTx<ElectronPersistedRow, ElectronPersistedKey>,
+        },
+        resolution,
+      )
     },
     ensureIndex: async (
       collectionId: string,
       signature: string,
       spec: PersistedIndexSpec,
     ): Promise<void> => {
-      await executeRequest(`ensureIndex`, collectionId, {
-        signature,
-        spec,
-      })
+      await executeRequest(
+        `ensureIndex`,
+        collectionId,
+        {
+          signature,
+          spec,
+        },
+        resolution,
+      )
     },
     markIndexRemoved: async (
       collectionId: string,
       signature: string,
     ): Promise<void> => {
-      await executeRequest(`markIndexRemoved`, collectionId, {
-        signature,
-      })
+      await executeRequest(
+        `markIndexRemoved`,
+        collectionId,
+        {
+          signature,
+        },
+        resolution,
+      )
     },
     pullSince: async (
       collectionId: string,
       fromRowVersion: number,
     ): Promise<SQLitePullSinceResult<TKey>> => {
-      const result = await executeRequest(`pullSince`, collectionId, {
-        fromRowVersion,
-      })
+      const result = await executeRequest(
+        `pullSince`,
+        collectionId,
+        {
+          fromRowVersion,
+        },
+        resolution,
+      )
       return result as SQLitePullSinceResult<TKey>
     },
-  }
-}
-
-export type ElectronRendererPersistenceOptions = {
-  invoke: ElectronPersistenceInvoke
-  channel?: string
-  timeoutMs?: number
-  coordinator?: PersistedCollectionCoordinator
-}
-
-export class ElectronRendererPersister {
-  private readonly coordinator: PersistedCollectionCoordinator
-  private readonly adapter: ElectronRendererPersistenceAdapter<
-    Record<string, unknown>,
-    string | number
-  >
-
-  constructor(options: ElectronRendererPersistenceOptions) {
-    const { coordinator, ...adapterOptions } = options
-    this.coordinator = coordinator ?? new SingleProcessCoordinator()
-    this.adapter = createElectronRendererPersistenceAdapter<
-      Record<string, unknown>,
-      string | number
-    >(adapterOptions)
-  }
-
-  getAdapter<
-    T extends object,
-    TKey extends string | number = string | number,
-  >(): ElectronRendererPersistenceAdapter<T, TKey> {
-    return this.adapter as unknown as ElectronRendererPersistenceAdapter<T, TKey>
-  }
-
-  getPersistence<
-    T extends object,
-    TKey extends string | number = string | number,
-  >(
-    coordinator: PersistedCollectionCoordinator = this.coordinator,
-  ): PersistedCollectionPersistence<T, TKey> & {
-    adapter: ElectronRendererPersistenceAdapter<T, TKey>
-  } {
-    return {
-      adapter: this.getAdapter<T, TKey>(),
-      coordinator,
-    }
-  }
-}
-
-export function createElectronRendererPersister(
-  options: ElectronRendererPersistenceOptions,
-): ElectronRendererPersister {
-  return new ElectronRendererPersister(options)
-}
-
-export function createElectronRendererPersistence<
-  T extends object,
-  TKey extends string | number = string | number,
->(
-  options: ElectronRendererPersistenceOptions,
-): PersistedCollectionPersistence<T, TKey> & {
-  adapter: ElectronRendererPersistenceAdapter<T, TKey>
-} {
-  const persister = createElectronRendererPersister(options)
-  const defaultPersistence = persister.getPersistence<T, TKey>()
-
-  return {
-    ...defaultPersistence,
-    resolvePersistenceForMode: () => persister.getPersistence<T, TKey>(),
   }
 }
 
@@ -292,8 +241,90 @@ export type ElectronIpcRendererLike = {
   ) => Promise<ElectronPersistenceResponseEnvelope>
 }
 
-export function createElectronPersistenceInvoke(
-  ipcRenderer: ElectronIpcRendererLike,
+export type ElectronSQLitePersistenceOptions = {
+  invoke?: ElectronPersistenceInvoke
+  ipcRenderer?: ElectronIpcRendererLike
+  channel?: string
+  timeoutMs?: number
+  coordinator?: PersistedCollectionCoordinator
+}
+
+function resolveInvoke(
+  options: ElectronSQLitePersistenceOptions,
 ): ElectronPersistenceInvoke {
-  return (channel, request) => ipcRenderer.invoke(channel, request)
+  if (options.invoke) {
+    return options.invoke
+  }
+
+  if (options.ipcRenderer) {
+    return (channel, request) => options.ipcRenderer!.invoke(channel, request)
+  }
+
+  throw new InvalidPersistedCollectionConfigError(
+    `Electron renderer persistence requires either invoke or ipcRenderer`,
+  )
+}
+
+export function createElectronSQLitePersistence<
+  T extends object,
+  TKey extends string | number = string | number,
+>(
+  options: ElectronSQLitePersistenceOptions,
+): PersistedCollectionPersistence<T, TKey> {
+  const invoke = resolveInvoke(options)
+  const coordinator = options.coordinator ?? new SingleProcessCoordinator()
+  const executeRequest = createRendererRequestExecutor({
+    invoke,
+    channel: options.channel,
+    timeoutMs: options.timeoutMs,
+  })
+  const adapterCache = new Map<
+    string,
+    ElectronRendererResolvedAdapter<Record<string, unknown>, string | number>
+  >()
+
+  const getAdapterForCollection = (
+    mode: PersistedCollectionMode,
+    schemaVersion: number | undefined,
+  ) => {
+    const schemaVersionKey =
+      schemaVersion === undefined ? `schema:default` : `schema:${schemaVersion}`
+    const cacheKey = `mode:${mode}|${schemaVersionKey}`
+    const cachedAdapter = adapterCache.get(cacheKey)
+    if (cachedAdapter) {
+      return cachedAdapter
+    }
+
+    const adapter = createResolvedRendererAdapter<Record<string, unknown>, string | number>(
+      executeRequest,
+      {
+        mode,
+        schemaVersion,
+      },
+    )
+    adapterCache.set(cacheKey, adapter)
+    return adapter
+  }
+
+  const createCollectionPersistence = (
+    mode: PersistedCollectionMode,
+    schemaVersion: number | undefined,
+  ): PersistedCollectionPersistence<T, TKey> => ({
+    adapter: getAdapterForCollection(
+      mode,
+      schemaVersion,
+    ) as PersistedCollectionPersistence<T, TKey>[`adapter`],
+    coordinator,
+  })
+
+  const defaultPersistence = createCollectionPersistence(`sync-absent`, undefined)
+
+  return {
+    ...defaultPersistence,
+    resolvePersistenceForCollection: ({ mode, schemaVersion }) =>
+      createCollectionPersistence(mode, schemaVersion),
+    // Backward compatible fallback for older callers.
+    resolvePersistenceForMode: (mode) =>
+      createCollectionPersistence(mode, undefined),
+  }
 }

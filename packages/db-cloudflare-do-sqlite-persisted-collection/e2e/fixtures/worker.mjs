@@ -2,21 +2,28 @@
 import { DurableObject } from 'cloudflare:workers'
 import { createCollection } from '../../../db/dist/esm/index.js'
 import {
-  createCloudflareDOCollectionRegistry,
-  initializeCloudflareDOCollections,
+  CloudflareDOSQLiteDriver,
+  createCloudflareDOSQLitePersistence,
   persistedCollectionOptions,
 } from '../../dist/esm/index.js'
 
 const DEFAULT_COLLECTION_ID = `todos`
-const DEFAULT_MODE = `local`
 const DEFAULT_SCHEMA_VERSION = 1
 
-function parsePersistenceMode(rawMode) {
-  const mode = rawMode ?? DEFAULT_MODE
-  if (mode === `local` || mode === `sync`) {
-    return mode
+function parseSyncEnabled(rawValue) {
+  if (rawValue == null) {
+    return false
   }
-  throw new Error(`Invalid PERSISTENCE_MODE "${String(mode)}"`)
+
+  const normalized = String(rawValue).toLowerCase()
+  if (normalized === `1` || normalized === `true`) {
+    return true
+  }
+  if (normalized === `0` || normalized === `false`) {
+    return false
+  }
+
+  throw new Error(`Invalid PERSISTENCE_WITH_SYNC "${String(rawValue)}"`)
 }
 
 function parseSchemaVersion(rawSchemaVersion) {
@@ -74,32 +81,33 @@ export class PersistenceObject extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env)
     this.collectionId = env.PERSISTENCE_COLLECTION_ID ?? DEFAULT_COLLECTION_ID
-    this.mode = parsePersistenceMode(env.PERSISTENCE_MODE)
+    this.syncEnabled = parseSyncEnabled(env.PERSISTENCE_WITH_SYNC)
     this.schemaVersion = parseSchemaVersion(env.PERSISTENCE_SCHEMA_VERSION)
-
-    this.registry = createCloudflareDOCollectionRegistry({
+    const driver = new CloudflareDOSQLiteDriver({
       storage: this.ctx.storage,
-      collections: [
-        {
-          collectionId: this.collectionId,
-          mode: this.mode,
-          adapterOptions: {
-            schemaVersion: this.schemaVersion,
-          },
-        },
-      ],
     })
-    this.ready = initializeCloudflareDOCollections(this.registry)
-    this.persistence = this.registry.getPersistence(this.collectionId)
-    if (!this.persistence) {
-      throw createUnknownCollectionError(this.collectionId)
+    this.persistence = createCloudflareDOSQLitePersistence({
+      driver,
+    })
+    this.ready = this.persistence.adapter.loadSubset(this.collectionId, { limit: 0 })
+
+    const baseCollectionOptions = {
+      id: this.collectionId,
+      schemaVersion: this.schemaVersion,
+      getKey: (todo) => todo.id,
+      persistence: this.persistence,
     }
     this.collection = createCollection(
-      persistedCollectionOptions({
-        id: this.collectionId,
-        getKey: (todo) => todo.id,
-        persistence: this.persistence,
-      }),
+      this.syncEnabled
+        ? persistedCollectionOptions({
+            ...baseCollectionOptions,
+            sync: {
+              sync: ({ markReady }) => {
+                markReady()
+              },
+            },
+          })
+        : persistedCollectionOptions(baseCollectionOptions),
     )
     this.collectionReady = this.collection.stateWhenReady()
   }
@@ -120,7 +128,8 @@ export class PersistenceObject extends DurableObject {
         return jsonResponse(200, {
           ok: true,
           collectionId: this.collectionId,
-          mode: this.mode,
+          mode: this.syncEnabled ? `sync` : `local`,
+          syncEnabled: this.syncEnabled,
           schemaVersion: this.schemaVersion,
         })
       }
@@ -161,11 +170,10 @@ export class PersistenceObject extends DurableObject {
         url.pathname === `/load-unknown-collection-error`
       ) {
         const unknownCollectionId = requestBody.collectionId ?? `missing`
-        const adapter = this.registry.getAdapter(unknownCollectionId)
-        if (!adapter) {
+        if (unknownCollectionId !== this.collectionId) {
           throw createUnknownCollectionError(unknownCollectionId)
         }
-        const rows = await adapter.loadSubset(unknownCollectionId, {})
+        const rows = await this.persistence.adapter.loadSubset(unknownCollectionId, {})
         return jsonResponse(200, {
           ok: true,
           rows,

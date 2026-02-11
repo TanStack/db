@@ -50,16 +50,6 @@
         "default": "./dist/cjs/react-native.cjs"
       }
     },
-    "./expo": {
-      "import": {
-        "types": "./dist/esm/expo.d.ts",
-        "default": "./dist/esm/expo.js"
-      },
-      "require": {
-        "types": "./dist/cjs/expo.d.cts",
-        "default": "./dist/cjs/expo.cjs"
-      }
-    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,

@@ -1,5 +1,6 @@
 import type { LoadSubsetOptions } from '@tanstack/db'
 import type {
+  PersistedCollectionMode,
   PersistedIndexSpec,
   PersistedTx,
   SQLitePullSinceResult,
@@ -10,6 +11,11 @@ export const DEFAULT_ELECTRON_PERSISTENCE_CHANNEL = `tanstack-db:sqlite-persiste
 
 export type ElectronPersistedRow = Record<string, unknown>
 export type ElectronPersistedKey = string | number
+
+export type ElectronPersistenceResolution = {
+  mode: PersistedCollectionMode
+  schemaVersion?: number
+}
 
 export type ElectronPersistenceMethod =
   | `loadSubset`
@@ -58,6 +64,7 @@ export type ElectronPersistenceRequestByMethod = {
     v: number
     requestId: string
     collectionId: string
+    resolution?: ElectronPersistenceResolution
     method: Method
     payload: ElectronPersistencePayloadMap[Method]
   }

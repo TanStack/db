@@ -6,10 +6,8 @@ import type {
   PersistedCollectionCoordinator,
   PersistedCollectionMode,
   PersistedCollectionPersistence,
-  PersistenceAdapter,
   SQLiteCoreAdapterOptions,
   SQLiteDriver,
-  SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persisted-collection-core'
 
 type NodeSQLiteCoreSchemaMismatchPolicy =
@@ -21,27 +19,13 @@ export type NodeSQLiteSchemaMismatchPolicy =
   | NodeSQLiteCoreSchemaMismatchPolicy
   | `throw`
 
-export type NodeSQLitePersistenceAdapterOptions = Omit<
+export type NodeSQLitePersistenceOptions = Omit<
   SQLiteCoreAdapterOptions,
-  `driver` | `schemaMismatchPolicy`
+  `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > & {
   driver: SQLiteDriver
+  coordinator?: PersistedCollectionCoordinator
   schemaMismatchPolicy?: NodeSQLiteSchemaMismatchPolicy
-}
-
-export type NodeSQLitePersistenceOptions =
-  NodeSQLitePersistenceAdapterOptions & {
-    coordinator?: PersistedCollectionCoordinator
-  }
-
-export type NodeSQLitePersistenceAdapter<
-  T extends object,
-  TKey extends string | number = string | number,
-> = PersistenceAdapter<T, TKey> & {
-  pullSince: (
-    collectionId: string,
-    fromRowVersion: number,
-  ) => Promise<SQLitePullSinceResult<TKey>>
 }
 
 function normalizeSchemaMismatchPolicy(
@@ -65,92 +49,19 @@ function resolveSchemaMismatchPolicy(
   return mode === `sync-present` ? `sync-present-reset` : `sync-absent-error`
 }
 
-export class NodeSQLitePersister {
-  private readonly coordinator: PersistedCollectionCoordinator
-  private readonly explicitSchemaMismatchPolicy: NodeSQLiteSchemaMismatchPolicy | undefined
-  private readonly adapterBaseOptions: Omit<
-    NodeSQLitePersistenceAdapterOptions,
-    `schemaMismatchPolicy`
-  >
-  private readonly adaptersBySchemaPolicy = new Map<
-    NodeSQLiteCoreSchemaMismatchPolicy,
-    PersistenceAdapter<Record<string, unknown>, string | number>
-  >()
-
-  constructor(options: NodeSQLitePersistenceOptions) {
-    const { coordinator, schemaMismatchPolicy, ...adapterBaseOptions } = options
-    this.coordinator = coordinator ?? new SingleProcessCoordinator()
-    this.explicitSchemaMismatchPolicy = schemaMismatchPolicy
-    this.adapterBaseOptions = adapterBaseOptions
-  }
-
-  getAdapter<
-    T extends object,
-    TKey extends string | number = string | number,
-  >(
-    mode: PersistedCollectionMode = `sync-absent`,
-  ): NodeSQLitePersistenceAdapter<T, TKey> {
-    const resolvedSchemaPolicy = resolveSchemaMismatchPolicy(
-      this.explicitSchemaMismatchPolicy,
-      mode,
-    )
-    const cachedAdapter = this.adaptersBySchemaPolicy.get(resolvedSchemaPolicy)
-    if (cachedAdapter) {
-      return cachedAdapter as unknown as NodeSQLitePersistenceAdapter<T, TKey>
-    }
-
-    const adapter = createSQLiteCorePersistenceAdapter<
-      Record<string, unknown>,
-      string | number
-    >({
-      ...this.adapterBaseOptions,
-      schemaMismatchPolicy: resolvedSchemaPolicy,
-    })
-    this.adaptersBySchemaPolicy.set(resolvedSchemaPolicy, adapter)
-    return adapter as unknown as NodeSQLitePersistenceAdapter<T, TKey>
-  }
-
-  getPersistence<
-    T extends object,
-    TKey extends string | number = string | number,
-  >(
-    mode: PersistedCollectionMode = `sync-absent`,
-    coordinator: PersistedCollectionCoordinator = this.coordinator,
-  ): PersistedCollectionPersistence<T, TKey> {
-    return {
-      adapter: this.getAdapter<T, TKey>(mode),
-      coordinator,
-    }
-  }
-}
-
-export function createNodeSQLitePersister(
-  options: NodeSQLitePersistenceOptions,
-): NodeSQLitePersister {
-  return new NodeSQLitePersister(options)
-}
-
-export function createNodeSQLitePersistenceAdapter<
-  T extends object,
-  TKey extends string | number = string | number,
->(
-  options: NodeSQLitePersistenceAdapterOptions,
-): NodeSQLitePersistenceAdapter<T, TKey> {
-  const { schemaMismatchPolicy: rawSchemaMismatchPolicy, ...adapterOptions } =
-    options
-  const schemaMismatchPolicy = rawSchemaMismatchPolicy
-    ? normalizeSchemaMismatchPolicy(rawSchemaMismatchPolicy)
-    : undefined
-
-  return createSQLiteCorePersistenceAdapter<T, TKey>({
-    ...adapterOptions,
-    schemaMismatchPolicy,
-  }) as unknown as NodeSQLitePersistenceAdapter<T, TKey>
+function createAdapterCacheKey(
+  schemaMismatchPolicy: NodeSQLiteCoreSchemaMismatchPolicy,
+  schemaVersion: number | undefined,
+): string {
+  const schemaVersionKey =
+    schemaVersion === undefined ? `schema:default` : `schema:${schemaVersion}`
+  return `${schemaMismatchPolicy}|${schemaVersionKey}`
 }
 
 /**
- * Returns mode-aware persistence that can be reused across collections.
- * `persistedCollectionOptions` calls `resolvePersistenceForMode` internally.
+ * Creates a shared SQLite persistence instance that can be reused by many
+ * collections on the same database. Collection-specific schema versions are
+ * resolved by `persistedCollectionOptions` via `resolvePersistenceForCollection`.
  */
 export function createNodeSQLitePersistence<
   T extends object,
@@ -158,11 +69,65 @@ export function createNodeSQLitePersistence<
 >(
   options: NodeSQLitePersistenceOptions,
 ): PersistedCollectionPersistence<T, TKey> {
-  const persister = createNodeSQLitePersister(options)
-  const defaultPersistence = persister.getPersistence<T, TKey>(`sync-absent`)
+  const { coordinator, driver, schemaMismatchPolicy, ...adapterBaseOptions } =
+    options
+  const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
+  const adapterCache = new Map<
+    string,
+    ReturnType<
+      typeof createSQLiteCorePersistenceAdapter<Record<string, unknown>, string | number>
+    >
+  >()
+
+  const getAdapterForCollection = (
+    mode: PersistedCollectionMode,
+    schemaVersion: number | undefined,
+  ) => {
+    const resolvedSchemaMismatchPolicy = resolveSchemaMismatchPolicy(
+      schemaMismatchPolicy,
+      mode,
+    )
+    const cacheKey = createAdapterCacheKey(
+      resolvedSchemaMismatchPolicy,
+      schemaVersion,
+    )
+    const cachedAdapter = adapterCache.get(cacheKey)
+    if (cachedAdapter) {
+      return cachedAdapter
+    }
+
+    const adapter = createSQLiteCorePersistenceAdapter<
+      Record<string, unknown>,
+      string | number
+    >({
+      ...adapterBaseOptions,
+      driver,
+      schemaMismatchPolicy: resolvedSchemaMismatchPolicy,
+      ...(schemaVersion === undefined ? {} : { schemaVersion }),
+    })
+    adapterCache.set(cacheKey, adapter)
+    return adapter
+  }
+
+  const createCollectionPersistence = (
+    mode: PersistedCollectionMode,
+    schemaVersion: number | undefined,
+  ): PersistedCollectionPersistence<T, TKey> => ({
+    adapter: getAdapterForCollection(
+      mode,
+      schemaVersion,
+    ) as PersistedCollectionPersistence<T, TKey>[`adapter`],
+    coordinator: resolvedCoordinator,
+  })
+
+  const defaultPersistence = createCollectionPersistence(`sync-absent`, undefined)
 
   return {
     ...defaultPersistence,
-    resolvePersistenceForMode: (mode) => persister.getPersistence<T, TKey>(mode),
+    resolvePersistenceForCollection: ({ mode, schemaVersion }) =>
+      createCollectionPersistence(mode, schemaVersion),
+    // Backward compatible fallback for older callers.
+    resolvePersistenceForMode: (mode) =>
+      createCollectionPersistence(mode, undefined),
   }
 }

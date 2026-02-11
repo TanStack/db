@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  SingleProcessCoordinator,
-  createExpoSQLitePersistence,
-  createOpSQLiteDriver,
+  OpSQLiteDriver,
   createReactNativeSQLitePersistence,
+  persistedCollectionOptions,
 } from '../src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
+import { SingleProcessCoordinator } from '../../db-sqlite-persisted-collection-core/src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 import type {
   PersistedCollectionCoordinator,
@@ -22,14 +22,13 @@ import type {
 
 type RuntimePersistenceFactory = (options: {
   driver: SQLiteDriver
-  schemaVersion?: number
   coordinator?: PersistedCollectionCoordinator
 }) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
 
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-mobile-persistence-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
-  const drivers = new Set<ReturnType<typeof createOpSQLiteDriver>>()
+  const drivers = new Set<OpSQLiteDriver>()
   const databases = new Set<ReturnType<typeof createOpSQLiteTestDatabase>>()
 
   return {
@@ -38,7 +37,7 @@ function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
         filename: dbPath,
         resultShape: `statement-array`,
       })
-      const driver = createOpSQLiteDriver({ database })
+      const driver = new OpSQLiteDriver({ database })
       databases.add(database)
       drivers.add(driver)
       return driver
@@ -67,8 +66,9 @@ const runtimePersistenceSuites: ReadonlyArray<{
     createPersistence: (options) => createReactNativeSQLitePersistence(options),
   },
   {
-    name: `expo`,
-    createPersistence: (options) => createExpoSQLitePersistence(options),
+    // Expo runtime uses the same React Native API.
+    name: `expo-runtime`,
+    createPersistence: (options) => createReactNativeSQLitePersistence(options),
   },
 ]
 
@@ -121,14 +121,24 @@ for (const suite of runtimePersistenceSuites) {
         filename: dbPath,
         resultShape: `statement-array`,
       })
-      const firstDriver = createOpSQLiteDriver({ database: firstDatabase })
+      const firstDriver = new OpSQLiteDriver({ database: firstDatabase })
 
       try {
         const firstPersistence = suite.createPersistence({
           driver: firstDriver,
-          schemaVersion: 1,
         })
-        await firstPersistence.adapter.applyCommittedTx(collectionId, {
+        const firstCollectionOptions = persistedCollectionOptions<
+          RuntimePersistenceContractTodo,
+          string
+        >({
+          id: collectionId,
+          schemaVersion: 1,
+          getKey: (todo) => todo.id,
+          persistence: firstPersistence,
+        })
+        await firstCollectionOptions.persistence.adapter.applyCommittedTx(
+          collectionId,
+          {
           txId: `tx-1`,
           term: 1,
           seq: 1,
@@ -144,7 +154,8 @@ for (const suite of runtimePersistenceSuites) {
               },
             },
           ],
-        })
+        },
+        )
       } finally {
         await Promise.resolve(firstDatabase.close())
       }
@@ -153,24 +164,40 @@ for (const suite of runtimePersistenceSuites) {
         filename: dbPath,
         resultShape: `statement-array`,
       })
-      const secondDriver = createOpSQLiteDriver({ database: secondDatabase })
+      const secondDriver = new OpSQLiteDriver({ database: secondDatabase })
       try {
         const secondPersistence = suite.createPersistence({
           driver: secondDriver,
-          schemaVersion: 2,
         })
 
-        const syncAbsentPersistence =
-          secondPersistence.resolvePersistenceForMode?.(`sync-absent`) ??
-          secondPersistence
+        const syncAbsentOptions = persistedCollectionOptions<
+          RuntimePersistenceContractTodo,
+          string
+        >({
+          id: collectionId,
+          schemaVersion: 2,
+          getKey: (todo) => todo.id,
+          persistence: secondPersistence,
+        })
         await expect(
-          syncAbsentPersistence.adapter.loadSubset(collectionId, {}),
+          syncAbsentOptions.persistence.adapter.loadSubset(collectionId, {}),
         ).rejects.toThrow(`Schema version mismatch`)
 
-        const syncPresentPersistence =
-          secondPersistence.resolvePersistenceForMode?.(`sync-present`) ??
-          secondPersistence
-        const rows = await syncPresentPersistence.adapter.loadSubset(
+        const syncPresentOptions = persistedCollectionOptions<
+          RuntimePersistenceContractTodo,
+          string
+        >({
+          id: collectionId,
+          schemaVersion: 2,
+          getKey: (todo) => todo.id,
+          sync: {
+            sync: ({ markReady }) => {
+              markReady()
+            },
+          },
+          persistence: secondPersistence,
+        })
+        const rows = await syncPresentOptions.persistence.adapter.loadSubset(
           collectionId,
           {},
         )

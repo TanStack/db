@@ -251,6 +251,11 @@ export interface PersistedCollectionPersistence<
 > {
   adapter: PersistenceAdapter<T, TKey>
   coordinator?: PersistedCollectionCoordinator
+  resolvePersistenceForCollection?: (options: {
+    collectionId: string
+    mode: PersistedCollectionMode
+    schemaVersion?: number
+  }) => PersistedCollectionPersistence<T, TKey>
   resolvePersistenceForMode?: (
     mode: PersistedCollectionMode,
   ) => PersistedCollectionPersistence<T, TKey>
@@ -284,6 +289,7 @@ export type PersistedSyncWrappedOptions<
 > = CollectionConfig<T, TKey, TSchema, TUtils> & {
   sync: SyncConfig<T, TKey>
   persistence: PersistedCollectionPersistence<T, TKey>
+  schemaVersion?: number
 }
 
 export type PersistedLocalOnlyOptions<
@@ -293,6 +299,7 @@ export type PersistedLocalOnlyOptions<
   TUtils extends UtilsRecord = UtilsRecord,
 > = Omit<CollectionConfig<T, TKey, TSchema, TUtils>, `sync`> & {
   persistence: PersistedCollectionPersistence<T, TKey>
+  schemaVersion?: number
 }
 
 type PersistedSyncOptionsResult<
@@ -461,6 +468,26 @@ function resolvePersistenceForMode<T extends object, TKey extends string | numbe
 ): PersistedResolvedPersistence<T, TKey> {
   const modeSpecificPersistence = persistence.resolvePersistenceForMode?.(mode)
   return resolvePersistence(modeSpecificPersistence ?? persistence)
+}
+
+function resolvePersistenceForCollection<
+  T extends object,
+  TKey extends string | number,
+>(
+  persistence: PersistedCollectionPersistence<T, TKey>,
+  options: {
+    collectionId: string
+    mode: PersistedCollectionMode
+    schemaVersion?: number
+  },
+): PersistedResolvedPersistence<T, TKey> {
+  const collectionSpecificPersistence =
+    persistence.resolvePersistenceForCollection?.(options)
+  if (collectionSpecificPersistence) {
+    return resolvePersistence(collectionSpecificPersistence)
+  }
+
+  return resolvePersistenceForMode(persistence, options.mode)
 }
 
 function hasOwnSyncKey(options: object): options is { sync: unknown } {
@@ -2009,36 +2036,41 @@ export function persistedCollectionOptions<
       )
     }
 
-    const persistence = resolvePersistenceForMode(
-      options.persistence,
-      `sync-present`,
-    )
+    const { schemaVersion, ...syncOptions } = options
+    const collectionId = syncOptions.id ?? `persisted-collection:${crypto.randomUUID()}`
+    const persistence = resolvePersistenceForCollection(syncOptions.persistence, {
+      collectionId,
+      mode: `sync-present`,
+      schemaVersion,
+    })
 
-    const collectionId =
-      options.id ?? `persisted-collection:${crypto.randomUUID()}`
     const runtime = new PersistedCollectionRuntime<T, TKey>(
       `sync-present`,
       collectionId,
       persistence,
-      options.syncMode ?? `eager`,
+      syncOptions.syncMode ?? `eager`,
       collectionId,
     )
 
     return {
-      ...options,
+      ...syncOptions,
       id: collectionId,
-      sync: createWrappedSyncConfig<T, TKey>(options.sync, runtime),
+      sync: createWrappedSyncConfig<T, TKey>(syncOptions.sync, runtime),
       persistence,
     }
   }
 
-  const localOnlyOptions = options
-  const persistence = resolvePersistenceForMode(
-    options.persistence,
-    `sync-absent`,
-  )
+  const { schemaVersion, ...localOnlyOptions } = options
   const collectionId =
     localOnlyOptions.id ?? `persisted-collection:${crypto.randomUUID()}`
+  const persistence = resolvePersistenceForCollection(
+    localOnlyOptions.persistence,
+    {
+      collectionId,
+      mode: `sync-absent`,
+      schemaVersion,
+    },
+  )
   const runtime = new PersistedCollectionRuntime<T, TKey>(
     `sync-absent`,
     collectionId,

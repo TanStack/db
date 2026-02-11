@@ -2,30 +2,28 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { InvalidPersistedCollectionConfigError } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
-  createBetterSqlite3Driver,
-  createNodeSQLitePersistenceAdapter,
+  BetterSqlite3SQLiteDriver,
+  createNodeSQLitePersistence,
 } from '@tanstack/db-node-sqlite-persisted-collection'
 import {
-  DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
-  ElectronPersistenceMainRegistry,
-  ElectronPersistenceRpcError,
-  ElectronPersistenceTimeoutError,
-  createElectronNodeSQLiteMainRegistry,
-  createElectronRendererPersistence,
-  createElectronRendererPersistenceAdapter,
-  registerElectronPersistenceMainIpcHandler,
+  createElectronSQLitePersistence,
+  exposeElectronSQLitePersistence,
 } from '../src'
+import {
+  DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
+  ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+} from '../src/protocol'
 import {
   createElectronRuntimeBridgeInvoke,
   isElectronFullE2EEnabled,
 } from './e2e/electron-process-client'
 import type {
   ElectronPersistenceInvoke,
-  ElectronPersistenceRequest,
-  ElectronPersistenceResponse,
-} from '../src'
-import type { ElectronRuntimeBridgeHostKind } from './e2e/fixtures/runtime-bridge-types'
+  ElectronPersistenceRequestEnvelope,
+  ElectronPersistenceResponseEnvelope,
+} from '../src/protocol'
 
 type Todo = {
   id: string
@@ -33,72 +31,121 @@ type Todo = {
   score: number
 }
 
-type MainRuntime = {
-  host: ReturnType<ElectronPersistenceMainRegistry[`createHost`]>
+type InvokeHarness = {
+  invoke: ElectronPersistenceInvoke
   close: () => void
 }
 
 const electronRuntimeBridgeTimeoutMs = isElectronFullE2EEnabled()
   ? 45_000
   : 4_000
-const rendererRequestTimeoutMs = isElectronFullE2EEnabled() ? 45_000 : undefined
 
-function createRendererAdapter<T extends object, TKey extends string | number>(
-  invoke: ElectronPersistenceInvoke,
+function createFilteredPersistence(
+  collectionId: string,
+  allowAnyCollectionId: boolean,
+  persistence: ReturnType<typeof createNodeSQLitePersistence>,
 ) {
-  return createElectronRendererPersistenceAdapter<T, TKey>({
-    invoke,
-    timeoutMs: rendererRequestTimeoutMs,
-  })
-}
+  if (allowAnyCollectionId) {
+    return persistence
+  }
 
-function createMainRuntime(dbPath: string, collectionId: string): MainRuntime {
-  const driver = createBetterSqlite3Driver({ filename: dbPath })
-  const adapter = createNodeSQLitePersistenceAdapter<
-    Record<string, unknown>,
-    string | number
-  >({
-    driver,
-  })
-
-  const registry = new ElectronPersistenceMainRegistry()
-  registry.registerCollection(collectionId, adapter)
+  const baseAdapter = persistence.adapter
+  const assertKnownCollection = (requestedCollectionId: string) => {
+    if (requestedCollectionId !== collectionId) {
+      const error = new Error(
+        `Unknown electron persistence collection "${requestedCollectionId}"`,
+      )
+      error.name = `UnknownElectronPersistenceCollectionError`
+      ;(error as Error & { code?: string }).code = `UNKNOWN_COLLECTION`
+      throw error
+    }
+  }
 
   return {
-    host: registry.createHost(),
-    close: () => {
-      driver.close()
-      registry.clear()
+    ...persistence,
+    adapter: {
+      loadSubset: (requestedCollectionId, options, ctx) => {
+        assertKnownCollection(requestedCollectionId)
+        return baseAdapter.loadSubset(requestedCollectionId, options, ctx)
+      },
+      applyCommittedTx: (requestedCollectionId, tx) => {
+        assertKnownCollection(requestedCollectionId)
+        return baseAdapter.applyCommittedTx(requestedCollectionId, tx)
+      },
+      ensureIndex: (requestedCollectionId, signature, spec) => {
+        assertKnownCollection(requestedCollectionId)
+        return baseAdapter.ensureIndex(requestedCollectionId, signature, spec)
+      },
+      markIndexRemoved: (requestedCollectionId, signature) => {
+        assertKnownCollection(requestedCollectionId)
+        return baseAdapter.markIndexRemoved?.(requestedCollectionId, signature)
+      },
     },
   }
-}
-
-type InvokeHarness = {
-  invoke: ElectronPersistenceInvoke
-  close: () => void
 }
 
 function createInvokeHarness(
   dbPath: string,
   collectionId: string,
-  options?: { hostKind?: ElectronRuntimeBridgeHostKind },
+  allowAnyCollectionId: boolean = false,
 ): InvokeHarness {
   if (isElectronFullE2EEnabled()) {
     return {
       invoke: createElectronRuntimeBridgeInvoke({
         dbPath,
         collectionId,
+        allowAnyCollectionId,
         timeoutMs: electronRuntimeBridgeTimeoutMs,
-        hostKind: options?.hostKind,
       }),
       close: () => {},
     }
   }
 
-  const runtime = createMainRuntime(dbPath, collectionId)
+  const driver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
+  const persistence = createNodeSQLitePersistence<Todo, string>({
+    driver,
+  })
+  const filteredPersistence = createFilteredPersistence(
+    collectionId,
+    allowAnyCollectionId,
+    persistence,
+  )
+
+  let handler:
+    | ((
+        event: unknown,
+        request: ElectronPersistenceRequestEnvelope,
+      ) => Promise<ElectronPersistenceResponseEnvelope>)
+    | undefined
+
+  const ipcMainLike = {
+    handle: (
+      _channel: string,
+      listener: (
+        event: unknown,
+        request: ElectronPersistenceRequestEnvelope,
+      ) => Promise<ElectronPersistenceResponseEnvelope>,
+    ) => {
+      handler = listener
+    },
+    removeHandler: () => {},
+  }
+  const dispose = exposeElectronSQLitePersistence({
+    ipcMain: ipcMainLike,
+    persistence: filteredPersistence,
+  })
+
   return {
-    invoke: async (_channel, request) => runtime.host.handleRequest(request),
-    close: () => runtime.close(),
+    invoke: async (_channel, request) => {
+      if (!handler) {
+        throw new Error(`Electron IPC handler was not registered`)
+      }
+      return handler(undefined, request)
+    },
+    close: () => {
+      dispose()
+      driver.close()
+    },
   }
 }
 
@@ -121,19 +168,20 @@ function createTempDbPath(): string {
 }
 
 describe(`electron sqlite persistence bridge`, () => {
-  it(`round-trips reads and writes through main-process host`, async () => {
+  it(`round-trips reads and writes through main process`, async () => {
     const dbPath = createTempDbPath()
     const invokeHarness = createInvokeHarness(dbPath, `todos`)
     activeCleanupFns.push(() => invokeHarness.close())
 
-    const invoke: ElectronPersistenceInvoke = async (channel, request) => {
-      expect(channel).toBe(DEFAULT_ELECTRON_PERSISTENCE_CHANNEL)
-      return invokeHarness.invoke(channel, request)
-    }
+    const rendererPersistence = createElectronSQLitePersistence<Todo, string>({
+      invoke: async (channel, request) => {
+        expect(channel).toBe(DEFAULT_ELECTRON_PERSISTENCE_CHANNEL)
+        return invokeHarness.invoke(channel, request)
+      },
+      timeoutMs: electronRuntimeBridgeTimeoutMs,
+    })
 
-    const rendererAdapter = createRendererAdapter<Todo, string>(invoke)
-
-    await rendererAdapter.applyCommittedTx(`todos`, {
+    await rendererPersistence.adapter.applyCommittedTx(`todos`, {
       txId: `tx-1`,
       term: 1,
       seq: 1,
@@ -151,7 +199,7 @@ describe(`electron sqlite persistence bridge`, () => {
       ],
     })
 
-    const rows = await rendererAdapter.loadSubset(`todos`, {})
+    const rows = await rendererPersistence.adapter.loadSubset(`todos`, {})
     expect(rows).toEqual([
       {
         key: `1`,
@@ -164,7 +212,7 @@ describe(`electron sqlite persistence bridge`, () => {
     ])
   })
 
-  it(`persists data across main-process restarts`, async () => {
+  it(`persists data across main process restarts`, async () => {
     const dbPath = createTempDbPath()
 
     if (isElectronFullE2EEnabled()) {
@@ -173,9 +221,12 @@ describe(`electron sqlite persistence bridge`, () => {
         collectionId: `todos`,
         timeoutMs: electronRuntimeBridgeTimeoutMs,
       })
-      const rendererAdapterA = createRendererAdapter<Todo, string>(invoke)
+      const rendererPersistence = createElectronSQLitePersistence<Todo, string>({
+        invoke,
+        timeoutMs: electronRuntimeBridgeTimeoutMs,
+      })
 
-      await rendererAdapterA.applyCommittedTx(`todos`, {
+      await rendererPersistence.adapter.applyCommittedTx(`todos`, {
         txId: `tx-restart-1`,
         term: 1,
         seq: 1,
@@ -193,20 +244,17 @@ describe(`electron sqlite persistence bridge`, () => {
         ],
       })
 
-      const rendererAdapterB = createRendererAdapter<Todo, string>(invoke)
-
-      const rows = await rendererAdapterB.loadSubset(`todos`, {})
-      expect(rows.map((row) => row.key)).toEqual([`persisted`])
+      const rows = await rendererPersistence.adapter.loadSubset(`todos`, {})
       expect(rows[0]?.value.title).toBe(`Survives restart`)
       return
     }
 
-    const runtimeA = createMainRuntime(dbPath, `todos`)
-    const invokeA: ElectronPersistenceInvoke = (_channel, request) =>
-      runtimeA.host.handleRequest(request)
-    const rendererAdapterA = createRendererAdapter<Todo, string>(invokeA)
-
-    await rendererAdapterA.applyCommittedTx(`todos`, {
+    const invokeHarnessA = createInvokeHarness(dbPath, `todos`)
+    const rendererPersistenceA = createElectronSQLitePersistence<Todo, string>({
+      invoke: invokeHarnessA.invoke,
+      timeoutMs: electronRuntimeBridgeTimeoutMs,
+    })
+    await rendererPersistenceA.adapter.applyCommittedTx(`todos`, {
       txId: `tx-restart-1`,
       term: 1,
       seq: 1,
@@ -223,87 +271,53 @@ describe(`electron sqlite persistence bridge`, () => {
         },
       ],
     })
-    runtimeA.close()
+    invokeHarnessA.close()
 
-    const runtimeB = createMainRuntime(dbPath, `todos`)
-    activeCleanupFns.push(() => runtimeB.close())
-    const invokeB: ElectronPersistenceInvoke = (_channel, request) =>
-      runtimeB.host.handleRequest(request)
-    const rendererAdapterB = createRendererAdapter<Todo, string>(invokeB)
-
-    const rows = await rendererAdapterB.loadSubset(`todos`, {})
-    expect(rows.map((row) => row.key)).toEqual([`persisted`])
+    const invokeHarnessB = createInvokeHarness(dbPath, `todos`)
+    activeCleanupFns.push(() => invokeHarnessB.close())
+    const rendererPersistenceB = createElectronSQLitePersistence<Todo, string>({
+      invoke: invokeHarnessB.invoke,
+      timeoutMs: electronRuntimeBridgeTimeoutMs,
+    })
+    const rows = await rendererPersistenceB.adapter.loadSubset(`todos`, {})
     expect(rows[0]?.value.title).toBe(`Survives restart`)
   })
 
   it(`returns deterministic timeout errors`, async () => {
     const neverInvoke: ElectronPersistenceInvoke = async () =>
-      await new Promise<ElectronPersistenceResponse>(() => {})
+      await new Promise<ElectronPersistenceResponseEnvelope>(() => {})
 
-    const rendererAdapter = createElectronRendererPersistenceAdapter<
-      Todo,
-      string
-    >({
+    const rendererPersistence = createElectronSQLitePersistence<Todo, string>({
       invoke: neverInvoke,
       timeoutMs: 5,
     })
 
     await expect(
-      rendererAdapter.loadSubset(`todos`, {}),
-    ).rejects.toBeInstanceOf(ElectronPersistenceTimeoutError)
+      rendererPersistence.adapter.loadSubset(`todos`, {}),
+    ).rejects.toBeInstanceOf(InvalidPersistedCollectionConfigError)
   })
 
-  it(`returns structured remote errors for unknown collections`, async () => {
+  it(`returns remote errors for unknown collections`, async () => {
     const dbPath = createTempDbPath()
-    const invokeHarness = createInvokeHarness(dbPath, `known`)
+    const invokeHarness = createInvokeHarness(dbPath, `known`, false)
     activeCleanupFns.push(() => invokeHarness.close())
-
-    const invoke: ElectronPersistenceInvoke = async (channel, request) =>
-      invokeHarness.invoke(channel, request)
-    const rendererAdapter = createRendererAdapter<Todo, string>(invoke)
-
-    await expect(
-      rendererAdapter.loadSubset(`missing`, {}),
-    ).rejects.toMatchObject({
-      name: `ElectronPersistenceRpcError`,
-      code: `UNKNOWN_COLLECTION`,
+    const rendererPersistence = createElectronSQLitePersistence<Todo, string>({
+      invoke: invokeHarness.invoke,
+      timeoutMs: electronRuntimeBridgeTimeoutMs,
     })
 
     await expect(
-      rendererAdapter.loadSubset(`missing`, {}),
-    ).rejects.toBeInstanceOf(ElectronPersistenceRpcError)
+      rendererPersistence.adapter.loadSubset(`missing`, {}),
+    ).rejects.toThrow(`Unknown electron persistence collection`)
   })
 
-  it(`wires renderer persistence helper with default and custom coordinator`, () => {
-    const invoke: ElectronPersistenceInvoke = (_channel, request) =>
-      Promise.resolve({
-        v: 1,
-        requestId: request.requestId,
-        method: request.method,
-        ok: true,
-        result: null,
-      }) as Promise<ElectronPersistenceResponse>
-
-    const persistenceWithDefault = createElectronRendererPersistence({
-      invoke,
-    })
-    expect(persistenceWithDefault.coordinator).toBeTruthy()
-
-    const customCoordinator = persistenceWithDefault.coordinator
-    const persistenceWithCustom = createElectronRendererPersistence({
-      invoke,
-      coordinator: customCoordinator,
-    })
-    expect(persistenceWithCustom.coordinator).toBe(customCoordinator)
-  })
-
-  it(`registers and unregisters electron ipc handlers`, async () => {
+  it(`registers and unregisters ipc handlers through thin api`, async () => {
     let registeredChannel: string | undefined
     let registeredHandler:
       | ((
           event: unknown,
-          request: ElectronPersistenceRequest,
-        ) => Promise<ElectronPersistenceResponse>)
+          request: ElectronPersistenceRequestEnvelope,
+        ) => Promise<ElectronPersistenceResponseEnvelope>)
       | undefined
     const removedChannels: Array<string> = []
 
@@ -312,8 +326,8 @@ describe(`electron sqlite persistence bridge`, () => {
         channel: string,
         handler: (
           event: unknown,
-          request: ElectronPersistenceRequest,
-        ) => Promise<ElectronPersistenceResponse>,
+          request: ElectronPersistenceRequestEnvelope,
+        ) => Promise<ElectronPersistenceResponseEnvelope>,
       ) => {
         registeredChannel = channel
         registeredHandler = handler
@@ -323,151 +337,34 @@ describe(`electron sqlite persistence bridge`, () => {
       },
     }
 
-    const host = {
-      handleRequest: (
-        request: ElectronPersistenceRequest,
-      ): Promise<ElectronPersistenceResponse> => {
-        switch (request.method) {
-          case `loadSubset`:
-            return Promise.resolve({
-              v: 1,
-              requestId: request.requestId,
-              method: request.method,
-              ok: true,
-              result: [],
-            })
-          case `pullSince`:
-            return Promise.resolve({
-              v: 1,
-              requestId: request.requestId,
-              method: request.method,
-              ok: true,
-              result: {
-                latestRowVersion: 0,
-                requiresFullReload: true,
-              },
-            })
-          default:
-            return Promise.resolve({
-              v: 1,
-              requestId: request.requestId,
-              method: request.method,
-              ok: true,
-              result: null,
-            })
-        }
-      },
-    }
+    const persistence = createNodeSQLitePersistence<Todo, string>({
+      driver: new BetterSqlite3SQLiteDriver({ filename: createTempDbPath() }),
+    })
 
-    const dispose = registerElectronPersistenceMainIpcHandler({
+    const dispose = exposeElectronSQLitePersistence({
       ipcMain: fakeIpcMain,
-      host,
+      persistence,
     })
 
     expect(registeredChannel).toBe(DEFAULT_ELECTRON_PERSISTENCE_CHANNEL)
     expect(registeredHandler).toBeDefined()
 
     const response = await registeredHandler?.(undefined, {
-      v: 1,
+      v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
       requestId: `req-1`,
       collectionId: `todos`,
-      method: `ensureIndex`,
+      method: `loadSubset`,
       payload: {
-        signature: `sig`,
-        spec: {
-          expressionSql: [`json_extract(value, '$.id')`],
-        },
+        options: {},
       },
     })
-
     expect(response).toMatchObject({
       ok: true,
       requestId: `req-1`,
-      method: `ensureIndex`,
+      method: `loadSubset`,
     })
 
     dispose()
     expect(removedChannels).toEqual([DEFAULT_ELECTRON_PERSISTENCE_CHANNEL])
-  })
-
-  it(`reuses node adapter logic through helper registry`, async () => {
-    if (isElectronFullE2EEnabled()) {
-      const dbPath = createTempDbPath()
-      const invoke = createElectronRuntimeBridgeInvoke({
-        dbPath,
-        collectionId: `todos`,
-        timeoutMs: electronRuntimeBridgeTimeoutMs,
-        hostKind: `node-registry`,
-      })
-      const rendererAdapter = createRendererAdapter<Todo, string>(invoke)
-
-      await rendererAdapter.applyCommittedTx(`todos`, {
-        txId: `tx-helper-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `helper`,
-            value: {
-              id: `helper`,
-              title: `Node helper`,
-              score: 9,
-            },
-          },
-        ],
-      })
-
-      const rows = await rendererAdapter.loadSubset(`todos`, {})
-      expect(rows).toHaveLength(1)
-      expect(rows[0]?.key).toBe(`helper`)
-      return
-    }
-
-    const dbPath = createTempDbPath()
-    const driver = createBetterSqlite3Driver({ filename: dbPath })
-    activeCleanupFns.push(() => {
-      driver.close()
-    })
-
-    const registry = createElectronNodeSQLiteMainRegistry([
-      {
-        collectionId: `todos`,
-        adapterOptions: {
-          driver,
-        },
-      },
-    ])
-    activeCleanupFns.push(() => {
-      registry.clear()
-    })
-    const host = registry.createHost()
-
-    const invoke: ElectronPersistenceInvoke = (_channel, request) =>
-      host.handleRequest(request)
-    const rendererAdapter = createRendererAdapter<Todo, string>(invoke)
-
-    await rendererAdapter.applyCommittedTx(`todos`, {
-      txId: `tx-helper-1`,
-      term: 1,
-      seq: 1,
-      rowVersion: 1,
-      mutations: [
-        {
-          type: `insert`,
-          key: `helper`,
-          value: {
-            id: `helper`,
-            title: `Node helper`,
-            score: 9,
-          },
-        },
-      ],
-    })
-
-    const rows = await rendererAdapter.loadSubset(`todos`, {})
-    expect(rows).toHaveLength(1)
-    expect(rows[0]?.key).toBe(`helper`)
   })
 })

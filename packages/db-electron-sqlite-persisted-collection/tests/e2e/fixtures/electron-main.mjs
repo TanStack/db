@@ -8,11 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { serialize } from 'node:v8'
 import { BrowserWindow, app, ipcMain } from 'electron'
 import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persisted-collection-core'
-import {
-  createElectronNodeSQLiteMainRegistry,
-  createElectronPersistenceMainHost,
-  registerElectronPersistenceMainIpcHandler,
-} from '../../../dist/esm/main.js'
+import { exposeElectronSQLitePersistence } from '../../../dist/esm/main.js'
 
 const E2E_RESULT_PREFIX = `__TANSTACK_DB_E2E_RESULT__:`
 const E2E_RESULT_BASE64_PREFIX = `__TANSTACK_DB_E2E_RESULT_BASE64__:`
@@ -262,38 +258,65 @@ function serializeError(error) {
   }
 }
 
-function createMainHost(input, driver) {
-  if (input.hostKind === `node-registry`) {
-    const registry = createElectronNodeSQLiteMainRegistry([
-      {
-        collectionId: input.collectionId,
-        adapterOptions: {
-          driver,
-          ...(input.adapterOptions ?? {}),
-        },
-      },
-    ])
+function createUnknownCollectionError(collectionId) {
+  const error = new Error(
+    `Unknown electron persistence collection "${collectionId}"`,
+  )
+  error.name = `UnknownElectronPersistenceCollectionError`
+  error.code = `UNKNOWN_COLLECTION`
+  return error
+}
 
-    return {
-      host: registry.createHost(),
-      cleanup: () => {
-        registry.clear()
-      },
-    }
-  }
-
+function createMainPersistence(input, driver) {
   const adapter = createSQLiteCorePersistenceAdapter({
     driver,
     ...(input.adapterOptions ?? {}),
   })
 
+  if (input.allowAnyCollectionId) {
+    return {
+      persistence: {
+        adapter,
+      },
+      cleanup: () => {},
+    }
+  }
+
   return {
-    host: createElectronPersistenceMainHost({
-      getAdapter: (collectionId) =>
-        input.allowAnyCollectionId || collectionId === input.collectionId
-          ? adapter
-          : undefined,
-    }),
+    persistence: {
+      adapter: {
+        loadSubset: (collectionId, options, ctx) => {
+          if (collectionId !== input.collectionId) {
+            throw createUnknownCollectionError(collectionId)
+          }
+          return adapter.loadSubset(collectionId, options, ctx)
+        },
+        applyCommittedTx: (collectionId, tx) => {
+          if (collectionId !== input.collectionId) {
+            throw createUnknownCollectionError(collectionId)
+          }
+          return adapter.applyCommittedTx(collectionId, tx)
+        },
+        ensureIndex: (collectionId, signature, spec) => {
+          if (collectionId !== input.collectionId) {
+            throw createUnknownCollectionError(collectionId)
+          }
+          return adapter.ensureIndex(collectionId, signature, spec)
+        },
+        markIndexRemoved: (collectionId, signature) => {
+          if (collectionId !== input.collectionId) {
+            throw createUnknownCollectionError(collectionId)
+          }
+          return adapter.markIndexRemoved?.(collectionId, signature)
+        },
+        pullSince: (collectionId, fromRowVersion) => {
+          if (collectionId !== input.collectionId) {
+            throw createUnknownCollectionError(collectionId)
+          }
+          return adapter.pullSince?.(collectionId, fromRowVersion)
+        },
+      },
+    },
     cleanup: () => {},
   }
 }
@@ -305,10 +328,10 @@ async function run() {
 
   const input = parseInputFromEnv()
   const driver = new SqliteCliDriver(input.dbPath)
-  const hostRuntime = createMainHost(input, driver)
-  const disposeIpc = registerElectronPersistenceMainIpcHandler({
+  const mainRuntime = createMainPersistence(input, driver)
+  const disposeIpc = exposeElectronSQLitePersistence({
     ipcMain,
-    host: hostRuntime.host,
+    persistence: mainRuntime.persistence,
     channel: input.channel,
   })
 
@@ -386,7 +409,7 @@ async function run() {
       window.destroy()
     }
     disposeIpc()
-    hostRuntime.cleanup()
+    mainRuntime.cleanup()
     await app.quit()
   }
 }
