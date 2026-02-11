@@ -136,8 +136,16 @@ export function createNodeSQLitePersistenceAdapter<
 >(
   options: NodeSQLitePersistenceAdapterOptions,
 ): NodeSQLitePersistenceAdapter<T, TKey> {
-  const persister = createNodeSQLitePersister(options)
-  return persister.getAdapter<T, TKey>(`sync-absent`)
+  const { schemaMismatchPolicy: rawSchemaMismatchPolicy, ...adapterOptions } =
+    options
+  const schemaMismatchPolicy = rawSchemaMismatchPolicy
+    ? normalizeSchemaMismatchPolicy(rawSchemaMismatchPolicy)
+    : undefined
+
+  return createSQLiteCorePersistenceAdapter<T, TKey>({
+    ...adapterOptions,
+    schemaMismatchPolicy,
+  }) as unknown as NodeSQLitePersistenceAdapter<T, TKey>
 }
 
 /**

@@ -171,8 +171,18 @@ export function createMobileSQLitePersistenceAdapter<
 >(
   options: MobileSQLitePersistenceAdapterOptions,
 ): MobileSQLitePersistenceAdapter<T, TKey> {
-  const persister = createMobileSQLitePersister(options)
-  return persister.getAdapter<T, TKey>(`sync-absent`)
+  const { driver, schemaMismatchPolicy: rawSchemaMismatchPolicy, ...adapterOptions } =
+    options
+  const schemaMismatchPolicy = rawSchemaMismatchPolicy
+    ? normalizeSchemaMismatchPolicy(rawSchemaMismatchPolicy)
+    : undefined
+  const resolvedDriver = resolveSQLiteDriver(driver)
+
+  return createSQLiteCorePersistenceAdapter<T, TKey>({
+    ...adapterOptions,
+    driver: resolvedDriver,
+    schemaMismatchPolicy,
+  }) as unknown as MobileSQLitePersistenceAdapter<T, TKey>
 }
 
 export function createMobileSQLitePersistence<
