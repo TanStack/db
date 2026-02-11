@@ -11,6 +11,7 @@ import type {
 } from './do-driver'
 import type {
   PersistedCollectionCoordinator,
+  PersistedCollectionMode,
   PersistedCollectionPersistence,
   PersistenceAdapter,
   SQLiteCoreAdapterOptions,
@@ -55,7 +56,7 @@ export type CloudflareDOCollectionConfig = {
 }
 
 type CloudflareDOCollectionEntry = {
-  mode: CloudflareDOPersistenceMode
+  mode?: CloudflareDOPersistenceMode
   adapterOptions?: Omit<
     CloudflareDOSQLitePersistenceAdapterOptions,
     `driver` | `mode`
@@ -103,6 +104,17 @@ export function resolveCloudflareDOSchemaMismatchPolicy(
   return mode === `sync` ? `sync-present-reset` : `sync-absent-error`
 }
 
+function resolveCloudflarePersistenceMode(
+  persistedMode: PersistedCollectionMode,
+  explicitMode?: CloudflareDOPersistenceMode,
+): CloudflareDOPersistenceMode {
+  if (explicitMode) {
+    return explicitMode
+  }
+
+  return persistedMode === `sync-present` ? `sync` : `local`
+}
+
 function normalizeSchemaMismatchPolicy(
   policy: CloudflareDOSchemaMismatchPolicy,
 ): CloudflareDOCoreSchemaMismatchPolicy {
@@ -118,22 +130,90 @@ export function createCloudflareDOSQLitePersistenceAdapter<
 >(
   options: CloudflareDOSQLitePersistenceAdapterOptions,
 ): CloudflareDOSQLitePersistenceAdapter<T, TKey> {
-  const {
-    driver,
-    mode = `local`,
-    schemaMismatchPolicy: rawSchemaMismatchPolicy,
-    ...adapterOptions
-  } = options
-  const schemaMismatchPolicy = rawSchemaMismatchPolicy
-    ? normalizeSchemaMismatchPolicy(rawSchemaMismatchPolicy)
-    : resolveCloudflareDOSchemaMismatchPolicy(mode)
+  const persister = createCloudflareDOSQLitePersister(options)
+  return persister.getAdapter<T, TKey>(`sync-absent`)
+}
 
-  const resolvedDriver = resolveSQLiteDriver(driver)
-  return createSQLiteCorePersistenceAdapter<T, TKey>({
-    ...adapterOptions,
-    driver: resolvedDriver,
-    schemaMismatchPolicy,
-  }) as CloudflareDOSQLitePersistenceAdapter<T, TKey>
+export class CloudflareDOSQLitePersister {
+  private readonly coordinator: PersistedCollectionCoordinator
+  private readonly explicitMode: CloudflareDOPersistenceMode | undefined
+  private readonly explicitSchemaMismatchPolicy:
+    | CloudflareDOSchemaMismatchPolicy
+    | undefined
+  private readonly adapterBaseOptions: Omit<
+    CloudflareDOSQLitePersistenceAdapterOptions,
+    `driver` | `mode` | `schemaMismatchPolicy`
+  >
+  private readonly driver: SQLiteDriver
+  private readonly adaptersBySchemaPolicy = new Map<
+    CloudflareDOCoreSchemaMismatchPolicy,
+    PersistenceAdapter<Record<string, unknown>, string | number>
+  >()
+
+  constructor(options: CloudflareDOSQLitePersistenceOptions) {
+    const {
+      coordinator,
+      driver,
+      mode,
+      schemaMismatchPolicy,
+      ...adapterBaseOptions
+    } = options
+
+    this.coordinator = coordinator ?? new SingleProcessCoordinator()
+    this.explicitMode = mode
+    this.explicitSchemaMismatchPolicy = schemaMismatchPolicy
+    this.adapterBaseOptions = adapterBaseOptions
+    this.driver = resolveSQLiteDriver(driver)
+  }
+
+  getAdapter<
+    T extends object,
+    TKey extends string | number = string | number,
+  >(
+    mode: PersistedCollectionMode = `sync-absent`,
+  ): CloudflareDOSQLitePersistenceAdapter<T, TKey> {
+    const runtimeMode = resolveCloudflarePersistenceMode(mode, this.explicitMode)
+    const resolvedSchemaPolicy = this.explicitSchemaMismatchPolicy
+      ? normalizeSchemaMismatchPolicy(this.explicitSchemaMismatchPolicy)
+      : resolveCloudflareDOSchemaMismatchPolicy(runtimeMode)
+    const cachedAdapter = this.adaptersBySchemaPolicy.get(resolvedSchemaPolicy)
+    if (cachedAdapter) {
+      return cachedAdapter as unknown as CloudflareDOSQLitePersistenceAdapter<
+        T,
+        TKey
+      >
+    }
+
+    const adapter = createSQLiteCorePersistenceAdapter<
+      Record<string, unknown>,
+      string | number
+    >({
+      ...this.adapterBaseOptions,
+      driver: this.driver,
+      schemaMismatchPolicy: resolvedSchemaPolicy,
+    })
+    this.adaptersBySchemaPolicy.set(resolvedSchemaPolicy, adapter)
+    return adapter as unknown as CloudflareDOSQLitePersistenceAdapter<T, TKey>
+  }
+
+  getPersistence<
+    T extends object,
+    TKey extends string | number = string | number,
+  >(
+    mode: PersistedCollectionMode = `sync-absent`,
+    coordinator: PersistedCollectionCoordinator = this.coordinator,
+  ): PersistedCollectionPersistence<T, TKey> {
+    return {
+      adapter: this.getAdapter<T, TKey>(mode),
+      coordinator,
+    }
+  }
+}
+
+export function createCloudflareDOSQLitePersister(
+  options: CloudflareDOSQLitePersistenceOptions,
+): CloudflareDOSQLitePersister {
+  return new CloudflareDOSQLitePersister(options)
 }
 
 export function createCloudflareDOSQLitePersistence<
@@ -142,10 +222,13 @@ export function createCloudflareDOSQLitePersistence<
 >(
   options: CloudflareDOSQLitePersistenceOptions,
 ): PersistedCollectionPersistence<T, TKey> {
-  const { coordinator, ...adapterOptions } = options
+  const persister = createCloudflareDOSQLitePersister(options)
+  const defaultPersistence = persister.getPersistence<T, TKey>(`sync-absent`)
+
   return {
-    adapter: createCloudflareDOSQLitePersistenceAdapter<T, TKey>(adapterOptions),
-    coordinator: coordinator ?? new SingleProcessCoordinator(),
+    ...defaultPersistence,
+    resolvePersistenceForMode: (mode) =>
+      persister.getPersistence<T, TKey>(mode),
   }
 }
 
@@ -153,6 +236,7 @@ export class CloudflareDOCollectionRegistry {
   private readonly driver: SQLiteDriver
   private readonly collections = new Map<string, CloudflareDOCollectionEntry>()
   private readonly adapters = new Map<string, PersistenceAdapter<any, any>>()
+  private readonly persisters = new Map<string, CloudflareDOSQLitePersister>()
 
   constructor(options: {
     driver: CloudflareDOSQLiteDriverInput
@@ -169,7 +253,7 @@ export class CloudflareDOCollectionRegistry {
       }
 
       this.collections.set(collectionId, {
-        mode: collection.mode ?? `local`,
+        mode: collection.mode,
         adapterOptions: collection.adapterOptions,
       })
     }
@@ -193,11 +277,8 @@ export class CloudflareDOCollectionRegistry {
       return cachedAdapter as PersistenceAdapter<T, TKey>
     }
 
-    const adapter = createCloudflareDOSQLitePersistenceAdapter<T, TKey>({
-      driver: this.driver,
-      mode: entry.mode,
-      ...entry.adapterOptions,
-    })
+    const persister = this.getOrCreatePersister(collectionId, entry)
+    const adapter = persister.getAdapter<T, TKey>(`sync-absent`)
     this.adapters.set(collectionId, adapter)
     return adapter
   }
@@ -209,15 +290,41 @@ export class CloudflareDOCollectionRegistry {
     collectionId: string,
     coordinator?: PersistedCollectionCoordinator,
   ): PersistedCollectionPersistence<T, TKey> | undefined {
-    const adapter = this.getAdapter<T, TKey>(collectionId)
-    if (!adapter) {
+    const entry = this.collections.get(collectionId)
+    if (!entry) {
       return undefined
     }
 
+    const persister = this.getOrCreatePersister(collectionId, entry)
+    const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
+    const defaultPersistence = persister.getPersistence<T, TKey>(
+      `sync-absent`,
+      resolvedCoordinator,
+    )
+
     return {
-      adapter,
-      coordinator: coordinator ?? new SingleProcessCoordinator(),
+      ...defaultPersistence,
+      resolvePersistenceForMode: (mode) =>
+        persister.getPersistence<T, TKey>(mode, resolvedCoordinator),
     }
+  }
+
+  private getOrCreatePersister(
+    collectionId: string,
+    entry: CloudflareDOCollectionEntry,
+  ): CloudflareDOSQLitePersister {
+    const cachedPersister = this.persisters.get(collectionId)
+    if (cachedPersister) {
+      return cachedPersister
+    }
+
+    const persister = createCloudflareDOSQLitePersister({
+      driver: this.driver,
+      mode: entry.mode,
+      ...entry.adapterOptions,
+    })
+    this.persisters.set(collectionId, persister)
+    return persister
   }
 }
 

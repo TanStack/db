@@ -22,6 +22,7 @@ import type {
 
 type RuntimePersistenceFactory = (options: {
   driver: SQLiteDriver
+  schemaVersion?: number
   coordinator?: PersistedCollectionCoordinator
 }) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
 
@@ -109,6 +110,74 @@ for (const suite of runtimePersistenceSuites) {
         expect(persistence.coordinator).toBe(coordinator)
       } finally {
         runtimeHarness.cleanup()
+      }
+    })
+
+    it(`infers schema policy from sync mode`, async () => {
+      const tempDirectory = mkdtempSync(join(tmpdir(), `db-mobile-schema-infer-`))
+      const dbPath = join(tempDirectory, `state.sqlite`)
+      const collectionId = `todos`
+      const firstDatabase = createOpSQLiteTestDatabase({
+        filename: dbPath,
+        resultShape: `statement-array`,
+      })
+      const firstDriver = createOpSQLiteDriver({ database: firstDatabase })
+
+      try {
+        const firstPersistence = suite.createPersistence({
+          driver: firstDriver,
+          schemaVersion: 1,
+        })
+        await firstPersistence.adapter.applyCommittedTx(collectionId, {
+          txId: `tx-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `before mismatch`,
+                score: 1,
+              },
+            },
+          ],
+        })
+      } finally {
+        await Promise.resolve(firstDatabase.close())
+      }
+
+      const secondDatabase = createOpSQLiteTestDatabase({
+        filename: dbPath,
+        resultShape: `statement-array`,
+      })
+      const secondDriver = createOpSQLiteDriver({ database: secondDatabase })
+      try {
+        const secondPersistence = suite.createPersistence({
+          driver: secondDriver,
+          schemaVersion: 2,
+        })
+
+        const syncAbsentPersistence =
+          secondPersistence.resolvePersistenceForMode?.(`sync-absent`) ??
+          secondPersistence
+        await expect(
+          syncAbsentPersistence.adapter.loadSubset(collectionId, {}),
+        ).rejects.toThrow(`Schema version mismatch`)
+
+        const syncPresentPersistence =
+          secondPersistence.resolvePersistenceForMode?.(`sync-present`) ??
+          secondPersistence
+        const rows = await syncPresentPersistence.adapter.loadSubset(
+          collectionId,
+          {},
+        )
+        expect(rows).toEqual([])
+      } finally {
+        await Promise.resolve(secondDatabase.close())
+        rmSync(tempDirectory, { recursive: true, force: true })
       }
     })
   })

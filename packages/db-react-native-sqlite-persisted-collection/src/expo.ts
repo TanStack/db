@@ -1,17 +1,28 @@
 import {
-  createMobileSQLitePersistence,
-  createMobileSQLitePersistenceAdapter,
-} from './mobile-persistence'
+  createReactNativeSQLitePersistence,
+  createReactNativeSQLitePersistenceAdapter,
+  createReactNativeSQLitePersister,
+} from './react-native'
+import type {
+  ReactNativeSQLitePersistenceAdapterOptions,
+  ReactNativeSQLitePersistenceOptions,
+  ReactNativeSQLitePersister,
+} from './react-native'
 import type {
   MobileSQLitePersistenceAdapter,
-  MobileSQLitePersistenceAdapterOptions,
-  MobileSQLitePersistenceOptions,
 } from './mobile-persistence'
 import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persisted-collection-core'
 
 export type ExpoSQLitePersistenceAdapterOptions =
-  MobileSQLitePersistenceAdapterOptions
-export type ExpoSQLitePersistenceOptions = MobileSQLitePersistenceOptions
+  ReactNativeSQLitePersistenceAdapterOptions
+export type ExpoSQLitePersistenceOptions = ReactNativeSQLitePersistenceOptions
+export type ExpoSQLitePersister = ReactNativeSQLitePersister
+
+export function createExpoSQLitePersister(
+  options: ExpoSQLitePersistenceOptions,
+): ExpoSQLitePersister {
+  return createReactNativeSQLitePersister(options)
+}
 
 export function createExpoSQLitePersistenceAdapter<
   T extends object,
@@ -19,7 +30,7 @@ export function createExpoSQLitePersistenceAdapter<
 >(
   options: ExpoSQLitePersistenceAdapterOptions,
 ): MobileSQLitePersistenceAdapter<T, TKey> {
-  return createMobileSQLitePersistenceAdapter<T, TKey>(options)
+  return createReactNativeSQLitePersistenceAdapter<T, TKey>(options)
 }
 
 export function createExpoSQLitePersistence<
@@ -28,5 +39,5 @@ export function createExpoSQLitePersistence<
 >(
   options: ExpoSQLitePersistenceOptions,
 ): PersistedCollectionPersistence<T, TKey> {
-  return createMobileSQLitePersistence<T, TKey>(options)
+  return createReactNativeSQLitePersistence<T, TKey>(options)
 }

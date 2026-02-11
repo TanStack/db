@@ -12,8 +12,12 @@ Node.js SQLite persisted collection adapters for TanStack DB, using
 - `BetterSqlite3DriverOptions`
 - `BetterSqlite3SQLiteDriver`
 - `createBetterSqlite3Driver(...)`
+- `NodeSQLiteSchemaMismatchPolicy`
 - `NodeSQLitePersistenceAdapterOptions`
 - `NodeSQLitePersistenceOptions`
+- `NodeSQLitePersistenceAdapter<T, TKey>`
+- `NodeSQLitePersister`
+- `createNodeSQLitePersister(...)`
 - `createNodeSQLitePersistenceAdapter<T, TKey>(...)`
 - `createNodeSQLitePersistence<T, TKey>(...)`
 
@@ -59,8 +63,14 @@ export const todosCollection = createCollection(
 
 ## Notes
 
-- `createBetterSqlite3Driver` accepts either:
+- `createNodeSQLitePersistence` and `createNodeSQLitePersister` expect a
+  `SQLiteDriver` instance. You own DB connection lifecycle and pass the driver
+  in explicitly.
+- `createBetterSqlite3Driver` is the convenience Node driver constructor and
+  accepts either:
   - `{ filename, options?, pragmas? }`
   - `{ database, pragmas? }` for existing `better-sqlite3` handles
 - The persistence helper defaults coordinator to `SingleProcessCoordinator`.
 - Call `driver.close()` when you own the DB lifecycle.
+- `createNodeSQLitePersister` supports sharing one persistence manager across
+  multiple collections backed by the same database.

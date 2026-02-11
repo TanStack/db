@@ -232,4 +232,75 @@ describe(`cloudflare durable object persistence helpers`, () => {
       rmSync(tempDirectory, { recursive: true, force: true })
     }
   })
+
+  it(`infers mode from sync presence when mode is omitted`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-schema-infer-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `todos`
+    const firstStorageHarness = createBetterSqliteDoStorageHarness({
+      filename: dbPath,
+    })
+    const firstPersistence = createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>(
+      {
+        driver: {
+          sql: firstStorageHarness.sql,
+        },
+        schemaVersion: 1,
+      },
+    )
+
+    try {
+      await firstPersistence.adapter.applyCommittedTx(collectionId, {
+        txId: `tx-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `before mismatch`,
+              score: 1,
+            },
+          },
+        ],
+      })
+    } finally {
+      firstStorageHarness.close()
+    }
+
+    const secondStorageHarness = createBetterSqliteDoStorageHarness({
+      filename: dbPath,
+    })
+    const secondPersistence = createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>(
+      {
+        driver: {
+          sql: secondStorageHarness.sql,
+        },
+        schemaVersion: 2,
+      },
+    )
+    try {
+      const syncAbsentPersistence =
+        secondPersistence.resolvePersistenceForMode?.(`sync-absent`) ??
+        secondPersistence
+      await expect(
+        syncAbsentPersistence.adapter.loadSubset(collectionId, {}),
+      ).rejects.toThrow(`Schema version mismatch`)
+
+      const syncPresentPersistence =
+        secondPersistence.resolvePersistenceForMode?.(`sync-present`) ??
+        secondPersistence
+      const rows = await syncPresentPersistence.adapter.loadSubset(
+        collectionId,
+        {},
+      )
+      expect(rows).toEqual([])
+    } finally {
+      secondStorageHarness.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
 })

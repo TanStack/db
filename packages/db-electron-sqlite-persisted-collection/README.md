@@ -45,6 +45,7 @@ Electron main/renderer bridge for TanStack DB SQLite persistence.
 - `createElectronPersistenceMainHost(...)`
 - `ElectronPersistenceMainRegistry`
 - `ElectronNodeSQLiteMainCollectionConfig`
+- `ElectronNodeSQLiteMainRegistryOptions`
 - `createElectronNodeSQLiteMainRegistry(...)`
 - `ElectronIpcMainLike`
 - `registerElectronPersistenceMainIpcHandler(...)`
@@ -55,6 +56,8 @@ Electron main/renderer bridge for TanStack DB SQLite persistence.
 - `ElectronRendererPersistenceAdapter<T, TKey>`
 - `createElectronRendererPersistenceAdapter<T, TKey>(...)`
 - `ElectronRendererPersistenceOptions`
+- `ElectronRendererPersister`
+- `createElectronRendererPersister(...)`
 - `createElectronRendererPersistence<T, TKey>(...)`
 - `ElectronIpcRendererLike`
 - `createElectronPersistenceInvoke(...)`
@@ -89,22 +92,24 @@ Exports only renderer-process APIs:
 
 ```ts
 import { ipcMain } from 'electron'
+import { createBetterSqlite3Driver } from '@tanstack/db-node-sqlite-persisted-collection'
 import {
   createElectronNodeSQLiteMainRegistry,
   registerElectronPersistenceMainIpcHandler,
 } from '@tanstack/db-electron-sqlite-persisted-collection/main'
 
-const registry = createElectronNodeSQLiteMainRegistry([
-  {
-    collectionId: `todos`,
-    adapterOptions: {
-      driver: {
-        filename: `./tanstack-db.sqlite`,
-      },
-      schemaVersion: 1,
-    },
+const driver = createBetterSqlite3Driver({
+  filename: `./tanstack-db.sqlite`,
+})
+
+const registry = createElectronNodeSQLiteMainRegistry({
+  adapterOptions: {
+    driver,
+    schemaVersion: 1,
   },
-])
+  // Optional allow-list; omit to allow any collection id over this adapter.
+  collectionIds: [`todos`],
+})
 
 const unregister = registerElectronPersistenceMainIpcHandler({
   ipcMain,
@@ -112,6 +117,7 @@ const unregister = registerElectronPersistenceMainIpcHandler({
 })
 
 // Call unregister() during app shutdown if needed.
+// Close driver when your app exits.
 ```
 
 ### Renderer process
