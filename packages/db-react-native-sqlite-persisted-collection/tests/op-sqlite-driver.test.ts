@@ -153,13 +153,15 @@ it(`supports transaction callbacks that use provided transaction driver`, async 
       throw new Error(`transaction entry signal missing`)
     }
     resolveEntered()
-    await transactionDriver.run(`INSERT INTO closure_tx_test (value) VALUES (?)`, [
-      1,
-    ])
+    await transactionDriver.run(
+      `INSERT INTO closure_tx_test (value) VALUES (?)`,
+      [1],
+    )
     await hold
-    await transactionDriver.run(`INSERT INTO closure_tx_test (value) VALUES (?)`, [
-      2,
-    ])
+    await transactionDriver.run(
+      `INSERT INTO closure_tx_test (value) VALUES (?)`,
+      [2],
+    )
   })
 
   await entered
