@@ -231,7 +231,9 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   })
 
   collection.startSyncImmediate()
-  await waitForCondition(() => collection.get(`2`)?.title === `After foreground`)
+  await waitForCondition(
+    () => collection.get(`2`)?.title === `After foreground`,
+  )
 
   const postResumeInsert = collection.insert({
     id: `3`,

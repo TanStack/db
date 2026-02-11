@@ -95,7 +95,9 @@ export function createOpSQLiteTestDatabase(options: {
   filename: string
   resultShape?: OpSQLiteTestResultShape
 }): OpSQLiteTestDatabase {
-  if (typeof globalThis.__tanstackDbCreateMobileSQLiteTestDatabase === `function`) {
+  if (
+    typeof globalThis.__tanstackDbCreateMobileSQLiteTestDatabase === `function`
+  ) {
     return globalThis.__tanstackDbCreateMobileSQLiteTestDatabase(options)
   }
 

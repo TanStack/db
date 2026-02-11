@@ -77,13 +77,14 @@ it(`rolls back transaction on failure`, async () => {
 
   await expect(
     driver.transactionWithDriver(async (transactionDriver) => {
-      await transactionDriver.run(`INSERT INTO tx_test (id, title) VALUES (?, ?)`, [
-        `1`,
-        `First`,
-      ])
-      await transactionDriver.run(`INSERT INTO tx_test (missing_column) VALUES (?)`, [
-        `x`,
-      ])
+      await transactionDriver.run(
+        `INSERT INTO tx_test (id, title) VALUES (?, ?)`,
+        [`1`, `First`],
+      )
+      await transactionDriver.run(
+        `INSERT INTO tx_test (missing_column) VALUES (?)`,
+        [`x`],
+      )
     }),
   ).rejects.toThrow()
 
@@ -108,10 +109,7 @@ it(`supports nested savepoint rollback without losing outer transaction`, async 
   await driver.transactionWithDriver(async (outerTransactionDriver) => {
     await outerTransactionDriver.run(
       `INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`,
-      [
-      `1`,
-      `Outer before`,
-      ],
+      [`1`, `Outer before`],
     )
 
     await expect(
