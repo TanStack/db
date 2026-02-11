@@ -210,6 +210,9 @@ export interface SQLiteDriver {
   ) => Promise<ReadonlyArray<T>>
   run: (sql: string, params?: ReadonlyArray<unknown>) => Promise<void>
   transaction: <T>(fn: () => Promise<T>) => Promise<T>
+  transactionWithDriver?: <T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ) => Promise<T>
 }
 
 export interface PersistedCollectionCoordinator {

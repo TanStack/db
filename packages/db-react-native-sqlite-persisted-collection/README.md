@@ -24,3 +24,20 @@ React Native and Expo SQLite persistence wrappers for TanStack DB, built on the 
 - Provide either an existing `op-sqlite` database object or an `openDatabase` factory.
 - The package defaults to `SingleProcessCoordinator`, matching typical RN/Expo runtime semantics.
 - Shared contract and conformance suites are wired in this package to validate behavior parity with node/electron wrappers.
+- Both React Native and Expo entrypoints run the persisted collection conformance suite.
+
+## Optional real-runtime test factory
+
+By default, test helpers use a `better-sqlite3`-backed `op-sqlite` test database for
+local Node runs. You can run the same suite against a real runtime adapter by providing a
+factory module through environment variables:
+
+- `TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE`
+- `TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT` (optional, defaults to
+  `createMobileSQLiteTestDatabaseFactory`)
+
+The selected export can either be:
+
+- a database factory function with signature
+  `({ filename, resultShape }) => { execute, close, ... }`
+- or a zero-arg function that returns that factory (sync or async)

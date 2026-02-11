@@ -76,12 +76,14 @@ it(`rolls back transaction on failure`, async () => {
   )
 
   await expect(
-    driver.transaction(async () => {
-      await driver.run(`INSERT INTO tx_test (id, title) VALUES (?, ?)`, [
+    driver.transactionWithDriver(async (transactionDriver) => {
+      await transactionDriver.run(`INSERT INTO tx_test (id, title) VALUES (?, ?)`, [
         `1`,
         `First`,
       ])
-      await driver.run(`INSERT INTO tx_test (missing_column) VALUES (?)`, [`x`])
+      await transactionDriver.run(`INSERT INTO tx_test (missing_column) VALUES (?)`, [
+        `x`,
+      ])
     }),
   ).rejects.toThrow()
 
@@ -103,15 +105,18 @@ it(`supports nested savepoint rollback without losing outer transaction`, async 
     `CREATE TABLE nested_tx_test (id TEXT PRIMARY KEY, title TEXT NOT NULL)`,
   )
 
-  await driver.transaction(async () => {
-    await driver.run(`INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`, [
+  await driver.transactionWithDriver(async (outerTransactionDriver) => {
+    await outerTransactionDriver.run(
+      `INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`,
+      [
       `1`,
       `Outer before`,
-    ])
+      ],
+    )
 
     await expect(
-      driver.transaction(async () => {
-        await driver.run(
+      outerTransactionDriver.transaction(async () => {
+        await outerTransactionDriver.run(
           `INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`,
           [`2`, `Inner failing`],
         )
@@ -119,10 +124,10 @@ it(`supports nested savepoint rollback without losing outer transaction`, async 
       }),
     ).rejects.toThrow(`nested-failure`)
 
-    await driver.run(`INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`, [
-      `3`,
-      `Outer after`,
-    ])
+    await outerTransactionDriver.run(
+      `INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`,
+      [`3`, `Outer after`],
+    )
   })
 
   const rows = await driver.query<{ id: string; title: string }>(
@@ -132,6 +137,65 @@ it(`supports nested savepoint rollback without losing outer transaction`, async 
     { id: `1`, title: `Outer before` },
     { id: `3`, title: `Outer after` },
   ])
+})
+
+it(`serializes unrelated operations behind an active transaction`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createOpSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => {
+    database.close()
+  })
+
+  const driver = createOpSQLiteDriver({ database })
+  await driver.exec(
+    `CREATE TABLE tx_scope_test (id TEXT PRIMARY KEY, title TEXT NOT NULL)`,
+  )
+
+  let resolveOuterTransaction: (() => void) | undefined
+  const outerTransactionGate = new Promise<void>((resolve) => {
+    resolveOuterTransaction = resolve
+  })
+
+  let signalOuterInsertComplete: (() => void) | undefined
+  const outerInsertComplete = new Promise<void>((resolve) => {
+    signalOuterInsertComplete = resolve
+  })
+
+  const outerTransaction = driver.transactionWithDriver(
+    async (transactionDriver) => {
+      await transactionDriver.run(
+        `INSERT INTO tx_scope_test (id, title) VALUES (?, ?)`,
+        [`outer`, `Inside transaction`],
+      )
+      signalOuterInsertComplete?.()
+      await outerTransactionGate
+      throw new Error(`rollback-outer-transaction`)
+    },
+  )
+
+  await outerInsertComplete
+
+  let unrelatedWriteCompleted = false
+  const unrelatedWrite = driver
+    .run(`INSERT INTO tx_scope_test (id, title) VALUES (?, ?)`, [
+      `outside`,
+      `Outside transaction`,
+    ])
+    .then(() => {
+      unrelatedWriteCompleted = true
+    })
+  await Promise.resolve()
+  expect(unrelatedWriteCompleted).toBe(false)
+
+  resolveOuterTransaction?.()
+
+  await expect(outerTransaction).rejects.toThrow(`rollback-outer-transaction`)
+  await unrelatedWrite
+
+  const rows = await driver.query<{ id: string; title: string }>(
+    `SELECT id, title FROM tx_scope_test ORDER BY id ASC`,
+  )
+  expect(rows).toEqual([{ id: `outside`, title: `Outside transaction` }])
 })
 
 it(`throws config error when db execute methods are missing`, () => {

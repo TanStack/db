@@ -1021,6 +1021,16 @@ export class SQLiteCorePersistenceAdapter<
     this.pullSinceReloadThreshold = pullSinceReloadThreshold
   }
 
+  private runInTransaction<TResult>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<TResult>,
+  ): Promise<TResult> {
+    if (typeof this.driver.transactionWithDriver === `function`) {
+      return this.driver.transactionWithDriver(fn)
+    }
+
+    return this.driver.transaction(async () => fn(this.driver))
+  }
+
   async loadSubset(
     collectionId: string,
     options: LoadSubsetOptions,
@@ -1080,8 +1090,8 @@ export class SQLiteCorePersistenceAdapter<
     const collectionTableSql = quoteIdentifier(tableMapping.tableName)
     const tombstoneTableSql = quoteIdentifier(tableMapping.tombstoneTableName)
 
-    await this.driver.transaction(async () => {
-      const alreadyApplied = await this.driver.query<{ applied: number }>(
+    await this.runInTransaction(async (transactionDriver) => {
+      const alreadyApplied = await transactionDriver.query<{ applied: number }>(
         `SELECT 1 AS applied
          FROM applied_tx
          WHERE collection_id = ? AND term = ? AND seq = ?
@@ -1093,7 +1103,7 @@ export class SQLiteCorePersistenceAdapter<
         return
       }
 
-      const versionRows = await this.driver.query<{
+      const versionRows = await transactionDriver.query<{
         latest_row_version: number
       }>(
         `SELECT latest_row_version
@@ -1108,12 +1118,12 @@ export class SQLiteCorePersistenceAdapter<
       for (const mutation of tx.mutations) {
         const encodedKey = encodePersistedStorageKey(mutation.key)
         if (mutation.type === `delete`) {
-          await this.driver.run(
+          await transactionDriver.run(
             `DELETE FROM ${collectionTableSql}
              WHERE key = ?`,
             [encodedKey],
           )
-          await this.driver.run(
+          await transactionDriver.run(
             `INSERT INTO ${tombstoneTableSql} (key, value, row_version, deleted_at)
              VALUES (?, ?, ?, ?)
              ON CONFLICT(key) DO UPDATE SET
@@ -1130,7 +1140,7 @@ export class SQLiteCorePersistenceAdapter<
           continue
         }
 
-        const existingRows = await this.driver.query<{ value: string }>(
+        const existingRows = await transactionDriver.query<{ value: string }>(
           `SELECT value
            FROM ${collectionTableSql}
            WHERE key = ?
@@ -1145,7 +1155,7 @@ export class SQLiteCorePersistenceAdapter<
             ? mergeObjectRows(existingValue, mutation.value)
             : mutation.value
 
-        await this.driver.run(
+        await transactionDriver.run(
           `INSERT INTO ${collectionTableSql} (key, value, row_version)
            VALUES (?, ?, ?)
            ON CONFLICT(key) DO UPDATE SET
@@ -1153,14 +1163,14 @@ export class SQLiteCorePersistenceAdapter<
              row_version = excluded.row_version`,
           [encodedKey, serializePersistedRowValue(mergedValue), nextRowVersion],
         )
-        await this.driver.run(
+        await transactionDriver.run(
           `DELETE FROM ${tombstoneTableSql}
            WHERE key = ?`,
           [encodedKey],
         )
       }
 
-      await this.driver.run(
+      await transactionDriver.run(
         `INSERT INTO collection_version (collection_id, latest_row_version)
          VALUES (?, ?)
          ON CONFLICT(collection_id) DO UPDATE SET
@@ -1168,7 +1178,7 @@ export class SQLiteCorePersistenceAdapter<
         [collectionId, nextRowVersion],
       )
 
-      await this.driver.run(
+      await transactionDriver.run(
         `INSERT INTO leader_term (collection_id, latest_term)
          VALUES (?, ?)
          ON CONFLICT(collection_id) DO UPDATE SET
@@ -1180,7 +1190,7 @@ export class SQLiteCorePersistenceAdapter<
         [collectionId, tx.term],
       )
 
-      await this.driver.run(
+      await transactionDriver.run(
         `INSERT INTO applied_tx (
            collection_id,
            term,
@@ -1193,7 +1203,7 @@ export class SQLiteCorePersistenceAdapter<
         [collectionId, tx.term, tx.seq, tx.txId, nextRowVersion],
       )
 
-      await this.pruneAppliedTxRows(collectionId)
+      await this.pruneAppliedTxRows(collectionId, transactionDriver)
     })
   }
 
@@ -1214,8 +1224,8 @@ export class SQLiteCorePersistenceAdapter<
       ? normalizeIndexSqlFragment(spec.whereSql)
       : undefined
 
-    await this.driver.transaction(async () => {
-      await this.driver.run(
+    await this.runInTransaction(async (transactionDriver) => {
+      await transactionDriver.run(
         `INSERT INTO persisted_index_registry (
            collection_id,
            signature,
@@ -1253,7 +1263,7 @@ export class SQLiteCorePersistenceAdapter<
            WHERE ${whereSql}`
         : `CREATE INDEX IF NOT EXISTS ${indexNameSql}
            ON ${collectionTableSql} (${expressionSql})`
-      await this.driver.exec(createIndexSql)
+      await transactionDriver.exec(createIndexSql)
     })
   }
 
@@ -1488,12 +1498,15 @@ export class SQLiteCorePersistenceAdapter<
     }
   }
 
-  private async pruneAppliedTxRows(collectionId: string): Promise<void> {
+  private async pruneAppliedTxRows(
+    collectionId: string,
+    driver: SQLiteDriver = this.driver,
+  ): Promise<void> {
     if (
       this.appliedTxPruneMaxAgeSeconds !== undefined &&
       this.appliedTxPruneMaxAgeSeconds > 0
     ) {
-      await this.driver.run(
+      await driver.run(
         `DELETE FROM applied_tx
          WHERE collection_id = ?
            AND applied_at < (CAST(strftime('%s', 'now') AS INTEGER) - ?)`,
@@ -1508,7 +1521,7 @@ export class SQLiteCorePersistenceAdapter<
       return
     }
 
-    const countRows = await this.driver.query<{ count: number }>(
+    const countRows = await driver.query<{ count: number }>(
       `SELECT COUNT(*) AS count
        FROM applied_tx
        WHERE collection_id = ?`,
@@ -1520,7 +1533,7 @@ export class SQLiteCorePersistenceAdapter<
       return
     }
 
-    await this.driver.run(
+    await driver.run(
       `DELETE FROM applied_tx
        WHERE rowid IN (
          SELECT rowid
@@ -1651,46 +1664,48 @@ export class SQLiteCorePersistenceAdapter<
     const collectionTableSql = quoteIdentifier(tableName)
     const tombstoneTableSql = quoteIdentifier(tombstoneTableName)
 
-    await this.driver.transaction(async () => {
-      const persistedIndexes = await this.driver.query<{ index_name: string }>(
+    await this.runInTransaction(async (transactionDriver) => {
+      const persistedIndexes = await transactionDriver.query<{
+        index_name: string
+      }>(
         `SELECT index_name
          FROM persisted_index_registry
          WHERE collection_id = ?`,
         [collectionId],
       )
       for (const row of persistedIndexes) {
-        await this.driver.exec(
+        await transactionDriver.exec(
           `DROP INDEX IF EXISTS ${quoteIdentifier(row.index_name)}`,
         )
       }
 
-      await this.driver.run(`DELETE FROM ${collectionTableSql}`)
-      await this.driver.run(`DELETE FROM ${tombstoneTableSql}`)
-      await this.driver.run(
+      await transactionDriver.run(`DELETE FROM ${collectionTableSql}`)
+      await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
+      await transactionDriver.run(
         `DELETE FROM applied_tx
          WHERE collection_id = ?`,
         [collectionId],
       )
-      await this.driver.run(
+      await transactionDriver.run(
         `DELETE FROM persisted_index_registry
          WHERE collection_id = ?`,
         [collectionId],
       )
-      await this.driver.run(
+      await transactionDriver.run(
         `UPDATE collection_registry
          SET schema_version = ?,
              updated_at = CAST(strftime('%s', 'now') AS INTEGER)
          WHERE collection_id = ?`,
         [nextSchemaVersion, collectionId],
       )
-      await this.driver.run(
+      await transactionDriver.run(
         `INSERT INTO collection_version (collection_id, latest_row_version)
          VALUES (?, 0)
          ON CONFLICT(collection_id) DO UPDATE SET
            latest_row_version = 0`,
         [collectionId],
       )
-      await this.driver.run(
+      await transactionDriver.run(
         `INSERT INTO collection_reset_epoch (collection_id, reset_epoch, updated_at)
          VALUES (?, 1, CAST(strftime('%s', 'now') AS INTEGER))
          ON CONFLICT(collection_id) DO UPDATE SET
