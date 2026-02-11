@@ -123,7 +123,7 @@ class SqliteCliDriver {
   async transaction(fn) {
     const activeDbPath = this.transactionDbPath.getStore()
     if (activeDbPath) {
-      return fn()
+      return fn(this)
     }
 
     return this.enqueue(async () => {
@@ -136,7 +136,7 @@ class SqliteCliDriver {
 
       try {
         const txResult = await this.transactionDbPath.run(txDbPath, async () =>
-          fn(),
+          fn(this),
         )
         if (existsSync(txDbPath)) {
           copyFileSync(txDbPath, this.dbPath)
