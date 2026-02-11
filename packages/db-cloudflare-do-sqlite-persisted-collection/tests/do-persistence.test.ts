@@ -4,8 +4,11 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   SingleProcessCoordinator,
+  createCloudflareDOCollectionRegistry,
   createCloudflareDOSQLiteDriver,
   createCloudflareDOSQLitePersistence,
+  createCloudflareDOSQLitePersistenceAdapter,
+  initializeCloudflareDOCollections,
   resolveCloudflareDOSchemaMismatchPolicy,
 } from '../src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
@@ -85,5 +88,148 @@ describe(`cloudflare durable object persistence helpers`, () => {
     expect(resolveCloudflareDOSchemaMismatchPolicy(`sync`)).toBe(
       `sync-present-reset`,
     )
+  })
+
+  it(`throws on schema mismatch in local mode`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-schema-local-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `todos`
+    const firstStorageHarness = createBetterSqliteDoStorageHarness({
+      filename: dbPath,
+    })
+    const firstAdapter = createCloudflareDOSQLitePersistenceAdapter({
+      driver: {
+        sql: firstStorageHarness.sql,
+      },
+      mode: `local`,
+      schemaVersion: 1,
+    })
+
+    try {
+      await firstAdapter.applyCommittedTx(collectionId, {
+        txId: `tx-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `before mismatch`,
+              score: 1,
+            },
+          },
+        ],
+      })
+    } finally {
+      firstStorageHarness.close()
+    }
+
+    const secondStorageHarness = createBetterSqliteDoStorageHarness({
+      filename: dbPath,
+    })
+    const secondAdapter = createCloudflareDOSQLitePersistenceAdapter({
+      driver: {
+        sql: secondStorageHarness.sql,
+      },
+      mode: `local`,
+      schemaVersion: 2,
+    })
+
+    try {
+      await expect(secondAdapter.loadSubset(collectionId, {})).rejects.toThrow(
+        `Schema version mismatch`,
+      )
+    } finally {
+      secondStorageHarness.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it(`resets on schema mismatch in sync mode`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-schema-sync-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `todos`
+    const firstStorageHarness = createBetterSqliteDoStorageHarness({
+      filename: dbPath,
+    })
+    const firstAdapter = createCloudflareDOSQLitePersistenceAdapter({
+      driver: {
+        sql: firstStorageHarness.sql,
+      },
+      mode: `sync`,
+      schemaVersion: 1,
+    })
+
+    try {
+      await firstAdapter.applyCommittedTx(collectionId, {
+        txId: `tx-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `before reset`,
+              score: 1,
+            },
+          },
+        ],
+      })
+    } finally {
+      firstStorageHarness.close()
+    }
+
+    const secondStorageHarness = createBetterSqliteDoStorageHarness({
+      filename: dbPath,
+    })
+    const secondAdapter = createCloudflareDOSQLitePersistenceAdapter({
+      driver: {
+        sql: secondStorageHarness.sql,
+      },
+      mode: `sync`,
+      schemaVersion: 2,
+    })
+
+    try {
+      const rows = await secondAdapter.loadSubset(collectionId, {})
+      expect(rows).toEqual([])
+    } finally {
+      secondStorageHarness.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it(`initializes configured collections and throws for unknown collection IDs`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-init-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const storageHarness = createBetterSqliteDoStorageHarness({
+      filename: dbPath,
+    })
+
+    const registry = createCloudflareDOCollectionRegistry({
+      sql: storageHarness.sql,
+      collections: [
+        {
+          collectionId: `todos`,
+          mode: `local`,
+        },
+      ],
+    })
+
+    try {
+      await initializeCloudflareDOCollections(registry)
+      await expect(
+        initializeCloudflareDOCollections(registry, [`missing`]),
+      ).rejects.toThrow(`Unknown Cloudflare DO collection`)
+    } finally {
+      storageHarness.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
+    }
   })
 })

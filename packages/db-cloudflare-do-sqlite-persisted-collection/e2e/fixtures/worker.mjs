@@ -1,11 +1,36 @@
 // @ts-nocheck
 import { DurableObject } from 'cloudflare:workers'
+import { createCollection } from '../../../db/dist/esm/index.js'
 import {
   createCloudflareDOCollectionRegistry,
   initializeCloudflareDOCollections,
+  persistedCollectionOptions,
 } from '../../dist/esm/index.js'
 
 const DEFAULT_COLLECTION_ID = `todos`
+const DEFAULT_MODE = `local`
+const DEFAULT_SCHEMA_VERSION = 1
+
+function parsePersistenceMode(rawMode) {
+  const mode = rawMode ?? DEFAULT_MODE
+  if (mode === `local` || mode === `sync`) {
+    return mode
+  }
+  throw new Error(`Invalid PERSISTENCE_MODE "${String(mode)}"`)
+}
+
+function parseSchemaVersion(rawSchemaVersion) {
+  if (rawSchemaVersion == null) {
+    return DEFAULT_SCHEMA_VERSION
+  }
+  const parsed = Number(rawSchemaVersion)
+  if (Number.isInteger(parsed) && parsed >= 0) {
+    return parsed
+  }
+  throw new Error(
+    `Invalid PERSISTENCE_SCHEMA_VERSION "${String(rawSchemaVersion)}"`,
+  )
+}
 
 function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), {
@@ -48,58 +73,68 @@ function createUnknownCollectionError(collectionId) {
 export class PersistenceObject extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env)
+    this.collectionId = env.PERSISTENCE_COLLECTION_ID ?? DEFAULT_COLLECTION_ID
+    this.mode = parsePersistenceMode(env.PERSISTENCE_MODE)
+    this.schemaVersion = parseSchemaVersion(env.PERSISTENCE_SCHEMA_VERSION)
+
     this.registry = createCloudflareDOCollectionRegistry({
       storage: this.ctx.storage,
       collections: [
         {
-          collectionId: DEFAULT_COLLECTION_ID,
-          mode: `local`,
+          collectionId: this.collectionId,
+          mode: this.mode,
           adapterOptions: {
-            schemaVersion: 1,
+            schemaVersion: this.schemaVersion,
           },
         },
       ],
     })
     this.ready = initializeCloudflareDOCollections(this.registry)
-  }
-
-  getAdapter(collectionId) {
-    const adapter = this.registry.getAdapter(collectionId)
-    if (!adapter) {
-      throw createUnknownCollectionError(collectionId)
+    this.persistence = this.registry.getPersistence(this.collectionId)
+    if (!this.persistence) {
+      throw createUnknownCollectionError(this.collectionId)
     }
-    return adapter
+    this.collection = createCollection(
+      persistedCollectionOptions({
+        id: this.collectionId,
+        getKey: (todo) => todo.id,
+        persistence: this.persistence,
+      }),
+    )
+    this.collectionReady = this.collection.stateWhenReady()
   }
 
   async fetch(request) {
-    await this.ready
     const url = new URL(request.url)
 
     try {
+      await this.ready
+
       if (request.method === `GET` && url.pathname === `/health`) {
         return jsonResponse(200, {
           ok: true,
         })
       }
 
+      if (request.method === `GET` && url.pathname === `/runtime-config`) {
+        return jsonResponse(200, {
+          ok: true,
+          collectionId: this.collectionId,
+          mode: this.mode,
+          schemaVersion: this.schemaVersion,
+        })
+      }
+
       const requestBody = await request.json()
-      const collectionId = requestBody.collectionId ?? DEFAULT_COLLECTION_ID
+      const collectionId = requestBody.collectionId ?? this.collectionId
 
       if (request.method === `POST` && url.pathname === `/write-todo`) {
-        const adapter = this.getAdapter(collectionId)
-        await adapter.applyCommittedTx(collectionId, {
-          txId: requestBody.txId,
-          term: 1,
-          seq: requestBody.seq,
-          rowVersion: requestBody.rowVersion,
-          mutations: [
-            {
-              type: `insert`,
-              key: requestBody.todo.id,
-              value: requestBody.todo,
-            },
-          ],
-        })
+        if (collectionId !== this.collectionId) {
+          throw createUnknownCollectionError(collectionId)
+        }
+        await this.collectionReady
+        const tx = this.collection.insert(requestBody.todo)
+        await tx.isPersisted.promise
 
         return jsonResponse(200, {
           ok: true,
@@ -107,8 +142,14 @@ export class PersistenceObject extends DurableObject {
       }
 
       if (request.method === `POST` && url.pathname === `/load-todos`) {
-        const adapter = this.getAdapter(collectionId)
-        const rows = await adapter.loadSubset(collectionId, {})
+        if (collectionId !== this.collectionId) {
+          throw createUnknownCollectionError(collectionId)
+        }
+        await this.collectionReady
+        const rows = this.collection.toArray.map((todo) => ({
+          key: todo.id,
+          value: todo,
+        }))
         return jsonResponse(200, {
           ok: true,
           rows,

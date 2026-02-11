@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
+import { describe, expect, it } from 'vitest'
 import { runRuntimeBridgeE2EContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-bridge-e2e-contract'
 import type {
   RuntimeBridgeE2EContractError,
@@ -17,6 +18,8 @@ type RuntimeProcessHarness = {
   restart: () => Promise<void>
   stop: () => Promise<void>
 }
+
+type CloudflareDORuntimeMode = `local` | `sync`
 
 type WranglerRuntimeResponse<TPayload> =
   | {
@@ -86,6 +89,9 @@ async function stopWranglerProcess(
 
 async function startWranglerRuntime(options: {
   persistPath: string
+  mode?: CloudflareDORuntimeMode
+  schemaVersion?: number
+  collectionId?: string
 }): Promise<RuntimeProcessHarness> {
   let child: ReturnType<typeof spawn> | undefined
   let stdoutBuffer = ``
@@ -93,22 +99,36 @@ async function startWranglerRuntime(options: {
   const port = await getAvailablePort()
 
   const spawnProcess = async (): Promise<void> => {
+    const runtimeVarEntries = [
+      [`PERSISTENCE_MODE`, options.mode],
+      [
+        `PERSISTENCE_SCHEMA_VERSION`,
+        options.schemaVersion !== undefined
+          ? String(options.schemaVersion)
+          : undefined,
+      ],
+      [`PERSISTENCE_COLLECTION_ID`, options.collectionId],
+    ].filter((entry): entry is [string, string] => entry[1] !== undefined)
+
+    const wranglerArgs = [
+      `exec`,
+      `wrangler`,
+      `dev`,
+      `--local`,
+      `--ip`,
+      `127.0.0.1`,
+      `--port`,
+      String(port),
+      `--persist-to`,
+      options.persistPath,
+      `--config`,
+      wranglerConfigPath,
+      ...runtimeVarEntries.flatMap(([key, value]) => [`--var`, `${key}:${value}`]),
+    ]
+
     child = spawn(
       `pnpm`,
-      [
-        `exec`,
-        `wrangler`,
-        `dev`,
-        `--local`,
-        `--ip`,
-        `127.0.0.1`,
-        `--port`,
-        String(port),
-        `--persist-to`,
-        options.persistPath,
-        `--config`,
-        wranglerConfigPath,
-      ],
+      wranglerArgs,
       {
         cwd: packageDirectory,
         env: {
@@ -194,6 +214,26 @@ async function postJson<TPayload>(
   return parsed
 }
 
+function assertRuntimeError(
+  response: WranglerRuntimeResponse<unknown>,
+): RuntimeBridgeE2EContractError {
+  if (!response.ok) {
+    return response.error
+  }
+
+  throw new Error(`Expected runtime call to fail, but it succeeded`)
+}
+
+function assertRuntimeSuccess<TPayload>(
+  response: WranglerRuntimeResponse<TPayload>,
+): TPayload | undefined {
+  if (response.ok) {
+    return response.rows
+  }
+
+  throw new Error(`${response.error.name}: ${response.error.message}`)
+}
+
 const createHarness: RuntimeBridgeE2EContractHarnessFactory = () => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-cloudflare-do-e2e-`))
   const persistPath = join(tempDirectory, `wrangler-state`)
@@ -272,3 +312,113 @@ runRuntimeBridgeE2EContractSuite(
     testTimeoutMs: 90_000,
   },
 )
+
+describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, () => {
+  it(
+    `throws on schema mismatch in local mode`,
+    async () => {
+      const tempDirectory = mkdtempSync(
+        join(tmpdir(), `db-cloudflare-do-local-mismatch-e2e-`),
+      )
+      const persistPath = join(tempDirectory, `wrangler-state`)
+      const collectionId = `todos`
+      let runtime = await startWranglerRuntime({
+        persistPath,
+        mode: `local`,
+        schemaVersion: 1,
+        collectionId,
+      })
+
+      try {
+        const writeResult = await postJson<void>(runtime.baseUrl, `/write-todo`, {
+          collectionId,
+          txId: `tx-1`,
+          seq: 1,
+          rowVersion: 1,
+          todo: {
+            id: `local-1`,
+            title: `Local mode row`,
+            score: 10,
+          },
+        })
+        assertRuntimeSuccess(writeResult)
+      } finally {
+        await runtime.stop()
+      }
+
+      runtime = await startWranglerRuntime({
+        persistPath,
+        mode: `local`,
+        schemaVersion: 2,
+        collectionId,
+      })
+      try {
+        const loadResult = await postJson<
+          Array<{ key: string; value: RuntimeBridgeE2EContractTodo }>
+        >(runtime.baseUrl, `/load-todos`, {
+          collectionId,
+        })
+        const runtimeError = assertRuntimeError(loadResult)
+        expect(runtimeError.message).toContain(`Schema version mismatch`)
+      } finally {
+        await runtime.stop()
+        rmSync(tempDirectory, { recursive: true, force: true })
+      }
+    },
+    90_000,
+  )
+
+  it(
+    `resets collection on schema mismatch in sync mode`,
+    async () => {
+      const tempDirectory = mkdtempSync(
+        join(tmpdir(), `db-cloudflare-do-sync-mismatch-e2e-`),
+      )
+      const persistPath = join(tempDirectory, `wrangler-state`)
+      const collectionId = `todos`
+      let runtime = await startWranglerRuntime({
+        persistPath,
+        mode: `sync`,
+        schemaVersion: 1,
+        collectionId,
+      })
+
+      try {
+        const writeResult = await postJson<void>(runtime.baseUrl, `/write-todo`, {
+          collectionId,
+          txId: `tx-1`,
+          seq: 1,
+          rowVersion: 1,
+          todo: {
+            id: `sync-1`,
+            title: `Sync mode row`,
+            score: 20,
+          },
+        })
+        assertRuntimeSuccess(writeResult)
+      } finally {
+        await runtime.stop()
+      }
+
+      runtime = await startWranglerRuntime({
+        persistPath,
+        mode: `sync`,
+        schemaVersion: 2,
+        collectionId,
+      })
+      try {
+        const loadResult = await postJson<
+          Array<{ key: string; value: RuntimeBridgeE2EContractTodo }>
+        >(runtime.baseUrl, `/load-todos`, {
+          collectionId,
+        })
+        const rows = assertRuntimeSuccess(loadResult) ?? []
+        expect(rows).toEqual([])
+      } finally {
+        await runtime.stop()
+        rmSync(tempDirectory, { recursive: true, force: true })
+      }
+    },
+    90_000,
+  )
+})

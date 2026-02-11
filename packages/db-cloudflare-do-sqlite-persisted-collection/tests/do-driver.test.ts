@@ -1,8 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, expect, it } from 'vitest'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-driver-contract'
-import { createCloudflareDOSQLiteDriver } from '../src'
+import {
+  InvalidPersistedCollectionConfigError,
+  createCloudflareDOSQLiteDriver,
+} from '../src'
 import { createBetterSqliteDoStorageHarness } from './helpers/better-sqlite-do-storage'
 import type { SQLiteDriverContractHarness } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-driver-contract'
 
@@ -29,3 +33,67 @@ function createDriverHarness(): SQLiteDriverContractHarness {
 }
 
 runSQLiteDriverContractSuite(`cloudflare durable object sqlite driver`, createDriverHarness)
+
+describe(`cloudflare durable object sqlite driver (native transaction mode)`, () => {
+  it(`uses storage.transaction when available`, async () => {
+    const executedSql = new Array<string>()
+    let transactionCalls = 0
+    const driver = createCloudflareDOSQLiteDriver({
+      storage: {
+        sql: {
+          exec: (sql) => {
+            executedSql.push(sql)
+            if (sql.startsWith(`SELECT`)) {
+              return [{ value: 1 }]
+            }
+            return []
+          },
+        },
+        transaction: async (fn) => {
+          transactionCalls++
+          return fn()
+        },
+      },
+    })
+
+    await driver.transaction(async (transactionDriver) => {
+      await transactionDriver.run(`INSERT INTO todos (id) VALUES (?)`, [`1`])
+      const rows = await transactionDriver.query<{ value: number }>(
+        `SELECT 1 AS value`,
+      )
+      expect(rows).toEqual([{ value: 1 }])
+    })
+
+    expect(transactionCalls).toBe(1)
+    expect(executedSql).toContain(`INSERT INTO todos (id) VALUES (?)`)
+    expect(executedSql).not.toContain(`BEGIN IMMEDIATE`)
+    expect(executedSql).not.toContain(`COMMIT`)
+  })
+
+  it(`throws a clear error for nested transactions in native transaction mode`, async () => {
+    const driver = createCloudflareDOSQLiteDriver({
+      storage: {
+        sql: {
+          exec: () => [],
+        },
+        transaction: async (fn) => fn(),
+      },
+    })
+
+    await expect(
+      driver.transaction(async (transactionDriver) =>
+        transactionDriver.transaction((_nestedDriver) =>
+          Promise.resolve(undefined),
+        ),
+      ),
+    ).rejects.toBeInstanceOf(InvalidPersistedCollectionConfigError)
+
+    await expect(
+      driver.transaction(async (transactionDriver) =>
+        transactionDriver.transaction((_nestedDriver) =>
+          Promise.resolve(undefined),
+        ),
+      ),
+    ).rejects.toThrow(`Nested SQL savepoints are not supported`)
+  })
+})
