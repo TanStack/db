@@ -862,8 +862,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: ^1.5.2
-        version: 1.5.2
+        specifier: ^1.5.3
+        version: 1.5.3
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
@@ -975,8 +975,8 @@ importers:
         version: 1.6.0(react@19.2.4)
     devDependencies:
       '@electric-sql/client':
-        specifier: ^1.5.2
-        version: 1.5.2
+        specifier: ^1.5.3
+        version: 1.5.3
       '@testing-library/react':
         specifier: ^16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -1040,8 +1040,8 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: ^1.5.2
-        version: 1.5.2
+        specifier: ^1.5.3
+        version: 1.5.3
       '@solidjs/testing-library':
         specifier: ^0.8.10
         version: 0.8.10(solid-js@1.9.11)
@@ -1121,8 +1121,8 @@ importers:
         version: link:../db
     devDependencies:
       '@electric-sql/client':
-        specifier: ^1.5.2
-        version: 1.5.2
+        specifier: ^1.5.3
+        version: 1.5.3
       '@vitejs/plugin-vue':
         specifier: ^6.0.4
         version: 6.0.4(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.30.2)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))(vue@3.5.28(typescript@5.9.3))
@@ -2010,8 +2010,8 @@ packages:
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
 
-  '@electric-sql/client@1.5.2':
-    resolution: {integrity: sha512-4kDyEXBhRz7+84Y1JQtKXy0FdRyXkjU/9rM9N9TOmGxWT0zuAl6dWIG/iJUu+0geBELYo8Ot8fVSMTqg5bf/Tw==}
+  '@electric-sql/client@1.5.3':
+    resolution: {integrity: sha512-hIF7Weuh5z68twXMxDW6nWGPZoSCdWc3/UI+tFM2AEiPAq1NRgO2YgF9bZEp4U2ZJ8TREnL0u3fIDDx9rltDsw==}
 
   '@emnapi/core@1.7.1':
     resolution: {integrity: sha512-o1uhUASyo921r2XtHYOHy7gdkGLge8ghBEQHMWmyJFoXlpU58kIrhhN3w26lpQb6dspetweapMn2CSNwQ8I4wg==}
@@ -11987,7 +11987,7 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
-  '@electric-sql/client@1.5.2':
+  '@electric-sql/client@1.5.3':
     dependencies:
       '@microsoft/fetch-event-source': 2.0.1
     optionalDependencies:
