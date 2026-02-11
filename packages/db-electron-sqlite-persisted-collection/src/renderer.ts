@@ -132,9 +132,16 @@ function createRendererRequestExecutor(options: {
     assertValidResponse(response, request)
 
     if (!response.ok) {
-      throw new InvalidPersistedCollectionConfigError(
+      const remoteError = new InvalidPersistedCollectionConfigError(
         `${response.error.name}: ${response.error.message}`,
       )
+      if (typeof response.error.stack === `string`) {
+        remoteError.stack = response.error.stack
+      }
+      if (typeof response.error.code === `string`) {
+        ;(remoteError as Error & { code?: string }).code = response.error.code
+      }
+      throw remoteError
     }
 
     return response.result as ElectronPersistenceResultMap[TMethod]
