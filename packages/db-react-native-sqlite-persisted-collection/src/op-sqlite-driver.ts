@@ -215,6 +215,18 @@ function hasExistingDatabase(
   return `database` in options
 }
 
+function assertTransactionCallbackHasDriverArg(
+  fn: (transactionDriver: SQLiteDriver) => Promise<unknown>,
+): void {
+  if (fn.length > 0) {
+    return
+  }
+
+  throw new InvalidPersistedCollectionConfigError(
+    `SQLiteDriver.transaction callback must accept the transaction driver argument`,
+  )
+}
+
 function resolveExecuteMethod(
   database: OpSQLiteDatabaseLike,
 ): OpSQLiteExecuteFn {
@@ -297,26 +309,17 @@ export class OpSQLiteDriver implements SQLiteDriver {
     })
   }
 
-  async transaction<T>(fn: () => Promise<T>): Promise<T> {
+  async transaction<T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ): Promise<T> {
+    assertTransactionCallbackHasDriverArg(fn)
+
     const activeTransactionDriver = await this.getActiveTransactionDriver()
     if (activeTransactionDriver) {
       return activeTransactionDriver.transaction(fn)
     }
 
-    return this.transactionWithDriver(async (transactionDriver) => {
-      // In runtimes without async context support, callbacks must use the
-      // transaction-scoped driver argument to avoid queue deadlocks.
-      if (
-        fn.length === 0 &&
-        !(await this.hasTransactionContextStorageSupport())
-      ) {
-        throw new InvalidPersistedCollectionConfigError(
-          `OpSQLiteDriver.transaction callback must accept the transaction driver argument in this runtime`,
-        )
-      }
-      const scopedFn = fn as (driver: SQLiteDriver) => Promise<T>
-      return scopedFn(transactionDriver)
-    })
+    return this.transactionWithDriver((transactionDriver) => fn(transactionDriver))
   }
 
   async transactionWithDriver<T>(
@@ -380,12 +383,9 @@ export class OpSQLiteDriver implements SQLiteDriver {
     return queuedOperation
   }
 
-  private async hasTransactionContextStorageSupport(): Promise<boolean> {
-    const transactionContextStorage = await this.getTransactionContextStorage()
-    return transactionContextStorage !== null
-  }
-
-  private async getTransactionContextStorage(): Promise<AsyncLocalStorageLike<TransactionContextStore> | null> {
+  private async getTransactionContextStorage(): Promise<
+    AsyncLocalStorageLike<TransactionContextStore> | null
+  > {
     if (this.transactionContextStoragePromise) {
       return this.transactionContextStoragePromise
     }
@@ -435,10 +435,12 @@ export class OpSQLiteDriver implements SQLiteDriver {
       run: async (sql, params = []) => {
         await this.execute(sql, params)
       },
-      transaction: async <T>(fn: () => Promise<T>): Promise<T> => {
+      transaction: async <T>(
+        fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+      ): Promise<T> => {
+        assertTransactionCallbackHasDriverArg(fn)
         return this.runNestedTransaction(transactionDriver, async (driver) => {
-          const scopedFn = fn as (transactionDriver: SQLiteDriver) => Promise<T>
-          return scopedFn(driver)
+          return fn(driver)
         })
       },
       transactionWithDriver: async <T>(

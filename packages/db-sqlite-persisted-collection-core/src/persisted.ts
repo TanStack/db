@@ -209,7 +209,9 @@ export interface SQLiteDriver {
     params?: ReadonlyArray<unknown>,
   ) => Promise<ReadonlyArray<T>>
   run: (sql: string, params?: ReadonlyArray<unknown>) => Promise<void>
-  transaction: <T>(fn: () => Promise<T>) => Promise<T>
+  transaction: <T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ) => Promise<T>
   transactionWithDriver?: <T>(
     fn: (transactionDriver: SQLiteDriver) => Promise<T>,
   ) => Promise<T>

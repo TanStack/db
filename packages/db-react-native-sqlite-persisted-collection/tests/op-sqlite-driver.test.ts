@@ -34,9 +34,7 @@ it.each([`rows-array`, `rows-object`, `rows-list`, `statement-array`] as const)(
       filename: dbPath,
       resultShape,
     })
-    activeCleanupFns.push(() => {
-      database.close()
-    })
+    activeCleanupFns.push(() => Promise.resolve(database.close()))
 
     const driver = createOpSQLiteDriver({ database })
     await driver.exec(
@@ -66,9 +64,7 @@ it.each([`rows-array`, `rows-object`, `rows-list`, `statement-array`] as const)(
 it(`rolls back transaction on failure`, async () => {
   const dbPath = createTempSqlitePath()
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
-  activeCleanupFns.push(() => {
-    database.close()
-  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const driver = createOpSQLiteDriver({ database })
   await driver.exec(
@@ -97,9 +93,7 @@ it(`rolls back transaction on failure`, async () => {
 it(`supports nested savepoint rollback without losing outer transaction`, async () => {
   const dbPath = createTempSqlitePath()
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
-  activeCleanupFns.push(() => {
-    database.close()
-  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const driver = createOpSQLiteDriver({ database })
   await driver.exec(
@@ -113,8 +107,8 @@ it(`supports nested savepoint rollback without losing outer transaction`, async 
     )
 
     await expect(
-      outerTransactionDriver.transaction(async () => {
-        await outerTransactionDriver.run(
+      outerTransactionDriver.transaction(async (innerTransactionDriver) => {
+        await innerTransactionDriver.run(
           `INSERT INTO nested_tx_test (id, title) VALUES (?, ?)`,
           [`2`, `Inner failing`],
         )
@@ -137,12 +131,10 @@ it(`supports nested savepoint rollback without losing outer transaction`, async 
   ])
 })
 
-it(`supports closure-style transaction callbacks without deadlock`, async () => {
+it(`supports transaction callbacks that use provided transaction driver`, async () => {
   const dbPath = createTempSqlitePath()
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
-  activeCleanupFns.push(() => {
-    database.close()
-  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const driver = createOpSQLiteDriver({ database })
   await driver.exec(`CREATE TABLE closure_tx_test (value INTEGER NOT NULL)`)
@@ -156,14 +148,18 @@ it(`supports closure-style transaction callbacks without deadlock`, async () => 
     resolveEntered = resolve
   })
 
-  const txPromise = driver.transaction(async () => {
+  const txPromise = driver.transaction(async (transactionDriver) => {
     if (!resolveEntered) {
       throw new Error(`transaction entry signal missing`)
     }
     resolveEntered()
-    await driver.run(`INSERT INTO closure_tx_test (value) VALUES (?)`, [1])
+    await transactionDriver.run(`INSERT INTO closure_tx_test (value) VALUES (?)`, [
+      1,
+    ])
     await hold
-    await driver.run(`INSERT INTO closure_tx_test (value) VALUES (?)`, [2])
+    await transactionDriver.run(`INSERT INTO closure_tx_test (value) VALUES (?)`, [
+      2,
+    ])
   })
 
   await entered
@@ -191,12 +187,22 @@ it(`supports closure-style transaction callbacks without deadlock`, async () => 
   expect(rows.map((row) => row.value)).toEqual([1, 2, 3])
 })
 
+it(`throws when transaction callback omits transaction driver argument`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createOpSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
+
+  const driver = createOpSQLiteDriver({ database })
+
+  await expect(
+    driver.transaction((async () => undefined) as never),
+  ).rejects.toThrow(`transaction driver argument`)
+})
+
 it(`serializes unrelated operations behind an active transaction`, async () => {
   const dbPath = createTempSqlitePath()
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
-  activeCleanupFns.push(() => {
-    database.close()
-  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const driver = createOpSQLiteDriver({ database })
   await driver.exec(

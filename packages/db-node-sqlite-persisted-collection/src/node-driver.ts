@@ -35,6 +35,18 @@ type TransactionContext = {
   depth: number
 }
 
+function assertTransactionCallbackHasDriverArg(
+  fn: (transactionDriver: SQLiteDriver) => Promise<unknown>,
+): void {
+  if (fn.length > 0) {
+    return
+  }
+
+  throw new InvalidPersistedCollectionConfigError(
+    `SQLiteDriver.transaction callback must accept the transaction driver argument`,
+  )
+}
+
 function hasExistingDatabase(
   options: BetterSqlite3DriverOptions,
 ): options is BetterSqlite3ExistingDatabaseOptions {
@@ -101,7 +113,11 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
     })
   }
 
-  async transaction<T>(fn: () => Promise<T>): Promise<T> {
+  async transaction<T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ): Promise<T> {
+    assertTransactionCallbackHasDriverArg(fn)
+
     if (this.isInsideTransaction()) {
       return this.runNestedTransaction(fn)
     }
@@ -111,7 +127,7 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
       try {
         const result = await this.transactionContext.run(
           { depth: 1 },
-          async () => fn(),
+          async () => fn(this),
         )
         this.database.exec(`COMMIT`)
         return result
@@ -124,6 +140,12 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
         throw error
       }
     })
+  }
+
+  async transactionWithDriver<T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ): Promise<T> {
+    return this.transaction(fn)
   }
 
   close(): void {
@@ -190,10 +212,12 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
     return queuedOperation
   }
 
-  private async runNestedTransaction<T>(fn: () => Promise<T>): Promise<T> {
+  private async runNestedTransaction<T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ): Promise<T> {
     const context = this.transactionContext.getStore()
     if (!context) {
-      return fn()
+      return fn(this)
     }
 
     const savepointName = `tsdb_sp_${this.nextSavepointId}`
@@ -203,7 +227,7 @@ export class BetterSqlite3SQLiteDriver implements SQLiteDriver {
     try {
       const result = await this.transactionContext.run(
         { depth: context.depth + 1 },
-        async () => fn(),
+        async () => fn(this),
       )
       this.database.exec(`RELEASE SAVEPOINT ${savepointName}`)
       return result

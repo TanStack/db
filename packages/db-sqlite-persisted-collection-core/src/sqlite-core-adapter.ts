@@ -1028,7 +1028,7 @@ export class SQLiteCorePersistenceAdapter<
       return this.driver.transactionWithDriver(fn)
     }
 
-    return this.driver.transaction(async () => fn(this.driver))
+    return this.driver.transaction(fn)
   }
 
   async loadSubset(

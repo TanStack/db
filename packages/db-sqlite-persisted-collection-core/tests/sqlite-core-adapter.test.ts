@@ -137,10 +137,18 @@ class SqliteCliDriver implements SQLiteDriver {
     })
   }
 
-  async transaction<T>(fn: () => Promise<T>): Promise<T> {
+  async transaction<T>(
+    fn: (transactionDriver: SQLiteDriver) => Promise<T>,
+  ): Promise<T> {
+    if (fn.length === 0) {
+      throw new Error(
+        `SQLiteDriver.transaction callback must accept the transaction driver argument`,
+      )
+    }
+
     const activeDbPath = this.transactionDbPath.getStore()
     if (activeDbPath) {
-      return fn()
+      return fn(this)
     }
 
     return this.enqueue(async () => {
@@ -153,7 +161,7 @@ class SqliteCliDriver implements SQLiteDriver {
 
       try {
         const txResult = await this.transactionDbPath.run(txDbPath, async () =>
-          fn(),
+          fn(this),
         )
 
         if (existsSync(txDbPath)) {

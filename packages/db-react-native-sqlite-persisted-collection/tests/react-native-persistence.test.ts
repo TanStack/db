@@ -61,12 +61,10 @@ it(`persists data across app restart (close and reopen)`, async () => {
       },
     ],
   })
-  firstDatabase.close()
+  await Promise.resolve(firstDatabase.close())
 
   const secondDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
-  activeCleanupFns.push(() => {
-    secondDatabase.close()
-  })
+  activeCleanupFns.push(() => Promise.resolve(secondDatabase.close()))
   const secondAdapter = createReactNativeSQLitePersistenceAdapter<Todo, string>(
     {
       driver: { database: secondDatabase },
@@ -90,9 +88,7 @@ it(`keeps all committed rows under rapid mutation bursts`, async () => {
   const dbPath = createTempSqlitePath()
   const collectionId = `todos-burst`
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
-  activeCleanupFns.push(() => {
-    database.close()
-  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const adapter = createReactNativeSQLitePersistenceAdapter<Todo, string>({
     driver: { database },
@@ -128,9 +124,7 @@ it(`exposes parity wrappers for react-native and expo entrypoints`, async () => 
   const dbPath = createTempSqlitePath()
   const collectionId = `todos-entrypoints`
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
-  activeCleanupFns.push(() => {
-    database.close()
-  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const reactNativePersistence = createReactNativeSQLitePersistence<
     Todo,
@@ -168,9 +162,7 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   const dbPath = createTempSqlitePath()
   const collectionId = `todos-lifecycle`
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
-  activeCleanupFns.push(() => {
-    database.close()
-  })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const persistence = createReactNativeSQLitePersistence<Todo, string>({
     driver: { database },
