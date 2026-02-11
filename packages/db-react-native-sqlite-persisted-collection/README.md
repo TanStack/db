@@ -121,6 +121,7 @@ pnpm --filter @tanstack/db-react-native-sqlite-persisted-collection test:e2e:run
 
 If your CI environment can provide a runtime factory module, run
 `test:e2e:runtime` in CI to enforce real-runtime validation rather than only the
-default Node-hosted mock harness. In this repository, the E2E workflow requires
-this runtime lane for non-fork runs and skips it only for fork PRs where
-repository variables are not available.
+default Node-hosted mock harness. In this repository, the E2E workflow runs the
+runtime lane when `TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE` is configured.
+Set `TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE=1` to make that lane required for
+non-fork runs.
