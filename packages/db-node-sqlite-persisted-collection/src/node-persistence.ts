@@ -2,6 +2,7 @@ import {
   SingleProcessCoordinator,
   createSQLiteCorePersistenceAdapter,
 } from '@tanstack/db-sqlite-persisted-collection-core'
+import { BetterSqlite3SQLiteDriver } from './node-driver'
 import type {
   PersistedCollectionCoordinator,
   PersistedCollectionMode,
@@ -9,6 +10,7 @@ import type {
   SQLiteCoreAdapterOptions,
   SQLiteDriver,
 } from '@tanstack/db-sqlite-persisted-collection-core'
+import type { BetterSqlite3Database } from './node-driver'
 
 type NodeSQLiteCoreSchemaMismatchPolicy =
   | `sync-present-reset`
@@ -19,14 +21,26 @@ export type NodeSQLiteSchemaMismatchPolicy =
   | NodeSQLiteCoreSchemaMismatchPolicy
   | `throw`
 
-export type NodeSQLitePersistenceOptions = Omit<
+type NodeSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > & {
-  driver: SQLiteDriver
   coordinator?: PersistedCollectionCoordinator
   schemaMismatchPolicy?: NodeSQLiteSchemaMismatchPolicy
 }
+
+type NodeSQLitePersistenceWithDriver = NodeSQLitePersistenceBaseOptions & {
+  driver: SQLiteDriver
+}
+
+type NodeSQLitePersistenceWithDatabase = NodeSQLitePersistenceBaseOptions & {
+  database: BetterSqlite3Database
+  pragmas?: ReadonlyArray<string>
+}
+
+export type NodeSQLitePersistenceOptions =
+  | NodeSQLitePersistenceWithDriver
+  | NodeSQLitePersistenceWithDatabase
 
 function normalizeSchemaMismatchPolicy(
   policy: NodeSQLiteSchemaMismatchPolicy,
@@ -58,6 +72,30 @@ function createAdapterCacheKey(
   return `${schemaMismatchPolicy}|${schemaVersionKey}`
 }
 
+function resolveSQLiteDriver(options: NodeSQLitePersistenceOptions): SQLiteDriver {
+  if (`driver` in options) {
+    return options.driver
+  }
+
+  return new BetterSqlite3SQLiteDriver({
+    database: options.database,
+    ...(options.pragmas ? { pragmas: options.pragmas } : {}),
+  })
+}
+
+function resolveAdapterBaseOptions(
+  options: NodeSQLitePersistenceOptions,
+): Omit<
+  SQLiteCoreAdapterOptions,
+  `driver` | `schemaVersion` | `schemaMismatchPolicy`
+> {
+  return {
+    appliedTxPruneMaxRows: options.appliedTxPruneMaxRows,
+    appliedTxPruneMaxAgeSeconds: options.appliedTxPruneMaxAgeSeconds,
+    pullSinceReloadThreshold: options.pullSinceReloadThreshold,
+  }
+}
+
 /**
  * Creates a shared SQLite persistence instance that can be reused by many
  * collections on the same database. Collection-specific schema versions are
@@ -69,8 +107,9 @@ export function createNodeSQLitePersistence<
 >(
   options: NodeSQLitePersistenceOptions,
 ): PersistedCollectionPersistence<T, TKey> {
-  const { coordinator, driver, schemaMismatchPolicy, ...adapterBaseOptions } =
-    options
+  const { coordinator, schemaMismatchPolicy } = options
+  const driver = resolveSQLiteDriver(options)
+  const adapterBaseOptions = resolveAdapterBaseOptions(options)
   const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
   const adapterCache = new Map<
     string,

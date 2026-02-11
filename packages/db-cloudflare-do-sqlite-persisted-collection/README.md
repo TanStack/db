@@ -4,16 +4,15 @@ Thin SQLite persistence for Cloudflare Durable Objects.
 
 ## Public API
 
-- `CloudflareDOSQLiteDriver`
 - `createCloudflareDOSQLitePersistence(...)`
 - `persistedCollectionOptions(...)` (re-exported from core)
+- `CloudflareDOSQLiteDriver` (optional advanced usage)
 
 ## Quick start
 
 ```ts
 import { createCollection } from '@tanstack/db'
 import {
-  CloudflareDOSQLiteDriver,
   createCloudflareDOSQLitePersistence,
   persistedCollectionOptions,
 } from '@tanstack/db-cloudflare-do-sqlite-persisted-collection'
@@ -26,10 +25,8 @@ type Todo = {
 
 export class TodosObject extends DurableObject {
   persistence = createCloudflareDOSQLitePersistence({
-    driver: new CloudflareDOSQLiteDriver({
-      // Pass full storage to use native DO transaction support.
-      storage: this.ctx.storage,
-    }),
+    // Pass full storage to use native DO transaction support.
+    storage: this.ctx.storage,
   })
 
   todos = createCollection(

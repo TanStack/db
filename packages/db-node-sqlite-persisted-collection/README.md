@@ -4,19 +4,19 @@ Thin Node SQLite persistence for TanStack DB.
 
 ## Public API
 
-- `BetterSqlite3SQLiteDriver`
 - `createNodeSQLitePersistence(...)`
 - `persistedCollectionOptions(...)` (re-exported from core)
+- `BetterSqlite3SQLiteDriver` (optional advanced usage)
 
 ## Quick start
 
 ```ts
 import { createCollection } from '@tanstack/db'
 import {
-  BetterSqlite3SQLiteDriver,
   createNodeSQLitePersistence,
   persistedCollectionOptions,
 } from '@tanstack/db-node-sqlite-persisted-collection'
+import Database from 'better-sqlite3'
 
 type Todo = {
   id: string
@@ -24,14 +24,12 @@ type Todo = {
   completed: boolean
 }
 
-// You own driver lifecycle directly.
-const driver = new BetterSqlite3SQLiteDriver({
-  filename: `./tanstack-db.sqlite`,
-})
+// You own database lifecycle directly.
+const database = new Database(`./tanstack-db.sqlite`)
 
 // One shared persistence instance for the whole database.
 const persistence = createNodeSQLitePersistence({
-  driver,
+  database,
 })
 
 export const todosCollection = createCollection(
@@ -49,4 +47,4 @@ export const todosCollection = createCollection(
 - `createNodeSQLitePersistence` is shared across collections; it resolves
   mode-specific behavior (`sync-present` vs `sync-absent`) automatically.
 - `schemaVersion` is specified per collection via `persistedCollectionOptions`.
-- Call `driver.close()` when your app shuts down.
+- Call `database.close()` when your app shuts down.

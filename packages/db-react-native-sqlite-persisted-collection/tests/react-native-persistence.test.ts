@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import {
-  OpSQLiteDriver,
   createReactNativeSQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
@@ -40,7 +39,7 @@ it(`persists data across app restart (close and reopen)`, async () => {
 
   const firstDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
   const firstPersistence = createReactNativeSQLitePersistence<Todo, string>({
-    driver: new OpSQLiteDriver({ database: firstDatabase }),
+    database: firstDatabase,
   })
   const firstAdapter = firstPersistence.adapter
 
@@ -66,7 +65,7 @@ it(`persists data across app restart (close and reopen)`, async () => {
   const secondDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(secondDatabase.close()))
   const secondPersistence = createReactNativeSQLitePersistence<Todo, string>({
-    driver: new OpSQLiteDriver({ database: secondDatabase }),
+    database: secondDatabase,
   })
   const secondAdapter = secondPersistence.adapter
 
@@ -89,7 +88,7 @@ it(`shared react-native api persists across expo-style restart`, async () => {
 
   const firstDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
   const firstPersistence = createReactNativeSQLitePersistence<Todo, string>({
-    driver: new OpSQLiteDriver({ database: firstDatabase }),
+    database: firstDatabase,
   })
   const firstAdapter = firstPersistence.adapter
 
@@ -115,7 +114,7 @@ it(`shared react-native api persists across expo-style restart`, async () => {
   const secondDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(secondDatabase.close()))
   const secondPersistence = createReactNativeSQLitePersistence<Todo, string>({
-    driver: new OpSQLiteDriver({ database: secondDatabase }),
+    database: secondDatabase,
   })
   const secondAdapter = secondPersistence.adapter
 
@@ -139,7 +138,7 @@ it(`keeps all committed rows under rapid mutation bursts`, async () => {
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const persistence = createReactNativeSQLitePersistence<Todo, string>({
-    driver: new OpSQLiteDriver({ database }),
+    database,
   })
   const adapter = persistence.adapter
 
@@ -179,10 +178,10 @@ it(`uses a single react-native api across runtime aliases`, async () => {
     Todo,
     string
   >({
-    driver: new OpSQLiteDriver({ database }),
+    database,
   })
   const sharedApiPersistence = createReactNativeSQLitePersistence<Todo, string>({
-    driver: new OpSQLiteDriver({ database }),
+    database,
   })
 
   await reactNativePersistence.adapter.applyCommittedTx(collectionId, {
@@ -214,7 +213,7 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const persistence = createReactNativeSQLitePersistence<Todo, string>({
-    driver: new OpSQLiteDriver({ database }),
+    database,
   })
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({
@@ -268,7 +267,7 @@ it(`shared api resumes persisted sync in expo-style lifecycle`, async () => {
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const persistence = createReactNativeSQLitePersistence<Todo, string>({
-    driver: new OpSQLiteDriver({ database }),
+    database,
   })
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({

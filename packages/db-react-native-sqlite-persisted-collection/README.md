@@ -4,9 +4,9 @@ Thin SQLite persistence for React Native apps (including Expo runtime).
 
 ## Public API
 
-- `OpSQLiteDriver`
 - `createReactNativeSQLitePersistence(...)`
 - `persistedCollectionOptions(...)` (re-exported from core)
+- `OpSQLiteDriver` (optional advanced usage)
 
 ## Quick start
 
@@ -14,7 +14,6 @@ Thin SQLite persistence for React Native apps (including Expo runtime).
 import { open } from '@op-engineering/op-sqlite'
 import { createCollection } from '@tanstack/db'
 import {
-  OpSQLiteDriver,
   createReactNativeSQLitePersistence,
   persistedCollectionOptions,
 } from '@tanstack/db-react-native-sqlite-persisted-collection'
@@ -30,12 +29,9 @@ const database = open({
   location: `default`,
 })
 
-// You own driver lifecycle directly.
-const driver = new OpSQLiteDriver({ database })
-
 // One shared persistence instance for the whole database.
 const persistence = createReactNativeSQLitePersistence({
-  driver,
+  database,
 })
 
 export const todosCollection = createCollection(

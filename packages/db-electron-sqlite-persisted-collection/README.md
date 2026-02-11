@@ -16,18 +16,14 @@ explicit process-specific entrypoints.
 
 ```ts
 import { ipcMain } from 'electron'
-import {
-  BetterSqlite3SQLiteDriver,
-  createNodeSQLitePersistence,
-} from '@tanstack/db-node-sqlite-persisted-collection'
+import { createNodeSQLitePersistence } from '@tanstack/db-node-sqlite-persisted-collection'
 import { exposeElectronSQLitePersistence } from '@tanstack/db-electron-sqlite-persisted-collection/main'
+import Database from 'better-sqlite3'
 
-const driver = new BetterSqlite3SQLiteDriver({
-  filename: `./tanstack-db.sqlite`,
-})
+const database = new Database(`./tanstack-db.sqlite`)
 
 const persistence = createNodeSQLitePersistence({
-  driver,
+  database,
 })
 
 const dispose = exposeElectronSQLitePersistence({
@@ -35,7 +31,7 @@ const dispose = exposeElectronSQLitePersistence({
   persistence,
 })
 
-// Call dispose() and driver.close() during shutdown.
+// Call dispose() and database.close() during shutdown.
 ```
 
 ## Renderer process

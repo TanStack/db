@@ -2,6 +2,7 @@ import {
   SingleProcessCoordinator,
   createSQLiteCorePersistenceAdapter,
 } from '@tanstack/db-sqlite-persisted-collection-core'
+import { OpSQLiteDriver } from './op-sqlite-driver'
 import type {
   PersistedCollectionCoordinator,
   PersistedCollectionMode,
@@ -9,6 +10,7 @@ import type {
   SQLiteCoreAdapterOptions,
   SQLiteDriver,
 } from '@tanstack/db-sqlite-persisted-collection-core'
+import type { OpSQLiteDatabaseLike } from './op-sqlite-driver'
 
 type MobileSQLiteCoreSchemaMismatchPolicy =
   | `sync-present-reset`
@@ -19,14 +21,25 @@ export type MobileSQLiteSchemaMismatchPolicy =
   | MobileSQLiteCoreSchemaMismatchPolicy
   | `throw`
 
-export type MobileSQLitePersistenceOptions = Omit<
+type MobileSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > & {
-  driver: SQLiteDriver
   coordinator?: PersistedCollectionCoordinator
   schemaMismatchPolicy?: MobileSQLiteSchemaMismatchPolicy
 }
+
+type MobileSQLitePersistenceWithDriver = MobileSQLitePersistenceBaseOptions & {
+  driver: SQLiteDriver
+}
+
+type MobileSQLitePersistenceWithDatabase = MobileSQLitePersistenceBaseOptions & {
+  database: OpSQLiteDatabaseLike
+}
+
+export type MobileSQLitePersistenceOptions =
+  | MobileSQLitePersistenceWithDriver
+  | MobileSQLitePersistenceWithDatabase
 
 function normalizeSchemaMismatchPolicy(
   policy: MobileSQLiteSchemaMismatchPolicy,
@@ -58,14 +71,38 @@ function createAdapterCacheKey(
   return `${schemaMismatchPolicy}|${schemaVersionKey}`
 }
 
+function resolveSQLiteDriver(options: MobileSQLitePersistenceOptions): SQLiteDriver {
+  if (`driver` in options) {
+    return options.driver
+  }
+
+  return new OpSQLiteDriver({
+    database: options.database,
+  })
+}
+
+function resolveAdapterBaseOptions(
+  options: MobileSQLitePersistenceOptions,
+): Omit<
+  SQLiteCoreAdapterOptions,
+  `driver` | `schemaVersion` | `schemaMismatchPolicy`
+> {
+  return {
+    appliedTxPruneMaxRows: options.appliedTxPruneMaxRows,
+    appliedTxPruneMaxAgeSeconds: options.appliedTxPruneMaxAgeSeconds,
+    pullSinceReloadThreshold: options.pullSinceReloadThreshold,
+  }
+}
+
 export function createMobileSQLitePersistence<
   T extends object,
   TKey extends string | number = string | number,
 >(
   options: MobileSQLitePersistenceOptions,
 ): PersistedCollectionPersistence<T, TKey> {
-  const { coordinator, driver, schemaMismatchPolicy, ...adapterBaseOptions } =
-    options
+  const { coordinator, schemaMismatchPolicy } = options
+  const driver = resolveSQLiteDriver(options)
+  const adapterBaseOptions = resolveAdapterBaseOptions(options)
   const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
   const adapterCache = new Map<
     string,
