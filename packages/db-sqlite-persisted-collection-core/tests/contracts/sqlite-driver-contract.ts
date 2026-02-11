@@ -3,7 +3,7 @@ import type { SQLiteDriver } from '../../src'
 
 export type SQLiteDriverContractHarness = {
   driver: SQLiteDriver
-  cleanup: () => void
+  cleanup: () => void | Promise<void>
 }
 
 export type SQLiteDriverContractHarnessFactory =
@@ -17,7 +17,7 @@ async function withHarness<T>(
   try {
     return await fn(harness)
   } finally {
-    harness.cleanup()
+    await Promise.resolve(harness.cleanup())
   }
 }
 

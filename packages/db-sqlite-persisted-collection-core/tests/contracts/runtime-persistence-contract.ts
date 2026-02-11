@@ -16,7 +16,7 @@ export type RuntimePersistenceContractTodo = {
 
 export type RuntimePersistenceDatabaseHarness = {
   createDriver: () => SQLiteDriver
-  cleanup: () => void
+  cleanup: () => void | Promise<void>
 }
 
 export type RuntimePersistenceContractFactory = {
@@ -33,13 +33,13 @@ export type RuntimePersistenceContractFactory = {
 
 async function withDatabaseHarness<T>(
   createHarness: () => RuntimePersistenceDatabaseHarness,
-  fn: (harness: RuntimePersistenceDatabaseHarness) => Promise<T>,
+  fn: (harness: RuntimePersistenceDatabaseHarness) => Promise<T> | T,
 ): Promise<T> {
   const harness = createHarness()
   try {
     return await fn(harness)
   } finally {
-    harness.cleanup()
+    await Promise.resolve(harness.cleanup())
   }
 }
 
@@ -130,7 +130,7 @@ export function runRuntimePersistenceContractSuite(
     it(`allows overriding the coordinator`, async () => {
       await withDatabaseHarness(
         factory.createDatabaseHarness,
-        async ({ createDriver }) => {
+        ({ createDriver }) => {
           const driver = createDriver()
           const coordinator = factory.createCoordinator()
           const persistence = factory.createPersistence(driver, coordinator)
