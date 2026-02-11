@@ -19,6 +19,7 @@ import {
   createElectronRuntimeBridgeInvoke,
   isElectronFullE2EEnabled,
 } from './e2e/electron-process-client'
+import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persisted-collection-core'
 import type {
   ElectronPersistenceInvoke,
   ElectronPersistenceRequestEnvelope,
@@ -36,6 +37,11 @@ type InvokeHarness = {
   close: () => void
 }
 
+type ElectronMainPersistence = PersistedCollectionPersistence<
+  Record<string, unknown>,
+  string | number
+>
+
 const electronRuntimeBridgeTimeoutMs = isElectronFullE2EEnabled()
   ? 45_000
   : 4_000
@@ -43,8 +49,8 @@ const electronRuntimeBridgeTimeoutMs = isElectronFullE2EEnabled()
 function createFilteredPersistence(
   collectionId: string,
   allowAnyCollectionId: boolean,
-  persistence: ReturnType<typeof createNodeSQLitePersistence>,
-) {
+  persistence: ElectronMainPersistence,
+): ElectronMainPersistence {
   if (allowAnyCollectionId) {
     return persistence
   }
@@ -61,26 +67,28 @@ function createFilteredPersistence(
     }
   }
 
+  const adapter: ElectronMainPersistence[`adapter`] = {
+    loadSubset: (requestedCollectionId, options, ctx) => {
+      assertKnownCollection(requestedCollectionId)
+      return baseAdapter.loadSubset(requestedCollectionId, options, ctx)
+    },
+    applyCommittedTx: (requestedCollectionId, tx) => {
+      assertKnownCollection(requestedCollectionId)
+      return baseAdapter.applyCommittedTx(requestedCollectionId, tx)
+    },
+    ensureIndex: (requestedCollectionId, signature, spec) => {
+      assertKnownCollection(requestedCollectionId)
+      return baseAdapter.ensureIndex(requestedCollectionId, signature, spec)
+    },
+    markIndexRemoved: (requestedCollectionId, signature) => {
+      assertKnownCollection(requestedCollectionId)
+      return baseAdapter.markIndexRemoved?.(requestedCollectionId, signature)
+    },
+  }
+
   return {
     coordinator: persistence.coordinator,
-    adapter: {
-      loadSubset: (requestedCollectionId, options, ctx) => {
-        assertKnownCollection(requestedCollectionId)
-        return baseAdapter.loadSubset(requestedCollectionId, options, ctx)
-      },
-      applyCommittedTx: (requestedCollectionId, tx) => {
-        assertKnownCollection(requestedCollectionId)
-        return baseAdapter.applyCommittedTx(requestedCollectionId, tx)
-      },
-      ensureIndex: (requestedCollectionId, signature, spec) => {
-        assertKnownCollection(requestedCollectionId)
-        return baseAdapter.ensureIndex(requestedCollectionId, signature, spec)
-      },
-      markIndexRemoved: (requestedCollectionId, signature) => {
-        assertKnownCollection(requestedCollectionId)
-        return baseAdapter.markIndexRemoved?.(requestedCollectionId, signature)
-      },
-    },
+    adapter,
   }
 }
 
@@ -102,7 +110,10 @@ function createInvokeHarness(
   }
 
   const driver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
-  const persistence = createNodeSQLitePersistence<Record<string, unknown>, string | number>({
+  const persistence = createNodeSQLitePersistence<
+    Record<string, unknown>,
+    string | number
+  >({
     driver,
   })
   const filteredPersistence = createFilteredPersistence(
