@@ -22,10 +22,11 @@ React Native and Expo SQLite persistence wrappers for TanStack DB, built on the 
 ## React Native setup (bare app)
 
 ```ts
+import { open } from '@op-engineering/op-sqlite'
 import { createCollection } from '@tanstack/db'
+import { persistedCollectionOptions } from '@tanstack/db-react-native-sqlite-persisted-collection'
 import {
   createReactNativeSQLitePersistence,
-  persistedCollectionOptions,
 } from '@tanstack/db-react-native-sqlite-persisted-collection/react-native'
 
 type Todo = {
@@ -34,15 +35,14 @@ type Todo = {
   completed: boolean
 }
 
-function openReactNativeDatabase() {
-  // Replace with your host initialization for @op-engineering/op-sqlite.
-  // The returned object must expose execute/executeAsync style methods.
-  throw new Error('Implement mobile database bootstrap')
-}
+const database = open({
+  name: 'tanstack-db.sqlite',
+  location: 'default',
+})
 
 const persistence = createReactNativeSQLitePersistence<Todo, string>({
   driver: {
-    openDatabase: openReactNativeDatabase,
+    database,
   },
 })
 
@@ -58,10 +58,11 @@ export const todosCollection = createCollection(
 ## Expo setup (managed workflow)
 
 ```ts
+import { open } from '@op-engineering/op-sqlite'
 import { createCollection } from '@tanstack/db'
+import { persistedCollectionOptions } from '@tanstack/db-react-native-sqlite-persisted-collection'
 import {
   createExpoSQLitePersistence,
-  persistedCollectionOptions,
 } from '@tanstack/db-react-native-sqlite-persisted-collection/expo'
 
 type Todo = {
@@ -70,14 +71,14 @@ type Todo = {
   completed: boolean
 }
 
-function openExpoDatabase() {
-  // Replace with your Expo bootstrap for @op-engineering/op-sqlite.
-  throw new Error('Implement expo database bootstrap')
-}
+const database = open({
+  name: 'tanstack-db.sqlite',
+  location: 'default',
+})
 
 const persistence = createExpoSQLitePersistence<Todo, string>({
   driver: {
-    openDatabase: openExpoDatabase,
+    database,
   },
 })
 
@@ -124,4 +125,6 @@ pnpm --filter @tanstack/db-react-native-sqlite-persisted-collection test:e2e:run
 
 If your CI environment can provide a runtime factory module, run
 `test:e2e:runtime` in CI to enforce real-runtime validation rather than only the
-default Node-hosted mock harness.
+default Node-hosted mock harness. In this repository, the E2E workflow requires
+this runtime lane for non-fork runs and skips it only for fork PRs where
+repository variables are not available.
