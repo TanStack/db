@@ -23,6 +23,8 @@ the shared `@tanstack/db-sqlite-persisted-collection-core` adapter.
 - `CloudflareDOSQLitePersistenceOptions`
 - `CloudflareDOCollectionConfig`
 - `CloudflareDOSQLitePersistenceAdapter<T, TKey>`
+- `CloudflareDOSQLitePersister`
+- `createCloudflareDOSQLitePersister(...)`
 - `resolveCloudflareDOSchemaMismatchPolicy(...)`
 - `createCloudflareDOSQLitePersistenceAdapter<T, TKey>(...)`
 - `createCloudflareDOSQLitePersistence<T, TKey>(...)`
@@ -76,8 +78,11 @@ export class TodosObject extends DurableObject {
 
 ## Schema mismatch defaults
 
-- `mode: 'local'` defaults to `schemaMismatchPolicy: 'sync-absent-error'`
-- `mode: 'sync'` defaults to `schemaMismatchPolicy: 'sync-present-reset'`
+- If `mode` is not provided, persistence mode is inferred from collection usage:
+  - sync present => `sync`
+  - sync absent => `local`
+- Inferred `local` mode uses `schemaMismatchPolicy: 'sync-absent-error'`
+- Inferred `sync` mode uses `schemaMismatchPolicy: 'sync-present-reset'`
 
 You can override `schemaMismatchPolicy` explicitly when needed (`'throw'` is
 accepted as an alias for `'sync-absent-error'`).

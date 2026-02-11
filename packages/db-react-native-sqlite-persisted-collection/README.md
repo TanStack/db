@@ -25,6 +25,9 @@ React Native and Expo SQLite persistence wrappers for TanStack DB, built on the 
 - `MobileSQLitePersistenceAdapterOptions`
 - `MobileSQLitePersistenceOptions`
 - `MobileSQLitePersistenceAdapter<T, TKey>`
+- `MobileSQLiteSchemaMismatchPolicy`
+- `MobileSQLitePersister`
+- `createMobileSQLitePersister(...)`
 - `createMobileSQLitePersistenceAdapter<T, TKey>(...)`
 - `createMobileSQLitePersistence<T, TKey>(...)`
 
@@ -32,6 +35,8 @@ React Native and Expo SQLite persistence wrappers for TanStack DB, built on the 
 
 - `ReactNativeSQLitePersistenceAdapterOptions`
 - `ReactNativeSQLitePersistenceOptions`
+- `ReactNativeSQLitePersister`
+- `createReactNativeSQLitePersister(...)`
 - `createReactNativeSQLitePersistenceAdapter<T, TKey>(...)`
 - `createReactNativeSQLitePersistence<T, TKey>(...)`
 
@@ -39,6 +44,8 @@ React Native and Expo SQLite persistence wrappers for TanStack DB, built on the 
 
 - `ExpoSQLitePersistenceAdapterOptions`
 - `ExpoSQLitePersistenceOptions`
+- `ExpoSQLitePersister`
+- `createExpoSQLitePersister(...)`
 - `createExpoSQLitePersistenceAdapter<T, TKey>(...)`
 - `createExpoSQLitePersistence<T, TKey>(...)`
 
@@ -136,6 +143,11 @@ export const todosCollection = createCollection(
 - The package defaults to `SingleProcessCoordinator`, matching typical RN/Expo runtime semantics.
 - Shared contract and conformance suites are wired in this package to validate behavior parity with node/electron wrappers.
 - Both React Native and Expo entrypoints run the persisted collection conformance suite.
+- `createReactNativeSQLitePersistence` is the primary API for both React Native
+  and Expo apps. Expo exports are compatibility aliases over the same mobile
+  implementation.
+- `createMobileSQLitePersister` / `createReactNativeSQLitePersister` allow one
+  shared persistence manager for multiple collections on the same database.
 
 ## Optional real-runtime test factory
 

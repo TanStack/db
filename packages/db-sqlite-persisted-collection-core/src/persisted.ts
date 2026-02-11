@@ -251,6 +251,9 @@ export interface PersistedCollectionPersistence<
 > {
   adapter: PersistenceAdapter<T, TKey>
   coordinator?: PersistedCollectionCoordinator
+  resolvePersistenceForMode?: (
+    mode: PersistedCollectionMode,
+  ) => PersistedCollectionPersistence<T, TKey>
 }
 
 type PersistedResolvedPersistence<
@@ -452,6 +455,14 @@ function resolvePersistence<T extends object, TKey extends string | number>(
   }
 }
 
+function resolvePersistenceForMode<T extends object, TKey extends string | number>(
+  persistence: PersistedCollectionPersistence<T, TKey>,
+  mode: PersistedCollectionMode,
+): PersistedResolvedPersistence<T, TKey> {
+  const modeSpecificPersistence = persistence.resolvePersistenceForMode?.(mode)
+  return resolvePersistence(modeSpecificPersistence ?? persistence)
+}
+
 function hasOwnSyncKey(options: object): options is { sync: unknown } {
   return Object.prototype.hasOwnProperty.call(options, `sync`)
 }
@@ -468,7 +479,8 @@ function isValidSyncConfig(value: unknown): value is SyncConfig<object> {
   return typeof value.sync === `function`
 }
 
-type PersistedMode = `sync-present` | `sync-absent`
+export type PersistedCollectionMode = `sync-present` | `sync-absent`
+type PersistedMode = PersistedCollectionMode
 
 type NormalizedSyncOperation<T extends object, TKey extends string | number> =
   | {
@@ -1990,14 +2002,17 @@ export function persistedCollectionOptions<
     )
   }
 
-  const persistence = resolvePersistence(options.persistence)
-
   if (hasOwnSyncKey(options)) {
     if (!isValidSyncConfig(options.sync)) {
       throw new InvalidSyncConfigError(
         `when the "sync" key is present it must provide a callable sync function`,
       )
     }
+
+    const persistence = resolvePersistenceForMode(
+      options.persistence,
+      `sync-present`,
+    )
 
     const collectionId =
       options.id ?? `persisted-collection:${crypto.randomUUID()}`
@@ -2018,6 +2033,10 @@ export function persistedCollectionOptions<
   }
 
   const localOnlyOptions = options
+  const persistence = resolvePersistenceForMode(
+    options.persistence,
+    `sync-absent`,
+  )
   const collectionId =
     localOnlyOptions.id ?? `persisted-collection:${crypto.randomUUID()}`
   const runtime = new PersistedCollectionRuntime<T, TKey>(

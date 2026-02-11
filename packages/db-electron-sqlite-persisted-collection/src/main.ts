@@ -218,6 +218,7 @@ export class ElectronPersistenceMainRegistry {
     string,
     ElectronMainPersistenceAdapter
   >()
+  private defaultAdapter: ElectronMainPersistenceAdapter | undefined
 
   registerCollection(
     collectionId: string,
@@ -231,16 +232,21 @@ export class ElectronPersistenceMainRegistry {
     this.collectionAdapters.set(collectionId, adapter)
   }
 
+  registerDefaultAdapter(adapter: ElectronMainPersistenceAdapter): void {
+    this.defaultAdapter = adapter
+  }
+
   unregisterCollection(collectionId: string): void {
     this.collectionAdapters.delete(collectionId)
   }
 
   clear(): void {
     this.collectionAdapters.clear()
+    this.defaultAdapter = undefined
   }
 
   getAdapter(collectionId: string): ElectronMainPersistenceAdapter | undefined {
-    return this.collectionAdapters.get(collectionId)
+    return this.collectionAdapters.get(collectionId) ?? this.defaultAdapter
   }
 
   createHost(): ElectronPersistenceMainHost {
@@ -255,6 +261,11 @@ export type ElectronNodeSQLiteMainCollectionConfig = {
   adapterOptions: NodeSQLitePersistenceAdapterOptions
 }
 
+export type ElectronNodeSQLiteMainRegistryOptions = {
+  adapterOptions: NodeSQLitePersistenceAdapterOptions
+  collectionIds?: ReadonlyArray<string>
+}
+
 type NodeSQLitePersistenceModule = {
   createNodeSQLitePersistenceAdapter: <
     T extends object,
@@ -262,6 +273,14 @@ type NodeSQLitePersistenceModule = {
   >(
     options: NodeSQLitePersistenceAdapterOptions,
   ) => PersistenceAdapter<T, TKey>
+}
+
+function isCollectionConfigArray(
+  input:
+    | ReadonlyArray<ElectronNodeSQLiteMainCollectionConfig>
+    | ElectronNodeSQLiteMainRegistryOptions,
+): input is ReadonlyArray<ElectronNodeSQLiteMainCollectionConfig> {
+  return Array.isArray(input)
 }
 
 function getCreateNodeSQLitePersistenceAdapter(): NodeSQLitePersistenceModule[`createNodeSQLitePersistenceAdapter`] {
@@ -274,17 +293,43 @@ function getCreateNodeSQLitePersistenceAdapter(): NodeSQLitePersistenceModule[`c
 
 export function createElectronNodeSQLiteMainRegistry(
   collections: ReadonlyArray<ElectronNodeSQLiteMainCollectionConfig>,
+): ElectronPersistenceMainRegistry
+export function createElectronNodeSQLiteMainRegistry(
+  options: ElectronNodeSQLiteMainRegistryOptions,
+): ElectronPersistenceMainRegistry
+export function createElectronNodeSQLiteMainRegistry(
+  input:
+    | ReadonlyArray<ElectronNodeSQLiteMainCollectionConfig>
+    | ElectronNodeSQLiteMainRegistryOptions,
 ): ElectronPersistenceMainRegistry {
   const createNodeAdapter = getCreateNodeSQLitePersistenceAdapter()
   const registry = new ElectronPersistenceMainRegistry()
-  for (const collection of collections) {
-    registry.registerCollection(
-      collection.collectionId,
-      createNodeAdapter<ElectronPersistedRow, ElectronPersistedKey>(
-        collection.adapterOptions,
-      ),
-    )
+
+  if (isCollectionConfigArray(input)) {
+    for (const collection of input) {
+      registry.registerCollection(
+        collection.collectionId,
+        createNodeAdapter<ElectronPersistedRow, ElectronPersistedKey>(
+          collection.adapterOptions,
+        ),
+      )
+    }
+    return registry
   }
+
+  const options = input
+  const sharedAdapter = createNodeAdapter<ElectronPersistedRow, ElectronPersistedKey>(
+    options.adapterOptions,
+  )
+  if (!options.collectionIds || options.collectionIds.length === 0) {
+    registry.registerDefaultAdapter(sharedAdapter)
+    return registry
+  }
+
+  for (const collectionId of options.collectionIds) {
+    registry.registerCollection(collectionId, sharedAdapter)
+  }
+
   return registry
 }
 

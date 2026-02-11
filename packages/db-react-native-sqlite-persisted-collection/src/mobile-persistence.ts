@@ -5,6 +5,7 @@ import {
 import { createOpSQLiteDriver } from './op-sqlite-driver'
 import type {
   PersistedCollectionCoordinator,
+  PersistedCollectionMode,
   PersistedCollectionPersistence,
   PersistenceAdapter,
   SQLiteCoreAdapterOptions,
@@ -15,11 +16,21 @@ import type { OpSQLiteDriverOptions } from './op-sqlite-driver'
 
 type MobileSQLiteDriverInput = SQLiteDriver | OpSQLiteDriverOptions
 
+type MobileSQLiteCoreSchemaMismatchPolicy =
+  | `sync-present-reset`
+  | `sync-absent-error`
+  | `reset`
+
+export type MobileSQLiteSchemaMismatchPolicy =
+  | MobileSQLiteCoreSchemaMismatchPolicy
+  | `throw`
+
 export type MobileSQLitePersistenceAdapterOptions = Omit<
   SQLiteCoreAdapterOptions,
-  `driver`
+  `driver` | `schemaMismatchPolicy`
 > & {
   driver: MobileSQLiteDriverInput
+  schemaMismatchPolicy?: MobileSQLiteSchemaMismatchPolicy
 }
 
 export type MobileSQLitePersistenceOptions =
@@ -62,19 +73,106 @@ function resolveSQLiteDriver(
   return createOpSQLiteDriver(driverInput)
 }
 
+function normalizeSchemaMismatchPolicy(
+  policy: MobileSQLiteSchemaMismatchPolicy,
+): MobileSQLiteCoreSchemaMismatchPolicy {
+  if (policy === `throw`) {
+    return `sync-absent-error`
+  }
+
+  return policy
+}
+
+function resolveSchemaMismatchPolicy(
+  explicitPolicy: MobileSQLiteSchemaMismatchPolicy | undefined,
+  mode: PersistedCollectionMode,
+): MobileSQLiteCoreSchemaMismatchPolicy {
+  if (explicitPolicy) {
+    return normalizeSchemaMismatchPolicy(explicitPolicy)
+  }
+
+  return mode === `sync-present` ? `sync-present-reset` : `sync-absent-error`
+}
+
+export class MobileSQLitePersister {
+  private readonly coordinator: PersistedCollectionCoordinator
+  private readonly explicitSchemaMismatchPolicy:
+    | MobileSQLiteSchemaMismatchPolicy
+    | undefined
+  private readonly adapterBaseOptions: Omit<
+    MobileSQLitePersistenceAdapterOptions,
+    `driver` | `schemaMismatchPolicy`
+  >
+  private readonly driver: SQLiteDriver
+  private readonly adaptersBySchemaPolicy = new Map<
+    MobileSQLiteCoreSchemaMismatchPolicy,
+    PersistenceAdapter<Record<string, unknown>, string | number>
+  >()
+
+  constructor(options: MobileSQLitePersistenceOptions) {
+    const { coordinator, driver, schemaMismatchPolicy, ...adapterBaseOptions } =
+      options
+    this.coordinator = coordinator ?? new SingleProcessCoordinator()
+    this.explicitSchemaMismatchPolicy = schemaMismatchPolicy
+    this.adapterBaseOptions = adapterBaseOptions
+    this.driver = resolveSQLiteDriver(driver)
+  }
+
+  getAdapter<
+    T extends object,
+    TKey extends string | number = string | number,
+  >(
+    mode: PersistedCollectionMode = `sync-absent`,
+  ): MobileSQLitePersistenceAdapter<T, TKey> {
+    const resolvedSchemaPolicy = resolveSchemaMismatchPolicy(
+      this.explicitSchemaMismatchPolicy,
+      mode,
+    )
+    const cachedAdapter = this.adaptersBySchemaPolicy.get(resolvedSchemaPolicy)
+    if (cachedAdapter) {
+      return cachedAdapter as unknown as MobileSQLitePersistenceAdapter<T, TKey>
+    }
+
+    const adapter = createSQLiteCorePersistenceAdapter<
+      Record<string, unknown>,
+      string | number
+    >({
+      ...this.adapterBaseOptions,
+      driver: this.driver,
+      schemaMismatchPolicy: resolvedSchemaPolicy,
+    })
+    this.adaptersBySchemaPolicy.set(resolvedSchemaPolicy, adapter)
+    return adapter as unknown as MobileSQLitePersistenceAdapter<T, TKey>
+  }
+
+  getPersistence<
+    T extends object,
+    TKey extends string | number = string | number,
+  >(
+    mode: PersistedCollectionMode = `sync-absent`,
+    coordinator: PersistedCollectionCoordinator = this.coordinator,
+  ): PersistedCollectionPersistence<T, TKey> {
+    return {
+      adapter: this.getAdapter<T, TKey>(mode),
+      coordinator,
+    }
+  }
+}
+
+export function createMobileSQLitePersister(
+  options: MobileSQLitePersistenceOptions,
+): MobileSQLitePersister {
+  return new MobileSQLitePersister(options)
+}
+
 export function createMobileSQLitePersistenceAdapter<
   T extends object,
   TKey extends string | number = string | number,
 >(
   options: MobileSQLitePersistenceAdapterOptions,
 ): MobileSQLitePersistenceAdapter<T, TKey> {
-  const { driver, ...adapterOptions } = options
-  const resolvedDriver = resolveSQLiteDriver(driver)
-
-  return createSQLiteCorePersistenceAdapter<T, TKey>({
-    ...adapterOptions,
-    driver: resolvedDriver,
-  }) as MobileSQLitePersistenceAdapter<T, TKey>
+  const persister = createMobileSQLitePersister(options)
+  return persister.getAdapter<T, TKey>(`sync-absent`)
 }
 
 export function createMobileSQLitePersistence<
@@ -83,9 +181,12 @@ export function createMobileSQLitePersistence<
 >(
   options: MobileSQLitePersistenceOptions,
 ): PersistedCollectionPersistence<T, TKey> {
-  const { coordinator, ...adapterOptions } = options
+  const persister = createMobileSQLitePersister(options)
+  const defaultPersistence = persister.getPersistence<T, TKey>(`sync-absent`)
+
   return {
-    adapter: createMobileSQLitePersistenceAdapter<T, TKey>(adapterOptions),
-    coordinator: coordinator ?? new SingleProcessCoordinator(),
+    ...defaultPersistence,
+    resolvePersistenceForMode: (mode) =>
+      persister.getPersistence<T, TKey>(mode),
   }
 }

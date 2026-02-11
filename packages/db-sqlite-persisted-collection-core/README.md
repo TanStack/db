@@ -36,6 +36,7 @@ binding. Provide a runtime `SQLiteDriver` implementation from a wrapper package.
 - `SQLiteDriver`
 - `PersistedCollectionCoordinator`
 - `PersistedCollectionPersistence<T, TKey>`
+- `PersistedCollectionMode`
 - `PersistedCollectionLeadershipState`
 - `PersistedCollectionUtils`
 - `PersistedSyncWrappedOptions<T, TKey, TSchema, TUtils>`
@@ -46,6 +47,12 @@ binding. Provide a runtime `SQLiteDriver` implementation from a wrapper package.
 - `encodePersistedStorageKey(...)`
 - `decodePersistedStorageKey(...)`
 - `createPersistedTableName(...)`
+
+`PersistedCollectionPersistence` can optionally implement
+`resolvePersistenceForMode(mode)` to provide mode-aware adapters for:
+
+- `sync-present`
+- `sync-absent`
 
 ### SQLite core adapter APIs
 

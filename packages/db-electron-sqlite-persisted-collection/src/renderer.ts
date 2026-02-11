@@ -224,6 +224,50 @@ export type ElectronRendererPersistenceOptions = {
   coordinator?: PersistedCollectionCoordinator
 }
 
+export class ElectronRendererPersister {
+  private readonly coordinator: PersistedCollectionCoordinator
+  private readonly adapter: ElectronRendererPersistenceAdapter<
+    Record<string, unknown>,
+    string | number
+  >
+
+  constructor(options: ElectronRendererPersistenceOptions) {
+    const { coordinator, ...adapterOptions } = options
+    this.coordinator = coordinator ?? new SingleProcessCoordinator()
+    this.adapter = createElectronRendererPersistenceAdapter<
+      Record<string, unknown>,
+      string | number
+    >(adapterOptions)
+  }
+
+  getAdapter<
+    T extends object,
+    TKey extends string | number = string | number,
+  >(): ElectronRendererPersistenceAdapter<T, TKey> {
+    return this.adapter as unknown as ElectronRendererPersistenceAdapter<T, TKey>
+  }
+
+  getPersistence<
+    T extends object,
+    TKey extends string | number = string | number,
+  >(
+    coordinator: PersistedCollectionCoordinator = this.coordinator,
+  ): PersistedCollectionPersistence<T, TKey> & {
+    adapter: ElectronRendererPersistenceAdapter<T, TKey>
+  } {
+    return {
+      adapter: this.getAdapter<T, TKey>(),
+      coordinator,
+    }
+  }
+}
+
+export function createElectronRendererPersister(
+  options: ElectronRendererPersistenceOptions,
+): ElectronRendererPersister {
+  return new ElectronRendererPersister(options)
+}
+
 export function createElectronRendererPersistence<
   T extends object,
   TKey extends string | number = string | number,
@@ -232,10 +276,12 @@ export function createElectronRendererPersistence<
 ): PersistedCollectionPersistence<T, TKey> & {
   adapter: ElectronRendererPersistenceAdapter<T, TKey>
 } {
-  const { coordinator, ...adapterOptions } = options
+  const persister = createElectronRendererPersister(options)
+  const defaultPersistence = persister.getPersistence<T, TKey>()
+
   return {
-    adapter: createElectronRendererPersistenceAdapter<T, TKey>(adapterOptions),
-    coordinator: coordinator ?? new SingleProcessCoordinator(),
+    ...defaultPersistence,
+    resolvePersistenceForMode: () => persister.getPersistence<T, TKey>(),
   }
 }
 
