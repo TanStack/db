@@ -70,6 +70,7 @@ jobs:
       - name: Run React Native/Expo runtime E2E lane
         run: |
           is_fork_pr=false
+          require_runtime_lane=${TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE:-0}
           if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
             is_fork_pr=$(jq -r '.pull_request.head.repo.fork' "${GITHUB_EVENT_PATH}")
           fi
@@ -80,9 +81,15 @@ jobs:
           fi
 
           if [ -z "${TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE}" ]; then
-            echo "::error::Missing repository variable TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE for non-fork CI runs."
-            echo "::error::Set TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE (and optional TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT)."
-            exit 1
+            if [ "${require_runtime_lane}" = "1" ]; then
+              echo "::error::Missing repository variable TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE while TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE=1."
+              echo "::error::Set TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE (and optional TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT)."
+              exit 1
+            fi
+
+            echo "Skipping runtime mobile lane (no TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE configured)."
+            echo "Set TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE=1 to enforce this lane."
+            exit 0
           fi
 
           cd packages/db-react-native-sqlite-persisted-collection
@@ -90,6 +97,7 @@ jobs:
         env:
           TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE }}
           TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT }}
+          TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE: ${{ vars.TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE }}
 
       - name: Stop Docker services
         if: always()
