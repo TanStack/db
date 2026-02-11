@@ -72,6 +72,11 @@ jobs:
           cd packages/db-electron-sqlite-persisted-collection
           TANSTACK_DB_ELECTRON_E2E_ALL=1 pnpm test:e2e
 
+      - name: Run Cloudflare Durable Object persisted collection E2E tests
+        run: |
+          cd packages/db-cloudflare-do-sqlite-persisted-collection
+          pnpm test:e2e
+
       - name: Run React Native/Expo persisted collection E2E tests
         run: |
           cd packages/db-react-native-sqlite-persisted-collection
