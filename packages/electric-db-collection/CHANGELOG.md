@@ -1,5 +1,11 @@
 # @tanstack/electric-db-collection
 
+## 0.2.32
+
+### Patch Changes
+
+- Upgrade @electric-sql/client to ^1.5.3 ([#1233](https://github.com/TanStack/db/pull/1233))
+
 ## 0.2.31
 
 ### Patch Changes
