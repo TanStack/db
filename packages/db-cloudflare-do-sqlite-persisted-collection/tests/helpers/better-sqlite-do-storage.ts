@@ -1,8 +1,9 @@
 import BetterSqlite3 from 'better-sqlite3'
-import type { DurableObjectSqlStorageLike } from '../../src'
+import type { DurableObjectSqlStorageLike, DurableObjectStorageLike } from '../../src'
 
 type BetterSqliteDoStorageHarness = {
   sql: DurableObjectSqlStorageLike
+  storage: DurableObjectStorageLike
   close: () => void
 }
 
@@ -42,9 +43,13 @@ export function createBetterSqliteDoStorageHarness(options: {
       return []
     },
   }
+  const storage: DurableObjectStorageLike = {
+    sql,
+  }
 
   return {
     sql,
+    storage,
     close: () => {
       database.close()
     },

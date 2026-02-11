@@ -2,7 +2,6 @@
 import { DurableObject } from 'cloudflare:workers'
 import { createCollection } from '../../../db/dist/esm/index.js'
 import {
-  CloudflareDOSQLiteDriver,
   createCloudflareDOSQLitePersistence,
   persistedCollectionOptions,
 } from '../../dist/esm/index.js'
@@ -101,11 +100,8 @@ export class PersistenceObject extends DurableObject {
     this.collectionId = env.PERSISTENCE_COLLECTION_ID ?? DEFAULT_COLLECTION_ID
     this.syncEnabled = parseSyncEnabled(env.PERSISTENCE_WITH_SYNC)
     this.schemaVersion = parseSchemaVersion(env.PERSISTENCE_SCHEMA_VERSION)
-    const driver = new CloudflareDOSQLiteDriver({
-      storage: this.ctx.storage,
-    })
     this.persistence = createCloudflareDOSQLitePersistence({
-      driver,
+      storage: this.ctx.storage,
     })
     this.collectionPersistence = resolveCollectionPersistence({
       persistence: this.persistence,

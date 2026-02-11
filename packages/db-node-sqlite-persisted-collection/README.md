@@ -6,6 +6,7 @@ Thin Node SQLite persistence for TanStack DB.
 
 - `createNodeSQLitePersistence(...)`
 - `persistedCollectionOptions(...)` (re-exported from core)
+- `BetterSqlite3SQLiteDriver` (optional advanced usage)
 
 ## Quick start
 
