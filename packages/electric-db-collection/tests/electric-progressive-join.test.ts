@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  createCollection,
-  createLiveQueryCollection,
-  eq,
-} from '@tanstack/db'
+import { createCollection, createLiveQueryCollection, eq } from '@tanstack/db'
 import { electricCollectionOptions } from '../src/electric'
 import type { Message } from '@electric-sql/client'
 
