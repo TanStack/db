@@ -62,10 +62,10 @@ export function runSQLiteDriverContractSuite(
 
         await expect(
           driver.transaction(async (transactionDriver) => {
-            await transactionDriver.run(`INSERT INTO todos (id, title) VALUES (?, ?)`, [
-              `1`,
-              `Should rollback`,
-            ])
+            await transactionDriver.run(
+              `INSERT INTO todos (id, title) VALUES (?, ?)`,
+              [`1`, `Should rollback`],
+            )
             throw new Error(`boom`)
           }),
         ).rejects.toThrow(`boom`)
@@ -95,9 +95,15 @@ export function runSQLiteDriverContractSuite(
             throw new Error(`transaction entry signal missing`)
           }
           resolveEntered()
-          await transactionDriver.run(`INSERT INTO events (value) VALUES (?)`, [1])
+          await transactionDriver.run(
+            `INSERT INTO events (value) VALUES (?)`,
+            [1],
+          )
           await hold
-          await transactionDriver.run(`INSERT INTO events (value) VALUES (?)`, [2])
+          await transactionDriver.run(
+            `INSERT INTO events (value) VALUES (?)`,
+            [2],
+          )
         })
 
         await entered
@@ -139,13 +145,15 @@ export function runSQLiteDriverContractSuite(
           )
 
           await expect(
-            outerTransactionDriver.transaction(async (innerTransactionDriver) => {
-              await innerTransactionDriver.run(
-                `INSERT INTO nested_events (value) VALUES (?)`,
-                [2],
-              )
-              throw new Error(`inner failure`)
-            }),
+            outerTransactionDriver.transaction(
+              async (innerTransactionDriver) => {
+                await innerTransactionDriver.run(
+                  `INSERT INTO nested_events (value) VALUES (?)`,
+                  [2],
+                )
+                throw new Error(`inner failure`)
+              },
+            ),
           ).rejects.toThrow(`inner failure`)
 
           await outerTransactionDriver.run(

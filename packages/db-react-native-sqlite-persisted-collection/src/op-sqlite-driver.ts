@@ -319,7 +319,9 @@ export class OpSQLiteDriver implements SQLiteDriver {
       return activeTransactionDriver.transaction(fn)
     }
 
-    return this.transactionWithDriver((transactionDriver) => fn(transactionDriver))
+    return this.transactionWithDriver((transactionDriver) =>
+      fn(transactionDriver),
+    )
   }
 
   async transactionWithDriver<T>(
@@ -383,9 +385,7 @@ export class OpSQLiteDriver implements SQLiteDriver {
     return queuedOperation
   }
 
-  private async getTransactionContextStorage(): Promise<
-    AsyncLocalStorageLike<TransactionContextStore> | null
-  > {
+  private async getTransactionContextStorage(): Promise<AsyncLocalStorageLike<TransactionContextStore> | null> {
     if (this.transactionContextStoragePromise) {
       return this.transactionContextStoragePromise
     }
