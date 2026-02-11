@@ -9,7 +9,7 @@ jobs:
   e2e-tests:
     name: Run E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
 
     steps:
       - name: Checkout code
@@ -61,6 +61,16 @@ jobs:
           pnpm test:e2e
         env:
           ELECTRIC_URL: http://localhost:3000
+
+      - name: Run Node SQLite persisted collection E2E tests
+        run: |
+          cd packages/db-node-sqlite-persisted-collection
+          pnpm test:e2e
+
+      - name: Run Electron SQLite persisted collection E2E tests (full bridge)
+        run: |
+          cd packages/db-electron-sqlite-persisted-collection
+          TANSTACK_DB_ELECTRON_E2E_ALL=1 pnpm test:e2e
 
       - name: Run React Native/Expo persisted collection E2E tests
         run: |
