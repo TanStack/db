@@ -111,10 +111,10 @@ export function createCloudflareDOSQLitePersistence<
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
   ): PersistedCollectionPersistence<T, TKey> => ({
-    adapter: getAdapterForCollection(
-      mode,
-      schemaVersion,
-    ) as PersistedCollectionPersistence<T, TKey>[`adapter`],
+    adapter: getAdapterForCollection(mode, schemaVersion) as unknown as PersistedCollectionPersistence<
+      T,
+      TKey
+    >[`adapter`],
     coordinator: resolvedCoordinator,
   })
 
