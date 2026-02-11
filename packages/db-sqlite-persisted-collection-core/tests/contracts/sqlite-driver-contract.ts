@@ -61,8 +61,8 @@ export function runSQLiteDriverContractSuite(
         )
 
         await expect(
-          driver.transaction(async () => {
-            await driver.run(`INSERT INTO todos (id, title) VALUES (?, ?)`, [
+          driver.transaction(async (transactionDriver) => {
+            await transactionDriver.run(`INSERT INTO todos (id, title) VALUES (?, ?)`, [
               `1`,
               `Should rollback`,
             ])
@@ -90,14 +90,14 @@ export function runSQLiteDriverContractSuite(
           resolveEntered = resolve
         })
 
-        const txPromise = driver.transaction(async () => {
+        const txPromise = driver.transaction(async (transactionDriver) => {
           if (!resolveEntered) {
             throw new Error(`transaction entry signal missing`)
           }
           resolveEntered()
-          await driver.run(`INSERT INTO events (value) VALUES (?)`, [1])
+          await transactionDriver.run(`INSERT INTO events (value) VALUES (?)`, [1])
           await hold
-          await driver.run(`INSERT INTO events (value) VALUES (?)`, [2])
+          await transactionDriver.run(`INSERT INTO events (value) VALUES (?)`, [2])
         })
 
         await entered
@@ -132,12 +132,15 @@ export function runSQLiteDriverContractSuite(
       await withHarness(createHarness, async ({ driver }) => {
         await driver.exec(`CREATE TABLE nested_events (value INTEGER NOT NULL)`)
 
-        await driver.transaction(async () => {
-          await driver.run(`INSERT INTO nested_events (value) VALUES (?)`, [1])
+        await driver.transaction(async (outerTransactionDriver) => {
+          await outerTransactionDriver.run(
+            `INSERT INTO nested_events (value) VALUES (?)`,
+            [1],
+          )
 
           await expect(
-            driver.transaction(async () => {
-              await driver.run(
+            outerTransactionDriver.transaction(async (innerTransactionDriver) => {
+              await innerTransactionDriver.run(
                 `INSERT INTO nested_events (value) VALUES (?)`,
                 [2],
               )
@@ -145,7 +148,10 @@ export function runSQLiteDriverContractSuite(
             }),
           ).rejects.toThrow(`inner failure`)
 
-          await driver.run(`INSERT INTO nested_events (value) VALUES (?)`, [3])
+          await outerTransactionDriver.run(
+            `INSERT INTO nested_events (value) VALUES (?)`,
+            [3],
+          )
         })
 
         const rows = await driver.query<{ value: number }>(
@@ -154,6 +160,18 @@ export function runSQLiteDriverContractSuite(
            ORDER BY value ASC`,
         )
         expect(rows.map((row) => row.value)).toEqual([1, 3])
+      })
+    })
+
+    it(`requires transaction callbacks to accept a driver argument`, async () => {
+      await withHarness(createHarness, async ({ driver }) => {
+        await expect(
+          driver.transaction(
+            (async () => undefined) as unknown as (
+              transactionDriver: SQLiteDriver,
+            ) => Promise<void>,
+          ),
+        ).rejects.toThrow(`transaction driver argument`)
       })
     })
   })
