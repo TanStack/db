@@ -85,9 +85,7 @@ async function resolveAsyncLocalStorageCtor(): Promise<AsyncLocalStorageCtor | n
     }
 
     try {
-      const asyncHooksModule = (await import(
-        getNodeAsyncHooksSpecifier()
-      )) as {
+      const asyncHooksModule = (await import(getNodeAsyncHooksSpecifier())) as {
         AsyncLocalStorage?: AsyncLocalStorageCtor
       }
 
@@ -245,9 +243,8 @@ export class OpSQLiteDriver implements SQLiteDriver {
   private readonly ownsDatabase: boolean
   private queue: Promise<void> = Promise.resolve()
   private nextSavepointId = 1
-  private transactionContextStoragePromise:
-    | Promise<AsyncLocalStorageLike<TransactionContextStore> | null>
-    | null = null
+  private transactionContextStoragePromise: Promise<AsyncLocalStorageLike<TransactionContextStore> | null> | null =
+    null
 
   constructor(options: OpSQLiteDriverOptions) {
     if (hasExistingDatabase(options)) {
@@ -388,9 +385,7 @@ export class OpSQLiteDriver implements SQLiteDriver {
     return transactionContextStorage !== null
   }
 
-  private async getTransactionContextStorage(): Promise<
-    AsyncLocalStorageLike<TransactionContextStore> | null
-  > {
+  private async getTransactionContextStorage(): Promise<AsyncLocalStorageLike<TransactionContextStore> | null> {
     if (this.transactionContextStoragePromise) {
       return this.transactionContextStoragePromise
     }
