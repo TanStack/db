@@ -82,7 +82,10 @@ function createFilteredPersistence(
     },
     markIndexRemoved: (requestedCollectionId, signature) => {
       assertKnownCollection(requestedCollectionId)
-      return baseAdapter.markIndexRemoved?.(requestedCollectionId, signature)
+      if (!baseAdapter.markIndexRemoved) {
+        return Promise.resolve()
+      }
+      return baseAdapter.markIndexRemoved(requestedCollectionId, signature)
     },
   }
 
