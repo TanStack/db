@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import BetterSqlite3 from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 import {
   BetterSqlite3SQLiteDriver,
@@ -80,6 +81,54 @@ describe(`node persistence helpers`, () => {
       expect(persistence.coordinator).toBe(coordinator)
     } finally {
       runtimeHarness.cleanup()
+    }
+  })
+
+  it(`accepts a bare better-sqlite3 database handle`, async () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-direct-db-`))
+    const dbPath = join(tempDirectory, `state.sqlite`)
+    const collectionId = `todos`
+    const database = new BetterSqlite3(dbPath)
+
+    try {
+      const persistence = createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>(
+        {
+          database,
+        },
+      )
+
+      await persistence.adapter.applyCommittedTx(collectionId, {
+        txId: `tx-direct-db-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `from raw database`,
+              score: 1,
+            },
+          },
+        ],
+      })
+
+      const rows = await persistence.adapter.loadSubset(collectionId, {})
+      expect(rows).toEqual([
+        {
+          key: `1`,
+          value: {
+            id: `1`,
+            title: `from raw database`,
+            score: 1,
+          },
+        },
+      ])
+    } finally {
+      database.close()
+      rmSync(tempDirectory, { recursive: true, force: true })
     }
   })
 

@@ -84,9 +84,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
     })
     const firstPersistence = createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>(
       {
-        driver: new CloudflareDOSQLiteDriver({
-          sql: firstStorageHarness.sql,
-        }),
+        storage: firstStorageHarness.storage,
       },
     )
 
@@ -129,9 +127,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
     })
     const secondPersistence = createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>(
       {
-        driver: new CloudflareDOSQLiteDriver({
-          sql: secondStorageHarness.sql,
-        }),
+        storage: secondStorageHarness.storage,
       },
     )
     try {
