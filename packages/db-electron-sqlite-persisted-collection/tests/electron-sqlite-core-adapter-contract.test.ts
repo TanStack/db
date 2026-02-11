@@ -80,7 +80,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   >({
     invoke,
     timeoutMs: requestTimeoutMs,
-  }).adapter
+  }).adapter as ReturnType<SQLiteCoreAdapterHarnessFactory>[`adapter`]
 
   return {
     adapter: rendererAdapter,
