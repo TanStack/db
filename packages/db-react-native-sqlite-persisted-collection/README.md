@@ -9,15 +9,58 @@ React Native and Expo SQLite persistence wrappers for TanStack DB, built on the 
 - `@tanstack/db-react-native-sqlite-persisted-collection/react-native`
 - `@tanstack/db-react-native-sqlite-persisted-collection/expo`
 
-## Core APIs
+## Exported API (complete)
 
-- `createOpSQLiteDriver`
-- `createMobileSQLitePersistenceAdapter`
-- `createMobileSQLitePersistence`
-- `createReactNativeSQLitePersistenceAdapter`
-- `createReactNativeSQLitePersistence`
-- `createExpoSQLitePersistenceAdapter`
-- `createExpoSQLitePersistence`
+### Root entrypoint (`.`)
+
+#### op-sqlite driver APIs
+
+- `OpSQLiteDatabaseLike`
+- `OpSQLiteDriverOptions`
+- `OpSQLiteDriver`
+- `createOpSQLiteDriver(...)`
+
+#### Mobile persistence APIs
+
+- `MobileSQLitePersistenceAdapterOptions`
+- `MobileSQLitePersistenceOptions`
+- `MobileSQLitePersistenceAdapter<T, TKey>`
+- `createMobileSQLitePersistenceAdapter<T, TKey>(...)`
+- `createMobileSQLitePersistence<T, TKey>(...)`
+
+#### React Native alias APIs
+
+- `ReactNativeSQLitePersistenceAdapterOptions`
+- `ReactNativeSQLitePersistenceOptions`
+- `createReactNativeSQLitePersistenceAdapter<T, TKey>(...)`
+- `createReactNativeSQLitePersistence<T, TKey>(...)`
+
+#### Expo alias APIs
+
+- `ExpoSQLitePersistenceAdapterOptions`
+- `ExpoSQLitePersistenceOptions`
+- `createExpoSQLitePersistenceAdapter<T, TKey>(...)`
+- `createExpoSQLitePersistence<T, TKey>(...)`
+
+#### Re-exported core APIs
+
+This package re-exports **all** exports from
+`@tanstack/db-sqlite-persisted-collection-core` at the root entrypoint
+(including `persistedCollectionOptions` and core types/errors).
+
+### `./react-native` entrypoint
+
+- `ReactNativeSQLitePersistenceAdapterOptions`
+- `ReactNativeSQLitePersistenceOptions`
+- `createReactNativeSQLitePersistenceAdapter<T, TKey>(...)`
+- `createReactNativeSQLitePersistence<T, TKey>(...)`
+
+### `./expo` entrypoint
+
+- `ExpoSQLitePersistenceAdapterOptions`
+- `ExpoSQLitePersistenceOptions`
+- `createExpoSQLitePersistenceAdapter<T, TKey>(...)`
+- `createExpoSQLitePersistence<T, TKey>(...)`
 
 ## React Native setup (bare app)
 
