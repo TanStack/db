@@ -3,14 +3,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  SingleProcessCoordinator,
-  createCloudflareDOCollectionRegistry,
-  createCloudflareDOSQLiteDriver,
+  CloudflareDOSQLiteDriver,
   createCloudflareDOSQLitePersistence,
-  createCloudflareDOSQLitePersistenceAdapter,
-  initializeCloudflareDOCollections,
-  resolveCloudflareDOSchemaMismatchPolicy,
+  persistedCollectionOptions,
 } from '../src'
+import { SingleProcessCoordinator } from '../../db-sqlite-persisted-collection-core/src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
 import { createBetterSqliteDoStorageHarness } from './helpers/better-sqlite-do-storage'
 import type {
@@ -31,7 +28,7 @@ function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
         filename: dbPath,
       })
       activeStorageHarnesses.add(storageHarness)
-      return createCloudflareDOSQLiteDriver({
+      return new CloudflareDOSQLiteDriver({
         sql: storageHarness.sql,
       })
     },
@@ -78,162 +75,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
     }
   })
 
-  it(`maps local mode to throw schema mismatch policy`, () => {
-    expect(resolveCloudflareDOSchemaMismatchPolicy(`local`)).toBe(
-      `sync-absent-error`,
-    )
-  })
-
-  it(`maps sync mode to reset schema mismatch policy`, () => {
-    expect(resolveCloudflareDOSchemaMismatchPolicy(`sync`)).toBe(
-      `sync-present-reset`,
-    )
-  })
-
-  it(`throws on schema mismatch in local mode`, async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-schema-local-`))
-    const dbPath = join(tempDirectory, `state.sqlite`)
-    const collectionId = `todos`
-    const firstStorageHarness = createBetterSqliteDoStorageHarness({
-      filename: dbPath,
-    })
-    const firstAdapter = createCloudflareDOSQLitePersistenceAdapter({
-      driver: {
-        sql: firstStorageHarness.sql,
-      },
-      mode: `local`,
-      schemaVersion: 1,
-    })
-
-    try {
-      await firstAdapter.applyCommittedTx(collectionId, {
-        txId: `tx-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `before mismatch`,
-              score: 1,
-            },
-          },
-        ],
-      })
-    } finally {
-      firstStorageHarness.close()
-    }
-
-    const secondStorageHarness = createBetterSqliteDoStorageHarness({
-      filename: dbPath,
-    })
-    const secondAdapter = createCloudflareDOSQLitePersistenceAdapter({
-      driver: {
-        sql: secondStorageHarness.sql,
-      },
-      mode: `local`,
-      schemaVersion: 2,
-    })
-
-    try {
-      await expect(secondAdapter.loadSubset(collectionId, {})).rejects.toThrow(
-        `Schema version mismatch`,
-      )
-    } finally {
-      secondStorageHarness.close()
-      rmSync(tempDirectory, { recursive: true, force: true })
-    }
-  })
-
-  it(`resets on schema mismatch in sync mode`, async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-schema-sync-`))
-    const dbPath = join(tempDirectory, `state.sqlite`)
-    const collectionId = `todos`
-    const firstStorageHarness = createBetterSqliteDoStorageHarness({
-      filename: dbPath,
-    })
-    const firstAdapter = createCloudflareDOSQLitePersistenceAdapter({
-      driver: {
-        sql: firstStorageHarness.sql,
-      },
-      mode: `sync`,
-      schemaVersion: 1,
-    })
-
-    try {
-      await firstAdapter.applyCommittedTx(collectionId, {
-        txId: `tx-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `before reset`,
-              score: 1,
-            },
-          },
-        ],
-      })
-    } finally {
-      firstStorageHarness.close()
-    }
-
-    const secondStorageHarness = createBetterSqliteDoStorageHarness({
-      filename: dbPath,
-    })
-    const secondAdapter = createCloudflareDOSQLitePersistenceAdapter({
-      driver: {
-        sql: secondStorageHarness.sql,
-      },
-      mode: `sync`,
-      schemaVersion: 2,
-    })
-
-    try {
-      const rows = await secondAdapter.loadSubset(collectionId, {})
-      expect(rows).toEqual([])
-    } finally {
-      secondStorageHarness.close()
-      rmSync(tempDirectory, { recursive: true, force: true })
-    }
-  })
-
-  it(`initializes configured collections and throws for unknown collection IDs`, async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-init-`))
-    const dbPath = join(tempDirectory, `state.sqlite`)
-    const storageHarness = createBetterSqliteDoStorageHarness({
-      filename: dbPath,
-    })
-
-    const registry = createCloudflareDOCollectionRegistry({
-      sql: storageHarness.sql,
-      collections: [
-        {
-          collectionId: `todos`,
-          mode: `local`,
-        },
-      ],
-    })
-
-    try {
-      await initializeCloudflareDOCollections(registry)
-      await expect(
-        initializeCloudflareDOCollections(registry, [`missing`]),
-      ).rejects.toThrow(`Unknown Cloudflare DO collection`)
-    } finally {
-      storageHarness.close()
-      rmSync(tempDirectory, { recursive: true, force: true })
-    }
-  })
-
-  it(`infers mode from sync presence when mode is omitted`, async () => {
+  it(`infers mode from sync presence and keeps schema per collection`, async () => {
     const tempDirectory = mkdtempSync(join(tmpdir(), `db-cf-do-schema-infer-`))
     const dbPath = join(tempDirectory, `state.sqlite`)
     const collectionId = `todos`
@@ -242,31 +84,42 @@ describe(`cloudflare durable object persistence helpers`, () => {
     })
     const firstPersistence = createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>(
       {
-        driver: {
+        driver: new CloudflareDOSQLiteDriver({
           sql: firstStorageHarness.sql,
-        },
-        schemaVersion: 1,
+        }),
       },
     )
 
     try {
-      await firstPersistence.adapter.applyCommittedTx(collectionId, {
-        txId: `tx-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `before mismatch`,
-              score: 1,
-            },
-          },
-        ],
+      const firstCollectionOptions = persistedCollectionOptions<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        id: collectionId,
+        schemaVersion: 1,
+        getKey: (todo) => todo.id,
+        persistence: firstPersistence,
       })
+      await firstCollectionOptions.persistence.adapter.applyCommittedTx(
+        collectionId,
+        {
+          txId: `tx-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `before mismatch`,
+                score: 1,
+              },
+            },
+          ],
+        },
+      )
     } finally {
       firstStorageHarness.close()
     }
@@ -276,24 +129,40 @@ describe(`cloudflare durable object persistence helpers`, () => {
     })
     const secondPersistence = createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>(
       {
-        driver: {
+        driver: new CloudflareDOSQLiteDriver({
           sql: secondStorageHarness.sql,
-        },
-        schemaVersion: 2,
+        }),
       },
     )
     try {
-      const syncAbsentPersistence =
-        secondPersistence.resolvePersistenceForMode?.(`sync-absent`) ??
-        secondPersistence
+      const syncAbsentOptions = persistedCollectionOptions<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        id: collectionId,
+        schemaVersion: 2,
+        getKey: (todo) => todo.id,
+        persistence: secondPersistence,
+      })
       await expect(
-        syncAbsentPersistence.adapter.loadSubset(collectionId, {}),
+        syncAbsentOptions.persistence.adapter.loadSubset(collectionId, {}),
       ).rejects.toThrow(`Schema version mismatch`)
 
-      const syncPresentPersistence =
-        secondPersistence.resolvePersistenceForMode?.(`sync-present`) ??
-        secondPersistence
-      const rows = await syncPresentPersistence.adapter.loadSubset(
+      const syncPresentOptions = persistedCollectionOptions<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        id: collectionId,
+        schemaVersion: 2,
+        getKey: (todo) => todo.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: secondPersistence,
+      })
+      const rows = await syncPresentOptions.persistence.adapter.loadSubset(
         collectionId,
         {},
       )
