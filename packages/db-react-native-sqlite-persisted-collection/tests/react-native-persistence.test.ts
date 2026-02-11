@@ -5,6 +5,7 @@ import { afterEach, expect, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import {
   createExpoSQLitePersistence,
+  createExpoSQLitePersistenceAdapter,
   createReactNativeSQLitePersistence,
   createReactNativeSQLitePersistenceAdapter,
   persistedCollectionOptions,
@@ -78,6 +79,53 @@ it(`persists data across app restart (close and reopen)`, async () => {
       value: {
         id: `1`,
         title: `Survives restart`,
+        score: 10,
+      },
+    },
+  ])
+})
+
+it(`expo entrypoint persists data across app restart (close and reopen)`, async () => {
+  const dbPath = createTempSqlitePath()
+  const collectionId = `todos-restart-expo`
+
+  const firstDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
+  const firstAdapter = createExpoSQLitePersistenceAdapter<Todo, string>({
+    driver: { database: firstDatabase },
+  })
+
+  await firstAdapter.applyCommittedTx(collectionId, {
+    txId: `tx-restart-expo-1`,
+    term: 1,
+    seq: 1,
+    rowVersion: 1,
+    mutations: [
+      {
+        type: `insert`,
+        key: `1`,
+        value: {
+          id: `1`,
+          title: `Expo survives restart`,
+          score: 10,
+        },
+      },
+    ],
+  })
+  await Promise.resolve(firstDatabase.close())
+
+  const secondDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => Promise.resolve(secondDatabase.close()))
+  const secondAdapter = createExpoSQLitePersistenceAdapter<Todo, string>({
+    driver: { database: secondDatabase },
+  })
+
+  const rows = await secondAdapter.loadSubset(collectionId, {})
+  expect(rows).toEqual([
+    {
+      key: `1`,
+      value: {
+        id: `1`,
+        title: `Expo survives restart`,
         score: 10,
       },
     },
@@ -165,6 +213,60 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const persistence = createReactNativeSQLitePersistence<Todo, string>({
+    driver: { database },
+  })
+  const collection = createCollection(
+    persistedCollectionOptions<Todo, string>({
+      id: collectionId,
+      getKey: (todo) => todo.id,
+      persistence,
+      syncMode: `eager`,
+    }),
+  )
+  activeCleanupFns.push(() => collection.cleanup())
+
+  await collection.stateWhenReady()
+
+  const initialInsert = collection.insert({
+    id: `1`,
+    title: `Before background`,
+    score: 1,
+  })
+  await initialInsert.isPersisted.promise
+  expect(collection.get(`1`)?.title).toBe(`Before background`)
+
+  await collection.cleanup()
+  collection.startSyncImmediate()
+  await collection.stateWhenReady()
+
+  const postResumeInsert = collection.insert({
+    id: `2`,
+    title: `Post resume write`,
+    score: 2,
+  })
+  await postResumeInsert.isPersisted.promise
+  expect(collection.get(`2`)?.title).toBe(`Post resume write`)
+
+  const persistedRows = await persistence.adapter.loadSubset(collectionId, {})
+  expect(persistedRows).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        key: `1`,
+      }),
+      expect.objectContaining({
+        key: `2`,
+      }),
+    ]),
+  )
+})
+
+it(`expo entrypoint resumes persisted sync after simulated background/foreground transitions`, async () => {
+  const dbPath = createTempSqlitePath()
+  const collectionId = `todos-lifecycle-expo`
+  const database = createOpSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => Promise.resolve(database.close()))
+
+  const persistence = createExpoSQLitePersistence<Todo, string>({
     driver: { database },
   })
   const collection = createCollection(

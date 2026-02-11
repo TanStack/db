@@ -62,6 +62,20 @@ jobs:
         env:
           ELECTRIC_URL: http://localhost:3000
 
+      - name: Run React Native/Expo persisted collection E2E tests
+        run: |
+          cd packages/db-react-native-sqlite-persisted-collection
+          pnpm test:e2e
+
+      - name: Run React Native/Expo runtime E2E lane (optional)
+        if: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE != '' }}
+        run: |
+          cd packages/db-react-native-sqlite-persisted-collection
+          pnpm test:e2e:runtime
+        env:
+          TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE }}
+          TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT }}
+
       - name: Stop Docker services
         if: always()
         run: |
