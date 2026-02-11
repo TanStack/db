@@ -3,17 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import {
-  createOpSQLiteDriver,
-  persistedCollectionOptions,
-} from '../src'
+import { createOpSQLiteDriver, persistedCollectionOptions } from '../src'
 import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/persisted-collection-conformance-contract'
 import { createOpSQLiteTestDatabase } from '../tests/helpers/op-sqlite-test-db'
 import type { Collection } from '@tanstack/db'
-import type {
-  PersistedCollectionPersistence,
-} from '@tanstack/db-sqlite-persisted-collection-core'
+import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persisted-collection-core'
 import type {
   Comment,
   E2ETestConfig,
