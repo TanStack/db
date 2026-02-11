@@ -62,7 +62,7 @@ function createFilteredPersistence(
   }
 
   return {
-    ...persistence,
+    coordinator: persistence.coordinator,
     adapter: {
       loadSubset: (requestedCollectionId, options, ctx) => {
         assertKnownCollection(requestedCollectionId)
@@ -87,7 +87,7 @@ function createFilteredPersistence(
 function createInvokeHarness(
   dbPath: string,
   collectionId: string,
-  allowAnyCollectionId: boolean = false,
+  allowAnyCollectionId: boolean = true,
 ): InvokeHarness {
   if (isElectronFullE2EEnabled()) {
     return {
@@ -102,7 +102,7 @@ function createInvokeHarness(
   }
 
   const driver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
-  const persistence = createNodeSQLitePersistence<Todo, string>({
+  const persistence = createNodeSQLitePersistence<Record<string, unknown>, string | number>({
     driver,
   })
   const filteredPersistence = createFilteredPersistence(
@@ -337,7 +337,10 @@ describe(`electron sqlite persistence bridge`, () => {
       },
     }
 
-    const persistence = createNodeSQLitePersistence<Todo, string>({
+    const persistence = createNodeSQLitePersistence<
+      Record<string, unknown>,
+      string | number
+    >({
       driver: new BetterSqlite3SQLiteDriver({ filename: createTempDbPath() }),
     })
 
