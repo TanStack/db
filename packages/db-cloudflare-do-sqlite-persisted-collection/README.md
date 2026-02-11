@@ -58,6 +58,18 @@ export class TodosObject extends DurableObject {
 You can override `schemaMismatchPolicy` explicitly when needed (`'throw'` is
 accepted as an alias for `'sync-absent-error'`).
 
+## Transaction behavior in Durable Objects
+
+When `driver.storage` is provided (recommended in real Durable Objects), the
+driver runs writes through `state.storage.transaction(...)` and intentionally
+does not emulate nested SQL savepoints in that mode.
+
+- Top-level transactions are supported.
+- Nested transactions throw an explicit configuration error.
+
+This aligns with Durable Objects' native transaction model and avoids unsafe
+SQL-level transaction orchestration in Workers runtime.
+
 ## Testing
 
 - `pnpm test` runs unit/contract suites for the DO driver and persistence
