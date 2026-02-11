@@ -2,10 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import {
-  InvalidPersistedCollectionConfigError,
-  createOpSQLiteDriver,
-} from '../src'
+import { OpSQLiteDriver } from '../src'
+import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persisted-collection-core/src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 
 const activeCleanupFns: Array<() => void | Promise<void>> = []
@@ -36,7 +34,7 @@ it.each([`rows-array`, `rows-object`, `rows-list`, `statement-array`] as const)(
     })
     activeCleanupFns.push(() => Promise.resolve(database.close()))
 
-    const driver = createOpSQLiteDriver({ database })
+    const driver = new OpSQLiteDriver({ database })
     await driver.exec(
       `CREATE TABLE todos (id TEXT PRIMARY KEY, title TEXT NOT NULL, score INTEGER NOT NULL)`,
     )
@@ -66,7 +64,7 @@ it(`rolls back transaction on failure`, async () => {
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
-  const driver = createOpSQLiteDriver({ database })
+  const driver = new OpSQLiteDriver({ database })
   await driver.exec(
     `CREATE TABLE tx_test (id TEXT PRIMARY KEY, title TEXT NOT NULL)`,
   )
@@ -95,7 +93,7 @@ it(`supports nested savepoint rollback without losing outer transaction`, async 
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
-  const driver = createOpSQLiteDriver({ database })
+  const driver = new OpSQLiteDriver({ database })
   await driver.exec(
     `CREATE TABLE nested_tx_test (id TEXT PRIMARY KEY, title TEXT NOT NULL)`,
   )
@@ -136,7 +134,7 @@ it(`supports transaction callbacks that use provided transaction driver`, async 
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
-  const driver = createOpSQLiteDriver({ database })
+  const driver = new OpSQLiteDriver({ database })
   await driver.exec(`CREATE TABLE closure_tx_test (value INTEGER NOT NULL)`)
 
   let resolveHold: (() => void) | undefined
@@ -194,7 +192,7 @@ it(`throws when transaction callback omits transaction driver argument`, async (
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
-  const driver = createOpSQLiteDriver({ database })
+  const driver = new OpSQLiteDriver({ database })
 
   await expect(
     driver.transaction((async () => undefined) as never),
@@ -206,7 +204,7 @@ it(`serializes unrelated operations behind an active transaction`, async () => {
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
-  const driver = createOpSQLiteDriver({ database })
+  const driver = new OpSQLiteDriver({ database })
   await driver.exec(
     `CREATE TABLE tx_scope_test (id TEXT PRIMARY KEY, title TEXT NOT NULL)`,
   )
@@ -259,7 +257,7 @@ it(`serializes unrelated operations behind an active transaction`, async () => {
 })
 
 it(`throws config error when db execute methods are missing`, () => {
-  expect(() => createOpSQLiteDriver({ database: {} as never })).toThrowError(
+  expect(() => new OpSQLiteDriver({ database: {} as never })).toThrowError(
     InvalidPersistedCollectionConfigError,
   )
 })

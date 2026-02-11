@@ -5,12 +5,12 @@ import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
-  createBetterSqlite3Driver,
-  createNodeSQLitePersistenceAdapter,
+  BetterSqlite3SQLiteDriver,
+  createNodeSQLitePersistence,
 } from '@tanstack/db-node-sqlite-persisted-collection'
 import {
-  createElectronPersistenceMainHost,
-  createElectronRendererPersistence,
+  createElectronSQLitePersistence,
+  exposeElectronSQLitePersistence,
 } from '../src'
 import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/persisted-collection-conformance-contract'
@@ -20,7 +20,11 @@ import {
 } from './e2e/electron-process-client'
 import type { PersistedTx } from '@tanstack/db-sqlite-persisted-collection-core'
 import type { Collection } from '@tanstack/db'
-import type { ElectronPersistenceInvoke } from '../src'
+import type {
+  ElectronPersistenceInvoke,
+  ElectronPersistenceRequestEnvelope,
+  ElectronPersistenceResponseEnvelope,
+} from '../src/protocol'
 import type {
   Comment,
   E2ETestConfig,
@@ -58,20 +62,35 @@ function createInvokeHarness(dbPath: string): InvokeHarness {
     }
   }
 
-  const driver = createBetterSqlite3Driver({ filename: dbPath })
-  const adapter = createNodeSQLitePersistenceAdapter<
-    Record<string, unknown>,
-    string | number
-  >({
+  const driver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
+  const persistence = createNodeSQLitePersistence<Record<string, unknown>, string | number>({
     driver,
   })
-  const host = createElectronPersistenceMainHost({
-    getAdapter: () => adapter,
+  let handler:
+    | ((
+        event: unknown,
+        request: ElectronPersistenceRequestEnvelope,
+      ) => Promise<ElectronPersistenceResponseEnvelope>)
+    | undefined
+  const dispose = exposeElectronSQLitePersistence({
+    ipcMain: {
+      handle: (_channel, listener) => {
+        handler = listener
+      },
+      removeHandler: () => {},
+    },
+    persistence,
   })
 
   return {
-    invoke: async (_channel, request) => host.handleRequest(request),
+    invoke: async (_channel, request) => {
+      if (!handler) {
+        throw new Error(`Electron IPC handler not registered`)
+      }
+      return handler(undefined, request)
+    },
     close: () => {
+      dispose()
       driver.close()
     },
   }
@@ -100,7 +119,7 @@ function createPersistedCollection<T extends PersistableRow>(
   id: string,
   syncMode: `eager` | `on-demand`,
 ): PersistedCollectionHarness<T> {
-  const persistence = createElectronRendererPersistence<T, string | number>({
+  const persistence = createElectronSQLitePersistence<T, string | number>({
     invoke,
   })
   let seedSequence = 0

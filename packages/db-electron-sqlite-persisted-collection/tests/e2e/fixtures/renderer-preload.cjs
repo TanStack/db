@@ -2,19 +2,17 @@ const { contextBridge, ipcRenderer } = require(`electron`)
 const { deserialize } = require(`node:v8`)
 const rendererModulePath = `${__dirname}/../../../dist/cjs/renderer.cjs`
 const protocolModulePath = `${__dirname}/../../../dist/cjs/protocol.cjs`
-const {
-  createElectronPersistenceInvoke,
-  createElectronRendererPersistenceAdapter,
-} = require(rendererModulePath)
+const { createElectronSQLitePersistence } = require(rendererModulePath)
 const { DEFAULT_ELECTRON_PERSISTENCE_CHANNEL } = require(protocolModulePath)
 
 async function runScenario(input) {
-  const invokeBridge = createElectronPersistenceInvoke(ipcRenderer)
-  const adapter = createElectronRendererPersistenceAdapter({
-    invoke: invokeBridge,
+  const invokeBridge = (channel, request) => ipcRenderer.invoke(channel, request)
+  const persistence = createElectronSQLitePersistence({
+    ipcRenderer,
     channel: input.channel,
     timeoutMs: input.timeoutMs,
   })
+  const adapter = persistence.adapter
 
   const scenario = input.scenario
   switch (scenario.type) {

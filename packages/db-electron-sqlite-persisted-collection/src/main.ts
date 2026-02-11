@@ -1,16 +1,10 @@
-import { createRequire } from 'node:module'
-import { isAbsolute } from 'node:path'
-import {
-  ElectronPersistenceProtocolError,
-  UnknownElectronPersistenceCollectionError,
-  UnsupportedElectronPersistenceMethodError,
-} from './errors'
+import { InvalidPersistedCollectionConfigError } from '@tanstack/db-sqlite-persisted-collection-core'
 import {
   DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
   ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
 } from './protocol'
-import type { NodeSQLitePersistenceAdapterOptions } from '@tanstack/db-node-sqlite-persisted-collection'
 import type {
+  PersistedCollectionPersistence,
   PersistenceAdapter,
   SQLitePullSinceResult,
 } from '@tanstack/db-sqlite-persisted-collection-core'
@@ -18,18 +12,9 @@ import type {
   ElectronPersistedKey,
   ElectronPersistedRow,
   ElectronPersistenceRequestEnvelope,
-  ElectronPersistenceRequestHandler,
   ElectronPersistenceResponseEnvelope,
   ElectronSerializedError,
 } from './protocol'
-
-const runtimeRequireBasePath =
-  typeof __filename !== `undefined`
-    ? __filename
-    : process.argv.find(
-        (arg) => isAbsolute(arg) || arg.startsWith(`file://`),
-      ) || `${process.cwd()}/package.json`
-const runtimeRequire = createRequire(runtimeRequireBasePath)
 
 type ElectronMainPersistenceAdapter = PersistenceAdapter<
   ElectronPersistedRow,
@@ -76,19 +61,25 @@ function createErrorResponse(
 
 function assertValidRequest(request: ElectronPersistenceRequestEnvelope): void {
   if (request.v !== ELECTRON_PERSISTENCE_PROTOCOL_VERSION) {
-    throw new ElectronPersistenceProtocolError(
+    throw new InvalidPersistedCollectionConfigError(
       `Unsupported electron persistence protocol version "${request.v}"`,
     )
   }
 
-  if (request.requestId.trim().length === 0) {
-    throw new ElectronPersistenceProtocolError(
+  if (
+    typeof request.requestId !== `string` ||
+    request.requestId.trim().length === 0
+  ) {
+    throw new InvalidPersistedCollectionConfigError(
       `Electron persistence requestId cannot be empty`,
     )
   }
 
-  if (request.collectionId.trim().length === 0) {
-    throw new ElectronPersistenceProtocolError(
+  if (
+    typeof request.collectionId !== `string` ||
+    request.collectionId.trim().length === 0
+  ) {
+    throw new InvalidPersistedCollectionConfigError(
       `Electron persistence collectionId cannot be empty`,
     )
   }
@@ -142,9 +133,8 @@ async function executeRequestAgainstAdapter(
 
     case `markIndexRemoved`: {
       if (!adapter.markIndexRemoved) {
-        throw new UnsupportedElectronPersistenceMethodError(
-          request.method,
-          request.collectionId,
+        throw new InvalidPersistedCollectionConfigError(
+          `markIndexRemoved is not supported by the configured electron persistence adapter`,
         )
       }
       await adapter.markIndexRemoved(
@@ -162,9 +152,8 @@ async function executeRequestAgainstAdapter(
 
     case `pullSince`: {
       if (!adapter.pullSince) {
-        throw new UnsupportedElectronPersistenceMethodError(
-          request.method,
-          request.collectionId,
+        throw new InvalidPersistedCollectionConfigError(
+          `pullSince is not supported by the configured electron persistence adapter`,
         )
       }
       const result = await adapter.pullSince(
@@ -182,155 +171,26 @@ async function executeRequestAgainstAdapter(
   }
 }
 
-export type ElectronPersistenceMainHost = {
-  handleRequest: ElectronPersistenceRequestHandler
-}
-
-export function createElectronPersistenceMainHost(options: {
-  getAdapter: (
-    collectionId: string,
-  ) => ElectronMainPersistenceAdapter | undefined
-}): ElectronPersistenceMainHost {
-  return {
-    handleRequest: async (
-      request: ElectronPersistenceRequestEnvelope,
-    ): Promise<ElectronPersistenceResponseEnvelope> => {
-      try {
-        assertValidRequest(request)
-
-        const adapter = options.getAdapter(request.collectionId)
-        if (!adapter) {
-          throw new UnknownElectronPersistenceCollectionError(
-            request.collectionId,
-          )
-        }
-
-        return executeRequestAgainstAdapter(request, adapter)
-      } catch (error) {
-        return createErrorResponse(request, error)
-      }
-    },
-  }
-}
-
-export class ElectronPersistenceMainRegistry {
-  private readonly collectionAdapters = new Map<
-    string,
-    ElectronMainPersistenceAdapter
-  >()
-  private defaultAdapter: ElectronMainPersistenceAdapter | undefined
-
-  registerCollection(
-    collectionId: string,
-    adapter: ElectronMainPersistenceAdapter,
-  ): void {
-    if (collectionId.trim().length === 0) {
-      throw new ElectronPersistenceProtocolError(
-        `Collection id cannot be empty when registering electron persistence adapter`,
-      )
-    }
-    this.collectionAdapters.set(collectionId, adapter)
+function resolveModeAwarePersistence(
+  persistence: PersistedCollectionPersistence<
+    ElectronPersistedRow,
+    ElectronPersistedKey
+  >,
+  request: ElectronPersistenceRequestEnvelope,
+): PersistedCollectionPersistence<ElectronPersistedRow, ElectronPersistedKey> {
+  const mode = request.resolution?.mode ?? `sync-absent`
+  const schemaVersion = request.resolution?.schemaVersion
+  const collectionAwarePersistence = persistence.resolvePersistenceForCollection?.({
+    collectionId: request.collectionId,
+    mode,
+    schemaVersion,
+  })
+  if (collectionAwarePersistence) {
+    return collectionAwarePersistence
   }
 
-  registerDefaultAdapter(adapter: ElectronMainPersistenceAdapter): void {
-    this.defaultAdapter = adapter
-  }
-
-  unregisterCollection(collectionId: string): void {
-    this.collectionAdapters.delete(collectionId)
-  }
-
-  clear(): void {
-    this.collectionAdapters.clear()
-    this.defaultAdapter = undefined
-  }
-
-  getAdapter(collectionId: string): ElectronMainPersistenceAdapter | undefined {
-    return this.collectionAdapters.get(collectionId) ?? this.defaultAdapter
-  }
-
-  createHost(): ElectronPersistenceMainHost {
-    return createElectronPersistenceMainHost({
-      getAdapter: (collectionId) => this.getAdapter(collectionId),
-    })
-  }
-}
-
-export type ElectronNodeSQLiteMainCollectionConfig = {
-  collectionId: string
-  adapterOptions: NodeSQLitePersistenceAdapterOptions
-}
-
-export type ElectronNodeSQLiteMainRegistryOptions = {
-  adapterOptions: NodeSQLitePersistenceAdapterOptions
-  collectionIds?: ReadonlyArray<string>
-}
-
-type NodeSQLitePersistenceModule = {
-  createNodeSQLitePersistenceAdapter: <
-    T extends object,
-    TKey extends string | number = string | number,
-  >(
-    options: NodeSQLitePersistenceAdapterOptions,
-  ) => PersistenceAdapter<T, TKey>
-}
-
-function isCollectionConfigArray(
-  input:
-    | ReadonlyArray<ElectronNodeSQLiteMainCollectionConfig>
-    | ElectronNodeSQLiteMainRegistryOptions,
-): input is ReadonlyArray<ElectronNodeSQLiteMainCollectionConfig> {
-  return Array.isArray(input)
-}
-
-function getCreateNodeSQLitePersistenceAdapter(): NodeSQLitePersistenceModule[`createNodeSQLitePersistenceAdapter`] {
-  const runtimeModule = runtimeRequire(
-    `@tanstack/db-node-sqlite-persisted-collection`,
-  ) as NodeSQLitePersistenceModule
-
-  return runtimeModule.createNodeSQLitePersistenceAdapter
-}
-
-export function createElectronNodeSQLiteMainRegistry(
-  collections: ReadonlyArray<ElectronNodeSQLiteMainCollectionConfig>,
-): ElectronPersistenceMainRegistry
-export function createElectronNodeSQLiteMainRegistry(
-  options: ElectronNodeSQLiteMainRegistryOptions,
-): ElectronPersistenceMainRegistry
-export function createElectronNodeSQLiteMainRegistry(
-  input:
-    | ReadonlyArray<ElectronNodeSQLiteMainCollectionConfig>
-    | ElectronNodeSQLiteMainRegistryOptions,
-): ElectronPersistenceMainRegistry {
-  const createNodeAdapter = getCreateNodeSQLitePersistenceAdapter()
-  const registry = new ElectronPersistenceMainRegistry()
-
-  if (isCollectionConfigArray(input)) {
-    for (const collection of input) {
-      registry.registerCollection(
-        collection.collectionId,
-        createNodeAdapter<ElectronPersistedRow, ElectronPersistedKey>(
-          collection.adapterOptions,
-        ),
-      )
-    }
-    return registry
-  }
-
-  const options = input
-  const sharedAdapter = createNodeAdapter<ElectronPersistedRow, ElectronPersistedKey>(
-    options.adapterOptions,
-  )
-  if (!options.collectionIds || options.collectionIds.length === 0) {
-    registry.registerDefaultAdapter(sharedAdapter)
-    return registry
-  }
-
-  for (const collectionId of options.collectionIds) {
-    registry.registerCollection(collectionId, sharedAdapter)
-  }
-
-  return registry
+  const modeAwarePersistence = persistence.resolvePersistenceForMode?.(mode)
+  return modeAwarePersistence ?? persistence
 }
 
 export type ElectronIpcMainLike = {
@@ -344,14 +204,36 @@ export type ElectronIpcMainLike = {
   removeHandler?: (channel: string) => void
 }
 
-export function registerElectronPersistenceMainIpcHandler(options: {
+export type ElectronSQLiteMainProcessOptions = {
+  persistence: PersistedCollectionPersistence<
+    ElectronPersistedRow,
+    ElectronPersistedKey
+  >
   ipcMain: ElectronIpcMainLike
-  host: ElectronPersistenceMainHost
   channel?: string
-}): () => void {
+}
+
+export function exposeElectronSQLitePersistence(
+  options: ElectronSQLiteMainProcessOptions,
+): () => void {
   const channel = options.channel ?? DEFAULT_ELECTRON_PERSISTENCE_CHANNEL
-  options.ipcMain.handle(channel, async (_event, request) =>
-    options.host.handleRequest(request),
+  options.ipcMain.handle(
+    channel,
+    async (
+      _event,
+      request: ElectronPersistenceRequestEnvelope,
+    ): Promise<ElectronPersistenceResponseEnvelope> => {
+      try {
+        assertValidRequest(request)
+        const modeAwarePersistence = resolveModeAwarePersistence(
+          options.persistence,
+          request,
+        )
+        return executeRequestAgainstAdapter(request, modeAwarePersistence.adapter)
+      } catch (error) {
+        return createErrorResponse(request, error)
+      }
+    },
   )
 
   return () => {

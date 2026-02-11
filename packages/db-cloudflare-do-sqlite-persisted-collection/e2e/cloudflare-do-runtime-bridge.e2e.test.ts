@@ -19,8 +19,6 @@ type RuntimeProcessHarness = {
   stop: () => Promise<void>
 }
 
-type CloudflareDORuntimeMode = `local` | `sync`
-
 type WranglerRuntimeResponse<TPayload> =
   | {
       ok: true
@@ -89,7 +87,7 @@ async function stopWranglerProcess(
 
 async function startWranglerRuntime(options: {
   persistPath: string
-  mode?: CloudflareDORuntimeMode
+  syncEnabled?: boolean
   schemaVersion?: number
   collectionId?: string
 }): Promise<RuntimeProcessHarness> {
@@ -100,7 +98,12 @@ async function startWranglerRuntime(options: {
 
   const spawnProcess = async (): Promise<void> => {
     const runtimeVarEntries = [
-      [`PERSISTENCE_MODE`, options.mode],
+      [
+        `PERSISTENCE_WITH_SYNC`,
+        options.syncEnabled !== undefined
+          ? String(options.syncEnabled)
+          : undefined,
+      ],
       [
         `PERSISTENCE_SCHEMA_VERSION`,
         options.schemaVersion !== undefined
@@ -315,7 +318,7 @@ runRuntimeBridgeE2EContractSuite(
 
 describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, () => {
   it(
-    `throws on schema mismatch in local mode`,
+    `throws on schema mismatch in sync-absent mode`,
     async () => {
       const tempDirectory = mkdtempSync(
         join(tmpdir(), `db-cloudflare-do-local-mismatch-e2e-`),
@@ -324,7 +327,7 @@ describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, 
       const collectionId = `todos`
       let runtime = await startWranglerRuntime({
         persistPath,
-        mode: `local`,
+        syncEnabled: false,
         schemaVersion: 1,
         collectionId,
       })
@@ -348,7 +351,7 @@ describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, 
 
       runtime = await startWranglerRuntime({
         persistPath,
-        mode: `local`,
+        syncEnabled: false,
         schemaVersion: 2,
         collectionId,
       })
@@ -369,7 +372,7 @@ describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, 
   )
 
   it(
-    `resets collection on schema mismatch in sync mode`,
+    `resets collection on schema mismatch in sync-present mode`,
     async () => {
       const tempDirectory = mkdtempSync(
         join(tmpdir(), `db-cloudflare-do-sync-mismatch-e2e-`),
@@ -378,7 +381,7 @@ describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, 
       const collectionId = `todos`
       let runtime = await startWranglerRuntime({
         persistPath,
-        mode: `sync`,
+        syncEnabled: true,
         schemaVersion: 1,
         collectionId,
       })
@@ -402,7 +405,7 @@ describe(`cloudflare durable object schema mismatch behavior (wrangler local)`, 
 
       runtime = await startWranglerRuntime({
         persistPath,
-        mode: `sync`,
+        syncEnabled: true,
         schemaVersion: 2,
         collectionId,
       })

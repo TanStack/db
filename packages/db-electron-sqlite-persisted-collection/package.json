@@ -68,7 +68,6 @@
     "src"
   ],
   "dependencies": {
-    "@tanstack/db-node-sqlite-persisted-collection": "workspace:*",
     "@tanstack/db-sqlite-persisted-collection-core": "workspace:*"
   },
   "peerDependencies": {

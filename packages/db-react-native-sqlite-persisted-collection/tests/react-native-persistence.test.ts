@@ -4,10 +4,8 @@ import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import {
-  createExpoSQLitePersistence,
-  createExpoSQLitePersistenceAdapter,
+  OpSQLiteDriver,
   createReactNativeSQLitePersistence,
-  createReactNativeSQLitePersistenceAdapter,
   persistedCollectionOptions,
 } from '../src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
@@ -41,9 +39,10 @@ it(`persists data across app restart (close and reopen)`, async () => {
   const collectionId = `todos-restart`
 
   const firstDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
-  const firstAdapter = createReactNativeSQLitePersistenceAdapter<Todo, string>({
-    driver: { database: firstDatabase },
+  const firstPersistence = createReactNativeSQLitePersistence<Todo, string>({
+    driver: new OpSQLiteDriver({ database: firstDatabase }),
   })
+  const firstAdapter = firstPersistence.adapter
 
   await firstAdapter.applyCommittedTx(collectionId, {
     txId: `tx-restart-1`,
@@ -66,11 +65,10 @@ it(`persists data across app restart (close and reopen)`, async () => {
 
   const secondDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(secondDatabase.close()))
-  const secondAdapter = createReactNativeSQLitePersistenceAdapter<Todo, string>(
-    {
-      driver: { database: secondDatabase },
-    },
-  )
+  const secondPersistence = createReactNativeSQLitePersistence<Todo, string>({
+    driver: new OpSQLiteDriver({ database: secondDatabase }),
+  })
+  const secondAdapter = secondPersistence.adapter
 
   const rows = await secondAdapter.loadSubset(collectionId, {})
   expect(rows).toEqual([
@@ -85,14 +83,15 @@ it(`persists data across app restart (close and reopen)`, async () => {
   ])
 })
 
-it(`expo entrypoint persists data across app restart (close and reopen)`, async () => {
+it(`shared react-native api persists across expo-style restart`, async () => {
   const dbPath = createTempSqlitePath()
   const collectionId = `todos-restart-expo`
 
   const firstDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
-  const firstAdapter = createExpoSQLitePersistenceAdapter<Todo, string>({
-    driver: { database: firstDatabase },
+  const firstPersistence = createReactNativeSQLitePersistence<Todo, string>({
+    driver: new OpSQLiteDriver({ database: firstDatabase }),
   })
+  const firstAdapter = firstPersistence.adapter
 
   await firstAdapter.applyCommittedTx(collectionId, {
     txId: `tx-restart-expo-1`,
@@ -115,9 +114,10 @@ it(`expo entrypoint persists data across app restart (close and reopen)`, async 
 
   const secondDatabase = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(secondDatabase.close()))
-  const secondAdapter = createExpoSQLitePersistenceAdapter<Todo, string>({
-    driver: { database: secondDatabase },
+  const secondPersistence = createReactNativeSQLitePersistence<Todo, string>({
+    driver: new OpSQLiteDriver({ database: secondDatabase }),
   })
+  const secondAdapter = secondPersistence.adapter
 
   const rows = await secondAdapter.loadSubset(collectionId, {})
   expect(rows).toEqual([
@@ -138,9 +138,10 @@ it(`keeps all committed rows under rapid mutation bursts`, async () => {
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
-  const adapter = createReactNativeSQLitePersistenceAdapter<Todo, string>({
-    driver: { database },
+  const persistence = createReactNativeSQLitePersistence<Todo, string>({
+    driver: new OpSQLiteDriver({ database }),
   })
+  const adapter = persistence.adapter
 
   const burstSize = 50
   for (let index = 0; index < burstSize; index++) {
@@ -168,7 +169,7 @@ it(`keeps all committed rows under rapid mutation bursts`, async () => {
   expect(rows).toHaveLength(burstSize)
 })
 
-it(`exposes parity wrappers for react-native and expo entrypoints`, async () => {
+it(`uses a single react-native api across runtime aliases`, async () => {
   const dbPath = createTempSqlitePath()
   const collectionId = `todos-entrypoints`
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
@@ -178,10 +179,10 @@ it(`exposes parity wrappers for react-native and expo entrypoints`, async () => 
     Todo,
     string
   >({
-    driver: { database },
+    driver: new OpSQLiteDriver({ database }),
   })
-  const expoPersistence = createExpoSQLitePersistence<Todo, string>({
-    driver: { database },
+  const sharedApiPersistence = createReactNativeSQLitePersistence<Todo, string>({
+    driver: new OpSQLiteDriver({ database }),
   })
 
   await reactNativePersistence.adapter.applyCommittedTx(collectionId, {
@@ -202,7 +203,7 @@ it(`exposes parity wrappers for react-native and expo entrypoints`, async () => 
     ],
   })
 
-  const rows = await expoPersistence.adapter.loadSubset(collectionId, {})
+  const rows = await sharedApiPersistence.adapter.loadSubset(collectionId, {})
   expect(rows[0]?.value.title).toBe(`Entry point parity`)
 })
 
@@ -213,7 +214,7 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
   const persistence = createReactNativeSQLitePersistence<Todo, string>({
-    driver: { database },
+    driver: new OpSQLiteDriver({ database }),
   })
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({
@@ -260,14 +261,14 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   )
 })
 
-it(`expo entrypoint resumes persisted sync after simulated background/foreground transitions`, async () => {
+it(`shared api resumes persisted sync in expo-style lifecycle`, async () => {
   const dbPath = createTempSqlitePath()
   const collectionId = `todos-lifecycle-expo`
   const database = createOpSQLiteTestDatabase({ filename: dbPath })
   activeCleanupFns.push(() => Promise.resolve(database.close()))
 
-  const persistence = createExpoSQLitePersistence<Todo, string>({
-    driver: { database },
+  const persistence = createReactNativeSQLitePersistence<Todo, string>({
+    driver: new OpSQLiteDriver({ database }),
   })
   const collection = createCollection(
     persistedCollectionOptions<Todo, string>({

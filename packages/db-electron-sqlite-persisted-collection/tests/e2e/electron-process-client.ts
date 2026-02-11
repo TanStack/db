@@ -4,12 +4,12 @@ import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { deserialize } from 'node:v8'
-import { DEFAULT_ELECTRON_PERSISTENCE_CHANNEL } from '../../src'
+import { DEFAULT_ELECTRON_PERSISTENCE_CHANNEL } from '../../src/protocol'
 import {
   E2E_RESULT_BASE64_PREFIX,
   E2E_RESULT_PREFIX,
 } from './fixtures/runtime-bridge-types'
-import type { ElectronPersistenceInvoke } from '../../src'
+import type { ElectronPersistenceInvoke } from '../../src/protocol'
 import type {
   ElectronRuntimeBridgeAdapterOptions,
   ElectronRuntimeBridgeHostKind,

@@ -13,6 +13,7 @@ import {
 } from '../src'
 import type {
   PersistedCollectionCoordinator,
+  PersistedCollectionPersistence,
   PersistedSyncWrappedOptions,
   PersistenceAdapter,
   ProtocolEnvelope,
@@ -284,6 +285,61 @@ describe(`persistedCollectionOptions`, () => {
     expect(options.persistence.coordinator).toBeInstanceOf(
       SingleProcessCoordinator,
     )
+  })
+
+  it(`resolves persistence per collection and forwards schemaVersion`, () => {
+    const baseAdapter = createNoopAdapter()
+    const syncAdapter = createNoopAdapter()
+    const localAdapter = createNoopAdapter()
+    const resolverCalls: Array<{
+      collectionId: string
+      mode: `sync-present` | `sync-absent`
+      schemaVersion?: number
+    }> = []
+
+    const persistence: PersistedCollectionPersistence<Todo, string> = {
+      adapter: baseAdapter,
+      resolvePersistenceForCollection: (options) => {
+        resolverCalls.push(options)
+        return {
+          adapter: options.mode === `sync-present` ? syncAdapter : localAdapter,
+        }
+      },
+    }
+
+    const syncOptions = persistedCollectionOptions<Todo, string>({
+      id: `sync-collection`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ markReady }) => {
+          markReady()
+        },
+      },
+      schemaVersion: 7,
+      persistence,
+    })
+    expect(syncOptions.persistence.adapter).toBe(syncAdapter)
+
+    const localOptions = persistedCollectionOptions<Todo, string>({
+      id: `local-collection`,
+      getKey: (item) => item.id,
+      schemaVersion: 3,
+      persistence,
+    })
+    expect(localOptions.persistence.adapter).toBe(localAdapter)
+
+    expect(resolverCalls).toEqual([
+      {
+        collectionId: `sync-collection`,
+        mode: `sync-present`,
+        schemaVersion: 7,
+      },
+      {
+        collectionId: `local-collection`,
+        mode: `sync-absent`,
+        schemaVersion: 3,
+      },
+    ])
   })
 
   it(`throws for invalid coordinator implementations`, () => {

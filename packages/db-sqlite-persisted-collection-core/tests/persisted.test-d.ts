@@ -32,6 +32,7 @@ describe(`persisted collection types`, () => {
       LocalExtraUtils
     >({
       id: `persisted-local-only`,
+      schemaVersion: 1,
       getKey: (item) => item.id,
       utils: {
         existingUtil: () => 42,
@@ -67,6 +68,7 @@ describe(`persisted collection types`, () => {
       SyncExtraUtils
     >({
       id: `persisted-sync-present`,
+      schemaVersion: 2,
       getKey: (item) => item.id,
       sync,
       utils: {

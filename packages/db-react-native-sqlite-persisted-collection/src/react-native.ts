@@ -1,35 +1,13 @@
-import {
-  createMobileSQLitePersistence,
-  createMobileSQLitePersistenceAdapter,
-  createMobileSQLitePersister,
-} from './mobile-persistence'
+import { createMobileSQLitePersistence } from './mobile-persistence'
 import type {
-  MobileSQLitePersistenceAdapter,
-  MobileSQLitePersistenceAdapterOptions,
   MobileSQLitePersistenceOptions,
-  MobileSQLitePersister,
+  MobileSQLiteSchemaMismatchPolicy,
 } from './mobile-persistence'
 import type { PersistedCollectionPersistence } from '@tanstack/db-sqlite-persisted-collection-core'
 
-export type ReactNativeSQLitePersistenceAdapterOptions =
-  MobileSQLitePersistenceAdapterOptions
 export type ReactNativeSQLitePersistenceOptions = MobileSQLitePersistenceOptions
-export type ReactNativeSQLitePersister = MobileSQLitePersister
-
-export function createReactNativeSQLitePersister(
-  options: ReactNativeSQLitePersistenceOptions,
-): ReactNativeSQLitePersister {
-  return createMobileSQLitePersister(options)
-}
-
-export function createReactNativeSQLitePersistenceAdapter<
-  T extends object,
-  TKey extends string | number = string | number,
->(
-  options: ReactNativeSQLitePersistenceAdapterOptions,
-): MobileSQLitePersistenceAdapter<T, TKey> {
-  return createMobileSQLitePersistenceAdapter<T, TKey>(options)
-}
+export type ReactNativeSQLiteSchemaMismatchPolicy =
+  MobileSQLiteSchemaMismatchPolicy
 
 export function createReactNativeSQLitePersistence<
   T extends object,

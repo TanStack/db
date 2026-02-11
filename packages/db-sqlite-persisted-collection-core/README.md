@@ -1,8 +1,8 @@
 # @tanstack/db-sqlite-persisted-collection-core
 
 Shared SQLite persistence primitives for TanStack DB. Runtime-specific wrappers
-(Node, Electron, React Native/Expo, Cloudflare Durable Objects) build on top of
-this package.
+(Node, Electron, React Native, Cloudflare Durable Objects) build on top of this
+package.
 
 ## What this package provides
 
@@ -48,11 +48,21 @@ binding. Provide a runtime `SQLiteDriver` implementation from a wrapper package.
 - `decodePersistedStorageKey(...)`
 - `createPersistedTableName(...)`
 
-`PersistedCollectionPersistence` can optionally implement
-`resolvePersistenceForMode(mode)` to provide mode-aware adapters for:
+`PersistedCollectionPersistence` can optionally implement:
 
-- `sync-present`
-- `sync-absent`
+- `resolvePersistenceForMode(mode)` (legacy mode-aware resolution)
+- `resolvePersistenceForCollection({ collectionId, mode, schemaVersion })`
+  (collection-aware resolution)
+
+`persistedCollectionOptions(...)` now supports `schemaVersion` per collection
+and resolves persistence using:
+
+- collection id
+- inferred mode (`sync-present` or `sync-absent`)
+- optional `schemaVersion`
+
+This lets runtime wrappers expose one shared persistence instance per database
+while still handling per-collection schema versions correctly.
 
 ### SQLite core adapter APIs
 
@@ -80,5 +90,4 @@ In most applications, use a runtime package directly:
 - `@tanstack/db-react-native-sqlite-persisted-collection`
 - `@tanstack/db-cloudflare-do-sqlite-persisted-collection`
 
-Those packages provide concrete drivers and re-export these core APIs for
-ergonomic usage.
+Those packages provide concrete drivers and runtime wiring.
