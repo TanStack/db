@@ -19,6 +19,77 @@ React Native and Expo SQLite persistence wrappers for TanStack DB, built on the 
 - `createExpoSQLitePersistenceAdapter`
 - `createExpoSQLitePersistence`
 
+## React Native setup (bare app)
+
+```ts
+import { createCollection } from '@tanstack/db'
+import {
+  createReactNativeSQLitePersistence,
+  persistedCollectionOptions,
+} from '@tanstack/db-react-native-sqlite-persisted-collection/react-native'
+
+type Todo = {
+  id: string
+  title: string
+  completed: boolean
+}
+
+function openReactNativeDatabase() {
+  // Replace with your host initialization for @op-engineering/op-sqlite.
+  // The returned object must expose execute/executeAsync style methods.
+  throw new Error('Implement mobile database bootstrap')
+}
+
+const persistence = createReactNativeSQLitePersistence<Todo, string>({
+  driver: {
+    openDatabase: openReactNativeDatabase,
+  },
+})
+
+export const todosCollection = createCollection(
+  persistedCollectionOptions<Todo, string>({
+    id: `todos`,
+    getKey: (todo) => todo.id,
+    persistence,
+  }),
+)
+```
+
+## Expo setup (managed workflow)
+
+```ts
+import { createCollection } from '@tanstack/db'
+import {
+  createExpoSQLitePersistence,
+  persistedCollectionOptions,
+} from '@tanstack/db-react-native-sqlite-persisted-collection/expo'
+
+type Todo = {
+  id: string
+  title: string
+  completed: boolean
+}
+
+function openExpoDatabase() {
+  // Replace with your Expo bootstrap for @op-engineering/op-sqlite.
+  throw new Error('Implement expo database bootstrap')
+}
+
+const persistence = createExpoSQLitePersistence<Todo, string>({
+  driver: {
+    openDatabase: openExpoDatabase,
+  },
+})
+
+export const todosCollection = createCollection(
+  persistedCollectionOptions<Todo, string>({
+    id: `todos`,
+    getKey: (todo) => todo.id,
+    persistence,
+  }),
+)
+```
+
 ## Notes
 
 - Provide either an existing `op-sqlite` database object or an `openDatabase` factory.
@@ -50,3 +121,7 @@ Example runtime lane:
 TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE=./path/to/runtime-factory.ts \
 pnpm --filter @tanstack/db-react-native-sqlite-persisted-collection test:e2e:runtime
 ```
+
+If your CI environment can provide a runtime factory module, run
+`test:e2e:runtime` in CI to enforce real-runtime validation rather than only the
+default Node-hosted mock harness.
