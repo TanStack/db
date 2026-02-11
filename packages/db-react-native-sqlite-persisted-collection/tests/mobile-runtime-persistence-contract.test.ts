@@ -13,16 +13,19 @@ import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 import type {
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
+  SQLiteDriver,
 } from '@tanstack/db-sqlite-persisted-collection-core'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
 } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
 
-type RuntimePersistenceFactory = (options: {
-  driver: ReturnType<typeof createOpSQLiteDriver>
-  coordinator?: PersistedCollectionCoordinator
-}) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
+type RuntimePersistenceFactory = (
+  options: {
+    driver: SQLiteDriver
+    coordinator?: PersistedCollectionCoordinator
+  },
+) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
 
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-mobile-persistence-`))
@@ -83,14 +86,13 @@ for (const suite of runtimePersistenceSuites) {
   )
 }
 
-describe.each(runtimePersistenceSuites)(
-  `mobile runtime persistence helper parity ($name)`,
-  ({ createPersistence }) => {
+for (const suite of runtimePersistenceSuites) {
+  describe(`mobile runtime persistence helper parity (${suite.name})`, () => {
     it(`defaults coordinator to SingleProcessCoordinator`, () => {
       const runtimeHarness = createRuntimeDatabaseHarness()
       const driver = runtimeHarness.createDriver()
       try {
-        const persistence = createPersistence({ driver })
+        const persistence = suite.createPersistence({ driver })
         expect(persistence.coordinator).toBeInstanceOf(SingleProcessCoordinator)
       } finally {
         runtimeHarness.cleanup()
@@ -102,7 +104,7 @@ describe.each(runtimePersistenceSuites)(
       const driver = runtimeHarness.createDriver()
       try {
         const coordinator = new SingleProcessCoordinator()
-        const persistence = createPersistence({
+        const persistence = suite.createPersistence({
           driver,
           coordinator,
         })
@@ -111,5 +113,5 @@ describe.each(runtimePersistenceSuites)(
         runtimeHarness.cleanup()
       }
     })
-  },
-)
+  })
+}

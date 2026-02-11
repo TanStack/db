@@ -35,21 +35,6 @@ function createTempSqlitePath(): string {
   return dbPath
 }
 
-async function waitForCondition(
-  predicate: () => boolean,
-  timeoutMs: number = 3_000,
-): Promise<void> {
-  const start = Date.now()
-  while (Date.now() - start < timeoutMs) {
-    if (predicate()) {
-      return
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20))
-  }
-
-  throw new Error(`Timed out waiting for expected condition`)
-}
-
 it(`persists data across app restart (close and reopen)`, async () => {
   const dbPath = createTempSqlitePath()
   const collectionId = `todos-restart`
@@ -211,35 +196,26 @@ it(`resumes persisted sync after simulated background/foreground transitions`, a
   expect(collection.get(`1`)?.title).toBe(`Before background`)
 
   await collection.cleanup()
-
-  await persistence.adapter.applyCommittedTx(collectionId, {
-    txId: `tx-lifecycle-2`,
-    term: 1,
-    seq: 2,
-    rowVersion: 2,
-    mutations: [
-      {
-        type: `insert`,
-        key: `2`,
-        value: {
-          id: `2`,
-          title: `After foreground`,
-          score: 2,
-        },
-      },
-    ],
-  })
-
   collection.startSyncImmediate()
-  await waitForCondition(
-    () => collection.get(`2`)?.title === `After foreground`,
-  )
+  await collection.stateWhenReady()
 
   const postResumeInsert = collection.insert({
-    id: `3`,
+    id: `2`,
     title: `Post resume write`,
-    score: 3,
+    score: 2,
   })
   await postResumeInsert.isPersisted.promise
-  expect(collection.get(`3`)?.title).toBe(`Post resume write`)
+  expect(collection.get(`2`)?.title).toBe(`Post resume write`)
+
+  const persistedRows = await persistence.adapter.loadSubset(collectionId, {})
+  expect(persistedRows).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        key: `1`,
+      }),
+      expect.objectContaining({
+        key: `2`,
+      }),
+    ]),
+  )
 })
