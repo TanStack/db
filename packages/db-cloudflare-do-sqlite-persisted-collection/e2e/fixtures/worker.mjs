@@ -10,6 +10,24 @@ import {
 const DEFAULT_COLLECTION_ID = `todos`
 const DEFAULT_SCHEMA_VERSION = 1
 
+function resolveCollectionPersistence({
+  persistence,
+  collectionId,
+  syncEnabled,
+  schemaVersion,
+}) {
+  const mode = syncEnabled ? `sync-present` : `sync-absent`
+  return (
+    persistence.resolvePersistenceForCollection?.({
+      collectionId,
+      mode,
+      schemaVersion,
+    }) ??
+    persistence.resolvePersistenceForMode?.(mode) ??
+    persistence
+  )
+}
+
 function parseSyncEnabled(rawValue) {
   if (rawValue == null) {
     return false
@@ -89,7 +107,15 @@ export class PersistenceObject extends DurableObject {
     this.persistence = createCloudflareDOSQLitePersistence({
       driver,
     })
-    this.ready = this.persistence.adapter.loadSubset(this.collectionId, { limit: 0 })
+    this.collectionPersistence = resolveCollectionPersistence({
+      persistence: this.persistence,
+      collectionId: this.collectionId,
+      syncEnabled: this.syncEnabled,
+      schemaVersion: this.schemaVersion,
+    })
+    this.ready = this.collectionPersistence.adapter.loadSubset(this.collectionId, {
+      limit: 0,
+    })
 
     const baseCollectionOptions = {
       id: this.collectionId,
@@ -116,13 +142,13 @@ export class PersistenceObject extends DurableObject {
     const url = new URL(request.url)
 
     try {
-      await this.ready
-
       if (request.method === `GET` && url.pathname === `/health`) {
         return jsonResponse(200, {
           ok: true,
         })
       }
+
+      await this.ready
 
       if (request.method === `GET` && url.pathname === `/runtime-config`) {
         return jsonResponse(200, {
@@ -141,6 +167,35 @@ export class PersistenceObject extends DurableObject {
         if (collectionId !== this.collectionId) {
           throw createUnknownCollectionError(collectionId)
         }
+        if (this.syncEnabled) {
+          const txId =
+            typeof requestBody.txId === `string`
+              ? requestBody.txId
+              : crypto.randomUUID()
+          const seq =
+            typeof requestBody.seq === `number` ? requestBody.seq : Date.now()
+          const rowVersion =
+            typeof requestBody.rowVersion === `number`
+              ? requestBody.rowVersion
+              : seq
+          await this.collectionPersistence.adapter.applyCommittedTx(collectionId, {
+            txId,
+            term: 1,
+            seq,
+            rowVersion,
+            mutations: [
+              {
+                type: `insert`,
+                key: requestBody.todo.id,
+                value: requestBody.todo,
+              },
+            ],
+          })
+
+          return jsonResponse(200, {
+            ok: true,
+          })
+        }
         await this.collectionReady
         const tx = this.collection.insert(requestBody.todo)
         await tx.isPersisted.promise
@@ -153,6 +208,19 @@ export class PersistenceObject extends DurableObject {
       if (request.method === `POST` && url.pathname === `/load-todos`) {
         if (collectionId !== this.collectionId) {
           throw createUnknownCollectionError(collectionId)
+        }
+        if (this.syncEnabled) {
+          const rows = await this.collectionPersistence.adapter.loadSubset(
+            collectionId,
+            {},
+          )
+          return jsonResponse(200, {
+            ok: true,
+            rows: rows.map((row) => ({
+              key: row.key,
+              value: row.value,
+            })),
+          })
         }
         await this.collectionReady
         const rows = this.collection.toArray.map((todo) => ({
