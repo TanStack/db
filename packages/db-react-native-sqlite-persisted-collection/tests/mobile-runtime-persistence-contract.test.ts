@@ -20,12 +20,10 @@ import type {
   RuntimePersistenceDatabaseHarness,
 } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
 
-type RuntimePersistenceFactory = (
-  options: {
-    driver: SQLiteDriver
-    coordinator?: PersistedCollectionCoordinator
-  },
-) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
+type RuntimePersistenceFactory = (options: {
+  driver: SQLiteDriver
+  coordinator?: PersistedCollectionCoordinator
+}) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
 
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-mobile-persistence-`))
