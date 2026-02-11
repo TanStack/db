@@ -35,9 +35,18 @@ factory module through environment variables:
 - `TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE`
 - `TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT` (optional, defaults to
   `createMobileSQLiteTestDatabaseFactory`)
+- `TANSTACK_DB_MOBILE_REQUIRE_RUNTIME_FACTORY=1` (set automatically by
+  `pnpm test:e2e:runtime`; causes setup to fail fast when no runtime factory is provided)
 
 The selected export can either be:
 
 - a database factory function with signature
   `({ filename, resultShape }) => { execute, close, ... }`
 - or a zero-arg function that returns that factory (sync or async)
+
+Example runtime lane:
+
+```bash
+TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE=./path/to/runtime-factory.ts \
+pnpm --filter @tanstack/db-react-native-sqlite-persisted-collection test:e2e:runtime
+```

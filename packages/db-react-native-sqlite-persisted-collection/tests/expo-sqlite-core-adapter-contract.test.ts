@@ -32,8 +32,8 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
   return {
     adapter,
     driver,
-    cleanup: () => {
-      void Promise.resolve(database.close())
+    cleanup: async () => {
+      await Promise.resolve(database.close())
       rmSync(tempDirectory, { recursive: true, force: true })
     },
   }

@@ -4,6 +4,7 @@ import type { MobileSQLiteTestDatabaseFactory } from './op-sqlite-test-db'
 
 const FACTORY_MODULE_ENV_VAR = `TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE`
 const FACTORY_EXPORT_ENV_VAR = `TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT`
+const REQUIRE_FACTORY_ENV_VAR = `TANSTACK_DB_MOBILE_REQUIRE_RUNTIME_FACTORY`
 const DEFAULT_FACTORY_EXPORT_NAME = `createMobileSQLiteTestDatabaseFactory`
 
 type MobileSQLiteFactoryExport =
@@ -30,25 +31,40 @@ async function resolveFactoryFromExport(
   }
 
   const candidate = exportedFactory as MobileSQLiteFactoryExport
-  if (candidate.length > 0) {
-    return candidate as MobileSQLiteTestDatabaseFactory
+  if (candidate.length === 0) {
+    try {
+      const resolvedFactory = await (
+        candidate as
+          | (() => MobileSQLiteTestDatabaseFactory)
+          | (() => Promise<MobileSQLiteTestDatabaseFactory>)
+      )()
+      if (typeof resolvedFactory === `function`) {
+        return resolvedFactory
+      }
+    } catch {
+      // Some direct factory implementations use defaulted params and report
+      // function.length === 0. Fall back to treating the export itself as the
+      // database factory in that case.
+    }
   }
 
-  const resolvedFactory = await (
-    candidate as
-      | (() => MobileSQLiteTestDatabaseFactory)
-      | (() => Promise<MobileSQLiteTestDatabaseFactory>)
-  )()
-  if (typeof resolvedFactory !== `function`) {
-    return null
-  }
-
-  return resolvedFactory
+  return candidate as MobileSQLiteTestDatabaseFactory
 }
 
 globalThis.__tanstackDbCreateMobileSQLiteTestDatabase = undefined
 
 const runtimeFactoryModule = process.env[FACTORY_MODULE_ENV_VAR]?.trim()
+const requireRuntimeFactory =
+  process.env[REQUIRE_FACTORY_ENV_VAR]?.trim() === `1`
+
+if (requireRuntimeFactory && !runtimeFactoryModule) {
+  throw new Error(
+    `Missing ${FACTORY_MODULE_ENV_VAR}. ` +
+      `Set it to a module exporting a runtime mobile SQLite test database factory ` +
+      `when ${REQUIRE_FACTORY_ENV_VAR}=1.`,
+  )
+}
+
 if (runtimeFactoryModule) {
   const runtimeModule = (await import(
     toImportSpecifier(runtimeFactoryModule)

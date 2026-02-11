@@ -2010,7 +2010,10 @@ export function persistedCollectionOptions<
     return {
       ...options,
       id: collectionId,
-      sync: createWrappedSyncConfig(options.sync, runtime),
+      sync: createWrappedSyncConfig<T, TKey>(
+        options.sync,
+        runtime,
+      ),
       persistence,
     }
   }

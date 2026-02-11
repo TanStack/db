@@ -180,7 +180,7 @@ type AdapterHarness = {
   adapter: SQLiteCorePersistenceAdapter<Todo, string>
   driver: SqliteCliDriver
   dbPath: string
-  cleanup: () => void
+  cleanup: () => void | Promise<void>
 }
 
 export type SQLiteCoreAdapterContractHarness = {
@@ -191,7 +191,7 @@ export type SQLiteCoreAdapterContractHarness = {
     ) => Promise<SQLitePullSinceResult<string>>
   }
   driver: SQLiteDriver
-  cleanup: () => void
+  cleanup: () => void | Promise<void>
 }
 
 function createHarness(
@@ -218,12 +218,12 @@ function createHarness(
   }
 }
 
-const activeCleanupFns: Array<() => void> = []
+const activeCleanupFns: Array<() => void | Promise<void>> = []
 
-afterEach(() => {
+afterEach(async () => {
   while (activeCleanupFns.length > 0) {
     const cleanupFn = activeCleanupFns.pop()
-    cleanupFn?.()
+    await Promise.resolve(cleanupFn?.())
   }
 })
 

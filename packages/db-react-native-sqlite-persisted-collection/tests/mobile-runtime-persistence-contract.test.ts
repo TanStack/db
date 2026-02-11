@@ -42,10 +42,10 @@ function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
       drivers.add(driver)
       return driver
     },
-    cleanup: () => {
+    cleanup: async () => {
       for (const database of databases) {
         try {
-          void Promise.resolve(database.close())
+          await Promise.resolve(database.close())
         } catch {
           // ignore cleanup errors from already-closed handles
         }

@@ -8,12 +8,12 @@ import {
 } from '../src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 
-const activeCleanupFns: Array<() => void> = []
+const activeCleanupFns: Array<() => void | Promise<void>> = []
 
-afterEach(() => {
+afterEach(async () => {
   while (activeCleanupFns.length > 0) {
     const cleanupFn = activeCleanupFns.pop()
-    cleanupFn?.()
+    await Promise.resolve(cleanupFn?.())
   }
 })
 
@@ -135,6 +135,60 @@ it(`supports nested savepoint rollback without losing outer transaction`, async 
     { id: `1`, title: `Outer before` },
     { id: `3`, title: `Outer after` },
   ])
+})
+
+it(`supports closure-style transaction callbacks without deadlock`, async () => {
+  const dbPath = createTempSqlitePath()
+  const database = createOpSQLiteTestDatabase({ filename: dbPath })
+  activeCleanupFns.push(() => {
+    database.close()
+  })
+
+  const driver = createOpSQLiteDriver({ database })
+  await driver.exec(`CREATE TABLE closure_tx_test (value INTEGER NOT NULL)`)
+
+  let resolveHold: (() => void) | undefined
+  const hold = new Promise<void>((resolve) => {
+    resolveHold = resolve
+  })
+  let resolveEntered: (() => void) | undefined
+  const entered = new Promise<void>((resolve) => {
+    resolveEntered = resolve
+  })
+
+  const txPromise = driver.transaction(async () => {
+    if (!resolveEntered) {
+      throw new Error(`transaction entry signal missing`)
+    }
+    resolveEntered()
+    await driver.run(`INSERT INTO closure_tx_test (value) VALUES (?)`, [1])
+    await hold
+    await driver.run(`INSERT INTO closure_tx_test (value) VALUES (?)`, [2])
+  })
+
+  await entered
+
+  let outsideResolved = false
+  const outsidePromise = driver
+    .run(`INSERT INTO closure_tx_test (value) VALUES (?)`, [3])
+    .then(() => {
+      outsideResolved = true
+    })
+
+  await Promise.resolve()
+  expect(outsideResolved).toBe(false)
+
+  if (!resolveHold) {
+    throw new Error(`transaction hold signal missing`)
+  }
+  resolveHold()
+
+  await Promise.all([txPromise, outsidePromise])
+
+  const rows = await driver.query<{ value: number }>(
+    `SELECT value FROM closure_tx_test ORDER BY value ASC`,
+  )
+  expect(rows.map((row) => row.value)).toEqual([1, 2, 3])
 })
 
 it(`serializes unrelated operations behind an active transaction`, async () => {
