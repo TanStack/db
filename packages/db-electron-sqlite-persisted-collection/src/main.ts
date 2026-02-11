@@ -229,7 +229,10 @@ export function exposeElectronSQLitePersistence(
           options.persistence,
           request,
         )
-        return executeRequestAgainstAdapter(request, modeAwarePersistence.adapter)
+        return await executeRequestAgainstAdapter(
+          request,
+          modeAwarePersistence.adapter,
+        )
       } catch (error) {
         return createErrorResponse(request, error)
       }
