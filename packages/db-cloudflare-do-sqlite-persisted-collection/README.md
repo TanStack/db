@@ -3,14 +3,38 @@
 Cloudflare Durable Object SQLite persistence wrappers for TanStack DB, built on
 the shared `@tanstack/db-sqlite-persisted-collection-core` adapter.
 
-## Core APIs
+## Exported API (complete)
 
-- `createCloudflareDOSQLiteDriver`
-- `createCloudflareDOSQLitePersistenceAdapter`
-- `createCloudflareDOSQLitePersistence`
-- `resolveCloudflareDOSchemaMismatchPolicy`
-- `createCloudflareDOCollectionRegistry`
-- `initializeCloudflareDOCollections`
+### Cloudflare DO driver APIs
+
+- `DurableObjectSqlStorageLike`
+- `DurableObjectTransactionExecutor`
+- `DurableObjectStorageLike`
+- `CloudflareDOSQLiteDriverOptions`
+- `CloudflareDOSQLiteDriver`
+- `createCloudflareDOSQLiteDriver(...)`
+
+### Cloudflare DO persistence APIs
+
+- `CloudflareDOPersistenceMode`
+- `CloudflareDOCoreSchemaMismatchPolicy`
+- `CloudflareDOSchemaMismatchPolicy`
+- `CloudflareDOSQLitePersistenceAdapterOptions`
+- `CloudflareDOSQLitePersistenceOptions`
+- `CloudflareDOCollectionConfig`
+- `CloudflareDOSQLitePersistenceAdapter<T, TKey>`
+- `resolveCloudflareDOSchemaMismatchPolicy(...)`
+- `createCloudflareDOSQLitePersistenceAdapter<T, TKey>(...)`
+- `createCloudflareDOSQLitePersistence<T, TKey>(...)`
+- `CloudflareDOCollectionRegistry`
+- `createCloudflareDOCollectionRegistry(...)`
+- `initializeCloudflareDOCollections(...)`
+
+### Re-exported core APIs
+
+This package re-exports **all** exports from
+`@tanstack/db-sqlite-persisted-collection-core` at the root entrypoint
+(including `persistedCollectionOptions` and core types/errors).
 
 ## Durable Object setup
 
