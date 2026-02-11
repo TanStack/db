@@ -25,9 +25,7 @@ React Native and Expo SQLite persistence wrappers for TanStack DB, built on the 
 import { open } from '@op-engineering/op-sqlite'
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '@tanstack/db-react-native-sqlite-persisted-collection'
-import {
-  createReactNativeSQLitePersistence,
-} from '@tanstack/db-react-native-sqlite-persisted-collection/react-native'
+import { createReactNativeSQLitePersistence } from '@tanstack/db-react-native-sqlite-persisted-collection/react-native'
 
 type Todo = {
   id: string
@@ -61,9 +59,7 @@ export const todosCollection = createCollection(
 import { open } from '@op-engineering/op-sqlite'
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '@tanstack/db-react-native-sqlite-persisted-collection'
-import {
-  createExpoSQLitePersistence,
-} from '@tanstack/db-react-native-sqlite-persisted-collection/expo'
+import { createExpoSQLitePersistence } from '@tanstack/db-react-native-sqlite-persisted-collection/expo'
 
 type Todo = {
   id: string
