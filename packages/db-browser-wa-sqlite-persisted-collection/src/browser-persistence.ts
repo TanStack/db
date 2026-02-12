@@ -101,7 +101,10 @@ export function createBrowserWASQLitePersistence<
   const adapterCache = new Map<
     string,
     ReturnType<
-      typeof createSQLiteCorePersistenceAdapter<Record<string, unknown>, string | number>
+      typeof createSQLiteCorePersistenceAdapter<
+        Record<string, unknown>,
+        string | number
+      >
     >
   >()
 
@@ -139,14 +142,17 @@ export function createBrowserWASQLitePersistence<
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
   ): PersistedCollectionPersistence<T, TKey> => ({
-    adapter: getAdapterForCollection(mode, schemaVersion) as unknown as PersistedCollectionPersistence<
-      T,
-      TKey
-    >[`adapter`],
+    adapter: getAdapterForCollection(
+      mode,
+      schemaVersion,
+    ) as unknown as PersistedCollectionPersistence<T, TKey>[`adapter`],
     coordinator: resolvedCoordinator,
   })
 
-  const defaultPersistence = createCollectionPersistence(`sync-absent`, undefined)
+  const defaultPersistence = createCollectionPersistence(
+    `sync-absent`,
+    undefined,
+  )
 
   return {
     ...defaultPersistence,

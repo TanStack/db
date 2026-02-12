@@ -22,7 +22,9 @@ afterEach(async () => {
 })
 
 function createTempSqlitePath(): string {
-  const tempDirectory = mkdtempSync(join(tmpdir(), `db-browser-single-tab-test-`))
+  const tempDirectory = mkdtempSync(
+    join(tmpdir(), `db-browser-single-tab-test-`),
+  )
   const dbPath = join(tempDirectory, `state.sqlite`)
   activeCleanupFns.push(() => {
     rmSync(tempDirectory, { recursive: true, force: true })
@@ -44,7 +46,9 @@ it(`works without browser election primitives`, async () => {
   Object.defineProperty(globalThis, `BroadcastChannel`, {
     value: class {
       constructor() {
-        throw new Error(`BroadcastChannel should not be used in single-tab mode`)
+        throw new Error(
+          `BroadcastChannel should not be used in single-tab mode`,
+        )
       }
     },
     configurable: true,
@@ -52,7 +56,11 @@ it(`works without browser election primitives`, async () => {
   })
   activeCleanupFns.push(() => {
     if (originalBroadcastDescriptor) {
-      Object.defineProperty(globalThis, `BroadcastChannel`, originalBroadcastDescriptor)
+      Object.defineProperty(
+        globalThis,
+        `BroadcastChannel`,
+        originalBroadcastDescriptor,
+      )
       return
     }
     Reflect.deleteProperty(globalThis, `BroadcastChannel`)

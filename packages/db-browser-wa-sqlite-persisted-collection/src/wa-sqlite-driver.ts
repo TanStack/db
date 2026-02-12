@@ -18,7 +18,10 @@ type BrowserWASQLiteBindingValue =
 
 export interface BrowserWASQLiteAPI {
   statements: (db: number, sql: string) => AsyncIterable<number>
-  bind_collection: (statement: number, bindings: BrowserWASQLiteBindCollection) => number
+  bind_collection: (
+    statement: number,
+    bindings: BrowserWASQLiteBindCollection,
+  ) => number
   step: (statement: number) => Promise<number>
   row: (statement: number) => ReadonlyArray<unknown>
   column_names: (statement: number) => ReadonlyArray<string>
