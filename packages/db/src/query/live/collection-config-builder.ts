@@ -347,11 +347,9 @@ export class CollectionConfigBuilder<
           callbackCalled = true
         }
 
-        // Call the callback at least once if it wasn't already called (no pending work).
-        // This is important for lazy loading scenarios where:
-        // 1. setWindow() increases the limit and needs to trigger loadMoreIfNeeded
-        // 2. An async loadSubset completes and we need to check if more data is needed
-        // Without this, the callback would never be called if the graph has no work.
+        // Ensure the callback runs at least once even when the graph has no pending work.
+        // This handles lazy loading scenarios where setWindow() increases the limit or
+        // an async loadSubset completes and we need to re-check if more data is needed.
         if (!callbackCalled) {
           callback?.()
         }
