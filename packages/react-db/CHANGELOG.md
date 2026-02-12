@@ -1,5 +1,16 @@
 # @tanstack/react-db
 
+## 0.1.70
+
+### Patch Changes
+
+- Fix `useLiveInfiniteQuery` peek-ahead detection for `hasNextPage`. The initial query now correctly requests `pageSize + 1` items to detect whether additional pages exist, matching the behavior of subsequent page loads. ([#1209](https://github.com/TanStack/db/pull/1209))
+
+  Fix async on-demand pagination by ensuring the graph callback fires at least once even when there is no pending graph work, so that `loadMoreIfNeeded` is triggered after `setWindow()` increases the limit.
+
+- Updated dependencies [[`85c373e`](https://github.com/TanStack/db/commit/85c373ef892e4080fe86b26e2fcb762181545e3c), [`9184dcc`](https://github.com/TanStack/db/commit/9184dcce62019ea870f968f4a4a5c2428291214d), [`83d5ac8`](https://github.com/TanStack/db/commit/83d5ac82983fb6c244c53d349c83845969473a9b)]:
+  - @tanstack/db@0.5.26
+
 ## 0.1.69
 
 ### Patch Changes

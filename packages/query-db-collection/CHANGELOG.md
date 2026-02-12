@@ -1,5 +1,14 @@
 # @tanstack/query-db-collection
 
+## 1.0.23
+
+### Patch Changes
+
+- Make loadSubsetOptions optional in QueryCollectionMeta to fix query-core interface pollution (#1061) ([#1238](https://github.com/TanStack/db/pull/1238))
+
+- Updated dependencies [[`85c373e`](https://github.com/TanStack/db/commit/85c373ef892e4080fe86b26e2fcb762181545e3c), [`9184dcc`](https://github.com/TanStack/db/commit/9184dcce62019ea870f968f4a4a5c2428291214d), [`83d5ac8`](https://github.com/TanStack/db/commit/83d5ac82983fb6c244c53d349c83845969473a9b)]:
+  - @tanstack/db@0.5.26
+
 ## 1.0.22
 
 ### Patch Changes
