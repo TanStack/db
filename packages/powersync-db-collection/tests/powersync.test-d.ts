@@ -22,8 +22,9 @@ describe(`PowerSync collection type tests`, () => {
     )
 
     // Verify that collection.utils is typed as PowerSyncCollectionUtils, not UtilsRecord
-    const utils: PowerSyncCollectionUtils<(typeof APP_SCHEMA.props)['documents']> =
-      collection.utils
+    const utils: PowerSyncCollectionUtils<
+      (typeof APP_SCHEMA.props)['documents']
+    > = collection.utils
     expectTypeOf(utils.getMeta).toBeFunction()
     expectTypeOf(collection.utils.getMeta).toBeFunction()
   })
