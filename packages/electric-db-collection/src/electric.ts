@@ -511,24 +511,33 @@ export function electricCollectionOptions<T extends StandardSchemaV1>(
   config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
     schema: T
   },
-): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T>, `utils` | `onInsert` | `onUpdate` | `onDelete`> &
-  Pick<ElectricCollectionConfig<InferSchemaOutput<T>, T>, `onInsert` | `onUpdate` | `onDelete`> & {
-  id?: string
-  utils: ElectricCollectionUtils<InferSchemaOutput<T>>
-  schema: T
-}
+): Omit<
+  CollectionConfig<InferSchemaOutput<T>, string | number, T>,
+  `utils` | `onInsert` | `onUpdate` | `onDelete`
+> &
+  Pick<
+    ElectricCollectionConfig<InferSchemaOutput<T>, T>,
+    `onInsert` | `onUpdate` | `onDelete`
+  > & {
+    id?: string
+    utils: ElectricCollectionUtils<InferSchemaOutput<T>>
+    schema: T
+  }
 
 // Overload for when no schema is provided
 export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T> & {
     schema?: never // prohibit schema
   },
-): Omit<CollectionConfig<T, string | number>, `utils` | `onInsert` | `onUpdate` | `onDelete`> &
+): Omit<
+  CollectionConfig<T, string | number>,
+  `utils` | `onInsert` | `onUpdate` | `onDelete`
+> &
   Pick<ElectricCollectionConfig<T>, `onInsert` | `onUpdate` | `onDelete`> & {
-  id?: string
-  utils: ElectricCollectionUtils<T>
-  schema?: never // no schema in the result
-}
+    id?: string
+    utils: ElectricCollectionUtils<T>
+    schema?: never // no schema in the result
+  }
 
 export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T, any>,

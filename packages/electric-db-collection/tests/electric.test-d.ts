@@ -234,15 +234,33 @@ describe(`Electric collection type resolution tests`, () => {
 
     // Verify that the handlers are properly typed with ElectricCollectionUtils
     expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [InsertMutationFnParams<ExplicitType, string | number, ElectricCollectionUtils<ExplicitType>>]
+      [
+        InsertMutationFnParams<
+          ExplicitType,
+          string | number,
+          ElectricCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
 
     expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [UpdateMutationFnParams<ExplicitType, string | number, ElectricCollectionUtils<ExplicitType>>]
+      [
+        UpdateMutationFnParams<
+          ExplicitType,
+          string | number,
+          ElectricCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
 
     expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [DeleteMutationFnParams<ExplicitType, string | number, ElectricCollectionUtils<ExplicitType>>]
+      [
+        DeleteMutationFnParams<
+          ExplicitType,
+          string | number,
+          ElectricCollectionUtils<ExplicitType>
+        >,
+      ]
     >()
   })
 
@@ -318,13 +336,31 @@ describe(`Electric collection type resolution tests`, () => {
 
     // Verify that the handlers are properly typed with ElectricCollectionUtils
     expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [DeleteMutationFnParams<TodoType, string | number, ElectricCollectionUtils<TodoType>>]
+      [
+        DeleteMutationFnParams<
+          TodoType,
+          string | number,
+          ElectricCollectionUtils<TodoType>
+        >,
+      ]
     >()
     expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [InsertMutationFnParams<TodoType, string | number, ElectricCollectionUtils<TodoType>>]
+      [
+        InsertMutationFnParams<
+          TodoType,
+          string | number,
+          ElectricCollectionUtils<TodoType>
+        >,
+      ]
     >()
     expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [UpdateMutationFnParams<TodoType, string | number, ElectricCollectionUtils<TodoType>>]
+      [
+        UpdateMutationFnParams<
+          TodoType,
+          string | number,
+          ElectricCollectionUtils<TodoType>
+        >,
+      ]
     >()
   })
 
