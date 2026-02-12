@@ -1,7 +1,8 @@
 ---
 '@tanstack/powersync-db-collection': patch
 '@tanstack/trailbase-db-collection': patch
+'@tanstack/electric-db-collection': patch
 '@tanstack/db': patch
 ---
 
-Make type of collection utils more precise for localOnly, PowerSync, and Trailbase collections
+Make type of collection utils more precise for localOnly, PowerSync, Trailbase, and Electric collections
