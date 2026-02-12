@@ -1351,7 +1351,9 @@ describe(`useLiveInfiniteQuery`, () => {
                   // Re-sort after combining
                   filtered.sort((a, b) => b.createdAt - a.createdAt)
                 } catch (e) {
-                  throw new Error(`Test loadSubset: cursor parsing failed`, { cause: e })
+                  throw new Error(`Test loadSubset: cursor parsing failed`, {
+                    cause: e,
+                  })
                 }
               } else if (opts.limit !== undefined) {
                 // Apply limit only if no cursor (cursor handles limit internally)
