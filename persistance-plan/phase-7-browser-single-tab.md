@@ -25,9 +25,9 @@ Deliver stable browser persistence for single-tab usage using `wa-sqlite` + `OPF
 
 ### Workstream A - Browser Driver Implementation
 
-- [ ] Integrate `wa-sqlite` with `OPFSCoopSyncVFS`.
-- [ ] Build browser `SQLiteDriver` wrapper.
-- [ ] Handle startup/open/reopen lifecycle and capability checks.
+- [x] Integrate `wa-sqlite` with `OPFSCoopSyncVFS`.
+- [x] Build browser `SQLiteDriver` wrapper.
+- [x] Handle startup/open/reopen lifecycle and capability checks.
 
 **Acceptance criteria**
 
@@ -36,9 +36,9 @@ Deliver stable browser persistence for single-tab usage using `wa-sqlite` + `OPF
 
 ### Workstream B - Single-Tab Runtime Wiring
 
-- [ ] Use `SingleProcessCoordinator` semantics in browser single-tab mode.
-- [ ] Ensure no dependencies on BroadcastChannel/Web Locks.
-- [ ] Validate sync-present and sync-absent wrapper modes.
+- [x] Use `SingleProcessCoordinator` semantics in browser single-tab mode.
+- [x] Ensure no dependencies on BroadcastChannel/Web Locks.
+- [x] Validate sync-present and sync-absent wrapper modes.
 
 **Acceptance criteria**
 
@@ -46,9 +46,9 @@ Deliver stable browser persistence for single-tab usage using `wa-sqlite` + `OPF
 
 ### Workstream C - Offline/Online Behavior
 
-- [ ] Validate offline `loadSubset` local path for sync-present mode.
-- [ ] Validate remote ensure replay on reconnect.
-- [ ] Validate sync-absent behavior unaffected by network transitions.
+- [x] Validate offline `loadSubset` local path for sync-present mode.
+- [x] Validate remote ensure replay on reconnect.
+- [x] Validate sync-absent behavior unaffected by network transitions.
 
 **Acceptance criteria**
 

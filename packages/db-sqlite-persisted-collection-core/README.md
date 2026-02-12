@@ -80,12 +80,14 @@ while still handling per-collection schema versions correctly.
 - `InvalidPersistenceAdapterError`
 - `InvalidPersistedStorageKeyError`
 - `InvalidPersistedStorageKeyEncodingError`
+- `PersistenceUnavailableError`
 
 ## Typical usage (via runtime wrappers)
 
 In most applications, use a runtime package directly:
 
 - `@tanstack/db-node-sqlite-persisted-collection`
+- `@tanstack/db-browser-wa-sqlite-persisted-collection`
 - `@tanstack/db-electron-sqlite-persisted-collection`
 - `@tanstack/db-react-native-sqlite-persisted-collection`
 - `@tanstack/db-cloudflare-do-sqlite-persisted-collection`

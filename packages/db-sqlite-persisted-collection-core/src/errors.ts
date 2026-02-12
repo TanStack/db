@@ -60,3 +60,14 @@ export class InvalidPersistedStorageKeyEncodingError extends InvalidPersistedCol
     this.name = `InvalidPersistedStorageKeyEncodingError`
   }
 }
+
+export class PersistenceUnavailableError extends PersistedCollectionCoreError {
+  constructor(details?: string) {
+    super(
+      details
+        ? `Persistence unavailable: ${details}`
+        : `Persistence unavailable in this runtime`,
+    )
+    this.name = `PersistenceUnavailableError`
+  }
+}
