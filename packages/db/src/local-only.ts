@@ -64,7 +64,7 @@ type LocalOnlyCollectionOptionsResult<
   T extends object,
   TKey extends string | number,
   TSchema extends StandardSchemaV1 | never = never,
-> = CollectionConfig<T, TKey, TSchema> & {
+> = CollectionConfig<T, TKey, TSchema, LocalOnlyCollectionUtils> & {
   utils: LocalOnlyCollectionUtils
 }
 

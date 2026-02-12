@@ -113,7 +113,7 @@ export function trailBaseCollectionOptions<
   TKey extends string | number = string | number,
 >(
   config: TrailBaseCollectionConfig<TItem, TRecord, TKey>,
-): CollectionConfig<TItem, TKey> & { utils: TrailBaseCollectionUtils } {
+): CollectionConfig<TItem, TKey, never, TrailBaseCollectionUtils> & { utils: TrailBaseCollectionUtils } {
   const getKey = config.getKey
 
   const parse = (record: TRecord) =>

@@ -260,7 +260,7 @@ export type EnhancedPowerSyncCollectionConfig<
   TTable extends Table,
   OutputType extends Record<string, unknown> = Record<string, unknown>,
   TSchema extends StandardSchemaV1 = never,
-> = CollectionConfig<OutputType, string, TSchema> & {
+> = CollectionConfig<OutputType, string, TSchema, PowerSyncCollectionUtils<TTable>> & {
   id?: string
   utils: PowerSyncCollectionUtils<TTable>
   schema?: TSchema
