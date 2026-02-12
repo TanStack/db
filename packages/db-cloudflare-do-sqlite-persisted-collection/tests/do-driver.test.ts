@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { runSQLiteDriverContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-driver-contract'
-import { CloudflareDOSQLiteDriver } from '../src'
+import { CloudflareDOSQLiteDriver } from '../src/do-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persisted-collection-core/src'
 import { createBetterSqliteDoStorageHarness } from './helpers/better-sqlite-do-storage'
 import type { SQLiteDriverContractHarness } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-driver-contract'
@@ -15,7 +15,7 @@ function createDriverHarness(): SQLiteDriverContractHarness {
     filename: dbPath,
   })
   const driver = new CloudflareDOSQLiteDriver({
-    sql: storageHarness.sql,
+    storage: storageHarness.storage,
   })
 
   return {
