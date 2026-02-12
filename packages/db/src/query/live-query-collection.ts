@@ -7,7 +7,7 @@ import {
 import type { LiveQueryCollectionUtils } from './live/collection-config-builder.js'
 import type { LiveQueryCollectionConfig } from './live/types.js'
 import type { InitialQueryBuilder, QueryBuilder } from './builder/index.js'
-import type { Collection } from '../collection/index.js'
+import type { Collection, CollectionImpl } from '../collection/index.js'
 import type {
   CollectionConfig,
   CollectionConfigSingleRowOption,
@@ -15,7 +15,14 @@ import type {
   SingleResult,
   UtilsRecord,
 } from '../types.js'
-import type { Context, GetResult } from './builder/types.js'
+import type {
+  Context,
+  GetQueryResult,
+  GetResult,
+  InferCollectionType,
+  SchemaFromSource,
+  Source,
+} from './builder/types.js'
 
 type CollectionConfigForContext<
   TContext extends Context,
@@ -34,6 +41,92 @@ type CollectionForContext<
 > = TContext extends SingleResult
   ? Collection<TResult, string | number, TUtils> & SingleResult
   : Collection<TResult, string | number, TUtils> & NonSingleResult
+
+type QueryableFieldList = ReadonlyArray<string>
+
+type KeysFromList<TKeys> =
+  TKeys extends ReadonlyArray<infer TKey> ? TKey : never
+
+type ResolveQueryableSchema<
+  TDocument extends object,
+  TFilterable,
+  TSortable,
+> = [TFilterable] extends [undefined]
+  ? [TSortable] extends [undefined]
+    ? TDocument
+    : Pick<
+        TDocument,
+        Extract<
+          KeysFromList<TFilterable> | KeysFromList<TSortable>,
+          keyof TDocument
+        >
+      >
+  : Pick<
+      TDocument,
+      Extract<
+        KeysFromList<TFilterable> | KeysFromList<TSortable>,
+        keyof TDocument
+      >
+    >
+
+type QuerySchemaFromSourceWithQueryable<
+  TSource extends Source,
+  TFilterable extends QueryableFieldList | undefined,
+  TSortable extends QueryableFieldList | undefined,
+> = {
+  [K in keyof TSource]: TSource[K] extends CollectionImpl<
+    infer _TOutput,
+    infer _TKey,
+    infer _TUtils,
+    infer _TSchema,
+    infer _TInput
+  >
+    ? ResolveQueryableSchema<
+        InferCollectionType<TSource[K]>,
+        TFilterable,
+        TSortable
+      >
+    : TSource[K] extends QueryBuilder<infer TContext>
+      ? GetQueryResult<TContext>
+      : never
+}
+
+type InitialQueryBuilderWithQueryable<
+  TFilterable extends QueryableFieldList | undefined,
+  TSortable extends QueryableFieldList | undefined,
+> = {
+  from: <TSource extends Source>(
+    source: TSource,
+  ) => QueryBuilder<{
+    baseSchema: SchemaFromSource<TSource>
+    schema: SchemaFromSource<TSource>
+    querySchema: QuerySchemaFromSourceWithQueryable<
+      TSource,
+      TFilterable,
+      TSortable
+    >
+    fromSourceName: keyof TSource & string
+    hasJoins: false
+  }>
+}
+
+type LiveQueryCollectionConfigWithQueryable<
+  TContext extends Context,
+  TResult extends object,
+  TFilterable extends QueryableFieldList | undefined,
+  TSortable extends QueryableFieldList | undefined,
+> = Omit<
+  LiveQueryCollectionConfig<TContext, TResult>,
+  `query` | `queryable`
+> & {
+  query: (
+    q: InitialQueryBuilderWithQueryable<TFilterable, TSortable>,
+  ) => QueryBuilder<TContext>
+  queryable: {
+    filterable?: TFilterable
+    sortable?: TSortable
+  }
+}
 
 /**
  * Creates live query collection options for use with createCollection
@@ -62,15 +155,51 @@ type CollectionForContext<
 export function liveQueryCollectionOptions<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
+  TFilterable extends QueryableFieldList | undefined = undefined,
+  TSortable extends QueryableFieldList | undefined = undefined,
+>(
+  config: LiveQueryCollectionConfigWithQueryable<
+    TContext,
+    TResult,
+    TFilterable,
+    TSortable
+  >,
+): CollectionConfigForContext<TContext, TResult> & {
+  utils: LiveQueryCollectionUtils
+}
+
+export function liveQueryCollectionOptions<
+  TContext extends Context,
+  TResult extends object = GetResult<TContext>,
 >(
   config: LiveQueryCollectionConfig<TContext, TResult>,
 ): CollectionConfigForContext<TContext, TResult> & {
   utils: LiveQueryCollectionUtils
+}
+
+export function liveQueryCollectionOptions<
+  TContext extends Context,
+  TResult extends object = GetResult<TContext>,
+>(
+  config:
+    | LiveQueryCollectionConfig<TContext, TResult>
+    | LiveQueryCollectionConfigWithQueryable<
+        TContext,
+        TResult,
+        QueryableFieldList | undefined,
+        QueryableFieldList | undefined
+      >,
+): CollectionConfigForContext<TContext, TResult> & {
+  utils: LiveQueryCollectionUtils
 } {
+  const normalizedConfig = config as unknown as LiveQueryCollectionConfig<
+    TContext,
+    TResult
+  >
   const collectionConfigBuilder = new CollectionConfigBuilder<
     TContext,
     TResult
-  >(config)
+  >(normalizedConfig)
   return collectionConfigBuilder.getConfig() as CollectionConfigForContext<
     TContext,
     TResult
@@ -108,6 +237,18 @@ export function liveQueryCollectionOptions<
  *     }
  *   }
  * })
+ *
+ * // Optional: constrain queryable refs at compile-time
+ * const constrained = createLiveQueryCollection({
+ *   queryable: {
+ *     filterable: ['id', 'status'] as const,
+ *     sortable: ['created_at'] as const,
+ *   },
+ *   query: (q) =>
+ *     q
+ *       .from({ post: postsCollection })
+ *       .where(({ post }) => eq(post.status, 'published'))
+ * })
  * ```
  */
 
@@ -126,6 +267,24 @@ export function createLiveQueryCollection<
   TContext extends Context,
   TResult extends object = GetResult<TContext>,
   TUtils extends UtilsRecord = {},
+  TFilterable extends QueryableFieldList | undefined = undefined,
+  TSortable extends QueryableFieldList | undefined = undefined,
+>(
+  config: LiveQueryCollectionConfigWithQueryable<
+    TContext,
+    TResult,
+    TFilterable,
+    TSortable
+  > & { utils?: TUtils },
+): CollectionForContext<TContext, TResult> & {
+  utils: LiveQueryCollectionUtils & TUtils
+}
+
+// Overload 3: Accept full config object with optional utilities
+export function createLiveQueryCollection<
+  TContext extends Context,
+  TResult extends object = GetResult<TContext>,
+  TUtils extends UtilsRecord = {},
 >(
   config: LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils },
 ): CollectionForContext<TContext, TResult> & {
@@ -140,6 +299,12 @@ export function createLiveQueryCollection<
 >(
   configOrQuery:
     | (LiveQueryCollectionConfig<TContext, TResult> & { utils?: TUtils })
+    | (LiveQueryCollectionConfigWithQueryable<
+        TContext,
+        TResult,
+        QueryableFieldList | undefined,
+        QueryableFieldList | undefined
+      > & { utils?: TUtils })
     | ((q: InitialQueryBuilder) => QueryBuilder<TContext>),
 ): CollectionForContext<TContext, TResult> & {
   utils: LiveQueryCollectionUtils & TUtils
