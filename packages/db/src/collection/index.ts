@@ -917,6 +917,77 @@ export class CollectionImpl<
   }
 
   /**
+   * Rollback optimistic updates for specific keys or all keys in the collection.
+   *
+   * When a server-side update arrives for entities that have pending optimistic
+   * mutations (e.g., from paced/debounced mutations), this method cancels those
+   * mutations so the server state takes precedence.
+   *
+   * Rolled-back transactions cascade: if a transaction touches other keys beyond
+   * the ones specified, those mutations are also rolled back (same as the normal
+   * transaction conflict rollback behavior).
+   *
+   * @param keys - Optional key or array of keys to rollback transactions for.
+   *               If omitted, all pending transactions for this collection are rolled back.
+   * @example
+   * // Rollback all optimistic updates for a specific entity when a server update arrives
+   * sync: ({ begin, write, commit }) => {
+   *   socket.on('update', (item) => {
+   *     collection.rollbackOptimisticUpdates(item.id)
+   *     begin()
+   *     write({ type: 'update', key: item.id, value: item })
+   *     commit()
+   *   })
+   * }
+   *
+   * @example
+   * // Rollback all optimistic updates in the collection
+   * collection.rollbackOptimisticUpdates()
+   */
+  public rollbackOptimisticUpdates(keys?: TKey | Array<TKey>): void {
+    const globalKeysToMatch = keys !== undefined
+      ? new Set(
+          (Array.isArray(keys) ? keys : [keys]).map(
+            (key) => `KEY::${this.id}/${key}`,
+          ),
+        )
+      : undefined
+
+    // Collect transactions to rollback first to avoid iterator invalidation
+    // from cascade rollbacks
+    const transactionsToRollback: Array<TransactionType<any>> = []
+
+    for (const transaction of this._state.transactions.values()) {
+      if (
+        transaction.state === `completed` ||
+        transaction.state === `failed`
+      ) {
+        continue
+      }
+
+      const shouldRollback =
+        !globalKeysToMatch ||
+        transaction.mutations.some((m) => globalKeysToMatch.has(m.globalKey))
+
+      if (shouldRollback) {
+        transactionsToRollback.push(transaction)
+      }
+    }
+
+    for (const transaction of transactionsToRollback) {
+      // Re-check state since a cascade rollback from a previous iteration
+      // may have already failed this transaction
+      if (
+        transaction.state === `completed` ||
+        transaction.state === `failed`
+      ) {
+        continue
+      }
+      transaction.rollback()
+    }
+  }
+
+  /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    */
