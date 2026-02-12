@@ -812,6 +812,9 @@ importers:
       '@tanstack/db-sqlite-persisted-collection-core':
         specifier: workspace:*
         version: link:../db-sqlite-persisted-collection-core
+      typescript:
+        specifier: '>=4.7'
+        version: 5.9.3
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -861,9 +864,6 @@ importers:
 
   packages/db-electron-sqlite-persisted-collection:
     dependencies:
-      '@tanstack/db-node-sqlite-persisted-collection':
-        specifier: workspace:*
-        version: link:../db-node-sqlite-persisted-collection
       '@tanstack/db-sqlite-persisted-collection-core':
         specifier: workspace:*
         version: link:../db-sqlite-persisted-collection-core
