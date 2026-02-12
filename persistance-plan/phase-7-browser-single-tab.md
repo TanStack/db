@@ -28,6 +28,7 @@ Deliver stable browser persistence for single-tab usage using `wa-sqlite` + `OPF
 - [x] Integrate `wa-sqlite` with `OPFSCoopSyncVFS`.
 - [x] Build browser `SQLiteDriver` wrapper.
 - [x] Handle startup/open/reopen lifecycle and capability checks.
+- [x] Run OPFS sync-handle access inside a dedicated Web Worker.
 
 **Acceptance criteria**
 
