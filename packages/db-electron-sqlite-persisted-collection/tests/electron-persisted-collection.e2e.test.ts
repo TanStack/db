@@ -61,7 +61,10 @@ function createInvokeHarness(dbPath: string): InvokeHarness {
   }
 
   const driver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
-  const persistence = createNodeSQLitePersistence<Record<string, unknown>, string | number>({
+  const persistence = createNodeSQLitePersistence<
+    Record<string, unknown>,
+    string | number
+  >({
     database: driver.getDatabase(),
   })
   let handler:

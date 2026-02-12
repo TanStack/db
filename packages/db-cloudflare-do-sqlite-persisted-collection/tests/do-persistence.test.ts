@@ -46,19 +46,28 @@ function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   }
 }
 
-runRuntimePersistenceContractSuite(`cloudflare durable object runtime helpers`, {
-  createDatabaseHarness: createRuntimeDatabaseHarness,
-  createAdapter: (driver) =>
-    createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>({
-      storage: (driver as CloudflareDOSQLiteDriver).getStorage(),
-    }).adapter,
-  createPersistence: (driver, coordinator) =>
-    createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>({
-      storage: (driver as CloudflareDOSQLiteDriver).getStorage(),
-      coordinator,
-    }),
-  createCoordinator: () => new SingleProcessCoordinator(),
-})
+runRuntimePersistenceContractSuite(
+  `cloudflare durable object runtime helpers`,
+  {
+    createDatabaseHarness: createRuntimeDatabaseHarness,
+    createAdapter: (driver) =>
+      createCloudflareDOSQLitePersistence<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        storage: (driver as CloudflareDOSQLiteDriver).getStorage(),
+      }).adapter,
+    createPersistence: (driver, coordinator) =>
+      createCloudflareDOSQLitePersistence<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        storage: (driver as CloudflareDOSQLiteDriver).getStorage(),
+        coordinator,
+      }),
+    createCoordinator: () => new SingleProcessCoordinator(),
+  },
+)
 
 describe(`cloudflare durable object persistence helpers`, () => {
   it(`defaults coordinator to SingleProcessCoordinator`, () => {
@@ -82,11 +91,12 @@ describe(`cloudflare durable object persistence helpers`, () => {
     const firstStorageHarness = createBetterSqliteDoStorageHarness({
       filename: dbPath,
     })
-    const firstPersistence = createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>(
-      {
-        storage: firstStorageHarness.storage,
-      },
-    )
+    const firstPersistence = createCloudflareDOSQLitePersistence<
+      RuntimePersistenceContractTodo,
+      string
+    >({
+      storage: firstStorageHarness.storage,
+    })
 
     try {
       const firstCollectionOptions = persistedCollectionOptions<
@@ -125,11 +135,12 @@ describe(`cloudflare durable object persistence helpers`, () => {
     const secondStorageHarness = createBetterSqliteDoStorageHarness({
       filename: dbPath,
     })
-    const secondPersistence = createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>(
-      {
-        storage: secondStorageHarness.storage,
-      },
-    )
+    const secondPersistence = createCloudflareDOSQLitePersistence<
+      RuntimePersistenceContractTodo,
+      string
+    >({
+      storage: secondStorageHarness.storage,
+    })
     try {
       const syncAbsentOptions = persistedCollectionOptions<
         RuntimePersistenceContractTodo,

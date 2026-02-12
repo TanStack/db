@@ -57,7 +57,10 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
     const dispose = exposeElectronSQLitePersistence({
       ipcMain: {
         handle: (_channel, listener) => {
-          handler = listener as (event: unknown, request: unknown) => Promise<unknown>
+          handler = listener as (
+            event: unknown,
+            request: unknown,
+          ) => Promise<unknown>
         },
         removeHandler: () => {},
       },
@@ -69,7 +72,10 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
       if (!handler) {
         throw new Error(`Electron IPC handler not registered`)
       }
-      return handler(undefined, request) as Promise<ElectronPersistenceResponseEnvelope>
+      return handler(
+        undefined,
+        request,
+      ) as Promise<ElectronPersistenceResponseEnvelope>
     }
     cleanupInvoke = () => dispose()
   }

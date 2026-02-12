@@ -122,7 +122,9 @@ for (const suite of runtimePersistenceSuites) {
     })
 
     it(`infers schema policy from sync mode`, async () => {
-      const tempDirectory = mkdtempSync(join(tmpdir(), `db-mobile-schema-infer-`))
+      const tempDirectory = mkdtempSync(
+        join(tmpdir(), `db-mobile-schema-infer-`),
+      )
       const dbPath = join(tempDirectory, `state.sqlite`)
       const collectionId = `todos`
       const firstDatabase = createOpSQLiteTestDatabase({
@@ -146,22 +148,22 @@ for (const suite of runtimePersistenceSuites) {
         await firstCollectionOptions.persistence.adapter.applyCommittedTx(
           collectionId,
           {
-          txId: `tx-1`,
-          term: 1,
-          seq: 1,
-          rowVersion: 1,
-          mutations: [
-            {
-              type: `insert`,
-              key: `1`,
-              value: {
-                id: `1`,
-                title: `before mismatch`,
-                score: 1,
+            txId: `tx-1`,
+            term: 1,
+            seq: 1,
+            rowVersion: 1,
+            mutations: [
+              {
+                type: `insert`,
+                key: `1`,
+                value: {
+                  id: `1`,
+                  title: `before mismatch`,
+                  score: 1,
+                },
               },
-            },
-          ],
-        },
+            ],
+          },
         )
       } finally {
         await Promise.resolve(firstDatabase.close())

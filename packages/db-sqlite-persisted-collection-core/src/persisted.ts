@@ -462,7 +462,10 @@ function resolvePersistence<T extends object, TKey extends string | number>(
   }
 }
 
-function resolvePersistenceForMode<T extends object, TKey extends string | number>(
+function resolvePersistenceForMode<
+  T extends object,
+  TKey extends string | number,
+>(
   persistence: PersistedCollectionPersistence<T, TKey>,
   mode: PersistedCollectionMode,
 ): PersistedResolvedPersistence<T, TKey> {
@@ -2037,12 +2040,16 @@ export function persistedCollectionOptions<
     }
 
     const { schemaVersion, ...syncOptions } = options
-    const collectionId = syncOptions.id ?? `persisted-collection:${crypto.randomUUID()}`
-    const persistence = resolvePersistenceForCollection(syncOptions.persistence, {
-      collectionId,
-      mode: `sync-present`,
-      schemaVersion,
-    })
+    const collectionId =
+      syncOptions.id ?? `persisted-collection:${crypto.randomUUID()}`
+    const persistence = resolvePersistenceForCollection(
+      syncOptions.persistence,
+      {
+        collectionId,
+        mode: `sync-present`,
+        schemaVersion,
+      },
+    )
 
     const runtime = new PersistedCollectionRuntime<T, TKey>(
       `sync-present`,

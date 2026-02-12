@@ -3,10 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
-import {
-  createNodeSQLitePersistence,
-  persistedCollectionOptions,
-} from '../src'
+import { createNodeSQLitePersistence, persistedCollectionOptions } from '../src'
 import { BetterSqlite3SQLiteDriver } from '../src/node-driver'
 import { SingleProcessCoordinator } from '../../db-sqlite-persisted-collection-core/src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
@@ -91,11 +88,12 @@ describe(`node persistence helpers`, () => {
     const database = new BetterSqlite3(dbPath)
 
     try {
-      const persistence = createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>(
-        {
-          database,
-        },
-      )
+      const persistence = createNodeSQLitePersistence<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        database,
+      })
 
       await persistence.adapter.applyCommittedTx(collectionId, {
         txId: `tx-direct-db-1`,
@@ -139,11 +137,12 @@ describe(`node persistence helpers`, () => {
     const firstDatabase = new BetterSqlite3(dbPath)
 
     try {
-      const firstPersistence = createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>(
-        {
-          database: firstDatabase,
-        },
-      )
+      const firstPersistence = createNodeSQLitePersistence<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        database: firstDatabase,
+      })
       const firstCollectionOptions = persistedCollectionOptions<
         RuntimePersistenceContractTodo,
         string
@@ -157,22 +156,22 @@ describe(`node persistence helpers`, () => {
       await firstCollectionOptions.persistence.adapter.applyCommittedTx(
         collectionId,
         {
-        txId: `tx-1`,
-        term: 1,
-        seq: 1,
-        rowVersion: 1,
-        mutations: [
-          {
-            type: `insert`,
-            key: `1`,
-            value: {
-              id: `1`,
-              title: `before mismatch`,
-              score: 1,
+          txId: `tx-1`,
+          term: 1,
+          seq: 1,
+          rowVersion: 1,
+          mutations: [
+            {
+              type: `insert`,
+              key: `1`,
+              value: {
+                id: `1`,
+                title: `before mismatch`,
+                score: 1,
+              },
             },
-          },
-        ],
-      },
+          ],
+        },
       )
     } finally {
       firstDatabase.close()
@@ -180,11 +179,12 @@ describe(`node persistence helpers`, () => {
 
     const secondDatabase = new BetterSqlite3(dbPath)
     try {
-      const secondPersistence = createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>(
-        {
-          database: secondDatabase,
-        },
-      )
+      const secondPersistence = createNodeSQLitePersistence<
+        RuntimePersistenceContractTodo,
+        string
+      >({
+        database: secondDatabase,
+      })
       const syncAbsentOptions = persistedCollectionOptions<
         RuntimePersistenceContractTodo,
         string
