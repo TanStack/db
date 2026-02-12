@@ -163,9 +163,7 @@ export async function openBrowserWASQLiteOPFSDatabase(
 
   const onError = (): void => {
     rejectAllPendingRequests(
-      new PersistenceUnavailableError(
-        `OPFS worker terminated unexpectedly`,
-      ),
+      new PersistenceUnavailableError(`OPFS worker terminated unexpectedly`),
     )
     disposeWorker()
   }
