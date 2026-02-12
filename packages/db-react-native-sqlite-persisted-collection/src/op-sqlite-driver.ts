@@ -364,6 +364,10 @@ export class OpSQLiteDriver implements SQLiteDriver {
     await Promise.resolve(this.database.close())
   }
 
+  getDatabase(): OpSQLiteDatabaseLike {
+    return this.database
+  }
+
   private async execute(
     sql: string,
     params: ReadonlyArray<unknown> = [],

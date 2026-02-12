@@ -6,7 +6,6 @@ Thin SQLite persistence for React Native apps (including Expo runtime).
 
 - `createReactNativeSQLitePersistence(...)`
 - `persistedCollectionOptions(...)` (re-exported from core)
-- `OpSQLiteDriver` (optional advanced usage)
 
 ## Quick start
 

@@ -3,25 +3,25 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  OpSQLiteDriver,
   createReactNativeSQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
+import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
 import { SingleProcessCoordinator } from '../../db-sqlite-persisted-collection-core/src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 import type {
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
-  SQLiteDriver,
 } from '@tanstack/db-sqlite-persisted-collection-core'
+import type { OpSQLiteDatabaseLike } from '../src/op-sqlite-driver'
 import type {
   RuntimePersistenceContractTodo,
   RuntimePersistenceDatabaseHarness,
 } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
 
 type RuntimePersistenceFactory = (options: {
-  driver: SQLiteDriver
+  database: OpSQLiteDatabaseLike
   coordinator?: PersistedCollectionCoordinator
 }) => PersistedCollectionPersistence<RuntimePersistenceContractTodo, string>
 
@@ -77,9 +77,15 @@ for (const suite of runtimePersistenceSuites) {
     `${suite.name} runtime persistence helpers`,
     {
       createDatabaseHarness: createRuntimeDatabaseHarness,
-      createAdapter: (driver) => suite.createPersistence({ driver }).adapter,
+      createAdapter: (driver) =>
+        suite.createPersistence({
+          database: (driver as OpSQLiteDriver).getDatabase(),
+        }).adapter,
       createPersistence: (driver, coordinator) =>
-        suite.createPersistence({ driver, coordinator }),
+        suite.createPersistence({
+          database: (driver as OpSQLiteDriver).getDatabase(),
+          coordinator,
+        }),
       createCoordinator: () => new SingleProcessCoordinator(),
     },
   )
@@ -91,7 +97,9 @@ for (const suite of runtimePersistenceSuites) {
       const runtimeHarness = createRuntimeDatabaseHarness()
       const driver = runtimeHarness.createDriver()
       try {
-        const persistence = suite.createPersistence({ driver })
+        const persistence = suite.createPersistence({
+          database: (driver as OpSQLiteDriver).getDatabase(),
+        })
         expect(persistence.coordinator).toBeInstanceOf(SingleProcessCoordinator)
       } finally {
         runtimeHarness.cleanup()
@@ -104,7 +112,7 @@ for (const suite of runtimePersistenceSuites) {
       try {
         const coordinator = new SingleProcessCoordinator()
         const persistence = suite.createPersistence({
-          driver,
+          database: (driver as OpSQLiteDriver).getDatabase(),
           coordinator,
         })
         expect(persistence.coordinator).toBe(coordinator)
@@ -121,11 +129,10 @@ for (const suite of runtimePersistenceSuites) {
         filename: dbPath,
         resultShape: `statement-array`,
       })
-      const firstDriver = new OpSQLiteDriver({ database: firstDatabase })
 
       try {
         const firstPersistence = suite.createPersistence({
-          driver: firstDriver,
+          database: firstDatabase,
         })
         const firstCollectionOptions = persistedCollectionOptions<
           RuntimePersistenceContractTodo,
@@ -164,10 +171,9 @@ for (const suite of runtimePersistenceSuites) {
         filename: dbPath,
         resultShape: `statement-array`,
       })
-      const secondDriver = new OpSQLiteDriver({ database: secondDatabase })
       try {
         const secondPersistence = suite.createPersistence({
-          driver: secondDriver,
+          database: secondDatabase,
         })
 
         const syncAbsentOptions = persistedCollectionOptions<

@@ -85,31 +85,35 @@ function toRowArray<T>(
 
 export class CloudflareDOSQLiteDriver implements SQLiteDriver {
   private readonly sqlStorage: DurableObjectSqlStorageLike
+  private readonly storage: DurableObjectStorageLike
   private readonly transactionExecutor: DurableObjectTransactionExecutor | null
   private queue: Promise<void> = Promise.resolve()
   private nextSavepointId = 1
 
   constructor(options: CloudflareDOSQLiteDriverOptions) {
-    const resolvedSqlStorage = `storage` in options ? options.storage.sql : options.sql
+    const resolvedStorage: DurableObjectStorageLike =
+      `storage` in options
+        ? options.storage
+        : {
+            sql: options.sql,
+            ...(typeof options.transaction === `function`
+              ? { transaction: options.transaction }
+              : {}),
+          }
+    const resolvedSqlStorage = resolvedStorage.sql
     if (typeof resolvedSqlStorage.exec !== `function`) {
       throw new InvalidPersistedCollectionConfigError(
         `Cloudflare DO SQL driver requires a sql.exec function`,
       )
     }
+    this.storage = resolvedStorage
     this.sqlStorage = resolvedSqlStorage
-    if (`storage` in options && typeof options.storage.transaction === `function`) {
-      const transactionMethod = options.storage.transaction
+    if (typeof resolvedStorage.transaction === `function`) {
+      const transactionMethod = resolvedStorage.transaction
       this.transactionExecutor = <T>(fn: () => Promise<T>) =>
         Promise.resolve(
-          transactionMethod.call(options.storage, fn) as Promise<T> | T,
+          transactionMethod.call(resolvedStorage, fn) as Promise<T> | T,
         )
-    } else if (
-      `transaction` in options &&
-      typeof options.transaction === `function`
-    ) {
-      const transactionMethod = options.transaction
-      this.transactionExecutor = <T>(fn: () => Promise<T>) =>
-        Promise.resolve(transactionMethod(fn))
     } else {
       this.transactionExecutor = null
     }
@@ -165,6 +169,10 @@ export class CloudflareDOSQLiteDriver implements SQLiteDriver {
     fn: (transactionDriver: SQLiteDriver) => Promise<T>,
   ): Promise<T> {
     return this.transaction(fn)
+  }
+
+  getStorage(): DurableObjectStorageLike {
+    return this.storage
   }
 
   private execute(sql: string, params: ReadonlyArray<unknown> = []): unknown {

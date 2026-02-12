@@ -1,5 +1,8 @@
 import BetterSqlite3 from 'better-sqlite3'
-import type { DurableObjectSqlStorageLike, DurableObjectStorageLike } from '../../src'
+import type {
+  DurableObjectSqlStorageLike,
+  DurableObjectStorageLike,
+} from '../../src/do-driver'
 
 type BetterSqliteDoStorageHarness = {
   sql: DurableObjectSqlStorageLike

@@ -12,6 +12,8 @@ import type {
 } from '@tanstack/db-sqlite-persisted-collection-core'
 import type { BetterSqlite3Database } from './node-driver'
 
+export type { BetterSqlite3Database } from './node-driver'
+
 type NodeSQLiteCoreSchemaMismatchPolicy =
   | `sync-present-reset`
   | `sync-absent-error`
@@ -25,22 +27,13 @@ type NodeSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > & {
+  database: BetterSqlite3Database
+  pragmas?: ReadonlyArray<string>
   coordinator?: PersistedCollectionCoordinator
   schemaMismatchPolicy?: NodeSQLiteSchemaMismatchPolicy
 }
 
-type NodeSQLitePersistenceWithDriver = NodeSQLitePersistenceBaseOptions & {
-  driver: SQLiteDriver
-}
-
-type NodeSQLitePersistenceWithDatabase = NodeSQLitePersistenceBaseOptions & {
-  database: BetterSqlite3Database
-  pragmas?: ReadonlyArray<string>
-}
-
-export type NodeSQLitePersistenceOptions =
-  | NodeSQLitePersistenceWithDriver
-  | NodeSQLitePersistenceWithDatabase
+export type NodeSQLitePersistenceOptions = NodeSQLitePersistenceBaseOptions
 
 function normalizeSchemaMismatchPolicy(
   policy: NodeSQLiteSchemaMismatchPolicy,
@@ -72,11 +65,9 @@ function createAdapterCacheKey(
   return `${schemaMismatchPolicy}|${schemaVersionKey}`
 }
 
-function resolveSQLiteDriver(options: NodeSQLitePersistenceOptions): SQLiteDriver {
-  if (`driver` in options) {
-    return options.driver
-  }
-
+function createInternalSQLiteDriver(
+  options: NodeSQLitePersistenceOptions,
+): SQLiteDriver {
   return new BetterSqlite3SQLiteDriver({
     database: options.database,
     ...(options.pragmas ? { pragmas: options.pragmas } : {}),
@@ -108,7 +99,7 @@ export function createNodeSQLitePersistence<
   options: NodeSQLitePersistenceOptions,
 ): PersistedCollectionPersistence<T, TKey> {
   const { coordinator, schemaMismatchPolicy } = options
-  const driver = resolveSQLiteDriver(options)
+  const driver = createInternalSQLiteDriver(options)
   const adapterBaseOptions = resolveAdapterBaseOptions(options)
   const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
   const adapterCache = new Map<

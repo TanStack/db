@@ -11,10 +11,10 @@ import type {
   SQLiteDriver,
 } from '@tanstack/db-sqlite-persisted-collection-core'
 import type {
-  DurableObjectSqlStorageLike,
   DurableObjectStorageLike,
-  DurableObjectTransactionExecutor,
 } from './do-driver'
+
+export type { DurableObjectStorageLike } from './do-driver'
 
 type CloudflareDOCoreSchemaMismatchPolicy =
   | `sync-present-reset`
@@ -29,30 +29,13 @@ type CloudflareDOSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > & {
+  storage: DurableObjectStorageLike
   coordinator?: PersistedCollectionCoordinator
   schemaMismatchPolicy?: CloudflareDOSchemaMismatchPolicy
 }
 
-type CloudflareDOSQLitePersistenceWithDriver =
-  CloudflareDOSQLitePersistenceBaseOptions & {
-    driver: SQLiteDriver
-  }
-
-type CloudflareDOSQLitePersistenceWithStorage =
-  CloudflareDOSQLitePersistenceBaseOptions & {
-    storage: DurableObjectStorageLike
-  }
-
-type CloudflareDOSQLitePersistenceWithSql =
-  CloudflareDOSQLitePersistenceBaseOptions & {
-    sql: DurableObjectSqlStorageLike
-    transaction?: DurableObjectTransactionExecutor
-  }
-
 export type CloudflareDOSQLitePersistenceOptions =
-  | CloudflareDOSQLitePersistenceWithDriver
-  | CloudflareDOSQLitePersistenceWithStorage
-  | CloudflareDOSQLitePersistenceWithSql
+  CloudflareDOSQLitePersistenceBaseOptions
 
 function normalizeSchemaMismatchPolicy(
   policy: CloudflareDOSchemaMismatchPolicy,
@@ -86,19 +69,8 @@ function createAdapterCacheKey(
 function resolveSQLiteDriver(
   options: CloudflareDOSQLitePersistenceOptions,
 ): SQLiteDriver {
-  if (`driver` in options) {
-    return options.driver
-  }
-
-  if (`storage` in options) {
-    return new CloudflareDOSQLiteDriver({
-      storage: options.storage,
-    })
-  }
-
   return new CloudflareDOSQLiteDriver({
-    sql: options.sql,
-    ...(options.transaction ? { transaction: options.transaction } : {}),
+    storage: options.storage,
   })
 }
 

@@ -6,7 +6,6 @@ Thin SQLite persistence for Cloudflare Durable Objects.
 
 - `createCloudflareDOSQLitePersistence(...)`
 - `persistedCollectionOptions(...)` (re-exported from core)
-- `CloudflareDOSQLiteDriver` (optional advanced usage)
 
 ## Quick start
 

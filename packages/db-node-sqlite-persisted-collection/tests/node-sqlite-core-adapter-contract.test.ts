@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
-import { BetterSqlite3SQLiteDriver } from '../src'
+import { BetterSqlite3SQLiteDriver } from '../src/node-driver'
 import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persisted-collection-core/src'
 import type {
   SQLiteCoreAdapterContractTodo,

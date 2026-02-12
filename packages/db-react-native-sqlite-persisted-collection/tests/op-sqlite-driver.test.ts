@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { OpSQLiteDriver } from '../src'
+import { OpSQLiteDriver } from '../src/op-sqlite-driver'
 import { InvalidPersistedCollectionConfigError } from '../../db-sqlite-persisted-collection-core/src'
 import { createOpSQLiteTestDatabase } from './helpers/op-sqlite-test-db'
 

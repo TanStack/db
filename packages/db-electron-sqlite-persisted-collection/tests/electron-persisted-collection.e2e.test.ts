@@ -4,10 +4,8 @@ import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import { persistedCollectionOptions } from '@tanstack/db-sqlite-persisted-collection-core'
-import {
-  BetterSqlite3SQLiteDriver,
-  createNodeSQLitePersistence,
-} from '@tanstack/db-node-sqlite-persisted-collection'
+import { createNodeSQLitePersistence } from '@tanstack/db-node-sqlite-persisted-collection'
+import { BetterSqlite3SQLiteDriver } from '../../db-node-sqlite-persisted-collection/src/node-driver'
 import {
   createElectronSQLitePersistence,
   exposeElectronSQLitePersistence,
@@ -64,7 +62,7 @@ function createInvokeHarness(dbPath: string): InvokeHarness {
 
   const driver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
   const persistence = createNodeSQLitePersistence<Record<string, unknown>, string | number>({
-    driver,
+    database: driver.getDatabase(),
   })
   let handler:
     | ((

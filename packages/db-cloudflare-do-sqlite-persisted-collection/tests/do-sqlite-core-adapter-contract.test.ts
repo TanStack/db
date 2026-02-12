@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
-import { CloudflareDOSQLiteDriver } from '../src'
+import { CloudflareDOSQLiteDriver } from '../src/do-driver'
 import { SQLiteCorePersistenceAdapter } from '../../db-sqlite-persisted-collection-core/src'
 import { createBetterSqliteDoStorageHarness } from './helpers/better-sqlite-do-storage'
 import type {
@@ -17,7 +17,7 @@ const createHarness: SQLiteCoreAdapterHarnessFactory = (options) => {
     filename: dbPath,
   })
   const driver = new CloudflareDOSQLiteDriver({
-    sql: storageHarness.sql,
+    storage: storageHarness.storage,
   })
   const adapter = new SQLiteCorePersistenceAdapter<
     SQLiteCoreAdapterContractTodo,
