@@ -4,6 +4,7 @@ import { createCollection } from '../src/index'
 import { localStorageCollectionOptions } from '../src/local-storage'
 import type {
   LocalStorageCollectionConfig,
+  LocalStorageCollectionUtils,
   StorageApi,
   StorageEventApi,
 } from '../src/local-storage'
@@ -393,5 +394,24 @@ describe(`LocalStorage collection type resolution tests`, () => {
     collection.update(`test-id`, (draft) => {
       expectTypeOf(draft).toEqualTypeOf<SelectUrlType>()
     })
+  })
+
+  it(`should type collection.utils as LocalStorageCollectionUtils after createCollection`, () => {
+    const collection = createCollection(
+      localStorageCollectionOptions<ExplicitType>({
+        storageKey: `test-utils-typing`,
+        storage: mockStorage,
+        storageEventApi: mockStorageEventApi,
+        getKey: (item) => item.id,
+      }),
+    )
+
+    // Verify that collection.utils is typed as LocalStorageCollectionUtils, not UtilsRecord
+    const utils: LocalStorageCollectionUtils = collection.utils
+    expectTypeOf(utils.clearStorage).toBeFunction()
+    expectTypeOf(utils.getStorageSize).toBeFunction()
+    expectTypeOf(utils.acceptMutations).toBeFunction()
+    expectTypeOf(collection.utils.clearStorage).toBeFunction()
+    expectTypeOf(collection.utils.getStorageSize).toBeFunction()
   })
 })
