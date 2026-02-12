@@ -12,13 +12,13 @@ type TestItem = {
 describe(`TrailBase collection type tests`, () => {
   it(`should type collection.utils as TrailBaseCollectionUtils after createCollection`, () => {
     const collection = createCollection(
-      trailBaseCollectionOptions <TestItem>({
-          id: `todos`,
-          recordApi: {} as RecordApi<TestItem>,
-          getKey: (item) => item.id,
-          parse: {},
-          serialize: {},
-        }),
+      trailBaseCollectionOptions<TestItem>({
+        id: `todos`,
+        recordApi: {} as RecordApi<TestItem>,
+        getKey: (item) => item.id,
+        parse: {},
+        serialize: {},
+      }),
     )
 
     // Verify that collection.utils is typed as TrailBaseCollectionUtils, not UtilsRecord
