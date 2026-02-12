@@ -266,3 +266,218 @@ describe(`loadSubset with subqueries`, () => {
     expect(lastCall!.orderBy).toEqual(expectedOrderBy)
   })
 })
+
+describe(`loadSubset with joins and on-demand sync`, () => {
+  let chargesCollection: ChargersCollection
+
+  beforeEach(() => {
+    chargesCollection = createCollection<Charge>({
+      id: `charges-join`,
+      getKey: (charge) => charge.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const charge of sampleCharges) {
+            write({ type: `insert`, value: charge })
+          }
+          commit()
+          markReady()
+        },
+      },
+    })
+  })
+
+  function createOrdersCollectionWithTracking(): {
+    collection: OrdersCollection
+    loadSubsetCalls: Array<LoadSubsetOptions>
+  } {
+    const loadSubsetCalls: Array<LoadSubsetOptions> = []
+
+    const collection = createCollection<Order>({
+      id: `orders-join`,
+      getKey: (order) => order.id,
+      syncMode: `on-demand`,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          for (const order of sampleOrders) {
+            write({ type: `insert`, value: order })
+          }
+          commit()
+          markReady()
+          return {
+            loadSubset: vi.fn((options: LoadSubsetOptions) => {
+              loadSubsetCalls.push(options)
+              return Promise.resolve()
+            }),
+          }
+        },
+      },
+    })
+
+    return { collection, loadSubsetCalls }
+  }
+
+  it(`inner join: active collection should be the one referenced by orderBy`, async () => {
+    const { collection: ordersCollection, loadSubsetCalls } =
+      createOrdersCollectionWithTracking()
+
+    // orderBy references order.scheduled_at (the main/left source).
+    // The inner join should make orders the ACTIVE collection so that
+    // its loadSubset receives the orderBy for efficient server-side fetching.
+    const joinQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ order: ordersCollection })
+        .innerJoin({ charge: chargesCollection }, ({ order, charge }) =>
+          eq(order.address_id, charge.address_id),
+        )
+        .orderBy(({ order }) => order.scheduled_at, `desc`),
+    )
+
+    await joinQuery.preload()
+
+    expect(loadSubsetCalls.length).toBeGreaterThan(0)
+
+    // Orders is the ACTIVE collection (driven by orderBy preference).
+    // Its loadSubset should receive the orderBy from the query via the
+    // subscribeToMatchingChanges path (includeInitialState: true).
+    const callWithOrderBy = loadSubsetCalls.find((call) => call.orderBy)
+    expect(callWithOrderBy).toBeDefined()
+
+    const expectedOrderBy: OrderBy = [
+      {
+        expression: new PropRef([`scheduled_at`]),
+        compareOptions: { direction: `desc`, nulls: `first` },
+      },
+    ]
+    expect(callWithOrderBy!.orderBy).toEqual(expectedOrderBy)
+  })
+
+  it(`inner join with limit: active collection should receive orderBy and limit`, async () => {
+    const { collection: ordersCollection, loadSubsetCalls } =
+      createOrdersCollectionWithTracking()
+
+    const joinQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ order: ordersCollection })
+        .innerJoin({ charge: chargesCollection }, ({ order, charge }) =>
+          eq(order.address_id, charge.address_id),
+        )
+        .orderBy(({ order }) => order.scheduled_at, `desc`)
+        .limit(2),
+    )
+
+    await joinQuery.preload()
+
+    expect(loadSubsetCalls.length).toBeGreaterThan(0)
+
+    // Orders is active (orderBy preference) and has a limit.
+    // loadSubset should receive both orderBy and limit.
+    const callWithOrderBy = loadSubsetCalls.find(
+      (call) => call.orderBy && call.limit !== undefined,
+    )
+    expect(callWithOrderBy).toBeDefined()
+
+    const expectedOrderBy: OrderBy = [
+      {
+        expression: new PropRef([`scheduled_at`]),
+        compareOptions: { direction: `desc`, nulls: `first` },
+      },
+    ]
+    expect(callWithOrderBy!.orderBy).toEqual(expectedOrderBy)
+    expect(callWithOrderBy!.limit).toBe(2)
+  })
+
+  it(`inner join: orderBy referencing the joined source should make it active`, async () => {
+    const { collection: ordersCollection, loadSubsetCalls } =
+      createOrdersCollectionWithTracking()
+
+    // orderBy references charge.amount (the joined/right source).
+    // Charges is eager (not on-demand), so no loadSubset calls for it.
+    // Orders should be the LAZY collection and get join key filter.
+    const joinQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ order: ordersCollection })
+        .innerJoin({ charge: chargesCollection }, ({ order, charge }) =>
+          eq(order.address_id, charge.address_id),
+        )
+        .orderBy(({ charge }) => charge.amount, `desc`),
+    )
+
+    await joinQuery.preload()
+
+    expect(loadSubsetCalls.length).toBeGreaterThan(0)
+
+    // Orders is the LAZY collection. Its loadSubset should NOT have
+    // the orderBy (which references the active collection, charges).
+    const callWithOrderBy = loadSubsetCalls.find((call) => call.orderBy)
+    expect(callWithOrderBy).toBeUndefined()
+
+    // But it should have a where clause from the join key filter (inArray)
+    const callWithWhere = loadSubsetCalls.find((call) => call.where)
+    expect(callWithWhere).toBeDefined()
+  })
+
+  it(`left join: lazy collection (right) should receive orderBy in loadSubset`, async () => {
+    const { collection: ordersCollection, loadSubsetCalls } =
+      createOrdersCollectionWithTracking()
+
+    // In a left join: left/main is ALWAYS active, right is ALWAYS lazy.
+    // charges (left) is active, orders (right/lazy) gets join key filter.
+    // orderBy references orders — it should be passed to orders' loadSubset
+    // via the join tap.
+    const joinQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ charge: chargesCollection })
+        .join({ order: ordersCollection }, ({ charge, order }) =>
+          eq(charge.address_id, order.address_id),
+        )
+        .orderBy(({ order }) => order.scheduled_at, `desc`),
+    )
+
+    await joinQuery.preload()
+
+    expect(loadSubsetCalls.length).toBeGreaterThan(0)
+
+    // Orders is lazy in a left join. The tap should pass orderBy from the
+    // query along with the join key filter.
+    const callWithOrderBy = loadSubsetCalls.find((call) => call.orderBy)
+    expect(callWithOrderBy).toBeDefined()
+
+    const expectedOrderBy: OrderBy = [
+      {
+        expression: new PropRef([`scheduled_at`]),
+        compareOptions: { direction: `desc`, nulls: `first` },
+      },
+    ]
+    expect(callWithOrderBy!.orderBy).toEqual(expectedOrderBy)
+    expect(callWithOrderBy!.where).toBeDefined()
+  })
+
+  it(`inner join without orderBy: should fall back to size heuristic`, async () => {
+    const { collection: ordersCollection, loadSubsetCalls } =
+      createOrdersCollectionWithTracking()
+
+    // No orderBy → size heuristic. Both empty at compile time → joined (charges) is active.
+    // Orders is lazy and should receive join key filter via tap.
+    const joinQuery = createLiveQueryCollection((q) =>
+      q
+        .from({ order: ordersCollection })
+        .innerJoin({ charge: chargesCollection }, ({ order, charge }) =>
+          eq(order.address_id, charge.address_id),
+        ),
+    )
+
+    await joinQuery.preload()
+
+    expect(loadSubsetCalls.length).toBeGreaterThan(0)
+
+    // Orders (lazy) should get a where clause (join key filter from tap)
+    // but no orderBy (none on the query)
+    const callWithWhere = loadSubsetCalls.find((call) => call.where)
+    expect(callWithWhere).toBeDefined()
+
+    const callWithOrderBy = loadSubsetCalls.find((call) => call.orderBy)
+    expect(callWithOrderBy).toBeUndefined()
+  })
+})
