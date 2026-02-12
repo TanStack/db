@@ -1,5 +1,24 @@
 # @tanstack/db
 
+## 0.5.26
+
+### Patch Changes
+
+- fix: export types used in public API signatures for declaration emit compatibility ([#1231](https://github.com/TanStack/db/pull/1231))
+
+  Types like `SchemaFromSource`, `MergeContextWithJoinType`, `WithResult`, `ResultTypeFromSelect`, and others
+  are used in the public method signatures of `BaseQueryBuilder` (e.g. `from()`, `join()`, `select()`) but
+  were not re-exported from the package's public API. This caused TypeScript error TS2742 when consumers used
+  `declaration: true` in their tsconfig, as TypeScript could not name the inferred types in generated `.d.ts` files.
+
+  Fixes #1012
+
+- Fix `useLiveInfiniteQuery` peek-ahead detection for `hasNextPage`. The initial query now correctly requests `pageSize + 1` items to detect whether additional pages exist, matching the behavior of subsequent page loads. ([#1209](https://github.com/TanStack/db/pull/1209))
+
+  Fix async on-demand pagination by ensuring the graph callback fires at least once even when there is no pending graph work, so that `loadMoreIfNeeded` is triggered after `setWindow()` increases the limit.
+
+- Fix `eq()` with Date objects in join conditions and `inArray()` with Date values in WHERE clauses by normalizing values via `normalizeValue` (#934) ([#1229](https://github.com/TanStack/db/pull/1229))
+
 ## 0.5.25
 
 ### Patch Changes
