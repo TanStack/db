@@ -9,8 +9,7 @@ import type {
 
 const DEFAULT_WASM_MODULE_PATH = `@journeyapps/wa-sqlite/dist/wa-sqlite.mjs`
 const DEFAULT_SQLITE_API_MODULE_PATH = `@journeyapps/wa-sqlite`
-const DEFAULT_OPFS_VFS_MODULE_PATH =
-  `@journeyapps/wa-sqlite/src/examples/OPFSCoopSyncVFS.js`
+const DEFAULT_OPFS_VFS_MODULE_PATH = `@journeyapps/wa-sqlite/src/examples/OPFSCoopSyncVFS.js`
 const DEFAULT_VFS_NAME = `opfs`
 
 type WASQLiteModuleFactory = (config?: object) => Promise<unknown>
@@ -116,7 +115,11 @@ function toOPFSCoopSyncVFSFactory(
 function assertOpenApiMethods(
   sqlite3: BrowserWASQLiteAPI,
 ): asserts sqlite3 is BrowserWASQLiteAPI & {
-  open_v2: (filename: string, flags?: number, vfsName?: string) => Promise<number>
+  open_v2: (
+    filename: string,
+    flags?: number,
+    vfsName?: string,
+  ) => Promise<number>
   vfs_register: (vfs: unknown, makeDefault?: boolean) => number
   close: (db: number) => Promise<number> | number
 } {
@@ -179,7 +182,10 @@ export async function openBrowserWASQLiteOPFSDatabase(
   }
 
   const sqliteImport = await import(/* @vite-ignore */ sqliteApiModulePath)
-  const sqliteRuntime = toWASQLiteRuntimeModule(sqliteImport, sqliteApiModulePath)
+  const sqliteRuntime = toWASQLiteRuntimeModule(
+    sqliteImport,
+    sqliteApiModulePath,
+  )
 
   const sqliteModule = await moduleFactory()
   const sqlite3 = sqliteRuntime.Factory(sqliteModule)

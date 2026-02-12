@@ -43,19 +43,22 @@ function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   }
 }
 
-runRuntimePersistenceContractSuite(`browser wa-sqlite runtime persistence helpers`, {
-  createDatabaseHarness: createRuntimeDatabaseHarness,
-  createAdapter: (driver) =>
-    createBrowserWASQLitePersistence<RuntimePersistenceContractTodo, string>({
-      database: (driver as BrowserWASQLiteDriver).getDatabase(),
-    }).adapter,
-  createPersistence: (driver, coordinator) =>
-    createBrowserWASQLitePersistence<RuntimePersistenceContractTodo, string>({
-      database: (driver as BrowserWASQLiteDriver).getDatabase(),
-      coordinator,
-    }),
-  createCoordinator: () => new SingleProcessCoordinator(),
-})
+runRuntimePersistenceContractSuite(
+  `browser wa-sqlite runtime persistence helpers`,
+  {
+    createDatabaseHarness: createRuntimeDatabaseHarness,
+    createAdapter: (driver) =>
+      createBrowserWASQLitePersistence<RuntimePersistenceContractTodo, string>({
+        database: (driver as BrowserWASQLiteDriver).getDatabase(),
+      }).adapter,
+    createPersistence: (driver, coordinator) =>
+      createBrowserWASQLitePersistence<RuntimePersistenceContractTodo, string>({
+        database: (driver as BrowserWASQLiteDriver).getDatabase(),
+        coordinator,
+      }),
+    createCoordinator: () => new SingleProcessCoordinator(),
+  },
+)
 
 describe(`browser wa-sqlite persistence helpers`, () => {
   it(`defaults coordinator to SingleProcessCoordinator`, () => {
@@ -87,7 +90,9 @@ describe(`browser wa-sqlite persistence helpers`, () => {
   })
 
   it(`infers schema policy from sync mode`, async () => {
-    const tempDirectory = mkdtempSync(join(tmpdir(), `db-browser-schema-infer-`))
+    const tempDirectory = mkdtempSync(
+      join(tmpdir(), `db-browser-schema-infer-`),
+    )
     const dbPath = join(tempDirectory, `state.sqlite`)
     const collectionId = `todos`
     const firstDatabase = createWASQLiteTestDatabase({ filename: dbPath })

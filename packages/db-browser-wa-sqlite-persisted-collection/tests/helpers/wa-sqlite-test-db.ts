@@ -5,7 +5,9 @@ const SQLITE_ROW = 100
 const SQLITE_DONE = 101
 
 type BetterSqliteStatement = ReturnType<BetterSqlite3.Database[`prepare`]>
-type StatementBindings = ReadonlyArray<unknown> | Readonly<Record<string, unknown>>
+type StatementBindings =
+  | ReadonlyArray<unknown>
+  | Readonly<Record<string, unknown>>
 
 type StatementState = {
   statement: BetterSqliteStatement
@@ -25,18 +27,20 @@ function readAllRows(
     all: (...params: ReadonlyArray<unknown>) => ReadonlyArray<unknown>
   }
   if (!bindings) {
-    return statementWithVariadicAll.all() as ReadonlyArray<Record<string, unknown>>
+    return statementWithVariadicAll.all() as ReadonlyArray<
+      Record<string, unknown>
+    >
   }
 
   if (Array.isArray(bindings)) {
-    return statementWithVariadicAll.all(
-      ...bindings,
-    ) as ReadonlyArray<Record<string, unknown>>
+    return statementWithVariadicAll.all(...bindings) as ReadonlyArray<
+      Record<string, unknown>
+    >
   }
 
-  return statementWithVariadicAll.all(
-    bindings,
-  ) as ReadonlyArray<Record<string, unknown>>
+  return statementWithVariadicAll.all(bindings) as ReadonlyArray<
+    Record<string, unknown>
+  >
 }
 
 function runWithBindings(
@@ -81,7 +85,10 @@ export function createWASQLiteTestDatabase(options: {
   let nextStatementId = 1
 
   const sqlite3 = {
-    statements: async function* (_db: number, sql: string): AsyncIterable<number> {
+    statements: async function* (
+      _db: number,
+      sql: string,
+    ): AsyncIterable<number> {
       const trimmedSql = sql.trim()
       if (trimmedSql.length === 0) {
         return
@@ -106,10 +113,15 @@ export function createWASQLiteTestDatabase(options: {
         statementById.delete(statementId)
       }
     },
-    bind_collection: (statementId: number, bindings: StatementBindings): number => {
+    bind_collection: (
+      statementId: number,
+      bindings: StatementBindings,
+    ): number => {
       const statementState = statementById.get(statementId)
       if (!statementState) {
-        throw new Error(`Unknown wa-sqlite test statement ${String(statementId)}`)
+        throw new Error(
+          `Unknown wa-sqlite test statement ${String(statementId)}`,
+        )
       }
 
       statementState.bindings = Array.isArray(bindings)
@@ -121,7 +133,9 @@ export function createWASQLiteTestDatabase(options: {
     step: async (statementId: number): Promise<number> => {
       const statementState = statementById.get(statementId)
       if (!statementState) {
-        throw new Error(`Unknown wa-sqlite test statement ${String(statementId)}`)
+        throw new Error(
+          `Unknown wa-sqlite test statement ${String(statementId)}`,
+        )
       }
 
       if (!statementState.initialized) {
@@ -139,7 +153,10 @@ export function createWASQLiteTestDatabase(options: {
               ? Object.keys(statementState.rows[0]!)
               : statementState.statement.columns().map((column) => column.name)
         } else {
-          executeMutationStatement(statementState.statement, statementState.bindings)
+          executeMutationStatement(
+            statementState.statement,
+            statementState.bindings,
+          )
           statementState.rows = []
           statementState.columns = []
         }
@@ -160,7 +177,9 @@ export function createWASQLiteTestDatabase(options: {
     row: (statementId: number): ReadonlyArray<unknown> => {
       const statementState = statementById.get(statementId)
       if (!statementState) {
-        throw new Error(`Unknown wa-sqlite test statement ${String(statementId)}`)
+        throw new Error(
+          `Unknown wa-sqlite test statement ${String(statementId)}`,
+        )
       }
 
       const currentRow =
@@ -170,7 +189,9 @@ export function createWASQLiteTestDatabase(options: {
     column_names: (statementId: number): ReadonlyArray<string> => {
       const statementState = statementById.get(statementId)
       if (!statementState) {
-        throw new Error(`Unknown wa-sqlite test statement ${String(statementId)}`)
+        throw new Error(
+          `Unknown wa-sqlite test statement ${String(statementId)}`,
+        )
       }
 
       return [...statementState.columns]

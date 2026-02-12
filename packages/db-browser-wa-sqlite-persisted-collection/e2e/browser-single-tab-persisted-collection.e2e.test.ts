@@ -133,9 +133,7 @@ async function deleteRowAcrossCollections<T extends PersistableRow>(
 }
 
 beforeAll(async () => {
-  const tempDirectory = mkdtempSync(
-    join(tmpdir(), `db-browser-persisted-e2e-`),
-  )
+  const tempDirectory = mkdtempSync(join(tmpdir(), `db-browser-persisted-e2e-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   const suiteId = Date.now().toString(36)
   const database = createWASQLiteTestDatabase({
