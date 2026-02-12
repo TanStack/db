@@ -807,6 +807,28 @@ importers:
         specifier: ^0.3.0
         version: 0.3.0
 
+  packages/db-browser-wa-sqlite-persisted-collection:
+    dependencies:
+      '@tanstack/db-sqlite-persisted-collection-core':
+        specifier: workspace:*
+        version: link:../db-sqlite-persisted-collection-core
+      typescript:
+        specifier: '>=4.7'
+        version: 5.9.3
+    devDependencies:
+      '@journeyapps/wa-sqlite':
+        specifier: ^1.4.1
+        version: 1.5.0
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@vitest/coverage-istanbul':
+        specifier: ^3.2.4
+        version: 3.2.4(vitest@3.2.4)
+      better-sqlite3:
+        specifier: ^12.6.2
+        version: 12.8.0
+
   packages/db-cloudflare-do-sqlite-persisted-collection:
     dependencies:
       '@tanstack/db-sqlite-persisted-collection-core':
@@ -3641,6 +3663,9 @@ packages:
   '@jest/types@29.6.3':
     resolution: {integrity: sha512-u3UPsIilWKOM3F9CXtrG8LEJmNxwoCQC/XVj4IKYXvvpx7QIi/Kg1LI5uDmDpKlac62NUtX7eLjRh+jVZcLOzw==}
     engines: {node: ^14.15.0 || ^16.10.0 || >=18.0.0}
+
+  '@journeyapps/wa-sqlite@1.5.0':
+    resolution: {integrity: sha512-oASXW/9Ktbhn6kJjxCJzRKxNnlOyj7GKBLF/59dkz1kbOLw7kAXBTwWTUvqfT97OEshtrK/J8bJUYbpggdCZ9Q==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -13878,6 +13903,8 @@ snapshots:
       '@types/node': 25.2.2
       '@types/yargs': 17.0.35
       chalk: 4.1.2
+
+  '@journeyapps/wa-sqlite@1.5.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
