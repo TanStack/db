@@ -2,144 +2,101 @@ import {
   InvalidPersistedCollectionConfigError,
   PersistenceUnavailableError,
 } from '@tanstack/db-sqlite-persisted-collection-core'
+import OPFSWorkerConstructor from './opfs-worker?worker'
+import type { BrowserWASQLiteDatabase } from './wa-sqlite-driver'
 import type {
-  BrowserWASQLiteAPI,
-  BrowserWASQLiteDatabase,
-} from './wa-sqlite-driver'
+  BrowserOPFSWorkerErrorCode,
+  BrowserOPFSWorkerRequest,
+  BrowserOPFSWorkerResponse,
+} from './opfs-worker-protocol'
 
-const DEFAULT_WASM_MODULE_PATH = `@journeyapps/wa-sqlite/dist/wa-sqlite.mjs`
-const DEFAULT_SQLITE_API_MODULE_PATH = `@journeyapps/wa-sqlite`
-const DEFAULT_OPFS_VFS_MODULE_PATH = `@journeyapps/wa-sqlite/src/examples/OPFSCoopSyncVFS.js`
 const DEFAULT_VFS_NAME = `opfs`
-
-type WASQLiteModuleFactory = (config?: object) => Promise<unknown>
-
-type WASQLiteRuntimeModule = {
-  Factory: (module: unknown) => BrowserWASQLiteAPI
-  SQLITE_OPEN_CREATE: number
-  SQLITE_OPEN_READWRITE: number
-  SQLITE_OPEN_URI: number
-}
-
-type OPFSVFSLike = {
-  close?: () => Promise<void> | void
-}
-
-type OPFSCoopSyncVFSFactory = {
-  create: (name: string, module: unknown) => Promise<OPFSVFSLike>
-}
-
-type BrowserOPFSGlobal = {
+type BrowserOPFSFeatureGlobal = {
   navigator?: {
     storage?: {
       getDirectory?: () => Promise<unknown>
     }
   }
-  FileSystemFileHandle?: {
-    prototype?: {
-      createSyncAccessHandle?: () => Promise<unknown>
-    }
-  }
+  Worker?: typeof Worker
 }
 
 export type OpenBrowserWASQLiteOPFSDatabaseOptions = {
   databaseName: string
   vfsName?: string
-  wasmModulePath?: string
-  sqliteApiModulePath?: string
-  opfsVfsModulePath?: string
 }
 
-function hasOPFSSyncAccessSupport(globalObject: unknown): boolean {
-  const candidate = globalObject as BrowserOPFSGlobal
+type BrowserOPFSWorkerLike = Pick<
+  Worker,
+  `postMessage` | `terminate` | `addEventListener` | `removeEventListener`
+>
+
+type PendingWorkerRequest = {
+  resolve: (value: unknown) => void
+  reject: (error: Error) => void
+}
+
+type BrowserOPFSWorkerRequestWithoutId =
+  BrowserOPFSWorkerRequest extends infer TRequest
+    ? TRequest extends { requestId: string }
+      ? Omit<TRequest, `requestId`>
+      : never
+    : never
+
+class OPFSWorkerRequestError extends Error {
+  constructor(
+    readonly code: BrowserOPFSWorkerErrorCode,
+    message: string,
+  ) {
+    super(message)
+    this.name = `OPFSWorkerRequestError`
+  }
+}
+
+function hasOPFSBrowserPrerequisites(globalObject: unknown): boolean {
+  const candidate = globalObject as BrowserOPFSFeatureGlobal
   const getDirectory = candidate.navigator?.storage?.getDirectory
-  const createSyncAccessHandle =
-    candidate.FileSystemFileHandle?.prototype?.createSyncAccessHandle
+  const WorkerConstructor = candidate.Worker
 
   return (
     typeof getDirectory === `function` &&
-    typeof createSyncAccessHandle === `function`
+    typeof WorkerConstructor === `function`
   )
 }
 
-function toWASQLiteRuntimeModule(
-  moduleValue: unknown,
-  modulePath: string,
-): WASQLiteRuntimeModule {
-  if (typeof moduleValue !== `object` || moduleValue === null) {
-    throw new InvalidPersistedCollectionConfigError(
-      `Invalid wa-sqlite API module loaded from "${modulePath}"`,
-    )
+function createWorkerError(
+  code: BrowserOPFSWorkerErrorCode,
+  message: string,
+): Error {
+  if (code === `PERSISTENCE_UNAVAILABLE`) {
+    return new PersistenceUnavailableError(message)
   }
-
-  const candidate = moduleValue as Partial<WASQLiteRuntimeModule>
-  if (
-    typeof candidate.Factory !== `function` ||
-    typeof candidate.SQLITE_OPEN_CREATE !== `number` ||
-    typeof candidate.SQLITE_OPEN_READWRITE !== `number` ||
-    typeof candidate.SQLITE_OPEN_URI !== `number`
-  ) {
-    throw new InvalidPersistedCollectionConfigError(
-      `wa-sqlite API module "${modulePath}" is missing required exports`,
-    )
+  if (code === `INVALID_CONFIG`) {
+    return new InvalidPersistedCollectionConfigError(message)
   }
-
-  return candidate as WASQLiteRuntimeModule
+  return new OPFSWorkerRequestError(code, message)
 }
 
-function toOPFSCoopSyncVFSFactory(
-  moduleValue: unknown,
-  modulePath: string,
-): OPFSCoopSyncVFSFactory {
-  if (typeof moduleValue !== `object` || moduleValue === null) {
-    throw new InvalidPersistedCollectionConfigError(
-      `Invalid OPFS VFS module loaded from "${modulePath}"`,
-    )
-  }
+function createWorkerRequestIdFactory(): () => string {
+  let sequence = 0
+  const prefix = `opfs-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 
-  const moduleRecord = moduleValue as Record<string, unknown>
-  const exportCandidate = moduleRecord.OPFSCoopSyncVFS ?? moduleRecord.default
-  if (
-    typeof exportCandidate !== `object` ||
-    exportCandidate === null ||
-    typeof (exportCandidate as { create?: unknown }).create !== `function`
-  ) {
-    throw new InvalidPersistedCollectionConfigError(
-      `OPFS VFS module "${modulePath}" does not export OPFSCoopSyncVFS.create(...)`,
-    )
+  return () => {
+    sequence++
+    return `${prefix}-${sequence}`
   }
-
-  return exportCandidate as OPFSCoopSyncVFSFactory
 }
 
-function assertOpenApiMethods(
-  sqlite3: BrowserWASQLiteAPI,
-): asserts sqlite3 is BrowserWASQLiteAPI & {
-  open_v2: (
-    filename: string,
-    flags?: number,
-    vfsName?: string,
-  ) => Promise<number>
-  vfs_register: (vfs: unknown, makeDefault?: boolean) => number
-  close: (db: number) => Promise<number> | number
-} {
-  if (typeof sqlite3.vfs_register !== `function`) {
-    throw new InvalidPersistedCollectionConfigError(
-      `wa-sqlite API instance is missing vfs_register(...)`,
+function createOPFSWorkerInstance(): BrowserOPFSWorkerLike {
+  const WorkerConstructor = (
+    globalThis as typeof globalThis & { Worker?: typeof Worker }
+  ).Worker
+  if (typeof WorkerConstructor !== `function`) {
+    throw new PersistenceUnavailableError(
+      `Web Worker support is required for browser OPFS persistence`,
     )
   }
 
-  if (typeof sqlite3.open_v2 !== `function`) {
-    throw new InvalidPersistedCollectionConfigError(
-      `wa-sqlite API instance is missing open_v2(...)`,
-    )
-  }
-
-  if (typeof sqlite3.close !== `function`) {
-    throw new InvalidPersistedCollectionConfigError(
-      `wa-sqlite API instance is missing close(...)`,
-    )
-  }
+  return new (OPFSWorkerConstructor as unknown as new () => BrowserOPFSWorkerLike)()
 }
 
 /**
@@ -156,59 +113,148 @@ export async function openBrowserWASQLiteOPFSDatabase(
     )
   }
 
-  if (!hasOPFSSyncAccessSupport(globalThis)) {
+  if (!hasOPFSBrowserPrerequisites(globalThis)) {
     throw new PersistenceUnavailableError(
-      `Browser OPFS sync access is not available in this runtime`,
+      `Browser OPFS prerequisites are not available in this runtime`,
     )
   }
 
-  const wasmModulePath = options.wasmModulePath ?? DEFAULT_WASM_MODULE_PATH
-  const sqliteApiModulePath =
-    options.sqliteApiModulePath ?? DEFAULT_SQLITE_API_MODULE_PATH
-  const opfsVfsModulePath =
-    options.opfsVfsModulePath ?? DEFAULT_OPFS_VFS_MODULE_PATH
   const vfsName = options.vfsName ?? DEFAULT_VFS_NAME
+  const worker = createOPFSWorkerInstance()
+  const nextRequestId = createWorkerRequestIdFactory()
+  const pendingRequests = new Map<string, PendingWorkerRequest>()
+  let disposed = false
 
-  const moduleFactoryImport = (await import(
-    /* @vite-ignore */ wasmModulePath
-  )) as {
-    default?: WASQLiteModuleFactory
+  const disposeWorker = (): void => {
+    if (disposed) {
+      return
+    }
+    disposed = true
+    worker.removeEventListener(`message`, onMessage)
+    worker.removeEventListener(`error`, onError)
+    worker.removeEventListener(`messageerror`, onMessageError)
+    worker.terminate()
   }
-  const moduleFactory = moduleFactoryImport.default
-  if (typeof moduleFactory !== `function`) {
-    throw new InvalidPersistedCollectionConfigError(
-      `WASM module "${wasmModulePath}" does not expose a default module factory`,
+
+  const rejectAllPendingRequests = (error: Error): void => {
+    for (const pendingRequest of pendingRequests.values()) {
+      pendingRequest.reject(error)
+    }
+    pendingRequests.clear()
+  }
+
+  const onMessage = (event: Event): void => {
+    const messageEvent = event as MessageEvent<BrowserOPFSWorkerResponse>
+    const response = messageEvent.data
+
+    const pendingRequest = pendingRequests.get(response.requestId)
+    if (!pendingRequest) {
+      return
+    }
+    pendingRequests.delete(response.requestId)
+
+    if (response.ok) {
+      pendingRequest.resolve(response.rows ?? [])
+      return
+    }
+
+    pendingRequest.reject(createWorkerError(response.code, response.error))
+  }
+
+  const onError = (): void => {
+    rejectAllPendingRequests(
+      new PersistenceUnavailableError(
+        `OPFS worker terminated unexpectedly`,
+      ),
     )
+    disposeWorker()
   }
 
-  const sqliteImport = await import(/* @vite-ignore */ sqliteApiModulePath)
-  const sqliteRuntime = toWASQLiteRuntimeModule(
-    sqliteImport,
-    sqliteApiModulePath,
-  )
+  const onMessageError = (): void => {
+    rejectAllPendingRequests(
+      new PersistenceUnavailableError(
+        `OPFS worker message serialization failed`,
+      ),
+    )
+    disposeWorker()
+  }
 
-  const sqliteModule = await moduleFactory()
-  const sqlite3 = sqliteRuntime.Factory(sqliteModule)
-  assertOpenApiMethods(sqlite3)
+  worker.addEventListener(`message`, onMessage)
+  worker.addEventListener(`error`, onError)
+  worker.addEventListener(`messageerror`, onMessageError)
 
-  const opfsVfsImport = await import(/* @vite-ignore */ opfsVfsModulePath)
-  const opfsFactory = toOPFSCoopSyncVFSFactory(opfsVfsImport, opfsVfsModulePath)
-  const opfsVfs = await opfsFactory.create(vfsName, sqliteModule)
+  const sendWorkerRequest = <T>(
+    request: BrowserOPFSWorkerRequestWithoutId,
+  ): Promise<T> => {
+    if (disposed) {
+      return Promise.reject(
+        new InvalidPersistedCollectionConfigError(
+          `Browser OPFS worker connection is closed`,
+        ),
+      )
+    }
 
-  sqlite3.vfs_register(opfsVfs as never, true)
-  const openFlags =
-    sqliteRuntime.SQLITE_OPEN_CREATE |
-    sqliteRuntime.SQLITE_OPEN_READWRITE |
-    sqliteRuntime.SQLITE_OPEN_URI
-  const databaseFileUri = `file:${databaseName}?vfs=${encodeURIComponent(vfsName)}`
-  const db = await sqlite3.open_v2(databaseFileUri, openFlags, vfsName)
+    const requestId = nextRequestId()
+    return new Promise<T>((resolve, reject) => {
+      pendingRequests.set(requestId, {
+        resolve: (value) => {
+          resolve(value as T)
+        },
+        reject,
+      })
+      try {
+        const payload = {
+          ...request,
+          requestId,
+        } as BrowserOPFSWorkerRequest
+        worker.postMessage(payload)
+      } catch (error) {
+        pendingRequests.delete(requestId)
+        reject(
+          new PersistenceUnavailableError(
+            `Failed to send message to OPFS worker: ${(error as Error).message}`,
+          ),
+        )
+      }
+    })
+  }
+
+  try {
+    await sendWorkerRequest<void>({
+      type: `init`,
+      databaseName,
+      vfsName,
+    })
+  } catch (error) {
+    disposeWorker()
+    throw error
+  }
 
   return {
-    sqlite3,
-    db,
+    execute: <TRow = unknown>(
+      sql: string,
+      params: ReadonlyArray<unknown> = [],
+    ) =>
+      sendWorkerRequest<ReadonlyArray<TRow>>({
+        type: `execute`,
+        sql,
+        params,
+      }),
     close: async () => {
-      await Promise.resolve(sqlite3.close(db))
-      await Promise.resolve(opfsVfs.close?.())
+      let closeError: unknown
+      try {
+        await sendWorkerRequest<void>({
+          type: `close`,
+        })
+      } catch (error) {
+        closeError = error
+      } finally {
+        disposeWorker()
+      }
+
+      if (closeError) {
+        throw closeError
+      }
     },
   }
 }
