@@ -154,7 +154,6 @@ describe(`Electric collection type resolution tests`, () => {
     // but ElectricCollectionUtils extends UtilsRecord which is Record<string, any> (no number index signature).
     // This causes a constraint error instead of a type mismatch error.
     // Instead, we test via type assignment which will show a proper type error if the types don't match.
-    // Currently this shows that todosCollection.utils is typed as UtilsRecord, not ElectricCollectionUtils<TodoType>
     const testTodosUtils: ElectricCollectionUtils<TodoType> =
       todosCollection.utils
 
@@ -233,17 +232,17 @@ describe(`Electric collection type resolution tests`, () => {
       },
     })
 
-    // Verify that the handlers are properly typed
+    // Verify that the handlers are properly typed with ElectricCollectionUtils
     expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [InsertMutationFnParams<ExplicitType>]
+      [InsertMutationFnParams<ExplicitType, string | number, ElectricCollectionUtils<ExplicitType>>]
     >()
 
     expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [UpdateMutationFnParams<ExplicitType>]
+      [UpdateMutationFnParams<ExplicitType, string | number, ElectricCollectionUtils<ExplicitType>>]
     >()
 
     expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [DeleteMutationFnParams<ExplicitType>]
+      [DeleteMutationFnParams<ExplicitType, string | number, ElectricCollectionUtils<ExplicitType>>]
     >()
   })
 
@@ -317,15 +316,15 @@ describe(`Electric collection type resolution tests`, () => {
       },
     })
 
-    // Verify that the handlers are properly typed
+    // Verify that the handlers are properly typed with ElectricCollectionUtils
     expectTypeOf(options.onDelete).parameters.toEqualTypeOf<
-      [DeleteMutationFnParams<TodoType>]
+      [DeleteMutationFnParams<TodoType, string | number, ElectricCollectionUtils<TodoType>>]
     >()
     expectTypeOf(options.onInsert).parameters.toEqualTypeOf<
-      [InsertMutationFnParams<TodoType>]
+      [InsertMutationFnParams<TodoType, string | number, ElectricCollectionUtils<TodoType>>]
     >()
     expectTypeOf(options.onUpdate).parameters.toEqualTypeOf<
-      [UpdateMutationFnParams<TodoType>]
+      [UpdateMutationFnParams<TodoType, string | number, ElectricCollectionUtils<TodoType>>]
     >()
   })
 

@@ -528,7 +528,7 @@ describe(`Electric Integration`, () => {
         id: `test-transaction`,
         mutations: [],
       } as unknown as TransactionWithMutations<Row, `insert`>
-      const mockParams: InsertMutationFnParams<Row> = {
+      const mockParams: InsertMutationFnParams<Row, string | number, ElectricCollectionUtils<Row>> = {
         transaction: mockTransaction,
         // @ts-expect-error not relevant to test
         collection: CollectionImpl,
