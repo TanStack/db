@@ -165,6 +165,44 @@ describe(`Electric collection type resolution tests`, () => {
     expectTypeOf(todosCollection.utils.awaitMatch).toBeFunction
   })
 
+  it(`should preserve ElectricCollectionUtils type on collection.utils after createCollection with handlers`, () => {
+    const todoSchema = z.object({
+      id: z.string(),
+      title: z.string(),
+      completed: z.boolean(),
+    })
+
+    type TodoType = z.infer<typeof todoSchema>
+
+    const options = electricCollectionOptions({
+      shapeOptions: {
+        url: `/api/todos`,
+      },
+      schema: todoSchema,
+      getKey: (item) => item.id,
+      onInsert: async () => {
+        return Promise.resolve({ txid: 1 })
+      },
+      onUpdate: async () => {
+        return Promise.resolve({ txid: 1 })
+      },
+      onDelete: async () => {
+        return Promise.resolve({ txid: 1 })
+      },
+    })
+
+    const todosCollection = createCollection(options)
+
+    // After createCollection, utils should be typed as ElectricCollectionUtils<TodoType>
+    // and not widened to UtilsRecord
+    const testUtils: ElectricCollectionUtils<TodoType> = todosCollection.utils
+
+    expectTypeOf(testUtils.awaitTxId).toBeFunction
+    expectTypeOf(testUtils.awaitMatch).toBeFunction
+    expectTypeOf(todosCollection.utils.awaitTxId).toBeFunction
+    expectTypeOf(todosCollection.utils.awaitMatch).toBeFunction
+  })
+
   it(`should properly type the onInsert, onUpdate, and onDelete handlers`, () => {
     const options = electricCollectionOptions<ExplicitType>({
       shapeOptions: {
