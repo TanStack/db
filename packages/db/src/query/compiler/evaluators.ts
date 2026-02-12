@@ -336,7 +336,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
       return (data) => {
-        const value = valueEvaluator(data)
+        const value = normalizeValue(valueEvaluator(data))
         const array = arrayEvaluator(data)
         // In 3-valued logic, if the value is null/undefined, return UNKNOWN
         if (isUnknown(value)) {
