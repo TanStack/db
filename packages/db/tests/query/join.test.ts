@@ -982,6 +982,122 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
 
         expect(joinQuery.size).toBe(3)
       })
+
+      test(`should match Date join keys by timestamp instead of object reference`, () => {
+        type DateLeft = { id: number; joinedAt: Date; name: string }
+        type DateRight = { id: number; joinedAt: Date; label: string }
+
+        const baseTimestamp = Date.parse(`2025-01-15T12:34:56.789Z`)
+
+        const leftData: Array<DateLeft> = [
+          { id: 1, joinedAt: new Date(baseTimestamp), name: `left-1` },
+        ]
+        const rightData: Array<DateRight> = [
+          { id: 10, joinedAt: new Date(baseTimestamp), label: `right-10` },
+        ]
+
+        // Guard against accidentally sharing the same Date object instance.
+        expect(leftData[0]!.joinedAt).not.toBe(rightData[0]!.joinedAt)
+        expect(leftData[0]!.joinedAt.getTime()).toBe(
+          rightData[0]!.joinedAt.getTime(),
+        )
+
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<DateLeft>({
+            id: `join-date-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: leftData,
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<DateRight>({
+            id: `join-date-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: rightData,
+            autoIndex,
+          }),
+        )
+
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.joinedAt, right.joinedAt),
+              )
+              .select(({ left, right }) => ({
+                leftId: left.id,
+                rightId: right.id,
+              })),
+        })
+
+        expect(query.toArray).toHaveLength(1)
+        expect(query.toArray[0]).toEqual({ leftId: 1, rightId: 10 })
+      })
+
+      test(`should update Date join matches when timestamp changes`, () => {
+        type DateLeft = { id: number; joinedAt: Date; name: string }
+        type DateRight = { id: number; joinedAt: Date; label: string }
+
+        const baseTimestamp = Date.parse(`2025-01-15T12:34:56.789Z`)
+
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<DateLeft>({
+            id: `join-date-update-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, joinedAt: new Date(baseTimestamp), name: `left-1` },
+            ],
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<DateRight>({
+            id: `join-date-update-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              {
+                id: 10,
+                joinedAt: new Date(baseTimestamp + 1),
+                label: `right-10`,
+              },
+            ],
+            autoIndex,
+          }),
+        )
+
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.joinedAt, right.joinedAt),
+              )
+              .select(({ left, right }) => ({
+                leftId: left.id,
+                rightId: right.id,
+              })),
+        })
+
+        expect(query.toArray).toHaveLength(0)
+
+        rightCollection.utils.begin()
+        rightCollection.utils.write({
+          type: `update`,
+          value: {
+            id: 10,
+            joinedAt: new Date(baseTimestamp),
+            label: `right-10`,
+          },
+        })
+        rightCollection.utils.commit()
+
+        expect(query.toArray).toHaveLength(1)
+        expect(query.toArray[0]).toEqual({ leftId: 1, rightId: 10 })
+      })
     })
 
     test(`should handle chained joins with incremental updates`, () => {
