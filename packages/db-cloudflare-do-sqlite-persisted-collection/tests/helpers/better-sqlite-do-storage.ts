@@ -12,13 +12,16 @@ type BetterSqliteDoStorageHarness = {
 
 type BetterSqliteStatement = ReturnType<BetterSqlite3.Database[`prepare`]>
 
-function readRows(statement: BetterSqliteStatement, params: ReadonlyArray<unknown>) {
+function readRows(
+  statement: BetterSqliteStatement,
+  params: ReadonlyArray<unknown>,
+) {
   const statementWithVariadicIterate = statement as BetterSqliteStatement & {
     iterate: (...params: ReadonlyArray<unknown>) => Iterable<unknown>
   }
-  return statementWithVariadicIterate.iterate(
-    ...params,
-  ) as Iterable<Record<string, unknown>>
+  return statementWithVariadicIterate.iterate(...params) as Iterable<
+    Record<string, unknown>
+  >
 }
 
 function runStatement(
