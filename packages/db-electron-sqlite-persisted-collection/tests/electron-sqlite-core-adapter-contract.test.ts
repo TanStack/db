@@ -1,9 +1,9 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { BetterSqlite3SQLiteDriver } from '@tanstack/db-node-sqlite-persisted-collection'
 import { createSQLiteCorePersistenceAdapter } from '@tanstack/db-sqlite-persisted-collection-core'
 import { runSQLiteCoreAdapterContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/sqlite-core-adapter-contract'
+import { BetterSqlite3SQLiteDriver } from '../../db-node-sqlite-persisted-collection/src/node-driver'
 import {
   createElectronSQLitePersistence,
   exposeElectronSQLitePersistence,

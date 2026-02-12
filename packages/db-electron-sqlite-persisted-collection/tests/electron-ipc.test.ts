@@ -3,10 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { InvalidPersistedCollectionConfigError } from '@tanstack/db-sqlite-persisted-collection-core'
-import {
-  BetterSqlite3SQLiteDriver,
-  createNodeSQLitePersistence,
-} from '@tanstack/db-node-sqlite-persisted-collection'
+import { createNodeSQLitePersistence } from '@tanstack/db-node-sqlite-persisted-collection'
+import { BetterSqlite3SQLiteDriver } from '../../db-node-sqlite-persisted-collection/src/node-driver'
 import {
   createElectronSQLitePersistence,
   exposeElectronSQLitePersistence,
@@ -117,7 +115,7 @@ function createInvokeHarness(
     Record<string, unknown>,
     string | number
   >({
-    driver,
+    database: driver.getDatabase(),
   })
   const filteredPersistence = createFilteredPersistence(
     collectionId,
@@ -351,11 +349,15 @@ describe(`electron sqlite persistence bridge`, () => {
       },
     }
 
+    const driver = new BetterSqlite3SQLiteDriver({
+      filename: createTempDbPath(),
+    })
+    activeCleanupFns.push(() => driver.close())
     const persistence = createNodeSQLitePersistence<
       Record<string, unknown>,
       string | number
     >({
-      driver: new BetterSqlite3SQLiteDriver({ filename: createTempDbPath() }),
+      database: driver.getDatabase(),
     })
 
     const dispose = exposeElectronSQLitePersistence({

@@ -3,5 +3,5 @@ import { runMobilePersistedCollectionConformanceSuite } from './mobile-persisted
 
 runMobilePersistedCollectionConformanceSuite(
   `expo persisted collection conformance`,
-  (driver) => createReactNativeSQLitePersistence({ driver }),
+  (database) => createReactNativeSQLitePersistence({ database }),
 )

@@ -3,10 +3,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  CloudflareDOSQLiteDriver,
   createCloudflareDOSQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
+import { CloudflareDOSQLiteDriver } from '../src/do-driver'
 import { SingleProcessCoordinator } from '../../db-sqlite-persisted-collection-core/src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
 import { createBetterSqliteDoStorageHarness } from './helpers/better-sqlite-do-storage'
@@ -29,7 +29,7 @@ function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
       })
       activeStorageHarnesses.add(storageHarness)
       return new CloudflareDOSQLiteDriver({
-        sql: storageHarness.sql,
+        storage: storageHarness.storage,
       })
     },
     cleanup: () => {
@@ -50,11 +50,11 @@ runRuntimePersistenceContractSuite(`cloudflare durable object runtime helpers`, 
   createDatabaseHarness: createRuntimeDatabaseHarness,
   createAdapter: (driver) =>
     createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>({
-      driver,
+      storage: (driver as CloudflareDOSQLiteDriver).getStorage(),
     }).adapter,
   createPersistence: (driver, coordinator) =>
     createCloudflareDOSQLitePersistence<RuntimePersistenceContractTodo, string>({
-      driver,
+      storage: (driver as CloudflareDOSQLiteDriver).getStorage(),
       coordinator,
     }),
   createCoordinator: () => new SingleProcessCoordinator(),
@@ -67,7 +67,7 @@ describe(`cloudflare durable object persistence helpers`, () => {
 
     try {
       const persistence = createCloudflareDOSQLitePersistence({
-        driver,
+        storage: (driver as CloudflareDOSQLiteDriver).getStorage(),
       })
       expect(persistence.coordinator).toBeInstanceOf(SingleProcessCoordinator)
     } finally {

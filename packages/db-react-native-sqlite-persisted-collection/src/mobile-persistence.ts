@@ -12,6 +12,8 @@ import type {
 } from '@tanstack/db-sqlite-persisted-collection-core'
 import type { OpSQLiteDatabaseLike } from './op-sqlite-driver'
 
+export type { OpSQLiteDatabaseLike } from './op-sqlite-driver'
+
 type MobileSQLiteCoreSchemaMismatchPolicy =
   | `sync-present-reset`
   | `sync-absent-error`
@@ -25,21 +27,12 @@ type MobileSQLitePersistenceBaseOptions = Omit<
   SQLiteCoreAdapterOptions,
   `driver` | `schemaVersion` | `schemaMismatchPolicy`
 > & {
+  database: OpSQLiteDatabaseLike
   coordinator?: PersistedCollectionCoordinator
   schemaMismatchPolicy?: MobileSQLiteSchemaMismatchPolicy
 }
 
-type MobileSQLitePersistenceWithDriver = MobileSQLitePersistenceBaseOptions & {
-  driver: SQLiteDriver
-}
-
-type MobileSQLitePersistenceWithDatabase = MobileSQLitePersistenceBaseOptions & {
-  database: OpSQLiteDatabaseLike
-}
-
-export type MobileSQLitePersistenceOptions =
-  | MobileSQLitePersistenceWithDriver
-  | MobileSQLitePersistenceWithDatabase
+export type MobileSQLitePersistenceOptions = MobileSQLitePersistenceBaseOptions
 
 function normalizeSchemaMismatchPolicy(
   policy: MobileSQLiteSchemaMismatchPolicy,
@@ -71,11 +64,9 @@ function createAdapterCacheKey(
   return `${schemaMismatchPolicy}|${schemaVersionKey}`
 }
 
-function resolveSQLiteDriver(options: MobileSQLitePersistenceOptions): SQLiteDriver {
-  if (`driver` in options) {
-    return options.driver
-  }
-
+function createInternalSQLiteDriver(
+  options: MobileSQLitePersistenceOptions,
+): SQLiteDriver {
   return new OpSQLiteDriver({
     database: options.database,
   })
@@ -101,7 +92,7 @@ export function createMobileSQLitePersistence<
   options: MobileSQLitePersistenceOptions,
 ): PersistedCollectionPersistence<T, TKey> {
   const { coordinator, schemaMismatchPolicy } = options
-  const driver = resolveSQLiteDriver(options)
+  const driver = createInternalSQLiteDriver(options)
   const adapterBaseOptions = resolveAdapterBaseOptions(options)
   const resolvedCoordinator = coordinator ?? new SingleProcessCoordinator()
   const adapterCache = new Map<

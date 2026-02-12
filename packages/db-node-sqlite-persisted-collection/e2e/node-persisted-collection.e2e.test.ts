@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
+import BetterSqlite3 from 'better-sqlite3'
 import {
-  BetterSqlite3SQLiteDriver,
   createNodeSQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
@@ -31,12 +31,12 @@ type PersistedCollectionHarness<T extends PersistableRow> = {
 let config: NodePersistedCollectionTestConfig
 
 function createPersistedCollection<T extends PersistableRow>(
-  driver: BetterSqlite3SQLiteDriver,
+  database: InstanceType<typeof BetterSqlite3>,
   id: string,
   syncMode: `eager` | `on-demand`,
 ): PersistedCollectionHarness<T> {
   const persistence = createNodeSQLitePersistence<T, string | number>({
-    driver,
+    database,
   })
   let seedTxSequence = 0
   const seedPersisted = async (rows: Array<T>): Promise<void> => {
@@ -135,39 +135,37 @@ beforeAll(async () => {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-persisted-e2e-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   const suiteId = Date.now().toString(36)
-  const driver = new BetterSqlite3SQLiteDriver({
-    filename: dbPath,
-  })
+  const database = new BetterSqlite3(dbPath)
   const seedData = generateSeedData()
 
   const eagerUsers = createPersistedCollection<User>(
-    driver,
+    database,
     `node-persisted-users-eager-${suiteId}`,
     `eager`,
   )
   const eagerPosts = createPersistedCollection<Post>(
-    driver,
+    database,
     `node-persisted-posts-eager-${suiteId}`,
     `eager`,
   )
   const eagerComments = createPersistedCollection<Comment>(
-    driver,
+    database,
     `node-persisted-comments-eager-${suiteId}`,
     `eager`,
   )
 
   const onDemandUsers = createPersistedCollection<User>(
-    driver,
+    database,
     `node-persisted-users-ondemand-${suiteId}`,
     `on-demand`,
   )
   const onDemandPosts = createPersistedCollection<Post>(
-    driver,
+    database,
     `node-persisted-posts-ondemand-${suiteId}`,
     `on-demand`,
   )
   const onDemandComments = createPersistedCollection<Comment>(
-    driver,
+    database,
     `node-persisted-comments-ondemand-${suiteId}`,
     `on-demand`,
   )
@@ -242,7 +240,7 @@ beforeAll(async () => {
         onDemandPosts.collection.cleanup(),
         onDemandComments.collection.cleanup(),
       ])
-      driver.close()
+      database.close()
       rmSync(tempDirectory, { recursive: true, force: true })
     },
   }

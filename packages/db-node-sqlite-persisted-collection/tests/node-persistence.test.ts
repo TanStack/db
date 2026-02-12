@@ -4,10 +4,10 @@ import { join } from 'node:path'
 import BetterSqlite3 from 'better-sqlite3'
 import { describe, expect, it } from 'vitest'
 import {
-  BetterSqlite3SQLiteDriver,
   createNodeSQLitePersistence,
   persistedCollectionOptions,
 } from '../src'
+import { BetterSqlite3SQLiteDriver } from '../src/node-driver'
 import { SingleProcessCoordinator } from '../../db-sqlite-persisted-collection-core/src'
 import { runRuntimePersistenceContractSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/runtime-persistence-contract'
 import type {
@@ -44,11 +44,11 @@ runRuntimePersistenceContractSuite(`node runtime persistence helpers`, {
   createDatabaseHarness: createRuntimeDatabaseHarness,
   createAdapter: (driver) =>
     createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>({
-      driver,
+      database: (driver as BetterSqlite3SQLiteDriver).getDatabase(),
     }).adapter,
   createPersistence: (driver, coordinator) =>
     createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>({
-      driver,
+      database: (driver as BetterSqlite3SQLiteDriver).getDatabase(),
       coordinator,
     }),
   createCoordinator: () => new SingleProcessCoordinator(),
@@ -60,7 +60,7 @@ describe(`node persistence helpers`, () => {
     const driver = runtimeHarness.createDriver()
     try {
       const persistence = createNodeSQLitePersistence({
-        driver,
+        database: (driver as BetterSqlite3SQLiteDriver).getDatabase(),
       })
       expect(persistence.coordinator).toBeInstanceOf(SingleProcessCoordinator)
     } finally {
@@ -74,7 +74,7 @@ describe(`node persistence helpers`, () => {
     try {
       const coordinator = new SingleProcessCoordinator()
       const persistence = createNodeSQLitePersistence({
-        driver,
+        database: (driver as BetterSqlite3SQLiteDriver).getDatabase(),
         coordinator,
       })
 
@@ -136,12 +136,12 @@ describe(`node persistence helpers`, () => {
     const tempDirectory = mkdtempSync(join(tmpdir(), `db-node-schema-infer-`))
     const dbPath = join(tempDirectory, `state.sqlite`)
     const collectionId = `todos`
-    const firstDriver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
+    const firstDatabase = new BetterSqlite3(dbPath)
 
     try {
       const firstPersistence = createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>(
         {
-          driver: firstDriver,
+          database: firstDatabase,
         },
       )
       const firstCollectionOptions = persistedCollectionOptions<
@@ -175,14 +175,14 @@ describe(`node persistence helpers`, () => {
       },
       )
     } finally {
-      firstDriver.close()
+      firstDatabase.close()
     }
 
-    const secondDriver = new BetterSqlite3SQLiteDriver({ filename: dbPath })
+    const secondDatabase = new BetterSqlite3(dbPath)
     try {
       const secondPersistence = createNodeSQLitePersistence<RuntimePersistenceContractTodo, string>(
         {
-          driver: secondDriver,
+          database: secondDatabase,
         },
       )
       const syncAbsentOptions = persistedCollectionOptions<
@@ -218,7 +218,7 @@ describe(`node persistence helpers`, () => {
       )
       expect(rows).toEqual([])
     } finally {
-      secondDriver.close()
+      secondDatabase.close()
       rmSync(tempDirectory, { recursive: true, force: true })
     }
   })

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import { OpSQLiteDriver, persistedCollectionOptions } from '../src'
+import { persistedCollectionOptions } from '../src'
 import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/persisted-collection-conformance-contract'
 import { createOpSQLiteTestDatabase } from '../tests/helpers/op-sqlite-test-db'
@@ -27,16 +27,16 @@ type PersistedCollectionHarness<T extends PersistableRow> = {
 }
 
 type MobilePersistenceFactory = <T extends PersistableRow>(
-  driver: OpSQLiteDriver,
+  database: ReturnType<typeof createOpSQLiteTestDatabase>,
 ) => PersistedCollectionPersistence<T, string | number>
 
 function createPersistedCollection<T extends PersistableRow>(
-  driver: OpSQLiteDriver,
+  database: ReturnType<typeof createOpSQLiteTestDatabase>,
   id: string,
   syncMode: `eager` | `on-demand`,
   createPersistence: MobilePersistenceFactory,
 ): PersistedCollectionHarness<T> {
-  const persistence = createPersistence<T>(driver)
+  const persistence = createPersistence<T>(database)
   let seedTxSequence = 0
   const seedPersisted = async (rows: Array<T>): Promise<void> => {
     if (rows.length === 0) {
@@ -146,42 +146,41 @@ export function runMobilePersistedCollectionConformanceSuite(
       filename: dbPath,
       resultShape: `statement-array`,
     })
-    const driver = new OpSQLiteDriver({ database })
     const seedData = generateSeedData()
 
     const eagerUsers = createPersistedCollection<User>(
-      driver,
+      database,
       `mobile-persisted-users-eager-${suiteId}`,
       `eager`,
       createPersistence,
     )
     const eagerPosts = createPersistedCollection<Post>(
-      driver,
+      database,
       `mobile-persisted-posts-eager-${suiteId}`,
       `eager`,
       createPersistence,
     )
     const eagerComments = createPersistedCollection<Comment>(
-      driver,
+      database,
       `mobile-persisted-comments-eager-${suiteId}`,
       `eager`,
       createPersistence,
     )
 
     const onDemandUsers = createPersistedCollection<User>(
-      driver,
+      database,
       `mobile-persisted-users-ondemand-${suiteId}`,
       `on-demand`,
       createPersistence,
     )
     const onDemandPosts = createPersistedCollection<Post>(
-      driver,
+      database,
       `mobile-persisted-posts-ondemand-${suiteId}`,
       `on-demand`,
       createPersistence,
     )
     const onDemandComments = createPersistedCollection<Comment>(
-      driver,
+      database,
       `mobile-persisted-comments-ondemand-${suiteId}`,
       `on-demand`,
       createPersistence,

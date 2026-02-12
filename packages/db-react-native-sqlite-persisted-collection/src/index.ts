@@ -1,14 +1,8 @@
 export {
-  OpSQLiteDriver,
-} from './op-sqlite-driver'
-export type {
-  OpSQLiteDatabaseLike,
-  OpSQLiteDriverOptions,
-} from './op-sqlite-driver'
-export {
   createReactNativeSQLitePersistence,
 } from './react-native'
 export type {
+  OpSQLiteDatabaseLike,
   ReactNativeSQLitePersistenceOptions,
   ReactNativeSQLiteSchemaMismatchPolicy,
 } from './react-native'
@@ -18,5 +12,4 @@ export {
 export type {
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,
-  SQLiteDriver,
 } from '@tanstack/db-sqlite-persisted-collection-core'
