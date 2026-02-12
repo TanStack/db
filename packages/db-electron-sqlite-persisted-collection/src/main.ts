@@ -180,11 +180,12 @@ function resolveModeAwarePersistence(
 ): PersistedCollectionPersistence<ElectronPersistedRow, ElectronPersistedKey> {
   const mode = request.resolution?.mode ?? `sync-absent`
   const schemaVersion = request.resolution?.schemaVersion
-  const collectionAwarePersistence = persistence.resolvePersistenceForCollection?.({
-    collectionId: request.collectionId,
-    mode,
-    schemaVersion,
-  })
+  const collectionAwarePersistence =
+    persistence.resolvePersistenceForCollection?.({
+      collectionId: request.collectionId,
+      mode,
+      schemaVersion,
+    })
   if (collectionAwarePersistence) {
     return collectionAwarePersistence
   }

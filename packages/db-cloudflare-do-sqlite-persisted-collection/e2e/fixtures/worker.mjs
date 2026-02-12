@@ -109,9 +109,12 @@ export class PersistenceObject extends DurableObject {
       syncEnabled: this.syncEnabled,
       schemaVersion: this.schemaVersion,
     })
-    this.ready = this.collectionPersistence.adapter.loadSubset(this.collectionId, {
-      limit: 0,
-    })
+    this.ready = this.collectionPersistence.adapter.loadSubset(
+      this.collectionId,
+      {
+        limit: 0,
+      },
+    )
 
     const baseCollectionOptions = {
       id: this.collectionId,
@@ -174,19 +177,22 @@ export class PersistenceObject extends DurableObject {
             typeof requestBody.rowVersion === `number`
               ? requestBody.rowVersion
               : seq
-          await this.collectionPersistence.adapter.applyCommittedTx(collectionId, {
-            txId,
-            term: 1,
-            seq,
-            rowVersion,
-            mutations: [
-              {
-                type: `insert`,
-                key: requestBody.todo.id,
-                value: requestBody.todo,
-              },
-            ],
-          })
+          await this.collectionPersistence.adapter.applyCommittedTx(
+            collectionId,
+            {
+              txId,
+              term: 1,
+              seq,
+              rowVersion,
+              mutations: [
+                {
+                  type: `insert`,
+                  key: requestBody.todo.id,
+                  value: requestBody.todo,
+                },
+              ],
+            },
+          )
 
           return jsonResponse(200, {
             ok: true,
@@ -237,7 +243,10 @@ export class PersistenceObject extends DurableObject {
         if (unknownCollectionId !== this.collectionId) {
           throw createUnknownCollectionError(unknownCollectionId)
         }
-        const rows = await this.persistence.adapter.loadSubset(unknownCollectionId, {})
+        const rows = await this.persistence.adapter.loadSubset(
+          unknownCollectionId,
+          {},
+        )
         return jsonResponse(200, {
           ok: true,
           rows,

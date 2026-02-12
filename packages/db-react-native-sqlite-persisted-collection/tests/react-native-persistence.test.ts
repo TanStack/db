@@ -180,9 +180,11 @@ it(`uses a single react-native api across runtime aliases`, async () => {
   >({
     database,
   })
-  const sharedApiPersistence = createReactNativeSQLitePersistence<Todo, string>({
-    database,
-  })
+  const sharedApiPersistence = createReactNativeSQLitePersistence<Todo, string>(
+    {
+      database,
+    },
+  )
 
   await reactNativePersistence.adapter.applyCommittedTx(collectionId, {
     txId: `tx-entrypoint-1`,

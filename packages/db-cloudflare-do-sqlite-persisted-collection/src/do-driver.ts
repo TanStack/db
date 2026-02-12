@@ -48,7 +48,9 @@ function assertTransactionCallbackHasDriverArg(
   )
 }
 
-function isIterableRecord(value: unknown): value is Iterable<DurableObjectSqlRow> {
+function isIterableRecord(
+  value: unknown,
+): value is Iterable<DurableObjectSqlRow> {
   if (!value || typeof value !== `object`) {
     return false
   }

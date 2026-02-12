@@ -30,7 +30,10 @@ function createDriverHarness(): SQLiteDriverContractHarness {
   }
 }
 
-runSQLiteDriverContractSuite(`cloudflare durable object sqlite driver`, createDriverHarness)
+runSQLiteDriverContractSuite(
+  `cloudflare durable object sqlite driver`,
+  createDriverHarness,
+)
 
 describe(`cloudflare durable object sqlite driver (native transaction mode)`, () => {
   it(`uses storage.transaction when available`, async () => {

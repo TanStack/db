@@ -302,13 +302,13 @@ export function createElectronSQLitePersistence<
       return cachedAdapter
     }
 
-    const adapter = createResolvedRendererAdapter<Record<string, unknown>, string | number>(
-      executeRequest,
-      {
-        mode,
-        schemaVersion,
-      },
-    )
+    const adapter = createResolvedRendererAdapter<
+      Record<string, unknown>,
+      string | number
+    >(executeRequest, {
+      mode,
+      schemaVersion,
+    })
     adapterCache.set(cacheKey, adapter)
     return adapter
   }
@@ -317,14 +317,17 @@ export function createElectronSQLitePersistence<
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
   ): PersistedCollectionPersistence<T, TKey> => ({
-    adapter: getAdapterForCollection(mode, schemaVersion) as unknown as PersistedCollectionPersistence<
-      T,
-      TKey
-    >[`adapter`],
+    adapter: getAdapterForCollection(
+      mode,
+      schemaVersion,
+    ) as unknown as PersistedCollectionPersistence<T, TKey>[`adapter`],
     coordinator,
   })
 
-  const defaultPersistence = createCollectionPersistence(`sync-absent`, undefined)
+  const defaultPersistence = createCollectionPersistence(
+    `sync-absent`,
+    undefined,
+  )
 
   return {
     ...defaultPersistence,

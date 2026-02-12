@@ -233,10 +233,12 @@ describe(`electron sqlite persistence bridge`, () => {
         collectionId: `todos`,
         timeoutMs: electronRuntimeBridgeTimeoutMs,
       })
-      const rendererPersistence = createElectronSQLitePersistence<Todo, string>({
-        invoke,
-        timeoutMs: electronRuntimeBridgeTimeoutMs,
-      })
+      const rendererPersistence = createElectronSQLitePersistence<Todo, string>(
+        {
+          invoke,
+          timeoutMs: electronRuntimeBridgeTimeoutMs,
+        },
+      )
 
       await rendererPersistence.adapter.applyCommittedTx(`todos`, {
         txId: `tx-restart-1`,

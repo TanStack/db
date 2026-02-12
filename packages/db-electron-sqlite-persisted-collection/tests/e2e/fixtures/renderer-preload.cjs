@@ -6,7 +6,8 @@ const { createElectronSQLitePersistence } = require(rendererModulePath)
 const { DEFAULT_ELECTRON_PERSISTENCE_CHANNEL } = require(protocolModulePath)
 
 async function runScenario(input) {
-  const invokeBridge = (channel, request) => ipcRenderer.invoke(channel, request)
+  const invokeBridge = (channel, request) =>
+    ipcRenderer.invoke(channel, request)
   const persistence = createElectronSQLitePersistence({
     ipcRenderer,
     channel: input.channel,

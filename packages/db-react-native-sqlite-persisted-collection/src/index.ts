@@ -1,14 +1,10 @@
-export {
-  createReactNativeSQLitePersistence,
-} from './react-native'
+export { createReactNativeSQLitePersistence } from './react-native'
 export type {
   OpSQLiteDatabaseLike,
   ReactNativeSQLitePersistenceOptions,
   ReactNativeSQLiteSchemaMismatchPolicy,
 } from './react-native'
-export {
-  persistedCollectionOptions,
-} from '@tanstack/db-sqlite-persisted-collection-core'
+export { persistedCollectionOptions } from '@tanstack/db-sqlite-persisted-collection-core'
 export type {
   PersistedCollectionCoordinator,
   PersistedCollectionPersistence,

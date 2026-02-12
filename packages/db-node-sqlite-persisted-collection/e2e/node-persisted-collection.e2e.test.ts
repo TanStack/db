@@ -4,10 +4,7 @@ import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll } from 'vitest'
 import { createCollection } from '@tanstack/db'
 import BetterSqlite3 from 'better-sqlite3'
-import {
-  createNodeSQLitePersistence,
-  persistedCollectionOptions,
-} from '../src'
+import { createNodeSQLitePersistence, persistedCollectionOptions } from '../src'
 import { generateSeedData } from '../../db-collection-e2e/src/fixtures/seed-data'
 import { runPersistedCollectionConformanceSuite } from '../../db-sqlite-persisted-collection-core/tests/contracts/persisted-collection-conformance-contract'
 import type { Collection } from '@tanstack/db'

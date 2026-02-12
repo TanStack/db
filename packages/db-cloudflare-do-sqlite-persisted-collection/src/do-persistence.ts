@@ -10,9 +10,7 @@ import type {
   SQLiteCoreAdapterOptions,
   SQLiteDriver,
 } from '@tanstack/db-sqlite-persisted-collection-core'
-import type {
-  DurableObjectStorageLike,
-} from './do-driver'
+import type { DurableObjectStorageLike } from './do-driver'
 
 export type { DurableObjectStorageLike } from './do-driver'
 
@@ -104,7 +102,10 @@ export function createCloudflareDOSQLitePersistence<
   const adapterCache = new Map<
     string,
     ReturnType<
-      typeof createSQLiteCorePersistenceAdapter<Record<string, unknown>, string | number>
+      typeof createSQLiteCorePersistenceAdapter<
+        Record<string, unknown>,
+        string | number
+      >
     >
   >()
 
@@ -142,14 +143,17 @@ export function createCloudflareDOSQLitePersistence<
     mode: PersistedCollectionMode,
     schemaVersion: number | undefined,
   ): PersistedCollectionPersistence<T, TKey> => ({
-    adapter: getAdapterForCollection(mode, schemaVersion) as unknown as PersistedCollectionPersistence<
-      T,
-      TKey
-    >[`adapter`],
+    adapter: getAdapterForCollection(
+      mode,
+      schemaVersion,
+    ) as unknown as PersistedCollectionPersistence<T, TKey>[`adapter`],
     coordinator: resolvedCoordinator,
   })
 
-  const defaultPersistence = createCollectionPersistence(`sync-absent`, undefined)
+  const defaultPersistence = createCollectionPersistence(
+    `sync-absent`,
+    undefined,
+  )
 
   return {
     ...defaultPersistence,
