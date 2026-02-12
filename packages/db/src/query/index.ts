@@ -11,6 +11,7 @@ export {
   type Source,
   type GetResult,
   type InferResultType,
+  type InferCollectionType,
   type ExtractContext,
   type QueryResult,
   // Types needed for declaration emit (https://github.com/TanStack/db/issues/1012)
