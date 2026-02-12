@@ -917,74 +917,55 @@ export class CollectionImpl<
   }
 
   /**
-   * Rollback optimistic updates for specific keys or all keys in the collection.
+   * Get the synced (server-side) value for a key, without any optimistic overlays.
    *
-   * When a server-side update arrives for entities that have pending optimistic
-   * mutations (e.g., from paced/debounced mutations), this method cancels those
-   * mutations so the server state takes precedence.
+   * This returns the authoritative server state for an entity, ignoring any
+   * pending optimistic mutations. Useful for detecting server-side changes
+   * during paced mutation persistence — compare `mutation.original` against
+   * the current synced value to decide whether to persist, merge, or skip.
    *
-   * Rolled-back transactions cascade: if a transaction touches other keys beyond
-   * the ones specified, those mutations are also rolled back (same as the normal
-   * transaction conflict rollback behavior).
-   *
-   * @param keys - Optional key or array of keys to rollback transactions for.
-   *               If omitted, all pending transactions for this collection are rolled back.
+   * @param key - The key to look up
+   * @returns The synced value, or undefined if no synced data exists for this key
    * @example
-   * // Rollback all optimistic updates for a specific entity when a server update arrives
-   * sync: ({ begin, write, commit }) => {
-   *   socket.on('update', (item) => {
-   *     collection.rollbackOptimisticUpdates(item.id)
-   *     begin()
-   *     write({ type: 'update', key: item.id, value: item })
-   *     commit()
-   *   })
+   * // In a paced mutation's mutationFn, check for server-side conflicts
+   * mutationFn: async ({ transaction }) => {
+   *   for (const mutation of transaction.mutations) {
+   *     const serverValue = collection.getSyncedValue(mutation.key)
+   *     if (serverValue && !deepEquals(serverValue, mutation.original)) {
+   *       // Server data changed since this mutation was created — reconcile
+   *       return
+   *     }
+   *   }
+   *   await api.save(transaction.mutations)
    * }
-   *
-   * @example
-   * // Rollback all optimistic updates in the collection
-   * collection.rollbackOptimisticUpdates()
    */
-  public rollbackOptimisticUpdates(keys?: TKey | Array<TKey>): void {
-    const globalKeysToMatch = keys !== undefined
-      ? new Set(
-          (Array.isArray(keys) ? keys : [keys]).map(
-            (key) => `KEY::${this.id}/${key}`,
-          ),
-        )
-      : undefined
+  public getSyncedValue(key: TKey): TOutput | undefined {
+    return this._state.syncedData.get(key)
+  }
 
-    // Collect transactions to rollback first to avoid iterator invalidation
-    // from cascade rollbacks
-    const transactionsToRollback: Array<TransactionType<any>> = []
-
-    for (const transaction of this._state.transactions.values()) {
-      if (
-        transaction.state === `completed` ||
-        transaction.state === `failed`
-      ) {
-        continue
-      }
-
-      const shouldRollback =
-        !globalKeysToMatch ||
-        transaction.mutations.some((m) => globalKeysToMatch.has(m.globalKey))
-
-      if (shouldRollback) {
-        transactionsToRollback.push(transaction)
-      }
-    }
-
-    for (const transaction of transactionsToRollback) {
-      // Re-check state since a cascade rollback from a previous iteration
-      // may have already failed this transaction
-      if (
-        transaction.state === `completed` ||
-        transaction.state === `failed`
-      ) {
-        continue
-      }
-      transaction.rollback()
-    }
+  /**
+   * Get the sync metadata for a key.
+   *
+   * Sync metadata is set by the sync layer via write operations and can
+   * contain information like revision numbers, timestamps, or ETags that
+   * are useful for conflict detection.
+   *
+   * @param key - The key to look up
+   * @returns The sync metadata, or undefined if none exists for this key
+   * @example
+   * // Check revision number before persisting
+   * mutationFn: async ({ transaction }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const meta = collection.getSyncedMetadata(mutation.key)
+   *   if (meta?.revision !== mutation.syncMetadata.revision) {
+   *     // Server revision changed — skip or merge
+   *     return
+   *   }
+   *   await api.save(transaction.mutations)
+   * }
+   */
+  public getSyncedMetadata(key: TKey): unknown {
+    return this._state.syncedMetadata.get(key)
   }
 
   /**
