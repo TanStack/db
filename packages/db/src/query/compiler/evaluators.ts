@@ -345,7 +345,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (!Array.isArray(array)) {
           return false
         }
-        return array.includes(value)
+        return array.some((item) => normalizeValue(item) === value)
       }
     }
 
