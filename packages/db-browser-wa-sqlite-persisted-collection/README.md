@@ -46,6 +46,9 @@ export const todosCollection = createCollection(
 
 - This package is Phase 7 single-tab browser wiring: it uses
   `SingleProcessCoordinator` semantics by default.
+- `openBrowserWASQLiteOPFSDatabase(...)` starts a dedicated Web Worker and
+  routes SQL operations through it. OPFS sync access handle APIs are used in
+  that worker context.
 - Single-tab mode does not require BroadcastChannel or Web Locks for
   correctness.
 - OPFS capability failures are surfaced as `PersistenceUnavailableError`.
