@@ -50,6 +50,16 @@
         "default": "./dist/cjs/react-native/index.cjs"
       }
     },
+    "./capacitor": {
+      "import": {
+        "types": "./dist/esm/capacitor/index.d.ts",
+        "default": "./dist/esm/capacitor/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/capacitor/index.d.cts",
+        "default": "./dist/cjs/capacitor/index.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "sideEffects": false,

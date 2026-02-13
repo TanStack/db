@@ -17,6 +17,6 @@ export default mergeConfig(
   tanstackViteConfig({
     entry: [`./src/index.ts`, `./src/react-native/index.ts`, `./src/capacitor/index.ts`],
     srcDir: `./src`,
-    externalDeps: [`react-native`, `@react-native-community/netinfo`],
+    externalDeps: [`react-native`, `@react-native-community/netinfo`, `@capacitor/preferences`, `@capacitor/network`],
   }),
 )
