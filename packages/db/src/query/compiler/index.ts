@@ -8,6 +8,7 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from '../../errors.js'
+import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import { PropRef, Value as ValClass, getWhereExpression } from '../ir.js'
 import { compileExpression, toBooleanPredicate } from './evaluators.js'
 import { processJoins } from './joins.js'
@@ -264,6 +265,7 @@ export function compileQuery(
       query.having,
       query.select,
       query.fnHaving,
+      mainCollectionId,
     )
   } else if (query.select) {
     // Check if SELECT contains aggregates but no GROUP BY (implicit single-group aggregation)
@@ -278,6 +280,7 @@ export function compileQuery(
         query.having,
         query.select,
         query.fnHaving,
+        mainCollectionId,
       )
     }
   }
@@ -334,7 +337,10 @@ export function compileQuery(
       map(([key, [row, orderByIndex]]) => {
         // Extract the final results from $selected and include orderBy index
         const raw = (row as any).$selected
-        const finalResults = unwrapValue(raw)
+        const finalResults = attachVirtualPropsToSelected(
+          unwrapValue(raw),
+          row as Record<string, any>,
+        )
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       }),
     )
@@ -361,7 +367,10 @@ export function compileQuery(
     map(([key, row]) => {
       // Extract the final results from $selected and return [key, [results, undefined]]
       const raw = (row as any).$selected
-      const finalResults = unwrapValue(raw)
+      const finalResults = attachVirtualPropsToSelected(
+        unwrapValue(raw),
+        row as Record<string, any>,
+      )
       return [key, [finalResults, undefined]] as [
         unknown,
         [any, string | undefined],
@@ -586,6 +595,36 @@ function isValue(raw: any): boolean {
 // Helper to unwrap a Value expression or return the value itself
 function unwrapValue(value: any): any {
   return isValue(value) ? value.value : value
+}
+
+function attachVirtualPropsToSelected(
+  selected: any,
+  row: Record<string, any>,
+): any {
+  if (!selected || typeof selected !== `object`) {
+    return selected
+  }
+
+  let needsMerge = false
+  for (const prop of VIRTUAL_PROP_NAMES) {
+    if (selected[prop] == null && prop in row) {
+      needsMerge = true
+      break
+    }
+  }
+
+  if (!needsMerge) {
+    return selected
+  }
+
+  const merged = { ...selected }
+  for (const prop of VIRTUAL_PROP_NAMES) {
+    if (merged[prop] == null && prop in row) {
+      merged[prop] = row[prop]
+    }
+  }
+
+  return merged
 }
 
 /**

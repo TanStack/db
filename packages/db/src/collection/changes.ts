@@ -10,6 +10,8 @@ import type { CollectionLifecycleManager } from './lifecycle.js'
 import type { CollectionSyncManager } from './sync.js'
 import type { CollectionEventsManager } from './events.js'
 import type { CollectionImpl } from './index.js'
+import type { CollectionStateManager } from './state.js'
+import type { WithVirtualProps } from '../virtual-props.js'
 
 export class CollectionChangesManager<
   TOutput extends object = Record<string, unknown>,
@@ -21,6 +23,7 @@ export class CollectionChangesManager<
   private sync!: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
   private events!: CollectionEventsManager
   private collection!: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+  private state!: CollectionStateManager<TOutput, TKey, TSchema, TInput>
 
   public activeSubscribersCount = 0
   public changeSubscriptions = new Set<CollectionSubscription>()
@@ -37,11 +40,13 @@ export class CollectionChangesManager<
     sync: CollectionSyncManager<TOutput, TKey, TSchema, TInput>
     events: CollectionEventsManager
     collection: CollectionImpl<TOutput, TKey, any, TSchema, TInput>
+    state: CollectionStateManager<TOutput, TKey, TSchema, TInput>
   }) {
     this.lifecycle = deps.lifecycle
     this.sync = deps.sync
     this.events = deps.events
     this.collection = deps.collection
+    this.state = deps.state
   }
 
   /**
@@ -53,6 +58,16 @@ export class CollectionChangesManager<
     for (const subscription of this.changeSubscriptions) {
       subscription.emitEvents([])
     }
+  }
+
+  /**
+   * Enriches a change message with virtual properties ($synced, $origin, $key, $collectionId).
+   * Uses the "add-if-missing" pattern to preserve virtual properties from upstream collections.
+   */
+  private enrichChangeWithVirtualProps(
+    change: ChangeMessage<TOutput, TKey>,
+  ): ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey> {
+    return this.state.enrichChangeMessage(change)
   }
 
   /**
@@ -70,26 +85,32 @@ export class CollectionChangesManager<
     }
 
     // Either we're not batching, or we're forcing emission (user action or ending batch cycle)
-    let eventsToEmit = changes
+    let rawEvents = changes
 
     if (forceEmit) {
       // Force emit is used to end a batch (e.g. after a sync commit). Combine any
       // buffered optimistic events with the final changes so subscribers see the
       // whole picture, even if the sync diff is empty.
       if (this.batchedEvents.length > 0) {
-        eventsToEmit = [...this.batchedEvents, ...changes]
+        rawEvents = [...this.batchedEvents, ...changes]
       }
       this.batchedEvents = []
       this.shouldBatchEvents = false
     }
 
-    if (eventsToEmit.length === 0) {
+    if (rawEvents.length === 0) {
       return
     }
 
+    // Enrich all change messages with virtual properties
+    // This uses the "add-if-missing" pattern to preserve pass-through semantics
+    const enrichedEvents: Array<
+      ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
+    > = rawEvents.map((change) => this.enrichChangeWithVirtualProps(change))
+
     // Emit to all listeners
     for (const subscription of this.changeSubscriptions) {
-      subscription.emitEvents(eventsToEmit)
+      subscription.emitEvents(enrichedEvents)
     }
   }
 
@@ -97,8 +118,10 @@ export class CollectionChangesManager<
    * Subscribe to changes in the collection
    */
   public subscribeChanges(
-    callback: (changes: Array<ChangeMessage<TOutput>>) => void,
-    options: SubscribeChangesOptions<TOutput> = {},
+    callback: (
+      changes: Array<ChangeMessage<WithVirtualProps<TOutput, TKey>>>,
+    ) => void,
+    options: SubscribeChangesOptions<TOutput, TKey> = {},
   ): CollectionSubscription {
     // Start sync and track subscriber
     this.addSubscriber()
@@ -113,7 +136,7 @@ export class CollectionChangesManager<
     const { where, ...opts } = options
     let whereExpression = opts.whereExpression
     if (where) {
-      const proxy = createSingleRowRefProxy<TOutput>()
+      const proxy = createSingleRowRefProxy<WithVirtualProps<TOutput, TKey>>()
       const result = where(proxy)
       whereExpression = toExpression(result)
     }

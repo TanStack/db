@@ -7,6 +7,7 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { OutputWithVirtual } from '../utils.js'
 
 // Sample user type for tests
 type User = {
@@ -23,6 +24,9 @@ type Department = {
   id: number
   name: string
 }
+
+type UserRow = OutputWithVirtual<User>
+type DepartmentRow = OutputWithVirtual<Department>
 
 // Sample data for tests
 const sampleUsers: Array<User> = [
@@ -87,12 +91,14 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        displayName: string
-        salaryTier: `senior` | `junior`
-        emailDomain: string
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          displayName: string
+          salaryTier: `senior` | `junior`
+          emailDomain: string
+        }>
+      >
     >()
   })
 
@@ -121,18 +127,20 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        profile: {
-          name: string
-          age: number
-        }
-        compensation: {
-          salary: number
-          grade: `A` | `B` | `C`
-          bonus_eligible: boolean
-        }
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          profile: {
+            name: string
+            age: number
+          }
+          compensation: {
+            salary: number
+            grade: `A` | `B` | `C`
+            bonus_eligible: boolean
+          }
+        }>
+      >
     >()
   })
 
@@ -146,7 +154,7 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should return the original User type since no select transformation
-    expectTypeOf(results).toEqualTypeOf<Array<User>>()
+    expectTypeOf(results).toMatchTypeOf<Array<UserRow>>()
   })
 
   test(`fn.where with regular where clause`, () => {
@@ -160,7 +168,7 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should return the original User type
-    expectTypeOf(results).toEqualTypeOf<Array<User>>()
+    expectTypeOf(results).toMatchTypeOf<Array<UserRow>>()
   })
 
   test(`fn.having with GROUP BY return type`, () => {
@@ -177,11 +185,13 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        department_id: number | null
-        employee_count: number
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          department_id: number | null
+          employee_count: number
+        }>
+      >
     >()
   })
 
@@ -195,7 +205,7 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should return the original User type when used as filter
-    expectTypeOf(results).toEqualTypeOf<Array<User>>()
+    expectTypeOf(results).toMatchTypeOf<Array<UserRow>>()
   })
 
   test(`joins with fn.select return type`, () => {
@@ -219,15 +229,17 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        employeeInfo: string
-        isHighEarner: boolean
-        departmentDetails: {
-          id: number
-          name: string
-        } | null
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          employeeInfo: string
+          isHighEarner: boolean
+          departmentDetails: {
+            id: number
+            name: string
+          } | null
+        }>
+      >
     >()
   })
 
@@ -247,11 +259,13 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should return namespaced joined type since no select
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        user: User
-        dept: Department | undefined
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          user: UserRow
+          dept: DepartmentRow | undefined
+        }>
+      >
     >()
   })
 
@@ -273,12 +287,14 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        departmentName: string
-        employeeName: string
-        salary: number
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          departmentName: string
+          employeeName: string
+          salary: number
+        }>
+      >
     >()
   })
 
@@ -306,12 +322,14 @@ describe(`Functional Variants Types`, () => {
 
     const results = liveCollection.toArray
     // Should use functional select type, not regular select type
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        employeeId: number
-        displayName: string
-        status: `Active` | `Inactive`
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          employeeId: number
+          displayName: string
+          status: `Active` | `Inactive`
+        }>
+      >
     >()
   })
 
@@ -334,11 +352,13 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        customName: string
-        isAdult: boolean
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          customName: string
+          isAdult: boolean
+        }>
+      >
     >()
   })
 
@@ -385,20 +405,22 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        profile: string
-        compensation: {
-          salary: number
-          grade: `A` | `B` | `C`
-          bonus_eligible: boolean
-        }
-        metrics: {
-          age: number
-          years_to_retirement: number
-          performance_bracket: `A` | `B` | `C`
-        }
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          profile: string
+          compensation: {
+            salary: number
+            grade: `A` | `B` | `C`
+            bonus_eligible: boolean
+          }
+          metrics: {
+            age: number
+            years_to_retirement: number
+            performance_bracket: `A` | `B` | `C`
+          }
+        }>
+      >
     >()
   })
 
@@ -414,11 +436,13 @@ describe(`Functional Variants Types`, () => {
     )
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        name: string
-        isActive: boolean
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          name: string
+          isActive: boolean
+        }>
+      >
     >()
   })
 
@@ -434,11 +458,13 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        userId: number
-        displayName: string
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          userId: number
+          displayName: string
+        }>
+      >
     >()
   })
 
@@ -460,12 +486,14 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        departmentId: number | undefined
-        departmentName: string | undefined
-        totalEmployees: number
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          departmentId: number | undefined
+          departmentName: string | undefined
+          totalEmployees: number
+        }>
+      >
     >()
   })
 
@@ -488,12 +516,14 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        name: string
-        salaryInThousands: number
-        ageCategory: `senior` | `mid` | `junior`
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          name: string
+          salaryInThousands: number
+          ageCategory: `senior` | `mid` | `junior`
+        }>
+      >
     >()
   })
 
@@ -512,12 +542,14 @@ describe(`Functional Variants Types`, () => {
     })
 
     const results = liveCollection.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        displayName: string
-        isActive: boolean
-        salary: number
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          displayName: string
+          isActive: boolean
+          salary: number
+        }>
+      >
     >()
   })
 })

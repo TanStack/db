@@ -5,6 +5,7 @@ import type { Transaction } from './transactions'
 import type { BasicExpression, OrderBy } from './query/ir.js'
 import type { EventEmitter } from './event-emitter.js'
 import type { SingleRowRefProxy } from './query/builder/ref-proxy.js'
+import type { WithVirtualProps } from './virtual-props.js'
 
 /**
  * Interface for a collection-like object that provides the necessary methods
@@ -739,9 +740,10 @@ export type CollectionConfigSingleRowOption<
   TUtils extends UtilsRecord = {},
 > = CollectionConfig<T, TKey, TSchema, TUtils> & MaybeSingleResult
 
-export type ChangesPayload<T extends object = Record<string, unknown>> = Array<
-  ChangeMessage<T>
->
+export type ChangesPayload<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>>
 
 /**
  * An input row from a collection
@@ -783,6 +785,7 @@ export type NamespacedAndKeyedStream = IStreamBuilder<KeyedNamespacedRow>
  */
 export interface SubscribeChangesOptions<
   T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
 > {
   /** Whether to include the current state as initial changes */
   includeInitialState?: boolean
@@ -800,7 +803,7 @@ export interface SubscribeChangesOptions<
    * })
    * ```
    */
-  where?: (row: SingleRowRefProxy<T>) => any
+  where?: (row: SingleRowRefProxy<WithVirtualProps<T, TKey>>) => any
   /** Pre-compiled expression for filtering changes */
   whereExpression?: BasicExpression<boolean>
   /**
@@ -829,7 +832,8 @@ export interface SubscribeChangesOptions<
 
 export interface SubscribeChangesSnapshotOptions<
   T extends object = Record<string, unknown>,
-> extends Omit<SubscribeChangesOptions<T>, `includeInitialState`> {
+  TKey extends string | number = string | number,
+> extends Omit<SubscribeChangesOptions<T, TKey>, `includeInitialState`> {
   orderBy?: OrderBy
   limit?: number
 }
@@ -879,7 +883,7 @@ export interface CurrentStateAsChangesOptions {
 export type ChangeListener<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-> = (changes: Array<ChangeMessage<T, TKey>>) => void
+> = (changes: Array<ChangeMessage<WithVirtualProps<T, TKey>, TKey>>) => void
 
 // Adapted from https://github.com/sindresorhus/type-fest
 // MIT License Copyright (c) Sindre Sorhus

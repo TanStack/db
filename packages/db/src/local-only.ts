@@ -312,9 +312,16 @@ function createLocalOnlySync<T extends object, TKey extends string | number>(
       syncWrite = write
       syncCommit = commit
       collection = params.collection
+      params.collection._state.isLocalOnly = true
 
       // Apply initial data if provided
       if (initialData && initialData.length > 0) {
+        // Mark initial data as local so $origin is 'local' for local-only collections
+        for (const item of initialData) {
+          const key = params.collection.getKeyFromItem(item)
+          params.collection._state.pendingLocalChanges.add(key)
+        }
+
         begin()
         initialData.forEach((item) => {
           write({

@@ -11,7 +11,7 @@ import {
   or,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample data types for join testing
 type User = {
@@ -1407,7 +1407,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             })),
       })
 
-      const forwardResults = forwardJoinQuery.toArray
+      const forwardResults = forwardJoinQuery.toArray.map((row) =>
+        stripVirtualProps(row),
+      )
       expect(forwardResults).toHaveLength(2) // Bob->Alice, Charlie->Alice
 
       // Test reverse direction: eq(parentUsers.id, users.parentId)
@@ -1427,7 +1429,9 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
             })),
       })
 
-      const reverseResults = reverseJoinQuery.toArray
+      const reverseResults = reverseJoinQuery.toArray.map((row) =>
+        stripVirtualProps(row),
+      )
       expect(reverseResults).toHaveLength(2) // Bob->Alice, Charlie->Alice
 
       // Both should produce identical results

@@ -29,6 +29,18 @@ const activeUsers = createCollection(liveQueryCollectionOptions({
 
 The result types are automatically inferred from your query structure, providing full TypeScript support. When you use a `select` clause, the result type matches your projection. Without `select`, you get the full schema with proper join optionality.
 
+## Virtual properties
+
+Live query results include computed, read-only virtual properties on every row:
+
+- `$synced`: `true` when the row is confirmed by sync; `false` when it is still optimistic.
+- `$origin`: `"local"` if the last confirmed change came from this client, otherwise `"remote"`.
+- `$key`: the row key for the result.
+- `$collectionId`: the source collection ID.
+
+These props can be used in `where`, `select`, and `orderBy` clauses. They are added to
+query outputs automatically and should not be persisted back to storage.
+
 ## Table of Contents
 
 - [Creating Live Query Collections](#creating-live-query-collections)

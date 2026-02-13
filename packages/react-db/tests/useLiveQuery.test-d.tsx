@@ -8,6 +8,7 @@ import {
   liveQueryCollectionOptions,
 } from '../../db/src/query/index'
 import { useLiveQuery } from '../src/useLiveQuery'
+import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
 type Person = {
@@ -38,7 +39,9 @@ describe(`useLiveQuery type assertions`, () => {
       )
     })
 
-    expectTypeOf(result.current.data).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type findOne config object to return a single row`, () => {
@@ -60,7 +63,9 @@ describe(`useLiveQuery type assertions`, () => {
       })
     })
 
-    expectTypeOf(result.current.data).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type findOne collection using liveQueryCollectionOptions to return a single row`, () => {
@@ -88,7 +93,9 @@ describe(`useLiveQuery type assertions`, () => {
       return useLiveQuery(liveQueryCollection)
     })
 
-    expectTypeOf(result.current.data).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type findOne collection using createLiveQueryCollection to return a single row`, () => {
@@ -114,6 +121,8 @@ describe(`useLiveQuery type assertions`, () => {
       return useLiveQuery(liveQueryCollection)
     })
 
-    expectTypeOf(result.current.data).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(result.current.data).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 })

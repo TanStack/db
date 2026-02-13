@@ -17,6 +17,15 @@ export { deepEquals } from './utils'
 export * from './paced-mutations'
 export * from './strategies/index.js'
 
+// Virtual properties exports
+export {
+  type VirtualRowProps,
+  type VirtualOrigin,
+  type WithVirtualProps,
+  type WithoutVirtualProps,
+  hasVirtualProps,
+} from './virtual-props.js'
+
 // Index system exports
 export * from './indexes/base-index.js'
 export * from './indexes/btree-index.js'
