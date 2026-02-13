@@ -560,4 +560,26 @@ describe(`Query collection type resolution tests`, () => {
       createCollection(options)
     })
   })
+
+  it(`should type collection.utils as QueryCollectionUtils after createCollection`, () => {
+    const collection = createCollection(
+      queryCollectionOptions<ExplicitType>({
+        id: `test-utils-typing`,
+        queryClient,
+        queryKey: [`test-utils`],
+        queryFn: () => Promise.resolve([]),
+        getKey: (item) => item.id,
+      }),
+    )
+
+    // Verify that collection.utils is typed as QueryCollectionUtils, not UtilsRecord
+    const utils: QueryCollectionUtils<ExplicitType> = collection.utils
+    expectTypeOf(utils.refetch).toBeFunction()
+    expectTypeOf(collection.utils.refetch).toBeFunction()
+    expectTypeOf(collection.utils.writeInsert).toBeFunction()
+    expectTypeOf(collection.utils.writeUpdate).toBeFunction()
+    expectTypeOf(collection.utils.writeDelete).toBeFunction()
+    expectTypeOf(collection.utils.isFetching).toBeBoolean()
+    expectTypeOf(collection.utils.isLoading).toBeBoolean()
+  })
 })
