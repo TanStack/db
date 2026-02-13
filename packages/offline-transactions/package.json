@@ -62,7 +62,9 @@
   },
   "peerDependencies": {
     "@react-native-community/netinfo": ">=11.0.0",
-    "react-native": ">=0.70.0"
+    "react-native": ">=0.70.0",
+    "@capacitor/preferences": ">=8.0.0",
+    "@capacitor/network": ">=8.0.0"
   },
   "peerDependenciesMeta": {
     "@react-native-community/netinfo": {
@@ -70,10 +72,18 @@
     },
     "react-native": {
       "optional": true
+    },
+    "@capacitor/preferences": {
+      "optional": true
+    },
+    "@capacitor/network": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@react-native-community/netinfo": "11.4.1",
+    "@capacitor/preferences": "8.0.0",
+    "@capacitor/network": "8.0.0",
     "@types/node": "^25.2.2",
     "eslint": "^9.39.2",
     "react-native": "0.79.6",
