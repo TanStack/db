@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { NonRetriableError } from '../src/types'
-import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
+import {
+  FakeOnlineDetector,
+  FakeStorageAdapter,
+  createTestOfflineEnvironment,
+} from './harness'
 import type { TestItem } from './harness'
 import type { OfflineMutationFnParams } from '../src/types'
 import type { PendingMutation } from '@tanstack/db'
@@ -428,6 +432,7 @@ describe(`offline executor end-to-end`, () => {
 
     // Give the executor a moment to react to leadership change
     await flushMicrotasks()
+    
 
     // Should not be offline enabled when not leader
     expect(env.executor.isOfflineEnabled).toBe(false)
@@ -463,6 +468,150 @@ describe(`offline executor end-to-end`, () => {
     // Should NOT have persisted to outbox
     const outboxEntries = await env.executor.peekOutbox()
     expect(outboxEntries).toEqual([])
+
+    env.executor.dispose()
+  })
+
+  it(`accepts a custom OnlineDetector via config`, async () => {
+    const customDetector = new FakeOnlineDetector()
+
+    const env = createTestOfflineEnvironment({
+      config: {
+        onlineDetector: customDetector,
+      },
+    })
+
+    await env.waitForLeader()
+
+    // Verify the executor uses the custom detector
+    expect(env.executor.getOnlineDetector()).toBe(customDetector)
+
+    env.executor.dispose()
+  })
+
+  it(`uses custom OnlineDetector instead of default`, async () => {
+    const customDetector = new FakeOnlineDetector()
+
+    // Set detector to offline initially
+    customDetector.online = false
+
+    const env = createTestOfflineEnvironment({
+      config: {
+        onlineDetector: customDetector,
+      },
+    })
+
+    await env.waitForLeader()
+
+    // Create a transaction while offline
+    const offlineTx = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+
+    offlineTx.mutate(() => {
+      env.collection.insert({
+        id: `custom-detector-item`,
+        value: `test`,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+
+    const commitPromise = offlineTx.commit()
+    await flushMicrotasks()
+
+    // Transaction should not execute because custom detector reports offline
+    expect(env.mutationCalls.length).toBe(0)
+
+    // Verify transaction is in outbox
+    let outboxEntries = await env.executor.peekOutbox()
+    expect(outboxEntries.length).toBe(1)
+
+    // Set detector back online and notify
+    customDetector.online = true
+    customDetector.notifyOnline()
+
+    // Wait for transaction to execute
+    await waitUntil(() => env.mutationCalls.length >= 1)
+
+    await commitPromise
+
+    // Verify transaction completed
+    outboxEntries = await env.executor.peekOutbox()
+    expect(outboxEntries).toEqual([])
+    expect(env.serverState.get(`custom-detector-item`)?.value).toBe(`test`)
+
+    env.executor.dispose()
+  })
+
+  it(`queues transaction created offline, then executes when going online`, async () => {
+    const customDetector = new FakeOnlineDetector()
+
+    // Start offline
+    customDetector.online = false
+
+    const env = createTestOfflineEnvironment({
+      config: {
+        onlineDetector: customDetector,
+      },
+    })
+
+    await env.waitForLeader()
+
+    // Create and commit transaction while offline
+    const offlineTx = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+
+    const now = new Date()
+    offlineTx.mutate(() => {
+      env.collection.insert({
+        id: `offline-queued`,
+        value: `will-sync-later`,
+        completed: false,
+        updatedAt: now,
+      })
+    })
+
+    const commitPromise = offlineTx.commit()
+    await flushMicrotasks()
+
+    // Transaction should not have executed yet (offline)
+    expect(env.mutationCalls.length).toBe(0)
+
+    // Transaction should be in outbox (queued)
+    let outboxEntries = await env.executor.peekOutbox()
+    expect(outboxEntries.length).toBe(1)
+    expect(outboxEntries[0].id).toBe(offlineTx.id)
+
+    // Local state should have the optimistic update
+    expect(env.collection.get(`offline-queued`)?.value).toBe(`will-sync-later`)
+
+    // Server should not have it yet
+    expect(env.serverState.get(`offline-queued`)).toBeUndefined()
+
+    // Go back online
+    customDetector.online = true
+    customDetector.notifyOnline()
+
+    // Wait for the transaction to execute
+    await waitUntil(() => env.mutationCalls.length >= 1)
+
+    // Commit promise should resolve
+    await commitPromise
+
+    // Verify transaction executed successfully
+    expect(env.mutationCalls.length).toBe(1)
+
+    // Transaction should be removed from outbox
+    outboxEntries = await env.executor.peekOutbox()
+    expect(outboxEntries).toEqual([])
+
+    // Both local and server should have the data
+    expect(env.collection.get(`offline-queued`)?.value).toBe(`will-sync-later`)
+    expect(env.serverState.get(`offline-queued`)?.value).toBe(`will-sync-later`)
 
     env.executor.dispose()
   })
