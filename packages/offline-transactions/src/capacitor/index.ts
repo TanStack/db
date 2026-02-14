@@ -38,7 +38,7 @@ export {
   TransactionExecutor,
 } from '../index'
 
-// Export RN-specific detector
+// Export Capacitor-specific detector
 export { CapacitorOnlineDetector } from '../connectivity/CapacitorOnlineDetector'
 
 // Export Capacitor-configured executor
