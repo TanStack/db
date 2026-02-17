@@ -1799,12 +1799,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         },
       ]
 
-      let dispatchCollection: ReturnType<
-        typeof createCollection<Dispatch, string>
-      >
-
-      beforeEach(() => {
-        dispatchCollection = createCollection(
+      function createDispatchCollection() {
+        return createCollection(
           mockSyncCollectionOptions<Dispatch>({
             id: `test-dispatches`,
             getKey: (d) => d.id,
@@ -1812,6 +1808,12 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
             autoIndex,
           }),
         )
+      }
+
+      let dispatchCollection: ReturnType<typeof createDispatchCollection>
+
+      beforeEach(() => {
+        dispatchCollection = createDispatchCollection()
       })
 
       test(`max returns the latest Temporal.PlainDate per group`, () => {
@@ -1831,11 +1833,11 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         const jobA = latestByJob.toArray.find((r) => r.jobId === `job-a`)
         expect(jobA).toBeDefined()
-        expect(jobA?.latestDate.toString()).toBe(`2025-10-07`)
+        expect(jobA?.latestDate?.toString()).toBe(`2025-10-07`)
 
         const jobB = latestByJob.toArray.find((r) => r.jobId === `job-b`)
         expect(jobB).toBeDefined()
-        expect(jobB?.latestDate.toString()).toBe(`2025-09-20`)
+        expect(jobB?.latestDate?.toString()).toBe(`2025-09-20`)
       })
 
       test(`min returns the earliest Temporal.PlainDate per group`, () => {
@@ -1855,11 +1857,11 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         const jobA = earliestByJob.toArray.find((r) => r.jobId === `job-a`)
         expect(jobA).toBeDefined()
-        expect(jobA?.earliestDate.toString()).toBe(`2025-10-01`)
+        expect(jobA?.earliestDate?.toString()).toBe(`2025-10-01`)
 
         const jobB = earliestByJob.toArray.find((r) => r.jobId === `job-b`)
         expect(jobB).toBeDefined()
-        expect(jobB?.earliestDate.toString()).toBe(`2025-09-15`)
+        expect(jobB?.earliestDate?.toString()).toBe(`2025-09-15`)
       })
 
       test(`min and max return correct Temporal.PlainDate with a single group row`, () => {
@@ -1899,8 +1901,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         expect(result.size).toBe(1)
         const row = result.toArray[0]
-        expect(row?.minDate.toString()).toBe(`2025-06-15`)
-        expect(row?.maxDate.toString()).toBe(`2025-06-15`)
+        expect(row?.minDate?.toString()).toBe(`2025-06-15`)
+        expect(row?.maxDate?.toString()).toBe(`2025-06-15`)
       })
     })
 
