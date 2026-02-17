@@ -374,6 +374,59 @@ describe(`evaluators`, () => {
           // In 3-valued logic, ilike with undefined pattern returns UNKNOWN (null)
           expect(compiled({})).toBe(null)
         })
+
+        it(`ilike % wildcard matches across newline characters`, () => {
+          // In SQL/PostgreSQL, % matches any sequence of characters including newlines.
+          // See: https://www.postgresql.org/docs/current/functions-matching.html
+          const func = new Func(`ilike`, [
+            new Value(`hello\nworld`),
+            new Value(`%world`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`ilike % wildcard matches pattern spanning a newline`, () => {
+          const func = new Func(`ilike`, [
+            new Value(`first line\nsecond line`),
+            new Value(`%line%line%`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`ilike matches word after newline with surrounding % wildcards`, () => {
+          const func = new Func(`ilike`, [
+            new Value(`some notes\ncontaining a keyword here`),
+            new Value(`%keyword%`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`like % wildcard matches across newline characters`, () => {
+          const func = new Func(`like`, [
+            new Value(`hello\nworld`),
+            new Value(`%world`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`ilike _ wildcard matches a newline character`, () => {
+          // In SQL, _ matches any single character, including newline
+          const func = new Func(`ilike`, [
+            new Value(`a\nb`),
+            new Value(`a_b`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
       })
 
       describe(`comparison operators`, () => {
