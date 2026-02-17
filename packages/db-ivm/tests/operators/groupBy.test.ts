@@ -961,6 +961,83 @@ describe(`Operators`, () => {
       expect(result).toEqual(expectedUpdateResult)
     })
 
+    test(`with min and max on Temporal-like objects`, () => {
+      // Mock Temporal-like class (avoids adding temporal-polyfill dependency to db-ivm)
+      class MockPlainDate {
+        static compare(a: MockPlainDate, b: MockPlainDate): number {
+          return a._epochDay - b._epochDay
+        }
+
+        private _epochDay: number
+
+        constructor(private _iso: string) {
+          // Simple date-to-epoch-day conversion for testing
+          const [y, m, d] = _iso.split(`-`).map(Number) as [number, number, number]
+          this._epochDay = y * 365 + m * 31 + d
+        }
+
+        get [Symbol.toStringTag]() {
+          return `Temporal.PlainDate`
+        }
+
+        valueOf(): never {
+          throw new TypeError(`Cannot use valueOf on Temporal.PlainDate`)
+        }
+
+        toString() {
+          return this._iso
+        }
+      }
+
+      const graph = new D2()
+      const input = graph.newInput<{
+        category: string
+        date: MockPlainDate
+      }>()
+      let latestMessage: any = null
+
+      input.pipe(
+        groupBy((data) => ({ category: data.category }), {
+          earliest: min((data: any) => data.date),
+          latest: max((data: any) => data.date),
+        }),
+        output((message) => {
+          latestMessage = message
+        }),
+      )
+
+      graph.finalize()
+
+      input.sendData(
+        new MultiSet([
+          [{ category: `A`, date: new MockPlainDate(`2025-10-01`) }, 1],
+          [{ category: `A`, date: new MockPlainDate(`2025-10-07`) }, 1],
+          [{ category: `A`, date: new MockPlainDate(`2025-10-04`) }, 1],
+          [{ category: `B`, date: new MockPlainDate(`2025-09-15`) }, 1],
+          [{ category: `B`, date: new MockPlainDate(`2025-09-20`) }, 1],
+        ]),
+      )
+
+      graph.run()
+
+      expect(latestMessage).not.toBeNull()
+      const result = latestMessage.getInner()
+
+      const groupA = result.find(
+        ([key]: any) => key[0] === `{"category":"A"}`,
+      )
+      expect(groupA).toBeDefined()
+      expect(groupA[0][1].earliest.toString()).toBe(`2025-10-01`)
+      expect(groupA[0][1].latest.toString()).toBe(`2025-10-07`)
+
+      const groupB = result.find(
+        ([key]: any) => key[0] === `{"category":"B"}`,
+      )
+      expect(groupB).toBeDefined()
+      expect(groupB[0][1].earliest.toString()).toBe(`2025-09-15`)
+      expect(groupB[0][1].latest.toString()).toBe(`2025-09-20`)
+    })
+
     test(`group removal and re-addition with multiple aggregates`, () => {
       const graph = new D2()
       const input = graph.newInput<{

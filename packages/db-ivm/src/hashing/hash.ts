@@ -18,6 +18,7 @@ const ARRAY_MARKER = randomHash()
 const MAP_MARKER = randomHash()
 const SET_MARKER = randomHash()
 const UINT8ARRAY_MARKER = randomHash()
+const TEMPORAL_MARKER = randomHash()
 
 // Maximum byte length for Uint8Arrays to hash by content instead of reference
 // Arrays smaller than this will be hashed by content, allowing proper equality comparisons
@@ -39,8 +40,11 @@ function hashObject(input: object): number {
   }
 
   let valueHash: number | undefined
+  const tag = (input as any)[Symbol.toStringTag]
   if (input instanceof Date) {
     valueHash = hashDate(input)
+  } else if (typeof tag === `string` && tag.startsWith(`Temporal.`)) {
+    valueHash = hashTemporal(tag, input)
   } else if (
     // Check if input is a Uint8Array or Buffer
     (typeof Buffer !== `undefined` && input instanceof Buffer) ||
@@ -88,6 +92,14 @@ function hashDate(input: Date): number {
   const hasher = new MurmurHashStream()
   hasher.update(DATE_MARKER)
   hasher.update(input.getTime())
+  return hasher.digest()
+}
+
+function hashTemporal(tag: string, input: object): number {
+  const hasher = new MurmurHashStream()
+  hasher.update(TEMPORAL_MARKER)
+  hasher.update(tag)
+  hasher.update((input as any).toString())
   return hasher.digest()
 }
 

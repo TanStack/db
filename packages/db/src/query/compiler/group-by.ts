@@ -12,6 +12,7 @@ import {
   UnknownHavingExpressionTypeError,
   UnsupportedAggregateFunctionError,
 } from '../../errors.js'
+import { isTemporal } from '../../utils.js'
 import { compileExpression, toBooleanPredicate } from './evaluators.js'
 import type {
   Aggregate,
@@ -365,12 +366,13 @@ function getAggregateFunction(aggExpr: Aggregate) {
     NamespacedRow,
   ]) => {
     const value = compiledExpr(namespacedRow)
-    // Preserve strings, numbers, Dates, and bigints for comparison
+    // Preserve strings, numbers, Dates, bigints, and Temporal objects for comparison
     if (
       typeof value === `number` ||
       typeof value === `string` ||
       typeof value === `bigint` ||
-      value instanceof Date
+      value instanceof Date ||
+      isTemporal(value)
     ) {
       return value
     }

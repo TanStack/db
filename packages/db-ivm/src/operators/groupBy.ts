@@ -211,7 +211,29 @@ export function avg<T>(
   }
 }
 
-type CanMinMax = number | Date | bigint | string
+type HasStaticCompare = { constructor: { compare: (a: any, b: any) => number } }
+
+function isTemporalLike(value: unknown): value is HasStaticCompare {
+  if (value === null || value === undefined || typeof value !== `object`) return false
+  const tag = (value as any)[Symbol.toStringTag]
+  return typeof tag === `string` && tag.startsWith(`Temporal.`)
+}
+
+function isLessThan(a: CanMinMax, b: CanMinMax): boolean {
+  if (isTemporalLike(a) && isTemporalLike(b)) {
+    return a.constructor.compare(a, b) < 0
+  }
+  return a < b
+}
+
+function isGreaterThan(a: CanMinMax, b: CanMinMax): boolean {
+  if (isTemporalLike(a) && isTemporalLike(b)) {
+    return a.constructor.compare(a, b) > 0
+  }
+  return a > b
+}
+
+type CanMinMax = number | Date | bigint | string | HasStaticCompare
 
 /**
  * Creates a min aggregate function that computes the minimum value in a group
@@ -234,7 +256,7 @@ export function min<T, V extends CanMinMax>(
     reduce: (values) => {
       let minValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (!minValue || (value && value < minValue)) {
+        if (!minValue || (value && isLessThan(value, minValue))) {
           minValue = value
         }
       }
@@ -264,7 +286,7 @@ export function max<T, V extends CanMinMax>(
     reduce: (values) => {
       let maxValue: V | undefined
       for (const [value, _multiplicity] of values) {
-        if (!maxValue || (value && value > maxValue)) {
+        if (!maxValue || (value && isGreaterThan(value, maxValue))) {
           maxValue = value
         }
       }
