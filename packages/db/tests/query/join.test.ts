@@ -1840,6 +1840,66 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
     expect(result.join2!.value).toBe(1)
     expect(result.join2!.other).toBe(30)
   })
+
+  test(`where with isUndefined on right-side field should filter entire joined rows`, () => {
+    type Left = {
+      id: string
+      rightId: string | null
+    }
+
+    type Right = {
+      id: string
+      payload: string | null | undefined
+    }
+
+    const leftCollection = createCollection(
+      mockSyncCollectionOptions<Left>({
+        id: `test-left-isundefined-field`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `l1`, rightId: `r1` },
+          { id: `l2`, rightId: `r2` },
+          { id: `l3`, rightId: `r3` },
+          { id: `l4`, rightId: null },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const rightCollection = createCollection(
+      mockSyncCollectionOptions<Right>({
+        id: `test-right-isundefined-field`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `r1`, payload: `ok` },
+          { id: `r2`, payload: null },
+          { id: `r3`, payload: undefined },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const lq = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ l: leftCollection })
+          .leftJoin({ r: rightCollection }, ({ l, r }) => eq(l.rightId, r.id))
+          .where(({ r }) => isUndefined(r?.payload))
+          .select(({ l, r }) => ({ leftId: l.id, right: r })),
+    })
+
+    const data = lq.toArray
+
+    // l1 joins r1 (payload='ok') → payload is defined → exclude
+    // l2 joins r2 (payload=null) → payload is null, not undefined → exclude
+    // l3 joins r3 (payload=undefined) → payload is undefined → include
+    // l4 has no match (rightId=null) → right is undefined, so r?.payload is undefined → include
+    expect(data.sort((a, b) => a.leftId.localeCompare(b.leftId))).toEqual([
+      { leftId: `l3`, right: { id: `r3`, payload: undefined } },
+      { leftId: `l4`, right: undefined },
+    ])
+  })
 }
 
 describe(`Query JOIN Operations`, () => {
