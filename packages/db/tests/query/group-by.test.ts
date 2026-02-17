@@ -1799,7 +1799,9 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         },
       ]
 
-      let dispatchCollection: ReturnType<typeof createCollection<Dispatch, string>>
+      let dispatchCollection: ReturnType<
+        typeof createCollection<Dispatch, string>
+      >
 
       beforeEach(() => {
         dispatchCollection = createCollection(
