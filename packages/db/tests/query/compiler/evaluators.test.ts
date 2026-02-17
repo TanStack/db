@@ -374,6 +374,23 @@ describe(`evaluators`, () => {
           // In 3-valued logic, ilike with undefined pattern returns UNKNOWN (null)
           expect(compiled({})).toBe(null)
         })
+
+        it(`like % wildcard matches across newline characters`, () => {
+          const func = new Func(`like`, [
+            new Value(`hello\nworld`),
+            new Value(`%world`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
+
+        it(`like _ wildcard matches a newline character`, () => {
+          const func = new Func(`like`, [new Value(`a\nb`), new Value(`a_b`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(true)
+        })
       })
 
       describe(`comparison operators`, () => {
