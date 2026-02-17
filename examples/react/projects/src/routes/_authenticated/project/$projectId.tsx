@@ -83,6 +83,16 @@ function ProjectPage() {
     todoCollection.delete(id)
   }
 
+  if (!project || !usersInProject) {
+    return (
+      <div className="p-6">
+        <div className="max-w-2xl mx-auto text-center py-8">
+          <p className="text-gray-500">Loading project...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="p-6">
       <div className="max-w-2xl mx-auto">
