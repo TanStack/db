@@ -20,37 +20,36 @@ import { createDbRequestScope } from '@tanstack/db/ssr'
 import { sharedDbEnv } from '@/db/server-shared'
 import { createServerCollections } from '@/db/createServerCollections'
 
-export const dbScopeMiddleware = createMiddleware().server(async ({ request, next }) => {
-  const dbScope = createDbRequestScope({
-    shared: sharedDbEnv,
-    createCollections: ({ shared }) =>
-      createServerCollections({ request, shared }),
-    collectionScopes: {
-      catalog: `process`,
-      account: `request`,
-    },
-  })
-
-  try {
-    return await next({
-      context: {
-        dbScope,
+export const dbScopeMiddleware = createMiddleware().server(
+  async ({ request, next }) => {
+    const dbScope = createDbRequestScope({
+      shared: sharedDbEnv,
+      createCollections: ({ shared }) =>
+        createServerCollections({ request, shared }),
+      collectionScopes: {
+        catalog: `process`,
+        account: `request`,
       },
     })
-  } finally {
-    await dbScope.cleanup()
-  }
-})
+
+    try {
+      return await next({
+        context: {
+          dbScope,
+        },
+      })
+    } finally {
+      await dbScope.cleanup()
+    }
+  },
+)
 ```
 
 ## 3) Route Loader: Prefetch with Request Scope
 
 ```tsx
 // src/routes/store.tsx
-import {
-  prefetchDbQuery,
-  dehydrateDbScope,
-} from '@tanstack/db/ssr'
+import { prefetchDbQuery, dehydrateDbScope } from '@tanstack/db/ssr'
 import { createFileRoute } from '@tanstack/react-router'
 import { HydrationBoundary } from '@tanstack/react-db/hydration'
 

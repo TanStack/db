@@ -35,11 +35,19 @@ import { queryCollectionOptions } from '@tanstack/query-db-collection'
 
 type CreateServerCollectionsArgs = {
   request: Request
-  shared: ReturnType<typeof import('@tanstack/db/ssr').createDbSharedEnvironment>
+  shared: ReturnType<
+    typeof import('@tanstack/db/ssr').createDbSharedEnvironment
+  >
 }
 
-export function createServerCollections({ request, shared }: CreateServerCollectionsArgs) {
-  const sharedQueryClient = shared.getOrCreate(`catalog-query-client`, () => new QueryClient())
+export function createServerCollections({
+  request,
+  shared,
+}: CreateServerCollectionsArgs) {
+  const sharedQueryClient = shared.getOrCreate(
+    `catalog-query-client`,
+    () => new QueryClient(),
+  )
   const catalogCollection = shared.getOrCreate(`catalog-collection`, () =>
     createCollection(
       queryCollectionOptions({
@@ -210,7 +218,10 @@ export const getServerSideProps: GetServerSideProps = async (ctx) => {
   const scope = createDbRequestScope({
     shared: sharedDbEnv,
     createCollections: ({ shared }) =>
-      createServerCollections({ request: ctx.req as unknown as Request, shared }),
+      createServerCollections({
+        request: ctx.req as unknown as Request,
+        shared,
+      }),
     collectionScopes: {
       catalog: `process`,
       account: `request`,

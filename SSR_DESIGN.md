@@ -114,12 +114,16 @@ export interface DbSharedEnvironment {
 export interface DbRequestScope<TCollections extends CollectionMap> {
   readonly id: string
   readonly collections: TCollections
-  readonly collectionScopes: Partial<Record<keyof TCollections, ServerCollectionScope>>
+  readonly collectionScopes: Partial<
+    Record<keyof TCollections, ServerCollectionScope>
+  >
   readonly prefetchedQueries: Map<string, DehydratedQueryRecord>
   cleanup(): Promise<void>
 }
 
-export interface CreateDbRequestScopeOptions<TCollections extends CollectionMap> {
+export interface CreateDbRequestScopeOptions<
+  TCollections extends CollectionMap,
+> {
   shared?: DbSharedEnvironment
   createCollections: (ctx: { shared: DbSharedEnvironment }) => TCollections
   collectionScopes?: Partial<Record<keyof TCollections, ServerCollectionScope>>
@@ -228,7 +232,9 @@ export interface DehydrateDbScopeOptions<TCollections extends CollectionMap> {
         transform?: Partial<
           Record<
             keyof TCollections,
-            (snapshot: CollectionSnapshot<unknown>) => CollectionSnapshot<unknown>
+            (
+              snapshot: CollectionSnapshot<unknown>,
+            ) => CollectionSnapshot<unknown>
           >
         >
       }
@@ -381,7 +387,8 @@ Then bind scopes explicitly in request creation:
 ```ts
 const scope = createDbRequestScope({
   shared: sharedEnv,
-  createCollections: ({ shared }) => createServerCollections({ request, shared }),
+  createCollections: ({ shared }) =>
+    createServerCollections({ request, shared }),
   collectionScopes: {
     catalog: `process`,
     account: `request`,

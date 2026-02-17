@@ -56,10 +56,7 @@ export default createRequestHandler({
 
 ```ts
 // app/routes/store.tsx
-import {
-  prefetchDbQuery,
-  dehydrateDbScope,
-} from '@tanstack/db/ssr'
+import { prefetchDbQuery, dehydrateDbScope } from '@tanstack/db/ssr'
 
 export async function loader({ context }: LoaderFunctionArgs) {
   const { dbScope } = context

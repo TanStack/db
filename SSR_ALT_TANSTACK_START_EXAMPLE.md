@@ -39,7 +39,8 @@ export const getAccountCollection = defineCollection(
 export const getCatalogGridLiveQuery = defineLiveQuery((scope?: DbScope) =>
   liveQueryCollectionOptions({
     id: `catalog-grid`,
-    query: (q) => q.from({ c: getCatalogCollection(scope) }).orderBy(({ c }) => c.name),
+    query: (q) =>
+      q.from({ c: getCatalogCollection(scope) }).orderBy(({ c }) => c.name),
     ssr: { serializes: true },
   }),
 )
@@ -48,7 +49,8 @@ export const getAccountSummaryLiveQuery = defineLiveQuery(
   ({ userId }: { userId: string }, scope: DbScope) =>
     liveQueryCollectionOptions({
       id: `account-summary:${userId}`,
-      query: (q) => q.from({ a: getAccountCollection({ userId }, scope) }).findOne(),
+      query: (q) =>
+        q.from({ a: getAccountCollection({ userId }, scope) }).findOne(),
       ssr: { serializes: true },
     }),
   { scope: 'required' },
@@ -104,13 +106,15 @@ TanStack Start calls `createRouter()` per server request, so `dbScope` is reques
 // src/start/middleware/db-scope.ts
 import { createMiddleware } from '@tanstack/start'
 
-export const dbScopeMiddleware = createMiddleware().server(async ({ next, context }) => {
-  try {
-    return await next()
-  } finally {
-    await context.dbScope.cleanup()
-  }
-})
+export const dbScopeMiddleware = createMiddleware().server(
+  async ({ next, context }) => {
+    try {
+      return await next()
+    } finally {
+      await context.dbScope.cleanup()
+    }
+  },
+)
 ```
 
 Cleanup runs after the full response lifecycle, not inside individual loaders.

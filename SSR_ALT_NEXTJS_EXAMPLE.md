@@ -66,7 +66,8 @@ export const getAccountCollection = defineCollection(
 export const getCatalogGridLiveQuery = defineLiveQuery((scope) =>
   liveQueryCollectionOptions({
     id: `catalog-grid`,
-    query: (q) => q.from({ c: getCatalogCollection(scope) }).orderBy(({ c }) => c.name),
+    query: (q) =>
+      q.from({ c: getCatalogCollection(scope) }).orderBy(({ c }) => c.name),
     ssr: { serializes: true },
   }),
 )
@@ -75,7 +76,8 @@ export const getAccountSummaryLiveQuery = defineLiveQuery(
   ({ userId }: { userId: string }, scope: DbScope) =>
     liveQueryCollectionOptions({
       id: `account-summary:${userId}`,
-      query: (q) => q.from({ a: getAccountCollection({ userId }, scope) }).findOne(),
+      query: (q) =>
+        q.from({ a: getAccountCollection({ userId }, scope) }).findOne(),
       ssr: { serializes: true },
     }),
   { scope: 'required' },
@@ -164,10 +166,7 @@ export function StorePageClient({ userId }: { userId: string }) {
 import type { GetServerSideProps } from 'next'
 import { createDbScope } from '@tanstack/db/ssr'
 import { ProvideDbScope } from '@tanstack/react-db/ssr'
-import {
-  getAccountCollection,
-  getAccountSummaryLiveQuery,
-} from '@/db/getters'
+import { getAccountCollection, getAccountSummaryLiveQuery } from '@/db/getters'
 import { StorePageClient } from '@/app/store/StorePageClient'
 
 export const getServerSideProps: GetServerSideProps = async (ctx) => {
