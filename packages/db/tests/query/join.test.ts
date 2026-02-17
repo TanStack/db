@@ -1884,10 +1884,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
       query: (q) =>
         q
           .from({ l: leftCollection })
-          .leftJoin(
-            { r: rightCollection },
-            ({ l, r }) => eq(l.rightId, r.id),
-          )
+          .leftJoin({ r: rightCollection }, ({ l, r }) => eq(l.rightId, r.id))
           .where(({ r }) => isUndefined(r?.payload))
           .select(({ l, r }) => ({ leftId: l.id, right: r })),
     })
