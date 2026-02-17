@@ -972,7 +972,11 @@ describe(`Operators`, () => {
 
         constructor(private _iso: string) {
           // Simple date-to-epoch-day conversion for testing
-          const [y, m, d] = _iso.split(`-`).map(Number) as [number, number, number]
+          const [y, m, d] = _iso.split(`-`).map(Number) as [
+            number,
+            number,
+            number,
+          ]
           this._epochDay = y * 365 + m * 31 + d
         }
 
@@ -1023,16 +1027,12 @@ describe(`Operators`, () => {
       expect(latestMessage).not.toBeNull()
       const result = latestMessage.getInner()
 
-      const groupA = result.find(
-        ([key]: any) => key[0] === `{"category":"A"}`,
-      )
+      const groupA = result.find(([key]: any) => key[0] === `{"category":"A"}`)
       expect(groupA).toBeDefined()
       expect(groupA[0][1].earliest.toString()).toBe(`2025-10-01`)
       expect(groupA[0][1].latest.toString()).toBe(`2025-10-07`)
 
-      const groupB = result.find(
-        ([key]: any) => key[0] === `{"category":"B"}`,
-      )
+      const groupB = result.find(([key]: any) => key[0] === `{"category":"B"}`)
       expect(groupB).toBeDefined()
       expect(groupB[0][1].earliest.toString()).toBe(`2025-09-15`)
       expect(groupB[0][1].latest.toString()).toBe(`2025-09-20`)

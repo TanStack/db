@@ -214,7 +214,8 @@ export function avg<T>(
 type HasStaticCompare = { constructor: { compare: (a: any, b: any) => number } }
 
 function isTemporalLike(value: unknown): value is HasStaticCompare {
-  if (value === null || value === undefined || typeof value !== `object`) return false
+  if (value === null || value === undefined || typeof value !== `object`)
+    return false
   const tag = (value as any)[Symbol.toStringTag]
   return typeof tag === `string` && tag.startsWith(`Temporal.`)
 }
