@@ -380,5 +380,4 @@ describe(`normalizeValue property-based tests`, () => {
   fcTest.prop([fc.integer()])(`integers pass through unchanged`, (n) => {
     expect(normalizeValue(n)).toBe(n)
   })
-
 })
