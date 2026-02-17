@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
@@ -1760,6 +1761,144 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Gold tier should remain unchanged
         const goldTier = results.find((r) => r.tier === `gold`)
         expect(goldTier?.order_count).toBe(initialGoldCount)
+      })
+    })
+
+    describe(`Temporal type aggregates`, () => {
+      type Dispatch = {
+        id: string
+        jobId: string
+        date: Temporal.PlainDate
+      }
+
+      const sampleDispatches: Array<Dispatch> = [
+        {
+          id: `d1`,
+          jobId: `job-a`,
+          date: Temporal.PlainDate.from(`2025-10-01`),
+        },
+        {
+          id: `d2`,
+          jobId: `job-a`,
+          date: Temporal.PlainDate.from(`2025-10-07`),
+        },
+        {
+          id: `d3`,
+          jobId: `job-a`,
+          date: Temporal.PlainDate.from(`2025-10-04`),
+        },
+        {
+          id: `d4`,
+          jobId: `job-b`,
+          date: Temporal.PlainDate.from(`2025-09-15`),
+        },
+        {
+          id: `d5`,
+          jobId: `job-b`,
+          date: Temporal.PlainDate.from(`2025-09-20`),
+        },
+      ]
+
+      let dispatchCollection: ReturnType<typeof createCollection<Dispatch, string>>
+
+      beforeEach(() => {
+        dispatchCollection = createCollection(
+          mockSyncCollectionOptions<Dispatch>({
+            id: `test-dispatches`,
+            getKey: (d) => d.id,
+            initialData: sampleDispatches,
+            autoIndex,
+          }),
+        )
+      })
+
+      test(`max returns the latest Temporal.PlainDate per group`, () => {
+        const latestByJob = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ dispatch: dispatchCollection })
+              .groupBy(({ dispatch }) => dispatch.jobId)
+              .select(({ dispatch }) => ({
+                jobId: dispatch.jobId,
+                latestDate: max(dispatch.date),
+              })),
+        })
+
+        expect(latestByJob.size).toBe(2)
+
+        const jobA = latestByJob.toArray.find((r) => r.jobId === `job-a`)
+        expect(jobA).toBeDefined()
+        expect(jobA?.latestDate.toString()).toBe(`2025-10-07`)
+
+        const jobB = latestByJob.toArray.find((r) => r.jobId === `job-b`)
+        expect(jobB).toBeDefined()
+        expect(jobB?.latestDate.toString()).toBe(`2025-09-20`)
+      })
+
+      test(`min returns the earliest Temporal.PlainDate per group`, () => {
+        const earliestByJob = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ dispatch: dispatchCollection })
+              .groupBy(({ dispatch }) => dispatch.jobId)
+              .select(({ dispatch }) => ({
+                jobId: dispatch.jobId,
+                earliestDate: min(dispatch.date),
+              })),
+        })
+
+        expect(earliestByJob.size).toBe(2)
+
+        const jobA = earliestByJob.toArray.find((r) => r.jobId === `job-a`)
+        expect(jobA).toBeDefined()
+        expect(jobA?.earliestDate.toString()).toBe(`2025-10-01`)
+
+        const jobB = earliestByJob.toArray.find((r) => r.jobId === `job-b`)
+        expect(jobB).toBeDefined()
+        expect(jobB?.earliestDate.toString()).toBe(`2025-09-15`)
+      })
+
+      test(`min and max return correct Temporal.PlainDate with a single group row`, () => {
+        type SingleDispatch = {
+          id: string
+          jobId: string
+          date: Temporal.PlainDate
+        }
+
+        const singleCollection = createCollection(
+          mockSyncCollectionOptions<SingleDispatch>({
+            id: `test-single-dispatch`,
+            getKey: (d) => d.id,
+            initialData: [
+              {
+                id: `d1`,
+                jobId: `job-x`,
+                date: Temporal.PlainDate.from(`2025-06-15`),
+              },
+            ],
+            autoIndex,
+          }),
+        )
+
+        const result = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ dispatch: singleCollection })
+              .groupBy(({ dispatch }) => dispatch.jobId)
+              .select(({ dispatch }) => ({
+                jobId: dispatch.jobId,
+                minDate: min(dispatch.date),
+                maxDate: max(dispatch.date),
+              })),
+        })
+
+        expect(result.size).toBe(1)
+        const row = result.toArray[0]
+        expect(row?.minDate.toString()).toBe(`2025-06-15`)
+        expect(row?.maxDate.toString()).toBe(`2025-06-15`)
       })
     })
 
