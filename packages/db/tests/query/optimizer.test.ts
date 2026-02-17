@@ -1649,35 +1649,18 @@ describe(`Query Optimizer`, () => {
       const { optimizedQuery } = optimizeQuery(query)
 
       // The WHERE clause should remain in the main query to preserve LEFT JOIN semantics
-      // It should NOT be completely moved to the subquery
+      // It must NOT be pushed down to the nullable (right) side because that would
+      // pre-filter the right data, converting excluded matches into unmatched rows
       expect(optimizedQuery.where).toHaveLength(1)
-      expect(optimizedQuery.where![0]).toEqual({
-        expression: createEq(
+      expect(optimizedQuery.where![0]).toEqual(
+        createEq(
           createPropRef(`teamMember`, `user_id`),
           createValue(100),
         ),
-        residual: true,
-      })
+      )
 
-      // If the optimizer creates a subquery for teamMember, the WHERE clause should also be copied there
-      // but a residual copy must remain in the main query
-      if (
-        optimizedQuery.join &&
-        optimizedQuery.join[0]?.from.type === `queryRef`
-      ) {
-        const teamMemberSubquery = optimizedQuery.join[0].from.query
-        // The subquery may have the WHERE clause for optimization
-        if (teamMemberSubquery.where && teamMemberSubquery.where.length > 0) {
-          // But the main query MUST still have it to preserve semantics
-          expect(optimizedQuery.where).toContainEqual({
-            expression: createEq(
-              createPropRef(`teamMember`, `user_id`),
-              createValue(100),
-            ),
-            residual: true,
-          })
-        }
-      }
+      // The optimizer should NOT create a subquery for the nullable side
+      expect(optimizedQuery.join![0]!.from.type).toBe(`collectionRef`)
     })
 
     test(`should preserve WHERE clause semantics when pushing down to RIGHT JOIN`, () => {
@@ -1715,32 +1698,17 @@ describe(`Query Optimizer`, () => {
       const { optimizedQuery } = optimizeQuery(query)
 
       // The WHERE clause should remain in the main query to preserve RIGHT JOIN semantics
-      // It should NOT be completely moved to the subquery
+      // It must NOT be pushed down to the nullable (left/from) side
       expect(optimizedQuery.where).toHaveLength(1)
-      expect(optimizedQuery.where![0]).toEqual({
-        expression: createEq(
+      expect(optimizedQuery.where![0]).toEqual(
+        createEq(
           createPropRef(`user`, `department_id`),
           createValue(1),
         ),
-        residual: true,
-      })
+      )
 
-      // If the optimizer creates a subquery for users, the WHERE clause should also be copied there
-      // but a residual copy must remain in the main query
-      if (optimizedQuery.from.type === `queryRef`) {
-        const userSubquery = optimizedQuery.from.query
-        // The subquery may have the WHERE clause for optimization
-        if (userSubquery.where && userSubquery.where.length > 0) {
-          // But the main query MUST still have it to preserve semantics
-          expect(optimizedQuery.where).toContainEqual({
-            expression: createEq(
-              createPropRef(`user`, `department_id`),
-              createValue(1),
-            ),
-            residual: true,
-          })
-        }
-      }
+      // The optimizer should NOT create a subquery for the nullable side (from)
+      expect(optimizedQuery.from.type).toBe(`collectionRef`)
     })
 
     test(`should preserve WHERE clause semantics when pushing down to FULL JOIN`, () => {
@@ -1778,35 +1746,18 @@ describe(`Query Optimizer`, () => {
       const { optimizedQuery } = optimizeQuery(query)
 
       // The WHERE clause should remain in the main query to preserve FULL JOIN semantics
-      // It should NOT be completely moved to the subquery
+      // It must NOT be pushed down to any nullable side
       expect(optimizedQuery.where).toHaveLength(1)
-      expect(optimizedQuery.where![0]).toEqual({
-        expression: createGt(
+      expect(optimizedQuery.where![0]).toEqual(
+        createGt(
           createPropRef(`payment`, `amount`),
           createValue(100),
         ),
-        residual: true,
-      })
+      )
 
-      // If the optimizer creates a subquery for payments, the WHERE clause should also be copied there
-      // but a residual copy must remain in the main query
-      if (
-        optimizedQuery.join &&
-        optimizedQuery.join[0]?.from.type === `queryRef`
-      ) {
-        const paymentSubquery = optimizedQuery.join[0].from.query
-        // The subquery may have the WHERE clause for optimization
-        if (paymentSubquery.where && paymentSubquery.where.length > 0) {
-          // But the main query MUST still have it to preserve semantics
-          expect(optimizedQuery.where).toContainEqual({
-            expression: createGt(
-              createPropRef(`payment`, `amount`),
-              createValue(100),
-            ),
-            residual: true,
-          })
-        }
-      }
+      // The optimizer should NOT create subqueries for nullable sides
+      expect(optimizedQuery.from.type).toBe(`collectionRef`)
+      expect(optimizedQuery.join![0]!.from.type).toBe(`collectionRef`)
     })
 
     test(`should allow WHERE clause pushdown for INNER JOIN (semantics preserved)`, () => {
