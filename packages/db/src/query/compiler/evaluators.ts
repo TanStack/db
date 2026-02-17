@@ -3,7 +3,6 @@ import {
   UnknownExpressionTypeError,
   UnknownFunctionError,
 } from '../../errors.js'
-import { areValuesEqual, normalizeValue } from '../../utils/comparison.js'
 import type { BasicExpression, Func, PropRef } from '../ir.js'
 import type { NamespacedRow } from '../../types.js'
 
@@ -202,14 +201,13 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const argA = compiledArgs[0]!
       const argB = compiledArgs[1]!
       return (data) => {
-        const a = normalizeValue(argA(data))
-        const b = normalizeValue(argB(data))
+        const a = argA(data)
+        const b = argB(data)
         // In 3-valued logic, any comparison with null/undefined returns UNKNOWN
         if (isUnknown(a) || isUnknown(b)) {
           return null
         }
-        // Use areValuesEqual for proper Uint8Array/Buffer comparison
-        return areValuesEqual(a, b)
+        return a === b
       }
     }
     case `gt`: {
@@ -336,7 +334,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
       return (data) => {
-        const value = normalizeValue(valueEvaluator(data))
+        const value = valueEvaluator(data)
         const array = arrayEvaluator(data)
         // In 3-valued logic, if the value is null/undefined, return UNKNOWN
         if (isUnknown(value)) {
@@ -345,7 +343,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (!Array.isArray(array)) {
           return false
         }
-        return array.some((item) => normalizeValue(item) === value)
+        return array.includes(value)
       }
     }
 

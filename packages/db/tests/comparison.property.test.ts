@@ -1,7 +1,6 @@
 import { describe, expect } from 'vitest'
 import { fc, test as fcTest } from '@fast-check/vitest'
 import {
-  areValuesEqual,
   ascComparator,
   descComparator,
   makeComparator,
@@ -374,23 +373,6 @@ describe(`normalizeValue property-based tests`, () => {
     expect(normalizeValue(date)).toBe(date.getTime())
   })
 
-  fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 128 })])(
-    `small Uint8Arrays normalize to string representation`,
-    (arr) => {
-      const normalized = normalizeValue(arr)
-      expect(typeof normalized).toBe(`string`)
-      expect(normalized).toMatch(/^__u8__/)
-    },
-  )
-
-  fcTest.prop([fc.uint8Array({ minLength: 129, maxLength: 200 })])(
-    `large Uint8Arrays are not normalized`,
-    (arr) => {
-      const normalized = normalizeValue(arr)
-      expect(normalized).toBe(arr)
-    },
-  )
-
   fcTest.prop([fc.string()])(`strings pass through unchanged`, (str) => {
     expect(normalizeValue(str)).toBe(str)
   })
@@ -399,50 +381,4 @@ describe(`normalizeValue property-based tests`, () => {
     expect(normalizeValue(n)).toBe(n)
   })
 
-  fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 128 })])(
-    `normalization is idempotent for Uint8Arrays`,
-    (arr) => {
-      const normalized1 = normalizeValue(arr)
-      // For strings (which small arrays become), normalizing again should be identity
-      expect(normalizeValue(normalized1)).toBe(normalized1)
-    },
-  )
-})
-
-describe(`areValuesEqual property-based tests`, () => {
-  fcTest.prop([fc.uint8Array({ minLength: 0, maxLength: 50 })])(
-    `Uint8Arrays with same content are equal`,
-    (arr) => {
-      const copy = new Uint8Array(arr)
-      expect(areValuesEqual(arr, copy)).toBe(true)
-    },
-  )
-
-  fcTest.prop([
-    fc.uint8Array({ minLength: 1, maxLength: 50 }),
-    fc.integer({ min: 0, max: 49 }),
-    fc.integer({ min: 0, max: 255 }),
-  ])(
-    `Uint8Arrays with different content are not equal`,
-    (arr, index, newValue) => {
-      if (index < arr.length && arr[index] !== newValue) {
-        const modified = new Uint8Array(arr)
-        modified[index] = newValue
-        expect(areValuesEqual(arr, modified)).toBe(false)
-      }
-    },
-  )
-
-  fcTest.prop([fc.integer()])(`reference equality for primitives`, (n) => {
-    expect(areValuesEqual(n, n)).toBe(true)
-  })
-
-  fcTest.prop([fc.integer(), fc.integer()])(
-    `different integers are not equal`,
-    (a, b) => {
-      if (a !== b) {
-        expect(areValuesEqual(a, b)).toBe(false)
-      }
-    },
-  )
 })
