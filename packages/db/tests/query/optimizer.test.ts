@@ -1653,10 +1653,7 @@ describe(`Query Optimizer`, () => {
       // pre-filter the right data, converting excluded matches into unmatched rows
       expect(optimizedQuery.where).toHaveLength(1)
       expect(optimizedQuery.where![0]).toEqual(
-        createEq(
-          createPropRef(`teamMember`, `user_id`),
-          createValue(100),
-        ),
+        createEq(createPropRef(`teamMember`, `user_id`), createValue(100)),
       )
 
       // The optimizer should NOT create a subquery for the nullable side
@@ -1701,10 +1698,7 @@ describe(`Query Optimizer`, () => {
       // It must NOT be pushed down to the nullable (left/from) side
       expect(optimizedQuery.where).toHaveLength(1)
       expect(optimizedQuery.where![0]).toEqual(
-        createEq(
-          createPropRef(`user`, `department_id`),
-          createValue(1),
-        ),
+        createEq(createPropRef(`user`, `department_id`), createValue(1)),
       )
 
       // The optimizer should NOT create a subquery for the nullable side (from)
@@ -1749,10 +1743,7 @@ describe(`Query Optimizer`, () => {
       // It must NOT be pushed down to any nullable side
       expect(optimizedQuery.where).toHaveLength(1)
       expect(optimizedQuery.where![0]).toEqual(
-        createGt(
-          createPropRef(`payment`, `amount`),
-          createValue(100),
-        ),
+        createGt(createPropRef(`payment`, `amount`), createValue(100)),
       )
 
       // The optimizer should NOT create subqueries for nullable sides
