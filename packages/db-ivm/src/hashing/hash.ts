@@ -17,12 +17,6 @@ const OBJECT_MARKER = randomHash()
 const ARRAY_MARKER = randomHash()
 const MAP_MARKER = randomHash()
 const SET_MARKER = randomHash()
-const UINT8ARRAY_MARKER = randomHash()
-
-// Maximum byte length for Uint8Arrays to hash by content instead of reference
-// Arrays smaller than this will be hashed by content, allowing proper equality comparisons
-// for small arrays like ULIDs (16 bytes) while still avoiding performance costs for large arrays
-const UINT8ARRAY_CONTENT_HASH_THRESHOLD = 128
 
 const hashCache = new WeakMap<object, number>()
 
@@ -42,22 +36,12 @@ function hashObject(input: object): number {
   if (input instanceof Date) {
     valueHash = hashDate(input)
   } else if (
-    // Check if input is a Uint8Array or Buffer
     (typeof Buffer !== `undefined` && input instanceof Buffer) ||
-    input instanceof Uint8Array
+    input instanceof Uint8Array ||
+    input instanceof File
   ) {
-    // For small Uint8Arrays/Buffers (e.g., ULIDs, UUIDs), hash by content
-    // to enable proper equality comparisons. For large arrays, hash by reference
-    // to avoid performance costs.
-    if (input.byteLength <= UINT8ARRAY_CONTENT_HASH_THRESHOLD) {
-      valueHash = hashUint8Array(input)
-    } else {
-      // Deeply hashing large arrays would be too costly
-      // so we track them by reference and cache them in a weak map
-      return cachedReferenceHash(input)
-    }
-  } else if (input instanceof File) {
-    // Files are always hashed by reference due to their potentially large size
+    // Deeply hashing these would be too costly
+    // so we track them by reference and cache them in a weak map
     return cachedReferenceHash(input)
   } else {
     let plainObjectInput = input
@@ -88,18 +72,6 @@ function hashDate(input: Date): number {
   const hasher = new MurmurHashStream()
   hasher.update(DATE_MARKER)
   hasher.update(input.getTime())
-  return hasher.digest()
-}
-
-function hashUint8Array(input: Uint8Array): number {
-  const hasher = new MurmurHashStream()
-  hasher.update(UINT8ARRAY_MARKER)
-  // Hash the byte length first to differentiate arrays of different sizes
-  hasher.update(input.byteLength)
-  // Hash each byte in the array
-  for (let i = 0; i < input.byteLength; i++) {
-    hasher.writeByte(input[i]!)
-  }
   return hasher.digest()
 }
 

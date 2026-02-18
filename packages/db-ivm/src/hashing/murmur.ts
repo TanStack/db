@@ -51,7 +51,7 @@ export class MurmurHashStream implements Hasher {
     this.hash = Math.imul(this.hash, 5) + 0xe6546b64
   }
 
-  writeByte(byte: number): void {
+  private _writeByte(byte: number): void {
     this.carry |= (byte & 0xff) << (8 * this.carryBytes)
     this.carryBytes++
     this.length++
@@ -74,8 +74,8 @@ export class MurmurHashStream implements Hasher {
 
         for (let i = 0; i < description.length; i++) {
           const code = description.charCodeAt(i)
-          this.writeByte(code & 0xff)
-          this.writeByte((code >>> 8) & 0xff)
+          this._writeByte(code & 0xff)
+          this._writeByte((code >>> 8) & 0xff)
         }
         return
       }
@@ -83,20 +83,20 @@ export class MurmurHashStream implements Hasher {
         this.update(STRING_MARKER)
         for (let i = 0; i < chunk.length; i++) {
           const code = chunk.charCodeAt(i)
-          this.writeByte(code & 0xff)
-          this.writeByte((code >>> 8) & 0xff)
+          this._writeByte(code & 0xff)
+          this._writeByte((code >>> 8) & 0xff)
         }
         return
       case `number`:
         dv.setFloat64(0, chunk, true) // fixed little-endian
-        this.writeByte(u8[0]!)
-        this.writeByte(u8[1]!)
-        this.writeByte(u8[2]!)
-        this.writeByte(u8[3]!)
-        this.writeByte(u8[4]!)
-        this.writeByte(u8[5]!)
-        this.writeByte(u8[6]!)
-        this.writeByte(u8[7]!)
+        this._writeByte(u8[0]!)
+        this._writeByte(u8[1]!)
+        this._writeByte(u8[2]!)
+        this._writeByte(u8[3]!)
+        this._writeByte(u8[4]!)
+        this._writeByte(u8[5]!)
+        this._writeByte(u8[6]!)
+        this._writeByte(u8[7]!)
         return
       case `bigint`: {
         let value = chunk
@@ -107,10 +107,10 @@ export class MurmurHashStream implements Hasher {
           this.update(BIG_INT_MARKER)
         }
         while (value > 0n) {
-          this.writeByte(Number(value & 0xffn))
+          this._writeByte(Number(value & 0xffn))
           value >>= 8n
         }
-        if (chunk === 0n) this.writeByte(0)
+        if (chunk === 0n) this._writeByte(0)
         return
       }
       default:
