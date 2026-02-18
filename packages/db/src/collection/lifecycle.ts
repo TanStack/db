@@ -180,8 +180,10 @@ export class CollectionLifecycleManager<
 
     const gcTime = this.config.gcTime ?? 300000 // 5 minutes default
 
-    // If gcTime is 0, GC is disabled
-    if (gcTime === 0) {
+    // If gcTime is 0, negative, or non-finite (Infinity, -Infinity, NaN), GC is disabled.
+    // Note: setTimeout with Infinity coerces to 0 via ToInt32, causing immediate GC,
+    // so we must explicitly check for non-finite values here.
+    if (gcTime <= 0 || !Number.isFinite(gcTime)) {
       return
     }
 
@@ -262,7 +264,21 @@ export class CollectionLifecycleManager<
       }
 
       this.hasBeenReady = false
+
+      // Call any pending onFirstReady callbacks before clearing them.
+      // This ensures preload() promises resolve during cleanup instead of hanging.
+      const callbacks = [...this.onFirstReadyCallbacks]
       this.onFirstReadyCallbacks = []
+      callbacks.forEach((callback) => {
+        try {
+          callback()
+        } catch (error) {
+          console.error(
+            `${this.config.id ? `[${this.config.id}] ` : ``}Error in onFirstReady callback during cleanup:`,
+            error,
+          )
+        }
+      })
 
       // Set status to cleaned-up after everything is cleaned up
       // This fires the status:change event to notify listeners

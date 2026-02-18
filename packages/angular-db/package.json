@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/angular-db",
-  "version": "0.1.45",
+  "version": "0.1.52",
   "description": "Angular integration for @tanstack/db",
   "author": "Ethan McDaniel",
   "license": "MIT",
@@ -51,13 +51,13 @@
     "rxjs": ">=6.0.0"
   },
   "devDependencies": {
-    "@angular/common": "^19.2.17",
-    "@angular/compiler": "^20.3.15",
-    "@angular/core": "^19.2.17",
-    "@angular/platform-browser": "^19.2.17",
-    "@angular/platform-browser-dynamic": "^19.2.17",
+    "@angular/common": "^20.3.16",
+    "@angular/compiler": "^20.3.16",
+    "@angular/core": "^20.3.16",
+    "@angular/platform-browser": "^20.3.16",
+    "@angular/platform-browser-dynamic": "^20.3.16",
     "@vitest/coverage-istanbul": "^3.2.4",
     "rxjs": "^7.8.2",
-    "zone.js": "^0.16.0"
+    "zone.js": "~0.15.0"
   }
 }

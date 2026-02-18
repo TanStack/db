@@ -28,6 +28,8 @@ type RequestSnapshotOptions = {
   orderBy?: OrderBy
   /** Optional limit to pass to loadSubset for backend optimization */
   limit?: number
+  /** Callback that receives the raw loadSubset result for external tracking */
+  onLoadSubsetResult?: (result: Promise<void> | true) => void
 }
 
 type RequestLimitedSnapshotOptions = {
@@ -37,6 +39,10 @@ type RequestLimitedSnapshotOptions = {
   minValues?: Array<unknown>
   /** Row offset for offset-based pagination (passed to sync layer) */
   offset?: number
+  /** Whether to track the loadSubset promise on this subscription (default: true) */
+  trackLoadSubsetPromise?: boolean
+  /** Callback that receives the raw loadSubset result for external tracking */
+  onLoadSubsetResult?: (result: Promise<void> | true) => void
 }
 
 type CollectionSubscriptionOptions = {
@@ -365,6 +371,9 @@ export class CollectionSubscription
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 
+    // Pass the raw loadSubset result to the caller for external tracking
+    opts?.onLoadSubsetResult?.(syncResult)
+
     // Track this loadSubset call so we can unload it later
     this.loadedSubsets.push(loadOptions)
 
@@ -416,6 +425,8 @@ export class CollectionSubscription
     limit,
     minValues,
     offset,
+    trackLoadSubsetPromise: shouldTrackLoadSubsetPromise = true,
+    onLoadSubsetResult,
   }: RequestLimitedSnapshotOptions) {
     if (!limit) throw new Error(`limit is required`)
 
@@ -425,6 +436,9 @@ export class CollectionSubscription
       )
     }
 
+    // Check if minValues has a first element (regardless of its value)
+    // This distinguishes between "no min value provided" vs "min value is undefined"
+    const hasMinValue = minValues !== undefined && minValues.length > 0
     // Derive first column value from minValues (used for local index operations)
     const minValue = minValues?.[0]
     // Cast for index operations (index expects string | number)
@@ -436,8 +450,8 @@ export class CollectionSubscription
       ? createFilterFunctionFromExpression(where)
       : undefined
 
-    const filterFn = (key: string | number): boolean => {
-      if (this.sentKeys.has(key)) {
+    const filterFn = (key: string | number | undefined): boolean => {
+      if (key !== undefined && this.sentKeys.has(key)) {
         return false
       }
 
@@ -462,7 +476,7 @@ export class CollectionSubscription
     // For multi-column orderBy, we use the first column value for index operations (wide bounds)
     // This may load some duplicates but ensures we never miss any rows.
     let keys: Array<string | number> = []
-    if (minValueForIndex !== undefined) {
+    if (hasMinValue) {
       // First, get all items with the same FIRST COLUMN value as minValue
       // This provides wide bounds for the local index
       const { expression } = orderBy[0]!
@@ -481,15 +495,16 @@ export class CollectionSubscription
         // Then get items greater than minValue
         const keysGreaterThanMin = index.take(
           limit - keys.length,
-          minValueForIndex,
+          minValueForIndex!,
           filterFn,
         )
         keys.push(...keysGreaterThanMin)
       } else {
-        keys = index.take(limit, minValueForIndex, filterFn)
+        keys = index.take(limit, minValueForIndex!, filterFn)
       }
     } else {
-      keys = index.take(limit, minValueForIndex, filterFn)
+      // No min value provided, start from the beginning
+      keys = index.takeFromStart(limit, filterFn)
     }
 
     const valuesNeeded = () => Math.max(limit - changes.length, 0)
@@ -518,7 +533,7 @@ export class CollectionSubscription
         insertedKeys.add(key) // Track this key
       }
 
-      keys = index.take(valuesNeeded(), biggestObservedValue, filterFn)
+      keys = index.take(valuesNeeded(), biggestObservedValue!, filterFn)
     }
 
     // Track row count for offset-based pagination (before sending to callback)
@@ -594,9 +609,14 @@ export class CollectionSubscription
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 
+    // Pass the raw loadSubset result to the caller for external tracking
+    onLoadSubsetResult?.(syncResult)
+
     // Track this loadSubset call
     this.loadedSubsets.push(loadOptions)
-    this.trackLoadSubsetPromise(syncResult)
+    if (shouldTrackLoadSubsetPromise) {
+      this.trackLoadSubsetPromise(syncResult)
+    }
   }
 
   // TODO: also add similar test but that checks that it can also load it from the collection's loadSubset function
@@ -667,12 +687,20 @@ export class CollectionSubscription
 
     for (const change of changes) {
       if (change.type === `delete`) {
-        // Remove deleted keys from sentKeys so future re-inserts are allowed
         this.sentKeys.delete(change.key)
       } else {
-        // For inserts and updates, track the key as sent
         this.sentKeys.add(change.key)
       }
+    }
+
+    // Keep the limited snapshot offset in sync with keys we've actually sent.
+    // This matters when loadSubset resolves asynchronously and requestLimitedSnapshot
+    // didn't have local rows to count yet.
+    if (this.orderByIndex) {
+      this.limitedSnapshotRowCount = Math.max(
+        this.limitedSnapshotRowCount,
+        this.sentKeys.size,
+      )
     }
   }
 

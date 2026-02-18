@@ -1,0 +1,43 @@
+{
+  "name": "offline-transactions-react-native",
+  "version": "1.0.1",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "ios": "expo run:ios",
+    "android": "expo run:android",
+    "reset-cache": "expo start --clear",
+    "server": "npx tsx server/index.ts"
+  },
+  "dependencies": {
+    "@expo/metro-runtime": "~5.0.5",
+    "@react-native-async-storage/async-storage": "2.1.2",
+    "@react-native-community/netinfo": "11.4.1",
+    "@tanstack/offline-transactions": "^1.0.16",
+    "@tanstack/query-db-collection": "^1.0.23",
+    "@tanstack/react-db": "^0.1.70",
+    "@tanstack/react-query": "^5.90.20",
+    "expo": "~53.0.26",
+    "expo-constants": "~17.1.0",
+    "expo-linking": "~7.1.0",
+    "expo-router": "~5.1.11",
+    "expo-status-bar": "~2.2.0",
+    "metro": "0.82.5",
+    "react": "^19.2.4",
+    "react-native": "0.79.6",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.11.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/react": "^19.2.13",
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.2"
+  }
+}

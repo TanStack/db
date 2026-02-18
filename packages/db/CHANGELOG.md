@@ -1,5 +1,76 @@
 # @tanstack/db
 
+## 0.5.26
+
+### Patch Changes
+
+- fix: export types used in public API signatures for declaration emit compatibility ([#1231](https://github.com/TanStack/db/pull/1231))
+
+  Types like `SchemaFromSource`, `MergeContextWithJoinType`, `WithResult`, `ResultTypeFromSelect`, and others
+  are used in the public method signatures of `BaseQueryBuilder` (e.g. `from()`, `join()`, `select()`) but
+  were not re-exported from the package's public API. This caused TypeScript error TS2742 when consumers used
+  `declaration: true` in their tsconfig, as TypeScript could not name the inferred types in generated `.d.ts` files.
+
+  Fixes #1012
+
+- Fix `useLiveInfiniteQuery` peek-ahead detection for `hasNextPage`. The initial query now correctly requests `pageSize + 1` items to detect whether additional pages exist, matching the behavior of subsequent page loads. ([#1209](https://github.com/TanStack/db/pull/1209))
+
+  Fix async on-demand pagination by ensuring the graph callback fires at least once even when there is no pending graph work, so that `loadMoreIfNeeded` is triggered after `setWindow()` increases the limit.
+
+- Fix `eq()` with Date objects in join conditions and `inArray()` with Date values in WHERE clauses by normalizing values via `normalizeValue` (#934) ([#1229](https://github.com/TanStack/db/pull/1229))
+
+## 0.5.25
+
+### Patch Changes
+
+- Fixed infinite loop in `BTreeIndex.takeInternal` when indexed values are `undefined`. ([#1198](https://github.com/TanStack/db/pull/1198))
+
+  The BTree uses `undefined` as a special parameter meaning "start from beginning/end", which caused an infinite loop when the actual indexed value was `undefined`.
+
+  Added `takeFromStart` and `takeReversedFromEnd` methods to explicitly start from the beginning/end, and introduced a sentinel value for storing `undefined` in the BTree.
+
+- Fix `isReady` tracking for on-demand live queries without orderBy. Previously, non-ordered live queries using `syncMode: 'on-demand'` were incorrectly marked as ready before data finished loading. Also fix `preload()` promises hanging when cleanup occurs before the collection becomes ready. Additionally, fix concurrent live queries subscribing to the same source collection - each now independently tracks loading state. ([#1192](https://github.com/TanStack/db/pull/1192))
+
+## 0.5.24
+
+### Patch Changes
+
+- Fix `$selected` namespace availability in `orderBy`, `having`, and `fn.having` when using `fn.select`. Previously, the `$selected` namespace was only available when using regular `.select()`, not functional `fn.select()`. ([#1183](https://github.com/TanStack/db/pull/1183))
+
+## 0.5.23
+
+### Patch Changes
+
+- Fix bug that caused the WHERE clause of a subquery not to be passed to the `loadSubset` function ([#1097](https://github.com/TanStack/db/pull/1097))
+
+## 0.5.22
+
+### Patch Changes
+
+- Fix `gcTime: Infinity` causing immediate garbage collection instead of disabling GC. JavaScript's `setTimeout` coerces `Infinity` to `0` via ToInt32, so we now explicitly check for non-finite values. ([#1135](https://github.com/TanStack/db/pull/1135))
+
+## 0.5.21
+
+### Patch Changes
+
+- Clarify queueStrategy error handling behavior in documentation. Changed "guaranteed to persist" to "guaranteed to be attempted" and added explicit documentation about how failed mutations are handled (not retried, queue continues). Added new Retry Behavior section with example code for implementing custom retry logic. ([#1107](https://github.com/TanStack/db/pull/1107))
+
+- Improve DuplicateKeySyncError message when using `.distinct()` with custom `getKey`. The error now explains that `.distinct()` deduplicates by the entire selected object, and provides actionable guidance to fix the issue. ([#1119](https://github.com/TanStack/db/pull/1119))
+
+- Fix syncedData not updating when manual write operations (writeUpsert, writeInsert, etc.) are called after async operations in mutation handlers. Previously, the sync transaction would be blocked by the persisting user transaction, leaving syncedData stale until the next sync cycle. ([#1130](https://github.com/TanStack/db/pull/1130))
+
+- Add string support to `min()` and `max()` aggregate functions. These functions now work with strings using lexicographic comparison, matching standard SQL behavior. ([#1120](https://github.com/TanStack/db/pull/1120))
+
+- Updated dependencies [[`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db-ivm@0.1.17
+
+## 0.5.20
+
+### Patch Changes
+
+- Updated dependencies [[`f5b504e`](https://github.com/TanStack/db/commit/f5b504e6d105034d23cb2ae27782e8cba0094cbe)]:
+  - @tanstack/db-ivm@0.1.16
+
 ## 0.5.19
 
 ### Patch Changes

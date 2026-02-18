@@ -440,7 +440,7 @@ describe(`Query collection type resolution tests`, () => {
           // Verify that loadSubsetOptions is assignable to LoadSubsetOptions
           // This ensures it can be used where LoadSubsetOptions is expected
           expectTypeOf(
-            ctx.meta!.loadSubsetOptions,
+            ctx.meta!.loadSubsetOptions!,
           ).toExtend<LoadSubsetOptions>()
           // so that parseLoadSubsetOptions can be called without type errors
           parseLoadSubsetOptions(ctx.meta?.loadSubsetOptions)
@@ -465,7 +465,7 @@ describe(`Query collection type resolution tests`, () => {
           // Verify that an object with loadSubsetOptions plus other properties
           // can be assigned to ctx.meta's type. This ensures the type is not too restrictive.
           const metaWithExtra = {
-            loadSubsetOptions: ctx.meta!.loadSubsetOptions,
+            loadSubsetOptions: ctx.meta!.loadSubsetOptions!,
             customProperty: `test`,
             anotherProperty: 123,
           }
@@ -476,7 +476,7 @@ describe(`Query collection type resolution tests`, () => {
 
           // Verify the assignment worked (this will fail at compile time if types don't match)
           expectTypeOf(
-            typedMeta.loadSubsetOptions,
+            typedMeta.loadSubsetOptions!,
           ).toExtend<LoadSubsetOptions>()
 
           return Promise.resolve([])
@@ -559,5 +559,27 @@ describe(`Query collection type resolution tests`, () => {
       const options = queryCollectionOptions(config)
       createCollection(options)
     })
+  })
+
+  it(`should type collection.utils as QueryCollectionUtils after createCollection`, () => {
+    const collection = createCollection(
+      queryCollectionOptions<ExplicitType>({
+        id: `test-utils-typing`,
+        queryClient,
+        queryKey: [`test-utils`],
+        queryFn: () => Promise.resolve([]),
+        getKey: (item) => item.id,
+      }),
+    )
+
+    // Verify that collection.utils is typed as QueryCollectionUtils, not UtilsRecord
+    const utils: QueryCollectionUtils<ExplicitType> = collection.utils
+    expectTypeOf(utils.refetch).toBeFunction()
+    expectTypeOf(collection.utils.refetch).toBeFunction()
+    expectTypeOf(collection.utils.writeInsert).toBeFunction()
+    expectTypeOf(collection.utils.writeUpdate).toBeFunction()
+    expectTypeOf(collection.utils.writeDelete).toBeFunction()
+    expectTypeOf(collection.utils.isFetching).toBeBoolean()
+    expectTypeOf(collection.utils.isLoading).toBeBoolean()
   })
 })

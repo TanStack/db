@@ -36,16 +36,27 @@ export class ReverseIndex<
     return this.originalIndex.rangeQuery(options)
   }
 
-  take(n: number, from?: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
+  take(n: number, from: any, filterFn?: (key: TKey) => boolean): Array<TKey> {
     return this.originalIndex.takeReversed(n, from, filterFn)
+  }
+
+  takeFromStart(n: number, filterFn?: (key: TKey) => boolean): Array<TKey> {
+    return this.originalIndex.takeReversedFromEnd(n, filterFn)
   }
 
   takeReversed(
     n: number,
-    from?: any,
+    from: any,
     filterFn?: (key: TKey) => boolean,
   ): Array<TKey> {
     return this.originalIndex.take(n, from, filterFn)
+  }
+
+  takeReversedFromEnd(
+    n: number,
+    filterFn?: (key: TKey) => boolean,
+  ): Array<TKey> {
+    return this.originalIndex.takeFromStart(n, filterFn)
   }
 
   get orderedEntriesArray(): Array<[any, Set<TKey>]> {

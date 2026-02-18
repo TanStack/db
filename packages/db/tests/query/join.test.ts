@@ -982,6 +982,122 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
 
         expect(joinQuery.size).toBe(3)
       })
+
+      test(`should match Date join keys by timestamp instead of object reference`, () => {
+        type DateLeft = { id: number; joinedAt: Date; name: string }
+        type DateRight = { id: number; joinedAt: Date; label: string }
+
+        const baseTimestamp = Date.parse(`2025-01-15T12:34:56.789Z`)
+
+        const leftData: Array<DateLeft> = [
+          { id: 1, joinedAt: new Date(baseTimestamp), name: `left-1` },
+        ]
+        const rightData: Array<DateRight> = [
+          { id: 10, joinedAt: new Date(baseTimestamp), label: `right-10` },
+        ]
+
+        // Guard against accidentally sharing the same Date object instance.
+        expect(leftData[0]!.joinedAt).not.toBe(rightData[0]!.joinedAt)
+        expect(leftData[0]!.joinedAt.getTime()).toBe(
+          rightData[0]!.joinedAt.getTime(),
+        )
+
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<DateLeft>({
+            id: `join-date-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: leftData,
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<DateRight>({
+            id: `join-date-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: rightData,
+            autoIndex,
+          }),
+        )
+
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.joinedAt, right.joinedAt),
+              )
+              .select(({ left, right }) => ({
+                leftId: left.id,
+                rightId: right.id,
+              })),
+        })
+
+        expect(query.toArray).toHaveLength(1)
+        expect(query.toArray[0]).toEqual({ leftId: 1, rightId: 10 })
+      })
+
+      test(`should update Date join matches when timestamp changes`, () => {
+        type DateLeft = { id: number; joinedAt: Date; name: string }
+        type DateRight = { id: number; joinedAt: Date; label: string }
+
+        const baseTimestamp = Date.parse(`2025-01-15T12:34:56.789Z`)
+
+        const leftCollection = createCollection(
+          mockSyncCollectionOptions<DateLeft>({
+            id: `join-date-update-left-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              { id: 1, joinedAt: new Date(baseTimestamp), name: `left-1` },
+            ],
+            autoIndex,
+          }),
+        )
+        const rightCollection = createCollection(
+          mockSyncCollectionOptions<DateRight>({
+            id: `join-date-update-right-${autoIndex}`,
+            getKey: (row) => row.id,
+            initialData: [
+              {
+                id: 10,
+                joinedAt: new Date(baseTimestamp + 1),
+                label: `right-10`,
+              },
+            ],
+            autoIndex,
+          }),
+        )
+
+        const query = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ left: leftCollection })
+              .innerJoin({ right: rightCollection }, ({ left, right }) =>
+                eq(left.joinedAt, right.joinedAt),
+              )
+              .select(({ left, right }) => ({
+                leftId: left.id,
+                rightId: right.id,
+              })),
+        })
+
+        expect(query.toArray).toHaveLength(0)
+
+        rightCollection.utils.begin()
+        rightCollection.utils.write({
+          type: `update`,
+          value: {
+            id: 10,
+            joinedAt: new Date(baseTimestamp),
+            label: `right-10`,
+          },
+        })
+        rightCollection.utils.commit()
+
+        expect(query.toArray).toHaveLength(1)
+        expect(query.toArray[0]).toEqual({ leftId: 1, rightId: 10 })
+      })
     })
 
     test(`should handle chained joins with incremental updates`, () => {
@@ -1723,6 +1839,66 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
     expect(result.join2!.id).toBe(2)
     expect(result.join2!.value).toBe(1)
     expect(result.join2!.other).toBe(30)
+  })
+
+  test(`where with isUndefined on right-side field should filter entire joined rows`, () => {
+    type Left = {
+      id: string
+      rightId: string | null
+    }
+
+    type Right = {
+      id: string
+      payload: string | null | undefined
+    }
+
+    const leftCollection = createCollection(
+      mockSyncCollectionOptions<Left>({
+        id: `test-left-isundefined-field`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `l1`, rightId: `r1` },
+          { id: `l2`, rightId: `r2` },
+          { id: `l3`, rightId: `r3` },
+          { id: `l4`, rightId: null },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const rightCollection = createCollection(
+      mockSyncCollectionOptions<Right>({
+        id: `test-right-isundefined-field`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `r1`, payload: `ok` },
+          { id: `r2`, payload: null },
+          { id: `r3`, payload: undefined },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const lq = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ l: leftCollection })
+          .leftJoin({ r: rightCollection }, ({ l, r }) => eq(l.rightId, r.id))
+          .where(({ r }) => isUndefined(r?.payload))
+          .select(({ l, r }) => ({ leftId: l.id, right: r })),
+    })
+
+    const data = lq.toArray
+
+    // l1 joins r1 (payload='ok') → payload is defined → exclude
+    // l2 joins r2 (payload=null) → payload is null, not undefined → exclude
+    // l3 joins r3 (payload=undefined) → payload is undefined → include
+    // l4 has no match (rightId=null) → right is undefined, so r?.payload is undefined → include
+    expect(data.sort((a, b) => a.leftId.localeCompare(b.leftId))).toEqual([
+      { leftId: `l3`, right: { id: `r3`, payload: undefined } },
+      { leftId: `l4`, right: undefined },
+    ])
   })
 }
 

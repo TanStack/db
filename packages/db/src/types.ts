@@ -328,7 +328,12 @@ export interface SyncConfig<
 > {
   sync: (params: {
     collection: Collection<T, TKey, any, any, any>
-    begin: () => void
+    /**
+     * Begin a new sync transaction.
+     * @param options.immediate - When true, the transaction will be processed immediately
+     *   even if there are persisting user transactions. Used by manual write operations.
+     */
+    begin: (options?: { immediate?: boolean }) => void
     write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => void
     commit: () => void
     markReady: () => void
@@ -804,6 +809,22 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   onStatusChange?: (event: SubscriptionStatusChangeEvent) => void
+  /**
+   * Optional orderBy to include in loadSubset for query-specific cache keys.
+   * @internal
+   */
+  orderBy?: OrderBy
+  /**
+   * Optional limit to include in loadSubset for query-specific cache keys.
+   * @internal
+   */
+  limit?: number
+  /**
+   * Callback that receives the loadSubset result (Promise or true) from requestSnapshot.
+   * Allows the caller to directly track the loading promise for isReady status.
+   * @internal
+   */
+  onLoadSubsetResult?: (result: Promise<void> | true) => void
 }
 
 export interface SubscribeChangesSnapshotOptions<

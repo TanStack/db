@@ -227,6 +227,7 @@ export class CollectionConfigBuilder<
           getBuilder: () => this,
           hasCustomGetKey: !!this.config.getKey,
           hasJoins: this.hasJoins(this.query),
+          hasDistinct: !!this.query.distinct,
         },
       },
     }
@@ -335,12 +336,21 @@ export class CollectionConfigBuilder<
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
+        let callbackCalled = false
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
           // Flush accumulated changes after each graph step to commit them as one transaction.
           // This ensures intermediate join states (like null on one side) don't cause
           // duplicate key errors when the full join result arrives in the same step.
           syncState.flushPendingChanges?.()
+          callback?.()
+          callbackCalled = true
+        }
+
+        // Ensure the callback runs at least once even when the graph has no pending work.
+        // This handles lazy loading scenarios where setWindow() increases the limit or
+        // an async loadSubset completes and we need to re-check if more data is needed.
+        if (!callbackCalled) {
           callback?.()
         }
 
@@ -829,17 +839,16 @@ export class CollectionConfigBuilder<
       return
     }
 
+    const subscribedToAll = this.currentSyncState?.subscribedToAllCollections
+    const allReady = this.allCollectionsReady()
+    const isLoading = this.liveQueryCollection?.isLoadingSubset
     // Mark ready when:
     // 1. All subscriptions are set up (subscribedToAllCollections)
     // 2. All source collections are ready
     // 3. The live query collection is not loading subset data
     // This prevents marking the live query ready before its data is processed
     // (fixes issue where useLiveQuery returns isReady=true with empty data)
-    if (
-      this.currentSyncState?.subscribedToAllCollections &&
-      this.allCollectionsReady() &&
-      !this.liveQueryCollection?.isLoadingSubset
-    ) {
+    if (subscribedToAll && allReady && !isLoading) {
       markReady()
     }
   }

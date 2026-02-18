@@ -785,6 +785,31 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         expect(salaryRanges.size).toBe(3) // Alice (75k), Diana (95k), Eve (55k)
       })
+
+      test(`inArray operator - filters Date fields by timestamp value`, () => {
+        // Alice and Bob both have hire_date 2020-01-15, Charlie has 2018-07-10
+        const hiredOnDates = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                inArray(emp.hire_date, [
+                  new Date(`2020-01-15`),
+                  new Date(`2018-07-10`),
+                ]),
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                hire_date: emp.hire_date,
+              })),
+        })
+
+        expect(hiredOnDates.size).toBe(3) // Alice, Bob, Charlie
+        const names = hiredOnDates.toArray.map((e) => e.name).sort()
+        expect(names).toEqual([`Alice Johnson`, `Bob Smith`, `Charlie Brown`])
+      })
     })
 
     describe(`Null Handling`, () => {

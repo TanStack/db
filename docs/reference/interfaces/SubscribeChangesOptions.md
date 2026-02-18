@@ -5,7 +5,7 @@ title: SubscribeChangesOptions
 
 # Interface: SubscribeChangesOptions\<T\>
 
-Defined in: [packages/db/src/types.ts:779](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L779)
+Defined in: [packages/db/src/types.ts:784](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L784)
 
 Options for subscribing to collection changes
 
@@ -23,9 +23,48 @@ Options for subscribing to collection changes
 optional includeInitialState: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:783](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L783)
+Defined in: [packages/db/src/types.ts:788](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L788)
 
 Whether to include the current state as initial changes
+
+***
+
+### limit?
+
+```ts
+optional limit: number;
+```
+
+Defined in: [packages/db/src/types.ts:821](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L821)
+
+**`Internal`**
+
+Optional limit to include in loadSubset for query-specific cache keys.
+
+***
+
+### onLoadSubsetResult()?
+
+```ts
+optional onLoadSubsetResult: (result) => void;
+```
+
+Defined in: [packages/db/src/types.ts:827](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L827)
+
+**`Internal`**
+
+Callback that receives the loadSubset result (Promise or true) from requestSnapshot.
+Allows the caller to directly track the loading promise for isReady status.
+
+#### Parameters
+
+##### result
+
+`true` | `Promise`\<`void`\>
+
+#### Returns
+
+`void`
 
 ***
 
@@ -35,7 +74,7 @@ Whether to include the current state as initial changes
 optional onStatusChange: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:806](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L806)
+Defined in: [packages/db/src/types.ts:811](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L811)
 
 **`Internal`**
 
@@ -54,13 +93,27 @@ Registered BEFORE any snapshot is requested, ensuring no status transitions are 
 
 ***
 
+### orderBy?
+
+```ts
+optional orderBy: OrderBy;
+```
+
+Defined in: [packages/db/src/types.ts:816](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L816)
+
+**`Internal`**
+
+Optional orderBy to include in loadSubset for query-specific cache keys.
+
+***
+
 ### where()?
 
 ```ts
 optional where: (row) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:798](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L798)
+Defined in: [packages/db/src/types.ts:803](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L803)
 
 Callback function for filtering changes using a row proxy.
 The callback receives a proxy object that records property access,
@@ -94,6 +147,6 @@ collection.subscribeChanges(callback, {
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:800](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L800)
+Defined in: [packages/db/src/types.ts:805](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L805)
 
 Pre-compiled expression for filtering changes

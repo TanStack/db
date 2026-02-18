@@ -1,5 +1,17 @@
 # @tanstack/db-ivm
 
+## 0.1.17
+
+### Patch Changes
+
+- Add string support to `min()` and `max()` aggregate functions. These functions now work with strings using lexicographic comparison, matching standard SQL behavior. ([#1120](https://github.com/TanStack/db/pull/1120))
+
+## 0.1.16
+
+### Patch Changes
+
+- Add `groupedOrderByWithFractionalIndex` operator. This operator groups elements by a provided `groupKeyFn` and applies ordering and limits independently to each group. Each group maintains its own sorted collection with independent limit/offset, which is useful for hierarchical data projections where child collections need to enforce limits within each parent's slice of the stream rather than across the entire dataset. ([#997](https://github.com/TanStack/db/pull/997))
+
 ## 0.1.15
 
 ### Patch Changes

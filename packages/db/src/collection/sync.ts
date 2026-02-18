@@ -88,11 +88,12 @@ export class CollectionSyncManager<
       const syncRes = normalizeSyncFnResult(
         this.config.sync.sync({
           collection: this.collection,
-          begin: () => {
+          begin: (options?: { immediate?: boolean }) => {
             this.state.pendingSyncedTransactions.push({
               committed: false,
               operations: [],
               deletedKeys: new Set(),
+              immediate: options?.immediate,
             })
           },
           write: (
@@ -149,6 +150,7 @@ export class CollectionSyncManager<
                   throw new DuplicateKeySyncError(key, this.id, {
                     hasCustomGetKey: internal?.hasCustomGetKey ?? false,
                     hasJoins: internal?.hasJoins ?? false,
+                    hasDistinct: internal?.hasDistinct ?? false,
                   })
                 }
               }

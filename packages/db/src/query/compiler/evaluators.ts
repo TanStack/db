@@ -336,7 +336,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
       const valueEvaluator = compiledArgs[0]!
       const arrayEvaluator = compiledArgs[1]!
       return (data) => {
-        const value = valueEvaluator(data)
+        const value = normalizeValue(valueEvaluator(data))
         const array = arrayEvaluator(data)
         // In 3-valued logic, if the value is null/undefined, return UNKNOWN
         if (isUnknown(value)) {
@@ -345,7 +345,7 @@ function compileFunction(func: Func, isSingleRow: boolean): (data: any) => any {
         if (!Array.isArray(array)) {
           return false
         }
-        return array.includes(value)
+        return array.some((item) => normalizeValue(item) === value)
       }
     }
 
@@ -516,6 +516,7 @@ function evaluateLike(
   regexPattern = regexPattern.replace(/%/g, `.*`) // % matches any sequence
   regexPattern = regexPattern.replace(/_/g, `.`) // _ matches any single char
 
-  const regex = new RegExp(`^${regexPattern}$`)
+  // 's' (dotAll flag) makes '.' match all characters including line terminations
+  const regex = new RegExp(`^${regexPattern}$`, 's')
   return regex.test(searchValue)
 }

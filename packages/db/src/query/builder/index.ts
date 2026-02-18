@@ -34,8 +34,8 @@ import type {
 import type {
   CompareOptions,
   Context,
-  GetResult,
   FunctionalHavingRow,
+  GetResult,
   GroupByCallback,
   JoinOnCallback,
   MergeContextForJoinCallback,
@@ -413,9 +413,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    */
   having(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    // Add $selected namespace if SELECT clause exists
+    // Add $selected namespace if SELECT clause exists (either regular or functional)
     const refProxy = (
-      this.query.select
+      this.query.select || this.query.fnSelect
         ? createRefProxyWithSelected(aliases)
         : createRefProxy(aliases)
     ) as RefsForContext<TContext>
@@ -516,9 +516,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     options: OrderByDirection | OrderByOptions = `asc`,
   ): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    // Add $selected namespace if SELECT clause exists
+    // Add $selected namespace if SELECT clause exists (either regular or functional)
     const refProxy = (
-      this.query.select
+      this.query.select || this.query.fnSelect
         ? createRefProxyWithSelected(aliases)
         : createRefProxy(aliases)
     ) as RefsForContext<TContext>
@@ -910,8 +910,26 @@ export type QueryResult<T> = GetResult<ExtractContext<T>>
 // Export the types from types.ts for convenience
 export type {
   Context,
+  ContextSchema,
   Source,
   GetResult,
   RefLeaf as Ref,
   InferResultType,
+  // Types used in public method signatures that must be exported
+  // for declaration emit to work (see https://github.com/TanStack/db/issues/1012)
+  SchemaFromSource,
+  InferCollectionType,
+  MergeContextWithJoinType,
+  MergeContextForJoinCallback,
+  ApplyJoinOptionalityToMergedSchema,
+  ResultTypeFromSelect,
+  WithResult,
+  JoinOnCallback,
+  RefsForContext,
+  WhereCallback,
+  OrderByCallback,
+  GroupByCallback,
+  SelectObject,
+  FunctionalHavingRow,
+  Prettify,
 } from './types.js'

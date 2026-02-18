@@ -8,10 +8,10 @@ title: useLiveQuery
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:114](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L114)
+Defined in: [useLiveQuery.ts:134](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L134)
 
 Create a live query using a query function
 
@@ -37,7 +37,7 @@ Array of reactive dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<`TContext`\>
 
 Reactive object with query data, state, and status information
 
@@ -94,10 +94,10 @@ const { data, isLoading, isError, status } = useLiveQuery((q) =>
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+function useLiveQuery<TContext>(queryFn, deps?): UseLiveQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:120](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L120)
+Defined in: [useLiveQuery.ts:140](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L140)
 
 Create a live query using a query function
 
@@ -123,7 +123,7 @@ Array of reactive dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<`TContext`\>
 
 Reactive object with query data, state, and status information
 
@@ -180,10 +180,10 @@ const { data, isLoading, isError, status } = useLiveQuery((q) =>
 ## Call Signature
 
 ```ts
-function useLiveQuery<TContext>(config, deps?): UseLiveQueryReturn<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }>;
+function useLiveQuery<TContext>(config, deps?): UseLiveQueryReturn<TContext>;
 ```
 
-Defined in: [useLiveQuery.ts:160](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L160)
+Defined in: [useLiveQuery.ts:180](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L180)
 
 Create a live query using configuration object
 
@@ -209,7 +209,7 @@ Array of reactive dependencies that trigger query re-execution when changed
 
 ### Returns
 
-[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<\{ \[K in string \| number \| symbol\]: (TContext\["result"\] extends object ? any\[any\] : TContext\["hasJoins"\] extends true ? TContext\["schema"\] : TContext\["schema"\]\[TContext\["fromSourceName"\]\])\[K\] \}\>
+[`UseLiveQueryReturn`](../interfaces/UseLiveQueryReturn.md)\<`TContext`\>
 
 Reactive object with query data, state, and status information
 
@@ -251,7 +251,7 @@ const { data, isLoading, isReady, isError } = useLiveQuery({
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithCollection<TResult, TKey, TUtils>;
 ```
 
-Defined in: [useLiveQuery.ts:205](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L205)
+Defined in: [useLiveQuery.ts:225](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L225)
 
 Subscribe to an existing query collection (can be reactive)
 
@@ -273,7 +273,7 @@ Subscribe to an existing query collection (can be reactive)
 
 #### liveQueryCollection
 
-`MaybeRefOrGetter`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\>\>
+`MaybeRefOrGetter`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `NonSingleResult`\>
 
 Pre-created query collection to subscribe to (can be a ref)
 
@@ -322,4 +322,90 @@ const { data, isLoading, isError } = useLiveQuery(sharedQuery)
 // <div v-else>
 //   <Item v-for="item in data" :key="item.id" v-bind="item" />
 // </div>
+```
+
+## Call Signature
+
+```ts
+function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): UseLiveQueryReturnWithSingleResultCollection<TResult, TKey, TUtils>;
+```
+
+Defined in: [useLiveQuery.ts:236](https://github.com/TanStack/db/blob/main/packages/vue-db/src/useLiveQuery.ts#L236)
+
+Create a live query using a query function
+
+### Type Parameters
+
+#### TResult
+
+`TResult` *extends* `object`
+
+#### TKey
+
+`TKey` *extends* `string` \| `number`
+
+#### TUtils
+
+`TUtils` *extends* `Record`\<`string`, `any`\>
+
+### Parameters
+
+#### liveQueryCollection
+
+`MaybeRefOrGetter`\<`Collection`\<`TResult`, `TKey`, `TUtils`, `StandardSchemaV1`\<`unknown`, `unknown`\>, `TResult`\> & `SingleResult`\>
+
+### Returns
+
+[`UseLiveQueryReturnWithSingleResultCollection`](../interfaces/UseLiveQueryReturnWithSingleResultCollection.md)\<`TResult`, `TKey`, `TUtils`\>
+
+Reactive object with query data, state, and status information
+
+### Examples
+
+```ts
+// Basic query with object syntax
+const { data, isLoading } = useLiveQuery((q) =>
+  q.from({ todos: todosCollection })
+   .where(({ todos }) => eq(todos.completed, false))
+   .select(({ todos }) => ({ id: todos.id, text: todos.text }))
+)
+```
+
+```ts
+// With reactive dependencies
+const minPriority = ref(5)
+const { data, state } = useLiveQuery(
+  (q) => q.from({ todos: todosCollection })
+         .where(({ todos }) => gt(todos.priority, minPriority.value)),
+  [minPriority] // Re-run when minPriority changes
+)
+```
+
+```ts
+// Join pattern
+const { data } = useLiveQuery((q) =>
+  q.from({ issues: issueCollection })
+   .join({ persons: personCollection }, ({ issues, persons }) =>
+     eq(issues.userId, persons.id)
+   )
+   .select(({ issues, persons }) => ({
+     id: issues.id,
+     title: issues.title,
+     userName: persons.name
+   }))
+)
+```
+
+```ts
+// Handle loading and error states in template
+const { data, isLoading, isError, status } = useLiveQuery((q) =>
+  q.from({ todos: todoCollection })
+)
+
+// In template:
+// <div v-if="isLoading">Loading...</div>
+// <div v-else-if="isError">Error: {{ status }}</div>
+// <ul v-else>
+//   <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
+// </ul>
 ```

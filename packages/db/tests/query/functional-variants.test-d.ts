@@ -468,4 +468,56 @@ describe(`Functional Variants Types`, () => {
       }>
     >()
   })
+
+  test(`fn.select with orderBy has access to $selected`, () => {
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .fn.select((row) => ({
+            name: row.user.name,
+            salaryInThousands: row.user.salary / 1000,
+            ageCategory:
+              row.user.age > 30
+                ? (`senior` as const)
+                : row.user.age > 25
+                  ? (`mid` as const)
+                  : (`junior` as const),
+          }))
+          .orderBy(({ $selected }) => $selected.salaryInThousands),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        name: string
+        salaryInThousands: number
+        ageCategory: `senior` | `mid` | `junior`
+      }>
+    >()
+  })
+
+  test(`fn.select with multiple orderBy clauses using $selected`, () => {
+    const liveCollection = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .fn.select((row) => ({
+            displayName: row.user.name,
+            isActive: row.user.active,
+            salary: row.user.salary,
+          }))
+          .orderBy(({ $selected }) => $selected.isActive, `desc`)
+          .orderBy(({ $selected }) => $selected.salary),
+    })
+
+    const results = liveCollection.toArray
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        displayName: string
+        isActive: boolean
+        salary: number
+      }>
+    >()
+  })
 })

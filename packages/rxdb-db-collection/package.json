@@ -1,7 +1,7 @@
 {
   "name": "@tanstack/rxdb-db-collection",
-  "version": "0.1.51",
-  "description": "RxDB collection for TanStack DB",
+  "version": "0.1.58",
+  "description": "Reactive, Offline-First adapter for TanStack DB using RxDB. Sync, Replication and Local-First support.",
   "author": "Kyle Mathews",
   "license": "MIT",
   "repository": {
@@ -9,20 +9,29 @@
     "url": "git+https://github.com/TanStack/db.git",
     "directory": "packages/rxdb-db-collection"
   },
-  "homepage": "https://tanstack.com/db",
+  "bugs": {
+    "url": "https://github.com/TanStack/db/issues"
+  },
+  "homepage": "https://tanstack.com/db/latest/docs/collections/rxdb-collection",
   "keywords": [
     "rxdb",
+    "tanstack",
+    "tanstack-db",
     "nosql",
     "realtime",
     "local-first",
+    "offline-first",
+    "offline",
+    "pwa",
+    "reactive",
+    "database",
     "sync-engine",
     "sync",
     "replication",
     "opfs",
     "indexeddb",
     "localstorage",
-    "optimistic",
-    "typescript"
+    "optimistic"
   ],
   "scripts": {
     "build": "vite build",

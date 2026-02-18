@@ -477,6 +477,219 @@ describe(`Functional Variants Query`, () => {
     })
   })
 
+  describe(`fn.select with orderBy using $selected`, () => {
+    let usersCollection: ReturnType<typeof createUsersCollection>
+
+    beforeEach(() => {
+      usersCollection = createUsersCollection()
+    })
+
+    test(`should allow orderBy to reference $selected fields from fn.select`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              name: row.user.name,
+              salaryInThousands: row.user.salary / 1000,
+            }))
+            .orderBy(({ $selected }) => $selected.salaryInThousands, `desc`),
+      })
+
+      const results = liveCollection.toArray
+
+      expect(results).toHaveLength(5)
+      // Should be ordered by salary descending
+      expect(results.map((r) => r.name)).toEqual([
+        `Charlie`, // 85k
+        `Alice`, // 75k
+        `Dave`, // 65k
+        `Eve`, // 55k
+        `Bob`, // 45k
+      ])
+    })
+
+    test(`should allow orderBy with $selected on computed string fields`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              displayName: `${row.user.name} (${row.user.age})`,
+              lastName: row.user.name.toLowerCase(),
+            }))
+            .orderBy(({ $selected }) => $selected.lastName),
+      })
+
+      const results = liveCollection.toArray
+
+      expect(results).toHaveLength(5)
+      // Should be ordered alphabetically by lowercase name
+      expect(results.map((r) => r.displayName)).toEqual([
+        `Alice (25)`,
+        `Bob (19)`,
+        `Charlie (30)`,
+        `Dave (22)`,
+        `Eve (28)`,
+      ])
+    })
+
+    test(`should allow multiple orderBy clauses with fn.select`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              name: row.user.name,
+              isActive: row.user.active,
+              salary: row.user.salary,
+            }))
+            .orderBy(({ $selected }) => $selected.isActive, `desc`)
+            .orderBy(({ $selected }) => $selected.salary, `desc`),
+      })
+
+      const results = liveCollection.toArray
+
+      expect(results).toHaveLength(5)
+      // Should be ordered by active (true first), then by salary desc
+      // Active users: Alice (75k), Dave (65k), Eve (55k), Bob (45k)
+      // Inactive users: Charlie (85k)
+      expect(results.map((r) => r.name)).toEqual([
+        `Alice`, // active, 75k
+        `Dave`, // active, 65k
+        `Eve`, // active, 55k
+        `Bob`, // active, 45k
+        `Charlie`, // inactive, 85k
+      ])
+    })
+
+    test(`should react to changes when using fn.select with orderBy`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              name: row.user.name,
+              salary: row.user.salary,
+            }))
+            .orderBy(({ $selected }) => $selected.salary),
+      })
+
+      // Initial order (ascending by salary)
+      expect(liveCollection.toArray.map((r) => r.name)).toEqual([
+        `Bob`, // 45k
+        `Eve`, // 55k
+        `Dave`, // 65k
+        `Alice`, // 75k
+        `Charlie`, // 85k
+      ])
+
+      // Update Bob's salary to be the highest
+      const bob = sampleUsers.find((u) => u.name === `Bob`)!
+      const richBob = { ...bob, salary: 100000 }
+      usersCollection.utils.begin()
+      usersCollection.utils.write({ type: `update`, value: richBob })
+      usersCollection.utils.commit()
+
+      // Bob should now be at the end (highest salary)
+      expect(liveCollection.toArray.map((r) => r.name)).toEqual([
+        `Eve`, // 55k
+        `Dave`, // 65k
+        `Alice`, // 75k
+        `Charlie`, // 85k
+        `Bob`, // 100k
+      ])
+
+      // Clean up
+      usersCollection.utils.begin()
+      usersCollection.utils.write({ type: `update`, value: bob })
+      usersCollection.utils.commit()
+    })
+
+    test(`should allow orderBy with table refs after fn.select`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              displayName: row.user.name,
+              salary: row.user.salary,
+            }))
+            .orderBy(({ user }) => user.age),
+      })
+
+      const results = liveCollection.toArray
+
+      expect(results).toHaveLength(5)
+      // Should be ordered by age (from original table, not $selected)
+      expect(results.map((r) => r.displayName)).toEqual([
+        `Bob`, // 19
+        `Dave`, // 22
+        `Alice`, // 25
+        `Eve`, // 28
+        `Charlie`, // 30
+      ])
+    })
+
+    test(`should allow fn.having to reference $selected fields from fn.select`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              name: row.user.name,
+              salaryTier: row.user.salary > 60000 ? `high` : `low`,
+            }))
+            .fn.having(({ $selected }) => $selected.salaryTier === `high`),
+      })
+
+      const results = liveCollection.toArray
+
+      // Only users with salary > 60k: Alice (75k), Charlie (85k), Dave (65k)
+      expect(results).toHaveLength(3)
+      expect(results.map((r) => r.name).sort()).toEqual([
+        `Alice`,
+        `Charlie`,
+        `Dave`,
+      ])
+    })
+
+    test(`should allow orderBy with both table refs and $selected`, () => {
+      const liveCollection = createLiveQueryCollection({
+        startSync: true,
+        query: (q) =>
+          q
+            .from({ user: usersCollection })
+            .fn.select((row) => ({
+              name: row.user.name,
+              salaryTier: row.user.salary > 60000 ? `high` : `low`,
+            }))
+            .orderBy(({ $selected }) => $selected.salaryTier)
+            .orderBy(({ user }) => user.age, `desc`),
+      })
+
+      const results = liveCollection.toArray
+
+      expect(results).toHaveLength(5)
+      // First by salaryTier (high < low alphabetically), then by age desc
+      // High tier (>60k): Charlie (30), Alice (25), Dave (22)
+      // Low tier (<=60k): Eve (28), Bob (19)
+      expect(results.map((r) => r.name)).toEqual([
+        `Charlie`, // high, 30
+        `Alice`, // high, 25
+        `Dave`, // high, 22
+        `Eve`, // low, 28
+        `Bob`, // low, 19
+      ])
+    })
+  })
+
   describe(`combinations`, () => {
     let usersCollection: ReturnType<typeof createUsersCollection>
     let departmentsCollection: ReturnType<typeof createDepartmentsCollection>

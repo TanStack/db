@@ -1,5 +1,102 @@
 # @tanstack/react-db
 
+## 0.2.6
+
+### Patch Changes
+
+- Updated dependencies [[`85c373e`](https://github.com/TanStack/db/commit/85c373ef892e4080fe86b26e2fcb762181545e3c), [`9184dcc`](https://github.com/TanStack/db/commit/9184dcce62019ea870f968f4a4a5c2428291214d), [`83d5ac8`](https://github.com/TanStack/db/commit/83d5ac82983fb6c244c53d349c83845969473a9b)]:
+  - @tanstack/db@0.5.26
+
+## 0.2.5
+
+### Patch Changes
+
+- Updated dependencies [[`43c7c9d`](https://github.com/TanStack/db/commit/43c7c9d5f2b47366a58f87470ac5dca95020ac57), [`284ebcc`](https://github.com/TanStack/db/commit/284ebcc8346bd237c3381de766995b8bda35009a)]:
+  - @tanstack/db@0.5.25
+
+## 0.2.4
+
+### Patch Changes
+
+- Updated dependencies [[`7099459`](https://github.com/TanStack/db/commit/7099459291810b237a9fb24bbfe6e543852a2ab2)]:
+  - @tanstack/db@0.5.24
+
+## 0.2.3
+
+### Patch Changes
+
+- Updated dependencies [[`05130f2`](https://github.com/TanStack/db/commit/05130f2420eb682f11f099310a0af87afa3f35fe)]:
+  - @tanstack/db@0.5.23
+
+## 0.2.2
+
+### Patch Changes
+
+- Updated dependencies [[`f9b741e`](https://github.com/TanStack/db/commit/f9b741e9fb636be1c9f1502b7e28fe691bae2480)]:
+  - @tanstack/db@0.5.22
+
+## 0.2.1
+
+### Patch Changes
+
+- Updated dependencies [[`6745ed0`](https://github.com/TanStack/db/commit/6745ed003dc25cfd6fa0f7e60f708205a6069ff2), [`1b22e40`](https://github.com/TanStack/db/commit/1b22e40c56323cfa5e7f759272fed53320aa32f7), [`7a2cacd`](https://github.com/TanStack/db/commit/7a2cacd7a426530cb77844a8c2680f6b06e9ce2f), [`bdf9405`](https://github.com/TanStack/db/commit/bdf94059e7ab98b5181e0df7d8d25cd1dbb5ae58)]:
+  - @tanstack/db@0.5.21
+
+## 0.2.0
+
+### Minor Changes
+
+- Update solid-db to enable suspense support. ([#826](https://github.com/TanStack/db/pull/826))
+  You can now run do
+
+  ```tsx
+  // Use Suspense boundaries
+  const todosQuery = useLiveQuery((q) => q.from({ todos: todoCollection }))
+
+  return (
+    <>
+      {/* Status and other getters don't trigger Suspense */}
+      <div>Status {todosQuery.status}</div>
+      <div>Loading {todosQuery.isLoading ? 'yes' : 'no'}</div>
+
+      <Suspense fallback={<div>Loading...</div>}>
+        <For each={todosQuery()}>
+          {(todo) => <li key={todo.id}>{todo.text}</li>}
+        </For>
+      </Suspense>
+    </>
+  )
+  ```
+
+  All values returned from useLiveQuery are now getters, so no longer need to be called as functions. This is a breaking change. This is to match how createResource works, and everything still stays reactive.
+
+  ```tsx
+  const todos = useLiveQuery(() => existingCollection)
+
+  const handleToggle = (id) => {
+    // Can now access collection directly
+    todos.collection.update(id, (draft) => {
+      draft.completed = !draft.completed
+    })
+  }
+
+  return (
+    <>
+      {/* Status and other getters don't trigger Suspense */}
+      <div>Status {todos.status}</div>
+      <div>Loading {todos.isLoading ? 'yes' : 'no'}</div>
+      <div>Ready {todos.isReady ? 'yes' : 'no'}</div>
+      <div>Idle {todos.isIdle ? 'yes' : 'no'}</div>
+      <div>Error {todos.isError ? 'yes' : 'no'}</div>
+    </>
+  )
+  ```
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @tanstack/db@0.5.20
+
 ## 0.1.62
 
 ### Patch Changes

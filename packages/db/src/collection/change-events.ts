@@ -347,7 +347,7 @@ function getOrderedKeys<T extends object, TKey extends string | number>(
         // Take the keys that match the filter and limit
         // if no limit is provided `index.keyCount` is used,
         // i.e. we will take all keys that match the filter
-        return index.take(limit ?? index.keyCount, undefined, filterFn)
+        return index.takeFromStart(limit ?? index.keyCount, filterFn)
       }
     }
   }
