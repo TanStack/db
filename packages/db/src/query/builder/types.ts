@@ -240,9 +240,7 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
             ? T | undefined
             : // RefLeaf | null (schema-nullable field)
               TSelectObject[K] extends RefLeaf<infer T> | null
-              ? IsNullableRef<
-                  Exclude<TSelectObject[K], null>
-                > extends true
+              ? IsNullableRef<Exclude<TSelectObject[K], null>> extends true
                 ? T | null | undefined
                 : T | null
               : // Ref | undefined (optional object-type schema field)
@@ -399,11 +397,11 @@ export type RefsForContext<TContext extends Context> = {
   > extends true
     ? IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
-          // Extract the non-undefined and non-null part, mark as nullable ref
-          Ref<NonNullable<TContext[`schema`][K]>, true>
+        // Extract the non-undefined and non-null part, mark as nullable ref
+        Ref<NonNullable<TContext[`schema`][K]>, true>
       : // T is optional (T | undefined) but not exactly undefined, and not nullable
-          // Extract the non-undefined part, mark as nullable ref
-          Ref<NonUndefined<TContext[`schema`][K]>, true>
+        // Extract the non-undefined part, mark as nullable ref
+        Ref<NonUndefined<TContext[`schema`][K]>, true>
     : IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is nullable (T | null) but not exactly null, and not optional
         // Extract the non-null part, mark as nullable ref
