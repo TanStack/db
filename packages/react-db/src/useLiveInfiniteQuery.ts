@@ -246,6 +246,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (!isCollection && !queryResult.isReady) return
 
     // Adjust the window
+    let cancelled = false
     const result = utils.setWindow({
       offset: expectedOffset,
       limit: expectedLimit,
@@ -253,11 +254,22 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
     if (result !== true) {
       setIsFetchingNextPage(true)
-      result.then(() => {
-        setIsFetchingNextPage(false)
-      })
+      result
+        .then(() => {
+          if (!cancelled) setIsFetchingNextPage(false)
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            setIsFetchingNextPage(false)
+            console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
+          }
+        })
     } else {
       setIsFetchingNextPage(false)
+    }
+
+    return () => {
+      cancelled = true
     }
   }, [
     isCollection,
