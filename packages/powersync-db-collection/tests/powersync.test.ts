@@ -464,6 +464,7 @@ describe(`PowerSync Integration`, () => {
       liveDocuments.subscribeChanges((changes) => {
         changes
           .map((change) => change.value.name)
+          .filter((name): name is string => name !== undefined)
           .forEach((change) => bookNames.add(change))
       })
 
