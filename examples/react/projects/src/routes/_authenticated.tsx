@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   Link,
   Outlet,
@@ -20,23 +20,9 @@ function AuthenticatedLayout() {
   const [showNewProjectForm, setShowNewProjectForm] = useState(false)
   const [newProjectName, setNewProjectName] = useState(``)
 
-  const { data: projects, isLoading } = useLiveQuery((q) =>
+  const { data: projects } = useLiveQuery((q) =>
     q.from({ projectCollection })
   )
-
-  useEffect(() => {
-    if (session && projects.length === 0 && !isLoading) {
-      projectCollection.insert({
-        id: Math.floor(Math.random() * 100000),
-        name: `Default`,
-        description: `Default project`,
-        owner_id: session.user.id,
-        shared_user_ids: [],
-        created_at: new Date(),
-        updated_at: new Date(),
-      })
-    }
-  }, [session, projects, isLoading])
 
   const handleLogout = async () => {
     await authClient.signOut()

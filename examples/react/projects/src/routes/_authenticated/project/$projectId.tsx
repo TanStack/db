@@ -87,6 +87,11 @@ function ProjectPage() {
     todoCollection.delete(id)
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  if (!project || !usersInProject) {
+    return null
+  }
+
   return (
     <div className="p-6">
       <div className="max-w-2xl mx-auto">
