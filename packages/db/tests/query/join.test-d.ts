@@ -735,6 +735,62 @@ describe(`Declarative select refs should not use union with undefined for nullab
     >()
   })
 
+  test(`right-joined ref in declarative select should allow direct property access on nullable left table`, () => {
+    const usersCollection = createUsersCollection()
+    const departmentsCollection = createDepartmentsCollection()
+
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .rightJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
+          )
+          .select(({ user, dept }) => ({
+            // user is the nullable side in a right join
+            userName: user.name,
+            deptName: dept.name,
+          })),
+    })
+
+    const results = query.toArray
+
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        userName: string | undefined
+        deptName: string
+      }>
+    >()
+  })
+
+  test(`full-joined refs in declarative select should allow direct property access on both nullable tables`, () => {
+    const usersCollection = createUsersCollection()
+    const departmentsCollection = createDepartmentsCollection()
+
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .fullJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
+          )
+          .select(({ user, dept }) => ({
+            userName: user.name,
+            deptName: dept.name,
+          })),
+    })
+
+    const results = query.toArray
+
+    // Both sides are nullable in a full join
+    expectTypeOf(results).toEqualTypeOf<
+      Array<{
+        userName: string | undefined
+        deptName: string | undefined
+      }>
+    >()
+  })
+
   test(`inner-joined ref in declarative select should allow direct property access with non-optional result`, () => {
     const usersCollection = createUsersCollection()
     const departmentsCollection = createDepartmentsCollection()
