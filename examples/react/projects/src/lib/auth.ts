@@ -17,8 +17,5 @@ export const auth = betterAuth({
     disableSignUp: process.env.NODE_ENV === 'production',
     minPasswordLength: process.env.NODE_ENV === 'production' ? 8 : 1,
   },
-  trustedOrigins: [
-    'http://localhost:5173',
-    'http://localhost:5174',
-  ],
+  trustedOrigins: ['http://localhost:5173', 'http://localhost:5174'],
 })
