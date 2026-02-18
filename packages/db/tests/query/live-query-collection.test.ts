@@ -3,6 +3,7 @@ import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../../src/collection/index.js'
 import {
   and,
+  coalesce,
   createLiveQueryCollection,
   eq,
   ilike,
@@ -2284,7 +2285,7 @@ describe(`createLiveQueryCollection`, () => {
             .select(({ base: b, related: r }) => ({
               id: b.id,
               name: b.name,
-              value: r?.value,
+              value: r.value,
             })),
         getKey: (item) => item.id, // Valid for 1:1 joins with unique keys
       })
@@ -2324,9 +2325,9 @@ describe(`createLiveQueryCollection`, () => {
             .join({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id))
             .select(({ comments: c, users: u }) => ({
               id: c.id,
-              userId: u?.id ?? c.userId,
+              userId: coalesce(u.id, c.userId),
               text: c.text,
-              userName: u?.name,
+              userName: u.name,
             })),
         getKey: (item) => item.userId,
         startSync: true,

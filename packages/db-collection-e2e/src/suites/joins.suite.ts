@@ -24,9 +24,9 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
               eq(user.id, post.userId),
             )
             .select(({ user, post }) => ({
-              id: post!.id,
+              id: post.id,
               userName: user.name,
-              postTitle: post!.title,
+              postTitle: post.title,
             })),
         )
 
@@ -53,12 +53,12 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .join({ post: postsCollection }, ({ user, post }) =>
               eq(user.id, post.userId),
             )
-            .where(({ post }) => gt(post!.viewCount, 10))
+            .where(({ post }) => gt(post.viewCount, 10))
             .select(({ user, post }) => ({
-              id: post!.id,
+              id: post.id,
               userName: user.name,
-              postTitle: post!.title,
-              viewCount: post!.viewCount,
+              postTitle: post.title,
+              viewCount: post.viewCount,
             })),
         )
 
@@ -88,9 +88,9 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
                 eq(user.id, post.userId),
               )
               .select(({ user, post }) => ({
-                id: post!.id,
+                id: post.id,
                 userName: user.name,
-                postTitle: post!.title,
+                postTitle: post.title,
               })),
           )
 
@@ -117,12 +117,12 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .join({ post: postsCollection }, ({ user, post }) =>
               eq(user.id, post.userId),
             )
-            .orderBy(({ post }) => post!.viewCount, `desc`)
+            .orderBy(({ post }) => post.viewCount, `desc`)
             .select(({ user, post }) => ({
-              id: post!.id,
+              id: post.id,
               userName: user.name,
-              postTitle: post!.title,
-              viewCount: post!.viewCount,
+              postTitle: post.title,
+              viewCount: post.viewCount,
             })),
         )
 
@@ -149,7 +149,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
         for (let i = 1; i < results.length; i++) {
           const prevCount = results[i - 1]!.viewCount
           const currCount = results[i]!.viewCount
-          expect(prevCount).toBeGreaterThanOrEqual(currCount)
+          expect(prevCount!).toBeGreaterThanOrEqual(currCount!)
         }
 
         await query.cleanup()
@@ -166,13 +166,13 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .join({ post: postsCollection }, ({ user, post }) =>
               eq(user.id, post.userId),
             )
-            .orderBy(({ post }) => post!.id, `asc`)
+            .orderBy(({ post }) => post.id, `asc`)
             .limit(10)
             .offset(5)
             .select(({ user, post }) => ({
-              id: post!.id,
+              id: post.id,
               userName: user.name,
-              postTitle: post!.title,
+              postTitle: post.title,
             })),
         )
 
@@ -194,13 +194,13 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .from({ user: users })
             .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId))
             .join({ comment: comments }, ({ post, comment }) =>
-              eq(post!.id, comment.postId),
+              eq(post.id, comment.postId),
             )
             .select(({ user, post, comment }) => ({
-              id: comment!.id,
+              id: comment.id,
               userName: user.name,
-              postTitle: post!.title,
-              commentText: comment!.text,
+              postTitle: post.title,
+              commentText: comment.text,
             })),
         )
 
@@ -225,16 +225,16 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .from({ user: users })
             .where(({ user }) => eq(user.isActive, true))
             .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId))
-            .where(({ post }) => isNull(post!.deletedAt))
+            .where(({ post }) => isNull(post.deletedAt))
             .join({ comment: comments }, ({ post, comment }) =>
-              eq(post!.id, comment.postId),
+              eq(post.id, comment.postId),
             )
-            .where(({ comment }) => isNull(comment!.deletedAt))
+            .where(({ comment }) => isNull(comment.deletedAt))
             .select(({ user, post, comment }) => ({
-              id: comment!.id,
+              id: comment.id,
               userName: user.name,
-              postTitle: post!.title,
-              commentText: comment!.text,
+              postTitle: post.title,
+              commentText: comment.text,
             })),
         )
 
@@ -264,13 +264,13 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
                 eq(user.id, post.userId),
               )
               .join({ comment: commentsOnDemand }, ({ post, comment }) =>
-                eq(post!.id, comment.postId),
+                eq(post.id, comment.postId),
               )
               .select(({ user, post, comment }) => ({
-                id: comment!.id,
+                id: comment.id,
                 userName: user.name,
-                postTitle: post!.title,
-                commentText: comment!.text,
+                postTitle: post.title,
+                commentText: comment.text,
               })),
           )
 
@@ -296,12 +296,12 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
           q
             .from({ user: users })
             .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId))
-            .where(({ post }) => gt(post!.viewCount, 50))
+            .where(({ post }) => gt(post.viewCount, 50))
             .select(({ user, post }) => ({
-              id: post!.id,
+              id: post.id,
               userName: user.name,
-              postTitle: post!.title,
-              viewCount: post!.viewCount,
+              postTitle: post.title,
+              viewCount: post.viewCount,
             })),
         )
 
@@ -326,10 +326,10 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .where(({ user }) => gt(user.age, 30))
             .join({ post: posts }, ({ user, post }) => eq(user.id, post.userId))
             .select(({ user, post }) => ({
-              id: post!.id,
+              id: post.id,
               userName: user.name,
               userAge: user.age,
-              postTitle: post!.title,
+              postTitle: post.title,
             })),
         )
 
@@ -359,7 +359,7 @@ export function createJoinsTestSuite(getConfig: () => Promise<E2ETestConfig>) {
             .select(({ user, post }) => ({
               id: user.id,
               userName: user.name,
-              postTitle: post!.title, // May be null for users without posts
+              postTitle: post.title, // May be null for users without posts
             })),
         )
 
