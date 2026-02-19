@@ -3,8 +3,10 @@ import { createLiveQueryCollection } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 import {
+  add,
   and,
   avg,
+  coalesce,
   count,
   eq,
   gt,
@@ -1760,6 +1762,150 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // Gold tier should remain unchanged
         const goldTier = results.find((r) => r.tier === `gold`)
         expect(goldTier?.order_count).toBe(initialGoldCount)
+      })
+    })
+
+    describe(`Aggregates nested inside expressions`, () => {
+      let ordersCollection: ReturnType<typeof createOrdersCollection>
+
+      beforeEach(() => {
+        ordersCollection = createOrdersCollection(autoIndex)
+      })
+
+      test(`coalesce wrapping count returns the count value or the fallback`, () => {
+        const customerSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                order_count: coalesce(count(orders.id), 0),
+              })),
+        })
+
+        expect(customerSummary.size).toBe(3)
+
+        const customer1 = customerSummary.get(1)
+        expect(customer1?.customer_id).toBe(1)
+        expect(customer1?.order_count).toBe(3)
+
+        const customer2 = customerSummary.get(2)
+        expect(customer2?.customer_id).toBe(2)
+        expect(customer2?.order_count).toBe(2)
+
+        const customer3 = customerSummary.get(3)
+        expect(customer3?.customer_id).toBe(3)
+        expect(customer3?.order_count).toBe(2)
+      })
+
+      test(`coalesce wrapping sum returns the sum value or the fallback`, () => {
+        const customerSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                total_amount: coalesce(sum(orders.amount), 0),
+              })),
+        })
+
+        expect(customerSummary.size).toBe(3)
+
+        const customer1 = customerSummary.get(1)
+        expect(customer1?.total_amount).toBe(700)
+      })
+
+      test(`add combines two aggregate results per group`, () => {
+        const customerSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                amount_plus_count: add(sum(orders.amount), count(orders.id)),
+              })),
+        })
+
+        expect(customerSummary.size).toBe(3)
+
+        // Customer 1: sum(amount)=700, count(id)=3 => 703
+        const customer1 = customerSummary.get(1)
+        expect(customer1?.amount_plus_count).toBe(703)
+      })
+
+      test(`select combines plain aggregates with expression-wrapped aggregates`, () => {
+        const customerSummary = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                order_count: count(orders.id),
+                safe_total: coalesce(sum(orders.amount), 0),
+              })),
+        })
+
+        expect(customerSummary.size).toBe(3)
+
+        const customer1 = customerSummary.get(1)
+        expect(customer1?.order_count).toBe(3)
+        expect(customer1?.safe_total).toBe(700)
+      })
+
+      test(`subquery with coalesce(count(...)) can be used as a join source`, () => {
+        type Customer = {
+          id: number
+          name: string
+        }
+        const customersCollection = createCollection(
+          mockSyncCollectionOptions<Customer>({
+            id: `test-customers-nested-agg`,
+            getKey: (c) => c.id,
+            initialData: [
+              { id: 1, name: `John` },
+              { id: 2, name: `Jane` },
+              { id: 3, name: `Bob` },
+            ],
+          }),
+        )
+
+        const result = createLiveQueryCollection({
+          startSync: true,
+          query: (q) => {
+            const orderCountSubquery = q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                orderCount: coalesce(count(orders.id), 0),
+              }))
+
+            return q
+              .from({ customer: customersCollection })
+              .leftJoin(
+                { oc: orderCountSubquery },
+                ({ customer, oc }) => eq(customer.id, oc.customer_id),
+              )
+              .select(({ customer, oc }) => ({
+                name: customer.name,
+                orderCount: oc?.orderCount,
+              }))
+          },
+        })
+
+        const results = result.toArray
+        expect(results).toHaveLength(3)
+
+        const john = results.find((r) => r.name === `John`)
+        expect(john?.orderCount).toBe(3) // orders 1, 2, 7
       })
     })
 

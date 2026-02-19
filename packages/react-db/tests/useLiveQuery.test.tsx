@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import {
   Query,
+  coalesce,
   count,
   createCollection,
   createLiveQueryCollection,
@@ -9,6 +10,7 @@ import {
   eq,
   gt,
   lte,
+  sum,
 } from '@tanstack/db'
 import { useEffect } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
@@ -2349,6 +2351,129 @@ describe(`Query Collections`, () => {
       expect(result.current.data).toBeUndefined()
       expect(result.current.status).toBe(`disabled`)
       expect(result.current.isEnabled).toBe(false)
+    })
+  })
+
+  describe(`aggregates nested inside expressions`, () => {
+    it(`coalesce(count(...), 0) in groupBy select returns count per group`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `nested-agg-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .groupBy(({ persons }) => persons.team)
+            .select(({ persons }) => ({
+              team: persons.team,
+              memberCount: coalesce(count(persons.id), 0),
+            })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(2) // team1 and team2
+      })
+
+      const results = result.current.data
+      const team1 = results.find((r) => r.team === `team1`)
+      expect(team1?.memberCount).toBe(2) // John Doe + John Smith
+
+      const team2 = results.find((r) => r.team === `team2`)
+      expect(team2?.memberCount).toBe(1) // Jane Doe
+    })
+
+    it(`subquery with coalesce(count(...)) can be left-joined as a source`, async () => {
+      const personCollection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `nested-agg-join-persons`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const issueCollection = createCollection(
+        mockSyncCollectionOptions<Issue>({
+          id: `nested-agg-join-issues`,
+          getKey: (issue: Issue) => issue.id,
+          initialData: initialIssues,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        return useLiveQuery(
+          (q) => {
+            const issueCountSubquery = q
+              .from({ issues: issueCollection })
+              .groupBy(({ issues }) => issues.userId)
+              .select(({ issues }) => ({
+                userId: issues.userId,
+                issueCount: coalesce(count(issues.id), 0),
+              }))
+
+            return q
+              .from({ persons: personCollection })
+              .leftJoin(
+                { ic: issueCountSubquery },
+                ({ persons, ic }) => eq(persons.id, ic.userId),
+              )
+              .select(({ persons, ic }) => ({
+                name: persons.name,
+                issueCount: ic?.issueCount,
+              }))
+          },
+          [],
+        )
+      })
+
+      await waitFor(() => {
+        expect(result.current.state.size).toBeGreaterThan(0)
+      })
+
+      const results = result.current.data
+      const john = results.find((r) => r.name === `John Doe`)
+      expect(john?.issueCount).toBe(2) // Issues 1 and 3
+
+      const jane = results.find((r) => r.name === `Jane Doe`)
+      expect(jane?.issueCount).toBe(1) // Issue 2
+    })
+
+    it(`coalesce(sum(...), 0) in groupBy select returns sum per group`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `nested-agg-sum-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { result } = renderHook(() => {
+        return useLiveQuery((q) =>
+          q
+            .from({ persons: collection })
+            .groupBy(({ persons }) => persons.team)
+            .select(({ persons }) => ({
+              team: persons.team,
+              totalAge: coalesce(sum(persons.age), 0),
+            })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(result.current.state.size).toBe(2)
+      })
+
+      const results = result.current.data
+      const team1 = results.find((r) => r.team === `team1`)
+      expect(team1?.totalAge).toBe(65) // 30 + 35
+
+      const team2 = results.find((r) => r.team === `team2`)
+      expect(team2?.totalAge).toBe(25) // 25
     })
   })
 })
