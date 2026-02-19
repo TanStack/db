@@ -393,9 +393,16 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     return false
   }
 
+  debug(
+    `${collectionId ? `[${collectionId}] ` : ``}createLoadSubsetDedupe: columnMapper.encode is ${encodeColumnName ? `configured` : `NOT configured`}`,
+  )
+
   const loadSubset = async (opts: LoadSubsetOptions) => {
     if (isBufferingInitialSync()) {
       const snapshotParams = compileSQL<T>(opts, compileOptions)
+      debug(
+        `${collectionId ? `[${collectionId}] ` : ``}loadSubset compiled WHERE: ${snapshotParams.where}`,
+      )
       try {
         const { data: rows } = await stream.fetchSnapshot(snapshotParams)
 
@@ -460,6 +467,9 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         ])
       } else {
         const snapshotParams = compileSQL<T>(opts, compileOptions)
+        debug(
+          `${collectionId ? `[${collectionId}] ` : ``}loadSubset compiled WHERE: ${snapshotParams.where}`,
+        )
         await stream.requestSnapshot(snapshotParams)
       }
     } catch (error) {

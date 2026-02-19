@@ -5,17 +5,29 @@ import {
   createTransaction,
 } from '@tanstack/db'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
-import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Collection,
+  IR,
   InsertMutationFnParams,
   MutationFnParams,
   PendingMutation,
   Transaction,
   TransactionWithMutations,
 } from '@tanstack/db'
+import type { ElectricCollectionUtils } from '../src/electric'
 import type { Message, Row } from '@electric-sql/client'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
+
+// Helper functions for creating IR expressions (same as sql-compiler.test.ts)
+function val<T>(value: T): IR.BasicExpression<T> {
+  return { type: `val`, value } as IR.BasicExpression<T>
+}
+function ref(...path: Array<string>): IR.BasicExpression {
+  return { type: `ref`, path } as IR.BasicExpression
+}
+function func(name: string, args: Array<any>): IR.BasicExpression<boolean> {
+  return { type: `func`, name, args } as IR.BasicExpression<boolean>
+}
 
 // Mock the ShapeStream module
 const mockSubscribe = vi.fn()
@@ -2845,6 +2857,108 @@ describe(`Electric Integration`, () => {
           offset: -1,
         }),
       )
+    })
+
+    it(`should encode column names using columnMapper.encode in loadSubset WHERE clause`, async () => {
+      vi.clearAllMocks()
+
+      // Helper to convert camelCase to snake_case (simulating snakeCamelMapper's encode)
+      const camelToSnake = (str: string): string =>
+        str.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+
+      const config = {
+        id: `column-mapper-encode-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          // Configure columnMapper to convert camelCase to snake_case
+          columnMapper: {
+            encode: camelToSnake,
+            decode: (name: string) => name, // Not used in this test
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send up-to-date to mark collection as ready
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Call loadSubset with a WHERE clause using camelCase column names
+      // The column names should be encoded to snake_case
+      await testCollection._sync.loadSubset({
+        where: func(`and`, [
+          func(`eq`, [ref(`isArchived`), val(false)]),
+          func(`eq`, [ref(`isDeleted`), val(false)]),
+        ]),
+        limit: 10,
+      })
+
+      // Verify requestSnapshot was called
+      expect(mockRequestSnapshot).toHaveBeenCalled()
+
+      // Get the params that were passed to requestSnapshot
+      const callArgs = mockRequestSnapshot.mock.calls[0]![0]
+
+      // The WHERE clause should have snake_case column names
+      // The format is: ("column_name" = $1)
+      expect(callArgs.where).toContain(`"is_archived"`)
+      expect(callArgs.where).toContain(`"is_deleted"`)
+
+      // Should NOT contain the original camelCase names
+      expect(callArgs.where).not.toContain(`"isArchived"`)
+      expect(callArgs.where).not.toContain(`"isDeleted"`)
+    })
+
+    it(`should not encode column names when columnMapper is not provided`, async () => {
+      vi.clearAllMocks()
+
+      const config = {
+        id: `no-column-mapper-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+          // No columnMapper configured
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      // Send up-to-date to mark collection as ready
+      subscriber([
+        {
+          headers: { control: `up-to-date` },
+        },
+      ])
+
+      // Call loadSubset with a WHERE clause using camelCase column names
+      await testCollection._sync.loadSubset({
+        where: func(`eq`, [ref(`isArchived`), val(false)]),
+        limit: 10,
+      })
+
+      // Verify requestSnapshot was called
+      expect(mockRequestSnapshot).toHaveBeenCalled()
+
+      // Get the params that were passed to requestSnapshot
+      const callArgs = mockRequestSnapshot.mock.calls[0]![0]
+
+      // The WHERE clause should preserve camelCase names when no columnMapper
+      expect(callArgs.where).toContain(`"isArchived"`)
     })
   })
 
