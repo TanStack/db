@@ -752,6 +752,40 @@ describe(`injectLiveQuery`, () => {
     })
   })
 
+  it(`should return a single object for findOne query`, async () => {
+    await TestBed.runInInjectionContext(async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `test-persons-findone-angular`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { state, data } = injectLiveQuery((q) =>
+        q
+          .from({ collection })
+          .where(({ collection: c }) => eq(c.id, `3`))
+          .findOne(),
+      )
+
+      await waitForAngularUpdate()
+
+      expect(state().size).toBe(1)
+      expect(state().get(`3`)).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+
+      // findOne should return a single object, not an array
+      expect(Array.isArray(data())).toBe(false)
+      expect(data()).toMatchObject({
+        id: `3`,
+        name: `John Smith`,
+      })
+    })
+  })
+
   describe(`eager execution during sync`, () => {
     it(`should show state while isLoading is true during sync`, async () => {
       await TestBed.runInInjectionContext(async () => {
