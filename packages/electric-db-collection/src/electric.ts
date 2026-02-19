@@ -16,14 +16,19 @@ import {
 import { compileSQL } from './sql-compiler'
 import {
   addTagToIndex,
+  deriveDisjunctPositions,
   findRowsMatchingPattern,
   getTagLength,
   isMoveOutMessage,
+  parseTag as parseTagString,
   removeTagFromIndex,
+  rowVisible,
   tagMatchesPattern,
 } from './tag-index'
 import type { ColumnEncoder } from './sql-compiler'
 import type {
+  ActiveConditions,
+  DisjunctPositions,
   MoveOutPattern,
   MoveTag,
   ParsedMoveTag,
@@ -981,16 +986,16 @@ function createElectricSync<T extends Row<unknown>>(
 
   const tagCache = new Map<MoveTag, ParsedMoveTag>()
 
-  // Parses a tag string into a MoveTag.
+  // Parses a tag string into a ParsedMoveTag.
   // It memoizes the result parsed tag such that future calls
-  // for the same tag string return the same MoveTag array.
+  // for the same tag string return the same ParsedMoveTag array.
   const parseTag = (tag: MoveTag): ParsedMoveTag => {
     const cachedTag = tagCache.get(tag)
     if (cachedTag) {
       return cachedTag
     }
 
-    const parsedTag = tag.split(`|`)
+    const parsedTag = parseTagString(tag)
     tagCache.set(tag, parsedTag)
     return parsedTag
   }
@@ -999,6 +1004,11 @@ function createElectricSync<T extends Row<unknown>>(
   const rowTagSets = new Map<RowId, Set<MoveTag>>()
   const tagIndex: TagIndex = []
   let tagLength: number | undefined = undefined
+
+  // DNF state: active_conditions are per-row, disjunct_positions are global
+  // (fixed by the shape's WHERE clause, derived once from the first tagged message).
+  const rowActiveConditions = new Map<RowId, ActiveConditions>()
+  let disjunctPositions: DisjunctPositions | undefined = undefined
 
   /**
    * Initialize the tag index with the correct length
@@ -1074,6 +1084,7 @@ function createElectricSync<T extends Row<unknown>>(
     tags: Array<MoveTag> | undefined,
     removedTags: Array<MoveTag> | undefined,
     rowId: RowId,
+    activeConditions?: ActiveConditions,
   ): Set<MoveTag> => {
     // Initialize tag set for this row if it doesn't exist (needed for checking deletion)
     if (!rowTagSets.has(rowId)) {
@@ -1084,11 +1095,22 @@ function createElectricSync<T extends Row<unknown>>(
     // Add new tags
     if (tags) {
       addTagsToRow(tags, rowId, rowTagSet)
+
+      // Derive disjunct positions once — they are fixed by the shape's WHERE clause.
+      if (disjunctPositions === undefined) {
+        const parsedTags = tags.map(parseTag)
+        disjunctPositions = deriveDisjunctPositions(parsedTags)
+      }
     }
 
     // Remove tags
     if (removedTags) {
       removeTagsFromRow(removedTags, rowId, rowTagSet)
+    }
+
+    // Store active conditions if provided (overwrite on re-send)
+    if (activeConditions && activeConditions.length > 0) {
+      rowActiveConditions.set(rowId, [...activeConditions])
     }
 
     return rowTagSet
@@ -1101,6 +1123,8 @@ function createElectricSync<T extends Row<unknown>>(
     rowTagSets.clear()
     tagIndex.length = 0
     tagLength = undefined
+    rowActiveConditions.clear()
+    disjunctPositions = undefined
   }
 
   /**
@@ -1129,11 +1153,12 @@ function createElectricSync<T extends Row<unknown>>(
 
     // Remove the row from the tag sets map
     rowTagSets.delete(rowId)
+    rowActiveConditions.delete(rowId)
   }
 
   /**
    * Remove matching tags from a row based on a pattern
-   * Returns true if the row's tag set is now empty
+   * Returns true if the row should be deleted (no longer visible)
    */
   const removeMatchingTagsFromRow = (
     rowId: RowId,
@@ -1153,7 +1178,23 @@ function createElectricSync<T extends Row<unknown>>(
       }
     }
 
-    // Check if row's tag set is now empty
+    // DNF mode: check visibility using active conditions
+    const activeConditions = rowActiveConditions.get(rowId)
+    if (activeConditions && disjunctPositions) {
+      // Set the condition at this pattern's position to false
+      activeConditions[pattern.pos] = false
+
+      if (!rowVisible(activeConditions, disjunctPositions)) {
+        // Row is no longer visible — clean up all state
+        rowTagSets.delete(rowId)
+        rowActiveConditions.delete(rowId)
+        return true
+      }
+      return false
+    }
+
+    // Simple shape (no subquery dependencies — server sends no active_conditions):
+    // delete if tag set is empty
     if (rowTagSet.size === 0) {
       rowTagSets.delete(rowId)
       return true
@@ -1433,6 +1474,10 @@ function createElectricSync<T extends Row<unknown>>(
         const removedTags = changeMessage.headers.removed_tags
         const hasTags = tags || removedTags
 
+        // Extract active_conditions from headers (DNF support)
+        const activeConditions = changeMessage.headers
+          .active_conditions as ActiveConditions | undefined
+
         const rowId = collection.getKeyFromItem(changeMessage.value)
         const operation = changeMessage.headers.operation
 
@@ -1453,7 +1498,7 @@ function createElectricSync<T extends Row<unknown>>(
         if (isDelete) {
           clearTagsForRow(rowId)
         } else if (hasTags) {
-          processTagsForChangeMessage(tags, removedTags, rowId)
+          processTagsForChangeMessage(tags, removedTags, rowId, activeConditions)
         }
 
         write({
