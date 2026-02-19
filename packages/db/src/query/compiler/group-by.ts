@@ -5,7 +5,7 @@ import {
   map,
   serializeValue,
 } from '@tanstack/db-ivm'
-import { Func, PropRef, getHavingExpression, isExpressionLike  } from '../ir.js'
+import { Func, PropRef, getHavingExpression, isExpressionLike } from '../ir.js'
 import {
   AggregateFunctionNotInSelectError,
   NonAggregateExpressionNotInGroupByError,
@@ -514,7 +514,7 @@ export function containsAggregate(
     return true
   }
   if (expr.type === `func`) {
-    return (expr).args.some((arg: BasicExpression | Aggregate) =>
+    return expr.args.some((arg: BasicExpression | Aggregate) =>
       containsAggregate(arg),
     )
   }

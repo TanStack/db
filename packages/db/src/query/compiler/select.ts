@@ -227,10 +227,7 @@ function addFromObject(
       continue
     }
 
-    if (
-      isAggregateExpression(expression) ||
-      containsAggregate(expression)
-    ) {
+    if (isAggregateExpression(expression) || containsAggregate(expression)) {
       // Placeholder for group-by processing later.
       // Both plain aggregates (count(...)) and expressions wrapping
       // aggregates (coalesce(count(...), 0)) are deferred to processGroupBy.
