@@ -350,6 +350,9 @@ export function useLiveQuery(
         startSync: true,
       })
     } else {
+      if (unwrappedParam === null || unwrappedParam === undefined) {
+        return null
+      }
       return createLiveQueryCollection({
         ...unwrappedParam,
         startSync: true,
