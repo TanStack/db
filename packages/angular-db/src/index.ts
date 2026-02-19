@@ -27,15 +27,17 @@ import type { Signal } from '@angular/core'
  * The result of calling `injectLiveQuery`.
  * Contains reactive signals for the query state and data.
  */
-export interface InjectLiveQueryResult<
-  TContext extends Context,
-> {
+export interface InjectLiveQueryResult<TContext extends Context> {
   /** A signal containing the complete state map of results keyed by their ID */
   state: Signal<Map<string | number, GetResult<TContext>>>
   /** A signal containing the results as an array, or single result for findOne queries */
   data: Signal<InferResultType<TContext>>
   /** A signal containing the underlying collection instance (null for disabled queries) */
-  collection: Signal<Collection<GetResult<TContext>, string | number, {}> | null>
+  collection: Signal<Collection<
+    GetResult<TContext>,
+    string | number,
+    {}
+  > | null>
   /** A signal containing the current status of the collection */
   status: Signal<CollectionStatus | `disabled`>
   /** A signal indicating whether the collection is currently loading */
@@ -210,7 +212,7 @@ export function injectLiveQuery(opts: any) {
     if (!currentCollection) {
       return internalData()
     }
-    const config = (currentCollection).config as
+    const config = currentCollection.config as
       | CollectionConfigSingleRowOption<any, any, any>
       | undefined
     return config?.singleResult ? internalData()[0] : internalData()
