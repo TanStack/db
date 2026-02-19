@@ -372,10 +372,7 @@ describe(`isWhereSubset`, () => {
     })
 
     it(`should handle and(A, B) as subset of or(and(A, B), and(C, D))`, () => {
-      const subsetExpr = and(
-        eq(ref(`id`), val(1)),
-        gt(ref(`age`), val(20)),
-      )
+      const subsetExpr = and(eq(ref(`id`), val(1)), gt(ref(`age`), val(20)))
       const supersetExpr = or(
         and(eq(ref(`id`), val(1)), gt(ref(`age`), val(20))),
         and(eq(ref(`id`), val(2)), gt(ref(`age`), val(30))),
@@ -384,10 +381,7 @@ describe(`isWhereSubset`, () => {
     })
 
     it(`should return false when and(A, B) does not match any disjunct`, () => {
-      const subsetExpr = and(
-        eq(ref(`id`), val(3)),
-        gt(ref(`age`), val(20)),
-      )
+      const subsetExpr = and(eq(ref(`id`), val(3)), gt(ref(`age`), val(20)))
       const supersetExpr = or(
         and(eq(ref(`id`), val(1)), gt(ref(`age`), val(20))),
         and(eq(ref(`id`), val(2)), gt(ref(`age`), val(30))),
