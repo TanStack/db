@@ -62,7 +62,10 @@ function findClosestKey(unknownKey: string): string | undefined {
   let bestMatch: string | undefined
   let bestDistance = Infinity
   for (const validKey of VALID_CONFIG_KEYS) {
-    const distance = levenshtein(unknownKey.toLowerCase(), validKey.toLowerCase())
+    const distance = levenshtein(
+      unknownKey.toLowerCase(),
+      validKey.toLowerCase(),
+    )
     if (distance < bestDistance) {
       bestDistance = distance
       bestMatch = validKey
@@ -164,7 +167,10 @@ export function validateCollectionConfig(config: unknown): void {
 
   // Validate gcTime
   if (`gcTime` in configObj && configObj.gcTime !== undefined) {
-    if (typeof configObj.gcTime !== `number` || Number.isNaN(configObj.gcTime)) {
+    if (
+      typeof configObj.gcTime !== `number` ||
+      Number.isNaN(configObj.gcTime)
+    ) {
       throw new InvalidOptionTypeError(
         `gcTime`,
         `a number`,
@@ -197,10 +203,7 @@ export function validateCollectionConfig(config: unknown): void {
 
   // Validate syncMode
   if (`syncMode` in configObj && configObj.syncMode !== undefined) {
-    if (
-      configObj.syncMode !== `eager` &&
-      configObj.syncMode !== `on-demand`
-    ) {
+    if (configObj.syncMode !== `eager` && configObj.syncMode !== `on-demand`) {
       throw new InvalidOptionTypeError(
         `syncMode`,
         `"eager" or "on-demand"`,

@@ -159,9 +159,7 @@ export class InvalidSyncFunctionError extends CollectionConfigurationError {
 
 export class InvalidCallbackOptionError extends CollectionConfigurationError {
   constructor(optionName: string, actualType: string) {
-    super(
-      `"${optionName}" must be a function, but received ${actualType}.`,
-    )
+    super(`"${optionName}" must be a function, but received ${actualType}.`)
   }
 }
 
@@ -185,7 +183,9 @@ export class UnknownCollectionConfigError extends CollectionConfigurationError {
     if (suggestions.length > 0) {
       parts.push(
         `\n\nDid you mean?\n` +
-          suggestions.map((s) => `  "${s.unknown}" → "${s.suggestion}"`).join(`\n`),
+          suggestions
+            .map((s) => `  "${s.unknown}" → "${s.suggestion}"`)
+            .join(`\n`),
       )
     }
     parts.push(

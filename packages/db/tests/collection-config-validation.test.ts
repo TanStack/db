@@ -37,9 +37,7 @@ describe(`createCollection runtime config validation`, () => {
 
     it(`should throw CollectionRequiresConfigError when an array is passed`, () => {
       // @ts-expect-error testing runtime behavior
-      expect(() => createCollection([])).toThrow(
-        CollectionRequiresConfigError,
-      )
+      expect(() => createCollection([])).toThrow(CollectionRequiresConfigError)
     })
   })
 

@@ -256,10 +256,7 @@ export function createCollection(
   // early with actionable messages.
   // Bundlers replace process.env.NODE_ENV with "production" in prod builds,
   // making this entire block (and the imported validate-config module) tree-shakeable.
-  if (
-    typeof process !== `undefined` &&
-    process.env.NODE_ENV !== `production`
-  ) {
+  if (typeof process !== `undefined` && process.env.NODE_ENV !== `production`) {
     validateCollectionConfig(options)
   }
 
