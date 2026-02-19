@@ -1890,9 +1890,8 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
             return q
               .from({ customer: customersCollection })
-              .leftJoin(
-                { oc: orderCountSubquery },
-                ({ customer, oc }) => eq(customer.id, oc.customer_id),
+              .leftJoin({ oc: orderCountSubquery }, ({ customer, oc }) =>
+                eq(customer.id, oc.customer_id),
               )
               .select(({ customer, oc }) => ({
                 name: customer.name,

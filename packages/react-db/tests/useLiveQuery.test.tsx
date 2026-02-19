@@ -2406,29 +2406,25 @@ describe(`Query Collections`, () => {
       )
 
       const { result } = renderHook(() => {
-        return useLiveQuery(
-          (q) => {
-            const issueCountSubquery = q
-              .from({ issues: issueCollection })
-              .groupBy(({ issues }) => issues.userId)
-              .select(({ issues }) => ({
-                userId: issues.userId,
-                issueCount: coalesce(count(issues.id), 0),
-              }))
+        return useLiveQuery((q) => {
+          const issueCountSubquery = q
+            .from({ issues: issueCollection })
+            .groupBy(({ issues }) => issues.userId)
+            .select(({ issues }) => ({
+              userId: issues.userId,
+              issueCount: coalesce(count(issues.id), 0),
+            }))
 
-            return q
-              .from({ persons: personCollection })
-              .leftJoin(
-                { ic: issueCountSubquery },
-                ({ persons, ic }) => eq(persons.id, ic.userId),
-              )
-              .select(({ persons, ic }) => ({
-                name: persons.name,
-                issueCount: ic?.issueCount,
-              }))
-          },
-          [],
-        )
+          return q
+            .from({ persons: personCollection })
+            .leftJoin({ ic: issueCountSubquery }, ({ persons, ic }) =>
+              eq(persons.id, ic.userId),
+            )
+            .select(({ persons, ic }) => ({
+              name: persons.name,
+              issueCount: ic?.issueCount,
+            }))
+        }, [])
       })
 
       await waitFor(() => {
