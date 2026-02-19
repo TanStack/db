@@ -4,6 +4,7 @@ import { PropRef, Value } from '../query/ir.js'
 import { EventEmitter } from '../event-emitter.js'
 import { compileExpression } from '../query/compiler/evaluators.js'
 import { buildCursor } from '../utils/cursor.js'
+import { isPredicateSubset } from '../query/predicate-utils.js'
 import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
@@ -375,7 +376,14 @@ export class CollectionSubscription
     opts?.onLoadSubsetResult?.(syncResult)
 
     // Track this loadSubset call so we can unload it later
-    this.loadedSubsets.push(loadOptions)
+    // Skip if an equivalent or superset predicate already exists to prevent
+    // unbounded accumulation of loadedSubsets
+    const isAlreadyCovered = this.loadedSubsets.some((existingOptions) =>
+      isPredicateSubset(loadOptions, existingOptions),
+    )
+    if (!isAlreadyCovered) {
+      this.loadedSubsets.push(loadOptions)
+    }
 
     const trackLoadSubsetPromise = opts?.trackLoadSubsetPromise ?? true
     if (trackLoadSubsetPromise) {
