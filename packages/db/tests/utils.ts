@@ -241,6 +241,12 @@ export function mockSyncCollectionOptions<
     },
   }
 
+  // Destructure to avoid passing test-only properties (like initialData) to createCollection
+  const {
+    initialData: _initialData,
+    ...collectionConfig
+  } = config
+
   const options: CollectionConfig<T, string | number, never> & {
     utils: typeof utils
   } = {
@@ -260,7 +266,7 @@ export function mockSyncCollectionOptions<
       await awaitSync()
     },
     utils,
-    ...config,
+    ...collectionConfig,
     autoIndex: config.autoIndex,
   }
 

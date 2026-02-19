@@ -2,6 +2,7 @@ import {
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
+import { validateCollectionConfig } from './validate-config'
 import { currentStateAsChanges } from './change-events'
 
 import { CollectionStateManager } from './state'
@@ -249,6 +250,12 @@ export function createCollection(
     schema?: StandardSchemaV1
   },
 ): Collection<any, string | number, UtilsRecord, any, any> {
+  // Validate config at runtime to produce clear error messages.
+  // TypeScript's type errors for createCollection overloads can be extremely
+  // hard to read due to deeply nested generics. This catches common mistakes
+  // early with actionable messages.
+  validateCollectionConfig(options)
+
   const collection = new CollectionImpl<any, string | number, any, any, any>(
     options,
   )
