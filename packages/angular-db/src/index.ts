@@ -141,7 +141,7 @@ export function injectLiveQuery(opts: any) {
       }
 
       return createLiveQueryCollection({
-        query: (q) => query({ params: currentParams, q }),
+        query: () => result,
         startSync: true,
         gcTime: 0,
       })
