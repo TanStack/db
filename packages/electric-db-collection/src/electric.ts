@@ -647,13 +647,33 @@ export function electricCollectionOptions<T extends Row<unknown>>(
     if (hasSnapshot) return true
 
     return new Promise((resolve, reject) => {
+      // Track txids at start to know which ones arrived during timeout
+      const txidsAtStart = new Set(seenTxids.state)
+      const txidsReceivedDuringTimeout: Array<Txid> = []
+
       const timeoutId = setTimeout(() => {
         unsubscribeSeenTxids()
         unsubscribeSeenSnapshots()
-        reject(new TimeoutWaitingForTxIdError(txId, config.id))
+        reject(
+          new TimeoutWaitingForTxIdError(
+            txId,
+            config.id,
+            txidsReceivedDuringTimeout,
+          ),
+        )
       }, timeout)
 
       const unsubscribeSeenTxids = seenTxids.subscribe(() => {
+        // Track new txids that arrived during the timeout period
+        for (const seenTxid of seenTxids.state) {
+          if (
+            !txidsAtStart.has(seenTxid) &&
+            !txidsReceivedDuringTimeout.includes(seenTxid)
+          ) {
+            txidsReceivedDuringTimeout.push(seenTxid)
+          }
+        }
+
         if (seenTxids.state.has(txId)) {
           debug(
             `${config.id ? `[${config.id}] ` : ``}awaitTxId found match for txid %o`,
