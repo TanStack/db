@@ -12,7 +12,11 @@ import { CollectionIndexesManager } from './indexes'
 import { CollectionMutationsManager } from './mutations'
 import { CollectionEventsManager } from './events.js'
 import type { CollectionSubscription } from './subscription'
-import type { AllCollectionEvents, CollectionEventHandler } from './events.js'
+import type {
+  AllCollectionEvents,
+  CollectionEventHandler,
+  CollectionIndexMetadata,
+} from './events.js'
 import type { BaseIndex, IndexResolver } from '../indexes/base-index.js'
 import type { IndexOptions } from '../indexes/index-options.js'
 import type {
@@ -37,6 +41,8 @@ import type { SingleRowRefProxy } from '../query/builder/ref-proxy'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { BTreeIndex } from '../indexes/btree-index.js'
 import type { IndexProxy } from '../indexes/lazy-index.js'
+
+export type { CollectionIndexMetadata } from './events.js'
 
 /**
  * Enhanced Collection interface that includes both data type T and utilities TUtils
@@ -347,6 +353,7 @@ export class CollectionImpl<
     this._indexes.setDeps({
       state: this._state,
       lifecycle: this._lifecycle,
+      events: this._events,
     })
     this._lifecycle.setDeps({
       changes: this._changes,
@@ -557,6 +564,27 @@ export class CollectionImpl<
     config: IndexOptions<TResolver> = {},
   ): IndexProxy<TKey> {
     return this._indexes.createIndex(indexCallback, config)
+  }
+
+  /**
+   * Removes an index created with createIndex.
+   * Returns true when an index existed and was removed.
+   *
+   * Best-effort semantics: removing an index guarantees it is detached from
+   * collection query planning. Existing index proxy references should be treated
+   * as invalid after removal.
+   */
+  public removeIndex(indexOrId: IndexProxy<TKey> | number): boolean {
+    return this._indexes.removeIndex(indexOrId)
+  }
+
+  /**
+   * Returns a snapshot of current index metadata sorted by indexId.
+   * Persistence wrappers can use this to bootstrap index state if indexes were
+   * created before event listeners were attached.
+   */
+  public getIndexMetadata(): Array<CollectionIndexMetadata> {
+    return this._indexes.getIndexMetadataSnapshot()
   }
 
   /**

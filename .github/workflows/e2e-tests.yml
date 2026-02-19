@@ -9,7 +9,7 @@ jobs:
   e2e-tests:
     name: Run E2E Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 35
 
     steps:
       - name: Checkout code
@@ -61,6 +61,58 @@ jobs:
           pnpm test:e2e
         env:
           ELECTRIC_URL: http://localhost:3000
+
+      - name: Run Node SQLite persisted collection E2E tests
+        run: |
+          cd packages/db-node-sqlite-persisted-collection
+          pnpm test:e2e
+
+      - name: Run Electron SQLite persisted collection E2E tests (full bridge)
+        run: |
+          cd packages/db-electron-sqlite-persisted-collection
+          TANSTACK_DB_ELECTRON_E2E_ALL=1 pnpm test:e2e
+
+      - name: Run Cloudflare Durable Object persisted collection E2E tests
+        run: |
+          cd packages/db-cloudflare-do-sqlite-persisted-collection
+          pnpm test:e2e
+
+      - name: Run React Native/Expo persisted collection E2E tests
+        run: |
+          cd packages/db-react-native-sqlite-persisted-collection
+          pnpm test:e2e
+
+      - name: Run React Native/Expo runtime E2E lane
+        run: |
+          is_fork_pr=false
+          require_runtime_lane=${TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE:-0}
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            is_fork_pr=$(jq -r '.pull_request.head.repo.fork' "${GITHUB_EVENT_PATH}")
+          fi
+
+          if [ "${is_fork_pr}" = "true" ]; then
+            echo "Skipping runtime mobile lane for fork PR (repo vars are unavailable)."
+            exit 0
+          fi
+
+          if [ -z "${TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE}" ]; then
+            if [ "${require_runtime_lane}" = "1" ]; then
+              echo "::error::Missing repository variable TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE while TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE=1."
+              echo "::error::Set TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE (and optional TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT)."
+              exit 1
+            fi
+
+            echo "Skipping runtime mobile lane (no TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE configured)."
+            echo "Set TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE=1 to enforce this lane."
+            exit 0
+          fi
+
+          cd packages/db-react-native-sqlite-persisted-collection
+          pnpm test:e2e:runtime
+        env:
+          TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_MODULE }}
+          TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT: ${{ vars.TANSTACK_DB_MOBILE_SQLITE_FACTORY_EXPORT }}
+          TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE: ${{ vars.TANSTACK_DB_REQUIRE_MOBILE_RUNTIME_LANE }}
 
       - name: Stop Docker services
         if: always()

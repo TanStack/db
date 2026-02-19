@@ -234,6 +234,42 @@ describe(`evaluators`, () => {
         })
       })
 
+      describe(`date/time functions`, () => {
+        it(`handles date by normalizing to YYYY-MM-DD`, () => {
+          const func = new Func(`date`, [new Value(`2026-01-02T05:06:07.000Z`)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(`2026-01-02`)
+        })
+
+        it(`handles datetime by normalizing to ISO string`, () => {
+          const func = new Func(`datetime`, [new Value(1767225600000)])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(`2026-01-01T00:00:00.000Z`)
+        })
+
+        it(`handles strftime with supported date format`, () => {
+          const func = new Func(`strftime`, [
+            new Value(`%Y-%m-%d`),
+            new Value(`2026-01-02T05:06:07.000Z`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBe(`2026-01-02`)
+        })
+
+        it(`returns null for strftime with non-string format`, () => {
+          const func = new Func(`strftime`, [
+            new Value(123),
+            new Value(`2026-01-02T05:06:07.000Z`),
+          ])
+          const compiled = compileExpression(func)
+
+          expect(compiled({})).toBeNull()
+        })
+      })
+
       describe(`like/ilike functions`, () => {
         it(`handles like with non-string value`, () => {
           const func = new Func(`like`, [new Value(42), new Value(`%2%`)])

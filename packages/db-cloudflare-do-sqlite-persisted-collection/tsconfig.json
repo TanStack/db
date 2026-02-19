@@ -1,0 +1,30 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "declaration": true,
+    "outDir": "dist",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react",
+    "paths": {
+      "@tanstack/db": ["../db/src"],
+      "@tanstack/db-ivm": ["../db-ivm/src"],
+      "@tanstack/db-sqlite-persisted-collection-core": [
+        "../db-sqlite-persisted-collection-core/src"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "tests",
+    "e2e/**/*.e2e.test.ts",
+    "vite.config.ts",
+    "vitest.e2e.config.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}
