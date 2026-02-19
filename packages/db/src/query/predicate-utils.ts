@@ -87,6 +87,32 @@ function isWhereSubsetInternal(
     )
   }
 
+  // Handle OR in subset: (A OR B) is subset of C only if both A and B are subsets of C
+  // This must be checked BEFORE the OR superset check, because when both subset
+  // and superset are OR, we need to decompose the subset first.
+  // e.g., or(A, B) ⊆ or(C, D) should check: A ⊆ or(C, D) AND B ⊆ or(C, D)
+  if (subset.type === `func` && subset.name === `or`) {
+    return subset.args.every((arg) =>
+      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset),
+    )
+  }
+
+  // Handle OR in superset: subset ⊆ (A OR B) if subset ⊆ A or subset ⊆ B
+  // (A OR B) as superset means data can satisfy A or B
+  // If subset is contained in any disjunct, it's contained in the union
+  //
+  // IMPORTANT: This must be checked BEFORE decomposing an AND subset.
+  // When subset = and(A, B) and superset = or(and(A, B), and(A', B)),
+  // the full AND expression is structurally equal to one of the OR disjuncts.
+  // If we decompose the AND first, individual conjuncts A or B alone can't
+  // prove subset of the OR (since each disjunct requires both conditions),
+  // but the full and(A, B) matches disjunct and(A, B) via structural equality.
+  if (superset.type === `func` && superset.name === `or`) {
+    return superset.args.some((arg) =>
+      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>),
+    )
+  }
+
   // Handle subset being an AND: (A AND B) implies both A and B
   if (subset.type === `func` && subset.name === `and`) {
     // For (A AND B) ⊆ C, since (A AND B) implies A, we check if any conjunct implies C
@@ -109,22 +135,6 @@ function isWhereSubsetInternal(
     if (inField) {
       return isWhereSubsetInternal(subset, convertInToOr(inField))
     }
-  }
-
-  // Handle OR in subset: (A OR B) is subset of C only if both A and B are subsets of C
-  if (subset.type === `func` && subset.name === `or`) {
-    return subset.args.every((arg) =>
-      isWhereSubsetInternal(arg as BasicExpression<boolean>, superset),
-    )
-  }
-
-  // Handle OR in superset: subset ⊆ (A OR B) if subset ⊆ A or subset ⊆ B
-  // (A OR B) as superset means data can satisfy A or B
-  // If subset is contained in any disjunct, it's contained in the union
-  if (superset.type === `func` && superset.name === `or`) {
-    return superset.args.some((arg) =>
-      isWhereSubsetInternal(subset, arg as BasicExpression<boolean>),
-    )
   }
 
   // Handle comparison operators on the same field
