@@ -280,9 +280,7 @@ describe(`select spreads (runtime)`, () => {
 
   it(`returning a ref directly (without spread) projects the full row`, async () => {
     const collection = createLiveQueryCollection((q) =>
-      q
-        .from({ message: messagesCollection })
-        .select(({ message }) => message),
+      q.from({ message: messagesCollection }).select(({ message }) => message),
     )
     await collection.preload()
 
@@ -309,9 +307,7 @@ describe(`select spreads (runtime)`, () => {
 
   it(`returning a ref directly works with live updates`, async () => {
     const collection = createLiveQueryCollection((q) =>
-      q
-        .from({ message: messagesCollection })
-        .select(({ message }) => message),
+      q.from({ message: messagesCollection }).select(({ message }) => message),
     )
     await collection.preload()
 
