@@ -10,12 +10,16 @@ import { BaseQueryBuilder, createLiveQueryCollection } from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
+  CollectionConfigSingleRowOption,
   CollectionStatus,
   Context,
   GetResult,
+  InferResultType,
   InitialQueryBuilder,
   LiveQueryCollectionConfig,
+  NonSingleResult,
   QueryBuilder,
+  SingleResult,
 } from '@tanstack/db'
 import type { Signal } from '@angular/core'
 
@@ -24,16 +28,14 @@ import type { Signal } from '@angular/core'
  * Contains reactive signals for the query state and data.
  */
 export interface InjectLiveQueryResult<
-  TResult extends object = any,
-  TKey extends string | number = string | number,
-  TUtils extends Record<string, any> = {},
+  TContext extends Context,
 > {
   /** A signal containing the complete state map of results keyed by their ID */
-  state: Signal<Map<TKey, TResult>>
-  /** A signal containing the results as an array */
-  data: Signal<Array<TResult>>
+  state: Signal<Map<string | number, GetResult<TContext>>>
+  /** A signal containing the results as an array, or single result for findOne queries */
+  data: Signal<InferResultType<TContext>>
   /** A signal containing the underlying collection instance (null for disabled queries) */
-  collection: Signal<Collection<TResult, TKey, TUtils> | null>
+  collection: Signal<Collection<GetResult<TContext>, string | number, {}> | null>
   /** A signal containing the current status of the collection */
   status: Signal<CollectionStatus | `disabled`>
   /** A signal indicating whether the collection is currently loading */
@@ -48,6 +50,38 @@ export interface InjectLiveQueryResult<
   isCleanedUp: Signal<boolean>
 }
 
+export interface InjectLiveQueryResultWithCollection<
+  TResult extends object = any,
+  TKey extends string | number = string | number,
+  TUtils extends Record<string, any> = {},
+> {
+  state: Signal<Map<TKey, TResult>>
+  data: Signal<Array<TResult>>
+  collection: Signal<Collection<TResult, TKey, TUtils> | null>
+  status: Signal<CollectionStatus | `disabled`>
+  isLoading: Signal<boolean>
+  isReady: Signal<boolean>
+  isIdle: Signal<boolean>
+  isError: Signal<boolean>
+  isCleanedUp: Signal<boolean>
+}
+
+export interface InjectLiveQueryResultWithSingleResultCollection<
+  TResult extends object = any,
+  TKey extends string | number = string | number,
+  TUtils extends Record<string, any> = {},
+> {
+  state: Signal<Map<TKey, TResult>>
+  data: Signal<TResult | undefined>
+  collection: Signal<(Collection<TResult, TKey, TUtils> & SingleResult) | null>
+  status: Signal<CollectionStatus | `disabled`>
+  isLoading: Signal<boolean>
+  isReady: Signal<boolean>
+  isIdle: Signal<boolean>
+  isError: Signal<boolean>
+  isCleanedUp: Signal<boolean>
+}
+
 export function injectLiveQuery<
   TContext extends Context,
   TParams extends any,
@@ -57,7 +91,7 @@ export function injectLiveQuery<
     params: TParams
     q: InitialQueryBuilder
   }) => QueryBuilder<TContext>
-}): InjectLiveQueryResult<GetResult<TContext>>
+}): InjectLiveQueryResult<TContext>
 export function injectLiveQuery<
   TContext extends Context,
   TParams extends any,
@@ -67,25 +101,34 @@ export function injectLiveQuery<
     params: TParams
     q: InitialQueryBuilder
   }) => QueryBuilder<TContext> | undefined | null
-}): InjectLiveQueryResult<GetResult<TContext>>
+}): InjectLiveQueryResult<TContext>
 export function injectLiveQuery<TContext extends Context>(
   queryFn: (q: InitialQueryBuilder) => QueryBuilder<TContext>,
-): InjectLiveQueryResult<GetResult<TContext>>
+): InjectLiveQueryResult<TContext>
 export function injectLiveQuery<TContext extends Context>(
   queryFn: (
     q: InitialQueryBuilder,
   ) => QueryBuilder<TContext> | undefined | null,
-): InjectLiveQueryResult<GetResult<TContext>>
+): InjectLiveQueryResult<TContext>
 export function injectLiveQuery<TContext extends Context>(
   config: LiveQueryCollectionConfig<TContext>,
-): InjectLiveQueryResult<GetResult<TContext>>
+): InjectLiveQueryResult<TContext>
+// Pre-created collection without singleResult
 export function injectLiveQuery<
   TResult extends object,
   TKey extends string | number,
   TUtils extends Record<string, any>,
 >(
-  liveQueryCollection: Collection<TResult, TKey, TUtils>,
-): InjectLiveQueryResult<TResult, TKey, TUtils>
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & NonSingleResult,
+): InjectLiveQueryResultWithCollection<TResult, TKey, TUtils>
+// Pre-created collection with singleResult
+export function injectLiveQuery<
+  TResult extends object,
+  TKey extends string | number,
+  TUtils extends Record<string, any>,
+>(
+  liveQueryCollection: Collection<TResult, TKey, TUtils> & SingleResult,
+): InjectLiveQueryResultWithSingleResultCollection<TResult, TKey, TUtils>
 export function injectLiveQuery(opts: any) {
   assertInInjectionContext(injectLiveQuery)
   const destroyRef = inject(DestroyRef)
@@ -156,10 +199,22 @@ export function injectLiveQuery(opts: any) {
   })
 
   const state = signal(new Map<string | number, any>())
-  const data = signal<Array<any>>([])
+  const internalData = signal<Array<any>>([])
   const status = signal<CollectionStatus | `disabled`>(
     collection() ? `idle` : `disabled`,
   )
+
+  // Returns single item for singleResult collections, array otherwise
+  const data = computed(() => {
+    const currentCollection = collection()
+    if (!currentCollection) {
+      return internalData()
+    }
+    const config = (currentCollection).config as
+      | CollectionConfigSingleRowOption<any, any, any>
+      | undefined
+    return config?.singleResult ? internalData()[0] : internalData()
+  })
 
   const syncDataFromCollection = (
     currentCollection: Collection<any, any, any>,
@@ -168,7 +223,7 @@ export function injectLiveQuery(opts: any) {
     const newData = Array.from(currentCollection.values())
 
     state.set(newState)
-    data.set(newData)
+    internalData.set(newData)
     status.set(currentCollection.status)
   }
 
@@ -185,7 +240,7 @@ export function injectLiveQuery(opts: any) {
     if (!currentCollection) {
       status.set(`disabled` as const)
       state.set(new Map())
-      data.set([])
+      internalData.set([])
       cleanup()
       return
     }
