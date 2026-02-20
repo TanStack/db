@@ -21,10 +21,13 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 const mockSubscribe = vi.fn()
 const mockRequestSnapshot = vi.fn()
 const mockFetchSnapshot = vi.fn()
+const mockForceDisconnectAndRefresh = vi.fn()
 const mockStream = {
   subscribe: mockSubscribe,
   requestSnapshot: mockRequestSnapshot,
   fetchSnapshot: mockFetchSnapshot,
+  forceDisconnectAndRefresh: mockForceDisconnectAndRefresh,
+  isUpToDate: false,
 }
 
 vi.mock(`@electric-sql/client`, async () => {
@@ -56,6 +59,8 @@ describe(`Electric Integration`, () => {
 
     // Reset mock requestSnapshot
     mockRequestSnapshot.mockResolvedValue(undefined)
+    mockForceDisconnectAndRefresh.mockResolvedValue(undefined)
+    mockStream.isUpToDate = false
 
     // Create collection with Electric configuration
     const config = {
@@ -2376,13 +2381,72 @@ describe(`Electric Integration`, () => {
       // In on-demand mode, calling loadSubset should request a snapshot
       await testCollection._sync.loadSubset({ limit: 10 })
 
-      // Verify requestSnapshot was called
+      expect(mockForceDisconnectAndRefresh).not.toHaveBeenCalled()
       expect(mockRequestSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({
           limit: 10,
           params: {},
         }),
       )
+    })
+
+    it(`should refresh the stream before requesting on-demand snapshots when already up-to-date`, async () => {
+      vi.clearAllMocks()
+
+      const config = {
+        id: `on-demand-refresh-before-snapshot-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      mockStream.isUpToDate = true
+
+      await testCollection._sync.loadSubset({ limit: 10 })
+
+      expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(1)
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
+      const refreshCall =
+        mockForceDisconnectAndRefresh.mock.invocationCallOrder[0]!
+      const snapshotCall = mockRequestSnapshot.mock.invocationCallOrder[0]!
+      expect(refreshCall).toBeLessThan(snapshotCall)
+    })
+
+    it(`should fall through to requestSnapshot when forceDisconnectAndRefresh fails`, async () => {
+      vi.clearAllMocks()
+
+      const config = {
+        id: `on-demand-refresh-fallthrough-test`,
+        shapeOptions: {
+          url: `http://test-url`,
+          params: {
+            table: `test_table`,
+          },
+        },
+        syncMode: `on-demand` as const,
+        getKey: (item: Row) => item.id as number,
+        startSync: true,
+      }
+
+      const testCollection = createCollection(electricCollectionOptions(config))
+
+      mockStream.isUpToDate = true
+      mockForceDisconnectAndRefresh.mockImplementationOnce(async () => {
+        throw new Error(`PauseLock held`)
+      })
+
+      await testCollection._sync.loadSubset({ limit: 10 })
+
+      expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(1)
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
     })
 
     it(`should fetch snapshots in progressive mode when loadSubset is called before sync completes`, async () => {
