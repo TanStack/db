@@ -1,5 +1,11 @@
 # @tanstack/db
 
+## 0.5.28
+
+### Patch Changes
+
+- Fix isNull predicate causing LiveQuery to never become ready when offline. Reorder predicate checks in `isWhereSubsetInternal` so OR superset handling runs before AND subset decomposition, allowing `and(eq, isNull)` to match structurally equal disjuncts. Also separate `forceDisconnectAndRefresh` error handling into its own try-catch with correct error attribution. ([#1275](https://github.com/TanStack/db/pull/1275))
+
 ## 0.5.27
 
 ### Patch Changes
