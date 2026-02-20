@@ -345,12 +345,8 @@ describe(`isWhereSubset`, () => {
     })
   })
 
-  describe(`AND subset with OR superset (isNull bug)`, () => {
-    it(`should handle and(eq, isNull) as subset of or(and(eq, isNull), and(eq, isNull)) — the reported bug`, () => {
-      // This is the exact scenario from the bug report:
-      // After loading data for two projects, the unlimitedWhere becomes:
-      //   or(and(eq(project_id, X), isNull(soft_deleted_at)), and(eq(project_id, Y), isNull(soft_deleted_at)))
-      // When re-requesting data for project X, the subset check should return true.
+  describe(`AND subset with OR superset`, () => {
+    it(`should recognize and(eq, isNull) as subset of or(and(eq, isNull), and(eq, isNull))`, () => {
       const projectX = `4e164373-31b4-4b42-95c9-9c395cfb4916`
       const projectY = `2fd4c147-2547-4b02-9554-9cd067187409`
 
@@ -365,13 +361,11 @@ describe(`isWhereSubset`, () => {
 
       const unionPredicate = or(queryX, queryY)
 
-      // Re-requesting project X data should be recognized as already loaded
       expect(isWhereSubset(queryX, unionPredicate)).toBe(true)
-      // Re-requesting project Y data should also be recognized
       expect(isWhereSubset(queryY, unionPredicate)).toBe(true)
     })
 
-    it(`should handle and(A, B) as subset of or(and(A, B), and(C, D))`, () => {
+    it(`should recognize and(A, B) as subset of or(and(A, B), and(C, D))`, () => {
       const subsetExpr = and(eq(ref(`id`), val(1)), gt(ref(`age`), val(20)))
       const supersetExpr = or(
         and(eq(ref(`id`), val(1)), gt(ref(`age`), val(20))),
@@ -380,7 +374,7 @@ describe(`isWhereSubset`, () => {
       expect(isWhereSubset(subsetExpr, supersetExpr)).toBe(true)
     })
 
-    it(`should return false when and(A, B) does not match any disjunct`, () => {
+    it(`should return false when and(A, B) matches no disjunct`, () => {
       const subsetExpr = and(eq(ref(`id`), val(3)), gt(ref(`age`), val(20)))
       const supersetExpr = or(
         and(eq(ref(`id`), val(1)), gt(ref(`age`), val(20))),
@@ -390,8 +384,8 @@ describe(`isWhereSubset`, () => {
     })
   })
 
-  describe(`isNull and isUndefined predicates`, () => {
-    it(`should handle identical isNull expressions`, () => {
+  describe(`isNull predicates`, () => {
+    it(`should return true for identical isNull expressions`, () => {
       const a = func(`isNull`, ref(`deleted_at`))
       const b = func(`isNull`, ref(`deleted_at`))
       expect(isWhereSubset(a, b)).toBe(true)
@@ -403,7 +397,7 @@ describe(`isWhereSubset`, () => {
       expect(isWhereSubset(a, b)).toBe(false)
     })
 
-    it(`should handle and with isNull: and(eq, isNull) subset of and(eq, isNull) with same args`, () => {
+    it(`should return true for and(eq, isNull) subset of identical and(eq, isNull)`, () => {
       const subset = and(
         eq(ref(`project_id`), val(`abc`)),
         func(`isNull`, ref(`soft_deleted_at`)),
