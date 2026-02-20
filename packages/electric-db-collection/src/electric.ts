@@ -434,6 +434,8 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
     // When the stream is already up-to-date, it may be in a long-poll wait.
     // Forcing a disconnect-and-refresh ensures requestSnapshot gets a response
     // from a fresh server round-trip rather than waiting for the current poll to end.
+    // If the refresh fails (e.g., PauseLock held during subscriber processing in
+    // join pipelines), we fall through to requestSnapshot which still works.
     if (stream.isUpToDate) {
       try {
         await stream.forceDisconnectAndRefresh()
@@ -441,7 +443,10 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
         if (handleSnapshotError(error, `forceDisconnectAndRefresh`)) {
           return
         }
-        throw error
+        debug(
+          `${logPrefix}forceDisconnectAndRefresh failed, proceeding to requestSnapshot: %o`,
+          error,
+        )
       }
     }
 

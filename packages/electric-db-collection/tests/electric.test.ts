@@ -2420,17 +2420,11 @@ describe(`Electric Integration`, () => {
       expect(refreshCall).toBeLessThan(snapshotCall)
     })
 
-    it(`should propagate forceDisconnectAndRefresh errors when stream is up-to-date`, async () => {
+    it(`should fall through to requestSnapshot when forceDisconnectAndRefresh fails`, async () => {
       vi.clearAllMocks()
 
-      // Intercept unhandled rejection from internal promise plumbing
-      // (CollectionSyncManager.trackLoadPromise creates a derivative promise chain
-      // that isn't directly awaited when the loadSubset promise rejects)
-      const handler = () => {}
-      process.on(`unhandledRejection`, handler)
-
       const config = {
-        id: `on-demand-refresh-error-test`,
+        id: `on-demand-refresh-fallthrough-test`,
         shapeOptions: {
           url: `http://test-url`,
           params: {
@@ -2446,19 +2440,13 @@ describe(`Electric Integration`, () => {
 
       mockStream.isUpToDate = true
       mockForceDisconnectAndRefresh.mockImplementationOnce(async () => {
-        throw new Error(`stream refresh failed`)
+        throw new Error(`PauseLock held`)
       })
 
-      const error = await testCollection._sync
-        .loadSubset({ limit: 10 })
-        .catch((e: unknown) => e)
+      await testCollection._sync.loadSubset({ limit: 10 })
 
-      expect(error).toBeInstanceOf(Error)
-      expect((error as Error).message).toBe(`stream refresh failed`)
-      expect(mockRequestSnapshot).not.toHaveBeenCalled()
-
-      await new Promise((resolve) => setTimeout(resolve, 0))
-      process.removeListener(`unhandledRejection`, handler)
+      expect(mockForceDisconnectAndRefresh).toHaveBeenCalledTimes(1)
+      expect(mockRequestSnapshot).toHaveBeenCalledTimes(1)
     })
 
     it(`should fetch snapshots in progressive mode when loadSubset is called before sync completes`, async () => {
