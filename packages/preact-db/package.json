@@ -1,0 +1,55 @@
+{
+  "name": "@tanstack/preact-db",
+  "version": "0.0.0",
+  "description": "Preact integration for @tanstack/db",
+  "author": "Kyle Mathews",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanStack/db.git",
+    "directory": "packages/preact-db"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "optimistic",
+    "preact",
+    "typescript"
+  ],
+  "scripts": {
+    "build": "vite build",
+    "build:minified": "vite build --minify",
+    "dev": "vite build --watch",
+    "test": "vitest --run",
+    "lint": "eslint . --fix"
+  },
+  "type": "module",
+  "main": "dist/esm/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src"
+  ],
+  "dependencies": {
+    "@tanstack/db": "workspace:*"
+  },
+  "peerDependencies": {
+    "preact": ">=10.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/client": "^1.5.3",
+    "@preact/preset-vite": "^2.10.2",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "preact": "^10.27.2"
+  }
+}
