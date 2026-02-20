@@ -20,6 +20,7 @@ import {
 import {
   createRefProxy,
   createRefProxyWithSelected,
+  isRefProxy,
   toExpression,
 } from './ref-proxy.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
@@ -475,7 +476,19 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   ): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
-    const selectObject = callback(refProxy)
+    let selectObject: any = callback(refProxy)
+
+    // When the callback returns a RefProxy directly
+    // (e.g. select(({ users }) => users)), treat it as if the user
+    // spread it (e.g. select(({ users }) => ({ ...users }))).
+    // This avoids a common pitfall where returning a ref directly
+    // produces ref/proxy metadata instead of actual row data.
+    if (isRefProxy(selectObject)) {
+      const path: Array<string> = selectObject.__path
+      const sentinelKey = `__SPREAD_SENTINEL__${path.join(`.`)}__0`
+      selectObject = { [sentinelKey]: true }
+    }
+
     const select = buildNestedSelect(selectObject)
 
     return new BaseQueryBuilder({
