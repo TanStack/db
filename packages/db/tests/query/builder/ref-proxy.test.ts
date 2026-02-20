@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  checkCallbackForJsOperators,
   createRefProxy,
   isRefProxy,
   toExpression,
   val,
 } from '../../../src/query/builder/ref-proxy.js'
 import { PropRef, Value } from '../../../src/query/ir.js'
+import { JavaScriptOperatorInQueryError } from '../../../src/errors.js'
 
 describe(`ref-proxy`, () => {
   describe(`createRefProxy`, () => {
@@ -212,6 +214,127 @@ describe(`ref-proxy`, () => {
       expect((val(null) as Value).value).toBe(null)
       expect((val([1, 2, 3]) as Value).value).toEqual([1, 2, 3])
       expect((val({ a: 1 }) as Value).value).toEqual({ a: 1 })
+    })
+  })
+
+  describe(`checkCallbackForJsOperators`, () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>
+    const originalEnv = process.env.NODE_ENV
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, `warn`).mockImplementation(() => {})
+      // Ensure we're in dev mode for tests
+      process.env.NODE_ENV = `development`
+    })
+
+    afterEach(() => {
+      warnSpy.mockRestore()
+      process.env.NODE_ENV = originalEnv
+    })
+
+    it(`warns for || operator`, () => {
+      const callback = ({ users }: any) => ({ data: users.data || [] })
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0]![0]).toContain(`||`)
+    })
+
+    it(`warns for && operator`, () => {
+      const callback = ({ users }: any) => users.active && users.name
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0]![0]).toContain(`&&`)
+    })
+
+    it(`warns for ?? operator`, () => {
+      const callback = ({ users }: any) => ({ name: users.name ?? `default` })
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0]![0]).toContain(`??`)
+    })
+
+    it(`warns for ternary operator`, () => {
+      const callback = ({ users }: any) => ({
+        status: users.active ? `active` : `inactive`,
+      })
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0]![0]).toContain(`?:`)
+    })
+
+    it(`does not warn for valid query callbacks`, () => {
+      // Simple property access
+      checkCallbackForJsOperators(({ users }: any) => users.name)
+      expect(warnSpy).not.toHaveBeenCalled()
+
+      // Object with property access
+      checkCallbackForJsOperators(({ users }: any) => ({
+        id: users.id,
+        name: users.name,
+      }))
+      expect(warnSpy).not.toHaveBeenCalled()
+
+      // Optional chaining is allowed
+      checkCallbackForJsOperators(({ users }: any) => users.profile?.bio)
+      expect(warnSpy).not.toHaveBeenCalled()
+    })
+
+    it(`does not warn for operators in string literals`, () => {
+      // || in a string literal should not trigger warning
+      checkCallbackForJsOperators(() => ({ message: `a || b is valid` }))
+      expect(warnSpy).not.toHaveBeenCalled()
+
+      // && in a string literal should not trigger warning
+      checkCallbackForJsOperators(() => ({ message: `a && b is valid` }))
+      expect(warnSpy).not.toHaveBeenCalled()
+
+      // ?: in a string literal should not trigger warning
+      checkCallbackForJsOperators(() => ({ message: `a ? b : c is valid` }))
+      expect(warnSpy).not.toHaveBeenCalled()
+    })
+
+    it(`does not warn for optional chaining`, () => {
+      // Optional chaining should not be confused with ternary
+      checkCallbackForJsOperators(({ users }: any) => users?.name)
+      expect(warnSpy).not.toHaveBeenCalled()
+    })
+
+    it(`warns for operators in regex literals (known limitation)`, () => {
+      // This is a known limitation - regex literals containing operators
+      // will trigger false positives. Document the behavior.
+      const callbackWithRegexOr = () => ({ pattern: /a||b/ })
+      checkCallbackForJsOperators(callbackWithRegexOr)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it(`does not warn in production mode`, () => {
+      process.env.NODE_ENV = `production`
+      const callback = ({ users }: any) => ({ data: users.data || [] })
+      checkCallbackForJsOperators(callback)
+      expect(warnSpy).not.toHaveBeenCalled()
+    })
+  })
+
+  describe(`Symbol.toPrimitive trap`, () => {
+    it(`throws error when proxy is coerced to string`, () => {
+      const proxy = createRefProxy<{ users: { id: number } }>([`users`])
+      expect(() => String(proxy.users.id)).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
+    })
+
+    it(`throws error when proxy is used in arithmetic`, () => {
+      const proxy = createRefProxy<{ users: { id: number } }>([`users`])
+      expect(() => Number(proxy.users.id)).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
+    })
+
+    it(`throws error when proxy is concatenated with string`, () => {
+      const proxy = createRefProxy<{ users: { name: string } }>([`users`])
+      expect(() => `Hello ${proxy.users.name}`).toThrow(
+        JavaScriptOperatorInQueryError,
+      )
     })
   })
 })
