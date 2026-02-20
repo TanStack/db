@@ -6,7 +6,7 @@ title: EnhancedPowerSyncCollectionConfig
 # Type Alias: EnhancedPowerSyncCollectionConfig\<TTable, OutputType, TSchema\>
 
 ```ts
-type EnhancedPowerSyncCollectionConfig<TTable, OutputType, TSchema> = CollectionConfig<OutputType, string, TSchema> & object;
+type EnhancedPowerSyncCollectionConfig<TTable, OutputType, TSchema> = CollectionConfig<OutputType, string, TSchema, PowerSyncCollectionUtils<TTable>> & object;
 ```
 
 Defined in: [definitions.ts:259](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L259)
