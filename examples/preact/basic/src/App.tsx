@@ -28,9 +28,7 @@ export default function App() {
   const [nextText, setNextText] = useState(``)
 
   const { data, isLoading } = useLiveQuery((q) =>
-    q
-      .from({ todos: todosCollection })
-      .select(({ todos }) => todos),
+    q.from({ todos: todosCollection }).select(({ todos }) => todos),
   )
 
   const addTodo = usePacedMutations<string>({
