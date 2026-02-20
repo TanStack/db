@@ -103,6 +103,10 @@
         {
           "label": "Svelte",
           "to": "framework/svelte/overview"
+        },
+        {
+          "label": "Preact",
+          "to": "framework/preact/overview"
         }
       ]
     },
@@ -237,6 +241,19 @@
             {
               "label": "injectLiveQuery",
               "to": "framework/angular/reference/functions/injectLiveQuery"
+            }
+          ]
+        },
+        {
+          "label": "preact",
+          "children": [
+            {
+              "label": "Preact Hooks",
+              "to": "framework/preact/reference/index"
+            },
+            {
+              "label": "useLiveQuery",
+              "to": "framework/preact/reference/functions/useLiveQuery"
             }
           ]
         }

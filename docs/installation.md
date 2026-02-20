@@ -13,6 +13,14 @@ npm install @tanstack/react-db
 
 TanStack DB is compatible with React v16.8+
 
+## Preact
+
+```sh
+npm install @tanstack/preact-db
+```
+
+TanStack DB is compatible with Preact v10+
+
 ## Solid
 
 ```sh
