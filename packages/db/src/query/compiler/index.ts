@@ -11,7 +11,7 @@ import {
 import { PropRef, Value as ValClass, getWhereExpression } from '../ir.js'
 import { compileExpression, toBooleanPredicate } from './evaluators.js'
 import { processJoins } from './joins.js'
-import { processGroupBy } from './group-by.js'
+import { containsAggregate, processGroupBy } from './group-by.js'
 import { processOrderBy } from './order-by.js'
 import { processSelect } from './select.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
@@ -268,7 +268,7 @@ export function compileQuery(
   } else if (query.select) {
     // Check if SELECT contains aggregates but no GROUP BY (implicit single-group aggregation)
     const hasAggregates = Object.values(query.select).some(
-      (expr) => expr.type === `agg`,
+      (expr) => expr.type === `agg` || containsAggregate(expr),
     )
     if (hasAggregates) {
       // Handle implicit single-group aggregation
