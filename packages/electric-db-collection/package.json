@@ -46,10 +46,10 @@
     "src"
   ],
   "dependencies": {
-    "@electric-sql/client": "^1.5.3",
+    "@electric-sql/client": "^1.5.7",
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.8.0",
+    "@tanstack/store": "^0.9.1",
     "debug": "^4.4.3"
   },
   "devDependencies": {
