@@ -66,7 +66,7 @@ The `queryCollectionOptions` function accepts the following options:
 
 ### Interop with `queryOptions(...)`
 
-If your app already uses a TanStack Query options helper (for example, `queryOptions` from `@tanstack/react-query`), you can pass those options directly into `queryCollectionOptions`:
+If your app already uses a TanStack Query options helper (for example, `queryOptions` from `@tanstack/react-query`), you can spread those options into `queryCollectionOptions`. Query collections still require an explicit `queryFn` in the final config type:
 
 ```typescript
 import { QueryClient } from "@tanstack/query-core"
@@ -87,13 +87,14 @@ const listOptions = queryOptions({
 const todosCollection = createCollection(
   queryCollectionOptions({
     ...listOptions,
+    queryFn: (context) => listOptions.queryFn!(context),
     queryClient,
     getKey: (item) => item.id,
   }),
 )
 ```
 
-`queryFn` is still required at runtime for query collections. If it is missing, `queryCollectionOptions` throws `QueryFnRequiredError`.
+`queryFn` is required for query collections both in types and at runtime. If it is missing at runtime, `queryCollectionOptions` throws `QueryFnRequiredError`.
 
 ### Collection Options
 

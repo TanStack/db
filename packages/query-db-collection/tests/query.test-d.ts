@@ -10,7 +10,11 @@ import {
 import { QueryClient } from '@tanstack/query-core'
 import { z } from 'zod'
 import { queryCollectionOptions } from '../src/query'
-import type { DataTag, QueryObserverOptions } from '@tanstack/query-core'
+import type {
+  DataTag,
+  QueryFunctionContext,
+  QueryObserverOptions,
+} from '@tanstack/query-core'
 import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
 import type {
   DeleteMutationFnParams,
@@ -611,6 +615,34 @@ describe(`Query collection type resolution tests`, () => {
 
       const options = queryCollectionOptions({
         ...queryOptionsLike,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
+    })
+
+    it(`should require explicit queryFn when source type marks queryFn optional`, () => {
+      const queryOptionsLike: {
+        queryKey: TaggedNumbersKey
+        queryFn?: (
+          context: QueryFunctionContext<TaggedNumbersKey>,
+        ) => Array<NumberItem> | Promise<Array<NumberItem>>
+      } = {
+        queryKey: taggedNumbersQueryKey,
+        queryFn: () => Promise.resolve([{ id: 1, value: `one` }]),
+      }
+
+      // @ts-expect-error - interop configs require queryFn even when source type marks it optional
+      queryCollectionOptions({
+        ...queryOptionsLike,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      const options = queryCollectionOptions({
+        ...queryOptionsLike,
+        queryFn: (context) => queryOptionsLike.queryFn!(context),
         queryClient,
         getKey: (item) => item.id,
       })

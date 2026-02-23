@@ -77,7 +77,7 @@ type QueryOptionsInteropConfig<
   `queryFn` | `queryKey`
 > & {
   queryKey: TaggedQueryKey<TQueryKey, TQueryData, TError>
-  queryFn?: (
+  queryFn: (
     context: QueryFunctionContext<
       TaggedQueryKey<TQueryKey, TQueryData, TError>
     >,
@@ -617,15 +617,10 @@ export function queryCollectionOptions<
 }
 
 export function queryCollectionOptions(
-  config: Omit<
-    QueryCollectionConfig<
-      Record<string, unknown>,
-      (context: QueryFunctionContext<any>) => any
-    >,
-    `queryFn`
-  > & {
-    queryFn?: (context: QueryFunctionContext<any>) => any
-  },
+  config: QueryCollectionConfig<
+    Record<string, unknown>,
+    (context: QueryFunctionContext<any>) => any
+  >,
 ): CollectionConfig<
   Record<string, unknown>,
   string | number,
@@ -662,6 +657,7 @@ export function queryCollectionOptions(
     throw new QueryKeyRequiredError()
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!queryFn) {
     throw new QueryFnRequiredError()
   }
