@@ -132,20 +132,11 @@ export function processGroupBy(
               finalResults[alias] = aggregatedRow[alias]
             }
           }
-          // Add synthetic aggregate values so wrapped expressions can reference them
-          for (const key of Object.keys(aggregatedRow)) {
-            if (key.startsWith(`__agg_`)) {
-              finalResults[key] = aggregatedRow[key]
-            }
-          }
-          // Second pass: evaluate wrapped-aggregate expressions
-          for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
-            finalResults[alias] = evaluator({ $selected: finalResults })
-          }
-          // Clean up synthetic keys so they don't leak onto result rows
-          for (const key of Object.keys(finalResults)) {
-            if (key.startsWith(`__agg_`)) delete finalResults[key]
-          }
+          evaluateWrappedAggregates(
+            finalResults,
+            aggregatedRow as Record<string, any>,
+            wrappedAggExprs,
+          )
         }
 
         // Use a single key for the result and update $selected
@@ -275,20 +266,11 @@ export function processGroupBy(
             }
           }
         }
-        // Add synthetic aggregate values so wrapped expressions can reference them
-        for (const key of Object.keys(aggregatedRow)) {
-          if (key.startsWith(`__agg_`)) {
-            finalResults[key] = aggregatedRow[key]
-          }
-        }
-        // Second pass: evaluate wrapped-aggregate expressions
-        for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
-          finalResults[alias] = evaluator({ $selected: finalResults })
-        }
-        // Clean up synthetic keys so they don't leak onto result rows
-        for (const key of Object.keys(finalResults)) {
-          if (key.startsWith(`__agg_`)) delete finalResults[key]
-        }
+        evaluateWrappedAggregates(
+          finalResults,
+          aggregatedRow as Record<string, any>,
+          wrappedAggExprs,
+        )
       } else {
         // No SELECT clause - just use the group keys
         for (let i = 0; i < groupByClause.length; i++) {
@@ -504,6 +486,30 @@ export function replaceAggregatesByRefs(
 
     default:
       throw new UnknownHavingExpressionTypeError((havingExpr as any).type)
+  }
+}
+
+/**
+ * Evaluates wrapped-aggregate expressions against the aggregated row.
+ * Copies synthetic __agg_N values into finalResults so the compiled wrapper
+ * expressions can reference them, evaluates each wrapper, then removes the
+ * synthetic keys so they don't leak onto user-visible result rows.
+ */
+function evaluateWrappedAggregates(
+  finalResults: Record<string, any>,
+  aggregatedRow: Record<string, any>,
+  wrappedAggExprs: Record<string, (data: any) => any>,
+): void {
+  for (const key of Object.keys(aggregatedRow)) {
+    if (key.startsWith(`__agg_`)) {
+      finalResults[key] = aggregatedRow[key]
+    }
+  }
+  for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
+    finalResults[alias] = evaluator({ $selected: finalResults })
+  }
+  for (const key of Object.keys(finalResults)) {
+    if (key.startsWith(`__agg_`)) delete finalResults[key]
   }
 }
 
