@@ -78,7 +78,9 @@ type QueryOptionsInteropConfig<
 > & {
   queryKey: TaggedQueryKey<TQueryKey, TQueryData, TError>
   queryFn?: (
-    context: QueryFunctionContext<TaggedQueryKey<TQueryKey, TQueryData, TError>>,
+    context: QueryFunctionContext<
+      TaggedQueryKey<TQueryKey, TQueryData, TError>
+    >,
   ) => TQueryData | Promise<TQueryData>
 }
 
@@ -108,9 +110,7 @@ export interface QueryCollectionConfig<
   queryFn: TQueryFn extends (
     context: QueryFunctionContext<TQueryKey>,
   ) => Promise<Array<any>> | Array<any>
-    ? (
-        context: QueryFunctionContext<TQueryKey>,
-      ) => Promise<Array<T>> | Array<T>
+    ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>> | Array<T>
     : TQueryFn
   /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
   select?: (data: TQueryData) => Array<T>
@@ -661,7 +661,7 @@ export function queryCollectionOptions(
   if (!queryKey) {
     throw new QueryKeyRequiredError()
   }
-   
+
   if (!queryFn) {
     throw new QueryFnRequiredError()
   }

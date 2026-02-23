@@ -572,8 +572,9 @@ describe(`Query collection type resolution tests`, () => {
       Array<NumberItem>,
       TaggedNumbersKey
     >
-    const taggedNumbersQueryKey =
-      [`query-options-numbers`] as unknown as TaggedNumbersKey
+    const taggedNumbersQueryKey = [
+      `query-options-numbers`,
+    ] as unknown as TaggedNumbersKey
 
     it(`should accept queryOptions-like spread config with tagged queryKey`, () => {
       const queryOptionsLike = {
@@ -630,8 +631,9 @@ describe(`Query collection type resolution tests`, () => {
         WrappedResponse,
         TaggedWrappedKey
       >
-      const taggedWrappedQueryKey =
-        [`query-options-wrapped`] as unknown as TaggedWrappedKey
+      const taggedWrappedQueryKey = [
+        `query-options-wrapped`,
+      ] as unknown as TaggedWrappedKey
 
       const wrappedQueryOptionsLike = {
         queryKey: taggedWrappedQueryKey,
