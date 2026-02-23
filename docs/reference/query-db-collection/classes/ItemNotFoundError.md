@@ -5,7 +5,7 @@ title: ItemNotFoundError
 
 # Class: ItemNotFoundError
 
-Defined in: [packages/query-db-collection/src/errors.ts:55](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L55)
+Defined in: packages/query-db-collection/src/errors.ts:55
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:55](https://github.com/T
 new ItemNotFoundError(key): ItemNotFoundError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:56](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L56)
+Defined in: packages/query-db-collection/src/errors.ts:56
 
 #### Parameters
 
