@@ -5,7 +5,7 @@ title: QueryCollectionError
 
 # Class: QueryCollectionError
 
-Defined in: [packages/query-db-collection/src/errors.ts:4](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L4)
+Defined in: packages/query-db-collection/src/errors.ts:4
 
 ## Extends
 
@@ -35,7 +35,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:4](https://github.com/Ta
 new QueryCollectionError(message): QueryCollectionError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:5](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L5)
+Defined in: packages/query-db-collection/src/errors.ts:5
 
 #### Parameters
 

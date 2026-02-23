@@ -5,7 +5,7 @@ title: QueryFnRequiredError
 
 # Class: QueryFnRequiredError
 
-Defined in: [packages/query-db-collection/src/errors.ts:18](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L18)
+Defined in: packages/query-db-collection/src/errors.ts:18
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:18](https://github.com/T
 new QueryFnRequiredError(): QueryFnRequiredError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:19](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L19)
+Defined in: packages/query-db-collection/src/errors.ts:19
 
 #### Returns
 

@@ -5,7 +5,7 @@ title: QueryClientRequiredError
 
 # Class: QueryClientRequiredError
 
-Defined in: [packages/query-db-collection/src/errors.ts:25](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L25)
+Defined in: packages/query-db-collection/src/errors.ts:25
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:25](https://github.com/T
 new QueryClientRequiredError(): QueryClientRequiredError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:26](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L26)
+Defined in: packages/query-db-collection/src/errors.ts:26
 
 #### Returns
 

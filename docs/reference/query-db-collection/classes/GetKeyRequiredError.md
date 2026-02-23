@@ -5,7 +5,7 @@ title: GetKeyRequiredError
 
 # Class: GetKeyRequiredError
 
-Defined in: [packages/query-db-collection/src/errors.ts:32](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L32)
+Defined in: packages/query-db-collection/src/errors.ts:32
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:32](https://github.com/T
 new GetKeyRequiredError(): GetKeyRequiredError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:33](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L33)
+Defined in: packages/query-db-collection/src/errors.ts:33
 
 #### Returns
 

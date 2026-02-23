@@ -5,7 +5,7 @@ title: UnknownOperationTypeError
 
 # Class: UnknownOperationTypeError
 
-Defined in: [packages/query-db-collection/src/errors.ts:90](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L90)
+Defined in: packages/query-db-collection/src/errors.ts:90
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: [packages/query-db-collection/src/errors.ts:90](https://github.com/T
 new UnknownOperationTypeError(type): UnknownOperationTypeError;
 ```
 
-Defined in: [packages/query-db-collection/src/errors.ts:91](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L91)
+Defined in: packages/query-db-collection/src/errors.ts:91
 
 #### Parameters
 
