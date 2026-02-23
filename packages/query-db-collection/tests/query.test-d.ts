@@ -228,7 +228,7 @@ describe(`Query collection type resolution tests`, () => {
         queryFn: async (): Promise<Array<TodoType>> => {
           return [] as Array<TodoType>
         },
-        getKey: (item: TodoType) => item.id,
+        getKey: (item) => item.id,
       })
 
       // Should infer TodoType from queryFn
@@ -241,17 +241,15 @@ describe(`Query collection type resolution tests`, () => {
         name: string
       }
 
-      const invalidConfig = {
+      queryCollectionOptions<UserType>({
         queryClient,
         queryKey: [`explicit-priority`],
+        // @ts-expect-error – queryFn doesn't match the explicit type
         queryFn: async (): Promise<Array<TodoType>> => {
           return [] as Array<TodoType>
         },
-        getKey: (item: UserType) => item.id,
-      }
-
-      // @ts-expect-error – queryFn doesn't match the explicit type
-      queryCollectionOptions<UserType>(invalidConfig)
+        getKey: (item) => item.id,
+      })
     })
 
     it(`should prioritize schema over queryFn`, () => {
@@ -288,18 +286,20 @@ describe(`Query collection type resolution tests`, () => {
         email: z.string(),
       })
 
-      const invalidConfig = {
+      const options = queryCollectionOptions({
         queryClient,
         queryKey: [`schema-priority`],
         queryFn: async () => {
           return [] as Array<UserType>
         },
+        // @ts-expect-error – queryFn doesn't match the schema type
         schema: userSchema,
-        getKey: (item: z.infer<typeof userSchema>) => item.id,
-      }
+        getKey: (item) => item.id,
+      })
 
-      // @ts-expect-error – queryFn doesn't match the schema type
-      queryCollectionOptions(invalidConfig)
+      // Should use schema type, not TodoType from queryFn
+      type ExpectedType = z.infer<typeof userSchema>
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExpectedType]>()
     })
 
     it(`should maintain backward compatibility with explicit types`, () => {
@@ -351,31 +351,34 @@ describe(`Query collection type resolution tests`, () => {
     })
 
     it(`should error when queryFn returns wrapped data without select`, () => {
-      type UserDataType = {
-        id: string
-        name: string
-        email: string
-      }
+      const userData = z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      })
+
+      type UserDataType = z.infer<typeof userData>
 
       type WrappedResponse = {
         metadata: string
         data: Array<UserDataType>
       }
 
-      const invalidConfig = {
+      queryCollectionOptions({
         queryClient,
         queryKey: [`wrapped-no-select`],
+        // @ts-expect-error - queryFn returns wrapped data but no select provided
         queryFn: (): Promise<WrappedResponse> => {
           return Promise.resolve({
             metadata: `example`,
             data: [],
           })
         },
-        getKey: () => `1`,
-      }
-
-      // @ts-expect-error - queryFn returns wrapped data but no select provided
-      queryCollectionOptions(invalidConfig)
+        // @ts-expect-error - schema type conflicts with queryFn return type
+        schema: userData,
+        // @ts-expect-error - item type is inferred as object due to type mismatch
+        getKey: (item) => item.id,
+      })
     })
 
     it(`select properly extracts array from wrapped response`, () => {
@@ -697,9 +700,9 @@ describe(`Query collection type resolution tests`, () => {
     })
 
     it(`should still require queryFn for plain configs`, () => {
+      // @ts-expect-error - queryFn is required for plain configs
       queryCollectionOptions<NumberItem>({
         queryClient,
-        // @ts-expect-error - queryFn is required for plain (non-queryOptions-like) configs
         queryKey: [`query-options-missing-query-fn`],
         getKey: (item) => item.id,
       })

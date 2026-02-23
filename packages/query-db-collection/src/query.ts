@@ -20,7 +20,6 @@ import type {
   UtilsRecord,
 } from '@tanstack/db'
 import type {
-  DataTag,
   FetchStatus,
   QueryClient,
   QueryFunctionContext,
@@ -48,41 +47,6 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
   : Record<string, unknown>
 
 type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
-type TaggedQueryKey<TQueryKey extends QueryKey, TQueryData, TError> = DataTag<
-  TQueryKey,
-  TQueryData,
-  TError
->
-type QueryOptionsInteropConfig<
-  T extends object,
-  TError,
-  TQueryKey extends QueryKey,
-  TQueryData,
-  TKey extends string | number = string | number,
-  TSchema extends StandardSchemaV1 = never,
-> = Omit<
-  QueryCollectionConfig<
-    T,
-    (
-      context: QueryFunctionContext<
-        TaggedQueryKey<TQueryKey, TQueryData, TError>
-      >,
-    ) => Promise<TQueryData>,
-    TError,
-    TaggedQueryKey<TQueryKey, TQueryData, TError>,
-    TKey,
-    TSchema,
-    TQueryData
-  >,
-  `queryFn` | `queryKey`
-> & {
-  queryKey: TaggedQueryKey<TQueryKey, TQueryData, TError>
-  queryFn: (
-    context: QueryFunctionContext<
-      TaggedQueryKey<TQueryKey, TQueryData, TError>
-    >,
-  ) => TQueryData | Promise<TQueryData>
-}
 
 /**
  * Configuration options for creating a Query Collection
@@ -500,35 +464,6 @@ export function queryCollectionOptions<
   utils: QueryCollectionUtils<T, TKey, T, TError>
 }
 
-// Interop overload for queryOptions(...) + select (no schema)
-export function queryCollectionOptions<
-  T extends object,
-  TError = unknown,
-  TQueryKey extends QueryKey = QueryKey,
-  TKey extends string | number = string | number,
-  TQueryData = unknown,
->(
-  config: QueryOptionsInteropConfig<
-    T,
-    TError,
-    TQueryKey,
-    TQueryData,
-    TKey,
-    never
-  > & {
-    schema?: never // prohibit schema
-    select: (data: TQueryData) => Array<T>
-  },
-): CollectionConfig<
-  T,
-  TKey,
-  never,
-  QueryCollectionUtils<T, TKey, T, TError>
-> & {
-  schema?: never // no schema in the result
-  utils: QueryCollectionUtils<T, TKey, T, TError>
-}
-
 // Overload for when schema is provided
 export function queryCollectionOptions<
   T extends StandardSchemaV1,
@@ -576,33 +511,6 @@ export function queryCollectionOptions<
     TError,
     TQueryKey,
     TKey
-  > & {
-    schema?: never // prohibit schema
-  },
-): CollectionConfig<
-  T,
-  TKey,
-  never,
-  QueryCollectionUtils<T, TKey, T, TError>
-> & {
-  schema?: never // no schema in the result
-  utils: QueryCollectionUtils<T, TKey, T, TError>
-}
-
-// Interop overload for queryOptions(...) (no schema, no select)
-export function queryCollectionOptions<
-  T extends object,
-  TError = unknown,
-  TQueryKey extends QueryKey = QueryKey,
-  TKey extends string | number = string | number,
->(
-  config: QueryOptionsInteropConfig<
-    T,
-    TError,
-    TQueryKey,
-    Array<T>,
-    TKey,
-    never
   > & {
     schema?: never // prohibit schema
   },
