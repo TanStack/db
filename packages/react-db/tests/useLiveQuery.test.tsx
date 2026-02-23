@@ -2381,11 +2381,14 @@ describe(`Query Collections`, () => {
       })
 
       const results = result.current.data
-      const team1 = results.find((r) => r.team === `team1`)
-      expect(team1?.memberCount).toBe(2) // John Doe + John Smith
-
-      const team2 = results.find((r) => r.team === `team2`)
-      expect(team2?.memberCount).toBe(1) // Jane Doe
+      expect(results.find((r) => r.team === `team1`)).toEqual({
+        team: `team1`,
+        memberCount: 2, // John Doe + John Smith
+      })
+      expect(results.find((r) => r.team === `team2`)).toEqual({
+        team: `team2`,
+        memberCount: 1, // Jane Doe
+      })
     })
 
     it(`subquery with coalesce(count(...)) can be left-joined as a source`, async () => {
@@ -2432,11 +2435,14 @@ describe(`Query Collections`, () => {
       })
 
       const results = result.current.data
-      const john = results.find((r) => r.name === `John Doe`)
-      expect(john?.issueCount).toBe(2) // Issues 1 and 3
-
-      const jane = results.find((r) => r.name === `Jane Doe`)
-      expect(jane?.issueCount).toBe(1) // Issue 2
+      expect(results.find((r) => r.name === `John Doe`)).toEqual({
+        name: `John Doe`,
+        issueCount: 2, // Issues 1 and 3
+      })
+      expect(results.find((r) => r.name === `Jane Doe`)).toEqual({
+        name: `Jane Doe`,
+        issueCount: 1, // Issue 2
+      })
     })
 
     it(`coalesce(sum(...), 0) in groupBy select returns sum per group`, async () => {
@@ -2465,11 +2471,14 @@ describe(`Query Collections`, () => {
       })
 
       const results = result.current.data
-      const team1 = results.find((r) => r.team === `team1`)
-      expect(team1?.totalAge).toBe(65) // 30 + 35
-
-      const team2 = results.find((r) => r.team === `team2`)
-      expect(team2?.totalAge).toBe(25) // 25
+      expect(results.find((r) => r.team === `team1`)).toEqual({
+        team: `team1`,
+        totalAge: 65, // 30 + 35
+      })
+      expect(results.find((r) => r.team === `team2`)).toEqual({
+        team: `team2`,
+        totalAge: 25,
+      })
     })
   })
 })

@@ -1786,18 +1786,18 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-
-        const customer1 = customerSummary.get(1)
-        expect(customer1?.customer_id).toBe(1)
-        expect(customer1?.order_count).toBe(3)
-
-        const customer2 = customerSummary.get(2)
-        expect(customer2?.customer_id).toBe(2)
-        expect(customer2?.order_count).toBe(2)
-
-        const customer3 = customerSummary.get(3)
-        expect(customer3?.customer_id).toBe(3)
-        expect(customer3?.order_count).toBe(2)
+        expect(customerSummary.get(1)).toEqual({
+          customer_id: 1,
+          order_count: 3,
+        })
+        expect(customerSummary.get(2)).toEqual({
+          customer_id: 2,
+          order_count: 2,
+        })
+        expect(customerSummary.get(3)).toEqual({
+          customer_id: 3,
+          order_count: 2,
+        })
       })
 
       test(`coalesce wrapping sum returns the sum value or the fallback`, () => {
@@ -1814,9 +1814,10 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-
-        const customer1 = customerSummary.get(1)
-        expect(customer1?.total_amount).toBe(700)
+        expect(customerSummary.get(1)).toEqual({
+          customer_id: 1,
+          total_amount: 700,
+        })
       })
 
       test(`add combines two aggregate results per group`, () => {
@@ -1833,10 +1834,11 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-
         // Customer 1: sum(amount)=700, count(id)=3 => 703
-        const customer1 = customerSummary.get(1)
-        expect(customer1?.amount_plus_count).toBe(703)
+        expect(customerSummary.get(1)).toEqual({
+          customer_id: 1,
+          amount_plus_count: 703,
+        })
       })
 
       test(`select combines plain aggregates with expression-wrapped aggregates`, () => {
@@ -1854,10 +1856,11 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-
-        const customer1 = customerSummary.get(1)
-        expect(customer1?.order_count).toBe(3)
-        expect(customer1?.safe_total).toBe(700)
+        expect(customerSummary.get(1)).toEqual({
+          customer_id: 1,
+          order_count: 3,
+          safe_total: 700,
+        })
       })
 
       test(`subquery with coalesce(count(...)) can be used as a join source`, () => {
@@ -1902,9 +1905,18 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         const results = result.toArray
         expect(results).toHaveLength(3)
-
-        const john = results.find((r) => r.name === `John`)
-        expect(john?.orderCount).toBe(3) // orders 1, 2, 7
+        expect(results.find((r) => r.name === `John`)).toEqual({
+          name: `John`,
+          orderCount: 3,
+        })
+        expect(results.find((r) => r.name === `Jane`)).toEqual({
+          name: `Jane`,
+          orderCount: 2,
+        })
+        expect(results.find((r) => r.name === `Bob`)).toEqual({
+          name: `Bob`,
+          orderCount: 2,
+        })
       })
     })
 
