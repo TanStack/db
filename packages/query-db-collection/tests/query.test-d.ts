@@ -10,6 +10,7 @@ import {
 import { QueryClient } from '@tanstack/query-core'
 import { z } from 'zod'
 import { queryCollectionOptions } from '../src/query'
+import type { DataTag, QueryObserverOptions } from '@tanstack/query-core'
 import type { QueryCollectionConfig, QueryCollectionUtils } from '../src/query'
 import type {
   DeleteMutationFnParams,
@@ -223,7 +224,7 @@ describe(`Query collection type resolution tests`, () => {
         queryFn: async (): Promise<Array<TodoType>> => {
           return [] as Array<TodoType>
         },
-        getKey: (item) => item.id,
+        getKey: (item: TodoType) => item.id,
       })
 
       // Should infer TodoType from queryFn
@@ -236,15 +237,17 @@ describe(`Query collection type resolution tests`, () => {
         name: string
       }
 
-      queryCollectionOptions<UserType>({
+      const invalidConfig = {
         queryClient,
         queryKey: [`explicit-priority`],
-        // @ts-expect-error – queryFn doesn't match the explicit type
         queryFn: async (): Promise<Array<TodoType>> => {
           return [] as Array<TodoType>
         },
-        getKey: (item) => item.id,
-      })
+        getKey: (item: UserType) => item.id,
+      }
+
+      // @ts-expect-error – queryFn doesn't match the explicit type
+      queryCollectionOptions<UserType>(invalidConfig)
     })
 
     it(`should prioritize schema over queryFn`, () => {
@@ -281,20 +284,18 @@ describe(`Query collection type resolution tests`, () => {
         email: z.string(),
       })
 
-      const options = queryCollectionOptions({
+      const invalidConfig = {
         queryClient,
         queryKey: [`schema-priority`],
         queryFn: async () => {
           return [] as Array<UserType>
         },
-        // @ts-expect-error – queryFn doesn't match the schema type
         schema: userSchema,
-        getKey: (item) => item.id,
-      })
+        getKey: (item: z.infer<typeof userSchema>) => item.id,
+      }
 
-      // Should use schema type, not TodoType from queryFn
-      type ExpectedType = z.infer<typeof userSchema>
-      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[ExpectedType]>()
+      // @ts-expect-error – queryFn doesn't match the schema type
+      queryCollectionOptions(invalidConfig)
     })
 
     it(`should maintain backward compatibility with explicit types`, () => {
@@ -346,34 +347,31 @@ describe(`Query collection type resolution tests`, () => {
     })
 
     it(`should error when queryFn returns wrapped data without select`, () => {
-      const userData = z.object({
-        id: z.string(),
-        name: z.string(),
-        email: z.string(),
-      })
-
-      type UserDataType = z.infer<typeof userData>
+      type UserDataType = {
+        id: string
+        name: string
+        email: string
+      }
 
       type WrappedResponse = {
         metadata: string
         data: Array<UserDataType>
       }
 
-      queryCollectionOptions({
+      const invalidConfig = {
         queryClient,
         queryKey: [`wrapped-no-select`],
-        // @ts-expect-error - queryFn returns wrapped data but no select provided
         queryFn: (): Promise<WrappedResponse> => {
           return Promise.resolve({
             metadata: `example`,
             data: [],
           })
         },
-        // @ts-expect-error - schema type conflicts with queryFn return type
-        schema: userData,
-        // @ts-expect-error - item type is inferred as object due to type mismatch
-        getKey: (item) => item.id,
-      })
+        getKey: () => `1`,
+      }
+
+      // @ts-expect-error - queryFn returns wrapped data but no select provided
+      queryCollectionOptions(invalidConfig)
     })
 
     it(`select properly extracts array from wrapped response`, () => {
@@ -558,6 +556,130 @@ describe(`Query collection type resolution tests`, () => {
 
       const options = queryCollectionOptions(config)
       createCollection(options)
+    })
+  })
+
+  describe(`queryOptions interoperability`, () => {
+    type NumberItem = {
+      id: number
+      value: string
+    }
+    type TaggedNumbersKey = DataTag<Array<string>, Array<NumberItem>, Error>
+    type NumberQueryObserverOptions = QueryObserverOptions<
+      Array<NumberItem>,
+      Error,
+      Array<NumberItem>,
+      Array<NumberItem>,
+      TaggedNumbersKey
+    >
+    const taggedNumbersQueryKey =
+      [`query-options-numbers`] as unknown as TaggedNumbersKey
+
+    it(`should accept queryOptions-like spread config with tagged queryKey`, () => {
+      const queryOptionsLike = {
+        queryKey: taggedNumbersQueryKey,
+        queryFn: () =>
+          Promise.resolve([
+            { id: 1, value: `one` },
+            { id: 2, value: `two` },
+          ]),
+      } satisfies {
+        queryKey: TaggedNumbersKey
+        queryFn?: NumberQueryObserverOptions[`queryFn`]
+      }
+
+      const options = queryCollectionOptions({
+        ...queryOptionsLike,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
+    })
+
+    it(`should accept enabled from queryOptions-like config`, () => {
+      const queryOptionsLike = {
+        queryKey: taggedNumbersQueryKey,
+        queryFn: () => Promise.resolve([{ id: 1, value: `one` }]),
+        enabled: (_query) => true,
+      } satisfies {
+        queryKey: TaggedNumbersKey
+        queryFn?: NumberQueryObserverOptions[`queryFn`]
+        enabled?: NumberQueryObserverOptions[`enabled`]
+      }
+
+      const options = queryCollectionOptions({
+        ...queryOptionsLike,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
+    })
+
+    it(`should require select for wrapped queryOptions-like responses`, () => {
+      type WrappedResponse = {
+        total: number
+        items: Array<NumberItem>
+      }
+      type TaggedWrappedKey = DataTag<Array<string>, WrappedResponse, Error>
+      type WrappedObserverOptions = QueryObserverOptions<
+        WrappedResponse,
+        Error,
+        WrappedResponse,
+        WrappedResponse,
+        TaggedWrappedKey
+      >
+      const taggedWrappedQueryKey =
+        [`query-options-wrapped`] as unknown as TaggedWrappedKey
+
+      const wrappedQueryOptionsLike = {
+        queryKey: taggedWrappedQueryKey,
+        queryFn: () =>
+          Promise.resolve({
+            total: 1,
+            items: [{ id: 1, value: `one` }],
+          }),
+      } satisfies {
+        queryKey: TaggedWrappedKey
+        queryFn?: WrappedObserverOptions[`queryFn`]
+      }
+
+      // @ts-expect-error - wrapped response requires select to extract the item array
+      queryCollectionOptions({
+        ...wrappedQueryOptionsLike,
+        queryClient,
+        getKey: () => 1,
+      })
+
+      const options = queryCollectionOptions({
+        ...wrappedQueryOptionsLike,
+        select: (response) => response.items,
+        queryClient,
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
+    })
+
+    it(`should still require queryFn for plain configs`, () => {
+      queryCollectionOptions<NumberItem>({
+        queryClient,
+        // @ts-expect-error - queryFn is required for plain (non-queryOptions-like) configs
+        queryKey: [`query-options-missing-query-fn`],
+        getKey: (item) => item.id,
+      })
+    })
+
+    it(`should accept synchronous queryFn return values`, () => {
+      const options = queryCollectionOptions<NumberItem>({
+        queryClient,
+        queryKey: [`query-options-sync-query-fn`],
+        queryFn: () => [{ id: 1, value: `one` }],
+        getKey: (item) => item.id,
+      })
+
+      expectTypeOf(options.getKey).parameters.toEqualTypeOf<[NumberItem]>()
     })
   })
 

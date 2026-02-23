@@ -20,6 +20,7 @@ import type {
   UtilsRecord,
 } from '@tanstack/db'
 import type {
+  DataTag,
   FetchStatus,
   QueryClient,
   QueryFunctionContext,
@@ -47,6 +48,39 @@ type InferSchemaInput<T> = T extends StandardSchemaV1
   : Record<string, unknown>
 
 type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
+type TaggedQueryKey<TQueryKey extends QueryKey, TQueryData, TError> = DataTag<
+  TQueryKey,
+  TQueryData,
+  TError
+>
+type QueryOptionsInteropConfig<
+  T extends object,
+  TError,
+  TQueryKey extends QueryKey,
+  TQueryData,
+  TKey extends string | number = string | number,
+  TSchema extends StandardSchemaV1 = never,
+> = Omit<
+  QueryCollectionConfig<
+    T,
+    (
+      context: QueryFunctionContext<
+        TaggedQueryKey<TQueryKey, TQueryData, TError>
+      >,
+    ) => Promise<TQueryData>,
+    TError,
+    TaggedQueryKey<TQueryKey, TQueryData, TError>,
+    TKey,
+    TSchema,
+    TQueryData
+  >,
+  `queryFn` | `queryKey`
+> & {
+  queryKey: TaggedQueryKey<TQueryKey, TQueryData, TError>
+  queryFn?: (
+    context: QueryFunctionContext<TaggedQueryKey<TQueryKey, TQueryData, TError>>,
+  ) => TQueryData | Promise<TQueryData>
+}
 
 /**
  * Configuration options for creating a Query Collection
@@ -59,9 +93,9 @@ type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
  */
 export interface QueryCollectionConfig<
   T extends object = object,
-  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
+  TQueryFn extends (context: QueryFunctionContext<any>) => any = (
     context: QueryFunctionContext<any>,
-  ) => Promise<any>,
+  ) => any,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
@@ -73,8 +107,10 @@ export interface QueryCollectionConfig<
   /** Function that fetches data from the server. Must return the complete collection state */
   queryFn: TQueryFn extends (
     context: QueryFunctionContext<TQueryKey>,
-  ) => Promise<Array<any>>
-    ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>>
+  ) => Promise<Array<any>> | Array<any>
+    ? (
+        context: QueryFunctionContext<TQueryKey>,
+      ) => Promise<Array<T>> | Array<T>
     : TQueryFn
   /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
   select?: (data: TQueryData) => Array<T>
@@ -83,33 +119,39 @@ export interface QueryCollectionConfig<
 
   // Query-specific options
   /** Whether the query should automatically run (default: true) */
-  enabled?: boolean
-  refetchInterval?: QueryObserverOptions<
-    Array<T>,
+  enabled?: QueryObserverOptions<
+    TQueryData,
     TError,
     Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`enabled`]
+  refetchInterval?: QueryObserverOptions<
+    TQueryData,
+    TError,
     Array<T>,
+    TQueryData,
     TQueryKey
   >[`refetchInterval`]
   retry?: QueryObserverOptions<
-    Array<T>,
+    TQueryData,
     TError,
     Array<T>,
-    Array<T>,
+    TQueryData,
     TQueryKey
   >[`retry`]
   retryDelay?: QueryObserverOptions<
-    Array<T>,
+    TQueryData,
     TError,
     Array<T>,
-    Array<T>,
+    TQueryData,
     TQueryKey
   >[`retryDelay`]
   staleTime?: QueryObserverOptions<
-    Array<T>,
+    TQueryData,
     TError,
     Array<T>,
-    Array<T>,
+    TQueryData,
     TQueryKey
   >[`staleTime`]
 
@@ -393,7 +435,7 @@ class QueryCollectionUtilsImpl {
 // Overload for when schema is provided and select present
 export function queryCollectionOptions<
   T extends StandardSchemaV1,
-  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any>,
+  TQueryFn extends (context: QueryFunctionContext<any>) => any,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
@@ -428,9 +470,9 @@ export function queryCollectionOptions<
 // Overload for when no schema is provided and select present
 export function queryCollectionOptions<
   T extends object,
-  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
+  TQueryFn extends (context: QueryFunctionContext<any>) => any = (
     context: QueryFunctionContext<any>,
-  ) => Promise<any>,
+  ) => any,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
@@ -458,6 +500,35 @@ export function queryCollectionOptions<
   utils: QueryCollectionUtils<T, TKey, T, TError>
 }
 
+// Interop overload for queryOptions(...) + select (no schema)
+export function queryCollectionOptions<
+  T extends object,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+  TQueryData = unknown,
+>(
+  config: QueryOptionsInteropConfig<
+    T,
+    TError,
+    TQueryKey,
+    TQueryData,
+    TKey,
+    never
+  > & {
+    schema?: never // prohibit schema
+    select: (data: TQueryData) => Array<T>
+  },
+): CollectionConfig<
+  T,
+  TKey,
+  never,
+  QueryCollectionUtils<T, TKey, T, TError>
+> & {
+  schema?: never // no schema in the result
+  utils: QueryCollectionUtils<T, TKey, T, TError>
+}
+
 // Overload for when schema is provided
 export function queryCollectionOptions<
   T extends StandardSchemaV1,
@@ -469,7 +540,7 @@ export function queryCollectionOptions<
     InferSchemaOutput<T>,
     (
       context: QueryFunctionContext<any>,
-    ) => Promise<Array<InferSchemaOutput<T>>>,
+    ) => Array<InferSchemaOutput<T>> | Promise<Array<InferSchemaOutput<T>>>,
     TError,
     TQueryKey,
     TKey,
@@ -501,7 +572,7 @@ export function queryCollectionOptions<
 >(
   config: QueryCollectionConfig<
     T,
-    (context: QueryFunctionContext<any>) => Promise<Array<T>>,
+    (context: QueryFunctionContext<any>) => Array<T> | Promise<Array<T>>,
     TError,
     TQueryKey,
     TKey
@@ -518,8 +589,43 @@ export function queryCollectionOptions<
   utils: QueryCollectionUtils<T, TKey, T, TError>
 }
 
+// Interop overload for queryOptions(...) (no schema, no select)
+export function queryCollectionOptions<
+  T extends object,
+  TError = unknown,
+  TQueryKey extends QueryKey = QueryKey,
+  TKey extends string | number = string | number,
+>(
+  config: QueryOptionsInteropConfig<
+    T,
+    TError,
+    TQueryKey,
+    Array<T>,
+    TKey,
+    never
+  > & {
+    schema?: never // prohibit schema
+  },
+): CollectionConfig<
+  T,
+  TKey,
+  never,
+  QueryCollectionUtils<T, TKey, T, TError>
+> & {
+  schema?: never // no schema in the result
+  utils: QueryCollectionUtils<T, TKey, T, TError>
+}
+
 export function queryCollectionOptions(
-  config: QueryCollectionConfig<Record<string, unknown>>,
+  config: Omit<
+    QueryCollectionConfig<
+      Record<string, unknown>,
+      (context: QueryFunctionContext<any>) => any
+    >,
+    `queryFn`
+  > & {
+    queryFn?: (context: QueryFunctionContext<any>) => any
+  },
 ): CollectionConfig<
   Record<string, unknown>,
   string | number,
@@ -555,7 +661,7 @@ export function queryCollectionOptions(
   if (!queryKey) {
     throw new QueryKeyRequiredError()
   }
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+   
   if (!queryFn) {
     throw new QueryFnRequiredError()
   }

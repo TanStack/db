@@ -64,6 +64,37 @@ The `queryCollectionOptions` function accepts the following options:
 - `staleTime`: How long data is considered fresh
 - `meta`: Optional metadata that will be passed to the query function context
 
+### Interop with `queryOptions(...)`
+
+If your app already uses a TanStack Query options helper (for example, `queryOptions` from `@tanstack/react-query`), you can pass those options directly into `queryCollectionOptions`:
+
+```typescript
+import { QueryClient } from "@tanstack/query-core"
+import { createCollection } from "@tanstack/db"
+import { queryCollectionOptions } from "@tanstack/query-db-collection"
+import { queryOptions } from "@tanstack/react-query"
+
+const queryClient = new QueryClient()
+
+const listOptions = queryOptions({
+  queryKey: ["todos"],
+  queryFn: async () => {
+    const response = await fetch("/api/todos")
+    return response.json() as Promise<Array<{ id: string; title: string }>>
+  },
+})
+
+const todosCollection = createCollection(
+  queryCollectionOptions({
+    ...listOptions,
+    queryClient,
+    getKey: (item) => item.id,
+  }),
+)
+```
+
+`queryFn` is still required at runtime for query collections. If it is missing, `queryCollectionOptions` throws `QueryFnRequiredError`.
+
 ### Collection Options
 
 - `id`: Unique identifier for the collection
