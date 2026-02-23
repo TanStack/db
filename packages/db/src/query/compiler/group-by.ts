@@ -142,6 +142,10 @@ export function processGroupBy(
           for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
             finalResults[alias] = evaluator({ $selected: finalResults })
           }
+          // Clean up synthetic keys so they don't leak onto result rows
+          for (const key of Object.keys(finalResults)) {
+            if (key.startsWith(`__agg_`)) delete finalResults[key]
+          }
         }
 
         // Use a single key for the result and update $selected
@@ -280,6 +284,10 @@ export function processGroupBy(
         // Second pass: evaluate wrapped-aggregate expressions
         for (const [alias, evaluator] of Object.entries(wrappedAggExprs)) {
           finalResults[alias] = evaluator({ $selected: finalResults })
+        }
+        // Clean up synthetic keys so they don't leak onto result rows
+        for (const key of Object.keys(finalResults)) {
+          if (key.startsWith(`__agg_`)) delete finalResults[key]
         }
       } else {
         // No SELECT clause - just use the group keys
