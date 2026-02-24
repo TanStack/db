@@ -50,7 +50,7 @@
     "vue": ">=3.3.0"
   },
   "devDependencies": {
-    "@electric-sql/client": "^1.5.3",
+    "@electric-sql/client": "^1.5.8",
     "@vitejs/plugin-vue": "^6.0.4",
     "@vitest/coverage-istanbul": "^3.2.4",
     "vue": "^3.5.28"
