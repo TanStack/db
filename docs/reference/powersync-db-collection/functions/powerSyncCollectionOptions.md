@@ -63,7 +63,7 @@ const collection = createCollection(
 ## Call Signature
 
 ```ts
-function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, UtilsRecord> & object & object;
+function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, PowerSyncCollectionUtils<TTable>> & object & object;
 ```
 
 Defined in: [powersync.ts:128](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L128)
@@ -96,7 +96,7 @@ serializer specifications. Partial column overrides can be supplied to `serializ
 
 ### Returns
 
-`CollectionConfig`\<[`InferPowerSyncOutputType`](../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
+`CollectionConfig`\<[`InferPowerSyncOutputType`](../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, [`PowerSyncCollectionUtils`](../type-aliases/PowerSyncCollectionUtils.md)\<`TTable`\>\> & `object` & `object`
 
 ### Example
 
@@ -138,7 +138,7 @@ const collection = createCollection(
 ## Call Signature
 
 ```ts
-function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, UtilsRecord> & object & object;
+function powerSyncCollectionOptions<TTable, TSchema>(config): CollectionConfig<InferPowerSyncOutputType<TTable, TSchema>, string, TSchema, PowerSyncCollectionUtils<TTable>> & object & object;
 ```
 
 Defined in: [powersync.ts:196](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/powersync.ts#L196)
@@ -173,7 +173,7 @@ serializer specifications. Partial column overrides can be supplied to `serializ
 
 ### Returns
 
-`CollectionConfig`\<[`InferPowerSyncOutputType`](../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, `UtilsRecord`\> & `object` & `object`
+`CollectionConfig`\<[`InferPowerSyncOutputType`](../type-aliases/InferPowerSyncOutputType.md)\<`TTable`, `TSchema`\>, `string`, `TSchema`, [`PowerSyncCollectionUtils`](../type-aliases/PowerSyncCollectionUtils.md)\<`TTable`\>\> & `object` & `object`
 
 ### Example
 

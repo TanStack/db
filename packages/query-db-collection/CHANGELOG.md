@@ -1,5 +1,32 @@
 # @tanstack/query-db-collection
 
+## 1.0.26
+
+### Patch Changes
+
+- Improve `queryCollectionOptions` type compatibility with TanStack Query option objects. ([#1289](https://github.com/TanStack/db/pull/1289))
+  - Accept `queryFn` return types of `T | Promise<T>` instead of requiring `Promise<T>`.
+  - Align `enabled`, `staleTime`, `refetchInterval`, `retry`, and `retryDelay` with `QueryObserverOptions` typing.
+  - Support tagged `queryKey` values (`DataTag`) from `queryOptions(...)` spread usage.
+  - Preserve runtime safety: query collections still require an executable `queryFn`, and wrapped responses still require `select`.
+
+- Updated dependencies [[`77b815e`](https://github.com/TanStack/db/commit/77b815ee52e91ca8d03110a551a4cb8bab4f2daa), [`ac4ce67`](https://github.com/TanStack/db/commit/ac4ce6790e906f5cfb086b063c8d7daa7681ceb9)]:
+  - @tanstack/db@0.5.29
+
+## 1.0.25
+
+### Patch Changes
+
+- Updated dependencies [[`46450e7`](https://github.com/TanStack/db/commit/46450e73bf78dbdcbef1fb46cb90c6a86b10f6c8)]:
+  - @tanstack/db@0.5.28
+
+## 1.0.24
+
+### Patch Changes
+
+- Updated dependencies [[`802550f`](https://github.com/TanStack/db/commit/802550f3c517b8decac273edf9a4a6074fb3526b), [`dc41d7d`](https://github.com/TanStack/db/commit/dc41d7dacc4a70cb62462633a375de823f01b280), [`4ff3da5`](https://github.com/TanStack/db/commit/4ff3da57e095dc17d8585585d7678b9538cf7602), [`2223cd6`](https://github.com/TanStack/db/commit/2223cd6b51ce37f21983302804a75af28b47f2fe)]:
+  - @tanstack/db@0.5.27
+
 ## 1.0.23
 
 ### Patch Changes

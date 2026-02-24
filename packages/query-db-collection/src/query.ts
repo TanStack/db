@@ -59,9 +59,9 @@ type TQueryKeyBuilder<TQueryKey> = (opts: LoadSubsetOptions) => TQueryKey
  */
 export interface QueryCollectionConfig<
   T extends object = object,
-  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
+  TQueryFn extends (context: QueryFunctionContext<any>) => any = (
     context: QueryFunctionContext<any>,
-  ) => Promise<any>,
+  ) => any,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
@@ -73,8 +73,8 @@ export interface QueryCollectionConfig<
   /** Function that fetches data from the server. Must return the complete collection state */
   queryFn: TQueryFn extends (
     context: QueryFunctionContext<TQueryKey>,
-  ) => Promise<Array<any>>
-    ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>>
+  ) => Promise<Array<any>> | Array<any>
+    ? (context: QueryFunctionContext<TQueryKey>) => Promise<Array<T>> | Array<T>
     : TQueryFn
   /* Function that extracts array items from wrapped API responses (e.g metadata, pagination)  */
   select?: (data: TQueryData) => Array<T>
@@ -83,33 +83,39 @@ export interface QueryCollectionConfig<
 
   // Query-specific options
   /** Whether the query should automatically run (default: true) */
-  enabled?: boolean
-  refetchInterval?: QueryObserverOptions<
-    Array<T>,
+  enabled?: QueryObserverOptions<
+    TQueryData,
     TError,
     Array<T>,
+    TQueryData,
+    TQueryKey
+  >[`enabled`]
+  refetchInterval?: QueryObserverOptions<
+    TQueryData,
+    TError,
     Array<T>,
+    TQueryData,
     TQueryKey
   >[`refetchInterval`]
   retry?: QueryObserverOptions<
-    Array<T>,
+    TQueryData,
     TError,
     Array<T>,
-    Array<T>,
+    TQueryData,
     TQueryKey
   >[`retry`]
   retryDelay?: QueryObserverOptions<
-    Array<T>,
+    TQueryData,
     TError,
     Array<T>,
-    Array<T>,
+    TQueryData,
     TQueryKey
   >[`retryDelay`]
   staleTime?: QueryObserverOptions<
-    Array<T>,
+    TQueryData,
     TError,
     Array<T>,
-    Array<T>,
+    TQueryData,
     TQueryKey
   >[`staleTime`]
 
@@ -393,7 +399,7 @@ class QueryCollectionUtilsImpl {
 // Overload for when schema is provided and select present
 export function queryCollectionOptions<
   T extends StandardSchemaV1,
-  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any>,
+  TQueryFn extends (context: QueryFunctionContext<any>) => any,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
@@ -428,9 +434,9 @@ export function queryCollectionOptions<
 // Overload for when no schema is provided and select present
 export function queryCollectionOptions<
   T extends object,
-  TQueryFn extends (context: QueryFunctionContext<any>) => Promise<any> = (
+  TQueryFn extends (context: QueryFunctionContext<any>) => any = (
     context: QueryFunctionContext<any>,
-  ) => Promise<any>,
+  ) => any,
   TError = unknown,
   TQueryKey extends QueryKey = QueryKey,
   TKey extends string | number = string | number,
@@ -469,7 +475,7 @@ export function queryCollectionOptions<
     InferSchemaOutput<T>,
     (
       context: QueryFunctionContext<any>,
-    ) => Promise<Array<InferSchemaOutput<T>>>,
+    ) => Array<InferSchemaOutput<T>> | Promise<Array<InferSchemaOutput<T>>>,
     TError,
     TQueryKey,
     TKey,
@@ -501,7 +507,7 @@ export function queryCollectionOptions<
 >(
   config: QueryCollectionConfig<
     T,
-    (context: QueryFunctionContext<any>) => Promise<Array<T>>,
+    (context: QueryFunctionContext<any>) => Array<T> | Promise<Array<T>>,
     TError,
     TQueryKey,
     TKey
@@ -519,7 +525,10 @@ export function queryCollectionOptions<
 }
 
 export function queryCollectionOptions(
-  config: QueryCollectionConfig<Record<string, unknown>>,
+  config: QueryCollectionConfig<
+    Record<string, unknown>,
+    (context: QueryFunctionContext<any>) => any
+  >,
 ): CollectionConfig<
   Record<string, unknown>,
   string | number,
@@ -555,6 +564,7 @@ export function queryCollectionOptions(
   if (!queryKey) {
     throw new QueryKeyRequiredError()
   }
+
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!queryFn) {
     throw new QueryFnRequiredError()

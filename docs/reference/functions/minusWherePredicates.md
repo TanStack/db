@@ -11,7 +11,7 @@ function minusWherePredicates(fromPredicate, subtractPredicate):
   | null;
 ```
 
-Defined in: [packages/db/src/query/predicate-utils.ts:338](https://github.com/TanStack/db/blob/main/packages/db/src/query/predicate-utils.ts#L338)
+Defined in: [packages/db/src/query/predicate-utils.ts:340](https://github.com/TanStack/db/blob/main/packages/db/src/query/predicate-utils.ts#L340)
 
 Compute the difference between two where predicates: `fromPredicate AND NOT(subtractPredicate)`.
 Returns the simplified predicate, or null if the difference cannot be simplified

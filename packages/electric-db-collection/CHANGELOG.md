@@ -1,5 +1,32 @@
 # @tanstack/electric-db-collection
 
+## 0.2.36
+
+### Patch Changes
+
+- Upgrade `@electric-sql/client` dependency from `^1.5.3` to `^1.5.8` ([#1291](https://github.com/TanStack/db/pull/1291))
+
+- Updated dependencies [[`77b815e`](https://github.com/TanStack/db/commit/77b815ee52e91ca8d03110a551a4cb8bab4f2daa), [`ac4ce67`](https://github.com/TanStack/db/commit/ac4ce6790e906f5cfb086b063c8d7daa7681ceb9)]:
+  - @tanstack/db@0.5.29
+
+## 0.2.35
+
+### Patch Changes
+
+- Fix isNull predicate causing LiveQuery to never become ready when offline. Reorder predicate checks in `isWhereSubsetInternal` so OR superset handling runs before AND subset decomposition, allowing `and(eq, isNull)` to match structurally equal disjuncts. Also separate `forceDisconnectAndRefresh` error handling into its own try-catch with correct error attribution. ([#1275](https://github.com/TanStack/db/pull/1275))
+
+- Updated dependencies [[`46450e7`](https://github.com/TanStack/db/commit/46450e73bf78dbdcbef1fb46cb90c6a86b10f6c8)]:
+  - @tanstack/db@0.5.28
+
+## 0.2.34
+
+### Patch Changes
+
+- Make type of collection utils more precise for localOnly, PowerSync, Trailbase, and Electric collections ([#1236](https://github.com/TanStack/db/pull/1236))
+
+- Updated dependencies [[`802550f`](https://github.com/TanStack/db/commit/802550f3c517b8decac273edf9a4a6074fb3526b), [`dc41d7d`](https://github.com/TanStack/db/commit/dc41d7dacc4a70cb62462633a375de823f01b280), [`4ff3da5`](https://github.com/TanStack/db/commit/4ff3da57e095dc17d8585585d7678b9538cf7602), [`2223cd6`](https://github.com/TanStack/db/commit/2223cd6b51ce37f21983302804a75af28b47f2fe)]:
+  - @tanstack/db@0.5.27
+
 ## 0.2.33
 
 ### Patch Changes

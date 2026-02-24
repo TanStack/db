@@ -11,7 +11,10 @@ import {
   or,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import {
+  mockSyncCollectionOptions,
+  mockSyncCollectionOptionsNoInitialState,
+} from '../utils.js'
 
 // Sample data types for join testing
 type User = {
@@ -1839,6 +1842,187 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
     expect(result.join2!.id).toBe(2)
     expect(result.join2!.value).toBe(1)
     expect(result.join2!.other).toBe(30)
+  })
+
+  test(`where with isUndefined on right-side field should filter entire joined rows`, () => {
+    type Left = {
+      id: string
+      rightId: string | null
+    }
+
+    type Right = {
+      id: string
+      payload: string | null | undefined
+    }
+
+    const leftCollection = createCollection(
+      mockSyncCollectionOptions<Left>({
+        id: `test-left-isundefined-field`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `l1`, rightId: `r1` },
+          { id: `l2`, rightId: `r2` },
+          { id: `l3`, rightId: `r3` },
+          { id: `l4`, rightId: null },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const rightCollection = createCollection(
+      mockSyncCollectionOptions<Right>({
+        id: `test-right-isundefined-field`,
+        getKey: (item) => item.id,
+        initialData: [
+          { id: `r1`, payload: `ok` },
+          { id: `r2`, payload: null },
+          { id: `r3`, payload: undefined },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const lq = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ l: leftCollection })
+          .leftJoin({ r: rightCollection }, ({ l, r }) => eq(l.rightId, r.id))
+          .where(({ r }) => isUndefined(r?.payload))
+          .select(({ l, r }) => ({ leftId: l.id, right: r })),
+    })
+
+    const data = lq.toArray
+
+    // l1 joins r1 (payload='ok') → payload is defined → exclude
+    // l2 joins r2 (payload=null) → payload is null, not undefined → exclude
+    // l3 joins r3 (payload=undefined) → payload is undefined → include
+    // l4 has no match (rightId=null) → right is undefined, so r?.payload is undefined → include
+    expect(data.sort((a, b) => a.leftId.localeCompare(b.leftId))).toEqual([
+      { leftId: `l3`, right: { id: `r3`, payload: undefined } },
+      { leftId: `l4`, right: undefined },
+    ])
+  })
+
+  // Regression test for https://github.com/TanStack/db/issues/677
+  // When a custom getKey is provided to a left join live query and the right
+  // collection is populated after initial sync, the system should not throw
+  // DuplicateKeySyncError. The old row (with undefined right side) should be
+  // deleted before the new row (with populated right side) is inserted.
+  test(`left join with custom getKey should not throw DuplicateKeySyncError when right collection is populated after initial sync (autoIndex: ${autoIndex})`, () => {
+    type Player = {
+      name: string
+      club_id: string
+      position: string
+    }
+
+    type Client = {
+      name: string
+      player: string
+      email: string
+    }
+
+    type Balance = {
+      name: string
+      client: string
+      amount: number
+    }
+
+    const samplePlayers: Array<Player> = [
+      { name: `player1`, club_id: `club1`, position: `forward` },
+      { name: `player2`, club_id: `club1`, position: `midfielder` },
+      { name: `player3`, club_id: `club1`, position: `defender` },
+    ]
+
+    const sampleClients: Array<Client> = [
+      { name: `client1`, player: `player1`, email: `client1@example.com` },
+      { name: `client2`, player: `player2`, email: `client2@example.com` },
+      { name: `client3`, player: `player3`, email: `client3@example.com` },
+    ]
+
+    const sampleBalances: Array<Balance> = [
+      { name: `balance1`, client: `client1`, amount: 1000 },
+      { name: `balance2`, client: `client2`, amount: 2000 },
+      { name: `balance3`, client: `client3`, amount: 1500 },
+    ]
+
+    const playersCollection = createCollection(
+      mockSyncCollectionOptions<Player>({
+        id: `test-players-getkey-collision-${autoIndex}`,
+        getKey: (player) => player.name,
+        initialData: samplePlayers,
+        autoIndex,
+      }),
+    )
+
+    const clientsCollection = createCollection(
+      mockSyncCollectionOptionsNoInitialState<Client>({
+        id: `test-clients-getkey-collision-${autoIndex}`,
+        getKey: (client) => client.name,
+        autoIndex,
+      }),
+    )
+
+    const balancesCollection = createCollection(
+      mockSyncCollectionOptions<Balance>({
+        id: `test-balances-getkey-collision-${autoIndex}`,
+        getKey: (balance) => balance.name,
+        initialData: sampleBalances,
+        autoIndex,
+      }),
+    )
+
+    const chainedJoinQuery = createLiveQueryCollection({
+      startSync: true,
+      getKey: (r) => r.player_name,
+      query: (q) =>
+        q
+          .from({ player: playersCollection })
+          .join(
+            { client: clientsCollection },
+            ({ client, player }) => eq(client.player, player.name),
+            `left`,
+          )
+          .join(
+            { balance: balancesCollection },
+            ({ balance, client }) => eq(balance.client, client?.name),
+            `left`,
+          )
+          .select(({ player, client, balance }) => ({
+            player_name: player.name,
+            client_name: client?.name,
+            balance_amount: balance?.amount,
+          })),
+    })
+
+    // Initial state: 3 players, no clients, so left join gives undefined for client and balance
+    expect(chainedJoinQuery.toArray).toHaveLength(3)
+    expect(
+      chainedJoinQuery.toArray.every((r) => r.client_name === undefined),
+    ).toBe(true)
+    expect(
+      chainedJoinQuery.toArray.every((r) => r.balance_amount === undefined),
+    ).toBe(true)
+
+    // Populating the clients collection should not throw DuplicateKeySyncError.
+    // The IVM retracts old rows (key e.g. player1 with undefined client) and inserts
+    // new rows (key e.g. player1 with populated client). Since both map to the same
+    // custom getKey, deletes must be processed before inserts to avoid a collision.
+    clientsCollection.utils.begin()
+    sampleClients.forEach((client) => {
+      clientsCollection.utils.write({ type: `insert`, value: client })
+    })
+    clientsCollection.utils.commit()
+    clientsCollection.utils.markReady()
+
+    // Should still have 3 results, now with client and balance data populated
+    expect(chainedJoinQuery.toArray).toHaveLength(3)
+    expect(
+      chainedJoinQuery.toArray.every((r) => r.client_name !== undefined),
+    ).toBe(true)
+    expect(
+      chainedJoinQuery.toArray.every((r) => r.balance_amount !== undefined),
+    ).toBe(true)
   })
 }
 

@@ -728,8 +728,37 @@ export class CollectionConfigBuilder<
       if (pendingChanges.size === 0) {
         return
       }
+
+      let changesToApply = pendingChanges
+
+      // When a custom getKey is provided, multiple D2 internal keys may map
+      // to the same user-visible key. Re-accumulate by custom key so that a
+      // retract + insert for the same logical row merges into an UPDATE
+      // instead of a separate DELETE and INSERT that can race.
+      if (this.config.getKey) {
+        const merged = new Map<unknown, Changes<TResult>>()
+        for (const [, changes] of pendingChanges) {
+          const customKey = this.config.getKey(changes.value)
+          const existing = merged.get(customKey)
+          if (existing) {
+            existing.inserts += changes.inserts
+            existing.deletes += changes.deletes
+            // Keep the value from the insert side (the new value)
+            if (changes.inserts > 0) {
+              existing.value = changes.value
+              if (changes.orderByIndex !== undefined) {
+                existing.orderByIndex = changes.orderByIndex
+              }
+            }
+          } else {
+            merged.set(customKey, { ...changes })
+          }
+        }
+        changesToApply = merged
+      }
+
       begin()
-      pendingChanges.forEach(this.applyChanges.bind(this, config))
+      changesToApply.forEach(this.applyChanges.bind(this, config))
       commit()
       pendingChanges = new Map()
     }

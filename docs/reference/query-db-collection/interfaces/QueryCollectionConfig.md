@@ -23,7 +23,7 @@ The explicit type of items stored in the collection
 
 ### TQueryFn
 
-`TQueryFn` *extends* (`context`) => `Promise`\<`any`\> = (`context`) => `Promise`\<`any`\>
+`TQueryFn` *extends* (`context`) => `any` = (`context`) => `any`
 
 The queryFn type
 
@@ -60,7 +60,7 @@ The schema type for validation
 ### enabled?
 
 ```ts
-optional enabled: boolean;
+optional enabled: Enabled<TQueryData, TError, TQueryData, TQueryKey>;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:86](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L86)
@@ -75,7 +75,7 @@ Whether the query should automatically run (default: true)
 optional meta: Record<string, unknown>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:136](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L136)
+Defined in: [packages/query-db-collection/src/query.ts:142](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L142)
 
 Metadata to pass to the query.
 Available in queryFn via context.meta
@@ -116,7 +116,7 @@ The TanStack Query client instance
 ### queryFn
 
 ```ts
-queryFn: TQueryFn extends (context) => Promise<any[]> ? (context) => Promise<T[]> : TQueryFn;
+queryFn: TQueryFn extends (context) => any[] | Promise<any[]> ? (context) => T[] | Promise<T[]> : TQueryFn;
 ```
 
 Defined in: [packages/query-db-collection/src/query.ts:74](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L74)
@@ -143,7 +143,7 @@ The query key used by TanStack Query to identify this query
 optional refetchInterval: number | false | (query) => number | false | undefined;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:87](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L87)
+Defined in: [packages/query-db-collection/src/query.ts:93](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L93)
 
 ***
 
@@ -153,7 +153,7 @@ Defined in: [packages/query-db-collection/src/query.ts:87](https://github.com/Ta
 optional retry: RetryValue<TError>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:94](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L94)
+Defined in: [packages/query-db-collection/src/query.ts:100](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L100)
 
 ***
 
@@ -163,7 +163,7 @@ Defined in: [packages/query-db-collection/src/query.ts:94](https://github.com/Ta
 optional retryDelay: RetryDelayValue<TError>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:101](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L101)
+Defined in: [packages/query-db-collection/src/query.ts:107](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L107)
 
 ***
 
@@ -190,7 +190,7 @@ Defined in: [packages/query-db-collection/src/query.ts:80](https://github.com/Ta
 ### staleTime?
 
 ```ts
-optional staleTime: StaleTimeFunction<T[], TError, T[], TQueryKey>;
+optional staleTime: StaleTimeFunction<TQueryData, TError, TQueryData, TQueryKey>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:108](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L108)
+Defined in: [packages/query-db-collection/src/query.ts:114](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L114)

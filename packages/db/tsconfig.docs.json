@@ -1,4 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  "include": ["tests", "src"]
+  "compilerOptions": {
+    "paths": {
+      "@tanstack/store": ["../store/src"],
+      "@tanstack/db-ivm": ["../db-ivm/src"]
+    }
+  },
+  "include": ["src"]
 }

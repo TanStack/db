@@ -7,8 +7,8 @@ title: getHavingExpression
 
 ```ts
 function getHavingExpression(having): 
-  | Aggregate<any>
-| BasicExpression<any>;
+  | BasicExpression<any>
+| Aggregate<any>;
 ```
 
 Defined in: [packages/db/src/query/ir.ts:165](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L165)
@@ -24,5 +24,5 @@ HAVING clauses can contain aggregates, unlike regular WHERE clauses
 
 ## Returns
 
-  \| [`Aggregate`](../classes/Aggregate.md)\<`any`\>
   \| [`BasicExpression`](../type-aliases/BasicExpression.md)\<`any`\>
+  \| [`Aggregate`](../classes/Aggregate.md)\<`any`\>

@@ -38,7 +38,7 @@ The type of the key returned by `getKey`
 ### autoIndex?
 
 ```ts
-optional autoIndex: "eager" | "off";
+optional autoIndex: "off" | "eager";
 ```
 
 Defined in: [packages/db/src/types.ts:548](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L548)

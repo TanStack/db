@@ -9,7 +9,7 @@ title: isPredicateSubset
 function isPredicateSubset(subset, superset): boolean;
 ```
 
-Defined in: [packages/db/src/query/predicate-utils.ts:854](https://github.com/TanStack/db/blob/main/packages/db/src/query/predicate-utils.ts#L854)
+Defined in: [packages/db/src/query/predicate-utils.ts:856](https://github.com/TanStack/db/blob/main/packages/db/src/query/predicate-utils.ts#L856)
 
 Check if one predicate (where + orderBy + limit + offset) is a subset of another.
 Returns true if all aspects of the subset predicate are satisfied by the superset.
