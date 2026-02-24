@@ -379,6 +379,93 @@ describe(`includes subqueries`, () => {
     })
   })
 
+  describe(`ordered child queries with limit`, () => {
+    it(`limits child collection to N items per parent`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ p: projects })
+          .select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `asc`)
+              .limit(1)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          })),
+      )
+
+      await collection.preload()
+
+      // Alpha has 2 issues; limit(1) with asc title should keep only "Bug in Alpha"
+      const alpha = collection.get(1) as any
+      expect([...alpha.issues.toArray]).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+      ])
+
+      // Beta has 1 issue; limit(1) keeps it
+      const beta = collection.get(2) as any
+      expect([...beta.issues.toArray]).toEqual([
+        { id: 20, title: `Bug in Beta` },
+      ])
+
+      // Gamma has 0 issues; limit(1) still empty
+      const gamma = collection.get(3) as any
+      expect([...gamma.issues.toArray]).toEqual([])
+    })
+
+    it(`inserting a child that displaces an existing one respects the limit`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ p: projects })
+          .select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `asc`)
+              .limit(1)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          })),
+      )
+
+      await collection.preload()
+
+      // Alpha should have exactly 1 issue (limit 1): "Bug in Alpha"
+      const alphaIssues = [...(collection.get(1) as any).issues.toArray]
+      expect(alphaIssues).toHaveLength(1)
+      expect(alphaIssues).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+      ])
+
+      // Insert an issue that comes before "Bug" alphabetically
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 12, projectId: 1, title: `Alpha priority issue` },
+      })
+      issues.utils.commit()
+
+      // The new issue should displace "Bug in Alpha" since it sorts first
+      expect([...(collection.get(1) as any).issues.toArray]).toEqual([
+        { id: 12, title: `Alpha priority issue` },
+      ])
+
+      // Beta should still have its 1 issue (limit is per-parent)
+      expect([...(collection.get(2) as any).issues.toArray]).toEqual([
+        { id: 20, title: `Bug in Beta` },
+      ])
+    })
+  })
+
   describe(`nested includes`, () => {
     it(`supports two levels of includes`, async () => {
       const collection = createLiveQueryCollection((q) =>
