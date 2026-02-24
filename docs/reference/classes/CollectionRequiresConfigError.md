@@ -5,7 +5,7 @@ title: CollectionRequiresConfigError
 
 # Class: CollectionRequiresConfigError
 
-Defined in: packages/db/src/errors.ts:78
+Defined in: [packages/db/src/errors.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L78)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:78
 new CollectionRequiresConfigError(): CollectionRequiresConfigError;
 ```
 
-Defined in: packages/db/src/errors.ts:79
+Defined in: [packages/db/src/errors.ts:79](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L79)
 
 #### Returns
 

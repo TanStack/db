@@ -9,7 +9,7 @@ title: GetResult
 type GetResult<TContext> = Prettify<TContext["result"] extends object ? TContext["result"] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]]>;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:678
+Defined in: [packages/db/src/query/builder/types.ts:678](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L678)
 
 GetResult - Determines the final result type of a query
 

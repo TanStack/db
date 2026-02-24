@@ -5,7 +5,7 @@ title: InvalidJoinConditionLeftSourceError
 
 # Class: InvalidJoinConditionLeftSourceError
 
-Defined in: packages/db/src/errors.ts:544
+Defined in: [packages/db/src/errors.ts:544](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L544)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:544
 new InvalidJoinConditionLeftSourceError(sourceAlias): InvalidJoinConditionLeftSourceError;
 ```
 
-Defined in: packages/db/src/errors.ts:545
+Defined in: [packages/db/src/errors.ts:545](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L545)
 
 #### Parameters
 

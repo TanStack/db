@@ -5,7 +5,7 @@ title: StorageKeyRequiredError
 
 # Class: StorageKeyRequiredError
 
-Defined in: packages/db/src/errors.ts:632
+Defined in: [packages/db/src/errors.ts:632](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L632)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:632
 new StorageKeyRequiredError(): StorageKeyRequiredError;
 ```
 
-Defined in: packages/db/src/errors.ts:633
+Defined in: [packages/db/src/errors.ts:633](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L633)
 
 #### Returns
 

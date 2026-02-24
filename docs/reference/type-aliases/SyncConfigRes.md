@@ -9,7 +9,7 @@ title: SyncConfigRes
 type SyncConfigRes = object;
 ```
 
-Defined in: packages/db/src/types.ts:320
+Defined in: [packages/db/src/types.ts:320](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L320)
 
 ## Properties
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/types.ts:320
 optional cleanup: CleanupFn;
 ```
 
-Defined in: packages/db/src/types.ts:321
+Defined in: [packages/db/src/types.ts:321](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L321)
 
 ***
 
@@ -29,7 +29,7 @@ Defined in: packages/db/src/types.ts:321
 optional loadSubset: LoadSubsetFn;
 ```
 
-Defined in: packages/db/src/types.ts:322
+Defined in: [packages/db/src/types.ts:322](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L322)
 
 ***
 
@@ -39,4 +39,4 @@ Defined in: packages/db/src/types.ts:322
 optional unloadSubset: UnloadSubsetFn;
 ```
 
-Defined in: packages/db/src/types.ts:323
+Defined in: [packages/db/src/types.ts:323](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L323)

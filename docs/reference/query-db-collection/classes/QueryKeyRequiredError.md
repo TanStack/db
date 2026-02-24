@@ -5,7 +5,7 @@ title: QueryKeyRequiredError
 
 # Class: QueryKeyRequiredError
 
-Defined in: packages/query-db-collection/src/errors.ts:11
+Defined in: [packages/query-db-collection/src/errors.ts:11](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L11)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/query-db-collection/src/errors.ts:11
 new QueryKeyRequiredError(): QueryKeyRequiredError;
 ```
 
-Defined in: packages/query-db-collection/src/errors.ts:12
+Defined in: [packages/query-db-collection/src/errors.ts:12](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L12)
 
 #### Returns
 

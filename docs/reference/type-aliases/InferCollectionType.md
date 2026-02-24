@@ -9,7 +9,7 @@ title: InferCollectionType
 type InferCollectionType<T> = T extends CollectionImpl<infer TOutput, any, any, any, any> ? TOutput : never;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:85
+Defined in: [packages/db/src/query/builder/types.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L85)
 
 InferCollectionType - Extracts the TypeScript type from a CollectionImpl
 

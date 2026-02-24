@@ -5,7 +5,7 @@ title: InvalidWhereExpressionError
 
 # Class: InvalidWhereExpressionError
 
-Defined in: packages/db/src/errors.ts:409
+Defined in: [packages/db/src/errors.ts:409](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L409)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:409
 new InvalidWhereExpressionError(valueType): InvalidWhereExpressionError;
 ```
 
-Defined in: packages/db/src/errors.ts:410
+Defined in: [packages/db/src/errors.ts:410](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L410)
 
 #### Parameters
 

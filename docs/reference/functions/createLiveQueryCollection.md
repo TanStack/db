@@ -12,7 +12,7 @@ function createLiveQueryCollection<TContext, TResult>(query): CollectionForConte
 }> & object;
 ```
 
-Defined in: packages/db/src/query/live-query-collection.ts:115
+Defined in: [packages/db/src/query/live-query-collection.ts:115](https://github.com/TanStack/db/blob/main/packages/db/src/query/live-query-collection.ts#L115)
 
 Creates a live query collection directly
 
@@ -75,7 +75,7 @@ function createLiveQueryCollection<TContext, TResult, TUtils>(config): Collectio
 }> & object;
 ```
 
-Defined in: packages/db/src/query/live-query-collection.ts:125
+Defined in: [packages/db/src/query/live-query-collection.ts:125](https://github.com/TanStack/db/blob/main/packages/db/src/query/live-query-collection.ts#L125)
 
 Creates a live query collection directly
 

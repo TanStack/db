@@ -5,7 +5,7 @@ title: UnsupportedAggregateFunctionError
 
 # Class: UnsupportedAggregateFunctionError
 
-Defined in: packages/db/src/errors.ts:588
+Defined in: [packages/db/src/errors.ts:588](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L588)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:588
 new UnsupportedAggregateFunctionError(functionName): UnsupportedAggregateFunctionError;
 ```
 
-Defined in: packages/db/src/errors.ts:589
+Defined in: [packages/db/src/errors.ts:589](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L589)
 
 #### Parameters
 

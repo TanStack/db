@@ -5,7 +5,7 @@ title: InvalidKeyError
 
 # Class: InvalidKeyError
 
-Defined in: packages/db/src/errors.ts:154
+Defined in: [packages/db/src/errors.ts:154](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L154)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:154
 new InvalidKeyError(key, item): InvalidKeyError;
 ```
 
-Defined in: packages/db/src/errors.ts:155
+Defined in: [packages/db/src/errors.ts:155](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L155)
 
 #### Parameters
 

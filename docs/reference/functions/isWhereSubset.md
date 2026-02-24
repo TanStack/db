@@ -9,7 +9,7 @@ title: isWhereSubset
 function isWhereSubset(subset, superset): boolean;
 ```
 
-Defined in: packages/db/src/query/predicate-utils.ts:21
+Defined in: [packages/db/src/query/predicate-utils.ts:21](https://github.com/TanStack/db/blob/main/packages/db/src/query/predicate-utils.ts#L21)
 
 Check if one where clause is a logical subset of another.
 Returns true if the subset predicate is more restrictive than (or equal to) the superset predicate.

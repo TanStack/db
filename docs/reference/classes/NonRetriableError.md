@@ -5,7 +5,7 @@ title: NonRetriableError
 
 # Class: NonRetriableError
 
-Defined in: packages/db/src/errors.ts:10
+Defined in: [packages/db/src/errors.ts:10](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L10)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:10
 new NonRetriableError(message): NonRetriableError;
 ```
 
-Defined in: packages/db/src/errors.ts:11
+Defined in: [packages/db/src/errors.ts:11](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L11)
 
 #### Parameters
 

@@ -5,7 +5,7 @@ title: ParseWhereOptions
 
 # Interface: ParseWhereOptions\<T\>
 
-Defined in: packages/db/src/query/expression-helpers.ts:53
+Defined in: [packages/db/src/query/expression-helpers.ts:53](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L53)
 
 Options for customizing how WHERE expressions are parsed
 
@@ -23,7 +23,7 @@ Options for customizing how WHERE expressions are parsed
 handlers: object & object;
 ```
 
-Defined in: packages/db/src/query/expression-helpers.ts:67
+Defined in: [packages/db/src/query/expression-helpers.ts:67](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L67)
 
 Handler functions for different operators.
 Each handler receives the parsed field path(s) and value(s) and returns your custom format.
@@ -431,7 +431,7 @@ optional upper: (...args) => T;
 optional onUnknownOperator: (operator, args) => T;
 ```
 
-Defined in: packages/db/src/query/expression-helpers.ts:76
+Defined in: [packages/db/src/query/expression-helpers.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L76)
 
 Optional handler for when an unknown operator is encountered.
 If not provided, unknown operators throw an error.

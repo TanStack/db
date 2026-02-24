@@ -9,7 +9,7 @@ title: Row
 type Row<TExtensions> = Record<string, Value<TExtensions>>;
 ```
 
-Defined in: packages/db/src/types.ts:201
+Defined in: [packages/db/src/types.ts:201](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L201)
 
 ## Type Parameters
 
