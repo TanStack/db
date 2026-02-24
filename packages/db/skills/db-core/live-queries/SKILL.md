@@ -3,7 +3,7 @@ name: db-core/live-queries
 description: >
   Building reactive queries across collections. Covers Query builder fluent
   API (from/where/join/select/groupBy/having/orderBy/limit/offset/distinct/
-  findOne). Comparison operators (eq, ne, gt, gte, lt, lte, like, ilike,
+  findOne). Comparison operators (eq, gt, gte, lt, lte, like, ilike,
   inArray, isNull, isUndefined). Logical operators (and, or, not). Aggregate
   functions (count, sum, avg, min, max). String functions (upper, lower,
   length, concat, coalesce). Math (add, subtract, multiply, divide). Join

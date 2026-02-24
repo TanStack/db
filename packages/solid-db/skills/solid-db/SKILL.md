@@ -95,6 +95,7 @@ function so changes are tracked automatically:
 
 ```typescript
 import { createSignal } from 'solid-js'
+import { eq, gte, and } from '@tanstack/db'
 
 function FilteredTodos() {
   const [status, setStatus] = createSignal('active')

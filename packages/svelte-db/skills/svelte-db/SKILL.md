@@ -98,7 +98,7 @@ in the dependency array to maintain reactivity:
 ```svelte
 <script lang="ts">
   import { useLiveQuery } from '@tanstack/svelte-db'
-  import { eq } from '@tanstack/db'
+  import { eq, gte, and } from '@tanstack/db'
 
   let { status }: { status: string } = $props()
   let minPriority = $state(0)
@@ -116,6 +116,37 @@ in the dependency array to maintain reactivity:
 ```
 
 ## Common Mistakes
+
+### HIGH — Destructuring useLiveQuery result breaks reactivity
+
+Wrong:
+```svelte
+<script lang="ts">
+  const { data, isLoading } = useLiveQuery((q) =>
+    q.from({ t: todosCollection })
+  )
+  // data and isLoading are captured once — never update
+</script>
+```
+
+Correct:
+```svelte
+<script lang="ts">
+  const query = useLiveQuery((q) =>
+    q.from({ t: todosCollection })
+  )
+  // Access via dot notation: query.data, query.isLoading
+
+  // OR destructure with $derived:
+  const { data, isLoading } = $derived(query)
+</script>
+```
+
+Direct destructuring captures values at creation time, breaking Svelte 5
+reactivity. Either use dot notation (`query.data`) or wrap with `$derived`
+to maintain reactive tracking.
+
+Source: packages/svelte-db/src/useLiveQuery.svelte.ts
 
 ### MEDIUM — Passing Svelte props directly instead of getter functions in deps
 

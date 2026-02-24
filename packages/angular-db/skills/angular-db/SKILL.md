@@ -89,7 +89,7 @@ export class TodoListComponent {
 ```
 
 All return values (`data`, `state`, `collection`, `status`, `isLoading`,
-`isReady`, `isError`) are Angular Signals.
+`isReady`, `isIdle`, `isError`, `isCleanedUp`) are Angular Signals.
 
 ### injectLiveQuery — reactive parameters with signals
 
@@ -98,7 +98,7 @@ Use the object form with `params` for reactive query parameters:
 ```typescript
 import { Component, signal } from '@angular/core'
 import { injectLiveQuery } from '@tanstack/angular-db'
-import { eq, gte } from '@tanstack/db'
+import { eq, gte, and } from '@tanstack/db'
 
 @Component({
   selector: 'app-filtered-todos',

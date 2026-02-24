@@ -85,7 +85,7 @@ const handleToggle = (id: string) => {
 ```
 
 All return values (`data`, `state`, `collection`, `status`, `isLoading`,
-`isReady`, `isError`) are Vue Refs.
+`isReady`, `isIdle`, `isError`, `isCleanedUp`) are Vue Refs.
 
 ## Vue-Specific Patterns
 
@@ -97,7 +97,7 @@ Vue refs used inside the query function are automatically tracked:
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useLiveQuery } from '@tanstack/vue-db'
-import { eq, gte } from '@tanstack/db'
+import { eq, gte, and } from '@tanstack/db'
 
 const statusFilter = ref('active')
 const minPriority = ref(0)

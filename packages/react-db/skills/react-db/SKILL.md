@@ -61,7 +61,7 @@ Subscribes to a live query and re-renders when results change:
 
 ```typescript
 import { useLiveQuery } from '@tanstack/react-db'
-import { eq, gt } from '@tanstack/db'
+import { eq, gt, and } from '@tanstack/db'
 
 function TodoList({ userId }: { userId: string }) {
   const { data, status, isLoading, isReady, isError } = useLiveQuery(
@@ -217,6 +217,7 @@ function FilteredTodos({ status, priority }: Props) {
         .where(({ t }) => and(eq(t.status, status), gte(t.priority, priority))),
     [status, priority],
   )
+  // Import: import { eq, gte, and } from '@tanstack/db'
   // ...
 }
 ```
