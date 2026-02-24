@@ -1,5 +1,14 @@
 # @tanstack/angular-db
 
+## 0.1.55
+
+### Patch Changes
+
+- Fix `injectLiveQuery` with `findOne()` returning an array instead of a single object, and add proper type overloads so TypeScript correctly infers `Signal<T | undefined>` for `findOne()` queries ([#1273](https://github.com/TanStack/db/pull/1273))
+
+- Updated dependencies [[`77b815e`](https://github.com/TanStack/db/commit/77b815ee52e91ca8d03110a551a4cb8bab4f2daa), [`ac4ce67`](https://github.com/TanStack/db/commit/ac4ce6790e906f5cfb086b063c8d7daa7681ceb9)]:
+  - @tanstack/db@0.5.29
+
 ## 0.1.54
 
 ### Patch Changes
