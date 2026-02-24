@@ -9,8 +9,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/db": "^0.5.28",
-    "@tanstack/react-db": "^0.1.72",
+    "@tanstack/db": "^0.5.29",
+    "@tanstack/react-db": "^0.1.73",
     "mitt": "^3.0.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

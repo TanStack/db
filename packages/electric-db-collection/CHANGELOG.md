@@ -1,5 +1,14 @@
 # @tanstack/electric-db-collection
 
+## 0.2.36
+
+### Patch Changes
+
+- Upgrade `@electric-sql/client` dependency from `^1.5.3` to `^1.5.8` ([#1291](https://github.com/TanStack/db/pull/1291))
+
+- Updated dependencies [[`77b815e`](https://github.com/TanStack/db/commit/77b815ee52e91ca8d03110a551a4cb8bab4f2daa), [`ac4ce67`](https://github.com/TanStack/db/commit/ac4ce6790e906f5cfb086b063c8d7daa7681ceb9)]:
+  - @tanstack/db@0.5.29
+
 ## 0.2.35
 
 ### Patch Changes

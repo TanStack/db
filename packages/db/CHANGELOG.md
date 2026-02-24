@@ -1,5 +1,13 @@
 # @tanstack/db
 
+## 0.5.29
+
+### Patch Changes
+
+- fix: avoid DuplicateKeySyncError in join live queries when custom getKey only considers the identity of one of the joined collections ([#1290](https://github.com/TanStack/db/pull/1290))
+
+- fix: support aggregates nested inside expressions (e.g. `coalesce(count(...), 0)`) ([#1274](https://github.com/TanStack/db/pull/1274))
+
 ## 0.5.28
 
 ### Patch Changes
