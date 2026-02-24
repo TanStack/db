@@ -3,6 +3,7 @@ import {
   Aggregate as AggregateExpr,
   CollectionRef,
   Func as FuncExpr,
+  IncludesSubquery,
   PropRef,
   QueryRef,
   Value as ValueExpr,
@@ -476,7 +477,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
     const selectObject = callback(refProxy)
-    const select = buildNestedSelect(selectObject)
+    const select = buildNestedSelect(selectObject, aliases)
 
     return new BaseQueryBuilder({
       ...this.query,
@@ -852,7 +853,7 @@ function isPlainObject(value: any): value is Record<string, any> {
   )
 }
 
-function buildNestedSelect(obj: any): any {
+function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
   if (!isPlainObject(obj)) return toExpr(obj)
   const out: Record<string, any> = {}
   for (const [k, v] of Object.entries(obj)) {
@@ -861,9 +862,124 @@ function buildNestedSelect(obj: any): any {
       out[k] = v
       continue
     }
-    out[k] = buildNestedSelect(v)
+    if (v instanceof BaseQueryBuilder) {
+      out[k] = buildIncludesSubquery(v, k, parentAliases)
+      continue
+    }
+    out[k] = buildNestedSelect(v, parentAliases)
   }
   return out
+}
+
+/**
+ * Builds an IncludesSubquery IR node from a child query builder.
+ * Extracts the correlation condition from the child's WHERE clauses by finding
+ * an eq() predicate that references both a parent alias and a child alias.
+ */
+function buildIncludesSubquery(
+  childBuilder: BaseQueryBuilder,
+  fieldName: string,
+  parentAliases: Array<string>,
+): IncludesSubquery {
+  const childQuery = childBuilder._getQuery()
+
+  // Collect child's own aliases
+  const childAliases: Array<string> = [childQuery.from.alias]
+  if (childQuery.join) {
+    for (const j of childQuery.join) {
+      childAliases.push(j.from.alias)
+    }
+  }
+
+  // Walk child's WHERE clauses to find the correlation condition
+  let parentRef: PropRef | undefined
+  let childRef: PropRef | undefined
+  let correlationWhereIndex = -1
+
+  if (childQuery.where) {
+    for (let i = 0; i < childQuery.where.length; i++) {
+      const where = childQuery.where[i]!
+      const expr =
+        typeof where === `object` && `expression` in where
+          ? where.expression
+          : where
+
+      // Look for eq(a, b) where one side references parent and other references child
+      if (
+        expr.type === `func` &&
+        expr.name === `eq` &&
+        expr.args.length === 2
+      ) {
+        const [argA, argB] = expr.args
+        const result = extractCorrelation(
+          argA!,
+          argB!,
+          parentAliases,
+          childAliases,
+        )
+        if (result) {
+          parentRef = result.parentRef
+          childRef = result.childRef
+          correlationWhereIndex = i
+          break
+        }
+      }
+    }
+  }
+
+  if (!parentRef || !childRef || correlationWhereIndex === -1) {
+    throw new Error(
+      `Includes subquery for "${fieldName}" must have a WHERE clause with an eq() condition ` +
+        `that correlates a parent field with a child field. ` +
+        `Example: .where(({child}) => eq(child.parentId, parent.id))`,
+    )
+  }
+
+  // Remove the correlation WHERE from the child query
+  const modifiedWhere = [...childQuery.where!]
+  modifiedWhere.splice(correlationWhereIndex, 1)
+  const modifiedQuery: QueryIR = {
+    ...childQuery,
+    where: modifiedWhere.length > 0 ? modifiedWhere : undefined,
+  }
+
+  return new IncludesSubquery(modifiedQuery, parentRef, childRef, fieldName)
+}
+
+/**
+ * Checks if two eq() arguments form a parent-child correlation.
+ * Returns the parent and child PropRefs if found, undefined otherwise.
+ */
+function extractCorrelation(
+  argA: BasicExpression,
+  argB: BasicExpression,
+  parentAliases: Array<string>,
+  childAliases: Array<string>,
+): { parentRef: PropRef; childRef: PropRef } | undefined {
+  if (argA.type === `ref` && argB.type === `ref`) {
+    const aAlias = argA.path[0]
+    const bAlias = argB.path[0]
+
+    if (
+      aAlias &&
+      bAlias &&
+      parentAliases.includes(aAlias) &&
+      childAliases.includes(bAlias)
+    ) {
+      return { parentRef: argA, childRef: argB }
+    }
+
+    if (
+      aAlias &&
+      bAlias &&
+      parentAliases.includes(bAlias) &&
+      childAliases.includes(aAlias)
+    ) {
+      return { parentRef: argB, childRef: argA }
+    }
+  }
+
+  return undefined
 }
 
 // Internal function to build a query from a callback
