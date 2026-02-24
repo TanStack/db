@@ -435,6 +435,14 @@ export function compileQuery(
 
   // Process orderBy parameter if it exists
   if (query.orderBy && query.orderBy.length > 0) {
+    // When in includes mode with limit/offset, use grouped ordering so that
+    // the limit is applied per parent (per correlation key), not globally.
+    const includesGroupKeyFn =
+      parentKeyStream && (query.limit !== undefined || query.offset !== undefined)
+        ? (_key: unknown, row: unknown) =>
+            (row as any)?.[mainSource]?.__correlationKey
+        : undefined
+
     const orderedPipeline = processOrderBy(
       rawQuery,
       pipeline,
@@ -445,6 +453,7 @@ export function compileQuery(
       setWindowFn,
       query.limit,
       query.offset,
+      includesGroupKeyFn,
     )
 
     // Final step: extract the $selected and include orderBy index
