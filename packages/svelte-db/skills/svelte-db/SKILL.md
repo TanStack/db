@@ -120,6 +120,7 @@ in the dependency array to maintain reactivity:
 ### HIGH — Destructuring useLiveQuery result breaks reactivity
 
 Wrong:
+
 ```svelte
 <script lang="ts">
   const { data, isLoading } = useLiveQuery((q) =>
@@ -130,6 +131,7 @@ Wrong:
 ```
 
 Correct:
+
 ```svelte
 <script lang="ts">
   const query = useLiveQuery((q) =>
