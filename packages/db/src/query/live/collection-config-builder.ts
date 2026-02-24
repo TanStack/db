@@ -822,6 +822,7 @@ export class CollectionConfigBuilder<
         fieldName: entry.fieldName,
         correlationField: entry.correlationField,
         childCorrelationField: entry.childCorrelationField,
+        hasOrderBy: entry.hasOrderBy,
         childRegistry: new Map(),
         pendingChildChanges: new Map(),
       }
@@ -1119,6 +1120,8 @@ type IncludesOutputState = {
   fieldName: string
   correlationField: PropRef
   childCorrelationField: PropRef
+  /** Whether the child query has an ORDER BY clause */
+  hasOrderBy: boolean
   /** Maps correlation key value → child Collection entry */
   childRegistry: Map<unknown, ChildCollectionEntry>
   /** Pending child changes: correlationKey → Map<childKey, Changes> */
@@ -1131,6 +1134,7 @@ type ChildCollectionEntry = {
   collection: Collection<any, any, any>
   syncMethods: SyncMethods<any> | null
   resultKeys: WeakMap<object, unknown>
+  orderByIndices: WeakMap<object, string> | null
 }
 
 /**
@@ -1141,13 +1145,20 @@ function createChildCollectionEntry(
   parentId: string,
   fieldName: string,
   correlationKey: unknown,
+  hasOrderBy: boolean,
 ): ChildCollectionEntry {
   const resultKeys = new WeakMap<object, unknown>()
+  const orderByIndices = hasOrderBy ? new WeakMap<object, string>() : null
   let syncMethods: SyncMethods<any> | null = null
+
+  const compare = orderByIndices
+    ? createOrderByComparator(orderByIndices)
+    : undefined
 
   const collection = createCollection<any, string | number>({
     id: `${parentId}-${fieldName}-${String(correlationKey)}`,
     getKey: (item: any) => resultKeys.get(item) as string | number,
+    compare,
     sync: {
       rowUpdateMode: `full`,
       sync: (methods) => {
@@ -1160,7 +1171,7 @@ function createChildCollectionEntry(
     startSync: true,
   })
 
-  return { collection, get syncMethods() { return syncMethods }, resultKeys }
+  return { collection, get syncMethods() { return syncMethods }, resultKeys, orderByIndices }
 }
 
 /**
@@ -1196,6 +1207,7 @@ function flushIncludesState(
                 parentId,
                 state.fieldName,
                 correlationKey,
+                state.hasOrderBy,
               )
               state.childRegistry.set(correlationKey, entry)
             }
@@ -1220,6 +1232,7 @@ function flushIncludesState(
             parentId,
             state.fieldName,
             correlationKey,
+            state.hasOrderBy,
           )
           state.childRegistry.set(correlationKey, entry)
         }
@@ -1239,6 +1252,9 @@ function flushIncludesState(
           entry.syncMethods.begin()
           for (const [childKey, change] of childChanges) {
             entry.resultKeys.set(change.value, childKey)
+            if (entry.orderByIndices && change.orderByIndex !== undefined) {
+              entry.orderByIndices.set(change.value, change.orderByIndex)
+            }
             if (change.inserts > 0 && change.deletes === 0) {
               entry.syncMethods.write({ value: change.value, type: `insert` })
             } else if (
