@@ -296,6 +296,89 @@ describe(`includes subqueries`, () => {
     })
   })
 
+  describe(`ordered child queries`, () => {
+    it(`child collection respects orderBy on the child query`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ p: projects })
+          .select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `desc`)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          })),
+      )
+
+      await collection.preload()
+
+      // Alpha's issues should be sorted by title descending:
+      // "Feature for Alpha" before "Bug in Alpha"
+      const alpha = collection.get(1) as any
+      const alphaIssues = [...alpha.issues.toArray]
+      expect(alphaIssues).toEqual([
+        { id: 11, title: `Feature for Alpha` },
+        { id: 10, title: `Bug in Alpha` },
+      ])
+
+      // Beta has one issue, order doesn't matter but it should still work
+      const beta = collection.get(2) as any
+      const betaIssues = [...beta.issues.toArray]
+      expect(betaIssues).toEqual([{ id: 20, title: `Bug in Beta` }])
+
+      // Gamma has no issues
+      const gamma = collection.get(3) as any
+      expect([...gamma.issues.toArray]).toEqual([])
+    })
+
+    it(`newly inserted children appear in the correct order`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ p: projects })
+          .select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `asc`)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          })),
+      )
+
+      await collection.preload()
+
+      // Alpha issues sorted ascending: "Bug in Alpha", "Feature for Alpha"
+      expect([...(collection.get(1) as any).issues.toArray]).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+
+      // Insert an issue that should appear between the existing two
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 12, projectId: 1, title: `Docs for Alpha` },
+      })
+      issues.utils.commit()
+
+      // Should maintain ascending order: Bug, Docs, Feature
+      expect([...(collection.get(1) as any).issues.toArray]).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 12, title: `Docs for Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+    })
+  })
+
   describe(`nested includes`, () => {
     it(`supports two levels of includes`, async () => {
       const collection = createLiveQueryCollection((q) =>
