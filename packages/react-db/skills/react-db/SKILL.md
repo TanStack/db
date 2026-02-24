@@ -9,7 +9,7 @@ description: >
 type: framework
 library: db
 framework: react
-library_version: "0.5.29"
+library_version: '0.5.29'
 requires:
   - db-core
 ---
@@ -49,7 +49,7 @@ export const todosCollection = createCollection(
         body: JSON.stringify(changes),
       })
     },
-  })
+  }),
 )
 ```
 
@@ -87,6 +87,7 @@ function TodoList({ userId }: { userId: string }) {
 ```
 
 Return shape:
+
 - `data` — query results array (empty array while loading)
 - `state` — Map of key → item for direct lookups
 - `collection` — the derived collection instance (or null)
@@ -213,10 +214,8 @@ function FilteredTodos({ status, priority }: Props) {
     (q) =>
       q
         .from({ t: todosCollection })
-        .where(({ t }) =>
-          and(eq(t.status, status), gte(t.priority, priority))
-        ),
-    [status, priority]
+        .where(({ t }) => and(eq(t.status, status), gte(t.priority, priority))),
+    [status, priority],
   )
   // ...
 }
@@ -231,9 +230,12 @@ function TodoDetail({ todoId }: { todoId: string | null }) {
   const { data, isEnabled } = useLiveQuery(
     (q) =>
       todoId
-        ? q.from({ t: todosCollection }).where(({ t }) => eq(t.id, todoId)).findOne()
+        ? q
+            .from({ t: todosCollection })
+            .where(({ t }) => eq(t.id, todoId))
+            .findOne()
         : undefined,
-    [todoId]
+    [todoId],
   )
   // isEnabled is false when todoId is null
 }
@@ -270,24 +272,24 @@ function TodoItem({ todo }: { todo: Todo }) {
 ### CRITICAL — Missing external values in useLiveQuery dependency array
 
 Wrong:
+
 ```typescript
 function FilteredTodos({ status }: { status: string }) {
   const { data } = useLiveQuery((q) =>
-    q.from({ t: todosCollection })
-      .where(({ t }) => eq(t.status, status))
+    q.from({ t: todosCollection }).where(({ t }) => eq(t.status, status)),
   )
   // Query never re-runs when status prop changes
 }
 ```
 
 Correct:
+
 ```typescript
 function FilteredTodos({ status }: { status: string }) {
   const { data } = useLiveQuery(
     (q) =>
-      q.from({ t: todosCollection })
-        .where(({ t }) => eq(t.status, status)),
-    [status]
+      q.from({ t: todosCollection }).where(({ t }) => eq(t.status, status)),
+    [status],
   )
 }
 ```
@@ -301,6 +303,7 @@ Source: docs/framework/react/overview.md
 ### HIGH — useLiveSuspenseQuery without Error Boundary
 
 Wrong:
+
 ```typescript
 function App() {
   return (
@@ -313,6 +316,7 @@ function App() {
 ```
 
 Correct:
+
 ```typescript
 function App() {
   return (

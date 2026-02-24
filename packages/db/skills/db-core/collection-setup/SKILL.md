@@ -10,14 +10,14 @@ description: >
   type transformations. Collection lifecycle and status tracking.
 type: sub-skill
 library: db
-library_version: "0.5.29"
+library_version: '0.5.29'
 sources:
-  - "TanStack/db:docs/overview.md"
-  - "TanStack/db:docs/collections/query-collection.md"
-  - "TanStack/db:docs/collections/electric-collection.md"
-  - "TanStack/db:docs/guides/schemas.md"
-  - "TanStack/db:packages/db/src/collection/collection.ts"
-  - "TanStack/db:packages/db/src/collection/mutations.ts"
+  - 'TanStack/db:docs/overview.md'
+  - 'TanStack/db:docs/collections/query-collection.md'
+  - 'TanStack/db:docs/collections/electric-collection.md'
+  - 'TanStack/db:docs/guides/schemas.md'
+  - 'TanStack/db:packages/db/src/collection/collection.ts'
+  - 'TanStack/db:packages/db/src/collection/mutations.ts'
 ---
 
 # Collection Setup & Schema
@@ -46,7 +46,7 @@ const todosCollection = createCollection(
         body: JSON.stringify(changes),
       })
     },
-  })
+  }),
 )
 ```
 
@@ -54,15 +54,15 @@ const todosCollection = createCollection(
 
 ### Choosing the right collection adapter
 
-| Backend | Package | Options creator |
-|---------|---------|----------------|
-| REST API / TanStack Query | `@tanstack/query-db-collection` | `queryCollectionOptions()` |
-| ElectricSQL (real-time Postgres) | `@tanstack/electric-db-collection` | `electricCollectionOptions()` |
-| PowerSync (SQLite sync) | `@tanstack/powersync-db-collection` | `powerSyncCollectionOptions()` |
-| RxDB (local-first) | `@tanstack/rxdb-db-collection` | `rxdbCollectionOptions()` |
-| TrailBase (self-hosted) | `@tanstack/trailbase-db-collection` | `trailBaseCollectionOptions()` |
-| In-memory only | `@tanstack/db` | `localOnlyCollectionOptions()` |
-| localStorage (cross-tab) | `@tanstack/db` | `localStorageCollectionOptions()` |
+| Backend                          | Package                             | Options creator                   |
+| -------------------------------- | ----------------------------------- | --------------------------------- |
+| REST API / TanStack Query        | `@tanstack/query-db-collection`     | `queryCollectionOptions()`        |
+| ElectricSQL (real-time Postgres) | `@tanstack/electric-db-collection`  | `electricCollectionOptions()`     |
+| PowerSync (SQLite sync)          | `@tanstack/powersync-db-collection` | `powerSyncCollectionOptions()`    |
+| RxDB (local-first)               | `@tanstack/rxdb-db-collection`      | `rxdbCollectionOptions()`         |
+| TrailBase (self-hosted)          | `@tanstack/trailbase-db-collection` | `trailBaseCollectionOptions()`    |
+| In-memory only                   | `@tanstack/db`                      | `localOnlyCollectionOptions()`    |
+| localStorage (cross-tab)         | `@tanstack/db`                      | `localStorageCollectionOptions()` |
 
 Each adapter returns a config object spread into `createCollection`. Always
 use the adapter matching your backend — it handles sync, handlers, and
@@ -80,10 +80,8 @@ import { createCollection, localOnlyCollectionOptions } from '@tanstack/db'
 const todosCollection = createCollection(
   localOnlyCollectionOptions({
     getKey: (todo) => todo.id,
-    initialData: [
-      { id: '1', text: 'Buy milk', completed: false },
-    ],
-  })
+    initialData: [{ id: '1', text: 'Buy milk', completed: false }],
+  }),
 )
 
 // Later, swap to real backend — no query/component changes needed:
@@ -106,8 +104,9 @@ const todoSchema = z.object({
   id: z.string(),
   text: z.string().min(1),
   completed: z.boolean().default(false),
-  created_at: z.union([z.string(), z.date()])
-    .transform((val) => typeof val === 'string' ? new Date(val) : val),
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
 })
 
 const todosCollection = createCollection(
@@ -116,7 +115,7 @@ const todosCollection = createCollection(
     queryKey: ['todos'],
     queryFn: async () => fetch('/api/todos').then((r) => r.json()),
     getKey: (todo) => todo.id,
-  })
+  }),
 )
 ```
 
@@ -132,7 +131,7 @@ const settingsCollection = createCollection(
     id: 'user-settings',
     storageKey: 'app-settings',
     getKey: (item) => item.key,
-  })
+  }),
 )
 
 // Direct mutations — no handlers needed
@@ -145,7 +144,7 @@ Collections transition through statuses:
 `idle` → `loading` → `ready` (or `error`) → `cleaned-up`
 
 ```typescript
-collection.status    // 'idle' | 'loading' | 'ready' | 'error' | 'cleaned-up'
+collection.status // 'idle' | 'loading' | 'ready' | 'error' | 'cleaned-up'
 collection.isReady() // boolean
 
 // Wait for initial data before proceeding
@@ -157,17 +156,19 @@ await collection.preload()
 ### CRITICAL — queryFn returning empty array deletes all collection data
 
 Wrong:
+
 ```typescript
 queryCollectionOptions({
   queryFn: async () => {
     const res = await fetch('/api/todos')
-    if (!res.ok) return []  // "safe" fallback
+    if (!res.ok) return [] // "safe" fallback
     return res.json()
   },
 })
 ```
 
 Correct:
+
 ```typescript
 queryCollectionOptions({
   queryFn: async () => {
@@ -187,17 +188,21 @@ Source: docs/collections/query-collection.md — Full State Sync section
 ### CRITICAL — Not knowing which collection type to use for a given backend
 
 Wrong:
+
 ```typescript
 import { createCollection } from '@tanstack/db'
 
 const todos = createCollection({
   id: 'todos',
   getKey: (t) => t.id,
-  sync: { /* manually wiring fetch + polling */ },
+  sync: {
+    /* manually wiring fetch + polling */
+  },
 })
 ```
 
 Correct:
+
 ```typescript
 import { createCollection } from '@tanstack/db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
@@ -207,7 +212,7 @@ const todos = createCollection(
     queryKey: ['todos'],
     queryFn: () => fetch('/api/todos').then((r) => r.json()),
     getKey: (t) => t.id,
-  })
+  }),
 )
 ```
 
@@ -220,6 +225,7 @@ Source: maintainer interview
 ### HIGH — Using async schema validation
 
 Wrong:
+
 ```typescript
 const schema = z.object({
   email: z.string().refine(async (email) => {
@@ -230,6 +236,7 @@ const schema = z.object({
 ```
 
 Correct:
+
 ```typescript
 const schema = z.object({
   email: z.string().email(),
@@ -245,18 +252,24 @@ Source: packages/db/src/collection/mutations.ts:101
 ### HIGH — getKey returning undefined for some items
 
 Wrong:
+
 ```typescript
-createCollection(queryCollectionOptions({
-  getKey: (item) => item.metadata.id,
-  // throws UndefinedKeyError when metadata is null
-}))
+createCollection(
+  queryCollectionOptions({
+    getKey: (item) => item.metadata.id,
+    // throws UndefinedKeyError when metadata is null
+  }),
+)
 ```
 
 Correct:
+
 ```typescript
-createCollection(queryCollectionOptions({
-  getKey: (item) => item.id,
-}))
+createCollection(
+  queryCollectionOptions({
+    getKey: (item) => item.id,
+  }),
+)
 ```
 
 If `getKey` returns `undefined` for any item, TanStack DB throws
@@ -267,6 +280,7 @@ Source: packages/db/src/collection/mutations.ts:148
 ### HIGH — TInput not a superset of TOutput with schema transforms
 
 Wrong:
+
 ```typescript
 const schema = z.object({
   created_at: z.string().transform((val) => new Date(val)),
@@ -277,10 +291,12 @@ const schema = z.object({
 ```
 
 Correct:
+
 ```typescript
 const schema = z.object({
-  created_at: z.union([z.string(), z.date()])
-    .transform((val) => typeof val === 'string' ? new Date(val) : val),
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
 })
 // TInput: { created_at: string | Date }  ← accepts both
 // TOutput: { created_at: Date }
@@ -295,6 +311,7 @@ Source: docs/guides/schemas.md
 ### HIGH — React Native missing crypto.randomUUID polyfill
 
 Wrong:
+
 ```typescript
 // App.tsx — React Native
 import { createCollection } from '@tanstack/db'
@@ -302,6 +319,7 @@ import { createCollection } from '@tanstack/db'
 ```
 
 Correct:
+
 ```typescript
 // App.tsx — React Native entry point
 import 'react-native-random-uuid'
@@ -317,22 +335,27 @@ Source: docs/overview.md — React Native section
 ### MEDIUM — Providing both explicit type parameter and schema
 
 Wrong:
+
 ```typescript
-interface Todo { id: string; text: string }
+interface Todo {
+  id: string
+  text: string
+}
 const collection = createCollection<Todo>(
   queryCollectionOptions({
-    schema: todoSchema,  // also infers types
+    schema: todoSchema, // also infers types
     // conflicting type constraints
-  })
+  }),
 )
 ```
 
 Correct:
+
 ```typescript
 const collection = createCollection(
   queryCollectionOptions({
-    schema: todoSchema,  // types inferred from schema
-  })
+    schema: todoSchema, // types inferred from schema
+  }),
 )
 ```
 

@@ -8,7 +8,7 @@ description: >
 type: framework
 library: db
 framework: angular
-library_version: "0.5.29"
+library_version: '0.5.29'
 requires:
   - db-core
 ---
@@ -45,7 +45,7 @@ export const todosCollection = createCollection(
         body: JSON.stringify(changes),
       })
     },
-  })
+  }),
 )
 ```
 
@@ -77,9 +77,7 @@ import { todosCollection } from '../collections/todos'
 })
 export class TodoListComponent {
   query = injectLiveQuery((q) =>
-    q
-      .from({ t: todosCollection })
-      .where(({ t }) => eq(t.completed, false))
+    q.from({ t: todosCollection }).where(({ t }) => eq(t.completed, false)),
   )
 
   toggle(id: string) {
@@ -130,10 +128,7 @@ export class FilteredTodosComponent {
       q
         .from({ t: todosCollection })
         .where(({ t }) =>
-          and(
-            eq(t.status, params.status),
-            gte(t.priority, params.minPriority)
-          )
+          and(eq(t.status, params.status), gte(t.priority, params.minPriority)),
         ),
   })
 }
@@ -161,7 +156,7 @@ export class TodoService {
       queryKey: ['todos'],
       queryFn: () => fetch('/api/todos').then((r) => r.json()),
       getKey: (todo) => todo.id,
-    })
+    }),
   )
 
   toggle(id: string) {

@@ -9,8 +9,8 @@ description: >
   Framework-agnostic core for @tanstack/db.
 type: core
 library: db
-library_version: "0.5.29"
-source_repository: "https://github.com/TanStack/db"
+library_version: '0.5.29'
+source_repository: 'https://github.com/TanStack/db'
 ---
 
 # TanStack DB — Core Concepts
@@ -24,12 +24,12 @@ local.
 
 ## Sub-Skills
 
-| Need to... | Read |
-|------------|------|
-| Create and configure collections from any data source | db-core/collection-setup/SKILL.md |
-| Build reactive queries with filters, joins, aggregations | db-core/live-queries/SKILL.md |
-| Write data with optimistic updates and transactions | db-core/mutations-optimistic/SKILL.md |
-| Configure sync, offline support, or build a custom adapter | db-core/sync-connectivity/SKILL.md |
+| Need to...                                                 | Read                                  |
+| ---------------------------------------------------------- | ------------------------------------- |
+| Create and configure collections from any data source      | db-core/collection-setup/SKILL.md     |
+| Build reactive queries with filters, joins, aggregations   | db-core/live-queries/SKILL.md         |
+| Write data with optimistic updates and transactions        | db-core/mutations-optimistic/SKILL.md |
+| Configure sync, offline support, or build a custom adapter | db-core/sync-connectivity/SKILL.md    |
 
 ## Quick Decision Tree
 

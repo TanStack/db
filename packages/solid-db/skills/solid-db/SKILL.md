@@ -8,7 +8,7 @@ description: >
 type: framework
 library: db
 framework: solid
-library_version: "0.5.29"
+library_version: '0.5.29'
 requires:
   - db-core
 ---
@@ -43,7 +43,7 @@ export const todosCollection = createCollection(
         body: JSON.stringify(changes),
       })
     },
-  })
+  }),
 )
 ```
 
@@ -132,6 +132,7 @@ function FilteredTodos() {
 ### HIGH — Reading Solid signals outside the query function
 
 Wrong:
+
 ```typescript
 function FilteredTodos() {
   const [status, setStatus] = createSignal('active')
@@ -140,20 +141,22 @@ function FilteredTodos() {
   const currentStatus = status()
 
   const query = useLiveQuery((q) =>
-    q.from({ t: todosCollection })
-      .where(({ t }) => eq(t.status, currentStatus))
+    q
+      .from({ t: todosCollection })
+      .where(({ t }) => eq(t.status, currentStatus)),
   )
 }
 ```
 
 Correct:
+
 ```typescript
 function FilteredTodos() {
   const [status, setStatus] = createSignal('active')
 
-  const query = useLiveQuery((q) =>
-    q.from({ t: todosCollection })
-      .where(({ t }) => eq(t.status, status()))  // Read INSIDE
+  const query = useLiveQuery(
+    (q) =>
+      q.from({ t: todosCollection }).where(({ t }) => eq(t.status, status())), // Read INSIDE
   )
 }
 ```

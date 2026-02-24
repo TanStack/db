@@ -12,12 +12,12 @@ description: >
   collection options creator pattern.
 type: sub-skill
 library: db
-library_version: "0.5.29"
+library_version: '0.5.29'
 sources:
-  - "TanStack/db:docs/collections/electric-collection.md"
-  - "TanStack/db:docs/collections/query-collection.md"
-  - "TanStack/db:docs/guides/collection-options-creator.md"
-  - "TanStack/db:packages/db/src/collection/sync.ts"
+  - 'TanStack/db:docs/collections/electric-collection.md'
+  - 'TanStack/db:docs/collections/query-collection.md'
+  - 'TanStack/db:docs/guides/collection-options-creator.md'
+  - 'TanStack/db:packages/db/src/collection/sync.ts'
 ---
 
 # Sync & Connectivity
@@ -48,7 +48,7 @@ const todosCollection = createCollection(
       `
       await todosCollection.utils.awaitTxId(result[0].txid)
     },
-  })
+  }),
 )
 ```
 
@@ -56,11 +56,11 @@ const todosCollection = createCollection(
 
 ### Sync modes
 
-| Mode | When to use | How it works |
-|------|-------------|-------------|
-| `eager` (default) | < 10k rows of relatively static data | Loads entire collection upfront |
-| `on-demand` | > 50k rows, search interfaces | Loads only what active queries request |
-| `progressive` | Need immediate results + full dataset | Loads query subset first, then syncs full dataset in background |
+| Mode              | When to use                           | How it works                                                    |
+| ----------------- | ------------------------------------- | --------------------------------------------------------------- |
+| `eager` (default) | < 10k rows of relatively static data  | Loads entire collection upfront                                 |
+| `on-demand`       | > 50k rows, search interfaces         | Loads only what active queries request                          |
+| `progressive`     | Need immediate results + full dataset | Loads query subset first, then syncs full dataset in background |
 
 ```typescript
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
@@ -75,7 +75,7 @@ const productsCollection = createCollection(
     },
     syncMode: 'on-demand',
     getKey: (p) => p.id,
-  })
+  }),
 )
 ```
 
@@ -120,7 +120,7 @@ const collection = createCollection(
       // Write the server response directly instead of refetching
       collection.utils.writeUpsert(saved)
     },
-  })
+  }),
 )
 ```
 
@@ -188,7 +188,11 @@ provides a persistent outbox integrated with the TanStack DB transaction
 model:
 
 ```typescript
-import { startOfflineExecutor, IndexedDBAdapter, WebLocksLeader } from '@tanstack/offline-transactions'
+import {
+  startOfflineExecutor,
+  IndexedDBAdapter,
+  WebLocksLeader,
+} from '@tanstack/offline-transactions'
 
 const executor = startOfflineExecutor({
   storage: new IndexedDBAdapter({ dbName: 'my-app-offline' }),
@@ -206,6 +210,7 @@ persistence, which is a separate concern from offline transaction queuing.
 ### CRITICAL — Electric txid queried outside mutation transaction
 
 Wrong:
+
 ```typescript
 onInsert: async ({ transaction }) => {
   const item = transaction.mutations[0].modified
@@ -217,6 +222,7 @@ onInsert: async ({ transaction }) => {
 ```
 
 Correct:
+
 ```typescript
 onInsert: async ({ transaction }) => {
   const item = transaction.mutations[0].modified
@@ -238,6 +244,7 @@ Source: docs/collections/electric-collection.md — Debugging txid section
 ### CRITICAL — Not calling markReady() in custom sync implementation
 
 Wrong:
+
 ```typescript
 sync: ({ begin, write, commit }) => {
   fetchData().then((items) => {
@@ -250,16 +257,19 @@ sync: ({ begin, write, commit }) => {
 ```
 
 Correct:
+
 ```typescript
 sync: ({ begin, write, commit, markReady }) => {
-  fetchData().then((items) => {
-    begin()
-    items.forEach((item) => write({ type: 'insert', value: item }))
-    commit()
-    markReady()
-  }).catch(() => {
-    markReady()  // Call even on error
-  })
+  fetchData()
+    .then((items) => {
+      begin()
+      items.forEach((item) => write({ type: 'insert', value: item }))
+      commit()
+      markReady()
+    })
+    .catch(() => {
+      markReady() // Call even on error
+    })
 }
 ```
 
@@ -272,6 +282,7 @@ Source: docs/guides/collection-options-creator.md
 ### CRITICAL — queryFn returning partial data without merging
 
 Wrong:
+
 ```typescript
 queryCollectionOptions({
   queryFn: async () => {
@@ -282,6 +293,7 @@ queryCollectionOptions({
 ```
 
 Correct:
+
 ```typescript
 queryCollectionOptions({
   queryFn: async () => {
@@ -301,6 +313,7 @@ Source: docs/collections/query-collection.md — Handling Partial/Incremental Fe
 ### HIGH — Race condition: subscribing after initial fetch loses changes
 
 Wrong:
+
 ```typescript
 sync: ({ begin, write, commit, markReady }) => {
   // Fetch first
@@ -320,6 +333,7 @@ sync: ({ begin, write, commit, markReady }) => {
 ```
 
 Correct:
+
 ```typescript
 sync: ({ begin, write, commit, markReady }) => {
   const buffer: any[] = []
@@ -327,7 +341,10 @@ sync: ({ begin, write, commit, markReady }) => {
 
   // Subscribe FIRST, buffer events during initial fetch
   const unsub = subscribe((event) => {
-    if (!ready) { buffer.push(event); return }
+    if (!ready) {
+      buffer.push(event)
+      return
+    }
     begin()
     write({ type: event.type, value: event.data })
     commit()
@@ -359,6 +376,7 @@ Source: docs/guides/collection-options-creator.md — Race condition prevention
 ### HIGH — write() called without begin() in sync implementation
 
 Wrong:
+
 ```typescript
 sync: ({ write, commit, markReady }) => {
   fetchAll().then((items) => {
@@ -370,6 +388,7 @@ sync: ({ write, commit, markReady }) => {
 ```
 
 Correct:
+
 ```typescript
 sync: ({ begin, write, commit, markReady }) => {
   fetchAll().then((items) => {
@@ -390,6 +409,7 @@ Source: packages/db/src/collection/sync.ts:110
 ### MEDIUM — Direct writes overridden by next query sync
 
 Wrong:
+
 ```typescript
 // Write directly, but next queryFn execution overwrites it
 collection.utils.writeInsert(newItem)
@@ -398,6 +418,7 @@ collection.utils.writeInsert(newItem)
 ```
 
 Correct:
+
 ```typescript
 // Option 1: Ensure server has the item before next refetch
 await api.createItem(newItem)
@@ -405,7 +426,7 @@ collection.utils.writeInsert(newItem)
 
 // Option 2: Coordinate with staleTime to delay refetch
 queryCollectionOptions({
-  staleTime: 30000,  // 30s before refetch
+  staleTime: 30000, // 30s before refetch
 })
 ```
 

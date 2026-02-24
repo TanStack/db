@@ -12,11 +12,11 @@ description: >
   Incremental view maintenance via d2ts.
 type: sub-skill
 library: db
-library_version: "0.5.29"
+library_version: '0.5.29'
 sources:
-  - "TanStack/db:docs/guides/live-queries.md"
-  - "TanStack/db:packages/db/src/query/builder/index.ts"
-  - "TanStack/db:packages/db/src/query/compiler/index.ts"
+  - 'TanStack/db:docs/guides/live-queries.md'
+  - 'TanStack/db:packages/db/src/query/builder/index.ts'
+  - 'TanStack/db:packages/db/src/query/compiler/index.ts'
 ---
 
 # Live Query Construction
@@ -40,7 +40,7 @@ const activeUsers = createCollection(
           name: user.name,
           email: user.email,
         })),
-  })
+  }),
 )
 ```
 
@@ -55,25 +55,33 @@ All operators return expression objects for the query engine. Import them
 from `@tanstack/db`:
 
 ```typescript
-import { eq, gt, lt, gte, lte, and, or, not, like, ilike, inArray, isNull, isUndefined } from '@tanstack/db'
+import {
+  eq,
+  gt,
+  lt,
+  gte,
+  lte,
+  and,
+  or,
+  not,
+  like,
+  ilike,
+  inArray,
+  isNull,
+  isUndefined,
+} from '@tanstack/db'
 
 // Single condition
 q.from({ t: todos }).where(({ t }) => eq(t.completed, false))
 
 // Multiple conditions with AND
 q.from({ t: todos }).where(({ t }) =>
-  and(
-    eq(t.completed, false),
-    gt(t.priority, 3)
-  )
+  and(eq(t.completed, false), gt(t.priority, 3)),
 )
 
 // OR conditions
 q.from({ t: todos }).where(({ t }) =>
-  or(
-    eq(t.status, 'urgent'),
-    and(gt(t.priority, 4), eq(t.completed, false))
-  )
+  or(eq(t.status, 'urgent'), and(gt(t.priority, 4), eq(t.completed, false))),
 )
 
 // Pattern matching
@@ -83,23 +91,35 @@ q.from({ u: users }).where(({ u }) => ilike(u.email, '%@example.com'))
 q.from({ t: todos }).where(({ t }) => not(isNull(t.assignee)))
 
 // Array membership
-q.from({ t: todos }).where(({ t }) => inArray(t.status, ['open', 'in-progress']))
+q.from({ t: todos }).where(({ t }) =>
+  inArray(t.status, ['open', 'in-progress']),
+)
 ```
 
 ### Projections with SELECT and computed fields
 
 ```typescript
-import { upper, concat, coalesce, add, count, sum, avg, min, max, length } from '@tanstack/db'
+import {
+  upper,
+  concat,
+  coalesce,
+  add,
+  count,
+  sum,
+  avg,
+  min,
+  max,
+  length,
+} from '@tanstack/db'
 
 // Project specific fields
-q.from({ u: users })
-  .select(({ u }) => ({
-    id: u.id,
-    displayName: upper(u.name),
-    fullName: concat(u.firstName, ' ', u.lastName),
-    score: add(u.baseScore, u.bonus),
-    status: coalesce(u.status, 'unknown'),
-  }))
+q.from({ u: users }).select(({ u }) => ({
+  id: u.id,
+  displayName: upper(u.name),
+  fullName: concat(u.firstName, ' ', u.lastName),
+  score: add(u.baseScore, u.bonus),
+  status: coalesce(u.status, 'unknown'),
+}))
 
 // Aggregations with GROUP BY
 q.from({ o: orders })
@@ -166,19 +186,19 @@ Query results are themselves collections that can be queried further:
 const activeUsers = createCollection(
   liveQueryCollectionOptions({
     query: (q) =>
-      q.from({ u: usersCollection })
-        .where(({ u }) => eq(u.active, true)),
-  })
+      q.from({ u: usersCollection }).where(({ u }) => eq(u.active, true)),
+  }),
 )
 
 // Query the derived collection
 const topActiveUsers = createCollection(
   liveQueryCollectionOptions({
     query: (q) =>
-      q.from({ u: activeUsers })
+      q
+        .from({ u: activeUsers })
         .orderBy(({ u }) => u.score, 'desc')
         .limit(10),
-  })
+  }),
 )
 ```
 
@@ -187,17 +207,17 @@ const topActiveUsers = createCollection(
 ### CRITICAL — Using === instead of eq() in where clauses
 
 Wrong:
+
 ```typescript
-q.from({ t: todos })
-  .where(({ t }) => t.completed === false)
+q.from({ t: todos }).where(({ t }) => t.completed === false)
 ```
 
 Correct:
+
 ```typescript
 import { eq } from '@tanstack/db'
 
-q.from({ t: todos })
-  .where(({ t }) => eq(t.completed, false))
+q.from({ t: todos }).where(({ t }) => eq(t.completed, false))
 ```
 
 JavaScript `===` returns a boolean, not an expression object. The query
@@ -209,21 +229,22 @@ Source: packages/db/src/query/builder/index.ts:375
 ### CRITICAL — Filtering or transforming data in JS instead of using query operators
 
 Wrong:
+
 ```typescript
-const { data } = useLiveQuery((q) =>
-  q.from({ t: todos })
-)
+const { data } = useLiveQuery((q) => q.from({ t: todos }))
 // Then in render:
 const filtered = data.filter((t) => t.priority > 3)
 const sorted = filtered.sort((a, b) => b.createdAt - a.createdAt)
 ```
 
 Correct:
+
 ```typescript
 const { data } = useLiveQuery((q) =>
-  q.from({ t: todos })
+  q
+    .from({ t: todos })
     .where(({ t }) => gt(t.priority, 3))
-    .orderBy(({ t }) => t.createdAt, 'desc')
+    .orderBy(({ t }) => t.createdAt, 'desc'),
 )
 ```
 
@@ -237,6 +258,7 @@ Source: maintainer interview
 ### HIGH — Not using the full set of available query operators
 
 Wrong:
+
 ```typescript
 // Using JS for string operations
 const { data } = useLiveQuery((q) => q.from({ u: users }))
@@ -248,14 +270,14 @@ const display = data.map((u) => ({
 ```
 
 Correct:
+
 ```typescript
 const { data } = useLiveQuery((q) =>
-  q.from({ u: users })
-    .select(({ u }) => ({
-      id: u.id,
-      name: upper(u.name),
-      label: concat(u.firstName, ' ', u.lastName),
-    }))
+  q.from({ u: users }).select(({ u }) => ({
+    id: u.id,
+    name: upper(u.name),
+    label: concat(u.firstName, ' ', u.lastName),
+  })),
 )
 ```
 
@@ -268,11 +290,13 @@ Source: maintainer interview
 ### HIGH — Using .distinct() without .select()
 
 Wrong:
+
 ```typescript
 q.from({ t: todos }).distinct()
 ```
 
 Correct:
+
 ```typescript
 q.from({ t: todos })
   .select(({ t }) => ({ status: t.status }))
@@ -287,6 +311,7 @@ Source: packages/db/src/query/compiler/index.ts:218
 ### HIGH — Using .having() without .groupBy()
 
 Wrong:
+
 ```typescript
 q.from({ o: orders })
   .select(({ o }) => ({ total: sum(o.amount) }))
@@ -294,6 +319,7 @@ q.from({ o: orders })
 ```
 
 Correct:
+
 ```typescript
 q.from({ o: orders })
   .groupBy(({ o }) => o.customerId)
@@ -312,11 +338,13 @@ Source: packages/db/src/query/compiler/index.ts:293
 ### HIGH — Using .limit() or .offset() without .orderBy()
 
 Wrong:
+
 ```typescript
 q.from({ t: todos }).limit(10)
 ```
 
 Correct:
+
 ```typescript
 q.from({ t: todos })
   .orderBy(({ t }) => t.createdAt, 'desc')
@@ -331,12 +359,15 @@ Source: packages/db/src/query/compiler/index.ts:356
 ### HIGH — Join condition using operator other than eq()
 
 Wrong:
+
 ```typescript
-q.from({ o: orders })
-  .join({ c: customers }, ({ o, c }) => gt(o.amount, c.minOrder))
+q.from({ o: orders }).join({ c: customers }, ({ o, c }) =>
+  gt(o.amount, c.minOrder),
+)
 ```
 
 Correct:
+
 ```typescript
 q.from({ o: orders })
   .join({ c: customers }, ({ o, c }) => eq(o.customerId, c.id))
@@ -352,11 +383,13 @@ Source: packages/db/src/query/builder/index.ts:216
 ### MEDIUM — Passing source directly instead of {alias: collection}
 
 Wrong:
+
 ```typescript
 q.from(todosCollection)
 ```
 
 Correct:
+
 ```typescript
 q.from({ todos: todosCollection })
 ```

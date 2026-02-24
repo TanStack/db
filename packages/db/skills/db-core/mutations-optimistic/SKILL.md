@@ -10,12 +10,12 @@ description: >
   stacking, mutation merging, PendingMutation type, rollback, isPersisted.
 type: sub-skill
 library: db
-library_version: "0.5.29"
+library_version: '0.5.29'
 sources:
-  - "TanStack/db:docs/guides/mutations.md"
-  - "TanStack/db:packages/db/src/collection/mutations.ts"
-  - "TanStack/db:packages/db/src/transactions.ts"
-  - "TanStack/db:packages/db/src/optimistic-action.ts"
+  - 'TanStack/db:docs/guides/mutations.md'
+  - 'TanStack/db:packages/db/src/collection/mutations.ts'
+  - 'TanStack/db:packages/db/src/transactions.ts'
+  - 'TanStack/db:packages/db/src/optimistic-action.ts'
 ---
 
 # Mutations & Optimistic State
@@ -53,7 +53,7 @@ const todosCollection = createCollection(
       const { original } = transaction.mutations[0]
       await fetch(`/api/todos/${original.id}`, { method: 'DELETE' })
     },
-  })
+  }),
 )
 ```
 
@@ -192,6 +192,7 @@ Strategies: `debounceStrategy`, `throttleStrategy`, `queueStrategy`.
 Transaction states: `pending` → `persisting` → `completed` | `failed`
 
 Multiple mutations on the same item within a transaction merge:
+
 - insert + update → insert (with merged fields)
 - insert + delete → cancelled (both removed)
 - update + update → update (union of changes)
@@ -204,11 +205,11 @@ Inside `mutationFn`, access mutation details via `transaction.mutations`:
 ```typescript
 mutationFn: async ({ transaction }) => {
   for (const mutation of transaction.mutations) {
-    mutation.type       // 'insert' | 'update' | 'delete'
-    mutation.original   // pre-mutation state (empty object for inserts)
-    mutation.modified   // post-mutation state
-    mutation.changes    // only the changed fields (for updates)
-    mutation.key        // item key
+    mutation.type // 'insert' | 'update' | 'delete'
+    mutation.original // pre-mutation state (empty object for inserts)
+    mutation.modified // post-mutation state
+    mutation.changes // only the changed fields (for updates)
+    mutation.key // item key
     mutation.collection // source collection
   }
 }
@@ -219,11 +220,13 @@ mutationFn: async ({ transaction }) => {
 ### CRITICAL — Passing a new object to update() instead of mutating the draft
 
 Wrong:
+
 ```typescript
 todosCollection.update(todo.id, { ...todo, completed: true })
 ```
 
 Correct:
+
 ```typescript
 todosCollection.update(todo.id, (draft) => {
   draft.completed = true
@@ -239,23 +242,28 @@ Source: maintainer interview
 ### CRITICAL — Hallucinating mutation API signatures
 
 Wrong:
+
 ```typescript
 // Invented signatures that look plausible but are wrong
 todosCollection.update(todo.id, { title: 'new' })
 todosCollection.upsert(todo)
 createTransaction({ onSuccess: () => {} })
-transaction.mutations[0].data  // wrong property name
+transaction.mutations[0].data // wrong property name
 ```
 
 Correct:
+
 ```typescript
-todosCollection.update(todo.id, (draft) => { draft.title = 'new' })
+todosCollection.update(todo.id, (draft) => {
+  draft.title = 'new'
+})
 todosCollection.insert(todo)
 createTransaction({ mutationFn: async ({ transaction }) => {} })
-transaction.mutations[0].changes  // correct property name
+transaction.mutations[0].changes // correct property name
 ```
 
 Read the actual API before writing mutation code. Key signatures:
+
 - `update(key, (draft) => void)` — draft callback, not object
 - `insert(item)` — not upsert
 - `createTransaction({ mutationFn })` — not onSuccess
@@ -266,24 +274,30 @@ Source: maintainer interview
 ### CRITICAL — onMutate callback returning a Promise
 
 Wrong:
+
 ```typescript
 createOptimisticAction({
   onMutate: async (text) => {
     const id = await generateId()
     todosCollection.insert({ id, text, completed: false })
   },
-  mutationFn: async (text) => { /* ... */ },
+  mutationFn: async (text) => {
+    /* ... */
+  },
 })
 ```
 
 Correct:
+
 ```typescript
 createOptimisticAction({
   onMutate: (text) => {
     const id = crypto.randomUUID()
     todosCollection.insert({ id, text, completed: false })
   },
-  mutationFn: async (text) => { /* ... */ },
+  mutationFn: async (text) => {
+    /* ... */
+  },
 })
 ```
 
@@ -295,6 +309,7 @@ Source: packages/db/src/optimistic-action.ts:75
 ### CRITICAL — Calling insert/update/delete without handler or ambient transaction
 
 Wrong:
+
 ```typescript
 const collection = createCollection(
   queryCollectionOptions({
@@ -302,7 +317,7 @@ const collection = createCollection(
     queryFn: () => fetch('/api/todos').then((r) => r.json()),
     getKey: (t) => t.id,
     // No onInsert handler
-  })
+  }),
 )
 
 collection.insert({ id: '1', text: 'test', completed: false })
@@ -310,6 +325,7 @@ collection.insert({ id: '1', text: 'test', completed: false })
 ```
 
 Correct:
+
 ```typescript
 const collection = createCollection(
   queryCollectionOptions({
@@ -319,7 +335,7 @@ const collection = createCollection(
     onInsert: async ({ transaction }) => {
       await api.createTodo(transaction.mutations[0].modified)
     },
-  })
+  }),
 )
 
 collection.insert({ id: '1', text: 'test', completed: false })
@@ -334,22 +350,32 @@ Source: packages/db/src/collection/mutations.ts:166
 ### HIGH — Calling .mutate() after transaction is no longer pending
 
 Wrong:
+
 ```typescript
 const tx = createTransaction({ mutationFn: async () => {} })
-tx.mutate(() => { todosCollection.insert(item1) })
+tx.mutate(() => {
+  todosCollection.insert(item1)
+})
 await tx.commit()
-tx.mutate(() => { todosCollection.insert(item2) })
+tx.mutate(() => {
+  todosCollection.insert(item2)
+})
 // Throws TransactionNotPendingMutateError
 ```
 
 Correct:
+
 ```typescript
 const tx = createTransaction({
   autoCommit: false,
   mutationFn: async () => {},
 })
-tx.mutate(() => { todosCollection.insert(item1) })
-tx.mutate(() => { todosCollection.insert(item2) })
+tx.mutate(() => {
+  todosCollection.insert(item1)
+})
+tx.mutate(() => {
+  todosCollection.insert(item2)
+})
 await tx.commit()
 ```
 
@@ -362,6 +388,7 @@ Source: packages/db/src/transactions.ts:289
 ### HIGH — Attempting to change an item's primary key via update
 
 Wrong:
+
 ```typescript
 todosCollection.update('old-id', (draft) => {
   draft.id = 'new-id'
@@ -369,6 +396,7 @@ todosCollection.update('old-id', (draft) => {
 ```
 
 Correct:
+
 ```typescript
 todosCollection.delete('old-id')
 todosCollection.insert({ ...todo, id: 'new-id' })
@@ -382,6 +410,7 @@ Source: packages/db/src/collection/mutations.ts:352
 ### HIGH — Inserting item with duplicate key
 
 Wrong:
+
 ```typescript
 todosCollection.insert({ id: 'abc', text: 'First' })
 todosCollection.insert({ id: 'abc', text: 'Second' })
@@ -389,6 +418,7 @@ todosCollection.insert({ id: 'abc', text: 'Second' })
 ```
 
 Correct:
+
 ```typescript
 todosCollection.insert({ id: crypto.randomUUID(), text: 'First' })
 todosCollection.insert({ id: crypto.randomUUID(), text: 'Second' })
@@ -403,6 +433,7 @@ Source: packages/db/src/collection/mutations.ts:181
 ### HIGH — Not awaiting refetch after mutation in query collection handler
 
 Wrong:
+
 ```typescript
 queryCollectionOptions({
   onInsert: async ({ transaction }) => {
@@ -414,6 +445,7 @@ queryCollectionOptions({
 ```
 
 Correct:
+
 ```typescript
 queryCollectionOptions({
   onInsert: async ({ transaction }) => {

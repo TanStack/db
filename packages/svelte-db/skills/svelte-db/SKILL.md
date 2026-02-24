@@ -8,7 +8,7 @@ description: >
 type: framework
 library: db
 framework: svelte
-library_version: "0.5.29"
+library_version: '0.5.29'
 requires:
   - db-core
 ---
@@ -45,7 +45,7 @@ export const todosCollection = createCollection(
         body: JSON.stringify(changes),
       })
     },
-  })
+  }),
 )
 ```
 
@@ -120,6 +120,7 @@ in the dependency array to maintain reactivity:
 ### MEDIUM — Passing Svelte props directly instead of getter functions in deps
 
 Wrong:
+
 ```svelte
 <script lang="ts">
   let { status }: { status: string } = $props()
@@ -133,6 +134,7 @@ Wrong:
 ```
 
 Correct:
+
 ```svelte
 <script lang="ts">
   let { status }: { status: string } = $props()

@@ -8,7 +8,7 @@ description: >
 type: framework
 library: db
 framework: vue
-library_version: "0.5.29"
+library_version: '0.5.29'
 requires:
   - db-core
 ---
@@ -43,7 +43,7 @@ export const todosCollection = createCollection(
         body: JSON.stringify(changes),
       })
     },
-  })
+  }),
 )
 ```
 
@@ -63,7 +63,7 @@ const { data, isLoading, isReady, isError } = useLiveQuery((q) =>
   q
     .from({ t: todosCollection })
     .where(({ t }) => eq(t.completed, false))
-    .orderBy(({ t }) => t.createdAt, 'desc')
+    .orderBy(({ t }) => t.createdAt, 'desc'),
 )
 
 const handleToggle = (id: string) => {
@@ -106,11 +106,8 @@ const { data } = useLiveQuery((q) =>
   q
     .from({ t: todosCollection })
     .where(({ t }) =>
-      and(
-        eq(t.status, statusFilter.value),
-        gte(t.priority, minPriority.value)
-      )
-    )
+      and(eq(t.status, statusFilter.value), gte(t.priority, minPriority.value)),
+    ),
 )
 </script>
 ```
