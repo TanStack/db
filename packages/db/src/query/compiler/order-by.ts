@@ -1,4 +1,4 @@
-import { orderByWithFractionalIndex } from '@tanstack/db-ivm'
+import { groupedOrderByWithFractionalIndex, orderByWithFractionalIndex } from '@tanstack/db-ivm'
 import { defaultComparator, makeComparator } from '../../utils/comparison.js'
 import { PropRef, followRef } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
@@ -51,6 +51,7 @@ export function processOrderBy(
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   limit?: number,
   offset?: number,
+  groupKeyFn?: (key: unknown, value: unknown) => unknown,
 ): IStreamBuilder<KeyValue<unknown, [NamespacedRow, string]>> {
   // Pre-compile all order by expressions
   const compiledOrderBy = orderByClause.map((clause) => {
@@ -126,7 +127,9 @@ export function processOrderBy(
   // to loadSubset so the sync layer can optimize the query.
   // We try to use an index on the FIRST orderBy column for lazy loading,
   // even for multi-column orderBy (using wider bounds on first column).
-  if (limit) {
+  // Skip this optimization when using grouped ordering (includes with limit),
+  // because the limit is per-group, not global — the child collection needs all data loaded.
+  if (limit && !groupKeyFn) {
     let index: IndexInterface<string | number> | undefined
     let followRefCollection: Collection | undefined
     let firstColumnValueExtractor: CompiledSingleRowExpression | undefined
@@ -288,6 +291,35 @@ export function processOrderBy(
         }
       }
     }
+  }
+
+  // Use grouped ordering when a groupKeyFn is provided (includes with limit/offset),
+  // otherwise use the standard global ordering operator.
+  if (groupKeyFn) {
+    return pipeline.pipe(
+      groupedOrderByWithFractionalIndex(valueExtractor, {
+        limit,
+        offset,
+        comparator: compare,
+        setSizeCallback,
+        groupKeyFn,
+        setWindowFn: (
+          windowFn: (options: { offset?: number; limit?: number }) => void,
+        ) => {
+          setWindowFn(
+            (options) => {
+              windowFn(options)
+              if (orderByOptimizationInfo) {
+                orderByOptimizationInfo.offset =
+                  options.offset ?? orderByOptimizationInfo.offset
+                orderByOptimizationInfo.limit =
+                  options.limit ?? orderByOptimizationInfo.limit
+              }
+            },
+          )
+        },
+      }),
+    )
   }
 
   // Use fractional indexing and return the tuple [value, index]
