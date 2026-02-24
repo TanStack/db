@@ -56,6 +56,8 @@ export interface IncludesCompilationResult {
   correlationField: PropRef
   /** Child-side correlation ref (e.g., issue.projectId) */
   childCorrelationField: PropRef
+  /** Whether the child query has an ORDER BY clause */
+  hasOrderBy: boolean
   /** Full compilation result for the child query (for nested includes + alias tracking) */
   childCompilationResult: CompilationResult
 }
@@ -321,6 +323,7 @@ export function compileQuery(
         fieldName: subquery.fieldName,
         correlationField: subquery.correlationField,
         childCorrelationField: subquery.childCorrelationField,
+        hasOrderBy: !!(subquery.query.orderBy && subquery.query.orderBy.length > 0),
         childCompilationResult: childResult,
       })
 
