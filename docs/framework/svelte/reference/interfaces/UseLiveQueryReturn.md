@@ -5,7 +5,7 @@ title: UseLiveQueryReturn
 
 # Interface: UseLiveQueryReturn\<T, TData\>
 
-Defined in: useLiveQuery.svelte.ts:33
+Defined in: [useLiveQuery.svelte.ts:33](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L33)
 
 Return type for useLiveQuery hook
 
@@ -28,7 +28,7 @@ collection: Collection<T, string | number, {
 }>;
 ```
 
-Defined in: useLiveQuery.svelte.ts:36
+Defined in: [useLiveQuery.svelte.ts:36](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L36)
 
 The underlying query collection instance
 
@@ -40,7 +40,7 @@ The underlying query collection instance
 data: TData;
 ```
 
-Defined in: useLiveQuery.svelte.ts:35
+Defined in: [useLiveQuery.svelte.ts:35](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L35)
 
 Reactive array of query results in order, or single item when using findOne()
 
@@ -52,7 +52,7 @@ Reactive array of query results in order, or single item when using findOne()
 isCleanedUp: boolean;
 ```
 
-Defined in: useLiveQuery.svelte.ts:42
+Defined in: [useLiveQuery.svelte.ts:42](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L42)
 
 True when query has been cleaned up
 
@@ -64,7 +64,7 @@ True when query has been cleaned up
 isError: boolean;
 ```
 
-Defined in: useLiveQuery.svelte.ts:41
+Defined in: [useLiveQuery.svelte.ts:41](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L41)
 
 True when query encountered an error
 
@@ -76,7 +76,7 @@ True when query encountered an error
 isIdle: boolean;
 ```
 
-Defined in: useLiveQuery.svelte.ts:40
+Defined in: [useLiveQuery.svelte.ts:40](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L40)
 
 True when query hasn't started yet
 
@@ -88,7 +88,7 @@ True when query hasn't started yet
 isLoading: boolean;
 ```
 
-Defined in: useLiveQuery.svelte.ts:38
+Defined in: [useLiveQuery.svelte.ts:38](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L38)
 
 True while initial query data is loading
 
@@ -100,7 +100,7 @@ True while initial query data is loading
 isReady: boolean;
 ```
 
-Defined in: useLiveQuery.svelte.ts:39
+Defined in: [useLiveQuery.svelte.ts:39](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L39)
 
 True when query has received first data and is ready
 
@@ -112,7 +112,7 @@ True when query has received first data and is ready
 state: Map<string | number, T>;
 ```
 
-Defined in: useLiveQuery.svelte.ts:34
+Defined in: [useLiveQuery.svelte.ts:34](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L34)
 
 Reactive Map of query results (key → item)
 
@@ -124,6 +124,6 @@ Reactive Map of query results (key → item)
 status: CollectionStatus;
 ```
 
-Defined in: useLiveQuery.svelte.ts:37
+Defined in: [useLiveQuery.svelte.ts:37](https://github.com/TanStack/db/blob/main/packages/svelte-db/src/useLiveQuery.svelte.ts#L37)
 
 Current query status

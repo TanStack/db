@@ -5,7 +5,7 @@ title: InvalidSyncOperationError
 
 # Class: InvalidSyncOperationError
 
-Defined in: packages/query-db-collection/src/errors.ts:83
+Defined in: [packages/query-db-collection/src/errors.ts:83](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L83)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/query-db-collection/src/errors.ts:83
 new InvalidSyncOperationError(message): InvalidSyncOperationError;
 ```
 
-Defined in: packages/query-db-collection/src/errors.ts:84
+Defined in: [packages/query-db-collection/src/errors.ts:84](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L84)
 
 #### Parameters
 

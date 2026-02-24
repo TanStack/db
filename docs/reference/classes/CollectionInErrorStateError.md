@@ -5,7 +5,7 @@ title: CollectionInErrorStateError
 
 # Class: CollectionInErrorStateError
 
-Defined in: packages/db/src/errors.ts:110
+Defined in: [packages/db/src/errors.ts:110](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L110)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:110
 new CollectionInErrorStateError(operation, collectionId): CollectionInErrorStateError;
 ```
 
-Defined in: packages/db/src/errors.ts:111
+Defined in: [packages/db/src/errors.ts:111](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L111)
 
 #### Parameters
 

@@ -5,7 +5,7 @@ title: MissingInsertHandlerError
 
 # Class: MissingInsertHandlerError
 
-Defined in: packages/db/src/errors.ts:261
+Defined in: [packages/db/src/errors.ts:261](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L261)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:261
 new MissingInsertHandlerError(): MissingInsertHandlerError;
 ```
 
-Defined in: packages/db/src/errors.ts:262
+Defined in: [packages/db/src/errors.ts:262](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L262)
 
 #### Returns
 

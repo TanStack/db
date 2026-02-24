@@ -5,7 +5,7 @@ title: BaseQueryBuilder
 
 # Class: BaseQueryBuilder\<TContext\>
 
-Defined in: packages/db/src/query/builder/index.ts:54
+Defined in: [packages/db/src/query/builder/index.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L54)
 
 ## Type Parameters
 
@@ -21,7 +21,7 @@ Defined in: packages/db/src/query/builder/index.ts:54
 new BaseQueryBuilder<TContext>(query): BaseQueryBuilder<TContext>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:57
+Defined in: [packages/db/src/query/builder/index.ts:57](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L57)
 
 #### Parameters
 
@@ -43,7 +43,7 @@ Defined in: packages/db/src/query/builder/index.ts:57
 get fn(): object;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:729
+Defined in: [packages/db/src/query/builder/index.ts:729](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L729)
 
 Functional variants of the query builder
 These are imperative function that are called for ery row.
@@ -176,7 +176,7 @@ query
 _getQuery(): QueryIR;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:816
+Defined in: [packages/db/src/query/builder/index.ts:816](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L816)
 
 #### Returns
 
@@ -190,7 +190,7 @@ Defined in: packages/db/src/query/builder/index.ts:816
 distinct(): QueryBuilder<TContext>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:668
+Defined in: [packages/db/src/query/builder/index.ts:668](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L668)
 
 Specify that the query should return distinct rows.
 Deduplicates rows based on the selected columns.
@@ -219,7 +219,7 @@ query
 findOne(): QueryBuilder<TContext & SingleResult>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:688
+Defined in: [packages/db/src/query/builder/index.ts:688](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L688)
 
 Specify that the query should return a single result
 
@@ -252,7 +252,7 @@ from<TSource>(source): QueryBuilder<{
 }>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:136
+Defined in: [packages/db/src/query/builder/index.ts:136](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L136)
 
 Specify the source table or subquery for the query
 
@@ -300,7 +300,7 @@ query.from({ activeUsers })
 fullJoin<TSource>(source, onCallback): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, "full">>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:327
+Defined in: [packages/db/src/query/builder/index.ts:327](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L327)
 
 Perform a FULL JOIN with another table or subquery
 
@@ -347,7 +347,7 @@ query
 groupBy(callback): QueryBuilder<TContext>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:590
+Defined in: [packages/db/src/query/builder/index.ts:590](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L590)
 
 Group rows by one or more columns for aggregation
 
@@ -396,7 +396,7 @@ query
 having(callback): QueryBuilder<TContext>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:414
+Defined in: [packages/db/src/query/builder/index.ts:414](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L414)
 
 Filter grouped rows based on aggregate conditions
 
@@ -445,7 +445,7 @@ query
 innerJoin<TSource>(source, onCallback): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, "inner">>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:301
+Defined in: [packages/db/src/query/builder/index.ts:301](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L301)
 
 Perform an INNER JOIN with another table or subquery
 
@@ -495,7 +495,7 @@ join<TSource, TJoinType>(
 type): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, TJoinType>>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:179
+Defined in: [packages/db/src/query/builder/index.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L179)
 
 Join another table or subquery to the current query
 
@@ -563,7 +563,7 @@ query
 leftJoin<TSource>(source, onCallback): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, "left">>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:249
+Defined in: [packages/db/src/query/builder/index.ts:249](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L249)
 
 Perform a LEFT JOIN with another table or subquery
 
@@ -610,7 +610,7 @@ query
 limit(count): QueryBuilder<TContext>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:623
+Defined in: [packages/db/src/query/builder/index.ts:623](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L623)
 
 Limit the number of rows returned by the query
 `orderBy` is required for `limit`
@@ -647,7 +647,7 @@ query
 offset(count): QueryBuilder<TContext>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:647
+Defined in: [packages/db/src/query/builder/index.ts:647](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L647)
 
 Skip a number of rows before returning results
 `orderBy` is required for `offset`
@@ -685,7 +685,7 @@ query
 orderBy(callback, options): QueryBuilder<TContext>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:514
+Defined in: [packages/db/src/query/builder/index.ts:514](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L514)
 
 Sort the query results by one or more columns
 
@@ -735,7 +735,7 @@ query
 rightJoin<TSource>(source, onCallback): QueryBuilder<MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, "right">>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:275
+Defined in: [packages/db/src/query/builder/index.ts:275](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L275)
 
 Perform a RIGHT JOIN with another table or subquery
 
@@ -782,7 +782,7 @@ query
 select<TSelectObject>(callback): QueryBuilder<WithResult<TContext, ResultTypeFromSelect<TSelectObject>>>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:473
+Defined in: [packages/db/src/query/builder/index.ts:473](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L473)
 
 Select specific columns or computed values from the query
 
@@ -843,7 +843,7 @@ query
 where(callback): QueryBuilder<TContext>;
 ```
 
-Defined in: packages/db/src/query/builder/index.ts:366
+Defined in: [packages/db/src/query/builder/index.ts:366](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/index.ts#L366)
 
 Filter rows based on a condition
 

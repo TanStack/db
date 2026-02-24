@@ -9,7 +9,7 @@ title: MergeContextForJoinCallback
 type MergeContextForJoinCallback<TContext, TNewSchema> = object;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:807
+Defined in: [packages/db/src/query/builder/types.ts:807](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L807)
 
 MergeContextForJoinCallback - Special context for join condition callbacks
 
@@ -55,7 +55,7 @@ The simple intersection (&) merges schemas without any optionality transformatio
 baseSchema: TContext["baseSchema"];
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:811
+Defined in: [packages/db/src/query/builder/types.ts:811](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L811)
 
 ***
 
@@ -65,7 +65,7 @@ Defined in: packages/db/src/query/builder/types.ts:811
 fromSourceName: TContext["fromSourceName"];
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:814
+Defined in: [packages/db/src/query/builder/types.ts:814](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L814)
 
 ***
 
@@ -75,7 +75,7 @@ Defined in: packages/db/src/query/builder/types.ts:814
 hasJoins: true;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:815
+Defined in: [packages/db/src/query/builder/types.ts:815](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L815)
 
 ***
 
@@ -85,7 +85,7 @@ Defined in: packages/db/src/query/builder/types.ts:815
 joinTypes: TContext["joinTypes"] extends Record<string, any> ? TContext["joinTypes"] : object;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:816
+Defined in: [packages/db/src/query/builder/types.ts:816](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L816)
 
 ***
 
@@ -95,7 +95,7 @@ Defined in: packages/db/src/query/builder/types.ts:816
 result: TContext["result"];
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:819
+Defined in: [packages/db/src/query/builder/types.ts:819](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L819)
 
 ***
 
@@ -105,4 +105,4 @@ Defined in: packages/db/src/query/builder/types.ts:819
 schema: TContext["schema"] & TNewSchema;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:813
+Defined in: [packages/db/src/query/builder/types.ts:813](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L813)

@@ -11,7 +11,7 @@ title: and
 function and(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: packages/db/src/query/builder/functions.ts:181
+Defined in: [packages/db/src/query/builder/functions.ts:181](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L181)
 
 ### Parameters
 
@@ -36,7 +36,7 @@ function and(
 rest): BasicExpression<boolean>;
 ```
 
-Defined in: packages/db/src/query/builder/functions.ts:185
+Defined in: [packages/db/src/query/builder/functions.ts:185](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L185)
 
 ### Parameters
 

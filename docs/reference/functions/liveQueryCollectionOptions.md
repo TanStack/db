@@ -10,7 +10,7 @@ function liveQueryCollectionOptions<TContext, TResult>(config): CollectionConfig
 }> & object;
 ```
 
-Defined in: packages/db/src/query/live-query-collection.ts:62
+Defined in: [packages/db/src/query/live-query-collection.ts:62](https://github.com/TanStack/db/blob/main/packages/db/src/query/live-query-collection.ts#L62)
 
 Creates live query collection options for use with createCollection
 

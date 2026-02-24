@@ -9,7 +9,7 @@ title: createPacedMutations
 function createPacedMutations<TVariables, T>(config): (variables) => Transaction<T>;
 ```
 
-Defined in: packages/db/src/paced-mutations.ts:87
+Defined in: [packages/db/src/paced-mutations.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/paced-mutations.ts#L87)
 
 Creates a paced mutations manager with pluggable timing strategies.
 

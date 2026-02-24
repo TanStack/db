@@ -9,7 +9,7 @@ title: ConfigWithArbitraryCollectionTypes
 type ConfigWithArbitraryCollectionTypes<TTable, TSchema> = SerializerConfig<StandardSchemaV1.InferOutput<TSchema>, ExtractedTable<TTable>> & object;
 ```
 
-Defined in: definitions.ts:125
+Defined in: [definitions.ts:125](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L125)
 
 Config where TInput and TOutput have arbitrarily typed values.
 The keys of the types need to equal the SQLite types.

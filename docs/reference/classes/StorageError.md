@@ -5,7 +5,7 @@ title: StorageError
 
 # Class: StorageError
 
-Defined in: packages/db/src/errors.ts:609
+Defined in: [packages/db/src/errors.ts:609](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L609)
 
 ## Extends
 
@@ -24,7 +24,7 @@ Defined in: packages/db/src/errors.ts:609
 new StorageError(message): StorageError;
 ```
 
-Defined in: packages/db/src/errors.ts:610
+Defined in: [packages/db/src/errors.ts:610](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L610)
 
 #### Parameters
 

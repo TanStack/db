@@ -5,7 +5,7 @@ title: PropRef
 
 # Class: PropRef\<T\>
 
-Defined in: packages/db/src/query/ir.ts:92
+Defined in: [packages/db/src/query/ir.ts:92](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L92)
 
 ## Extends
 
@@ -25,7 +25,7 @@ Defined in: packages/db/src/query/ir.ts:92
 new PropRef<T>(path): PropRef<T>;
 ```
 
-Defined in: packages/db/src/query/ir.ts:94
+Defined in: [packages/db/src/query/ir.ts:94](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L94)
 
 #### Parameters
 
@@ -51,7 +51,7 @@ BaseExpression<T>.constructor
 readonly __returnType: T;
 ```
 
-Defined in: packages/db/src/query/ir.ts:69
+Defined in: [packages/db/src/query/ir.ts:69](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L69)
 
 **`Internal`**
 
@@ -71,7 +71,7 @@ BaseExpression.__returnType
 path: string[];
 ```
 
-Defined in: packages/db/src/query/ir.ts:95
+Defined in: [packages/db/src/query/ir.ts:95](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L95)
 
 ***
 
@@ -81,7 +81,7 @@ Defined in: packages/db/src/query/ir.ts:95
 type: "ref";
 ```
 
-Defined in: packages/db/src/query/ir.ts:93
+Defined in: [packages/db/src/query/ir.ts:93](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L93)
 
 #### Overrides
 

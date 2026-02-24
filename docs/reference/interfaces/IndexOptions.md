@@ -5,7 +5,7 @@ title: IndexOptions
 
 # Interface: IndexOptions\<TResolver\>
 
-Defined in: packages/db/src/indexes/index-options.ts:6
+Defined in: [packages/db/src/indexes/index-options.ts:6](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L6)
 
 Enhanced index options that support both sync and async resolvers
 
@@ -23,7 +23,7 @@ Enhanced index options that support both sync and async resolvers
 optional indexType: TResolver;
 ```
 
-Defined in: packages/db/src/indexes/index-options.ts:8
+Defined in: [packages/db/src/indexes/index-options.ts:8](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L8)
 
 ***
 
@@ -33,7 +33,7 @@ Defined in: packages/db/src/indexes/index-options.ts:8
 optional name: string;
 ```
 
-Defined in: packages/db/src/indexes/index-options.ts:7
+Defined in: [packages/db/src/indexes/index-options.ts:7](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L7)
 
 ***
 
@@ -43,4 +43,4 @@ Defined in: packages/db/src/indexes/index-options.ts:7
 optional options: TResolver extends IndexConstructor<any> ? TResolver<TResolver> extends (id, expr, name?, options?) => any ? O : never : TResolver extends () => Promise<TCtor> ? TCtor extends (id, expr, name?, options?) => any ? O : never : never;
 ```
 
-Defined in: packages/db/src/indexes/index-options.ts:9
+Defined in: [packages/db/src/indexes/index-options.ts:9](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/index-options.ts#L9)

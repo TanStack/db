@@ -5,7 +5,7 @@ title: SchemaMustBeSynchronousError
 
 # Class: SchemaMustBeSynchronousError
 
-Defined in: packages/db/src/errors.ts:96
+Defined in: [packages/db/src/errors.ts:96](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L96)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:96
 new SchemaMustBeSynchronousError(): SchemaMustBeSynchronousError;
 ```
 
-Defined in: packages/db/src/errors.ts:97
+Defined in: [packages/db/src/errors.ts:97](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L97)
 
 #### Returns
 

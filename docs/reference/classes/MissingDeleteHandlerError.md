@@ -5,7 +5,7 @@ title: MissingDeleteHandlerError
 
 # Class: MissingDeleteHandlerError
 
-Defined in: packages/db/src/errors.ts:277
+Defined in: [packages/db/src/errors.ts:277](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L277)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:277
 new MissingDeleteHandlerError(): MissingDeleteHandlerError;
 ```
 
-Defined in: packages/db/src/errors.ts:278
+Defined in: [packages/db/src/errors.ts:278](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L278)
 
 #### Returns
 

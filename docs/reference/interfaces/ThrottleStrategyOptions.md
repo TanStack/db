@@ -5,7 +5,7 @@ title: ThrottleStrategyOptions
 
 # Interface: ThrottleStrategyOptions
 
-Defined in: packages/db/src/strategies/types.ts:74
+Defined in: [packages/db/src/strategies/types.ts:74](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L74)
 
 Options for throttle strategy
 Ensures executions are evenly spaced over time
@@ -18,7 +18,7 @@ Ensures executions are evenly spaced over time
 optional leading: boolean;
 ```
 
-Defined in: packages/db/src/strategies/types.ts:78
+Defined in: [packages/db/src/strategies/types.ts:78](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L78)
 
 Execute immediately on the first call
 
@@ -30,7 +30,7 @@ Execute immediately on the first call
 optional trailing: boolean;
 ```
 
-Defined in: packages/db/src/strategies/types.ts:80
+Defined in: [packages/db/src/strategies/types.ts:80](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L80)
 
 Execute on the last call after wait period
 
@@ -42,6 +42,6 @@ Execute on the last call after wait period
 wait: number;
 ```
 
-Defined in: packages/db/src/strategies/types.ts:76
+Defined in: [packages/db/src/strategies/types.ts:76](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L76)
 
 Minimum wait time between executions (milliseconds)

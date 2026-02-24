@@ -5,7 +5,7 @@ title: NegativeActiveSubscribersError
 
 # Class: NegativeActiveSubscribersError
 
-Defined in: packages/db/src/errors.ts:132
+Defined in: [packages/db/src/errors.ts:132](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L132)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:132
 new NegativeActiveSubscribersError(): NegativeActiveSubscribersError;
 ```
 
-Defined in: packages/db/src/errors.ts:133
+Defined in: [packages/db/src/errors.ts:133](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L133)
 
 #### Returns
 

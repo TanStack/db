@@ -5,7 +5,7 @@ title: MissingMutationFunctionError
 
 # Class: MissingMutationFunctionError
 
-Defined in: packages/db/src/errors.ts:293
+Defined in: [packages/db/src/errors.ts:293](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L293)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:293
 new MissingMutationFunctionError(): MissingMutationFunctionError;
 ```
 
-Defined in: packages/db/src/errors.ts:294
+Defined in: [packages/db/src/errors.ts:294](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L294)
 
 #### Returns
 

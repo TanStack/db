@@ -9,6 +9,6 @@ title: OPEN_RXDB_SUBSCRIPTIONS
 const OPEN_RXDB_SUBSCRIPTIONS: WeakMap<RxCollection, Set<Subscription>>;
 ```
 
-Defined in: rxdb.ts:31
+Defined in: [rxdb.ts:31](https://github.com/TanStack/db/blob/main/packages/rxdb-db-collection/src/rxdb.ts#L31)
 
 Used in tests to ensure proper cleanup

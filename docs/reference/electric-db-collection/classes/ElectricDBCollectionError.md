@@ -5,7 +5,7 @@ title: ElectricDBCollectionError
 
 # Class: ElectricDBCollectionError
 
-Defined in: packages/electric-db-collection/src/errors.ts:4
+Defined in: [packages/electric-db-collection/src/errors.ts:4](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L4)
 
 ## Extends
 
@@ -26,7 +26,7 @@ Defined in: packages/electric-db-collection/src/errors.ts:4
 new ElectricDBCollectionError(message, collectionId?): ElectricDBCollectionError;
 ```
 
-Defined in: packages/electric-db-collection/src/errors.ts:5
+Defined in: [packages/electric-db-collection/src/errors.ts:5](https://github.com/TanStack/db/blob/main/packages/electric-db-collection/src/errors.ts#L5)
 
 #### Parameters
 

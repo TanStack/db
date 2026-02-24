@@ -5,7 +5,7 @@ title: CollectionRequiresSyncConfigError
 
 # Class: CollectionRequiresSyncConfigError
 
-Defined in: packages/db/src/errors.ts:84
+Defined in: [packages/db/src/errors.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L84)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:84
 new CollectionRequiresSyncConfigError(): CollectionRequiresSyncConfigError;
 ```
 
-Defined in: packages/db/src/errors.ts:85
+Defined in: [packages/db/src/errors.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L85)
 
 #### Returns
 
