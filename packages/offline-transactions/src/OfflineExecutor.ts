@@ -263,6 +263,7 @@ export class OfflineExecutor {
           this.outbox,
           this.config,
           this,
+          this.onlineDetector,
         )
         this.leaderElection = this.createLeaderElection()
 

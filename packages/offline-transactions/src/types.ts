@@ -132,6 +132,7 @@ export interface LeaderElection {
 export interface OnlineDetector {
   subscribe: (callback: () => void) => () => void
   notifyOnline: () => void
+  isOnline: () => boolean
   dispose: () => void
 }
 
