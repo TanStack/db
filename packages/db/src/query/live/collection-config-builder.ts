@@ -1,5 +1,6 @@
 import { D2, output } from '@tanstack/db-ivm'
 import { compileQuery } from '../compiler/index.js'
+import { createCollection } from '../../collection/index.js'
 import {
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
@@ -16,7 +17,10 @@ import {
   extractCollectionsFromQuery,
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
-import type { WindowOptions } from '../compiler/index.js'
+import type {
+  IncludesCompilationResult,
+  WindowOptions,
+} from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
@@ -31,7 +35,7 @@ import type {
   UtilsRecord,
 } from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
-import type { BasicExpression, QueryIR } from '../ir.js'
+import type { BasicExpression, PropRef, QueryIR } from '../ir.js'
 import type { LazyCollectionCallbacks } from '../compiler/joins.js'
 import type {
   Changes,
@@ -140,6 +144,7 @@ export class CollectionConfigBuilder<
   public sourceWhereClausesCache:
     | Map<string, BasicExpression<boolean>>
     | undefined
+  private includesCache: Array<IncludesCompilationResult> | undefined
 
   // Map of source alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
@@ -632,6 +637,7 @@ export class CollectionConfigBuilder<
       this.inputsCache = undefined
       this.pipelineCache = undefined
       this.sourceWhereClausesCache = undefined
+      this.includesCache = undefined
 
       // Reset lazy source alias state
       this.lazySources.clear()
@@ -680,6 +686,7 @@ export class CollectionConfigBuilder<
     this.pipelineCache = compilation.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.compiledAliasToCollectionId = compilation.aliasToCollectionId
+    this.includesCache = compilation.includes
 
     // Defensive check: verify all compiled aliases have corresponding inputs
     // This should never happen since all aliases come from user declarations,
@@ -727,10 +734,18 @@ export class CollectionConfigBuilder<
       }),
     )
 
+    // Set up includes output routing and child collection lifecycle
+    const includesState = this.setupIncludesOutput(this.includesCache, syncState)
+
     // Flush pending changes and reset the accumulator.
     // Called at the end of each graph run to commit all accumulated changes.
     syncState.flushPendingChanges = () => {
-      if (pendingChanges.size === 0) {
+      const hasParentChanges = pendingChanges.size > 0
+      const hasChildChanges = includesState.some(
+        (s) => s.pendingChildChanges.size > 0,
+      )
+
+      if (!hasParentChanges && !hasChildChanges) {
         return
       }
 
@@ -762,10 +777,21 @@ export class CollectionConfigBuilder<
         changesToApply = merged
       }
 
-      begin()
-      changesToApply.forEach(this.applyChanges.bind(this, config))
-      commit()
+      // 1. Flush parent changes
+      if (hasParentChanges) {
+        begin()
+        changesToApply.forEach(this.applyChanges.bind(this, config))
+        commit()
+      }
       pendingChanges = new Map()
+
+      // 2. Process includes: create/dispose child Collections, route child changes
+      flushIncludesState(
+        includesState,
+        config.collection,
+        this.id,
+        hasParentChanges ? changesToApply : null,
+      )
     }
 
     graph.finalize()
@@ -776,6 +802,79 @@ export class CollectionConfigBuilder<
     syncState.pipeline = pipeline
 
     return syncState as FullSyncState
+  }
+
+  /**
+   * Sets up output callbacks for includes child pipelines.
+   * Each includes entry gets its own output callback that accumulates child changes,
+   * and a child registry that maps correlation key → child Collection.
+   */
+  private setupIncludesOutput(
+    includesEntries: Array<IncludesCompilationResult> | undefined,
+    syncState: SyncState,
+  ): Array<IncludesOutputState> {
+    if (!includesEntries || includesEntries.length === 0) {
+      return []
+    }
+
+    return includesEntries.map((entry) => {
+      const state: IncludesOutputState = {
+        fieldName: entry.fieldName,
+        correlationField: entry.correlationField,
+        childCorrelationField: entry.childCorrelationField,
+        childRegistry: new Map(),
+        pendingChildChanges: new Map(),
+      }
+
+      // Attach output callback on the child pipeline
+      entry.pipeline.pipe(
+        output((data) => {
+          const messages = data.getInner()
+          syncState.messagesCount += messages.length
+
+          for (const [
+            [childKey, tupleData],
+            multiplicity,
+          ] of messages) {
+            const [childResult, _orderByIndex, correlationKey] =
+              tupleData as unknown as [any, string | undefined, unknown]
+
+            // Accumulate by [correlationKey, childKey]
+            let byChild = state.pendingChildChanges.get(correlationKey)
+            if (!byChild) {
+              byChild = new Map()
+              state.pendingChildChanges.set(correlationKey, byChild)
+            }
+
+            const existing = byChild.get(childKey) || {
+              deletes: 0,
+              inserts: 0,
+              value: childResult,
+              orderByIndex: _orderByIndex,
+            }
+
+            if (multiplicity < 0) {
+              existing.deletes += Math.abs(multiplicity)
+            } else if (multiplicity > 0) {
+              existing.inserts += multiplicity
+              existing.value = childResult
+            }
+
+            byChild.set(childKey, existing)
+          }
+        }),
+      )
+
+      // Recursively set up nested includes (e.g., comments inside issues)
+      if (entry.childCompilationResult.includes) {
+        state.nestedIncludesState = this.setupIncludesOutput(
+          entry.childCompilationResult.includes,
+          syncState,
+        )
+      }
+
+      return state
+    })
   }
 
   private applyChanges(
@@ -1010,6 +1109,217 @@ function createOrderByComparator<T extends object>(
 
     // Fallback to no ordering if indices are missing
     return 0
+  }
+}
+
+/**
+ * State tracked per includes entry for output routing and child lifecycle
+ */
+type IncludesOutputState = {
+  fieldName: string
+  correlationField: PropRef
+  childCorrelationField: PropRef
+  /** Maps correlation key value → child Collection entry */
+  childRegistry: Map<unknown, ChildCollectionEntry>
+  /** Pending child changes: correlationKey → Map<childKey, Changes> */
+  pendingChildChanges: Map<unknown, Map<unknown, Changes<any>>>
+  /** Nested includes state (for projects → issues → comments) */
+  nestedIncludesState?: Array<IncludesOutputState>
+}
+
+type ChildCollectionEntry = {
+  collection: Collection<any, any, any>
+  syncMethods: SyncMethods<any> | null
+  resultKeys: WeakMap<object, unknown>
+}
+
+/**
+ * Creates a child Collection entry for includes subqueries.
+ * The child Collection is a full-fledged Collection instance that starts syncing immediately.
+ */
+function createChildCollectionEntry(
+  parentId: string,
+  fieldName: string,
+  correlationKey: unknown,
+): ChildCollectionEntry {
+  const resultKeys = new WeakMap<object, unknown>()
+  let syncMethods: SyncMethods<any> | null = null
+
+  const collection = createCollection<any, string | number>({
+    id: `${parentId}-${fieldName}-${String(correlationKey)}`,
+    getKey: (item: any) => resultKeys.get(item) as string | number,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (methods) => {
+        syncMethods = methods
+        return () => {
+          syncMethods = null
+        }
+      },
+    },
+    startSync: true,
+  })
+
+  return { collection, get syncMethods() { return syncMethods }, resultKeys }
+}
+
+/**
+ * Recursively flushes includes state, processing child changes and creating
+ * child Collections. Handles nested includes (e.g., comments inside issues)
+ * by recursing into nested state after flushing each level.
+ */
+function flushIncludesState(
+  includesState: Array<IncludesOutputState>,
+  parentCollection: Collection<any, any, any>,
+  parentId: string,
+  parentChanges: Map<unknown, Changes<any>> | null,
+): void {
+  for (const state of includesState) {
+    // For parent INSERTs: ensure a child Collection exists for every parent,
+    // even those with no children (produces an empty child Collection).
+    if (parentChanges) {
+      const fieldPath = state.correlationField.path.slice(1) // remove alias prefix
+      for (const [_key, changes] of parentChanges) {
+        if (changes.inserts > 0) {
+          const parentResult = changes.value
+          // Extract the correlation key value from the parent result
+          let correlationKey: unknown = parentResult
+          for (const segment of fieldPath) {
+            if (correlationKey == null) break
+            correlationKey = (correlationKey as any)[segment]
+          }
+
+          if (correlationKey != null) {
+            // Ensure child Collection exists for this correlation key
+            if (!state.childRegistry.has(correlationKey)) {
+              const entry = createChildCollectionEntry(
+                parentId,
+                state.fieldName,
+                correlationKey,
+              )
+              state.childRegistry.set(correlationKey, entry)
+            }
+            // Attach child Collection to the parent result
+            parentResult[state.fieldName] =
+              state.childRegistry.get(correlationKey)!.collection
+          }
+        }
+      }
+    }
+
+    // Flush child changes: route to correct child Collections
+    if (state.pendingChildChanges.size > 0) {
+      for (const [
+        correlationKey,
+        childChanges,
+      ] of state.pendingChildChanges) {
+        // Ensure child Collection exists for this correlation key
+        let entry = state.childRegistry.get(correlationKey)
+        if (!entry) {
+          entry = createChildCollectionEntry(
+            parentId,
+            state.fieldName,
+            correlationKey,
+          )
+          state.childRegistry.set(correlationKey, entry)
+        }
+
+        // Attach the child Collection to ANY parent that has this correlation key
+        // by scanning the parent result collection
+        attachChildCollectionToParent(
+          parentCollection,
+          state.fieldName,
+          correlationKey,
+          state.correlationField,
+          entry.collection,
+        )
+
+        // Apply child changes to the child Collection
+        if (entry.syncMethods) {
+          entry.syncMethods.begin()
+          for (const [childKey, change] of childChanges) {
+            entry.resultKeys.set(change.value, childKey)
+            if (change.inserts > 0 && change.deletes === 0) {
+              entry.syncMethods.write({ value: change.value, type: `insert` })
+            } else if (
+              change.inserts > change.deletes ||
+              (change.inserts === change.deletes &&
+                entry.syncMethods.collection.has(
+                  entry.syncMethods.collection.getKeyFromItem(change.value),
+                ))
+            ) {
+              entry.syncMethods.write({ value: change.value, type: `update` })
+            } else if (change.deletes > 0) {
+              entry.syncMethods.write({ value: change.value, type: `delete` })
+            }
+          }
+          entry.syncMethods.commit()
+        }
+
+        // Recursively process nested includes (e.g., comments inside issues)
+        if (state.nestedIncludesState) {
+          flushIncludesState(
+            state.nestedIncludesState,
+            entry.collection,
+            entry.collection.id,
+            childChanges,
+          )
+        }
+      }
+      state.pendingChildChanges.clear()
+    }
+
+    // For parent DELETEs: dispose child Collections so re-added parents
+    // get a fresh empty child Collection instead of reusing stale data.
+    if (parentChanges) {
+      const fieldPath = state.correlationField.path.slice(1)
+      for (const [_key, changes] of parentChanges) {
+        if (changes.deletes > 0 && changes.inserts === 0) {
+          let correlationKey: unknown = changes.value
+          for (const segment of fieldPath) {
+            if (correlationKey == null) break
+            correlationKey = (correlationKey as any)[segment]
+          }
+          if (correlationKey != null) {
+            state.childRegistry.delete(correlationKey)
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Attaches a child Collection to parent rows that match a given correlation key.
+ * Scans the parent collection to find matching parents and sets the field.
+ */
+function attachChildCollectionToParent(
+  parentCollection: Collection<any, any, any>,
+  fieldName: string,
+  correlationKey: unknown,
+  correlationField: PropRef,
+  childCollection: Collection<any, any, any>,
+): void {
+  // Walk the parent collection's items to find those matching this correlation key
+  // The correlation field path has the alias prefix (e.g., ['project', 'id']),
+  // but at this point the parent result is the selected object, not namespaced.
+  // We need to find parents by their correlation value.
+  // Since the parent correlation field is e.g. project.id, and the selected result
+  // might have 'id' as a field, we use the correlation field path (minus alias).
+  const fieldPath = correlationField.path.slice(1) // remove alias prefix
+
+  for (const [_key, item] of parentCollection) {
+    // Navigate to the correlation value on the parent result
+    let value: any = item
+    for (const segment of fieldPath) {
+      if (value == null) break
+      value = value[segment]
+    }
+
+    if (value === correlationKey) {
+      // Set the child Collection on this parent row
+      ;(item)[fieldName] = childCollection
+    }
   }
 }
 

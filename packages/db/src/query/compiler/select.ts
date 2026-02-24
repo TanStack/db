@@ -221,6 +221,15 @@ function addFromObject(
     }
 
     const expression = value as any
+    if (expression && expression.type === `includesSubquery`) {
+      // Placeholder — field will be set to a child Collection by the output layer
+      ops.push({
+        kind: `field`,
+        alias: [...prefixPath, key].join(`.`),
+        compiled: () => null,
+      })
+      continue
+    }
     if (isNestedSelectObject(expression)) {
       // Nested selection object
       addFromObject([...prefixPath, key], expression, ops)
