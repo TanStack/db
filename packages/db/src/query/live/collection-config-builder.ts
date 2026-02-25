@@ -1779,7 +1779,7 @@ function flushIncludesState(
           entry.collection,
           entry.collection.id,
           childChanges,
-          null,
+          entry.syncMethods,
         )
       }
     }
@@ -1793,20 +1793,22 @@ function flushIncludesState(
           entry.collection,
           entry.collection.id,
           null,
-          null,
+          entry.syncMethods,
         )
       }
     }
 
     // For toArray entries: re-emit affected parents with updated array snapshots
+    const toArrayReEmitKeys = state.materializeAsArray
+      ? new Set([...(affectedCorrelationKeys || []), ...dirtyFromBuffers])
+      : null
     if (
-      state.materializeAsArray &&
       parentSyncMethods &&
-      affectedCorrelationKeys &&
-      affectedCorrelationKeys.size > 0
+      toArrayReEmitKeys &&
+      toArrayReEmitKeys.size > 0
     ) {
       parentSyncMethods.begin()
-      for (const correlationKey of affectedCorrelationKeys) {
+      for (const correlationKey of toArrayReEmitKeys) {
         const parentKeys = state.correlationToParentKeys.get(correlationKey)
         if (!parentKeys) continue
         const entry = state.childRegistry.get(correlationKey)
