@@ -492,7 +492,7 @@ export function createPredicatesTestSuite(
             .where(({ post }) =>
               or(
                 like(lower(post.title), `%${searchLower}%`),
-                like(lower(post.content ?? ``), `%${searchLower}%`),
+                like(lower(post.content!), `%${searchLower}%`),
               ),
             ),
         )
