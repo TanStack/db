@@ -1,9 +1,4 @@
-import {
-  distinct,
-  filter,
-  join as joinOperator,
-  map,
-} from '@tanstack/db-ivm'
+import { distinct, filter, join as joinOperator, map } from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
 import {
   CollectionInputNotFoundError,
@@ -203,9 +198,7 @@ export function compileQuery(
     )
 
     // Inner join: only children whose correlation key exists in parent keys pass through
-    const joined = childRekeyed.pipe(
-      joinOperator(parentKeyStream, `inner`),
-    )
+    const joined = childRekeyed.pipe(joinOperator(parentKeyStream, `inner`))
 
     // Extract: [correlationValue, [[childKey, childRow], null]] → [childKey, childRow]
     // Tag the row with __correlationKey for output routing
@@ -323,7 +316,9 @@ export function compileQuery(
         fieldName: subquery.fieldName,
         correlationField: subquery.correlationField,
         childCorrelationField: subquery.childCorrelationField,
-        hasOrderBy: !!(subquery.query.orderBy && subquery.query.orderBy.length > 0),
+        hasOrderBy: !!(
+          subquery.query.orderBy && subquery.query.orderBy.length > 0
+        ),
         childCompilationResult: childResult,
       })
 
@@ -438,7 +433,8 @@ export function compileQuery(
     // When in includes mode with limit/offset, use grouped ordering so that
     // the limit is applied per parent (per correlation key), not globally.
     const includesGroupKeyFn =
-      parentKeyStream && (query.limit !== undefined || query.offset !== undefined)
+      parentKeyStream &&
+      (query.limit !== undefined || query.offset !== undefined)
         ? (_key: unknown, row: unknown) =>
             (row as any)?.[mainSource]?.__correlationKey
         : undefined
@@ -479,8 +475,7 @@ export function compileQuery(
       sourceWhereClauses,
       aliasToCollectionId,
       aliasRemapping,
-      includes:
-        includesResults.length > 0 ? includesResults : undefined,
+      includes: includesResults.length > 0 ? includesResults : undefined,
     }
     cache.set(rawQuery, compilationResult)
 
@@ -516,8 +511,7 @@ export function compileQuery(
     sourceWhereClauses,
     aliasToCollectionId,
     aliasRemapping,
-    includes:
-      includesResults.length > 0 ? includesResults : undefined,
+    includes: includesResults.length > 0 ? includesResults : undefined,
   }
   cache.set(rawQuery, compilationResult)
 

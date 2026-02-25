@@ -731,7 +731,10 @@ export class CollectionConfigBuilder<
     )
 
     // Set up includes output routing and child collection lifecycle
-    const includesState = this.setupIncludesOutput(this.includesCache, syncState)
+    const includesState = this.setupIncludesOutput(
+      this.includesCache,
+      syncState,
+    )
 
     // Flush pending changes and reset the accumulator.
     // Called at the end of each graph run to commit all accumulated changes.
@@ -829,10 +832,7 @@ export class CollectionConfigBuilder<
           const messages = data.getInner()
           syncState.messagesCount += messages.length
 
-          for (const [
-            [childKey, tupleData],
-            multiplicity,
-          ] of messages) {
+          for (const [[childKey, tupleData], multiplicity] of messages) {
             const [childResult, _orderByIndex, correlationKey] =
               tupleData as unknown as [any, string | undefined, unknown]
 
@@ -1346,7 +1346,14 @@ function createChildCollectionEntry(
     startSync: true,
   })
 
-  return { collection, get syncMethods() { return syncMethods }, resultKeys, orderByIndices }
+  return {
+    collection,
+    get syncMethods() {
+      return syncMethods
+    },
+    resultKeys,
+    orderByIndices,
+  }
 }
 
 /**
@@ -1396,10 +1403,7 @@ function flushIncludesState(
 
     // Flush child changes: route to correct child Collections
     if (state.pendingChildChanges.size > 0) {
-      for (const [
-        correlationKey,
-        childChanges,
-      ] of state.pendingChildChanges) {
+      for (const [correlationKey, childChanges] of state.pendingChildChanges) {
         // Ensure child Collection exists for this correlation key
         let entry = state.childRegistry.get(correlationKey)
         if (!entry) {
@@ -1509,7 +1513,7 @@ function attachChildCollectionToParent(
 
     if (value === correlationKey) {
       // Set the child Collection on this parent row
-      ;(item)[fieldName] = childCollection
+      item[fieldName] = childCollection
     }
   }
 }
