@@ -5,35 +5,39 @@ Package: `@tanstack/powersync-db-collection`
 ## Setup
 
 ```typescript
-import { createCollection } from '@tanstack/db'
-import { powerSyncCollectionOptions } from '@tanstack/powersync-db-collection'
-import { Schema, Table, column } from '@powersync/common'
+import { Schema, Table, column } from '@powersync/web'
 import { PowerSyncDatabase } from '@powersync/web'
+import { createCollection } from '@tanstack/react-db'
+import { powerSyncCollectionOptions } from '@tanstack/powersync-db-collection'
 
 const APP_SCHEMA = new Schema({
-  todos: new Table({
-    text: column.text,
-    completed: column.integer, // booleans stored as 0/1
+  documents: new Table({
+    name: column.text,
+    author: column.text,
+    created_at: column.text,
+    archived: column.integer,
   }),
 })
 
 const db = new PowerSyncDatabase({
-  database: { dbFilename: 'my-app.sqlite' },
+  database: { dbFilename: 'app.sqlite' },
   schema: APP_SCHEMA,
 })
 
-const todosCollection = createCollection(
+const documentsCollection = createCollection(
   powerSyncCollectionOptions({
     database: db,
-    table: APP_SCHEMA.props.todos,
+    table: APP_SCHEMA.props.documents,
   }),
 )
 ```
 
-PowerSync manages mutations automatically — you do NOT provide `onInsert`,
-`onUpdate`, or `onDelete` handlers. The adapter writes mutations directly
-to the local SQLite database via a transactor, and PowerSync's sync engine
-handles replication to the server.
+PowerSync manages mutations automatically — you do NOT provide
+`onInsert`, `onUpdate`, or `onDelete` handlers. The adapter writes
+mutations directly to the local SQLite database via a transactor, and
+PowerSync's sync engine handles replication to the server.
+
+Source: docs/collections/powersync-collection.md — Basic Usage
 
 ## Configuration
 
@@ -45,128 +49,209 @@ powerSyncCollectionOptions({
 
   // Optional
   id: string,
-  schema: StandardSchemaV1, // additional validation
-  syncBatchSize: number, // default 1000
+  schema: StandardSchemaV1,           // additional validation
+  deserializationSchema: StandardSchemaV1, // for custom input types
+  onDeserializationError: (error) => void, // required with schema
+  serializer: { [key]: (value) => sqliteValue },
+  syncBatchSize: number,              // default 1000
 })
 ```
 
-## Three Overloads
+Source: docs/collections/powersync-collection.md — Configuration Options
 
-The function has three overloads depending on how you handle types:
+## SQLite Type Mapping
 
-### 1. No schema — SQLite types only
+| PowerSync Column Type | TypeScript Type   |
+|-----------------------|-------------------|
+| `column.text`         | `string \| null`  |
+| `column.integer`      | `number \| null`  |
+| `column.real`         | `number \| null`  |
+
+All PowerSync column types are nullable by default.
+
+Source: docs/collections/powersync-collection.md — Type mapping table
+
+## Option 1: Table Type Inference (no schema)
+
+Types inferred from the PowerSync schema table definition:
 
 ```typescript
-const collection = createCollection(
+const documentsCollection = createCollection(
   powerSyncCollectionOptions({
     database: db,
-    table: APP_SCHEMA.props.todos,
+    table: APP_SCHEMA.props.documents,
   }),
 )
-// Types: { id: string, text: string | null, completed: number | null }
+// Input/Output: { id: string, name: string | null, author: string | null, ... }
 ```
 
-### 2. Schema with SQLite-compatible input
+Source: docs/collections/powersync-collection.md — Option 1
 
-Use when schema input types match SQLite column types but you want
-richer output types (e.g. Date from string):
+## Option 2: SQLite Types with Schema Validation
+
+Schema adds constraints while keeping SQLite-compatible types:
 
 ```typescript
 import { z } from 'zod'
 
 const schema = z.object({
   id: z.string(),
-  name: z.string().min(3).nullable(),
-  created_at: z.string().transform((val) => new Date(val)),
+  name: z.string().min(3, { message: 'Should be at least 3 characters' }),
+  author: z.string(),
+  created_at: z.string(),
+  archived: z.number(),
 })
 
-const collection = createCollection(
+const documentsCollection = createCollection(
   powerSyncCollectionOptions({
     database: db,
     table: APP_SCHEMA.props.documents,
     schema,
-    serializer: {
-      created_at: (date) => date.toISOString(),
+    onDeserializationError: (error) => {
+      // Handle fatal deserialization error
     },
   }),
 )
 ```
 
-### 3. Schema with arbitrary input types
+Source: docs/collections/powersync-collection.md — Option 2
 
-Use when input types don't match SQLite types (e.g. accepting booleans
-instead of integers). Requires a `deserializationSchema`:
+## Option 3: Transform SQLite to Rich Types
+
+Transform SQLite types to richer JavaScript types (Date, boolean):
 
 ```typescript
 const schema = z.object({
   id: z.string(),
-  isActive: z.boolean(),
+  name: z.string().nullable(),
+  created_at: z
+    .string()
+    .nullable()
+    .transform((val) => (val ? new Date(val) : null)),
+  archived: z
+    .number()
+    .nullable()
+    .transform((val) => (val != null ? val > 0 : null)),
+})
+
+const documentsCollection = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: APP_SCHEMA.props.documents,
+    schema,
+    onDeserializationError: (error) => {
+      // Handle fatal deserialization error
+    },
+    serializer: {
+      created_at: (value) => (value ? value.toISOString() : null),
+    },
+  }),
+)
+// Input: { name: string | null, created_at: string | null, ... }
+// Output: { name: string | null, created_at: Date | null, archived: boolean | null, ... }
+```
+
+Source: docs/collections/powersync-collection.md — Option 3
+
+## Option 4: Custom Input/Output with Deserialization
+
+Decouple input/output types completely from SQLite types. Requires a
+`deserializationSchema` to convert incoming SQLite data:
+
+```typescript
+const schema = z.object({
+  id: z.string(),
+  name: z.string(),
+  created_at: z.date(),
+  archived: z.boolean(),
 })
 
 const deserializationSchema = z.object({
   id: z.string(),
-  isActive: z
-    .number()
-    .nullable()
-    .transform((val) => (val == null ? true : val > 0)),
+  name: z.string(),
+  created_at: z.string().transform((val) => new Date(val)),
+  archived: z.number().transform((val) => val > 0),
 })
 
-const collection = createCollection(
+const documentsCollection = createCollection(
   powerSyncCollectionOptions({
     database: db,
-    table: APP_SCHEMA.props.items,
+    table: APP_SCHEMA.props.documents,
     schema,
     deserializationSchema,
+    onDeserializationError: (error) => {
+      // Handle fatal deserialization error
+    },
   }),
 )
+// Input AND Output: { name: string, created_at: Date, archived: boolean, ... }
 ```
+
+Source: docs/collections/powersync-collection.md — Option 4
 
 ## Serializer
 
-When output types differ from SQLite types, you need a serializer to
-convert back to SQLite for persistence:
+When output types differ from SQLite types, provide a serializer to
+convert values back to SQLite for persistence:
 
 ```typescript
-powerSyncCollectionOptions({
-  database: db,
-  table: APP_SCHEMA.props.documents,
-  schema,
-  serializer: {
-    created_at: (date) => date.toISOString(),
-    meta: (obj) => JSON.stringify(obj),
-    isActive: (bool) => (bool ? 1 : 0),
-  },
-  onDeserializationError: (error) => {
-    console.error('Failed to deserialize sync data:', error)
-  },
-})
+serializer: {
+  created_at: (value) => (value ? value.toISOString() : null),
+  meta: (obj) => JSON.stringify(obj),
+  isActive: (bool) => (bool ? 1 : 0),
+}
 ```
 
 Default serialization:
-
 - `TEXT`: strings as-is, Dates as ISO strings, objects JSON-stringified
 - `INTEGER`/`REAL`: numbers as-is, booleans as 1/0
+
+Source: packages/powersync-db-collection/src/serialization.ts
 
 ## Utils
 
 ```typescript
-// Get collection metadata
 const meta = collection.utils.getMeta()
-meta.tableName // SQLite view name
-meta.trackedTableName // internal diff tracking table
+meta.tableName         // SQLite view name
+meta.trackedTableName  // internal diff tracking table
 meta.metadataIsTracked // whether PowerSync tracks metadata
 meta.serializeValue(item) // serialize to SQLite types
 ```
 
+Source: packages/powersync-db-collection/src/definitions.ts:277-279
+
+## Metadata Tracking
+
+Enable metadata tracking on the PowerSync table to attach custom
+metadata to operations:
+
+```typescript
+const APP_SCHEMA = new Schema({
+  documents: new Table(
+    { name: column.text },
+    { trackMetadata: true },
+  ),
+})
+
+// Insert with metadata
+await documentsCollection.insert(
+  { id: crypto.randomUUID(), name: 'Report' },
+  { metadata: { source: 'web-app', userId: 'user-123' } },
+).isPersisted.promise
+```
+
+Source: docs/collections/powersync-collection.md — Metadata Tracking
+
 ## Key Differences from Other Adapters
 
-- **No mutation handlers**: PowerSync handles mutations via its own
-  transactor — writing directly to SQLite
+- **No user-provided mutation handlers**: PowerSync handles mutations
+  via its own transactor — writing directly to SQLite
 - **SQLite-backed**: Data persists locally in SQLite, synced via
   PowerSync's replication protocol
-- **getKey is automatic**: Always uses the `id` column (PowerSync
-  requirement)
+- **getKey is automatic**: Always uses the `id` column
 - **startSync is always true**: Syncing begins immediately since
   the adapter monitors SQLite changes via diff triggers
 - **Batch loading**: Initial sync reads from SQLite in batches
   (configurable via `syncBatchSize`, default 1000)
+- **`onDeserializationError` required with schema**: Failing to
+  deserialize synced data is a fatal error — must be handled

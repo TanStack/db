@@ -5,74 +5,83 @@ Package: `@tanstack/trailbase-db-collection`
 ## Setup
 
 ```typescript
-import { createCollection } from '@tanstack/db'
+import { createCollection } from '@tanstack/react-db'
 import { trailBaseCollectionOptions } from '@tanstack/trailbase-db-collection'
-import { Client } from 'trailbase'
+import { initClient } from 'trailbase'
 
-const client = new Client('http://localhost:4000')
-const recordApi = client.records('todos')
+const trailBaseClient = initClient('http://localhost:4000')
 
 const todosCollection = createCollection(
   trailBaseCollectionOptions({
-    recordApi,
-    getKey: (todo) => todo.id,
+    id: 'todos',
+    recordApi: trailBaseClient.records('todos'),
+    getKey: (item) => item.id,
     parse: {
-      // Convert from TrailBase record format to app format
-      created_at: (val) => new Date(val),
+      created_at: (ts) => new Date(ts * 1000),
+      updated_at: (ts) => new Date(ts * 1000),
     },
     serialize: {
-      // Convert from app format to TrailBase record format
-      created_at: (val) => val.toISOString(),
+      created_at: (date) => Math.floor(date.valueOf() / 1000),
+      updated_at: (date) => Math.floor(date.valueOf() / 1000),
     },
   }),
 )
 ```
+
+Source: examples/react/todo/src/lib/collections.ts:131-146
 
 ## Configuration
 
 ```typescript
 trailBaseCollectionOptions({
   // Required
+  id: string,
   recordApi: RecordApi<TRecord>,
   getKey: (item: TItem) => string | number,
-  parse: Conversions<TRecord, TItem>, // record → app type
-  serialize: Conversions<TItem, TRecord>, // app type → record
+  parse: Conversions<TRecord, TItem>,      // record → app type
+  serialize: Conversions<TItem, TRecord>,   // app type → record
 
   // Optional
-  id: string,
+  schema: StandardSchemaV1,
 })
 ```
+
+Source: docs/collections/trailbase-collection.md — Configuration Options
 
 ## Type Conversions (parse / serialize)
 
 TrailBase uses a bidirectional conversion system. `parse` converts
 from the server record type to the app type, `serialize` does the
-reverse:
+reverse. TrailBase stores timestamps as Unix seconds (numbers):
 
 ```typescript
 type Todo = {
   id: string
   text: string
   completed: boolean
-  created_at: Date // app uses Date
+  created_at: Date       // app uses Date
+  updated_at: Date
 }
 
 type TodoRecord = {
-  id: string
+  id: number             // TrailBase uses numeric IDs
   text: string
   completed: boolean
-  created_at: string // server sends ISO string
+  created_at: number     // Unix timestamp (seconds)
+  updated_at: number
 }
 
 trailBaseCollectionOptions<Todo, TodoRecord>({
-  recordApi,
-  getKey: (todo) => todo.id,
+  id: 'todos',
+  recordApi: trailBaseClient.records('todos'),
+  getKey: (item) => item.id,
   parse: {
-    // Only need converters for keys where types differ
-    created_at: (val: string) => new Date(val),
+    created_at: (ts) => new Date(ts * 1000),
+    updated_at: (ts) => new Date(ts * 1000),
   },
   serialize: {
-    created_at: (val: Date) => val.toISOString(),
+    created_at: (date) => Math.floor(date.valueOf() / 1000),
+    updated_at: (date) => Math.floor(date.valueOf() / 1000),
   },
 })
 ```
@@ -82,6 +91,9 @@ trailBaseCollectionOptions<Todo, TodoRecord>({
 are passed through unchanged. Properties with differing types are
 **required** — TypeScript enforces this.
 
+Source: docs/collections/trailbase-collection.md — Data Transformation,
+examples/react/todo/src/lib/collections.ts:136-145
+
 ## How Sync Works
 
 1. **Subscribe first**: Opens an event stream via
@@ -89,23 +101,30 @@ are passed through unchanged. Properties with differing types are
 2. **Initial fetch**: Pages through all records using
    `recordApi.list()` with cursor-based pagination (256 per page)
 3. **Live events**: Processes Insert, Update, Delete, and Error events
-   from the stream
+   from the ReadableStream
 4. **ID tracking**: Maintains a `seenIds` store for optimistic state
    resolution (entries expire after 5 minutes)
 
+Source: packages/trailbase-db-collection/src/trailbase.ts:167-287
+
 ## How Mutations Work
 
-Mutations use the TrailBase Record API:
+Mutations use the TrailBase Record API. The adapter handles all
+persistence automatically — you do NOT provide `onInsert`, `onUpdate`,
+or `onDelete` handlers:
 
-- **Insert**: `recordApi.createBulk()` — then awaits the IDs
+- **Insert**: `recordApi.createBulk(items)` — then awaits the IDs
   appearing in the event stream before resolving
-- **Update**: `recordApi.update(key, changes)` — serializes partial
-  changes, awaits confirmation
-- **Delete**: `recordApi.delete(key)` — awaits confirmation
+- **Update**: `recordApi.update(key, serializedChanges)` — awaits
+  confirmation via event stream
+- **Delete**: `recordApi.delete(key)` — awaits confirmation via
+  event stream
 
-All mutations await their IDs in the event stream before resolving.
-This ensures the optimistic overlay is only removed after the local
-state has been updated by the subscription.
+All mutations await their IDs in the event stream before resolving
+(default timeout: 120s). This ensures the optimistic overlay is only
+removed after the local state has been updated by the subscription.
+
+Source: packages/trailbase-db-collection/src/trailbase.ts:296-355
 
 ## Utils
 
@@ -113,6 +132,28 @@ state has been updated by the subscription.
 // Cancel the event stream reader
 collection.utils.cancel()
 ```
+
+Source: packages/trailbase-db-collection/src/trailbase.ts:106-108
+
+## Real-time Subscriptions
+
+TrailBase supports real-time subscriptions when `enable_subscriptions`
+is enabled on the server. The adapter subscribes automatically:
+
+```typescript
+const todosCollection = createCollection(
+  trailBaseCollectionOptions({
+    id: 'todos',
+    recordApi: trailBaseClient.records('todos'),
+    getKey: (item) => item.id,
+    parse: {},
+    serialize: {},
+  }),
+)
+// Changes from other clients automatically update in real-time
+```
+
+Source: docs/collections/trailbase-collection.md — Real-time Subscriptions
 
 ## Key Differences from Other Adapters
 
@@ -127,3 +168,5 @@ collection.utils.cancel()
   memory leaks, with cleanup running every 2 minutes
 - **Cursor-based pagination**: Initial sync uses cursor-based
   pagination for efficient loading of large datasets
+- **No user-provided mutation handlers**: The adapter handles all
+  persistence via the Record API automatically

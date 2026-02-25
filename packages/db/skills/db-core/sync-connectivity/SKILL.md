@@ -29,24 +29,23 @@ source. The adapter options creators handle this — you rarely write
 `SyncConfig` directly unless building a custom adapter.
 
 ```typescript
-import { createCollection } from '@tanstack/db'
+import { createCollection } from '@tanstack/react-db'
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 
 const todosCollection = createCollection(
   electricCollectionOptions({
     shapeOptions: {
-      url: 'http://localhost:3000/v1/shape',
-      params: { table: 'todos' },
+      url: '/api/todos',
     },
     getKey: (todo) => todo.id,
     onUpdate: async ({ transaction }) => {
       const { original, changes } = transaction.mutations[0]
-      const result = await sql`
-        UPDATE todos SET ${sql(changes)}
-        WHERE id = ${original.id}
-        RETURNING pg_current_xact_id()::text AS txid
-      `
-      await todosCollection.utils.awaitTxId(result[0].txid)
+      const response = await api.todos.update({
+        where: { id: original.id },
+        data: changes,
+      })
+      // Return txid so optimistic state holds until Electric syncs it
+      return { txid: response.txid }
     },
   }),
 )
@@ -86,17 +85,13 @@ flash — hold optimistic state until the sync stream catches up:
 
 ```typescript
 electricCollectionOptions({
-  shapeOptions: { url: ELECTRIC_URL, params: { table: 'todos' } },
+  shapeOptions: { url: '/api/todos' },
   getKey: (t) => t.id,
   onInsert: async ({ transaction }) => {
-    const item = transaction.mutations[0].modified
-    const result = await sql`
-      INSERT INTO todos (id, text, completed)
-      VALUES (${item.id}, ${item.text}, ${item.completed})
-      RETURNING pg_current_xact_id()::text AS txid
-    `
+    const newItem = transaction.mutations[0].modified
+    const response = await api.todos.create(newItem)
     // Hold optimistic state until Electric streams this txid
-    await todosCollection.utils.awaitTxId(result[0].txid)
+    return { txid: response.txid }
   },
 })
 ```
@@ -217,35 +212,57 @@ persistence, which is a separate concern from offline transaction queuing.
 
 ### CRITICAL — Electric txid queried outside mutation transaction
 
-Wrong:
+The backend must generate the txid INSIDE the same SQL transaction as the
+mutation. The handler itself calls an API — the bug is in server code.
+
+Wrong (server-side):
 
 ```typescript
-onInsert: async ({ transaction }) => {
-  const item = transaction.mutations[0].modified
-  await sql`INSERT INTO todos VALUES (${item.id}, ${item.text})`
-  // Separate query = separate transaction = wrong txid
-  const result = await sql`SELECT pg_current_xact_id()::text AS txid`
-  await collection.utils.awaitTxId(result[0].txid)
-},
+// Server: txid queried OUTSIDE the mutation transaction
+async function createTodo(data) {
+  const txid = await generateTxId(sql)  // separate transaction!
+  await sql.begin(async (tx) => {
+    await tx`INSERT INTO todos ${tx(data)}`
+  })
+  return { txid }  // This txid won't match the mutation
+}
 ```
 
-Correct:
+Correct (server-side):
+
+```typescript
+// Server: txid queried INSIDE the mutation transaction
+async function createTodo(data) {
+  let txid
+  const result = await sql.begin(async (tx) => {
+    txid = await generateTxId(tx)  // same transaction!
+    const [todo] = await tx`INSERT INTO todos ${tx(data)} RETURNING *`
+    return todo
+  })
+  return { todo: result, txid }
+}
+
+async function generateTxId(tx) {
+  // ::xid cast strips epoch to match Electric's replication stream
+  const result = await tx`SELECT pg_current_xact_id()::xid::text as txid`
+  return parseInt(result[0].txid, 10)
+}
+```
+
+Client handler (correct):
 
 ```typescript
 onInsert: async ({ transaction }) => {
-  const item = transaction.mutations[0].modified
-  const result = await sql`
-    INSERT INTO todos VALUES (${item.id}, ${item.text})
-    RETURNING pg_current_xact_id()::text AS txid
-  `
-  await collection.utils.awaitTxId(result[0].txid)
+  const newItem = transaction.mutations[0].modified
+  const response = await api.todos.create(newItem)
+  return { txid: response.txid }
 },
 ```
 
 `pg_current_xact_id()` must be queried INSIDE the same SQL transaction
 as the mutation. A separate query runs in its own transaction, returning a
-different txid. `awaitTxId` then waits for a txid that will never arrive
-in the sync stream — it stalls forever.
+different txid. The client's `awaitTxId` then waits for a txid that never
+arrives in the sync stream — it stalls forever.
 
 Source: docs/collections/electric-collection.md — Debugging txid section
 

@@ -5,22 +5,25 @@ Package: `@tanstack/rxdb-db-collection`
 ## Setup
 
 ```typescript
-import { createCollection } from '@tanstack/db'
+import { createRxDatabase, addRxPlugin } from 'rxdb/plugins/core'
+import { getRxStorageLocalstorage } from 'rxdb/plugins/storage-localstorage'
+import { createCollection } from '@tanstack/react-db'
 import { rxdbCollectionOptions } from '@tanstack/rxdb-db-collection'
-import { createRxDatabase, addRxPlugin } from 'rxdb'
-import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie'
 
-const rxdb = await createRxDatabase({
-  name: 'mydb',
-  storage: getRxStorageDexie(),
+type Todo = { id: string; text: string; completed: boolean }
+
+const db = await createRxDatabase({
+  name: 'my-todos',
+  storage: getRxStorageLocalstorage(),
 })
 
-await rxdb.addCollections({
+await db.addCollections({
   todos: {
     schema: {
+      title: 'todos',
       version: 0,
-      primaryKey: 'id',
       type: 'object',
+      primaryKey: 'id',
       properties: {
         id: { type: 'string', maxLength: 100 },
         text: { type: 'string' },
@@ -33,10 +36,13 @@ await rxdb.addCollections({
 
 const todosCollection = createCollection(
   rxdbCollectionOptions({
-    rxCollection: rxdb.todos,
+    rxCollection: db.todos,
+    startSync: true,
   }),
 )
 ```
+
+Source: docs/collections/rxdb-collection.md — Setup steps 1-4
 
 ## Configuration
 
@@ -47,10 +53,13 @@ rxdbCollectionOptions({
 
   // Optional
   id: string,
-  schema: StandardSchemaV1, // additional validation on top of RxDB schema
-  syncBatchSize: number, // default 1000
+  schema: StandardSchemaV1,  // additional validation on top of RxDB schema
+  startSync: boolean,        // default: true
+  syncBatchSize: number,     // default 1000
 })
 ```
+
+Source: docs/collections/rxdb-collection.md — Configuration Options
 
 ## Two Overloads
 
@@ -59,7 +68,7 @@ rxdbCollectionOptions({
 ```typescript
 const collection = createCollection(
   rxdbCollectionOptions({
-    rxCollection: rxdb.todos,
+    rxCollection: db.todos,
   }),
 )
 ```
@@ -79,7 +88,7 @@ const schema = z.object({
 
 const collection = createCollection(
   rxdbCollectionOptions({
-    rxCollection: rxdb.todos,
+    rxCollection: db.todos,
     schema,
   }),
 )
@@ -87,33 +96,59 @@ const collection = createCollection(
 
 Provide EITHER an explicit type via the generic OR a schema, not both.
 
+Source: packages/rxdb-db-collection/src/rxdb.ts:88-102
+
 ## How Sync Works
 
 The adapter syncs between the local RxDB collection and the in-memory
-TanStack DB collection (not between client and server — RxDB handles
-that separately via its own replication plugins).
+TanStack DB collection. This is NOT client-server sync — RxDB handles
+that separately via its own replication plugins.
 
-1. **Initial fetch**: Reads documents from RxDB storage in batches,
+1. **Subscribe first**: Subscribes to the RxDB collection's change
+   stream (`rxCollection.$`) and buffers events during initial load
+2. **Initial fetch**: Reads documents from RxDB storage in batches,
    sorted by last-write-time (`_meta.lwt`), directly from the storage
    engine (bypasses RxDB document cache for efficiency)
-2. **Live subscription**: Subscribes to the RxDB collection's change
-   stream (`rxCollection.$`) to receive INSERT, UPDATE, and DELETE events
-3. **Buffering**: Events during initial fetch are buffered and replayed
-   after the initial load completes
+3. **Buffer replay**: After initial fetch, replays buffered events
+   and calls `markReady()`
+
+Source: packages/rxdb-db-collection/src/rxdb.ts:130-250
 
 ## How Mutations Work
 
-Mutations are forwarded to the RxDB collection:
+Default mutation handlers forward writes to the RxDB collection:
 
-- **Insert**: Uses `rxCollection.bulkUpsert()` for batch efficiency
-- **Update**: Finds the document via `rxCollection.findOne()` then
-  applies `incrementalPatch()` for each mutation
-- **Delete**: Uses `rxCollection.bulkRemove()` with collected IDs
+- **Insert**: `rxCollection.bulkUpsert(newItems)` for batch efficiency
+- **Update**: `rxCollection.findOne(id).exec()` then
+  `doc.incrementalPatch(changes)` for each mutation
+- **Delete**: `rxCollection.bulkRemove(ids)` with collected IDs
+
+Source: packages/rxdb-db-collection/src/rxdb.ts:270-311
+
+## Syncing with Backends
+
+Replication is configured entirely on the RxDB side using RxDB's
+replication plugins. TanStack DB automatically picks up changes:
+
+```typescript
+import { replicateRxCollection } from 'rxdb/plugins/replication'
+
+const replicationState = replicateRxCollection({
+  collection: db.todos,
+  pull: { handler: myPullHandler },
+  push: { handler: myPushHandler },
+})
+```
+
+Supported backends via RxDB plugins: CouchDB, MongoDB, Supabase,
+REST APIs, GraphQL, WebRTC (P2P), and more.
+
+Source: docs/collections/rxdb-collection.md — Syncing with Backends
 
 ## Key Differences from Other Adapters
 
-- **No mutation handlers**: Like PowerSync, the adapter handles
-  mutations automatically via the RxDB collection
+- **Default mutation handlers**: The adapter provides insert, update,
+  and delete handlers that write to RxDB. You don't need to write them.
 - **getKey is automatic**: Uses the RxDB schema's `primaryPath`
   (always a string in RxDB)
 - **RxDB fields stripped**: Internal RxDB fields (`_rev`, `_meta`,
@@ -123,3 +158,7 @@ Mutations are forwarded to the RxDB collection:
   changes, cleaned up on collection disposal
 - **Storage-engine direct**: Initial sync queries the storage engine
   directly rather than going through the RxDB query layer
+- **Data is intentionally duplicated**: RxDB stores durably on disk,
+  TanStack DB stores in memory for fast queries and reactivity
+
+Source: docs/collections/rxdb-collection.md — FAQ
