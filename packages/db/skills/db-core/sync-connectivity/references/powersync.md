@@ -61,11 +61,11 @@ Source: docs/collections/powersync-collection.md — Configuration Options
 
 ## SQLite Type Mapping
 
-| PowerSync Column Type | TypeScript Type   |
-|-----------------------|-------------------|
-| `column.text`         | `string \| null`  |
-| `column.integer`      | `number \| null`  |
-| `column.real`         | `number \| null`  |
+| PowerSync Column Type | TypeScript Type  |
+| --------------------- | ---------------- |
+| `column.text`         | `string \| null` |
+| `column.integer`      | `number \| null` |
+| `column.real`         | `number \| null` |
 
 All PowerSync column types are nullable by default.
 
@@ -203,6 +203,7 @@ serializer: {
 ```
 
 Default serialization:
+
 - `TEXT`: strings as-is, Dates as ISO strings, objects JSON-stringified
 - `INTEGER`/`REAL`: numbers as-is, booleans as 1/0
 
@@ -212,8 +213,8 @@ Source: packages/powersync-db-collection/src/serialization.ts
 
 ```typescript
 const meta = collection.utils.getMeta()
-meta.tableName         // SQLite view name
-meta.trackedTableName  // internal diff tracking table
+meta.tableName // SQLite view name
+meta.trackedTableName // internal diff tracking table
 meta.metadataIsTracked // whether PowerSync tracks metadata
 meta.serializeValue(item) // serialize to SQLite types
 ```
@@ -227,10 +228,7 @@ metadata to operations:
 
 ```typescript
 const APP_SCHEMA = new Schema({
-  documents: new Table(
-    { name: column.text },
-    { trackMetadata: true },
-  ),
+  documents: new Table({ name: column.text }, { trackMetadata: true }),
 })
 
 // Insert with metadata

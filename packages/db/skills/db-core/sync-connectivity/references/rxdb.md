@@ -53,9 +53,9 @@ rxdbCollectionOptions({
 
   // Optional
   id: string,
-  schema: StandardSchemaV1,  // additional validation on top of RxDB schema
-  startSync: boolean,        // default: true
-  syncBatchSize: number,     // default 1000
+  schema: StandardSchemaV1, // additional validation on top of RxDB schema
+  startSync: boolean, // default: true
+  syncBatchSize: number, // default 1000
 })
 ```
 

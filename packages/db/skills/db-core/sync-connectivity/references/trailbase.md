@@ -38,8 +38,8 @@ trailBaseCollectionOptions({
   id: string,
   recordApi: RecordApi<TRecord>,
   getKey: (item: TItem) => string | number,
-  parse: Conversions<TRecord, TItem>,      // record → app type
-  serialize: Conversions<TItem, TRecord>,   // app type → record
+  parse: Conversions<TRecord, TItem>, // record → app type
+  serialize: Conversions<TItem, TRecord>, // app type → record
 
   // Optional
   schema: StandardSchemaV1,
@@ -59,15 +59,15 @@ type Todo = {
   id: string
   text: string
   completed: boolean
-  created_at: Date       // app uses Date
+  created_at: Date // app uses Date
   updated_at: Date
 }
 
 type TodoRecord = {
-  id: number             // TrailBase uses numeric IDs
+  id: number // TrailBase uses numeric IDs
   text: string
   completed: boolean
-  created_at: number     // Unix timestamp (seconds)
+  created_at: number // Unix timestamp (seconds)
   updated_at: number
 }
 

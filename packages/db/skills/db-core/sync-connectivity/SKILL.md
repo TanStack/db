@@ -220,11 +220,11 @@ Wrong (server-side):
 ```typescript
 // Server: txid queried OUTSIDE the mutation transaction
 async function createTodo(data) {
-  const txid = await generateTxId(sql)  // separate transaction!
+  const txid = await generateTxId(sql) // separate transaction!
   await sql.begin(async (tx) => {
     await tx`INSERT INTO todos ${tx(data)}`
   })
-  return { txid }  // This txid won't match the mutation
+  return { txid } // This txid won't match the mutation
 }
 ```
 
@@ -235,7 +235,7 @@ Correct (server-side):
 async function createTodo(data) {
   let txid
   const result = await sql.begin(async (tx) => {
-    txid = await generateTxId(tx)  // same transaction!
+    txid = await generateTxId(tx) // same transaction!
     const [todo] = await tx`INSERT INTO todos ${tx(data)} RETURNING *`
     return todo
   })

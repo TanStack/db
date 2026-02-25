@@ -149,7 +149,7 @@ this:
 async function generateTxId(tx) {
   // ::xid cast strips off the epoch to match Electric's replication stream
   const result = await tx.execute(
-    sql`SELECT pg_current_xact_id()::xid::text as txid`
+    sql`SELECT pg_current_xact_id()::xid::text as txid`,
   )
   const txid = result.rows[0]?.txid
   if (txid === undefined) {
@@ -180,12 +180,12 @@ Source: docs/collections/electric-collection.md — Debugging section
 ```typescript
 // Wait for a specific txid in the sync stream (default timeout: 5000ms)
 await collection.utils.awaitTxId(12345)
-await collection.utils.awaitTxId(12345, 10000)  // custom timeout
+await collection.utils.awaitTxId(12345, 10000) // custom timeout
 
 // Wait for a custom condition in the sync stream (default timeout: 3000ms)
 await collection.utils.awaitMatch(
   (message) => isChangeMessage(message) && message.value.id === newId,
-  5000,  // custom timeout
+  5000, // custom timeout
 )
 ```
 
@@ -196,7 +196,7 @@ Source: packages/electric-db-collection/src/electric.ts:646-715
 ```typescript
 electricCollectionOptions({
   shapeOptions: {
-    url: '/api/todos',          // URL to your Electric proxy
+    url: '/api/todos', // URL to your Electric proxy
     params: { table: 'todos' }, // shape parameters
     parser: {
       // Custom PostgreSQL type parsers
