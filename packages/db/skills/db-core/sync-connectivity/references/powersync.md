@@ -45,8 +45,8 @@ powerSyncCollectionOptions({
 
   // Optional
   id: string,
-  schema: StandardSchemaV1,    // additional validation
-  syncBatchSize: number,       // default 1000
+  schema: StandardSchemaV1, // additional validation
+  syncBatchSize: number, // default 1000
 })
 ```
 
@@ -105,7 +105,10 @@ const schema = z.object({
 
 const deserializationSchema = z.object({
   id: z.string(),
-  isActive: z.number().nullable().transform((val) => val == null ? true : val > 0),
+  isActive: z
+    .number()
+    .nullable()
+    .transform((val) => (val == null ? true : val > 0)),
 })
 
 const collection = createCollection(
@@ -131,7 +134,7 @@ powerSyncCollectionOptions({
   serializer: {
     created_at: (date) => date.toISOString(),
     meta: (obj) => JSON.stringify(obj),
-    isActive: (bool) => bool ? 1 : 0,
+    isActive: (bool) => (bool ? 1 : 0),
   },
   onDeserializationError: (error) => {
     console.error('Failed to deserialize sync data:', error)
@@ -140,6 +143,7 @@ powerSyncCollectionOptions({
 ```
 
 Default serialization:
+
 - `TEXT`: strings as-is, Dates as ISO strings, objects JSON-stringified
 - `INTEGER`/`REAL`: numbers as-is, booleans as 1/0
 
@@ -148,8 +152,8 @@ Default serialization:
 ```typescript
 // Get collection metadata
 const meta = collection.utils.getMeta()
-meta.tableName         // SQLite view name
-meta.trackedTableName  // internal diff tracking table
+meta.tableName // SQLite view name
+meta.trackedTableName // internal diff tracking table
 meta.metadataIsTracked // whether PowerSync tracks metadata
 meta.serializeValue(item) // serialize to SQLite types
 ```

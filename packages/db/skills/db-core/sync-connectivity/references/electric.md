@@ -50,7 +50,7 @@ const todosCollection = createCollection(
 ```typescript
 electricCollectionOptions({
   // Required
-  shapeOptions: ShapeStreamOptions,  // Electric shape definition
+  shapeOptions: ShapeStreamOptions, // Electric shape definition
   getKey: (item: T) => string | number,
 
   // Optional
@@ -59,9 +59,12 @@ electricCollectionOptions({
   syncMode: 'eager' | 'on-demand' | 'progressive',
 
   // Handlers — return MatchingStrategy to hold optimistic state
-  onInsert: (params) => Promise<{ txid: number | number[], timeout?: number } | void>,
-  onUpdate: (params) => Promise<{ txid: number | number[], timeout?: number } | void>,
-  onDelete: (params) => Promise<{ txid: number | number[], timeout?: number } | void>,
+  onInsert: (params) =>
+    Promise<{ txid: number | number[]; timeout?: number } | void>,
+  onUpdate: (params) =>
+    Promise<{ txid: number | number[]; timeout?: number } | void>,
+  onDelete: (params) =>
+    Promise<{ txid: number | number[]; timeout?: number } | void>,
 })
 ```
 
@@ -100,16 +103,19 @@ await collection.utils.awaitMatch(
 
 ## Sync Modes
 
-| Mode | Behavior |
-|------|----------|
-| `eager` (default) | Syncs all data, collection ready after initial sync |
-| `on-demand` | Syncs incrementally when queried |
-| `progressive` | Syncs query subset immediately, full dataset in background |
+| Mode              | Behavior                                                   |
+| ----------------- | ---------------------------------------------------------- |
+| `eager` (default) | Syncs all data, collection ready after initial sync        |
+| `on-demand`       | Syncs incrementally when queried                           |
+| `progressive`     | Syncs query subset immediately, full dataset in background |
 
 ## Helper Functions
 
 ```typescript
-import { isChangeMessage, isControlMessage } from '@tanstack/electric-db-collection'
+import {
+  isChangeMessage,
+  isControlMessage,
+} from '@tanstack/electric-db-collection'
 
 // Use in awaitMatch to filter message types
 await collection.utils.awaitMatch(

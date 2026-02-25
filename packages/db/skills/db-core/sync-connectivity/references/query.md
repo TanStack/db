@@ -107,7 +107,7 @@ collection.utils.writeUpdate([partial1, partial2])
 collection.utils.writeDelete('item-id')
 collection.utils.writeDelete(['id1', 'id2'])
 
-collection.utils.writeUpsert(item)  // insert or update by key
+collection.utils.writeUpsert(item) // insert or update by key
 collection.utils.writeUpsert([item1, item2])
 
 // Batch multiple writes atomically
@@ -124,14 +124,14 @@ The server must have the data before the next refetch, or coordinate with
 ## Utils — Query State
 
 ```typescript
-collection.utils.isError       // boolean
-collection.utils.errorCount    // number
-collection.utils.lastError     // Error | undefined
-collection.utils.isFetching    // boolean
-collection.utils.isRefetching  // boolean
-collection.utils.isLoading     // boolean
+collection.utils.isError // boolean
+collection.utils.errorCount // number
+collection.utils.lastError // Error | undefined
+collection.utils.isFetching // boolean
+collection.utils.isRefetching // boolean
+collection.utils.isLoading // boolean
 collection.utils.dataUpdatedAt // timestamp
-collection.utils.fetchStatus   // 'fetching' | 'paused' | 'idle'
+collection.utils.fetchStatus // 'fetching' | 'paused' | 'idle'
 
 // Clear error and trigger refetch
 await collection.utils.clearError()

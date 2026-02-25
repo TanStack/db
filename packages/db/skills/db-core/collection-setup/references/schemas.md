@@ -9,6 +9,7 @@ loaded via sync is not validated.
 ## TInput vs TOutput
 
 When a schema has transformations, it creates two types:
+
 - **TInput** — what users provide to `insert()` / `update()`
 - **TOutput** — what's stored in the collection and returned from queries
 
@@ -36,6 +37,7 @@ const schema = z.object({
 ```
 
 Where types appear at runtime:
+
 - `collection.get(key)` → TOutput
 - `useLiveQuery` data → TOutput
 - `PendingMutation.modified` → TOutput
@@ -74,9 +76,9 @@ z.enum(['todo', 'in-progress', 'done'])
 ### Optional and nullable
 
 ```typescript
-z.string().optional()                // field can be omitted
-z.string().nullable()                // field can be null
-z.string().optional().nullable()     // both
+z.string().optional() // field can be omitted
+z.string().nullable() // field can be null
+z.string().optional().nullable() // both
 ```
 
 ### Arrays
@@ -90,10 +92,7 @@ z.array(z.number()).max(100)
 ### Custom validation
 
 ```typescript
-z.string().refine(
-  (val) => /^[A-Z]/.test(val),
-  'Must start with uppercase',
-)
+z.string().refine((val) => /^[A-Z]/.test(val), 'Must start with uppercase')
 ```
 
 ### Cross-field validation
@@ -141,7 +140,10 @@ z.object({
 
 ```typescript
 z.object({
-  email: z.string().email().transform((val) => val.toLowerCase().trim()),
+  email: z
+    .string()
+    .email()
+    .transform((val) => val.toLowerCase().trim()),
   tags: z.array(z.string()).transform((val) => val.map((t) => t.toLowerCase())),
 })
 ```
@@ -173,8 +175,8 @@ try {
   collection.insert({ id: '1', email: 'not-an-email', age: -5 })
 } catch (error) {
   if (error instanceof SchemaValidationError) {
-    error.type    // 'insert' | 'update'
-    error.issues  // [{ message: '...', path: ['email'] }, ...]
+    error.type // 'insert' | 'update'
+    error.issues // [{ message: '...', path: ['email'] }, ...]
 
     error.issues.forEach((issue) => {
       const field = issue.path?.join('.') || 'unknown'

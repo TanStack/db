@@ -35,8 +35,8 @@ trailBaseCollectionOptions({
   // Required
   recordApi: RecordApi<TRecord>,
   getKey: (item: TItem) => string | number,
-  parse: Conversions<TRecord, TItem>,      // record → app type
-  serialize: Conversions<TItem, TRecord>,   // app type → record
+  parse: Conversions<TRecord, TItem>, // record → app type
+  serialize: Conversions<TItem, TRecord>, // app type → record
 
   // Optional
   id: string,
@@ -54,14 +54,14 @@ type Todo = {
   id: string
   text: string
   completed: boolean
-  created_at: Date       // app uses Date
+  created_at: Date // app uses Date
 }
 
 type TodoRecord = {
   id: string
   text: string
   completed: boolean
-  created_at: string     // server sends ISO string
+  created_at: string // server sends ISO string
 }
 
 trailBaseCollectionOptions<Todo, TodoRecord>({

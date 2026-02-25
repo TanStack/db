@@ -6,21 +6,32 @@ objects for the query engine — never use JS operators in `.where()`.
 ## Comparison Operators
 
 ```typescript
-import { eq, gt, gte, lt, lte, like, ilike, inArray, isNull, isUndefined } from '@tanstack/db'
+import {
+  eq,
+  gt,
+  gte,
+  lt,
+  lte,
+  like,
+  ilike,
+  inArray,
+  isNull,
+  isUndefined,
+} from '@tanstack/db'
 ```
 
-| Operator | SQL equivalent | Example |
-|----------|---------------|---------|
-| `eq(a, b)` | `a = b` | `eq(t.status, 'active')` |
-| `gt(a, b)` | `a > b` | `gt(t.priority, 3)` |
-| `gte(a, b)` | `a >= b` | `gte(t.age, 18)` |
-| `lt(a, b)` | `a < b` | `lt(t.price, 100)` |
-| `lte(a, b)` | `a <= b` | `lte(t.quantity, 0)` |
-| `like(a, pattern)` | `a LIKE pattern` | `like(t.name, 'John%')` |
-| `ilike(a, pattern)` | `a ILIKE pattern` | `ilike(t.email, '%@example.com')` |
-| `inArray(a, arr)` | `a IN (...)` | `inArray(t.status, ['open', 'pending'])` |
-| `isNull(a)` | `a IS NULL` | `isNull(t.deletedAt)` |
-| `isUndefined(a)` | `a IS UNDEFINED` | `isUndefined(t.optional)` |
+| Operator            | SQL equivalent    | Example                                  |
+| ------------------- | ----------------- | ---------------------------------------- |
+| `eq(a, b)`          | `a = b`           | `eq(t.status, 'active')`                 |
+| `gt(a, b)`          | `a > b`           | `gt(t.priority, 3)`                      |
+| `gte(a, b)`         | `a >= b`          | `gte(t.age, 18)`                         |
+| `lt(a, b)`          | `a < b`           | `lt(t.price, 100)`                       |
+| `lte(a, b)`         | `a <= b`          | `lte(t.quantity, 0)`                     |
+| `like(a, pattern)`  | `a LIKE pattern`  | `like(t.name, 'John%')`                  |
+| `ilike(a, pattern)` | `a ILIKE pattern` | `ilike(t.email, '%@example.com')`        |
+| `inArray(a, arr)`   | `a IN (...)`      | `inArray(t.status, ['open', 'pending'])` |
+| `isNull(a)`         | `a IS NULL`       | `isNull(t.deletedAt)`                    |
+| `isUndefined(a)`    | `a IS UNDEFINED`  | `isUndefined(t.optional)`                |
 
 `like` / `ilike` use SQL-style patterns: `%` matches any sequence, `_`
 matches one character. `ilike` is case-insensitive.
@@ -33,11 +44,11 @@ matches one character. `ilike` is case-insensitive.
 import { and, or, not } from '@tanstack/db'
 ```
 
-| Operator | Example |
-|----------|---------|
-| `and(...exprs)` | `and(eq(t.active, true), gt(t.age, 18))` |
-| `or(...exprs)` | `or(eq(t.role, 'admin'), eq(t.role, 'owner'))` |
-| `not(expr)` | `not(isNull(t.email))` |
+| Operator        | Example                                        |
+| --------------- | ---------------------------------------------- |
+| `and(...exprs)` | `and(eq(t.active, true), gt(t.age, 18))`       |
+| `or(...exprs)`  | `or(eq(t.role, 'admin'), eq(t.role, 'owner'))` |
+| `not(expr)`     | `not(isNull(t.email))`                         |
 
 `and` and `or` accept any number of arguments:
 
@@ -56,14 +67,14 @@ and(
 import { count, sum, avg, min, max } from '@tanstack/db'
 ```
 
-| Function | Returns | Example |
-|----------|---------|---------|
-| `count()` | number | `count()` — count all rows |
-| `count(expr)` | number | `count(t.email)` — count non-null |
-| `sum(expr)` | number | `sum(o.amount)` |
-| `avg(expr)` | number | `avg(o.amount)` |
-| `min(expr)` | same type | `min(o.createdAt)` |
-| `max(expr)` | same type | `max(o.createdAt)` |
+| Function      | Returns   | Example                           |
+| ------------- | --------- | --------------------------------- |
+| `count()`     | number    | `count()` — count all rows        |
+| `count(expr)` | number    | `count(t.email)` — count non-null |
+| `sum(expr)`   | number    | `sum(o.amount)`                   |
+| `avg(expr)`   | number    | `avg(o.amount)`                   |
+| `min(expr)`   | same type | `min(o.createdAt)`                |
+| `max(expr)`   | same type | `max(o.createdAt)`                |
 
 Aggregates require `.groupBy()`:
 
@@ -92,12 +103,12 @@ Use `$selected` to reference aggregated fields in `.having()`:
 import { upper, lower, length, concat, coalesce } from '@tanstack/db'
 ```
 
-| Function | Returns | Example |
-|----------|---------|---------|
-| `upper(expr)` | string | `upper(u.name)` |
-| `lower(expr)` | string | `lower(u.email)` |
-| `length(expr)` | number | `length(u.name)` |
-| `concat(...exprs)` | string | `concat(u.first, ' ', u.last)` |
+| Function             | Returns        | Example                        |
+| -------------------- | -------------- | ------------------------------ |
+| `upper(expr)`        | string         | `upper(u.name)`                |
+| `lower(expr)`        | string         | `lower(u.email)`               |
+| `length(expr)`       | number         | `length(u.name)`               |
+| `concat(...exprs)`   | string         | `concat(u.first, ' ', u.last)` |
 | `coalesce(...exprs)` | first non-null | `coalesce(u.nickname, u.name)` |
 
 ```typescript
@@ -115,9 +126,9 @@ q.from({ u: users }).select(({ u }) => ({
 import { add } from '@tanstack/db'
 ```
 
-| Function | Returns | Example |
-|----------|---------|---------|
-| `add(a, b)` | number | `add(t.price, t.tax)` |
+| Function    | Returns | Example               |
+| ----------- | ------- | --------------------- |
+| `add(a, b)` | number  | `add(t.price, t.tax)` |
 
 ```typescript
 q.from({ p: products }).select(({ p }) => ({
@@ -130,9 +141,21 @@ q.from({ p: products }).select(({ p }) => ({
 
 ```typescript
 import {
-  eq, gt, and, or, not, isNull, inArray, ilike,
-  count, sum, avg,
-  upper, concat, coalesce, add,
+  eq,
+  gt,
+  and,
+  or,
+  not,
+  isNull,
+  inArray,
+  ilike,
+  count,
+  sum,
+  avg,
+  upper,
+  concat,
+  coalesce,
+  add,
 } from '@tanstack/db'
 
 q.from({ o: orders })
