@@ -391,7 +391,10 @@ export function compileQuery(
     )
   }
 
-  // Process the GROUP BY clause if it exists
+  // Process the GROUP BY clause if it exists.
+  // When in includes mode (parentKeyStream), pass mainSource so that groupBy
+  // preserves __correlationKey for per-parent aggregation.
+  const groupByMainSource = parentKeyStream ? mainSource : undefined
   if (query.groupBy && query.groupBy.length > 0) {
     pipeline = processGroupBy(
       pipeline,
@@ -399,6 +402,7 @@ export function compileQuery(
       query.having,
       query.select,
       query.fnHaving,
+      groupByMainSource,
     )
   } else if (query.select) {
     // Check if SELECT contains aggregates but no GROUP BY (implicit single-group aggregation)
@@ -413,6 +417,7 @@ export function compileQuery(
         query.having,
         query.select,
         query.fnHaving,
+        groupByMainSource,
       )
     }
   }
