@@ -257,4 +257,35 @@ describe(`KeyScheduler`, () => {
     const scheduler = new KeyScheduler()
     expect(scheduler.getNextBatch(1)).toEqual([])
   })
+
+  it(`processes transactions with identical createdAt in scheduling order`, () => {
+    vi.useFakeTimers()
+
+    const now = new Date(`2026-01-01T00:00:00.000Z`)
+    vi.setSystemTime(now)
+
+    const scheduler = new KeyScheduler()
+    const first = createTransaction({
+      id: `first`,
+      createdAt: new Date(now.getTime()),
+      nextAttemptAt: now.getTime(),
+    })
+    const second = createTransaction({
+      id: `second`,
+      createdAt: new Date(now.getTime()),
+      nextAttemptAt: now.getTime(),
+    })
+
+    scheduler.schedule(first)
+    scheduler.schedule(second)
+
+    const batch1 = scheduler.getNextBatch(1)
+    expect(batch1.map((tx) => tx.id)).toEqual([`first`])
+
+    scheduler.markStarted(first)
+    scheduler.markCompleted(first)
+
+    const batch2 = scheduler.getNextBatch(1)
+    expect(batch2.map((tx) => tx.id)).toEqual([`second`])
+  })
 })
