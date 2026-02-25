@@ -740,9 +740,7 @@ export class CollectionConfigBuilder<
     // Called at the end of each graph run to commit all accumulated changes.
     syncState.flushPendingChanges = () => {
       const hasParentChanges = pendingChanges.size > 0
-      const hasChildChanges = includesState.some(
-        (s) => s.pendingChildChanges.size > 0,
-      )
+      const hasChildChanges = hasPendingIncludesChanges(includesState)
 
       if (!hasParentChanges && !hasChildChanges) {
         return
@@ -863,12 +861,14 @@ export class CollectionConfigBuilder<
         }),
       )
 
-      // Recursively set up nested includes (e.g., comments inside issues)
+      // Set up shared buffers for nested includes (e.g., comments inside issues)
       if (entry.childCompilationResult.includes) {
-        state.nestedIncludesState = this.setupIncludesOutput(
+        state.nestedSetups = setupNestedPipelines(
           entry.childCompilationResult.includes,
           syncState,
         )
+        state.nestedRoutingIndex = new Map()
+        state.nestedRoutingReverseIndex = new Map()
       }
 
       return state
@@ -1290,6 +1290,19 @@ function isNestedSelectObject(obj: any): boolean {
 }
 
 /**
+ * Shared buffer setup for a single nested includes level.
+ * Pipeline output writes into the buffer; during flush the buffer is drained
+ * into per-entry states via the routing index.
+ */
+type NestedIncludesSetup = {
+  compilationResult: IncludesCompilationResult
+  /** Shared buffer: nestedCorrelationKey → Map<childKey, Changes> */
+  buffer: Map<unknown, Map<unknown, Changes<any>>>
+  /** For 3+ levels of nesting */
+  nestedSetups?: Array<NestedIncludesSetup>
+}
+
+/**
  * State tracked per includes entry for output routing and child lifecycle
  */
 type IncludesOutputState = {
@@ -1304,8 +1317,12 @@ type IncludesOutputState = {
   pendingChildChanges: Map<unknown, Map<unknown, Changes<any>>>
   /** Reverse index: correlation key → Set of parent collection keys */
   correlationToParentKeys: Map<unknown, Set<unknown>>
-  /** Nested includes state (for projects → issues → comments) */
-  nestedIncludesState?: Array<IncludesOutputState>
+  /** Shared nested pipeline setups (one per nested includes level) */
+  nestedSetups?: Array<NestedIncludesSetup>
+  /** nestedCorrelationKey → parentCorrelationKey */
+  nestedRoutingIndex?: Map<unknown, unknown>
+  /** parentCorrelationKey → Set<nestedCorrelationKeys> */
+  nestedRoutingReverseIndex?: Map<unknown, Set<unknown>>
 }
 
 type ChildCollectionEntry = {
@@ -1313,6 +1330,250 @@ type ChildCollectionEntry = {
   syncMethods: SyncMethods<any> | null
   resultKeys: WeakMap<object, unknown>
   orderByIndices: WeakMap<object, string> | null
+  /** Per-entry nested includes states (one per nested includes level) */
+  includesStates?: Array<IncludesOutputState>
+}
+
+/**
+ * Sets up shared buffers for nested includes pipelines.
+ * Instead of writing directly into a single shared IncludesOutputState,
+ * each nested pipeline writes into a buffer that is later drained per-entry.
+ */
+function setupNestedPipelines(
+  includes: Array<IncludesCompilationResult>,
+  syncState: SyncState,
+): Array<NestedIncludesSetup> {
+  return includes.map((entry) => {
+    const buffer: Map<unknown, Map<unknown, Changes<any>>> = new Map()
+
+    // Attach output callback that writes into the shared buffer
+    entry.pipeline.pipe(
+      output((data) => {
+        const messages = data.getInner()
+        syncState.messagesCount += messages.length
+
+        for (const [[childKey, tupleData], multiplicity] of messages) {
+          const [childResult, _orderByIndex, correlationKey] =
+            tupleData as unknown as [any, string | undefined, unknown]
+
+          let byChild = buffer.get(correlationKey)
+          if (!byChild) {
+            byChild = new Map()
+            buffer.set(correlationKey, byChild)
+          }
+
+          const existing = byChild.get(childKey) || {
+            deletes: 0,
+            inserts: 0,
+            value: childResult,
+            orderByIndex: _orderByIndex,
+          }
+
+          if (multiplicity < 0) {
+            existing.deletes += Math.abs(multiplicity)
+          } else if (multiplicity > 0) {
+            existing.inserts += multiplicity
+            existing.value = childResult
+          }
+
+          byChild.set(childKey, existing)
+        }
+      }),
+    )
+
+    const setup: NestedIncludesSetup = {
+      compilationResult: entry,
+      buffer,
+    }
+
+    // Recursively set up deeper levels
+    if (entry.childCompilationResult.includes) {
+      setup.nestedSetups = setupNestedPipelines(
+        entry.childCompilationResult.includes,
+        syncState,
+      )
+    }
+
+    return setup
+  })
+}
+
+/**
+ * Creates fresh per-entry IncludesOutputState array from NestedIncludesSetup array.
+ * Each entry gets its own isolated state for nested includes.
+ */
+function createPerEntryIncludesStates(
+  setups: Array<NestedIncludesSetup>,
+): Array<IncludesOutputState> {
+  return setups.map((setup) => {
+    const state: IncludesOutputState = {
+      fieldName: setup.compilationResult.fieldName,
+      correlationField: setup.compilationResult.correlationField,
+      childCorrelationField: setup.compilationResult.childCorrelationField,
+      hasOrderBy: setup.compilationResult.hasOrderBy,
+      childRegistry: new Map(),
+      pendingChildChanges: new Map(),
+      correlationToParentKeys: new Map(),
+    }
+
+    if (setup.nestedSetups) {
+      state.nestedSetups = setup.nestedSetups
+      state.nestedRoutingIndex = new Map()
+      state.nestedRoutingReverseIndex = new Map()
+    }
+
+    return state
+  })
+}
+
+/**
+ * Drains shared buffers into per-entry states using the routing index.
+ * Returns the set of parent correlation keys that had changes routed to them.
+ */
+function drainNestedBuffers(
+  state: IncludesOutputState,
+): Set<unknown> {
+  const dirtyCorrelationKeys = new Set<unknown>()
+
+  if (!state.nestedSetups) return dirtyCorrelationKeys
+
+  for (let i = 0; i < state.nestedSetups.length; i++) {
+    const setup = state.nestedSetups[i]!
+    const toDelete: Array<unknown> = []
+
+    for (const [nestedCorrelationKey, childChanges] of setup.buffer) {
+      const parentCorrelationKey = state.nestedRoutingIndex!.get(nestedCorrelationKey)
+      if (parentCorrelationKey === undefined) {
+        // Unroutable — parent not yet seen; keep in buffer
+        continue
+      }
+
+      const entry = state.childRegistry.get(parentCorrelationKey)
+      if (!entry || !entry.includesStates) {
+        continue
+      }
+
+      // Route changes into this entry's per-entry state at position i
+      const entryState = entry.includesStates[i]!
+      for (const [childKey, changes] of childChanges) {
+        let byChild = entryState.pendingChildChanges.get(nestedCorrelationKey)
+        if (!byChild) {
+          byChild = new Map()
+          entryState.pendingChildChanges.set(nestedCorrelationKey, byChild)
+        }
+        const existing = byChild.get(childKey)
+        if (existing) {
+          existing.inserts += changes.inserts
+          existing.deletes += changes.deletes
+          if (changes.inserts > 0) {
+            existing.value = changes.value
+            if (changes.orderByIndex !== undefined) {
+              existing.orderByIndex = changes.orderByIndex
+            }
+          }
+        } else {
+          byChild.set(childKey, { ...changes })
+        }
+      }
+
+      dirtyCorrelationKeys.add(parentCorrelationKey)
+      toDelete.push(nestedCorrelationKey)
+    }
+
+    for (const key of toDelete) {
+      setup.buffer.delete(key)
+    }
+  }
+
+  return dirtyCorrelationKeys
+}
+
+/**
+ * Updates the routing index after processing child changes.
+ * Maps nested correlation keys to parent correlation keys so that
+ * grandchild changes can be routed to the correct per-entry state.
+ */
+function updateRoutingIndex(
+  state: IncludesOutputState,
+  correlationKey: unknown,
+  childChanges: Map<unknown, Changes<any>>,
+): void {
+  if (!state.nestedSetups) return
+
+  for (const setup of state.nestedSetups) {
+    const nestedFieldPath = setup.compilationResult.correlationField.path.slice(1)
+
+    for (const [, change] of childChanges) {
+      if (change.inserts > 0) {
+        // Extract nested correlation key from child result
+        let nestedCorrelationKey: unknown = change.value
+        for (const segment of nestedFieldPath) {
+          if (nestedCorrelationKey == null) break
+          nestedCorrelationKey = (nestedCorrelationKey as any)[segment]
+        }
+
+        if (nestedCorrelationKey != null) {
+          state.nestedRoutingIndex!.set(nestedCorrelationKey, correlationKey)
+          let reverseSet = state.nestedRoutingReverseIndex!.get(correlationKey)
+          if (!reverseSet) {
+            reverseSet = new Set()
+            state.nestedRoutingReverseIndex!.set(correlationKey, reverseSet)
+          }
+          reverseSet.add(nestedCorrelationKey)
+        }
+      } else if (change.deletes > 0 && change.inserts === 0) {
+        // Remove from routing index
+        let nestedCorrelationKey: unknown = change.value
+        for (const segment of nestedFieldPath) {
+          if (nestedCorrelationKey == null) break
+          nestedCorrelationKey = (nestedCorrelationKey as any)[segment]
+        }
+
+        if (nestedCorrelationKey != null) {
+          state.nestedRoutingIndex!.delete(nestedCorrelationKey)
+          const reverseSet = state.nestedRoutingReverseIndex!.get(correlationKey)
+          if (reverseSet) {
+            reverseSet.delete(nestedCorrelationKey)
+            if (reverseSet.size === 0) {
+              state.nestedRoutingReverseIndex!.delete(correlationKey)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Cleans routing index entries when a parent is deleted.
+ * Uses the reverse index to find and remove all nested routing entries.
+ */
+function cleanRoutingIndexOnDelete(
+  state: IncludesOutputState,
+  correlationKey: unknown,
+): void {
+  if (!state.nestedRoutingReverseIndex) return
+
+  const nestedKeys = state.nestedRoutingReverseIndex.get(correlationKey)
+  if (nestedKeys) {
+    for (const nestedKey of nestedKeys) {
+      state.nestedRoutingIndex!.delete(nestedKey)
+    }
+    state.nestedRoutingReverseIndex.delete(correlationKey)
+  }
+}
+
+/**
+ * Recursively checks whether any nested buffer has pending changes.
+ */
+function hasNestedBufferChanges(
+  setups: Array<NestedIncludesSetup>,
+): boolean {
+  for (const setup of setups) {
+    if (setup.buffer.size > 0) return true
+    if (setup.nestedSetups && hasNestedBufferChanges(setup.nestedSetups)) return true
+  }
+  return false
 }
 
 /**
@@ -1324,6 +1585,7 @@ function createChildCollectionEntry(
   fieldName: string,
   correlationKey: unknown,
   hasOrderBy: boolean,
+  nestedSetups?: Array<NestedIncludesSetup>,
 ): ChildCollectionEntry {
   const resultKeys = new WeakMap<object, unknown>()
   const orderByIndices = hasOrderBy ? new WeakMap<object, string>() : null
@@ -1349,7 +1611,7 @@ function createChildCollectionEntry(
     startSync: true,
   })
 
-  return {
+  const entry: ChildCollectionEntry = {
     collection,
     get syncMethods() {
       return syncMethods
@@ -1357,12 +1619,22 @@ function createChildCollectionEntry(
     resultKeys,
     orderByIndices,
   }
+
+  if (nestedSetups) {
+    entry.includesStates = createPerEntryIncludesStates(nestedSetups)
+  }
+
+  return entry
 }
 
 /**
- * Recursively flushes includes state, processing child changes and creating
- * child Collections. Handles nested includes (e.g., comments inside issues)
- * by recursing into nested state after flushing each level.
+ * Flushes includes state using a bottom-up per-entry approach.
+ * Five phases ensure correct ordering:
+ *   1. Parent INSERTs — create child entries with per-entry nested states
+ *   2. Child changes — apply to child Collections, update routing index
+ *   3. Drain nested buffers — route buffered grandchild changes to per-entry states
+ *   4. Flush per-entry states — recursively flush nested includes on each entry
+ *   5. Parent DELETEs — clean up child entries and routing index
  */
 function flushIncludesState(
   includesState: Array<IncludesOutputState>,
@@ -1371,8 +1643,7 @@ function flushIncludesState(
   parentChanges: Map<unknown, Changes<any>> | null,
 ): void {
   for (const state of includesState) {
-    // For parent INSERTs: ensure a child Collection exists for every parent,
-    // even those with no children (produces an empty child Collection).
+    // Phase 1: Parent INSERTs — ensure a child Collection exists for every parent
     if (parentChanges) {
       const fieldPath = state.correlationField.path.slice(1) // remove alias prefix
       for (const [parentKey, changes] of parentChanges) {
@@ -1393,6 +1664,7 @@ function flushIncludesState(
                 state.fieldName,
                 correlationKey,
                 state.hasOrderBy,
+                state.nestedSetups,
               )
               state.childRegistry.set(correlationKey, entry)
             }
@@ -1412,7 +1684,10 @@ function flushIncludesState(
       }
     }
 
-    // Flush child changes: route to correct child Collections
+    // Phase 2: Child changes — apply to child Collections
+    // Track which entries had child changes and capture their childChanges maps
+    const entriesWithChildChanges = new Map<unknown, { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }>()
+
     if (state.pendingChildChanges.size > 0) {
       for (const [correlationKey, childChanges] of state.pendingChildChanges) {
         // Ensure child Collection exists for this correlation key
@@ -1423,6 +1698,7 @@ function flushIncludesState(
             state.fieldName,
             correlationKey,
             state.hasOrderBy,
+            state.nestedSetups,
           )
           state.childRegistry.set(correlationKey, entry)
         }
@@ -1461,21 +1737,44 @@ function flushIncludesState(
           entry.syncMethods.commit()
         }
 
-        // Recursively process nested includes (e.g., comments inside issues)
-        if (state.nestedIncludesState) {
-          flushIncludesState(
-            state.nestedIncludesState,
-            entry.collection,
-            entry.collection.id,
-            childChanges,
-          )
-        }
+        // Update routing index for nested includes
+        updateRoutingIndex(state, correlationKey, childChanges)
+
+        entriesWithChildChanges.set(correlationKey, { entry, childChanges })
       }
       state.pendingChildChanges.clear()
     }
 
-    // For parent DELETEs: dispose child Collections and clean up reverse index
-    // so re-added parents get a fresh empty child Collection instead of reusing stale data.
+    // Phase 3: Drain nested buffers — route buffered grandchild changes to per-entry states
+    const dirtyFromBuffers = drainNestedBuffers(state)
+
+    // Phase 4: Flush per-entry states
+    // First: entries that had child changes in Phase 2
+    for (const [, { entry, childChanges }] of entriesWithChildChanges) {
+      if (entry.includesStates) {
+        flushIncludesState(
+          entry.includesStates,
+          entry.collection,
+          entry.collection.id,
+          childChanges,
+        )
+      }
+    }
+    // Then: entries that only had buffer-routed changes (no child changes at this level)
+    for (const correlationKey of dirtyFromBuffers) {
+      if (entriesWithChildChanges.has(correlationKey)) continue
+      const entry = state.childRegistry.get(correlationKey)
+      if (entry?.includesStates) {
+        flushIncludesState(
+          entry.includesStates,
+          entry.collection,
+          entry.collection.id,
+          null,
+        )
+      }
+    }
+
+    // Phase 5: Parent DELETEs — dispose child Collections and clean up
     if (parentChanges) {
       const fieldPath = state.correlationField.path.slice(1)
       for (const [parentKey, changes] of parentChanges) {
@@ -1486,6 +1785,7 @@ function flushIncludesState(
             correlationKey = (correlationKey as any)[segment]
           }
           if (correlationKey != null) {
+            cleanRoutingIndexOnDelete(state, correlationKey)
             state.childRegistry.delete(correlationKey)
             // Clean up reverse index
             const parentKeys = state.correlationToParentKeys.get(correlationKey)
@@ -1500,6 +1800,20 @@ function flushIncludesState(
       }
     }
   }
+}
+
+/**
+ * Checks whether any includes state has pending changes that need to be flushed.
+ * Checks direct pending child changes and shared nested buffers.
+ */
+function hasPendingIncludesChanges(
+  states: Array<IncludesOutputState>,
+): boolean {
+  for (const state of states) {
+    if (state.pendingChildChanges.size > 0) return true
+    if (state.nestedSetups && hasNestedBufferChanges(state.nestedSetups)) return true
+  }
+  return false
 }
 
 /**
