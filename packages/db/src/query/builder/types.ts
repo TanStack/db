@@ -37,6 +37,9 @@ export interface Context {
   baseSchema: ContextSchema
   // The current schema available (includes joined collections)
   schema: ContextSchema
+  // Optional schema used for query refs in where/orderBy callbacks.
+  // When omitted, refs default to the main `schema`.
+  querySchema?: ContextSchema
   // the name of the source that was used in the from clause
   fromSourceName: string
   // Whether this query has joins
@@ -85,6 +88,21 @@ export type Source = {
 export type InferCollectionType<T> =
   T extends CollectionImpl<infer TOutput, any, any, any, any> ? TOutput : never
 
+declare const QuerySchemaBrand: unique symbol
+
+export type CollectionWithQuerySchema<
+  TCollection extends CollectionImpl<any, any, any, any, any>,
+  TQuerySchema extends object,
+> = TCollection & {
+  readonly [QuerySchemaBrand]: TQuerySchema
+}
+
+type InferCollectionQuerySchema<T> = T extends {
+  readonly [QuerySchemaBrand]: infer TQuerySchema
+}
+  ? TQuerySchema
+  : InferCollectionType<T>
+
 /**
  * SchemaFromSource - Converts a Source definition into a ContextSchema
  *
@@ -103,6 +121,14 @@ export type SchemaFromSource<T extends Source> = Prettify<{
       : never
 }>
 
+export type QuerySchemaFromSource<T extends Source> = Prettify<{
+  [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any>
+    ? InferCollectionQuerySchema<T[K]>
+    : T[K] extends QueryBuilder<infer TContext>
+      ? GetQueryResult<TContext>
+      : never
+}>
+
 /**
  * GetAliases - Extracts all table aliases available in a query context
  *
@@ -110,6 +136,11 @@ export type SchemaFromSource<T extends Source> = Prettify<{
  * all table/source aliases that can be referenced in the current query.
  */
 export type GetAliases<TContext extends Context> = keyof TContext[`schema`]
+
+type ResolveQuerySchema<TContext extends Context> =
+  TContext[`querySchema`] extends ContextSchema
+    ? TContext[`querySchema`]
+    : TContext[`schema`]
 
 /**
  * WhereCallback - Type for where/having clause callback functions
@@ -122,6 +153,10 @@ export type GetAliases<TContext extends Context> = keyof TContext[`schema`]
  */
 export type WhereCallback<TContext extends Context> = (
   refs: RefsForContext<TContext>,
+) => any
+
+export type QueryWhereCallback<TContext extends Context> = (
+  refs: QueryRefsForContext<TContext>,
 ) => any
 
 /**
@@ -290,7 +325,7 @@ type NeedsExtraction<T> = T extends
  * Example: `(refs) => refs.users.createdAt`
  */
 export type OrderByCallback<TContext extends Context> = (
-  refs: RefsForContext<TContext>,
+  refs: QueryRefsForContext<TContext>,
 ) => any
 
 /**
@@ -388,27 +423,25 @@ export type FunctionalHavingRow<TContext extends Context> = TContext[`schema`] &
  * After `select()` is called, this type also includes `$selected` which provides access
  * to the SELECT result fields via `$selected.fieldName` syntax.
  */
-export type RefsForContext<TContext extends Context> = {
-  [K in keyof TContext[`schema`]]: IsNonExactOptional<
-    TContext[`schema`][K]
-  > extends true
-    ? IsNonExactNullable<TContext[`schema`][K]> extends true
-      ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
-          // Extract the non-undefined and non-null part and place undefined outside
-          Ref<NonNullable<TContext[`schema`][K]>> | undefined
-      : // T is optional (T | undefined) but not exactly undefined, and not nullable
-          // Extract the non-undefined part and place undefined outside
-          Ref<NonUndefined<TContext[`schema`][K]>> | undefined
-    : IsNonExactNullable<TContext[`schema`][K]> extends true
-      ? // T is nullable (T | null) but not exactly null, and not optional
-        // Extract the non-null part and place null outside
-        Ref<NonNull<TContext[`schema`][K]>> | null
-      : // T is exactly undefined, exactly null, or neither optional nor nullable
-        // Wrap in RefProxy as-is (includes exact undefined, exact null, and normal types)
-        Ref<TContext[`schema`][K]>
-} & (TContext[`result`] extends object
-  ? { $selected: Ref<TContext[`result`]> }
-  : {})
+type RefsForSchema<TSchema extends ContextSchema, TResult> = {
+  [K in keyof TSchema]: IsNonExactOptional<TSchema[K]> extends true
+    ? IsNonExactNullable<TSchema[K]> extends true
+      ? Ref<NonNullable<TSchema[K]>> | undefined
+      : Ref<NonUndefined<TSchema[K]>> | undefined
+    : IsNonExactNullable<TSchema[K]> extends true
+      ? Ref<NonNull<TSchema[K]>> | null
+      : Ref<TSchema[K]>
+} & (TResult extends object ? { $selected: Ref<TResult> } : {})
+
+export type RefsForContext<TContext extends Context> = RefsForSchema<
+  TContext[`schema`],
+  TContext[`result`]
+>
+
+export type QueryRefsForContext<TContext extends Context> = RefsForSchema<
+  ResolveQuerySchema<TContext>,
+  TContext[`result`]
+>
 
 /**
  * Type Detection Helpers
@@ -574,12 +607,19 @@ export type MergeContextWithJoinType<
   TContext extends Context,
   TNewSchema extends ContextSchema,
   TJoinType extends `inner` | `left` | `right` | `full` | `outer` | `cross`,
+  TNewQuerySchema extends ContextSchema = TNewSchema,
 > = {
   baseSchema: TContext[`baseSchema`]
   // Apply optionality immediately to the schema
   schema: ApplyJoinOptionalityToMergedSchema<
     TContext[`schema`],
     TNewSchema,
+    TJoinType,
+    TContext[`fromSourceName`]
+  >
+  querySchema: ApplyJoinOptionalityToMergedSchema<
+    ResolveQuerySchema<TContext>,
+    TNewQuerySchema,
     TJoinType,
     TContext[`fromSourceName`]
   >
@@ -683,6 +723,14 @@ export type GetResult<TContext extends Context> = Prettify<
         TContext[`schema`]
       : // Single table query - return the specific table
         TContext[`schema`][TContext[`fromSourceName`]]
+>
+
+export type GetQueryResult<TContext extends Context> = Prettify<
+  TContext[`result`] extends object
+    ? TContext[`result`]
+    : TContext[`hasJoins`] extends true
+      ? ResolveQuerySchema<TContext>
+      : ResolveQuerySchema<TContext>[TContext[`fromSourceName`]]
 >
 
 /**
@@ -807,10 +855,12 @@ export type HasJoinType<
 export type MergeContextForJoinCallback<
   TContext extends Context,
   TNewSchema extends ContextSchema,
+  TNewQuerySchema extends ContextSchema = TNewSchema,
 > = {
   baseSchema: TContext[`baseSchema`]
   // Merge schemas without applying join optionality - both are non-optional in join condition
   schema: TContext[`schema`] & TNewSchema
+  querySchema: ResolveQuerySchema<TContext> & TNewQuerySchema
   fromSourceName: TContext[`fromSourceName`]
   hasJoins: true
   joinTypes: TContext[`joinTypes`] extends Record<string, any>

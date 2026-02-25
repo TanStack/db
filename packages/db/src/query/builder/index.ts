@@ -42,6 +42,9 @@ import type {
   MergeContextWithJoinType,
   OrderByCallback,
   OrderByOptions,
+  QueryRefsForContext,
+  QuerySchemaFromSource,
+  QueryWhereCallback,
   RefsForContext,
   ResultTypeFromSelect,
   SchemaFromSource,
@@ -138,6 +141,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   ): QueryBuilder<{
     baseSchema: SchemaFromSource<TSource>
     schema: SchemaFromSource<TSource>
+    querySchema: QuerySchemaFromSource<TSource>
     fromSourceName: keyof TSource & string
     hasJoins: false
   }> {
@@ -182,11 +186,20 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   >(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<
+        TContext,
+        SchemaFromSource<TSource>,
+        QuerySchemaFromSource<TSource>
+      >
     >,
     type: TJoinType = `left` as TJoinType,
   ): QueryBuilder<
-    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, TJoinType>
+    MergeContextWithJoinType<
+      TContext,
+      SchemaFromSource<TSource>,
+      TJoinType,
+      QuerySchemaFromSource<TSource>
+    >
   > {
     const [alias, from] = this._createRefForSource(source, `join clause`)
 
@@ -194,7 +207,11 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
     const currentAliases = this._getCurrentAliases()
     const newAliases = [...currentAliases, alias]
     const refProxy = createRefProxy(newAliases) as RefsForContext<
-      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<
+        TContext,
+        SchemaFromSource<TSource>,
+        QuerySchemaFromSource<TSource>
+      >
     >
 
     // Get the join condition expression
@@ -249,10 +266,19 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   leftJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<
+        TContext,
+        SchemaFromSource<TSource>,
+        QuerySchemaFromSource<TSource>
+      >
     >,
   ): QueryBuilder<
-    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `left`>
+    MergeContextWithJoinType<
+      TContext,
+      SchemaFromSource<TSource>,
+      `left`,
+      QuerySchemaFromSource<TSource>
+    >
   > {
     return this.join(source, onCallback, `left`)
   }
@@ -275,10 +301,19 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   rightJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<
+        TContext,
+        SchemaFromSource<TSource>,
+        QuerySchemaFromSource<TSource>
+      >
     >,
   ): QueryBuilder<
-    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `right`>
+    MergeContextWithJoinType<
+      TContext,
+      SchemaFromSource<TSource>,
+      `right`,
+      QuerySchemaFromSource<TSource>
+    >
   > {
     return this.join(source, onCallback, `right`)
   }
@@ -301,10 +336,19 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   innerJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<
+        TContext,
+        SchemaFromSource<TSource>,
+        QuerySchemaFromSource<TSource>
+      >
     >,
   ): QueryBuilder<
-    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `inner`>
+    MergeContextWithJoinType<
+      TContext,
+      SchemaFromSource<TSource>,
+      `inner`,
+      QuerySchemaFromSource<TSource>
+    >
   > {
     return this.join(source, onCallback, `inner`)
   }
@@ -327,10 +371,19 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   fullJoin<TSource extends Source>(
     source: TSource,
     onCallback: JoinOnCallback<
-      MergeContextForJoinCallback<TContext, SchemaFromSource<TSource>>
+      MergeContextForJoinCallback<
+        TContext,
+        SchemaFromSource<TSource>,
+        QuerySchemaFromSource<TSource>
+      >
     >,
   ): QueryBuilder<
-    MergeContextWithJoinType<TContext, SchemaFromSource<TSource>, `full`>
+    MergeContextWithJoinType<
+      TContext,
+      SchemaFromSource<TSource>,
+      `full`,
+      QuerySchemaFromSource<TSource>
+    >
   > {
     return this.join(source, onCallback, `full`)
   }
@@ -363,9 +416,9 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    *   .where(({users}) => eq(users.active, true))
    * ```
    */
-  where(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
+  where(callback: QueryWhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
-    const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
+    const refProxy = createRefProxy(aliases) as QueryRefsForContext<TContext>
     const expression = callback(refProxy)
 
     // Validate that the callback returned a valid expression
@@ -691,7 +744,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
       // TODO: enforcing return only one result with also a default orderBy if none is specified
       // limit: 1,
       singleResult: true,
-    })
+    }) as any
   }
 
   // Helper methods
@@ -754,7 +807,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
           ...builder.query,
           select: undefined, // remove the select clause if it exists
           fnSelect: callback,
-        })
+        }) as any
       },
       /**
        * Filter rows using a function that operates on each row
@@ -780,7 +833,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
             ...(builder.query.fnWhere || []),
             callback as (row: NamespacedRow) => any,
           ],
-        })
+        }) as any
       },
       /**
        * Filter grouped rows using a function that operates on each aggregated row
@@ -808,7 +861,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
             ...(builder.query.fnHaving || []),
             callback as (row: NamespacedRow) => any,
           ],
-        })
+        }) as any
       },
     }
   }
