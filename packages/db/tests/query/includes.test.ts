@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import {
+  count,
   createLiveQueryCollection,
   eq,
   toArray,
@@ -1510,6 +1511,220 @@ describe(`includes subqueries`, () => {
       const alpha = collection.get(1) as any
       const issue11 = alpha.issues.find((i: any) => i.id === 11)
       expect(issue11.comments).toEqual([{ id: 110, body: `Great feature` }])
+    })
+  })
+
+  // Aggregates in child queries: the aggregate (e.g. count) should be computed
+  // per-parent, not globally across all parents. Currently, the correlation key
+  // is lost after GROUP BY, causing all child rows to aggregate into a single
+  // global result rather than per-parent results.
+  describe(`aggregates in child queries`, () => {
+    describe(`single-group aggregate: count issues per project (as Collection)`, () => {
+      function buildAggregateQuery() {
+        return createLiveQueryCollection((q) =>
+          q.from({ p: projects }).select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issueCount: q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({ total: count(i.id) })),
+          })),
+        )
+      }
+
+      it(`each project gets its own aggregate result`, async () => {
+        const collection = buildAggregateQuery()
+        await collection.preload()
+
+        // Alpha has 2 issues
+        const alpha = collection.get(1) as any
+        expect(childItems(alpha.issueCount, `total`)).toEqual([{ total: 2 }])
+
+        // Beta has 1 issue
+        const beta = collection.get(2) as any
+        expect(childItems(beta.issueCount, `total`)).toEqual([{ total: 1 }])
+
+        // Gamma has 0 issues — no matching rows means empty Collection
+        const gamma = collection.get(3) as any
+        expect(childItems(gamma.issueCount, `total`)).toEqual([])
+      })
+
+      it(`adding an issue updates the count for that parent`, async () => {
+        const collection = buildAggregateQuery()
+        await collection.preload()
+
+        // Gamma starts with 0 issues
+        expect(
+          childItems((collection.get(3) as any).issueCount, `total`),
+        ).toEqual([])
+
+        issues.utils.begin()
+        issues.utils.write({
+          type: `insert`,
+          value: { id: 30, projectId: 3, title: `Gamma issue` },
+        })
+        issues.utils.commit()
+
+        // Gamma now has 1 issue
+        expect(
+          childItems((collection.get(3) as any).issueCount, `total`),
+        ).toEqual([{ total: 1 }])
+
+        // Alpha should still have 2
+        expect(
+          childItems((collection.get(1) as any).issueCount, `total`),
+        ).toEqual([{ total: 2 }])
+      })
+
+      it(`removing an issue updates the count for that parent`, async () => {
+        const collection = buildAggregateQuery()
+        await collection.preload()
+
+        // Alpha starts with 2 issues
+        expect(
+          childItems((collection.get(1) as any).issueCount, `total`),
+        ).toEqual([{ total: 2 }])
+
+        issues.utils.begin()
+        issues.utils.write({
+          type: `delete`,
+          value: sampleIssues.find((i) => i.id === 10)!,
+        })
+        issues.utils.commit()
+
+        // Alpha now has 1 issue
+        expect(
+          childItems((collection.get(1) as any).issueCount, `total`),
+        ).toEqual([{ total: 1 }])
+
+        // Beta should still have 1
+        expect(
+          childItems((collection.get(2) as any).issueCount, `total`),
+        ).toEqual([{ total: 1 }])
+      })
+    })
+
+    describe(`single-group aggregate: count issues per project (as toArray)`, () => {
+      function buildAggregateToArrayQuery() {
+        return createLiveQueryCollection((q) =>
+          q.from({ p: projects }).select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issueCount: toArray(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({ total: count(i.id) })),
+            ),
+          })),
+        )
+      }
+
+      it(`each project gets its own aggregate result as an array`, async () => {
+        const collection = buildAggregateToArrayQuery()
+        await collection.preload()
+
+        // Alpha has 2 issues
+        const alpha = collection.get(1) as any
+        expect(alpha.issueCount).toEqual([{ total: 2 }])
+
+        // Beta has 1 issue
+        const beta = collection.get(2) as any
+        expect(beta.issueCount).toEqual([{ total: 1 }])
+
+        // Gamma has 0 issues — empty array
+        const gamma = collection.get(3) as any
+        expect(gamma.issueCount).toEqual([])
+      })
+    })
+
+    describe(`nested aggregate: count comments per issue (as Collection)`, () => {
+      function buildNestedAggregateQuery() {
+        return createLiveQueryCollection((q) =>
+          q.from({ p: projects }).select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                commentCount: q
+                  .from({ c: comments })
+                  .where(({ c }) => eq(c.issueId, i.id))
+                  .select(({ c }) => ({ total: count(c.id) })),
+              })),
+          })),
+        )
+      }
+
+      it(`each issue gets its own comment count`, async () => {
+        const collection = buildNestedAggregateQuery()
+        await collection.preload()
+
+        // Alpha's issues
+        const alpha = collection.get(1) as any
+        const issue10 = alpha.issues.get(10)
+        expect(childItems(issue10.commentCount, `total`)).toEqual([
+          { total: 2 },
+        ])
+
+        const issue11 = alpha.issues.get(11)
+        // Issue 11 has 0 comments — empty Collection
+        expect(childItems(issue11.commentCount, `total`)).toEqual([])
+
+        // Beta's issue
+        const beta = collection.get(2) as any
+        const issue20 = beta.issues.get(20)
+        expect(childItems(issue20.commentCount, `total`)).toEqual([
+          { total: 1 },
+        ])
+      })
+    })
+
+    describe(`nested aggregate: count comments per issue (as toArray)`, () => {
+      function buildNestedAggregateToArrayQuery() {
+        return createLiveQueryCollection((q) =>
+          q.from({ p: projects }).select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+                commentCount: toArray(
+                  q
+                    .from({ c: comments })
+                    .where(({ c }) => eq(c.issueId, i.id))
+                    .select(({ c }) => ({ total: count(c.id) })),
+                ),
+              })),
+          })),
+        )
+      }
+
+      it(`each issue gets its own comment count as an array`, async () => {
+        const collection = buildNestedAggregateToArrayQuery()
+        await collection.preload()
+
+        // Alpha's issues
+        const alpha = collection.get(1) as any
+        const issue10 = alpha.issues.get(10)
+        expect(issue10.commentCount).toEqual([{ total: 2 }])
+
+        const issue11 = alpha.issues.get(11)
+        // Issue 11 has 0 comments — empty array
+        expect(issue11.commentCount).toEqual([])
+
+        // Beta's issue
+        const beta = collection.get(2) as any
+        const issue20 = beta.issues.get(20)
+        expect(issue20.commentCount).toEqual([{ total: 1 }])
+      })
     })
   })
 })
