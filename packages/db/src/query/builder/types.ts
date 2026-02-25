@@ -9,6 +9,7 @@ import type {
   Value,
 } from '../ir.js'
 import type { QueryBuilder } from './index.js'
+import type { ToArrayWrapper } from './functions.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -174,6 +175,7 @@ type SelectValue =
   | undefined // Optional values
   | { [key: string]: SelectValue }
   | Array<RefLeaf<any>>
+  | ToArrayWrapper // toArray() wrapped subquery
 
 // Recursive shape for select objects allowing nested projections
 type SelectShape = { [key: string]: SelectValue | SelectShape }
