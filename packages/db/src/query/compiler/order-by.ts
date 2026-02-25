@@ -1,4 +1,7 @@
-import { groupedOrderByWithFractionalIndex, orderByWithFractionalIndex } from '@tanstack/db-ivm'
+import {
+  groupedOrderByWithFractionalIndex,
+  orderByWithFractionalIndex,
+} from '@tanstack/db-ivm'
 import { defaultComparator, makeComparator } from '../../utils/comparison.js'
 import { PropRef, followRef } from '../ir.js'
 import { ensureIndexForField } from '../../indexes/auto-index.js'
@@ -306,17 +309,15 @@ export function processOrderBy(
         setWindowFn: (
           windowFn: (options: { offset?: number; limit?: number }) => void,
         ) => {
-          setWindowFn(
-            (options) => {
-              windowFn(options)
-              if (orderByOptimizationInfo) {
-                orderByOptimizationInfo.offset =
-                  options.offset ?? orderByOptimizationInfo.offset
-                orderByOptimizationInfo.limit =
-                  options.limit ?? orderByOptimizationInfo.limit
-              }
-            },
-          )
+          setWindowFn((options) => {
+            windowFn(options)
+            if (orderByOptimizationInfo) {
+              orderByOptimizationInfo.offset =
+                options.offset ?? orderByOptimizationInfo.offset
+              orderByOptimizationInfo.limit =
+                options.limit ?? orderByOptimizationInfo.limit
+            }
+          })
         },
       }),
     )

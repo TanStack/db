@@ -113,19 +113,17 @@ describe(`includes subqueries`, () => {
 
   function buildIncludesQuery() {
     return createLiveQueryCollection((q) =>
-      q
-        .from({ p: projects })
-        .select(({ p }) => ({
-          id: p.id,
-          name: p.name,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id))
-            .select(({ i }) => ({
-              id: i.id,
-              title: i.title,
-            })),
-        })),
+      q.from({ p: projects }).select(({ p }) => ({
+        id: p.id,
+        name: p.name,
+        issues: q
+          .from({ i: issues })
+          .where(({ i }) => eq(i.projectId, p.id))
+          .select(({ i }) => ({
+            id: i.id,
+            title: i.title,
+          })),
+      })),
     )
   }
 
@@ -155,8 +153,7 @@ describe(`includes subqueries`, () => {
         },
       ])
     })
-
-})
+  })
 
   describe(`reactivity`, () => {
     it(`adding a child updates the parent's child collection`, async () => {
@@ -299,20 +296,18 @@ describe(`includes subqueries`, () => {
   describe(`ordered child queries`, () => {
     it(`child collection respects orderBy on the child query`, async () => {
       const collection = createLiveQueryCollection((q) =>
-        q
-          .from({ p: projects })
-          .select(({ p }) => ({
-            id: p.id,
-            name: p.name,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .orderBy(({ i }) => i.title, `desc`)
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-              })),
-          })),
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .orderBy(({ i }) => i.title, `desc`)
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+            })),
+        })),
       )
 
       await collection.preload()
@@ -338,20 +333,18 @@ describe(`includes subqueries`, () => {
 
     it(`newly inserted children appear in the correct order`, async () => {
       const collection = createLiveQueryCollection((q) =>
-        q
-          .from({ p: projects })
-          .select(({ p }) => ({
-            id: p.id,
-            name: p.name,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .orderBy(({ i }) => i.title, `asc`)
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-              })),
-          })),
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .orderBy(({ i }) => i.title, `asc`)
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+            })),
+        })),
       )
 
       await collection.preload()
@@ -382,21 +375,19 @@ describe(`includes subqueries`, () => {
   describe(`ordered child queries with limit`, () => {
     it(`limits child collection to N items per parent`, async () => {
       const collection = createLiveQueryCollection((q) =>
-        q
-          .from({ p: projects })
-          .select(({ p }) => ({
-            id: p.id,
-            name: p.name,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .orderBy(({ i }) => i.title, `asc`)
-              .limit(1)
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-              })),
-          })),
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .orderBy(({ i }) => i.title, `asc`)
+            .limit(1)
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+            })),
+        })),
       )
 
       await collection.preload()
@@ -420,21 +411,19 @@ describe(`includes subqueries`, () => {
 
     it(`inserting a child that displaces an existing one respects the limit`, async () => {
       const collection = createLiveQueryCollection((q) =>
-        q
-          .from({ p: projects })
-          .select(({ p }) => ({
-            id: p.id,
-            name: p.name,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .orderBy(({ i }) => i.title, `asc`)
-              .limit(1)
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-              })),
-          })),
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .orderBy(({ i }) => i.title, `asc`)
+            .limit(1)
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+            })),
+        })),
       )
 
       await collection.preload()
@@ -442,9 +431,7 @@ describe(`includes subqueries`, () => {
       // Alpha should have exactly 1 issue (limit 1): "Bug in Alpha"
       const alphaIssues = [...(collection.get(1) as any).issues.toArray]
       expect(alphaIssues).toHaveLength(1)
-      expect(alphaIssues).toEqual([
-        { id: 10, title: `Bug in Alpha` },
-      ])
+      expect(alphaIssues).toEqual([{ id: 10, title: `Bug in Alpha` }])
 
       // Insert an issue that comes before "Bug" alphabetically
       issues.utils.begin()
@@ -469,26 +456,24 @@ describe(`includes subqueries`, () => {
   describe(`nested includes`, () => {
     it(`supports two levels of includes`, async () => {
       const collection = createLiveQueryCollection((q) =>
-        q
-          .from({ p: projects })
-          .select(({ p }) => ({
-            id: p.id,
-            name: p.name,
-            issues: q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id))
-              .select(({ i }) => ({
-                id: i.id,
-                title: i.title,
-                comments: q
-                  .from({ c: comments })
-                  .where(({ c }) => eq(c.issueId, i.id))
-                  .select(({ c }) => ({
-                    id: c.id,
-                    body: c.body,
-                  })),
-              })),
-          })),
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              comments: q
+                .from({ c: comments })
+                .where(({ c }) => eq(c.issueId, i.id))
+                .select(({ c }) => ({
+                  id: c.id,
+                  body: c.body,
+                })),
+            })),
+        })),
       )
 
       await collection.preload()
