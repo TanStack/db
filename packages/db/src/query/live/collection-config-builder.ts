@@ -1412,6 +1412,7 @@ function createPerEntryIncludesStates(
       fieldName: setup.compilationResult.fieldName,
       childCorrelationField: setup.compilationResult.childCorrelationField,
       hasOrderBy: setup.compilationResult.hasOrderBy,
+      materializeAsArray: setup.compilationResult.materializeAsArray,
       childRegistry: new Map(),
       pendingChildChanges: new Map(),
       correlationToParentKeys: new Map(),
