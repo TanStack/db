@@ -1802,11 +1802,7 @@ function flushIncludesState(
     const toArrayReEmitKeys = state.materializeAsArray
       ? new Set([...(affectedCorrelationKeys || []), ...dirtyFromBuffers])
       : null
-    if (
-      parentSyncMethods &&
-      toArrayReEmitKeys &&
-      toArrayReEmitKeys.size > 0
-    ) {
+    if (parentSyncMethods && toArrayReEmitKeys && toArrayReEmitKeys.size > 0) {
       parentSyncMethods.begin()
       for (const correlationKey of toArrayReEmitKeys) {
         const parentKeys = state.correlationToParentKeys.get(correlationKey)

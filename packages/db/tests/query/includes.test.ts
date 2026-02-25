@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq, toArray } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -598,14 +602,27 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Bug in Alpha`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Bug in Alpha`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
             { id: 11, title: `Feature for Alpha`, comments: [] },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -631,13 +648,26 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Bug in Alpha`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Bug in Alpha`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -663,14 +693,27 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Renamed Bug`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Renamed Bug`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
             { id: 11, title: `Feature for Alpha`, comments: [] },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -684,21 +727,19 @@ describe(`includes subqueries`, () => {
   describe(`toArray`, () => {
     function buildToArrayQuery() {
       return createLiveQueryCollection((q) =>
-        q
-          .from({ p: projects })
-          .select(({ p }) => ({
-            id: p.id,
-            name: p.name,
-            issues: toArray(
-              q
-                .from({ i: issues })
-                .where(({ i }) => eq(i.projectId, p.id))
-                .select(({ i }) => ({
-                  id: i.id,
-                  title: i.title,
-                })),
-            ),
-          })),
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: toArray(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
+        })),
       )
     }
 
@@ -764,22 +805,20 @@ describe(`includes subqueries`, () => {
 
     it(`array respects ORDER BY`, async () => {
       const collection = createLiveQueryCollection((q) =>
-        q
-          .from({ p: projects })
-          .select(({ p }) => ({
-            id: p.id,
-            name: p.name,
-            issues: toArray(
-              q
-                .from({ i: issues })
-                .where(({ i }) => eq(i.projectId, p.id))
-                .orderBy(({ i }) => i.title, `asc`)
-                .select(({ i }) => ({
-                  id: i.id,
-                  title: i.title,
-                })),
-            ),
-          })),
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: toArray(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `asc`)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
+        })),
       )
 
       await collection.preload()
@@ -793,23 +832,21 @@ describe(`includes subqueries`, () => {
 
     it(`ordered toArray with limit applied per parent`, async () => {
       const collection = createLiveQueryCollection((q) =>
-        q
-          .from({ p: projects })
-          .select(({ p }) => ({
-            id: p.id,
-            name: p.name,
-            issues: toArray(
-              q
-                .from({ i: issues })
-                .where(({ i }) => eq(i.projectId, p.id))
-                .orderBy(({ i }) => i.title, `asc`)
-                .limit(1)
-                .select(({ i }) => ({
-                  id: i.id,
-                  title: i.title,
-                })),
-            ),
-          })),
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: toArray(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .orderBy(({ i }) => i.title, `asc`)
+              .limit(1)
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
+        })),
       )
 
       await collection.preload()
@@ -823,7 +860,6 @@ describe(`includes subqueries`, () => {
       const gamma = collection.get(3) as any
       expect(gamma.issues).toEqual([])
     })
-
   })
 
   describe(`nested includes: Collection → toArray`, () => {
@@ -928,14 +964,27 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Bug in Alpha`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Bug in Alpha`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
             { id: 11, title: `Feature for Alpha`, comments: [] },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -961,13 +1010,26 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Bug in Alpha`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Bug in Alpha`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -993,14 +1055,27 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Renamed Bug`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Renamed Bug`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
             { id: 11, title: `Feature for Alpha`, comments: [] },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -1044,14 +1119,10 @@ describe(`includes subqueries`, () => {
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
 
-      const sortedIssues = alpha.issues.sort(
-        (a: any, b: any) => a.id - b.id,
-      )
+      const sortedIssues = alpha.issues.sort((a: any, b: any) => a.id - b.id)
       // comments should be Collections
       expect(sortedIssues[0].comments.toArray).toBeDefined()
-      expect(
-        childItems(sortedIssues[0].comments),
-      ).toEqual([
+      expect(childItems(sortedIssues[0].comments)).toEqual([
         { id: 100, body: `Looks bad` },
         { id: 101, body: `Fixed it` },
       ])
@@ -1116,13 +1187,26 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Bug in Alpha`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Bug in Alpha`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -1148,14 +1232,27 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Renamed Bug`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Renamed Bug`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
             { id: 11, title: `Feature for Alpha`, comments: [] },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -1201,9 +1298,7 @@ describe(`includes subqueries`, () => {
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
 
-      const sortedIssues = alpha.issues.sort(
-        (a: any, b: any) => a.id - b.id,
-      )
+      const sortedIssues = alpha.issues.sort((a: any, b: any) => a.id - b.id)
       expect(Array.isArray(sortedIssues[0].comments)).toBe(true)
       expect(
         sortedIssues[0].comments.sort((a: any, b: any) => a.id - b.id),
@@ -1265,14 +1360,27 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Bug in Alpha`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Bug in Alpha`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
             { id: 11, title: `Feature for Alpha`, comments: [] },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -1298,13 +1406,26 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Bug in Alpha`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Bug in Alpha`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
@@ -1330,14 +1451,27 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           issues: [
-            { id: 10, title: `Renamed Bug`, comments: [{ id: 100, body: `Looks bad` }, { id: 101, body: `Fixed it` }] },
+            {
+              id: 10,
+              title: `Renamed Bug`,
+              comments: [
+                { id: 100, body: `Looks bad` },
+                { id: 101, body: `Fixed it` },
+              ],
+            },
             { id: 11, title: `Feature for Alpha`, comments: [] },
           ],
         },
         {
           id: 2,
           name: `Beta`,
-          issues: [{ id: 20, title: `Bug in Beta`, comments: [{ id: 200, body: `Same bug` }] }],
+          issues: [
+            {
+              id: 20,
+              title: `Bug in Beta`,
+              comments: [{ id: 200, body: `Same bug` }],
+            },
+          ],
         },
         {
           id: 3,
