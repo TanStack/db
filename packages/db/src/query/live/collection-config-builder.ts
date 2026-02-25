@@ -824,6 +824,7 @@ export class CollectionConfigBuilder<
         hasOrderBy: entry.hasOrderBy,
         childRegistry: new Map(),
         pendingChildChanges: new Map(),
+        correlationToParentKeys: new Map(),
       }
 
       // Attach output callback on the child pipeline
@@ -1301,6 +1302,8 @@ type IncludesOutputState = {
   childRegistry: Map<unknown, ChildCollectionEntry>
   /** Pending child changes: correlationKey → Map<childKey, Changes> */
   pendingChildChanges: Map<unknown, Map<unknown, Changes<any>>>
+  /** Reverse index: correlation key → Set of parent collection keys */
+  correlationToParentKeys: Map<unknown, Set<unknown>>
   /** Nested includes state (for projects → issues → comments) */
   nestedIncludesState?: Array<IncludesOutputState>
 }
@@ -1372,7 +1375,7 @@ function flushIncludesState(
     // even those with no children (produces an empty child Collection).
     if (parentChanges) {
       const fieldPath = state.correlationField.path.slice(1) // remove alias prefix
-      for (const [_key, changes] of parentChanges) {
+      for (const [parentKey, changes] of parentChanges) {
         if (changes.inserts > 0) {
           const parentResult = changes.value
           // Extract the correlation key value from the parent result
@@ -1393,6 +1396,14 @@ function flushIncludesState(
               )
               state.childRegistry.set(correlationKey, entry)
             }
+            // Update reverse index: correlation key → parent keys
+            let parentKeys = state.correlationToParentKeys.get(correlationKey)
+            if (!parentKeys) {
+              parentKeys = new Set()
+              state.correlationToParentKeys.set(correlationKey, parentKeys)
+            }
+            parentKeys.add(parentKey)
+
             // Attach child Collection to the parent result
             parentResult[state.fieldName] =
               state.childRegistry.get(correlationKey)!.collection
@@ -1417,12 +1428,11 @@ function flushIncludesState(
         }
 
         // Attach the child Collection to ANY parent that has this correlation key
-        // by scanning the parent result collection
         attachChildCollectionToParent(
           parentCollection,
           state.fieldName,
           correlationKey,
-          state.correlationField,
+          state.correlationToParentKeys,
           entry.collection,
         )
 
@@ -1464,11 +1474,11 @@ function flushIncludesState(
       state.pendingChildChanges.clear()
     }
 
-    // For parent DELETEs: dispose child Collections so re-added parents
-    // get a fresh empty child Collection instead of reusing stale data.
+    // For parent DELETEs: dispose child Collections and clean up reverse index
+    // so re-added parents get a fresh empty child Collection instead of reusing stale data.
     if (parentChanges) {
       const fieldPath = state.correlationField.path.slice(1)
-      for (const [_key, changes] of parentChanges) {
+      for (const [parentKey, changes] of parentChanges) {
         if (changes.deletes > 0 && changes.inserts === 0) {
           let correlationKey: unknown = changes.value
           for (const segment of fieldPath) {
@@ -1477,6 +1487,15 @@ function flushIncludesState(
           }
           if (correlationKey != null) {
             state.childRegistry.delete(correlationKey)
+            // Clean up reverse index
+            const parentKeys =
+              state.correlationToParentKeys.get(correlationKey)
+            if (parentKeys) {
+              parentKeys.delete(parentKey)
+              if (parentKeys.size === 0) {
+                state.correlationToParentKeys.delete(correlationKey)
+              }
+            }
           }
         }
       }
@@ -1486,33 +1505,21 @@ function flushIncludesState(
 
 /**
  * Attaches a child Collection to parent rows that match a given correlation key.
- * Scans the parent collection to find matching parents and sets the field.
+ * Uses the reverse index to look up parent keys directly instead of scanning.
  */
 function attachChildCollectionToParent(
   parentCollection: Collection<any, any, any>,
   fieldName: string,
   correlationKey: unknown,
-  correlationField: PropRef,
+  correlationToParentKeys: Map<unknown, Set<unknown>>,
   childCollection: Collection<any, any, any>,
 ): void {
-  // Walk the parent collection's items to find those matching this correlation key
-  // The correlation field path has the alias prefix (e.g., ['project', 'id']),
-  // but at this point the parent result is the selected object, not namespaced.
-  // We need to find parents by their correlation value.
-  // Since the parent correlation field is e.g. project.id, and the selected result
-  // might have 'id' as a field, we use the correlation field path (minus alias).
-  const fieldPath = correlationField.path.slice(1) // remove alias prefix
+  const parentKeys = correlationToParentKeys.get(correlationKey)
+  if (!parentKeys) return
 
-  for (const [_key, item] of parentCollection) {
-    // Navigate to the correlation value on the parent result
-    let value: any = item
-    for (const segment of fieldPath) {
-      if (value == null) break
-      value = value[segment]
-    }
-
-    if (value === correlationKey) {
-      // Set the child Collection on this parent row
+  for (const parentKey of parentKeys) {
+    const item = parentCollection.get(parentKey as any)
+    if (item) {
       item[fieldName] = childCollection
     }
   }
