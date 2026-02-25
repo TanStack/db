@@ -454,8 +454,8 @@ describe(`includes subqueries`, () => {
   })
 
   describe(`nested includes`, () => {
-    it(`supports two levels of includes`, async () => {
-      const collection = createLiveQueryCollection((q) =>
+    function buildNestedQuery() {
+      return createLiveQueryCollection((q) =>
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           name: p.name,
@@ -475,7 +475,10 @@ describe(`includes subqueries`, () => {
             })),
         })),
       )
+    }
 
+    it(`supports two levels of includes`, async () => {
+      const collection = buildNestedQuery()
       await collection.preload()
 
       expect(toTree(collection)).toEqual([
@@ -514,6 +517,51 @@ describe(`includes subqueries`, () => {
           name: `Gamma`,
           issues: [],
         },
+      ])
+    })
+
+    it(`adding a grandchild (comment) updates the nested child collection`, async () => {
+      const collection = buildNestedQuery()
+      await collection.preload()
+
+      // Issue 11 (Feature for Alpha) has no comments initially
+      const alpha = collection.get(1) as any
+      const issue11 = alpha.issues.get(11)
+      expect(childItems(issue11.comments)).toEqual([])
+
+      // Add a comment to issue 11 — no issue or project changes
+      comments.utils.begin()
+      comments.utils.write({
+        type: `insert`,
+        value: { id: 110, issueId: 11, body: `Great feature` },
+      })
+      comments.utils.commit()
+
+      const issue11After = (collection.get(1) as any).issues.get(11)
+      expect(childItems(issue11After.comments)).toEqual([
+        { id: 110, body: `Great feature` },
+      ])
+    })
+
+    it(`removing a grandchild (comment) updates the nested child collection`, async () => {
+      const collection = buildNestedQuery()
+      await collection.preload()
+
+      // Issue 10 (Bug in Alpha) has 2 comments
+      const issue10 = (collection.get(1) as any).issues.get(10)
+      expect(childItems(issue10.comments)).toHaveLength(2)
+
+      // Remove one comment
+      comments.utils.begin()
+      comments.utils.write({
+        type: `delete`,
+        value: sampleComments.find((c) => c.id === 100)!,
+      })
+      comments.utils.commit()
+
+      const issue10After = (collection.get(1) as any).issues.get(10)
+      expect(childItems(issue10After.comments)).toEqual([
+        { id: 101, body: `Fixed it` },
       ])
     })
   })
