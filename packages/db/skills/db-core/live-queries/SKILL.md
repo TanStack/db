@@ -204,11 +204,18 @@ const topActiveUsers = createCollection(
 
 ## Common Mistakes
 
-### CRITICAL — Using === instead of eq() in where clauses
+### CRITICAL — Using JS expressions instead of operator functions in where clauses
 
 Wrong:
 
 ```typescript
+// Bare property reference — returns a Proxy, not a PropRef
+q.from({ t: todos }).where(({ t }) => t.completed)
+
+// Negation — evaluates to a boolean primitive
+q.from({ t: todos }).where(({ t }) => !t.completed)
+
+// Comparison operator — returns a boolean, not an expression object
 q.from({ t: todos }).where(({ t }) => t.completed === false)
 ```
 
@@ -217,12 +224,17 @@ Correct:
 ```typescript
 import { eq } from '@tanstack/db'
 
+q.from({ t: todos }).where(({ t }) => eq(t.completed, true))
 q.from({ t: todos }).where(({ t }) => eq(t.completed, false))
 ```
 
-JavaScript `===` returns a boolean, not an expression object. The query
-engine cannot build a filter predicate from a plain boolean. This throws
-`InvalidWhereExpressionError`.
+`.where()` requires expression objects created by operator functions
+(`eq()`, `gt()`, `and()`, etc.). It validates with `isExpressionLike()`,
+which checks for `Aggregate | Func | PropRef | Value` instances. Bare
+property refs return a Proxy (not a PropRef), `!prop` evaluates to a
+boolean, and `===` returns a boolean. All three throw
+`InvalidWhereExpressionError` at runtime. Always use `eq()` for boolean
+fields.
 
 Source: packages/db/src/query/builder/index.ts:375
 
