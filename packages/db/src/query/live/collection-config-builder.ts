@@ -1313,8 +1313,7 @@ function flushIncludesState(
           if (correlationKey != null) {
             state.childRegistry.delete(correlationKey)
             // Clean up reverse index
-            const parentKeys =
-              state.correlationToParentKeys.get(correlationKey)
+            const parentKeys = state.correlationToParentKeys.get(correlationKey)
             if (parentKeys) {
               parentKeys.delete(parentKey)
               if (parentKeys.size === 0) {
