@@ -151,6 +151,10 @@ collection.isReady() // boolean
 await collection.preload()
 ```
 
+## References
+
+- [references/schemas.md](references/schemas.md) — Schema validation deep-dive: TInput vs TOutput, transforms, defaults, cross-field validation, error handling
+
 ## Common Mistakes
 
 ### CRITICAL — queryFn returning empty array deletes all collection data

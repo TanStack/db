@@ -202,6 +202,10 @@ const topActiveUsers = createCollection(
 )
 ```
 
+## References
+
+- [references/operators.md](references/operators.md) — Full operator reference: comparison, logical, aggregate, string, and math functions with signatures and examples
+
 ## Common Mistakes
 
 ### CRITICAL — Using JS expressions instead of operator functions in where clauses

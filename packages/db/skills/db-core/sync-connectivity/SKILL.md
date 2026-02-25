@@ -205,6 +205,14 @@ Only adopt offline transactions when you genuinely need offline support.
 It adds complexity — PowerSync and RxDB handle their own local
 persistence, which is a separate concern from offline transaction queuing.
 
+## References
+
+- [references/electric.md](references/electric.md) — ElectricSQL adapter: config, txid matching, awaitTxId/awaitMatch, sync modes
+- [references/query.md](references/query.md) — TanStack Query adapter: config, refetch, direct writes, query state, on-demand mode
+- [references/powersync.md](references/powersync.md) — PowerSync adapter: SQLite persistence, schema overloads, serializer, deserialization
+- [references/rxdb.md](references/rxdb.md) — RxDB adapter: Observable-driven sync, storage-engine direct reads, automatic mutations
+- [references/trailbase.md](references/trailbase.md) — TrailBase adapter: event streaming, bidirectional type conversions, cursor pagination
+
 ## Common Mistakes
 
 ### CRITICAL — Electric txid queried outside mutation transaction
