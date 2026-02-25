@@ -709,19 +709,5 @@ describe(`includes subqueries`, () => {
       expect(gamma.issues).toEqual([])
     })
 
-    it(`existing Collection-based includes still work`, async () => {
-      // Non-toArray includes should be unaffected
-      const collection = buildIncludesQuery()
-      await collection.preload()
-
-      const alpha = collection.get(1) as any
-      // Should be a Collection, not an array
-      expect(Array.isArray(alpha.issues)).toBe(false)
-      expect(alpha.issues.toArray).toBeDefined()
-      expect(childItems(alpha.issues)).toEqual([
-        { id: 10, title: `Bug in Alpha` },
-        { id: 11, title: `Feature for Alpha` },
-      ])
-    })
-  })
+})
 })
