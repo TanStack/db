@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { createLiveQueryCollection, eq, toArray } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -562,6 +562,165 @@ describe(`includes subqueries`, () => {
       const issue10After = (collection.get(1) as any).issues.get(10)
       expect(childItems(issue10After.comments)).toEqual([
         { id: 101, body: `Fixed it` },
+      ])
+    })
+  })
+
+  describe(`toArray`, () => {
+    function buildToArrayQuery() {
+      return createLiveQueryCollection((q) =>
+        q
+          .from({ p: projects })
+          .select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: toArray(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                })),
+            ),
+          })),
+      )
+    }
+
+    it(`produces arrays on parent rows, not Collections`, async () => {
+      const collection = buildToArrayQuery()
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      expect(Array.isArray(alpha.issues)).toBe(true)
+      expect(alpha.issues.sort((a: any, b: any) => a.id - b.id)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+
+      const beta = collection.get(2) as any
+      expect(Array.isArray(beta.issues)).toBe(true)
+      expect(beta.issues).toEqual([{ id: 20, title: `Bug in Beta` }])
+    })
+
+    it(`empty parents get empty arrays`, async () => {
+      const collection = buildToArrayQuery()
+      await collection.preload()
+
+      const gamma = collection.get(3) as any
+      expect(Array.isArray(gamma.issues)).toBe(true)
+      expect(gamma.issues).toEqual([])
+    })
+
+    it(`adding a child re-emits the parent with updated array`, async () => {
+      const collection = buildToArrayQuery()
+      await collection.preload()
+
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 12, projectId: 1, title: `New Alpha issue` },
+      })
+      issues.utils.commit()
+
+      const alpha = collection.get(1) as any
+      expect(Array.isArray(alpha.issues)).toBe(true)
+      expect(alpha.issues.sort((a: any, b: any) => a.id - b.id)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+        { id: 12, title: `New Alpha issue` },
+      ])
+    })
+
+    it(`removing a child re-emits the parent with updated array`, async () => {
+      const collection = buildToArrayQuery()
+      await collection.preload()
+
+      issues.utils.begin()
+      issues.utils.write({
+        type: `delete`,
+        value: sampleIssues.find((i) => i.id === 10)!,
+      })
+      issues.utils.commit()
+
+      const alpha = collection.get(1) as any
+      expect(alpha.issues).toEqual([{ id: 11, title: `Feature for Alpha` }])
+    })
+
+    it(`array respects ORDER BY`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ p: projects })
+          .select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: toArray(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .orderBy(({ i }) => i.title, `asc`)
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                })),
+            ),
+          })),
+      )
+
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      expect(alpha.issues).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+    })
+
+    it(`ordered toArray with limit applied per parent`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q
+          .from({ p: projects })
+          .select(({ p }) => ({
+            id: p.id,
+            name: p.name,
+            issues: toArray(
+              q
+                .from({ i: issues })
+                .where(({ i }) => eq(i.projectId, p.id))
+                .orderBy(({ i }) => i.title, `asc`)
+                .limit(1)
+                .select(({ i }) => ({
+                  id: i.id,
+                  title: i.title,
+                })),
+            ),
+          })),
+      )
+
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      expect(alpha.issues).toEqual([{ id: 10, title: `Bug in Alpha` }])
+
+      const beta = collection.get(2) as any
+      expect(beta.issues).toEqual([{ id: 20, title: `Bug in Beta` }])
+
+      const gamma = collection.get(3) as any
+      expect(gamma.issues).toEqual([])
+    })
+
+    it(`existing Collection-based includes still work`, async () => {
+      // Non-toArray includes should be unaffected
+      const collection = buildIncludesQuery()
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      // Should be a Collection, not an array
+      expect(Array.isArray(alpha.issues)).toBe(false)
+      expect(alpha.issues.toArray).toBeDefined()
+      expect(childItems(alpha.issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
       ])
     })
   })
