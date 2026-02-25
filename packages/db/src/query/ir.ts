@@ -139,6 +139,7 @@ export class IncludesSubquery extends BaseExpression {
     public correlationField: PropRef, // Parent-side ref (e.g., project.id)
     public childCorrelationField: PropRef, // Child-side ref (e.g., issue.projectId)
     public fieldName: string, // Result field name (e.g., "issues")
+    public materializeAsArray: boolean = false, // When true, parent gets Array<T> instead of Collection<T>
   ) {
     super()
   }

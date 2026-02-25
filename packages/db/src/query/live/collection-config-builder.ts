@@ -788,6 +788,7 @@ export class CollectionConfigBuilder<
         config.collection,
         this.id,
         hasParentChanges ? changesToApply : null,
+        config,
       )
     }
 
@@ -820,6 +821,7 @@ export class CollectionConfigBuilder<
         correlationField: entry.correlationField,
         childCorrelationField: entry.childCorrelationField,
         hasOrderBy: entry.hasOrderBy,
+        materializeAsArray: entry.materializeAsArray,
         childRegistry: new Map(),
         pendingChildChanges: new Map(),
         correlationToParentKeys: new Map(),
@@ -1311,6 +1313,8 @@ type IncludesOutputState = {
   childCorrelationField: PropRef
   /** Whether the child query has an ORDER BY clause */
   hasOrderBy: boolean
+  /** When true, parent gets Array<T> instead of Collection<T> */
+  materializeAsArray: boolean
   /** Maps correlation key value → child Collection entry */
   childRegistry: Map<unknown, ChildCollectionEntry>
   /** Pending child changes: correlationKey → Map<childKey, Changes> */
@@ -1411,6 +1415,7 @@ function createPerEntryIncludesStates(
       correlationField: setup.compilationResult.correlationField,
       childCorrelationField: setup.compilationResult.childCorrelationField,
       hasOrderBy: setup.compilationResult.hasOrderBy,
+      materializeAsArray: setup.compilationResult.materializeAsArray,
       childRegistry: new Map(),
       pendingChildChanges: new Map(),
       correlationToParentKeys: new Map(),
@@ -1641,6 +1646,7 @@ function flushIncludesState(
   parentCollection: Collection<any, any, any>,
   parentId: string,
   parentChanges: Map<unknown, Changes<any>> | null,
+  parentSyncMethods: SyncMethods<any> | null,
 ): void {
   for (const state of includesState) {
     // Phase 1: Parent INSERTs — ensure a child Collection exists for every parent
@@ -1676,13 +1682,24 @@ function flushIncludesState(
             }
             parentKeys.add(parentKey)
 
-            // Attach child Collection to the parent result
-            parentResult[state.fieldName] =
-              state.childRegistry.get(correlationKey)!.collection
+            // Attach child Collection (or array snapshot for toArray) to the parent result
+            if (state.materializeAsArray) {
+              parentResult[state.fieldName] = [
+                ...state.childRegistry.get(correlationKey)!.collection.toArray,
+              ]
+            } else {
+              parentResult[state.fieldName] =
+                state.childRegistry.get(correlationKey)!.collection
+            }
           }
         }
       }
     }
+
+    // Track affected correlation keys for toArray re-emit (before clearing pendingChildChanges)
+    const affectedCorrelationKeys = state.materializeAsArray
+      ? new Set<unknown>(state.pendingChildChanges.keys())
+      : null
 
     // Phase 2: Child changes — apply to child Collections
     // Track which entries had child changes and capture their childChanges maps
@@ -1690,7 +1707,6 @@ function flushIncludesState(
       unknown,
       { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }
     >()
-
     if (state.pendingChildChanges.size > 0) {
       for (const [correlationKey, childChanges] of state.pendingChildChanges) {
         // Ensure child Collection exists for this correlation key
@@ -1706,14 +1722,17 @@ function flushIncludesState(
           state.childRegistry.set(correlationKey, entry)
         }
 
-        // Attach the child Collection to ANY parent that has this correlation key
-        attachChildCollectionToParent(
-          parentCollection,
-          state.fieldName,
-          correlationKey,
-          state.correlationToParentKeys,
-          entry.collection,
-        )
+        // For non-toArray: attach the child Collection to ANY parent that has this correlation key
+        // For toArray: skip — the array snapshot is set during re-emit below
+        if (!state.materializeAsArray) {
+          attachChildCollectionToParent(
+            parentCollection,
+            state.fieldName,
+            correlationKey,
+            state.correlationToParentKeys,
+            entry.collection,
+          )
+        }
 
         // Apply child changes to the child Collection
         if (entry.syncMethods) {
@@ -1760,6 +1779,7 @@ function flushIncludesState(
           entry.collection,
           entry.collection.id,
           childChanges,
+          entry.syncMethods,
         )
       }
     }
@@ -1773,8 +1793,32 @@ function flushIncludesState(
           entry.collection,
           entry.collection.id,
           null,
+          entry.syncMethods,
         )
       }
+    }
+
+    // For toArray entries: re-emit affected parents with updated array snapshots
+    const toArrayReEmitKeys = state.materializeAsArray
+      ? new Set([...(affectedCorrelationKeys || []), ...dirtyFromBuffers])
+      : null
+    if (parentSyncMethods && toArrayReEmitKeys && toArrayReEmitKeys.size > 0) {
+      parentSyncMethods.begin()
+      for (const correlationKey of toArrayReEmitKeys) {
+        const parentKeys = state.correlationToParentKeys.get(correlationKey)
+        if (!parentKeys) continue
+        const entry = state.childRegistry.get(correlationKey)
+        for (const parentKey of parentKeys) {
+          const item = parentCollection.get(parentKey as any)
+          if (item) {
+            if (entry) {
+              item[state.fieldName] = [...entry.collection.toArray]
+            }
+            parentSyncMethods.write({ value: item, type: `update` })
+          }
+        }
+      }
+      parentSyncMethods.commit()
     }
 
     // Phase 5: Parent DELETEs — dispose child Collections and clean up
