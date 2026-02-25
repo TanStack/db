@@ -33,19 +33,22 @@ export class KeyScheduler {
           return []
         }
 
-        // Find the first transaction that's ready to run
-        const readyTransaction = this.pendingTransactions.find((tx) =>
-          this.isReadyToRun(tx),
-        )
+        const firstTransaction = this.pendingTransactions[0]
 
-        if (readyTransaction) {
-          span.setAttribute(`result`, `found`)
-          span.setAttribute(`transaction.id`, readyTransaction.id)
-        } else {
-          span.setAttribute(`result`, `none_ready`)
+        if (!firstTransaction) {
+          span.setAttribute(`result`, `empty`)
+          return []
         }
 
-        return readyTransaction ? [readyTransaction] : []
+        if (!this.isReadyToRun(firstTransaction)) {
+          span.setAttribute(`result`, `waiting_for_first`)
+          span.setAttribute(`transaction.id`, firstTransaction.id)
+          return []
+        }
+
+        span.setAttribute(`result`, `found`)
+        span.setAttribute(`transaction.id`, firstTransaction.id)
+        return [firstTransaction]
       },
     )
   }
