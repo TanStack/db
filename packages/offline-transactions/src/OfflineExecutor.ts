@@ -220,11 +220,6 @@ export class OfflineExecutor {
 
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
       if (this.isOfflineEnabled && this.executor) {
-        if (!this.isOnline()) {
-          return
-        }
-
-        // Reset retry delays so transactions can execute immediately when back online
         this.executor.resetRetryDelays()
         this.executor.executeAll().catch((error) => {
           console.warn(
@@ -548,10 +543,6 @@ export class OfflineExecutor {
     }
     await this.outbox.clear()
     this.executor.clear()
-  }
-
-  notifyOnline(): void {
-    this.onlineDetector.notifyOnline()
   }
 
   getPendingCount(): number {

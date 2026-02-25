@@ -152,7 +152,7 @@ describe(`offline executor end-to-end`, () => {
 
     // Now bring the system back online
     online = true
-    env.executor.notifyOnline()
+    env.executor.getOnlineDetector().notifyOnline()
 
     // Wait for the retry to succeed
     await waitUntil(() => env.mutationCalls.length >= 2)

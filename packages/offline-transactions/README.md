@@ -145,7 +145,6 @@ interface OfflineConfig {
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
 - `peekOutbox()` - View all pending transactions
-- `notifyOnline()` - Manually trigger retry execution
 - `dispose()` - Clean up resources
 
 ### Error Handling
