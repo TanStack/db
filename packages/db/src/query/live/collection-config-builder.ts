@@ -1430,9 +1430,7 @@ function createPerEntryIncludesStates(
  * Drains shared buffers into per-entry states using the routing index.
  * Returns the set of parent correlation keys that had changes routed to them.
  */
-function drainNestedBuffers(
-  state: IncludesOutputState,
-): Set<unknown> {
+function drainNestedBuffers(state: IncludesOutputState): Set<unknown> {
   const dirtyCorrelationKeys = new Set<unknown>()
 
   if (!state.nestedSetups) return dirtyCorrelationKeys
@@ -1442,7 +1440,8 @@ function drainNestedBuffers(
     const toDelete: Array<unknown> = []
 
     for (const [nestedCorrelationKey, childChanges] of setup.buffer) {
-      const parentCorrelationKey = state.nestedRoutingIndex!.get(nestedCorrelationKey)
+      const parentCorrelationKey =
+        state.nestedRoutingIndex!.get(nestedCorrelationKey)
       if (parentCorrelationKey === undefined) {
         // Unroutable — parent not yet seen; keep in buffer
         continue
@@ -1501,7 +1500,8 @@ function updateRoutingIndex(
   if (!state.nestedSetups) return
 
   for (const setup of state.nestedSetups) {
-    const nestedFieldPath = setup.compilationResult.correlationField.path.slice(1)
+    const nestedFieldPath =
+      setup.compilationResult.correlationField.path.slice(1)
 
     for (const [, change] of childChanges) {
       if (change.inserts > 0) {
@@ -1531,7 +1531,8 @@ function updateRoutingIndex(
 
         if (nestedCorrelationKey != null) {
           state.nestedRoutingIndex!.delete(nestedCorrelationKey)
-          const reverseSet = state.nestedRoutingReverseIndex!.get(correlationKey)
+          const reverseSet =
+            state.nestedRoutingReverseIndex!.get(correlationKey)
           if (reverseSet) {
             reverseSet.delete(nestedCorrelationKey)
             if (reverseSet.size === 0) {
@@ -1566,12 +1567,11 @@ function cleanRoutingIndexOnDelete(
 /**
  * Recursively checks whether any nested buffer has pending changes.
  */
-function hasNestedBufferChanges(
-  setups: Array<NestedIncludesSetup>,
-): boolean {
+function hasNestedBufferChanges(setups: Array<NestedIncludesSetup>): boolean {
   for (const setup of setups) {
     if (setup.buffer.size > 0) return true
-    if (setup.nestedSetups && hasNestedBufferChanges(setup.nestedSetups)) return true
+    if (setup.nestedSetups && hasNestedBufferChanges(setup.nestedSetups))
+      return true
   }
   return false
 }
@@ -1686,7 +1686,10 @@ function flushIncludesState(
 
     // Phase 2: Child changes — apply to child Collections
     // Track which entries had child changes and capture their childChanges maps
-    const entriesWithChildChanges = new Map<unknown, { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }>()
+    const entriesWithChildChanges = new Map<
+      unknown,
+      { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }
+    >()
 
     if (state.pendingChildChanges.size > 0) {
       for (const [correlationKey, childChanges] of state.pendingChildChanges) {
@@ -1811,7 +1814,8 @@ function hasPendingIncludesChanges(
 ): boolean {
   for (const state of states) {
     if (state.pendingChildChanges.size > 0) return true
-    if (state.nestedSetups && hasNestedBufferChanges(state.nestedSetups)) return true
+    if (state.nestedSetups && hasNestedBufferChanges(state.nestedSetups))
+      return true
   }
   return false
 }
