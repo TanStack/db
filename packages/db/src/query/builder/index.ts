@@ -952,7 +952,13 @@ function buildIncludesSubquery(
     where: modifiedWhere.length > 0 ? modifiedWhere : undefined,
   }
 
-  return new IncludesSubquery(modifiedQuery, parentRef, childRef, fieldName, materializeAsArray)
+  return new IncludesSubquery(
+    modifiedQuery,
+    parentRef,
+    childRef,
+    fieldName,
+    materializeAsArray,
+  )
 }
 
 /**
