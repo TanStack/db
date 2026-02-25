@@ -33,12 +33,7 @@ export class KeyScheduler {
           return []
         }
 
-        const firstTransaction = this.pendingTransactions[0]
-
-        if (!firstTransaction) {
-          span.setAttribute(`result`, `empty`)
-          return []
-        }
+        const firstTransaction = this.pendingTransactions[0]!
 
         if (!this.isReadyToRun(firstTransaction)) {
           span.setAttribute(`result`, `waiting_for_first`)
