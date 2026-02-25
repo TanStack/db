@@ -220,6 +220,10 @@ export class OfflineExecutor {
 
     this.unsubscribeOnline = this.onlineDetector.subscribe(() => {
       if (this.isOfflineEnabled && this.executor) {
+        if (!this.isOnline()) {
+          return
+        }
+
         // Reset retry delays so transactions can execute immediately when back online
         this.executor.resetRetryDelays()
         this.executor.executeAll().catch((error) => {
@@ -566,6 +570,10 @@ export class OfflineExecutor {
 
   getOnlineDetector(): OnlineDetector {
     return this.onlineDetector
+  }
+
+  isOnline(): boolean {
+    return this.onlineDetector.isOnline()
   }
 
   dispose(): void {

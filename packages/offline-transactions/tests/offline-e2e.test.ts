@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { NonRetriableError } from '../src/types'
+import { DefaultRetryPolicy } from '../src/retry/RetryPolicy'
 import { FakeStorageAdapter, createTestOfflineEnvironment } from './harness'
 import type { TestItem } from './harness'
-import type { OfflineMutationFnParams } from '../src/types'
+import type { OfflineMutationFnParams, OnlineDetector } from '../src/types'
 import type { PendingMutation } from '@tanstack/db'
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0))
@@ -20,6 +21,45 @@ const waitUntil = async (
     await new Promise((resolve) => setTimeout(resolve, intervalMs))
   }
   throw new Error(`Timed out waiting for condition`)
+}
+
+class ManualOnlineDetector implements OnlineDetector {
+  private listeners = new Set<() => void>()
+  private online: boolean
+
+  constructor(initialOnline: boolean) {
+    this.online = initialOnline
+  }
+
+  subscribe(callback: () => void): () => void {
+    this.listeners.add(callback)
+
+    return () => {
+      this.listeners.delete(callback)
+    }
+  }
+
+  notifyOnline(): void {
+    for (const listener of this.listeners) {
+      listener()
+    }
+  }
+
+  isOnline(): boolean {
+    return this.online
+  }
+
+  setOnline(isOnline: boolean): void {
+    this.online = isOnline
+
+    if (isOnline) {
+      this.notifyOnline()
+    }
+  }
+
+  dispose(): void {
+    this.listeners.clear()
+  }
 }
 
 describe(`offline executor end-to-end`, () => {
@@ -128,6 +168,56 @@ describe(`offline executor end-to-end`, () => {
     expect(outboxEntries).toEqual([])
     expect(env.mutationCalls.length).toBeGreaterThanOrEqual(2)
     expect(env.serverState.get(`queued-item`)?.value).toBe(`queued`)
+
+    env.executor.dispose()
+  })
+
+  it(`retries beyond 10 attempts by default`, () => {
+    const policy = new DefaultRetryPolicy()
+    const error = new Error(`transient`)
+
+    for (let i = 0; i < 50; i++) {
+      expect(policy.shouldRetry(error, i)).toBe(true)
+    }
+
+    expect(policy.shouldRetry(new NonRetriableError(`permanent`), 0)).toBe(false)
+  })
+
+  it(`does not execute mutations while offline`, async () => {
+    const onlineDetector = new ManualOnlineDetector(false)
+    const env = createTestOfflineEnvironment({
+      config: {
+        onlineDetector,
+      },
+    })
+
+    await env.waitForLeader()
+
+    const offlineTx = env.executor.createOfflineTransaction({
+      mutationFnName: env.mutationFnName,
+      autoCommit: false,
+    })
+
+    offlineTx.mutate(() => {
+      env.collection.insert({
+        id: `queued-while-offline`,
+        value: `queued`,
+        completed: false,
+        updatedAt: new Date(),
+      })
+    })
+
+    const commitPromise = offlineTx.commit()
+
+    await flushMicrotasks()
+    expect(env.mutationCalls).toHaveLength(0)
+    expect(await env.executor.peekOutbox()).toHaveLength(1)
+
+    onlineDetector.setOnline(true)
+
+    await expect(commitPromise).resolves.toBeDefined()
+    expect(env.mutationCalls).toHaveLength(1)
+    expect(await env.executor.peekOutbox()).toEqual([])
 
     env.executor.dispose()
   })
