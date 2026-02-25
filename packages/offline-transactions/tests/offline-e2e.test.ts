@@ -180,7 +180,9 @@ describe(`offline executor end-to-end`, () => {
       expect(policy.shouldRetry(error, i)).toBe(true)
     }
 
-    expect(policy.shouldRetry(new NonRetriableError(`permanent`), 0)).toBe(false)
+    expect(policy.shouldRetry(new NonRetriableError(`permanent`), 0)).toBe(
+      false,
+    )
   })
 
   it(`does not execute mutations while offline`, async () => {
