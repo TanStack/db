@@ -237,3 +237,40 @@ export const DEFAULT_COMPARE_OPTIONS: CompareOptions = {
   nulls: `first`,
   stringSort: `locale`,
 }
+
+/**
+ * Set of warning keys that have already been shown.
+ * Used to prevent duplicate warnings from spamming the console.
+ */
+const warnedKeys = new Set<string>()
+
+/**
+ * Log a warning message only once per unique key.
+ * Subsequent calls with the same key will be silently ignored.
+ *
+ * @param key - Unique identifier for this warning
+ * @param message - The warning message to display
+ *
+ * @example
+ * ```typescript
+ * // First call logs the warning
+ * warnOnce('deprecated-api', 'This API is deprecated')
+ *
+ * // Subsequent calls with same key are ignored
+ * warnOnce('deprecated-api', 'This API is deprecated') // silent
+ * ```
+ */
+export function warnOnce(key: string, message: string): void {
+  if (warnedKeys.has(key)) {
+    return
+  }
+  warnedKeys.add(key)
+  console.warn(message)
+}
+
+/**
+ * Reset all warning states. Primarily useful for testing.
+ */
+export function resetWarnings(): void {
+  warnedKeys.clear()
+}

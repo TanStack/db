@@ -231,7 +231,7 @@ const productsCollection = createCollection(
 
 ## Persistence Handlers
 
-You can define handlers that are called when mutations occur. These handlers can persist changes to your backend and control whether the query should refetch after the operation:
+You can define handlers that are called when mutations occur. These handlers persist changes to your backend:
 
 ```typescript
 const todosCollection = createCollection(
@@ -244,8 +244,7 @@ const todosCollection = createCollection(
     onInsert: async ({ transaction }) => {
       const newItems = transaction.mutations.map((m) => m.modified)
       await api.createTodos(newItems)
-      // Returning nothing or { refetch: true } will trigger a refetch
-      // Return { refetch: false } to skip automatic refetch
+      // Auto-refetch happens after handler completes (pre-1.0 behavior)
     },
 
     onUpdate: async ({ transaction }) => {
@@ -264,32 +263,63 @@ const todosCollection = createCollection(
 )
 ```
 
+> **Note**: QueryCollection currently auto-refetches after handlers complete. See [Controlling Refetch Behavior](#controlling-refetch-behavior) for details on this transitional behavior.
+
 ### Controlling Refetch Behavior
 
-By default, after any persistence handler (`onInsert`, `onUpdate`, or `onDelete`) completes successfully, the query will automatically refetch to ensure the local state matches the server state.
+> **⚠️ Transitional API**: QueryCollection currently auto-refetches after handlers complete. This behavior is deprecated and will be removed in v1.0. See the migration notes below.
 
-You can control this behavior by returning an object with a `refetch` property:
+#### Current Behavior (Pre-1.0)
+
+By default, QueryCollection automatically refetches after each handler completes. To **skip** auto-refetch, return `{ refetch: false }`:
 
 ```typescript
 onInsert: async ({ transaction }) => {
   await api.createTodos(transaction.mutations.map((m) => m.modified))
 
-  // Skip the automatic refetch
+  // Skip auto-refetch - use this when server doesn't modify the data
   return { refetch: false }
 }
 ```
 
-This is useful when:
+If you don't return `{ refetch: false }`, auto-refetch happens automatically.
 
-- You're confident the server state matches what you sent
-- You want to avoid unnecessary network requests
-- You're handling state updates through other mechanisms (like WebSockets)
+#### v1.0 Behavior (Future)
+
+In v1.0, auto-refetch will be **removed**. Handlers will need to explicitly call `collection.utils.refetch()` when refetching is needed:
+
+```typescript
+onInsert: async ({ transaction, collection }) => {
+  await api.createTodos(transaction.mutations.map((m) => m.modified))
+
+  // Explicitly trigger refetch when you need server state
+  await collection.utils.refetch()
+}
+```
+
+To skip refetch in v1.0, simply don't call `refetch()`:
+
+```typescript
+onInsert: async ({ transaction }) => {
+  await api.createTodos(transaction.mutations.map((m) => m.modified))
+
+  // No refetch call = no refetch (v1.0 behavior)
+}
+```
+
+#### When to Skip Refetch
+
+Skip refetching when:
+
+- You're confident the server state exactly matches what you sent (no server-side processing)
+- You're handling state updates through other mechanisms (like WebSockets or direct writes)
+- You want to optimize for fewer network requests
 
 ## Utility Methods
 
 The collection provides these utility methods via `collection.utils`:
 
-- `refetch(opts?)`: Manually trigger a refetch of the query
+- `refetch(opts?)`: Trigger a refetch of the query
   - `opts.throwOnError`: Whether to throw an error if the refetch fails (default: `false`)
   - Bypasses `enabled: false` to support imperative/manual refetching patterns (similar to hook `refetch()` behavior)
   - Returns `QueryObserverResult` for inspecting the result
@@ -393,7 +423,7 @@ ws.on("todos:update", (changes) => {
 
 ### Example: Incremental Updates
 
-When the server returns computed fields (like server-generated IDs or timestamps), you can use the `onInsert` handler with `{ refetch: false }` to avoid unnecessary refetches while still syncing the server response:
+When the server returns computed fields (like server-generated IDs or timestamps), you can use direct writes to sync the server response without triggering a full refetch:
 
 ```typescript
 const todosCollection = createCollection(
@@ -403,26 +433,25 @@ const todosCollection = createCollection(
     queryClient,
     getKey: (item) => item.id,
 
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const newItems = transaction.mutations.map((m) => m.modified)
 
       // Send to server and get back items with server-computed fields
       const serverItems = await api.createTodos(newItems)
 
       // Sync server-computed fields (like server-generated IDs, timestamps, etc.)
-      // to the collection's synced data store
-      todosCollection.utils.writeBatch(() => {
+      // to the collection's synced data store using direct writes
+      collection.utils.writeBatch(() => {
         serverItems.forEach((serverItem) => {
-          todosCollection.utils.writeInsert(serverItem)
+          collection.utils.writeInsert(serverItem)
         })
       })
 
-      // Skip automatic refetch since we've already synced the server response
+      // No need to refetch - we've already synced the server response via direct writes
       // (optimistic state is automatically replaced when handler completes)
-      return { refetch: false }
     },
 
-    onUpdate: async ({ transaction }) => {
+    onUpdate: async ({ transaction, collection }) => {
       const updates = transaction.mutations.map((m) => ({
         id: m.key,
         changes: m.changes,
@@ -430,13 +459,13 @@ const todosCollection = createCollection(
       const serverItems = await api.updateTodos(updates)
 
       // Sync server-computed fields from the update response
-      todosCollection.utils.writeBatch(() => {
+      collection.utils.writeBatch(() => {
         serverItems.forEach((serverItem) => {
-          todosCollection.utils.writeUpdate(serverItem)
+          collection.utils.writeUpdate(serverItem)
         })
       })
 
-      return { refetch: false }
+      // No refetch needed since we used direct writes
     },
   })
 )
@@ -536,7 +565,7 @@ Direct writes update the collection immediately and also update the TanStack Que
 
 To handle this properly:
 
-1. Use `{ refetch: false }` in your persistence handlers when using direct writes
+1. Skip calling `collection.utils.refetch()` in your persistence handlers when using direct writes
 2. Set appropriate `staleTime` to prevent unnecessary refetches
 3. Design your `queryFn` to be aware of incremental updates (e.g., only fetch new data)
 
@@ -549,7 +578,7 @@ All direct write methods are available on `collection.utils`:
 - `writeDelete(keys)`: Delete one or more items directly
 - `writeUpsert(data)`: Insert or update one or more items directly
 - `writeBatch(callback)`: Perform multiple operations atomically
-- `refetch(opts?)`: Manually trigger a refetch of the query
+- `refetch(opts?)`: Trigger a refetch of the query
 
 ## QueryFn and Predicate Push-Down
 

@@ -498,10 +498,11 @@ export const todoCollection = createCollection(
     },
     getKey: (item) => item.id,
     schema: todoSchema,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const response = await api.todos.create(transaction.mutations[0].modified)
 
-      return { txid: response.txid }
+      // Wait for txid to sync
+      await collection.utils.awaitTxId(response.txid)
     },
     // You can also implement onUpdate, onDelete as needed.
   })

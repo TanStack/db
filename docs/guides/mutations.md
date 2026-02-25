@@ -233,7 +233,7 @@ Use this approach when:
 - You want to use TanStack DB only for queries and state management
 
 How to sync changes back:
-- **QueryCollection**: Manually refetch with `collection.utils.refetch()` to reload data from the server
+- **QueryCollection**: Refetch with `collection.utils.refetch()` to reload data from the server
 - **ElectricCollection**: Use `collection.utils.awaitTxId(txid)` to wait for a specific transaction to sync
 - **Other sync systems**: Wait for your sync mechanism to update the collection
 
@@ -437,28 +437,29 @@ const todoCollection = createCollection({
 
 Different collection types have specific patterns for their handlers:
 
-**QueryCollection** - automatically refetches after handler completes:
+**QueryCollection** - refetch after persisting changes:
 ```typescript
-onUpdate: async ({ transaction }) => {
+onUpdate: async ({ transaction, collection }) => {
   await Promise.all(
     transaction.mutations.map((mutation) =>
       api.todos.update(mutation.original.id, mutation.changes)
     )
   )
-  // Automatic refetch happens after handler completes
+  // Trigger refetch to sync server state
+  await collection.utils.refetch()
 }
 ```
 
-**ElectricCollection** - return txid(s) to track sync:
+**ElectricCollection** - wait for txid(s) to sync:
 ```typescript
-onUpdate: async ({ transaction }) => {
-  const txids = await Promise.all(
+onUpdate: async ({ transaction, collection }) => {
+  await Promise.all(
     transaction.mutations.map(async (mutation) => {
       const response = await api.todos.update(mutation.original.id, mutation.changes)
-      return response.txid
+      // Wait for this txid to sync
+      await collection.utils.awaitTxId(response.txid)
     })
   )
-  return { txid: txids }
 }
 ```
 
