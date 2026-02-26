@@ -587,6 +587,52 @@ describe(`includes subqueries`, () => {
         { id: 20, name: `Charlie` },
       ])
     })
+
+    it(`correlation field does not need to be in the parent select`, async () => {
+      const teams = createTeamsCollection()
+      const members = createMembersCollection()
+
+      // departmentId is used for correlation but NOT selected in the parent output
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ t: teams }).select(({ t }) => ({
+          id: t.id,
+          name: t.name,
+          members: q
+            .from({ m: members })
+            .where(({ m }) => eq(m.departmentId, t.departmentId))
+            .select(({ m }) => ({
+              id: m.id,
+              name: m.name,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          name: `Frontend`,
+          members: [
+            { id: 10, name: `Alice` },
+            { id: 11, name: `Bob` },
+          ],
+        },
+        {
+          id: 2,
+          name: `Backend`,
+          members: [
+            { id: 10, name: `Alice` },
+            { id: 11, name: `Bob` },
+          ],
+        },
+        {
+          id: 3,
+          name: `Marketing`,
+          members: [{ id: 20, name: `Charlie` }],
+        },
+      ])
+    })
   })
 
   describe(`nested includes`, () => {
