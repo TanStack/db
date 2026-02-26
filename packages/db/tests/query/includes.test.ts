@@ -817,25 +817,19 @@ describe(`includes subqueries`, () => {
           id: 1,
           name: `Alpha`,
           createdBy: `alice`,
-          issues: [
-            { id: 10, title: `Bug in Alpha`, createdBy: `alice` },
-          ],
+          issues: [{ id: 10, title: `Bug in Alpha`, createdBy: `alice` }],
         },
         {
           id: 2,
           name: `Beta`,
           createdBy: `bob`,
-          issues: [
-            { id: 20, title: `Bug in Beta`, createdBy: `bob` },
-          ],
+          issues: [{ id: 20, title: `Bug in Beta`, createdBy: `bob` }],
         },
         {
           id: 3,
           name: `Gamma`,
           createdBy: `alice`,
-          issues: [
-            { id: 30, title: `Bug in Gamma`, createdBy: `alice` },
-          ],
+          issues: [{ id: 30, title: `Bug in Gamma`, createdBy: `alice` }],
         },
       ])
     })
