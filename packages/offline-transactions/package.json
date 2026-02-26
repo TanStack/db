@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/offline-transactions",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "description": "Offline-first transaction capabilities for TanStack DB",
   "author": "TanStack",
   "license": "MIT",

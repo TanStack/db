@@ -1,5 +1,14 @@
 # @tanstack/offline-transactions
 
+## 1.0.20
+
+### Patch Changes
+
+- Fix KeyScheduler to enforce strict FIFO ordering on retries. Previously, the scheduler could skip past a transaction waiting for retry and execute a later one, causing dependent UPDATE-before-INSERT failures. Also refactored `getNextBatch` to `getNext` to reflect that it always returns at most one transaction. ([#1300](https://github.com/TanStack/db/pull/1300))
+
+- Updated dependencies [[`e9d0fd8`](https://github.com/TanStack/db/commit/e9d0fd8f0db18a7dc8a0f2b3eacd50a94f6258f7)]:
+  - @tanstack/db@0.5.30
+
 ## 1.0.19
 
 ### Patch Changes
