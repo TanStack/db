@@ -337,6 +337,32 @@ describe(`Vue best-practice fixes`, () => {
       expect((returnedCollection.value as any).config.gcTime).toBe(60000)
     })
 
+    it(`should force startSync even if user config passes startSync: false`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `startsync-forced-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const { data } = useLiveQuery({
+        query: (q) =>
+          q
+            .from({ persons: collection })
+            .select(({ persons }) => ({
+              id: persons.id,
+              name: persons.name,
+            })),
+        startSync: false, // User tries to disable sync — should be overridden
+      })
+
+      await waitForVueUpdate()
+
+      // startSync is forced to true, so data should still load
+      expect(data.value.length).toBe(3)
+    })
+
     it(`should not override gcTime on pre-created collections`, async () => {
       const collection = createCollection(
         mockSyncCollectionOptions<Person>({
