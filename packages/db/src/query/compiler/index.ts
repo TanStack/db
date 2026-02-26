@@ -298,10 +298,7 @@ export function compileQuery(
       // When parentProjection exists, project referenced parent fields; otherwise null (zero overhead)
       const compiledCorrelation = compileExpression(subquery.correlationField)
       let parentKeys: any
-      if (
-        subquery.parentProjection &&
-        subquery.parentProjection.length > 0
-      ) {
+      if (subquery.parentProjection && subquery.parentProjection.length > 0) {
         const compiledProjections = subquery.parentProjection.map((ref) => ({
           alias: ref.path[0]!,
           field: ref.path.slice(1),
@@ -331,8 +328,7 @@ export function compileQuery(
       } else {
         parentKeys = pipeline.pipe(
           map(
-            ([_key, nsRow]: any) =>
-              [compiledCorrelation(nsRow), null] as any,
+            ([_key, nsRow]: any) => [compiledCorrelation(nsRow), null] as any,
           ),
         )
       }
