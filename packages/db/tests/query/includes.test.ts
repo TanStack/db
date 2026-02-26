@@ -742,7 +742,12 @@ describe(`includes subqueries`, () => {
       issuesWC.utils.begin()
       issuesWC.utils.write({
         type: `update`,
-        value: { id: 11, projectId: 1, title: `Feature for Alpha`, createdBy: `alice` },
+        value: {
+          id: 11,
+          projectId: 1,
+          title: `Feature for Alpha`,
+          createdBy: `alice`,
+        },
         oldValue: sampleIssuesWithCreator[1]!,
       })
       issuesWC.utils.commit()
