@@ -878,9 +878,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 order_count: count(orders.id),
                 is_high_volume: gt(count(orders.id), 2),
               }))
-              .having(
-                ({ $selected }) => $selected.is_high_volume,
-              ),
+              .having(({ $selected }) => $selected.is_high_volume),
         })
 
         // Only customer 1 has more than 2 orders (3 orders)
@@ -902,9 +900,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                 order_count: count(orders.id),
                 is_high_volume: gt(count(orders.id), 2),
               }))
-              .having(
-                ({ $selected }) => not($selected.is_high_volume),
-              ),
+              .having(({ $selected }) => not($selected.is_high_volume)),
         })
 
         // Customers 2 and 3 have 2 orders each (not > 2)
