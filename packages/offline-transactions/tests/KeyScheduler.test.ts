@@ -53,8 +53,8 @@ describe(`KeyScheduler`, () => {
     scheduler.schedule(first)
     scheduler.schedule(second)
 
-    const firstBatch = scheduler.getNextBatch(1)
-    expect(firstBatch.map((tx) => tx.id)).toEqual([`first`])
+    const firstTx = scheduler.getNext()
+    expect(firstTx?.id).toBe(`first`)
 
     scheduler.markStarted(first)
     scheduler.markFailed(first)
@@ -68,8 +68,8 @@ describe(`KeyScheduler`, () => {
       },
     })
 
-    const secondBatch = scheduler.getNextBatch(1)
-    expect(secondBatch).toEqual([])
+    const secondTx = scheduler.getNext()
+    expect(secondTx).toBeUndefined()
   })
 
   it(`executes the first transaction once its retry delay has elapsed`, () => {
@@ -94,12 +94,12 @@ describe(`KeyScheduler`, () => {
     scheduler.schedule(first)
     scheduler.schedule(second)
 
-    expect(scheduler.getNextBatch(1)).toEqual([])
+    expect(scheduler.getNext()).toBeUndefined()
 
     vi.advanceTimersByTime(5000)
 
-    const batch = scheduler.getNextBatch(1)
-    expect(batch.map((tx) => tx.id)).toEqual([`first`])
+    const result = scheduler.getNext()
+    expect(result?.id).toBe(`first`)
   })
 
   it(`processes the second transaction after the first completes`, () => {
@@ -123,17 +123,17 @@ describe(`KeyScheduler`, () => {
     scheduler.schedule(first)
     scheduler.schedule(second)
 
-    const batch1 = scheduler.getNextBatch(1)
-    expect(batch1.map((tx) => tx.id)).toEqual([`first`])
+    const tx1 = scheduler.getNext()
+    expect(tx1?.id).toBe(`first`)
 
     scheduler.markStarted(first)
     scheduler.markCompleted(first)
 
-    const batch2 = scheduler.getNextBatch(1)
-    expect(batch2.map((tx) => tx.id)).toEqual([`second`])
+    const tx2 = scheduler.getNext()
+    expect(tx2?.id).toBe(`second`)
   })
 
-  it(`returns empty batch while a transaction is running`, () => {
+  it(`returns nothing while a transaction is running`, () => {
     vi.useFakeTimers()
 
     const now = new Date(`2026-01-01T00:00:00.000Z`)
@@ -149,7 +149,7 @@ describe(`KeyScheduler`, () => {
     scheduler.schedule(tx)
     scheduler.markStarted(tx)
 
-    expect(scheduler.getNextBatch(1)).toEqual([])
+    expect(scheduler.getNext()).toBeUndefined()
   })
 
   it(`processes second transaction after first retries and succeeds`, () => {
@@ -181,18 +181,18 @@ describe(`KeyScheduler`, () => {
       nextAttemptAt: now.getTime() + 5000,
     })
 
-    expect(scheduler.getNextBatch(1)).toEqual([])
+    expect(scheduler.getNext()).toBeUndefined()
 
     vi.advanceTimersByTime(5000)
 
-    const retryBatch = scheduler.getNextBatch(1)
-    expect(retryBatch.map((tx) => tx.id)).toEqual([`first`])
+    const retryTx = scheduler.getNext()
+    expect(retryTx?.id).toBe(`first`)
 
-    scheduler.markStarted(retryBatch[0]!)
-    scheduler.markCompleted(retryBatch[0]!)
+    scheduler.markStarted(retryTx!)
+    scheduler.markCompleted(retryTx!)
 
-    const finalBatch = scheduler.getNextBatch(1)
-    expect(finalBatch.map((tx) => tx.id)).toEqual([`second`])
+    const finalTx = scheduler.getNext()
+    expect(finalTx?.id).toBe(`second`)
   })
 
   it(`maintains FIFO order regardless of scheduling order`, () => {
@@ -216,8 +216,8 @@ describe(`KeyScheduler`, () => {
     scheduler.schedule(newer)
     scheduler.schedule(older)
 
-    const batch = scheduler.getNextBatch(1)
-    expect(batch.map((tx) => tx.id)).toEqual([`older`])
+    const next = scheduler.getNext()
+    expect(next?.id).toBe(`older`)
   })
 
   it(`preserves FIFO order after updateTransaction`, () => {
@@ -249,13 +249,13 @@ describe(`KeyScheduler`, () => {
 
     vi.advanceTimersByTime(5000)
 
-    const batch = scheduler.getNextBatch(1)
-    expect(batch.map((tx) => tx.id)).toEqual([`first`])
+    const next = scheduler.getNext()
+    expect(next?.id).toBe(`first`)
   })
 
-  it(`returns empty batch when no transactions are scheduled`, () => {
+  it(`returns undefined when no transactions are scheduled`, () => {
     const scheduler = new KeyScheduler()
-    expect(scheduler.getNextBatch(1)).toEqual([])
+    expect(scheduler.getNext()).toBeUndefined()
   })
 
   it(`processes transactions with identical createdAt in scheduling order`, () => {
@@ -279,13 +279,13 @@ describe(`KeyScheduler`, () => {
     scheduler.schedule(first)
     scheduler.schedule(second)
 
-    const batch1 = scheduler.getNextBatch(1)
-    expect(batch1.map((tx) => tx.id)).toEqual([`first`])
+    const tx1 = scheduler.getNext()
+    expect(tx1?.id).toBe(`first`)
 
     scheduler.markStarted(first)
     scheduler.markCompleted(first)
 
-    const batch2 = scheduler.getNextBatch(1)
-    expect(batch2.map((tx) => tx.id)).toEqual([`second`])
+    const tx2 = scheduler.getNext()
+    expect(tx2?.id).toBe(`second`)
   })
 })
