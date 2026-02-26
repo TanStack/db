@@ -453,6 +453,142 @@ describe(`includes subqueries`, () => {
     })
   })
 
+  describe(`shared correlation key`, () => {
+    // Multiple parents share the same correlationKey value.
+    // e.g., two teams in the same department — both should see the same department members.
+    type Team = { id: number; name: string; departmentId: number }
+    type Member = { id: number; departmentId: number; name: string }
+
+    const sampleTeams: Array<Team> = [
+      { id: 1, name: `Frontend`, departmentId: 100 },
+      { id: 2, name: `Backend`, departmentId: 100 },
+      { id: 3, name: `Marketing`, departmentId: 200 },
+    ]
+
+    const sampleMembers: Array<Member> = [
+      { id: 10, departmentId: 100, name: `Alice` },
+      { id: 11, departmentId: 100, name: `Bob` },
+      { id: 20, departmentId: 200, name: `Charlie` },
+    ]
+
+    function createTeamsCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Team>({
+          id: `includes-teams`,
+          getKey: (t) => t.id,
+          initialData: sampleTeams,
+        }),
+      )
+    }
+
+    function createMembersCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Member>({
+          id: `includes-members`,
+          getKey: (m) => m.id,
+          initialData: sampleMembers,
+        }),
+      )
+    }
+
+    it(`multiple parents with the same correlationKey each get the shared children`, async () => {
+      const teams = createTeamsCollection()
+      const members = createMembersCollection()
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ t: teams }).select(({ t }) => ({
+          id: t.id,
+          name: t.name,
+          departmentId: t.departmentId,
+          members: q
+            .from({ m: members })
+            .where(({ m }) => eq(m.departmentId, t.departmentId))
+            .select(({ m }) => ({
+              id: m.id,
+              name: m.name,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      // Both Frontend and Backend teams share departmentId 100
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          name: `Frontend`,
+          departmentId: 100,
+          members: [
+            { id: 10, name: `Alice` },
+            { id: 11, name: `Bob` },
+          ],
+        },
+        {
+          id: 2,
+          name: `Backend`,
+          departmentId: 100,
+          members: [
+            { id: 10, name: `Alice` },
+            { id: 11, name: `Bob` },
+          ],
+        },
+        {
+          id: 3,
+          name: `Marketing`,
+          departmentId: 200,
+          members: [{ id: 20, name: `Charlie` }],
+        },
+      ])
+    })
+
+    it(`adding a child updates all parents that share the correlation key`, async () => {
+      const teams = createTeamsCollection()
+      const members = createMembersCollection()
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ t: teams }).select(({ t }) => ({
+          id: t.id,
+          name: t.name,
+          departmentId: t.departmentId,
+          members: q
+            .from({ m: members })
+            .where(({ m }) => eq(m.departmentId, t.departmentId))
+            .select(({ m }) => ({
+              id: m.id,
+              name: m.name,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      // Add a new member to department 100
+      members.utils.begin()
+      members.utils.write({
+        type: `insert`,
+        value: { id: 12, departmentId: 100, name: `Dave` },
+      })
+      members.utils.commit()
+
+      // Both Frontend and Backend should see the new member
+      expect(childItems((collection.get(1) as any).members)).toEqual([
+        { id: 10, name: `Alice` },
+        { id: 11, name: `Bob` },
+        { id: 12, name: `Dave` },
+      ])
+      expect(childItems((collection.get(2) as any).members)).toEqual([
+        { id: 10, name: `Alice` },
+        { id: 11, name: `Bob` },
+        { id: 12, name: `Dave` },
+      ])
+
+      // Marketing unaffected
+      expect(childItems((collection.get(3) as any).members)).toEqual([
+        { id: 20, name: `Charlie` },
+      ])
+    })
+  })
+
   describe(`nested includes`, () => {
     function buildNestedQuery() {
       return createLiveQueryCollection((q) =>
