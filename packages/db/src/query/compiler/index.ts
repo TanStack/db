@@ -200,15 +200,20 @@ export function compileQuery(
     // Inner join: only children whose correlation key exists in parent keys pass through
     const joined = childRekeyed.pipe(joinOperator(parentKeyStream, `inner`))
 
-    // Extract: [correlationValue, [[childKey, childRow], null]] → [childKey, childRow]
+    // Extract: [correlationValue, [[childKey, childRow], parentContext]] → [childKey, childRow]
     // Tag the row with __correlationKey for output routing
+    // If parentSide is non-null (parent context projected), attach as __parentContext
     filteredMainInput = joined.pipe(
       filter(([_correlationValue, [childSide]]: any) => {
         return childSide != null
       }),
-      map(([correlationValue, [childSide, _parentSide]]: any) => {
+      map(([correlationValue, [childSide, parentSide]]: any) => {
         const [childKey, childRow] = childSide
-        return [childKey, { ...childRow, __correlationKey: correlationValue }]
+        const tagged: any = { ...childRow, __correlationKey: correlationValue }
+        if (parentSide != null) {
+          tagged.__parentContext = parentSide
+        }
+        return [childKey, tagged]
       }),
     )
 
@@ -220,10 +225,14 @@ export function compileQuery(
   let pipeline: NamespacedAndKeyedStream = filteredMainInput.pipe(
     map(([key, row]) => {
       // Initialize the record with a nested structure
-      const ret = [key, { [mainSource]: row }] as [
-        string,
-        Record<string, typeof row>,
-      ]
+      // If __parentContext exists (from parent-referencing includes), merge parent
+      // aliases into the namespaced row so WHERE can resolve parent refs
+      const { __parentContext, ...cleanRow } = row as any
+      const nsRow: Record<string, any> = { [mainSource]: cleanRow }
+      if (__parentContext) {
+        Object.assign(nsRow, __parentContext)
+      }
+      const ret = [key, nsRow] as [string, Record<string, typeof row>]
       return ret
     }),
   )
@@ -285,15 +294,60 @@ export function compileQuery(
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
     for (const { key, subquery } of includesEntries) {
-      // Branch parent pipeline: map to [correlationValue, null]
+      // Branch parent pipeline: map to [correlationValue, parentContext]
+      // When parentProjection exists, project referenced parent fields; otherwise null (zero overhead)
       const compiledCorrelation = compileExpression(subquery.correlationField)
-      const parentKeys = pipeline.pipe(
-        map(([_key, nsRow]: any) => [compiledCorrelation(nsRow), null] as any),
-      )
+      let parentKeys: any
+      if (subquery.parentProjection && subquery.parentProjection.length > 0) {
+        const compiledProjections = subquery.parentProjection.map((ref) => ({
+          alias: ref.path[0]!,
+          field: ref.path.slice(1),
+          compiled: compileExpression(ref),
+        }))
+        parentKeys = pipeline.pipe(
+          map(([_key, nsRow]: any) => {
+            const parentContext: Record<string, Record<string, any>> = {}
+            for (const proj of compiledProjections) {
+              if (!parentContext[proj.alias]) {
+                parentContext[proj.alias] = {}
+              }
+              const value = proj.compiled(nsRow)
+              // Set nested field in the alias namespace
+              let target = parentContext[proj.alias]!
+              for (let i = 0; i < proj.field.length - 1; i++) {
+                if (!target[proj.field[i]!]) {
+                  target[proj.field[i]!] = {}
+                }
+                target = target[proj.field[i]!]
+              }
+              target[proj.field[proj.field.length - 1]!] = value
+            }
+            return [compiledCorrelation(nsRow), parentContext] as any
+          }),
+        )
+      } else {
+        parentKeys = pipeline.pipe(
+          map(
+            ([_key, nsRow]: any) => [compiledCorrelation(nsRow), null] as any,
+          ),
+        )
+      }
+
+      // If parent filters exist, append them to the child query's WHERE
+      const childQuery =
+        subquery.parentFilters && subquery.parentFilters.length > 0
+          ? {
+              ...subquery.query,
+              where: [
+                ...(subquery.query.where || []),
+                ...subquery.parentFilters,
+              ],
+            }
+          : subquery.query
 
       // Recursively compile child query WITH the parent key stream
       const childResult = compileQuery(
-        subquery.query,
+        childQuery,
         allInputs,
         collections,
         subscriptions,
