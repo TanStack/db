@@ -1,4 +1,4 @@
-import { D2, output } from '@tanstack/db-ivm'
+import { D2, output, serializeValue } from '@tanstack/db-ivm'
 import { compileQuery } from '../compiler/index.js'
 import { createCollection } from '../../collection/index.js'
 import { IncludesSubquery } from '../ir.js'
@@ -1596,7 +1596,7 @@ function createChildCollectionEntry(
     : undefined
 
   const collection = createCollection<any, string | number>({
-    id: `__child-collection:${parentId}-${fieldName}-${String(correlationKey)}`,
+    id: `__child-collection:${parentId}-${fieldName}-${serializeValue(correlationKey)}`,
     getKey: (item: any) => resultKeys.get(item) as string | number,
     compare,
     sync: {
