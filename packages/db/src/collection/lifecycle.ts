@@ -129,8 +129,9 @@ export class CollectionLifecycleManager<
     switch (this.status) {
       case `error`:
         throw new CollectionInErrorStateError(operation, this.id)
+      case `idle`:
       case `cleaned-up`:
-        // Automatically restart the collection when operations are called on cleaned-up collections
+        // Automatically start sync when operations are called on idle/cleaned-up collections
         this.sync.startSync()
         break
     }
