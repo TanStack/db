@@ -791,6 +791,84 @@ describe(`includes subqueries`, () => {
       expect(childItems((collection.get(3) as any).issues)).toEqual([])
     })
 
+    it(`extracts correlation from and() with a pure-child filter`, async () => {
+      // and(correlation, childFilter) in a single .where() — no parent ref
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projectsWC }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issuesWC })
+            .where(({ i }) =>
+              and(eq(i.projectId, p.id), eq(i.createdBy, `alice`)),
+            )
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          name: `Alpha`,
+          issues: [{ id: 10, title: `Bug in Alpha` }],
+        },
+        {
+          id: 2,
+          name: `Beta`,
+          issues: [{ id: 21, title: `Feature for Beta` }],
+        },
+        {
+          id: 3,
+          name: `Gamma`,
+          issues: [{ id: 30, title: `Bug in Gamma` }],
+        },
+      ])
+    })
+
+    it(`reactivity works when correlation is inside and()`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projectsWC }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          createdBy: p.createdBy,
+          issues: q
+            .from({ i: issuesWC })
+            .where(({ i }) =>
+              and(eq(i.projectId, p.id), eq(i.createdBy, p.createdBy)),
+            )
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              createdBy: i.createdBy,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha`, createdBy: `alice` },
+      ])
+
+      // Change project 1 createdBy from alice to bob → issue 11 should match instead
+      projectsWC.utils.begin()
+      projectsWC.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Alpha`, createdBy: `bob` },
+        oldValue: sampleProjectsWithCreator[0]!,
+      })
+      projectsWC.utils.commit()
+
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 11, title: `Feature for Alpha`, createdBy: `bob` },
+      ])
+    })
+
     it(`extracts correlation from inside and()`, async () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ p: projectsWC }).select(({ p }) => ({
