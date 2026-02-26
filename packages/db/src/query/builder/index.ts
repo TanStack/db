@@ -31,6 +31,7 @@ import type {
   OrderBy,
   OrderByDirection,
   QueryIR,
+  Where,
 } from '../ir.js'
 import type {
   CompareOptions,
@@ -872,6 +873,42 @@ function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
 }
 
 /**
+ * Recursively collects all PropRef nodes from an expression tree.
+ */
+function collectRefsFromExpression(expr: BasicExpression): Array<PropRef> {
+  const refs: Array<PropRef> = []
+  switch (expr.type) {
+    case `ref`:
+      refs.push(expr)
+      break
+    case `func`:
+      for (const arg of (expr as any).args ?? []) {
+        refs.push(...collectRefsFromExpression(arg))
+      }
+      break
+    default:
+      break
+  }
+  return refs
+}
+
+/**
+ * Checks whether a WHERE clause references any parent alias.
+ */
+function referencesParent(
+  where: Where,
+  parentAliases: Array<string>,
+): boolean {
+  const expr =
+    typeof where === `object` && `expression` in where
+      ? where.expression
+      : where
+  return collectRefsFromExpression(expr).some(
+    (ref) => ref.path[0] != null && parentAliases.includes(ref.path[0]),
+  )
+}
+
+/**
  * Builds an IncludesSubquery IR node from a child query builder.
  * Extracts the correlation condition from the child's WHERE clauses by finding
  * an eq() predicate that references both a parent alias and a child alias.
@@ -938,12 +975,52 @@ function buildIncludesSubquery(
   // Remove the correlation WHERE from the child query
   const modifiedWhere = [...childQuery.where!]
   modifiedWhere.splice(correlationWhereIndex, 1)
-  const modifiedQuery: QueryIR = {
-    ...childQuery,
-    where: modifiedWhere.length > 0 ? modifiedWhere : undefined,
+
+  // Separate remaining WHEREs into pure-child vs parent-referencing
+  const pureChildWhere: Array<Where> = []
+  const parentFilters: Array<Where> = []
+  for (const w of modifiedWhere) {
+    if (referencesParent(w, parentAliases)) {
+      parentFilters.push(w)
+    } else {
+      pureChildWhere.push(w)
+    }
   }
 
-  return new IncludesSubquery(modifiedQuery, parentRef, childRef, fieldName)
+  // Collect distinct parent PropRefs from parent-referencing filters
+  let parentProjection: Array<PropRef> | undefined
+  if (parentFilters.length > 0) {
+    const seen = new Set<string>()
+    parentProjection = []
+    for (const w of parentFilters) {
+      const expr =
+        typeof w === `object` && `expression` in w ? w.expression : w
+      for (const ref of collectRefsFromExpression(expr)) {
+        if (
+          ref.path[0] != null &&
+          parentAliases.includes(ref.path[0]) &&
+          !seen.has(ref.path.join(`.`))
+        ) {
+          seen.add(ref.path.join(`.`))
+          parentProjection.push(ref)
+        }
+      }
+    }
+  }
+
+  const modifiedQuery: QueryIR = {
+    ...childQuery,
+    where: pureChildWhere.length > 0 ? pureChildWhere : undefined,
+  }
+
+  return new IncludesSubquery(
+    modifiedQuery,
+    parentRef,
+    childRef,
+    fieldName,
+    parentFilters.length > 0 ? parentFilters : undefined,
+    parentProjection,
+  )
 }
 
 /**
