@@ -1,14 +1,18 @@
 import {
   computed,
-  getCurrentInstance,
-  nextTick,
-  onUnmounted,
-  reactive,
+  getCurrentScope,
+  onScopeDispose,
   ref,
+  shallowReactive,
+  shallowRef,
   toValue,
   watchEffect,
 } from 'vue'
-import { createLiveQueryCollection } from '@tanstack/db'
+import {
+  BaseQueryBuilder,
+  CollectionImpl,
+  createLiveQueryCollection,
+} from '@tanstack/db'
 import type {
   ChangeMessage,
   Collection,
@@ -25,6 +29,8 @@ import type {
 } from '@tanstack/db'
 import type { ComputedRef, MaybeRefOrGetter } from 'vue'
 
+const DEFAULT_GC_TIME_MS = 1 // Live queries created by useLiveQuery are cleaned up immediately (0 disables GC)
+
 /**
  * Return type for useLiveQuery hook
  * @property state - Reactive Map of query results (key → item)
@@ -36,6 +42,7 @@ import type { ComputedRef, MaybeRefOrGetter } from 'vue'
  * @property isIdle - True when query hasn't started yet
  * @property isError - True when query encountered an error
  * @property isCleanedUp - True when query has been cleaned up
+ * @property isEnabled - True when query is active, false when disabled
  */
 export interface UseLiveQueryReturn<TContext extends Context> {
   state: ComputedRef<Map<string | number, GetResult<TContext>>>
@@ -47,6 +54,7 @@ export interface UseLiveQueryReturn<TContext extends Context> {
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  isEnabled: ComputedRef<boolean>
 }
 
 export interface UseLiveQueryReturnWithCollection<
@@ -63,6 +71,7 @@ export interface UseLiveQueryReturnWithCollection<
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  isEnabled: ComputedRef<boolean>
 }
 
 export interface UseLiveQueryReturnWithSingleResultCollection<
@@ -79,6 +88,7 @@ export interface UseLiveQueryReturnWithSingleResultCollection<
   isIdle: ComputedRef<boolean>
   isError: ComputedRef<boolean>
   isCleanedUp: ComputedRef<boolean>
+  isEnabled: ComputedRef<boolean>
 }
 
 /**
@@ -265,15 +275,8 @@ export function useLiveQuery(
       }
     }
 
-    // Check if it's already a collection by checking for specific collection methods
-    const isCollection =
-      unwrappedParam &&
-      typeof unwrappedParam === `object` &&
-      typeof unwrappedParam.subscribeChanges === `function` &&
-      typeof unwrappedParam.startSyncImmediate === `function` &&
-      typeof unwrappedParam.id === `string`
-
-    if (isCollection) {
+    // Check if it's already a collection instance
+    if (unwrappedParam instanceof CollectionImpl) {
       // Warn when passing a collection directly with on-demand sync mode
       // In on-demand mode, data is only loaded when queries with predicates request it
       // Passing the collection directly doesn't provide any predicates, so no data loads
@@ -301,55 +304,49 @@ export function useLiveQuery(
 
     // Ensure we always start sync for Vue hooks
     if (typeof unwrappedParam === `function`) {
-      // To avoid calling the query function twice, we wrap it to handle null/undefined returns
-      // The wrapper will be called once by createLiveQueryCollection
-      const wrappedQuery = (q: InitialQueryBuilder) => {
-        const result = unwrappedParam(q)
-        // If the query function returns null/undefined, throw a special error
-        // that we'll catch to return null collection
-        if (result === undefined || result === null) {
-          throw new Error(`__DISABLED_QUERY__`)
-        }
-        return result
+      // Probe the query function to check if it returns null/undefined (disabled query)
+      // This matches the pattern used by React and Solid adapters
+      const queryBuilder = new BaseQueryBuilder() as InitialQueryBuilder
+      const result = unwrappedParam(queryBuilder)
+
+      if (result === undefined || result === null) {
+        return null
       }
 
-      try {
-        return createLiveQueryCollection({
-          query: wrappedQuery,
-          startSync: true,
-        })
-      } catch (error) {
-        // Check if this is our special disabled query marker
-        if (error instanceof Error && error.message === `__DISABLED_QUERY__`) {
-          return null
-        }
-        // Re-throw other errors
-        throw error
-      }
+      return createLiveQueryCollection({
+        query: unwrappedParam,
+        startSync: true,
+        gcTime: DEFAULT_GC_TIME_MS,
+      })
     } else {
       return createLiveQueryCollection({
-        ...unwrappedParam,
         startSync: true,
+        gcTime: DEFAULT_GC_TIME_MS,
+        ...unwrappedParam,
       })
     }
   })
 
   // Reactive state that gets updated granularly through change events
-  const state = reactive(new Map<string | number, any>())
+  // shallowReactive tracks Map operations (set/delete/has/get/size) without
+  // deeply proxying stored values — collection items are immutable snapshots
+  const state = shallowReactive(new Map<string | number, any>())
 
-  // Reactive data array that maintains sorted order
-  const internalData = reactive<Array<any>>([])
+  // Reactive data array — shallowRef avoids deep proxying of array elements
+  // and triggers a single notification on .value assignment (vs reactive array's
+  // double trigger from length=0 + push)
+  const internalData = shallowRef<Array<any>>([])
 
   // Computed wrapper for the data to match expected return type
   // Returns single item for singleResult collections, array otherwise
   const data = computed(() => {
     const currentCollection = collection.value
     if (!currentCollection) {
-      return internalData
+      return internalData.value
     }
     const config: CollectionConfigSingleRowOption<any, any, any> =
       currentCollection.config
-    return config.singleResult ? internalData[0] : internalData
+    return config.singleResult ? internalData.value[0] : internalData.value
   })
 
   // Track collection status reactively
@@ -361,8 +358,7 @@ export function useLiveQuery(
   const syncDataFromCollection = (
     currentCollection: Collection<any, any, any>,
   ) => {
-    internalData.length = 0
-    internalData.push(...Array.from(currentCollection.values()))
+    internalData.value = Array.from(currentCollection.values())
   }
 
   // Track current unsubscribe function
@@ -376,7 +372,7 @@ export function useLiveQuery(
     if (!currentCollection) {
       status.value = `disabled` as const
       state.clear()
-      internalData.length = 0
+      internalData.value = []
       if (currentUnsubscribe) {
         currentUnsubscribe()
         currentUnsubscribe = null
@@ -404,10 +400,7 @@ export function useLiveQuery(
     // Listen for the first ready event to catch status transitions
     // that might not trigger change events (fixes async status transition bug)
     currentCollection.onFirstReady(() => {
-      // Use nextTick to ensure Vue reactivity updates properly
-      nextTick(() => {
-        status.value = currentCollection.status
-      })
+      status.value = currentCollection.status
     })
 
     // Subscribe to collection changes with granular updates
@@ -452,12 +445,15 @@ export function useLiveQuery(
     })
   })
 
-  // Cleanup on unmount (only if we're in a component context)
-  const instance = getCurrentInstance()
-  if (instance) {
-    onUnmounted(() => {
+  // Cleanup on scope disposal — works in components, composables, and standalone effectScope.
+  // Guard with getCurrentScope() since useLiveQuery may be called outside any reactive scope
+  // (e.g., in tests or standalone utility code). watchEffect's onInvalidate handles cleanup
+  // when the effect is stopped, but onScopeDispose provides defense-in-depth for scope disposal.
+  if (getCurrentScope()) {
+    onScopeDispose(() => {
       if (currentUnsubscribe) {
         currentUnsubscribe()
+        currentUnsubscribe = null
       }
     })
   }
@@ -465,8 +461,10 @@ export function useLiveQuery(
   return {
     state: computed(() => state),
     data,
-    collection: computed(() => collection.value),
-    status: computed(() => status.value),
+    collection: computed(
+      () => collection.value as Collection<any, any, any>,
+    ),
+    status: computed(() => status.value as CollectionStatus),
     isLoading: computed(() => status.value === `loading`),
     isReady: computed(
       () => status.value === `ready` || status.value === `disabled`,
@@ -474,5 +472,6 @@ export function useLiveQuery(
     isIdle: computed(() => status.value === `idle`),
     isError: computed(() => status.value === `error`),
     isCleanedUp: computed(() => status.value === `cleaned-up`),
+    isEnabled: computed(() => status.value !== `disabled`),
   }
 }
