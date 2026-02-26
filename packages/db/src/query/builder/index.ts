@@ -895,10 +895,7 @@ function collectRefsFromExpression(expr: BasicExpression): Array<PropRef> {
 /**
  * Checks whether a WHERE clause references any parent alias.
  */
-function referencesParent(
-  where: Where,
-  parentAliases: Array<string>,
-): boolean {
+function referencesParent(where: Where, parentAliases: Array<string>): boolean {
   const expr =
     typeof where === `object` && `expression` in where
       ? where.expression
@@ -993,8 +990,7 @@ function buildIncludesSubquery(
     const seen = new Set<string>()
     parentProjection = []
     for (const w of parentFilters) {
-      const expr =
-        typeof w === `object` && `expression` in w ? w.expression : w
+      const expr = typeof w === `object` && `expression` in w ? w.expression : w
       for (const ref of collectRefsFromExpression(expr)) {
         if (
           ref.path[0] != null &&
