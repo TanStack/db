@@ -130,7 +130,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * query.from({ users: usersCollection })
    *
    * // Query from a subquery
-   * const activeUsers = query.from({ u: usersCollection }).where(({u}) => eq(u.active, true))
+   * const activeUsers = query.from({ u: usersCollection }).where(({u}) => u.active)
    * query.from({ activeUsers })
    * ```
    */
@@ -172,7 +172,7 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
    * ```
    *
    * // Join with a subquery
-   * const activeUsers = query.from({ u: usersCollection }).where(({u}) => eq(u.active, true))
+   * const activeUsers = query.from({ u: usersCollection }).where(({u}) => u.active)
    * query
    *   .from({ activeUsers })
    *   .join({ p: postsCollection }, ({u, p}) => eq(u.id, p.userId))
