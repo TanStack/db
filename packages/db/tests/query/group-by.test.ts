@@ -864,6 +864,56 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         // No customer has total > 1000 (max is 700)
         expect(impossibleFilter.size).toBe(0)
       })
+
+      test(`having with bare boolean selected field`, () => {
+        // Select a computed boolean into the result, then use it directly in having
+        const highVolumeCustomers = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                order_count: count(orders.id),
+                is_high_volume: gt(count(orders.id), 2),
+              }))
+              .having(
+                ({ $selected }) => $selected.is_high_volume,
+              ),
+        })
+
+        // Only customer 1 has more than 2 orders (3 orders)
+        expect(highVolumeCustomers.size).toBe(1)
+        expect(highVolumeCustomers.get(1)?.customer_id).toBe(1)
+        expect(highVolumeCustomers.get(1)?.is_high_volume).toBe(true)
+      })
+
+      test(`having with negated boolean selected field`, () => {
+        // Using not() with a bare boolean selected field
+        const lowVolumeCustomers = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ orders: ordersCollection })
+              .groupBy(({ orders }) => orders.customer_id)
+              .select(({ orders }) => ({
+                customer_id: orders.customer_id,
+                order_count: count(orders.id),
+                is_high_volume: gt(count(orders.id), 2),
+              }))
+              .having(
+                ({ $selected }) => not($selected.is_high_volume),
+              ),
+        })
+
+        // Customers 2 and 3 have 2 orders each (not > 2)
+        expect(lowVolumeCustomers.size).toBe(2)
+        expect(lowVolumeCustomers.get(2)?.customer_id).toBe(2)
+        expect(lowVolumeCustomers.get(3)?.customer_id).toBe(3)
+        expect(lowVolumeCustomers.get(2)?.is_high_volume).toBe(false)
+        expect(lowVolumeCustomers.get(3)?.is_high_volume).toBe(false)
+      })
     })
 
     describe(`Live Updates with GROUP BY`, () => {
