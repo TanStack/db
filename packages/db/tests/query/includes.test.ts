@@ -565,4 +565,225 @@ describe(`includes subqueries`, () => {
       ])
     })
   })
+
+  describe(`parent-referencing filters`, () => {
+    type ProjectWithCreator = {
+      id: number
+      name: string
+      createdBy: string
+    }
+
+    type IssueWithCreator = {
+      id: number
+      projectId: number
+      title: string
+      createdBy: string
+    }
+
+    const sampleProjectsWithCreator: Array<ProjectWithCreator> = [
+      { id: 1, name: `Alpha`, createdBy: `alice` },
+      { id: 2, name: `Beta`, createdBy: `bob` },
+      { id: 3, name: `Gamma`, createdBy: `alice` },
+    ]
+
+    const sampleIssuesWithCreator: Array<IssueWithCreator> = [
+      { id: 10, projectId: 1, title: `Bug in Alpha`, createdBy: `alice` },
+      { id: 11, projectId: 1, title: `Feature for Alpha`, createdBy: `bob` },
+      { id: 20, projectId: 2, title: `Bug in Beta`, createdBy: `bob` },
+      { id: 21, projectId: 2, title: `Feature for Beta`, createdBy: `alice` },
+      { id: 30, projectId: 3, title: `Bug in Gamma`, createdBy: `alice` },
+    ]
+
+    function createProjectsWC() {
+      return createCollection(
+        mockSyncCollectionOptions<ProjectWithCreator>({
+          id: `includes-projects-wc`,
+          getKey: (p) => p.id,
+          initialData: sampleProjectsWithCreator,
+        }),
+      )
+    }
+
+    function createIssuesWC() {
+      return createCollection(
+        mockSyncCollectionOptions<IssueWithCreator>({
+          id: `includes-issues-wc`,
+          getKey: (i) => i.id,
+          initialData: sampleIssuesWithCreator,
+        }),
+      )
+    }
+
+    let projectsWC: ReturnType<typeof createProjectsWC>
+    let issuesWC: ReturnType<typeof createIssuesWC>
+
+    beforeEach(() => {
+      projectsWC = createProjectsWC()
+      issuesWC = createIssuesWC()
+    })
+
+    it(`filters children by parent-referencing eq()`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projectsWC }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          createdBy: p.createdBy,
+          issues: q
+            .from({ i: issuesWC })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .where(({ i }) => eq(i.createdBy, p.createdBy))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              createdBy: i.createdBy,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          name: `Alpha`,
+          createdBy: `alice`,
+          issues: [
+            // Only issue 10 (createdBy: alice) matches project 1 (createdBy: alice)
+            { id: 10, title: `Bug in Alpha`, createdBy: `alice` },
+          ],
+        },
+        {
+          id: 2,
+          name: `Beta`,
+          createdBy: `bob`,
+          issues: [
+            // Only issue 20 (createdBy: bob) matches project 2 (createdBy: bob)
+            { id: 20, title: `Bug in Beta`, createdBy: `bob` },
+          ],
+        },
+        {
+          id: 3,
+          name: `Gamma`,
+          createdBy: `alice`,
+          issues: [
+            // Only issue 30 (createdBy: alice) matches project 3 (createdBy: alice)
+            { id: 30, title: `Bug in Gamma`, createdBy: `alice` },
+          ],
+        },
+      ])
+    })
+
+    it(`reacts to parent field change`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projectsWC }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          createdBy: p.createdBy,
+          issues: q
+            .from({ i: issuesWC })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .where(({ i }) => eq(i.createdBy, p.createdBy))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              createdBy: i.createdBy,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      // Project 1 (createdBy: alice) → only issue 10 (alice)
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha`, createdBy: `alice` },
+      ])
+
+      // Change project 1 createdBy from alice to bob
+      projectsWC.utils.begin()
+      projectsWC.utils.write({
+        type: `update`,
+        value: { id: 1, name: `Alpha`, createdBy: `bob` },
+        oldValue: sampleProjectsWithCreator[0]!,
+      })
+      projectsWC.utils.commit()
+
+      // Now issue 11 (createdBy: bob) should match, issue 10 (alice) should not
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 11, title: `Feature for Alpha`, createdBy: `bob` },
+      ])
+    })
+
+    it(`reacts to child field change`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projectsWC }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          createdBy: p.createdBy,
+          issues: q
+            .from({ i: issuesWC })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .where(({ i }) => eq(i.createdBy, p.createdBy))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              createdBy: i.createdBy,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      // Project 1 (alice) → only issue 10
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha`, createdBy: `alice` },
+      ])
+
+      // Change issue 11's createdBy from bob to alice → it should now appear
+      issuesWC.utils.begin()
+      issuesWC.utils.write({
+        type: `update`,
+        value: { id: 11, projectId: 1, title: `Feature for Alpha`, createdBy: `alice` },
+        oldValue: sampleIssuesWithCreator[1]!,
+      })
+      issuesWC.utils.commit()
+
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha`, createdBy: `alice` },
+        { id: 11, title: `Feature for Alpha`, createdBy: `alice` },
+      ])
+    })
+
+    it(`mixed filters: parent-referencing + pure-child`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projectsWC }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          createdBy: p.createdBy,
+          issues: q
+            .from({ i: issuesWC })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .where(({ i }) => eq(i.createdBy, p.createdBy))
+            .where(({ i }) => eq(i.title, `Bug in Alpha`))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              createdBy: i.createdBy,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      // Project 1 (alice): matching createdBy + title = only issue 10
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha`, createdBy: `alice` },
+      ])
+
+      // Project 2 (bob): no issues with title "Bug in Alpha"
+      expect(childItems((collection.get(2) as any).issues)).toEqual([])
+
+      // Project 3 (alice): no issues with title "Bug in Alpha"
+      expect(childItems((collection.get(3) as any).issues)).toEqual([])
+    })
+  })
 })
