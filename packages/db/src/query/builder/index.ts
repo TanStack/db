@@ -925,10 +925,12 @@ function buildIncludesSubquery(
     }
   }
 
-  // Walk child's WHERE clauses to find the correlation condition
+  // Walk child's WHERE clauses to find the correlation condition.
+  // The correlation eq() may be a standalone WHERE or nested inside a top-level and().
   let parentRef: PropRef | undefined
   let childRef: PropRef | undefined
   let correlationWhereIndex = -1
+  let correlationAndArgIndex = -1 // >= 0 when found inside an and()
 
   if (childQuery.where) {
     for (let i = 0; i < childQuery.where.length; i++) {
@@ -938,16 +940,15 @@ function buildIncludesSubquery(
           ? where.expression
           : where
 
-      // Look for eq(a, b) where one side references parent and other references child
+      // Try standalone eq()
       if (
         expr.type === `func` &&
         expr.name === `eq` &&
         expr.args.length === 2
       ) {
-        const [argA, argB] = expr.args
         const result = extractCorrelation(
-          argA!,
-          argB!,
+          expr.args[0]!,
+          expr.args[1]!,
           parentAliases,
           childAliases,
         )
@@ -957,6 +958,37 @@ function buildIncludesSubquery(
           correlationWhereIndex = i
           break
         }
+      }
+
+      // Try inside top-level and()
+      if (
+        expr.type === `func` &&
+        expr.name === `and` &&
+        expr.args.length >= 2
+      ) {
+        for (let j = 0; j < expr.args.length; j++) {
+          const arg = expr.args[j]!
+          if (
+            arg.type === `func` &&
+            arg.name === `eq` &&
+            arg.args.length === 2
+          ) {
+            const result = extractCorrelation(
+              arg.args[0]!,
+              arg.args[1]!,
+              parentAliases,
+              childAliases,
+            )
+            if (result) {
+              parentRef = result.parentRef
+              childRef = result.childRef
+              correlationWhereIndex = i
+              correlationAndArgIndex = j
+              break
+            }
+          }
+        }
+        if (parentRef) break
       }
     }
   }
@@ -969,9 +1001,37 @@ function buildIncludesSubquery(
     )
   }
 
-  // Remove the correlation WHERE from the child query
+  // Remove the correlation eq() from the child query's WHERE clauses.
+  // If it was inside an and(), remove just that arg (collapsing the and() if needed).
   const modifiedWhere = [...childQuery.where!]
-  modifiedWhere.splice(correlationWhereIndex, 1)
+  if (correlationAndArgIndex >= 0) {
+    const where = modifiedWhere[correlationWhereIndex]!
+    const expr =
+      typeof where === `object` && `expression` in where
+        ? where.expression
+        : where
+    const remainingArgs = (expr as any).args.filter(
+      (_: any, idx: number) => idx !== correlationAndArgIndex,
+    )
+    if (remainingArgs.length === 1) {
+      // Collapse and() with single remaining arg to just that expression
+      const isResidual =
+        typeof where === `object` && `expression` in where && where.residual
+      modifiedWhere[correlationWhereIndex] = isResidual
+        ? { expression: remainingArgs[0], residual: true }
+        : remainingArgs[0]
+    } else {
+      // Rebuild and() without the extracted arg
+      const newAnd = new FuncExpr(`and`, remainingArgs)
+      const isResidual =
+        typeof where === `object` && `expression` in where && where.residual
+      modifiedWhere[correlationWhereIndex] = isResidual
+        ? { expression: newAnd, residual: true }
+        : newAnd
+    }
+  } else {
+    modifiedWhere.splice(correlationWhereIndex, 1)
+  }
 
   // Separate remaining WHEREs into pure-child vs parent-referencing
   const pureChildWhere: Array<Where> = []

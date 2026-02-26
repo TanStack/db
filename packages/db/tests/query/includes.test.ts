@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createLiveQueryCollection, eq } from '../../src/query/index.js'
+import { and, createLiveQueryCollection, eq } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -788,6 +788,88 @@ describe(`includes subqueries`, () => {
       expect(childItems((collection.get(2) as any).issues)).toEqual([])
 
       // Project 3 (alice): no issues with title "Bug in Alpha"
+      expect(childItems((collection.get(3) as any).issues)).toEqual([])
+    })
+
+    it(`extracts correlation from inside and()`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projectsWC }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          createdBy: p.createdBy,
+          issues: q
+            .from({ i: issuesWC })
+            .where(({ i }) =>
+              and(eq(i.projectId, p.id), eq(i.createdBy, p.createdBy)),
+            )
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              createdBy: i.createdBy,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          name: `Alpha`,
+          createdBy: `alice`,
+          issues: [
+            { id: 10, title: `Bug in Alpha`, createdBy: `alice` },
+          ],
+        },
+        {
+          id: 2,
+          name: `Beta`,
+          createdBy: `bob`,
+          issues: [
+            { id: 20, title: `Bug in Beta`, createdBy: `bob` },
+          ],
+        },
+        {
+          id: 3,
+          name: `Gamma`,
+          createdBy: `alice`,
+          issues: [
+            { id: 30, title: `Bug in Gamma`, createdBy: `alice` },
+          ],
+        },
+      ])
+    })
+
+    it(`extracts correlation from and() with more than 2 args`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projectsWC }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          createdBy: p.createdBy,
+          issues: q
+            .from({ i: issuesWC })
+            .where(({ i }) =>
+              and(
+                eq(i.projectId, p.id),
+                eq(i.createdBy, p.createdBy),
+                eq(i.title, `Bug in Alpha`),
+              ),
+            )
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              createdBy: i.createdBy,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      // Only project 1 (alice) has an issue matching all three conditions
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha`, createdBy: `alice` },
+      ])
+      expect(childItems((collection.get(2) as any).issues)).toEqual([])
       expect(childItems((collection.get(3) as any).issues)).toEqual([])
     })
   })
