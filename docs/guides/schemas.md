@@ -831,7 +831,8 @@ A complete todo application demonstrating validation, transformations, and defau
 
 ```typescript
 import { z } from 'zod'
-import { createCollection, eq } from '@tanstack/react-db'
+import { createCollection } from '@tanstack/react-db'
+import { not } from '@tanstack/db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 
 // Schema with validation, transformations, and defaults
@@ -921,7 +922,7 @@ const todoCollection = createCollection(
 function TodoApp() {
   const { data: todos } = useLiveQuery(q =>
     q.from({ todo: todoCollection })
-      .where(({ todo }) => eq(todo.completed, false))
+      .where(({ todo }) => not(todo.completed))
       .orderBy(({ todo }) => todo.created_at, 'desc')
   )
 
@@ -991,7 +992,6 @@ function TodoApp() {
 
 ```typescript
 import { z } from 'zod'
-import { eq } from '@tanstack/db'
 
 // Schema with computed fields and transformations
 const productSchema = z.object({
@@ -1047,7 +1047,7 @@ const productCollection = createCollection(
 function ProductList() {
   const { data: products } = useLiveQuery(q =>
     q.from({ product: productCollection })
-      .where(({ product }) => eq(product.in_stock, true))  // Use computed field
+      .where(({ product }) => product.in_stock)  // Use computed field
       .orderBy(({ product }) => product.final_price, 'asc')
   )
 
