@@ -320,9 +320,9 @@ export function useLiveQuery(
       })
     } else {
       return createLiveQueryCollection({
-        startSync: true,
         gcTime: DEFAULT_GC_TIME_MS,
         ...unwrappedParam,
+        startSync: true,
       })
     }
   })
@@ -398,9 +398,14 @@ export function useLiveQuery(
     syncDataFromCollection(currentCollection)
 
     // Listen for the first ready event to catch status transitions
-    // that might not trigger change events (fixes async status transition bug)
+    // that might not trigger change events (fixes async status transition bug).
+    // Guard: if the collection has changed by the time the callback fires,
+    // skip the update — the new collection's own callback will handle it.
+    const collectionAtRegistration = currentCollection
     currentCollection.onFirstReady(() => {
-      status.value = currentCollection.status
+      if (collection.value === collectionAtRegistration) {
+        status.value = currentCollection.status
+      }
     })
 
     // Subscribe to collection changes with granular updates
