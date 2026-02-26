@@ -120,6 +120,23 @@ export interface LocalStorageCollectionUtils extends UtilsRecord {
   acceptMutations: (transaction: {
     mutations: Array<PendingMutation<Record<string, unknown>>>
   }) => void
+  /**
+   * Upsert one or more items directly into the synced data store without triggering optimistic updates.
+   * If an item with the same key exists, it will be updated; otherwise, it will be inserted.
+   *
+   * @param data - The item or array of items to upsert
+   * @example
+   * // Upsert a single item
+   * localSettings.utils.writeUpsert({ id: 'theme', value: 'dark' })
+   *
+   * @example
+   * // Upsert multiple items
+   * localSettings.utils.writeUpsert([
+   *   { id: 'theme', value: 'dark' },
+   *   { id: 'language', value: 'en' }
+   * ])
+   */
+  writeUpsert: <T extends object>(data: T | Array<T>) => void
 }
 
 /**
@@ -528,6 +545,57 @@ export function localStorageCollectionOptions(
     return handlerResult
   }
 
+  /**
+   * Upsert utility function that directly persists to localStorage
+   * Inserts if item doesn't exist, updates if it does
+   */
+  const writeUpsert = <T extends object>(data: T | Array<T>): void => {
+    const items = Array.isArray(data) ? data : [data]
+
+    // Validate that all values can be JSON serialized
+    items.forEach((item) => {
+      validateJsonSerializable(parser, item, `upsert`)
+    })
+
+    // Prepare change messages for sync confirmation
+    const mutations: Array<PendingMutation<T>> = []
+
+    // Process each item: check if exists, then insert or update
+    items.forEach((item) => {
+      const key = config.getKey(item as any)
+      const existsInStorage = lastKnownData.has(key)
+      const operationType = existsInStorage ? `update` : `insert`
+
+      // For updates, merge with existing data; for inserts, use item as-is
+      const finalData = existsInStorage
+        ? { ...lastKnownData.get(key)!.data, ...item }
+        : item
+
+      const storedItem: StoredItem<T> = {
+        versionKey: generateUuid(),
+        data: finalData as T,
+      }
+      lastKnownData.set(key, storedItem)
+
+      // Track mutation for sync confirmation
+      mutations.push({
+        type: operationType,
+        key,
+        modified: finalData as T,
+        original: existsInStorage
+          ? (lastKnownData.get(key)?.data as T)
+          : ({} as T),
+        collection: sync.collection,
+      } as PendingMutation<T>)
+    })
+
+    // Save to storage
+    saveToStorage(lastKnownData)
+
+    // Confirm mutations through sync interface
+    sync.confirmOperationsSync(mutations)
+  }
+
   // Extract standard Collection config properties
   const {
     storageKey: _storageKey,
@@ -617,6 +685,7 @@ export function localStorageCollectionOptions(
       clearStorage,
       getStorageSize,
       acceptMutations,
+      writeUpsert,
     },
   }
 }
