@@ -479,8 +479,9 @@ export function compileQuery(
         const finalResults = unwrapValue(raw)
         // Stamp includes correlation keys onto the result for child routing
         if ((row as any).__includesCorrelationKeys) {
-          finalResults.__includesCorrelationKeys =
-            (row as any).__includesCorrelationKeys
+          finalResults.__includesCorrelationKeys = (
+            row as any
+          ).__includesCorrelationKeys
         }
         // When in includes mode, embed the correlation key as third element
         if (parentKeyStream) {
@@ -517,8 +518,9 @@ export function compileQuery(
       const finalResults = unwrapValue(raw)
       // Stamp includes correlation keys onto the result for child routing
       if ((row as any).__includesCorrelationKeys) {
-        finalResults.__includesCorrelationKeys =
-          (row as any).__includesCorrelationKeys
+        finalResults.__includesCorrelationKeys = (
+          row as any
+        ).__includesCorrelationKeys
       }
       // When in includes mode, embed the correlation key as third element
       if (parentKeyStream) {

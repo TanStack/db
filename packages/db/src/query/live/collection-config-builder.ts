@@ -1501,7 +1501,7 @@ function updateRoutingIndex(
       if (change.inserts > 0) {
         // Read the pre-computed nested correlation key from the compiler stamp
         const nestedCorrelationKey =
-          (change.value).__includesCorrelationKeys?.[
+          change.value.__includesCorrelationKeys?.[
             setup.compilationResult.fieldName
           ]
 
@@ -1517,7 +1517,7 @@ function updateRoutingIndex(
       } else if (change.deletes > 0 && change.inserts === 0) {
         // Remove from routing index
         const nestedCorrelationKey =
-          (change.value).__includesCorrelationKeys?.[
+          change.value.__includesCorrelationKeys?.[
             setup.compilationResult.fieldName
           ]
 
@@ -1642,7 +1642,7 @@ function flushIncludesState(
           const parentResult = changes.value
           // Read the pre-computed correlation key from the compiler stamp
           const correlationKey =
-            (parentResult).__includesCorrelationKeys?.[state.fieldName]
+            parentResult.__includesCorrelationKeys?.[state.fieldName]
 
           if (correlationKey != null) {
             // Ensure child Collection exists for this correlation key
@@ -1770,7 +1770,7 @@ function flushIncludesState(
       for (const [parentKey, changes] of parentChanges) {
         if (changes.deletes > 0 && changes.inserts === 0) {
           const correlationKey =
-            (changes.value).__includesCorrelationKeys?.[state.fieldName]
+            changes.value.__includesCorrelationKeys?.[state.fieldName]
           if (correlationKey != null) {
             cleanRoutingIndexOnDelete(state, correlationKey)
             state.childRegistry.delete(correlationKey)
@@ -1791,7 +1791,7 @@ function flushIncludesState(
   // Clean up the internal stamp from parent/child results so it doesn't leak to the user
   if (parentChanges) {
     for (const [, changes] of parentChanges) {
-      delete (changes.value).__includesCorrelationKeys
+      delete changes.value.__includesCorrelationKeys
     }
   }
 }
