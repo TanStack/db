@@ -817,7 +817,6 @@ export class CollectionConfigBuilder<
     return includesEntries.map((entry) => {
       const state: IncludesOutputState = {
         fieldName: entry.fieldName,
-        correlationField: entry.correlationField,
         childCorrelationField: entry.childCorrelationField,
         hasOrderBy: entry.hasOrderBy,
         childRegistry: new Map(),
@@ -1307,7 +1306,6 @@ type NestedIncludesSetup = {
  */
 type IncludesOutputState = {
   fieldName: string
-  correlationField: PropRef
   childCorrelationField: PropRef
   /** Whether the child query has an ORDER BY clause */
   hasOrderBy: boolean
@@ -1408,7 +1406,6 @@ function createPerEntryIncludesStates(
   return setups.map((setup) => {
     const state: IncludesOutputState = {
       fieldName: setup.compilationResult.fieldName,
-      correlationField: setup.compilationResult.correlationField,
       childCorrelationField: setup.compilationResult.childCorrelationField,
       hasOrderBy: setup.compilationResult.hasOrderBy,
       childRegistry: new Map(),
@@ -1500,17 +1497,13 @@ function updateRoutingIndex(
   if (!state.nestedSetups) return
 
   for (const setup of state.nestedSetups) {
-    const nestedFieldPath =
-      setup.compilationResult.correlationField.path.slice(1)
-
     for (const [, change] of childChanges) {
       if (change.inserts > 0) {
-        // Extract nested correlation key from child result
-        let nestedCorrelationKey: unknown = change.value
-        for (const segment of nestedFieldPath) {
-          if (nestedCorrelationKey == null) break
-          nestedCorrelationKey = (nestedCorrelationKey as any)[segment]
-        }
+        // Read the pre-computed nested correlation key from the compiler stamp
+        const nestedCorrelationKey =
+          (change.value).__includesCorrelationKeys?.[
+            setup.compilationResult.fieldName
+          ]
 
         if (nestedCorrelationKey != null) {
           state.nestedRoutingIndex!.set(nestedCorrelationKey, correlationKey)
@@ -1523,11 +1516,10 @@ function updateRoutingIndex(
         }
       } else if (change.deletes > 0 && change.inserts === 0) {
         // Remove from routing index
-        let nestedCorrelationKey: unknown = change.value
-        for (const segment of nestedFieldPath) {
-          if (nestedCorrelationKey == null) break
-          nestedCorrelationKey = (nestedCorrelationKey as any)[segment]
-        }
+        const nestedCorrelationKey =
+          (change.value).__includesCorrelationKeys?.[
+            setup.compilationResult.fieldName
+          ]
 
         if (nestedCorrelationKey != null) {
           state.nestedRoutingIndex!.delete(nestedCorrelationKey)
@@ -1645,16 +1637,12 @@ function flushIncludesState(
   for (const state of includesState) {
     // Phase 1: Parent INSERTs — ensure a child Collection exists for every parent
     if (parentChanges) {
-      const fieldPath = state.correlationField.path.slice(1) // remove alias prefix
       for (const [parentKey, changes] of parentChanges) {
         if (changes.inserts > 0) {
           const parentResult = changes.value
-          // Extract the correlation key value from the parent result
-          let correlationKey: unknown = parentResult
-          for (const segment of fieldPath) {
-            if (correlationKey == null) break
-            correlationKey = (correlationKey as any)[segment]
-          }
+          // Read the pre-computed correlation key from the compiler stamp
+          const correlationKey =
+            (parentResult).__includesCorrelationKeys?.[state.fieldName]
 
           if (correlationKey != null) {
             // Ensure child Collection exists for this correlation key
@@ -1779,14 +1767,10 @@ function flushIncludesState(
 
     // Phase 5: Parent DELETEs — dispose child Collections and clean up
     if (parentChanges) {
-      const fieldPath = state.correlationField.path.slice(1)
       for (const [parentKey, changes] of parentChanges) {
         if (changes.deletes > 0 && changes.inserts === 0) {
-          let correlationKey: unknown = changes.value
-          for (const segment of fieldPath) {
-            if (correlationKey == null) break
-            correlationKey = (correlationKey as any)[segment]
-          }
+          const correlationKey =
+            (changes.value).__includesCorrelationKeys?.[state.fieldName]
           if (correlationKey != null) {
             cleanRoutingIndexOnDelete(state, correlationKey)
             state.childRegistry.delete(correlationKey)
@@ -1801,6 +1785,13 @@ function flushIncludesState(
           }
         }
       }
+    }
+  }
+
+  // Clean up the internal stamp from parent/child results so it doesn't leak to the user
+  if (parentChanges) {
+    for (const [, changes] of parentChanges) {
+      delete (changes.value).__includesCorrelationKeys
     }
   }
 }

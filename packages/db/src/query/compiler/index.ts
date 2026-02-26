@@ -325,6 +325,25 @@ export function compileQuery(
       // Replace includes entry in select with a null placeholder
       replaceIncludesInSelect(query.select, key)
     }
+
+    // Stamp correlation key values onto the namespaced row so they survive
+    // select extraction. This allows flushIncludesState to read them directly
+    // without requiring the correlation field to be in the user's select.
+    if (includesEntries.length > 0) {
+      const compiledCorrelations = includesEntries.map(({ subquery }) => ({
+        fieldName: subquery.fieldName,
+        compiled: compileExpression(subquery.correlationField),
+      }))
+      pipeline = pipeline.pipe(
+        map(([key, nsRow]: any) => {
+          const correlationKeys: Record<string, unknown> = {}
+          for (const { fieldName: fn, compiled } of compiledCorrelations) {
+            correlationKeys[fn] = compiled(nsRow)
+          }
+          return [key, { ...nsRow, __includesCorrelationKeys: correlationKeys }]
+        }),
+      )
+    }
   }
 
   if (query.distinct && !query.fnSelect && !query.select) {
@@ -458,6 +477,11 @@ export function compileQuery(
         // Extract the final results from $selected and include orderBy index
         const raw = (row as any).$selected
         const finalResults = unwrapValue(raw)
+        // Stamp includes correlation keys onto the result for child routing
+        if ((row as any).__includesCorrelationKeys) {
+          finalResults.__includesCorrelationKeys =
+            (row as any).__includesCorrelationKeys
+        }
         // When in includes mode, embed the correlation key as third element
         if (parentKeyStream) {
           const correlationKey = (row as any)[mainSource]?.__correlationKey
@@ -491,6 +515,11 @@ export function compileQuery(
       // Extract the final results from $selected and return [key, [results, undefined]]
       const raw = (row as any).$selected
       const finalResults = unwrapValue(raw)
+      // Stamp includes correlation keys onto the result for child routing
+      if ((row as any).__includesCorrelationKeys) {
+        finalResults.__includesCorrelationKeys =
+          (row as any).__includesCorrelationKeys
+      }
       // When in includes mode, embed the correlation key as third element
       if (parentKeyStream) {
         const correlationKey = (row as any)[mainSource]?.__correlationKey
