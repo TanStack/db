@@ -1596,7 +1596,7 @@ function createChildCollectionEntry(
     : undefined
 
   const collection = createCollection<any, string | number>({
-    id: `${parentId}-${fieldName}-${String(correlationKey)}`,
+    id: `__child-collection:${parentId}-${fieldName}-${String(correlationKey)}`,
     getKey: (item: any) => resultKeys.get(item) as string | number,
     compare,
     sync: {
