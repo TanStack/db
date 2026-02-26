@@ -57,7 +57,7 @@ const todoCollection = createCollection({
 const Todos = () => {
   // Bind data using live queries
   const { data: todos } = useLiveQuery((q) =>
-    q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.completed, false))
+    q.from({ todo: todoCollection }).where(({ todo }) => not(todo.completed))
   )
 
   const complete = (todo) => {

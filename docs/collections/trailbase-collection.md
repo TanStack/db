@@ -147,7 +147,8 @@ const todosCollection = createCollection(
 ## Complete Example
 
 ```typescript
-import { createCollection, eq } from '@tanstack/react-db'
+import { createCollection } from '@tanstack/react-db'
+import { not } from '@tanstack/db'
 import { trailBaseCollectionOptions } from '@tanstack/trailbase-db-collection'
 import { initClient } from 'trailbase'
 import { z } from 'zod'
@@ -195,7 +196,7 @@ export const todosCollection = createCollection<SelectTodo, Todo>(
 function TodoList() {
   const { data: todos } = useLiveQuery((q) =>
     q.from({ todo: todosCollection })
-      .where(({ todo }) => eq(todo.completed, false))
+      .where(({ todo }) => not(todo.completed))
       .orderBy(({ todo }) => todo.created_at, 'desc')
   )
 

@@ -60,23 +60,18 @@ export class TransactionExecutor {
   }
 
   private async runExecution(): Promise<void> {
-    const maxConcurrency = this.config.maxConcurrency ?? 3
-
     while (this.scheduler.getPendingCount() > 0) {
       if (!this.isOnline()) {
         break
       }
 
-      const batch = this.scheduler.getNextBatch(maxConcurrency)
+      const transaction = this.scheduler.getNext()
 
-      if (batch.length === 0) {
+      if (!transaction) {
         break
       }
 
-      const executions = batch.map((transaction) =>
-        this.executeTransaction(transaction),
-      )
-      await Promise.allSettled(executions)
+      await this.executeTransaction(transaction)
     }
 
     // Schedule next retry after execution completes
