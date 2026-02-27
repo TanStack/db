@@ -118,6 +118,27 @@ export interface QueryCollectionConfig<
     TQueryData,
     TQueryKey
   >[`staleTime`]
+  refetchOnWindowFocus?: QueryObserverOptions<
+    Array<T>,
+    TError,
+    Array<T>,
+    Array<T>,
+    TQueryKey
+  >['refetchOnWindowFocus']
+  refetchOnReconnect?: QueryObserverOptions<
+    Array<T>,
+    TError,
+    Array<T>,
+    Array<T>,
+    TQueryKey
+  >['refetchOnReconnect']
+  networkMode?: QueryObserverOptions<
+    Array<T>,
+    TError,
+    Array<T>,
+    Array<T>,
+    TQueryKey
+  >['networkMode']
 
   /**
    * Metadata to pass to the query.
@@ -547,6 +568,9 @@ export function queryCollectionOptions(
     retry,
     retryDelay,
     staleTime,
+    refetchOnWindowFocus,
+    refetchOnReconnect,
+    networkMode,
     getKey,
     onInsert,
     onUpdate,
@@ -736,7 +760,6 @@ export function queryCollectionOptions(
         queryKey: key,
         queryFn: queryFunction,
         meta: extendedMeta,
-        structuralSharing: true,
         notifyOnChangeProps: `all`,
 
         // Only include options that are explicitly defined to allow QueryClient defaultOptions to be used
@@ -745,6 +768,9 @@ export function queryCollectionOptions(
         ...(retry !== undefined && { retry }),
         ...(retryDelay !== undefined && { retryDelay }),
         ...(staleTime !== undefined && { staleTime }),
+        ...(refetchOnWindowFocus !== undefined && { refetchOnWindowFocus }),
+        ...(refetchOnReconnect !== undefined && { refetchOnReconnect }),
+        ...(networkMode !== undefined && { networkMode }),
       }
 
       const localObserver = new QueryObserver<
