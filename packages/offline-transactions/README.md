@@ -27,12 +27,21 @@ npm install @tanstack/offline-transactions @react-native-community/netinfo
 
 The React Native implementation requires the `@react-native-community/netinfo` peer dependency for network connectivity detection.
 
+### Capacitor
+
+```bash
+npm install @tanstack/offline-transactions @capacitor/network @capacitor/preferences
+```
+
+The Capacitor implementation requires the `@capacitor/network` and `@capacitor/preferences` peer dependency for network connectivity detection.
+
 ## Platform Support
 
 This package provides platform-specific implementations for web and React Native environments:
 
 - **Web**: Uses browser APIs (`window.online/offline` events, `document.visibilitychange`)
 - **React Native**: Uses React Native primitives (`@react-native-community/netinfo` for network status, `AppState` for foreground/background detection)
+- **Capacitor**: Uses Capacitor primitives (`@capacitor/network` and `@capacitor/preferences`)
 
 ## Quick Start
 
@@ -48,6 +57,12 @@ import { startOfflineExecutor } from '@tanstack/offline-transactions'
 
 ```typescript
 import { startOfflineExecutor } from '@tanstack/offline-transactions/react-native'
+```
+
+**Capacitor**
+
+```typescript
+import { startOfflineExecutor } from '@tanstack/offline-transactions/capacitor'
 ```
 
 **Usage (same for both platforms):**
@@ -253,6 +268,10 @@ await tx.commit() // Works offline!
 - **Expo**: SDK 40+ (tested with latest versions)
 - **Required peer dependency**: `@react-native-community/netinfo` for network connectivity detection
 - **Storage**: Uses AsyncStorage or custom storage adapters
+
+## Capacitor
+- **Capacitor**: 8.0.0+ (tested with latest versions)
+- **Required peer dependency**: `@capacitor/network` and `@capacitor/preferences` for network connectivity detection
 
 ## License
 
