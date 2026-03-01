@@ -1,0 +1,41 @@
+{
+  "name": "@tanstack/db-playbook",
+  "version": "0.0.1",
+  "description": "TanStack DB Playbook - skills for AI agents building with TanStack DB",
+  "author": "TanStack",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TanStack/db.git",
+    "directory": "packages/playbook"
+  },
+  "homepage": "https://tanstack.com/db",
+  "keywords": [
+    "tanstack",
+    "db",
+    "playbook",
+    "skills",
+    "ai",
+    "llm",
+    "documentation",
+    "reactive",
+    "live-queries",
+    "optimistic-updates"
+  ],
+  "bin": {
+    "db-playbook": "./bin/cli.js"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "bin",
+    "skills",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "lint": "true"
+  }
+}
