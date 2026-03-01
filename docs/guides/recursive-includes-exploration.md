@@ -97,116 +97,262 @@ This is the core "single branch, external fan-out" shape.
    - Current nested buffering/routing works for known levels.
    - Recursive trees need dynamic level creation and pruning.
 
-## Option space
+## Option status after this exploration
 
-### Option A: Depth-limited unrolling (MVP-friendly)
+- **Option A (depth-limited unrolling):** compelling MVP route and syntax-compatible with a stronger future implementation.
+- **Option B (per-node dynamic queries):** rejected.
+- **Option C (output-layer recursive materializer):** currently less compelling given desire to solve recursion at the IVM graph level.
+- **Option D (new recursive IVM operator):** most compelling long-term direction.
 
-Idea:
-- Introduce recursive syntax, but require `maxDepth`.
-- Compile by unrolling into N nested includes nodes.
+The rest of this document focuses on how to make Option D practical in `db-ivm`, while avoiding global multidimensional time unless absolutely required.
 
-Pros:
-- Reuses almost all current implementation.
-- Predictable complexity and easy testing.
+## Option D deep dive: recursive operator in `@tanstack/db-ivm`
 
-Cons:
-- Not true recursion (cutoff behavior).
-- Query/IR grows with depth.
-- Not ideal for unknown depth trees.
+### Key observations from the current codebases
 
-### Option B: Per-node dynamic child query instances
+1. `db-ivm` intentionally removed version/frontier machinery and runs until local quiescence (`D2.run()` loops while operators have pending work).
+2. The original `d2ts` has `iterate` based on:
+   - version extension/truncation (`Version.extend()` / `truncate()`),
+   - per-iteration step (`applyStep()`),
+   - frontier coordination in `FeedbackOperator`.
+3. The DBSP paper explicitly supports recursion (including non-monotonic recursion) and models recursive incrementalization with nested time dimensions.
 
-Idea:
-- At runtime create child query/subscription per discovered node.
+So we have a useful tension:
 
-Pros:
-- Easy to reason about.
+- Differential-style multidimensional time is expressive and principled.
+- `db-ivm` is intentionally much simpler.
+- We want recursion now, but do not want to pay the full complexity tax upfront.
 
-Cons:
-- Violates performance goal (effectively N queries/subscriptions).
-- High memory/loadSubset pressure on large trees.
-- Hard to optimize globally.
+### What Differential/DBSP are telling us (and what to borrow)
 
-Conclusion: likely reject.
+From Differential and DBSP, the durable ideas to keep are:
 
-### Option C: Shared recursive edge stream + recursive fan-out state (recommended medium-term)
+1. **Recursion should be fixed-point computation over deltas**, not repeated full recomputation.
+2. **Semi-naive style propagation** (only newly discovered tuples drive next iteration) is essential.
+3. **Strict feedback / convergence discipline** is mandatory to avoid non-termination.
+4. **Two notions of progress exist conceptually**:
+   - outer progress (incoming transaction/update),
+   - inner progress (loop iteration).
 
-Idea:
-- Compile a recursive declaration into one shared child/edge stream (same "one branch" principle).
-- Maintain recursive adjacency/materialization state outside query graph:
-  - `childrenByParentKey`,
-  - reverse links for impacted-ancestor propagation,
-  - per-parent child Collection/array materialization.
-- Recursively attach children using the same stream/state, not new query branches.
+The implementation question is whether we must expose both dimensions in the public runtime timestamp model.
 
-Pros:
-- Preserves core includes performance model.
-- Supports unbounded depth.
-- Keeps incremental/reactive behavior centralized in output layer.
+### Can we avoid global multidimensional time?
 
-Cons:
-- Non-trivial runtime/state-engine work.
-- Needs explicit cycle policy and update semantics.
+**Yes, as a first-class engineering step**: keep one external time dimension (current `db-ivm` behavior), and model the recursion iteration dimension as *internal operator state*.
 
-### Option D: New query-graph recursive operator (transitive closure/fixpoint)
+Think of this as "local nested time" instead of "global timestamp vectors".
 
-Idea:
-- Add dedicated incremental operator in `@tanstack/db-ivm` for recursive traversal.
+- External graph: unchanged, still versionless from the API perspective.
+- Recursive operator internals:
+  - own work queue,
+  - own iteration counter/depth,
+  - own convergence checks.
 
-Pros:
-- Most declarative and potentially most powerful long-term.
+This gives most of the practical value without changing every operator or stream type.
 
-Cons:
-- Highest implementation complexity/risk.
-- More invasive engine work before shipping user value.
+## Proposed operator shape (first pass)
 
-## Recommended staged plan
+### Conceptual API
 
-### Phase 0: API and semantics RFC
+```ts
+recursiveFixpoint({
+  roots,      // stream of root entities / correlation keys
+  edges,      // stream of adjacency edges
+  expand,     // one-step expansion function (join-like)
+  options: {
+    maxDepth?: number,
+    cyclePolicy: 'dedupe-node' | 'allow-paths' | 'error',
+    deletionMode: 'recompute-affected' | 'support-counts',
+  },
+})
+```
 
-Decide:
-- allowed graph shape (tree only vs DAG),
-- cycle behavior (error, truncate, or dedupe by node key),
-- ordering/limit semantics (`orderBy/limit` per parent at each depth),
-- identity semantics (shared node object across paths vs per-path copy),
-- whether recursion requires stable correlation key (likely yes).
+For tree includes, `expand` is typically "follow `parentId -> id` edge one hop".
 
-### Phase 1: Ship depth-limited recursion (Option A)
+### Output contract for includes
 
-- Good for early user feedback and type-system validation.
-- Keeps current architecture almost unchanged.
-- Enables concrete UX/API iteration (`withQuery` vs dedicated `recursiveInclude(...)` API).
+Emit tuples keyed by child identity, with payload that includes:
 
-### Phase 2: Build shared recursive materializer (Option C)
+- `correlationKey` (root/parent scope key for fan-out),
+- `nodeKey` (child key),
+- `depth`,
+- optional `parentNodeKey` (for deterministic tree reconstruction),
+- optional stable order token.
 
-- Add a recursive includes IR node that represents a fixed-point/self call.
-- Compile one child branch per declaration.
-- Extend output-layer state machine to dynamic-depth traversal and impacted-ancestor propagation.
-- Preserve existing non-recursive includes behavior as-is.
+This stays compatible with current includes output routing (`correlationKey` fan-out remains outside graph).
 
-### Phase 3 (optional/long-term): evaluate graph-level operator (Option D)
+## Internal algorithm sketch (no global multidimensional time)
 
-- If runtime-layer complexity or performance ceilings appear, move recursion core into IVM.
+### State
 
-## Open questions to resolve early
+Per recursive operator instance:
 
-1. **Cycle policy**: What should happen on `A -> B -> A`?
-2. **DAG duplication**: If node `X` is reachable from two parents, share instance or duplicate per path?
-3. **Move semantics**: Parent change (`parentId` update) should re-home full subtree incrementally.
-4. **Result keying**: Need robust key serialization for correlation values.
-5. **Interplay with `toArray`**: re-emit boundaries and batching strategy for deep updates.
-6. **Parent-referencing child filters**: align recursion design with parent-filtering includes work.
+- `edgeIndex`: parentNodeKey -> children
+- `reverseEdgeIndex`: childNodeKey -> parents (for deletes)
+- `rootsIndex`: active roots
+- `reachable`: map `(rootKey, nodeKey) -> state`
+  - at minimum: present/not-present, depth
+  - for robust deletions: support count / witness set
+- `frontierQueue`: pending delta tuples for next expansion wave
 
-## Practical next step
+### Insert propagation (semi-naive)
 
-Build a small RFC/POC on top of this branch with:
+1. Ingest root/edge inserts as delta.
+2. Seed `frontierQueue` with new reachable facts.
+3. Loop until queue empty:
+   - pop wave,
+   - expand one hop via `edgeIndex`,
+   - apply cycle/dedupe policy,
+   - emit only net-new tuples,
+   - enqueue only newly-added tuples for next wave.
 
-- API sketch (including TypeScript inference expectations),
-- Phase-1 depth-limited prototype (`maxDepth`),
-- benchmark scenarios:
+This is standard semi-naive fixed-point iteration inside one operator run.
+
+### Delete propagation: two viable modes
+
+#### Mode 1: recompute-affected (simpler, good first cut)
+
+- On edge/root delete, identify affected roots/subgraph.
+- Retract previously emitted tuples for affected scope.
+- Recompute fixed point for that affected scope from current base data.
+
+Tradeoff:
+- simpler correctness,
+- potentially expensive on large deletions.
+
+#### Mode 2: support-counts / witnesses (full incremental)
+
+- Track derivation support per `(root,node)` tuple.
+- Inserts increment support and may cross 0 -> positive (emit insert).
+- Deletes decrement support and may cross positive -> 0 (emit delete), then cascade.
+
+Tradeoff:
+- best incremental behavior,
+- more state and complexity (especially for DAGs with many alternative paths).
+
+## Cycle, DAG, and depth semantics
+
+### Cycle policy
+
+Recommended default: `dedupe-node` by `(rootKey,nodeKey)`.
+
+- Guarantees termination on finite graphs.
+- Produces one materialized node per root, not one row per path.
+
+Alternative `allow-paths` is much heavier (potential explosion), and should be opt-in.
+
+### Depth handling (the "inject depth per iteration" idea)
+
+Depth can be treated as the operator's internal iteration coordinate:
+
+- `depth=0` at root seed (or `1` at first child hop; pick one and document),
+- each expansion increments depth by 1.
+
+This supports:
+
+- optional `maxDepth` stopping criterion (Option A compatibility),
+- deterministic breadth-first layering,
+- future APIs that expose depth/path metadata.
+
+Important: with dedupe-by-node, keep the minimal depth seen for each `(root,node)`.
+
+## Why this is syntax-compatible with Option A
+
+If we introduce recursive query syntax now, we can compile it in two different ways without API break:
+
+1. **MVP path**: unroll to `maxDepth` nested includes (Option A).
+2. **Future path**: compile to `recursiveFixpoint` operator (Option D).
+
+Same user syntax, different backend strategy.
+
+## Integration points in TanStack DB
+
+### IR / builder
+
+Add a recursive include IR form (placeholder naming):
+
+- `RecursiveIncludesSubquery`:
+  - base child query,
+  - self reference marker,
+  - correlation metadata,
+  - options (`maxDepth`, cycle policy, etc.).
+
+### Compiler
+
+When recursive IR is detected:
+
+- emit one recursive operator branch in `compileQuery`,
+- continue returning child rows with correlation metadata,
+- keep select placeholder behavior (as done for includes now).
+
+### Output layer
+
+Largely unchanged core principle:
+
+- still fan out by correlation key in `flushIncludesState`,
+- recursive operator only changes what child stream arrives, not where fan-out happens.
+
+## Concrete phased plan (A now, D in parallel)
+
+### Phase A1 (MVP)
+
+- Implement depth-limited recursive syntax with explicit `maxDepth`.
+- Compile by unrolling.
+- Land tests for:
   - deep chain,
   - wide tree,
   - subtree move,
-  - frequent leaf insert/delete.
+  - cycle handling under `maxDepth`.
 
-That gives fast signal on ergonomics and correctness before committing to full fixed-point execution.
+### Phase D0 (operator spike, behind flag)
+
+- Add internal `recursiveFixpoint` operator with:
+  - inserts + updates,
+  - delete handling via recompute-affected mode.
+- Tree-first semantics (`dedupe-node`, stable keys).
+- Benchmark against Option A at moderate depths.
+
+### Phase D1 (full incremental deletes)
+
+- Add support counts / witnesses.
+- Expand to robust DAG behavior.
+- Add stress tests for high churn and subtree re-parenting.
+
+### Phase D2 (only if needed)
+
+- Revisit whether global multidimensional time/frontiers are necessary.
+- Only escalate if concrete workloads show correctness/performance gaps that local iteration cannot close cleanly.
+
+## Risks and mitigations
+
+1. **Delete complexity in DAGs**
+   - Mitigation: start with recompute-affected mode; gate support-count mode later.
+
+2. **State growth**
+   - Mitigation: strict dedupe policy by default; expose safeguards (`maxDepth`, optional per-root limits).
+
+3. **Non-termination under permissive path semantics**
+   - Mitigation: default `dedupe-node`; explicit opt-in for path semantics with hard limits.
+
+4. **Ordering instability across recursive updates**
+   - Mitigation: define deterministic order contract early (e.g., by depth then key, or explicit `orderBy` semantics per level).
+
+## Open questions to lock before implementation
+
+1. Node identity semantics for DAGs:
+   - one instance per `(root,node)` or per path?
+2. Parent-child ordering semantics at each depth.
+3. Whether subtree moves must be strongly incremental in v1 of Option D.
+4. How much recursion metadata should be exposed (`depth`, `path`, `ancestor`).
+5. Hard bounds for safe execution (depth, node-count, iteration-count).
+
+## References used in this exploration
+
+- Current TanStack DB includes pipeline:
+  - `packages/db/src/query/compiler/index.ts`
+  - `packages/db/src/query/live/collection-config-builder.ts`
+- `d2ts` iterative machinery (pre-simplification reference):
+  - `packages/d2ts/src/operators/iterate.ts`
+  - `packages/d2ts/src/order.ts`
+- DBSP paper (arXiv 2203.16684):
+  - abstract and sections 5-6 discuss recursion, fixed points, and nested time dimensions.
