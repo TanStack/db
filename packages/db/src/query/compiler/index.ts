@@ -1,4 +1,4 @@
-import { distinct, filter, map } from '@tanstack/db-ivm'
+import { distinct, filter, join as joinOperator, map } from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
 import {
   CollectionInputNotFoundError,
@@ -8,7 +8,12 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from '../../errors.js'
-import { PropRef, Value as ValClass, getWhereExpression } from '../ir.js'
+import {
+  IncludesSubquery,
+  PropRef,
+  Value as ValClass,
+  getWhereExpression,
+} from '../ir.js'
 import { compileExpression, toBooleanPredicate } from './evaluators.js'
 import { processJoins } from './joins.js'
 import { containsAggregate, processGroupBy } from './group-by.js'
@@ -32,6 +37,25 @@ import type {
 import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 
 export type { WindowOptions } from './types.js'
+
+/**
+ * Result of compiling an includes subquery, including the child pipeline
+ * and metadata needed to route child results to parent-scoped Collections.
+ */
+export interface IncludesCompilationResult {
+  /** Filtered child pipeline (post inner-join with parent keys) */
+  pipeline: ResultStream
+  /** Result field name on parent (e.g., "issues") */
+  fieldName: string
+  /** Parent-side correlation ref (e.g., project.id) */
+  correlationField: PropRef
+  /** Child-side correlation ref (e.g., issue.projectId) */
+  childCorrelationField: PropRef
+  /** Whether the child query has an ORDER BY clause */
+  hasOrderBy: boolean
+  /** Full compilation result for the child query (for nested includes + alias tracking) */
+  childCompilationResult: CompilationResult
+}
 
 /**
  * Result of query compilation including both the pipeline and source-specific WHERE clauses
@@ -67,6 +91,9 @@ export interface CompilationResult {
    * the inner aliases where collection subscriptions were created.
    */
   aliasRemapping: Record<string, string>
+
+  /** Child pipelines for includes subqueries */
+  includes?: Array<IncludesCompilationResult>
 }
 
 /**
@@ -93,6 +120,9 @@ export function compileQuery(
   setWindowFn: (windowFn: (options: WindowOptions) => void) => void,
   cache: QueryCache = new WeakMap(),
   queryMapping: QueryMapping = new WeakMap(),
+  // For includes: parent key stream to inner-join with this query's FROM
+  parentKeyStream?: KeyedStream,
+  childCorrelationField?: PropRef,
 ): CompilationResult {
   // Check if the original raw query has already been compiled
   const cachedResult = cache.get(rawQuery)
@@ -152,8 +182,42 @@ export function compileQuery(
   )
   sources[mainSource] = mainInput
 
+  // If this is an includes child query, inner-join the raw input with parent keys.
+  // This filters the child collection to only rows matching parents in the result set.
+  // The inner join happens BEFORE namespace wrapping / WHERE / SELECT / ORDER BY,
+  // so the child pipeline only processes rows that match parents.
+  let filteredMainInput = mainInput
+  if (parentKeyStream && childCorrelationField) {
+    // Re-key child input by correlation field: [correlationValue, [childKey, childRow]]
+    const childFieldPath = childCorrelationField.path.slice(1) // remove alias prefix
+    const childRekeyed = mainInput.pipe(
+      map(([key, row]: [unknown, any]) => {
+        const correlationValue = getNestedValue(row, childFieldPath)
+        return [correlationValue, [key, row]] as [unknown, [unknown, any]]
+      }),
+    )
+
+    // Inner join: only children whose correlation key exists in parent keys pass through
+    const joined = childRekeyed.pipe(joinOperator(parentKeyStream, `inner`))
+
+    // Extract: [correlationValue, [[childKey, childRow], null]] → [childKey, childRow]
+    // Tag the row with __correlationKey for output routing
+    filteredMainInput = joined.pipe(
+      filter(([_correlationValue, [childSide]]: any) => {
+        return childSide != null
+      }),
+      map(([correlationValue, [childSide, _parentSide]]: any) => {
+        const [childKey, childRow] = childSide
+        return [childKey, { ...childRow, __correlationKey: correlationValue }]
+      }),
+    )
+
+    // Update sources so the rest of the pipeline uses the filtered input
+    sources[mainSource] = filteredMainInput
+  }
+
   // Prepare the initial pipeline with the main source wrapped in its alias
-  let pipeline: NamespacedAndKeyedStream = mainInput.pipe(
+  let pipeline: NamespacedAndKeyedStream = filteredMainInput.pipe(
     map(([key, row]) => {
       // Initialize the record with a nested structure
       const ret = [key, { [mainSource]: row }] as [
@@ -209,6 +273,74 @@ export function compileQuery(
       pipeline = pipeline.pipe(
         filter(([_key, namespacedRow]) => {
           return toBooleanPredicate(fnWhere(namespacedRow))
+        }),
+      )
+    }
+  }
+
+  // Extract includes from SELECT, compile child pipelines, and replace with placeholders.
+  // This must happen AFTER WHERE (so parent pipeline is filtered) but BEFORE processSelect
+  // (so IncludesSubquery nodes are stripped before select compilation).
+  const includesResults: Array<IncludesCompilationResult> = []
+  if (query.select) {
+    const includesEntries = extractIncludesFromSelect(query.select)
+    for (const { key, subquery } of includesEntries) {
+      // Branch parent pipeline: map to [correlationValue, null]
+      const compiledCorrelation = compileExpression(subquery.correlationField)
+      const parentKeys = pipeline.pipe(
+        map(([_key, nsRow]: any) => [compiledCorrelation(nsRow), null] as any),
+      )
+
+      // Recursively compile child query WITH the parent key stream
+      const childResult = compileQuery(
+        subquery.query,
+        allInputs,
+        collections,
+        subscriptions,
+        callbacks,
+        lazySources,
+        optimizableOrderByCollections,
+        setWindowFn,
+        cache,
+        queryMapping,
+        parentKeys,
+        subquery.childCorrelationField,
+      )
+
+      // Merge child's alias metadata into parent's
+      Object.assign(aliasToCollectionId, childResult.aliasToCollectionId)
+      Object.assign(aliasRemapping, childResult.aliasRemapping)
+
+      includesResults.push({
+        pipeline: childResult.pipeline,
+        fieldName: subquery.fieldName,
+        correlationField: subquery.correlationField,
+        childCorrelationField: subquery.childCorrelationField,
+        hasOrderBy: !!(
+          subquery.query.orderBy && subquery.query.orderBy.length > 0
+        ),
+        childCompilationResult: childResult,
+      })
+
+      // Replace includes entry in select with a null placeholder
+      replaceIncludesInSelect(query.select, key)
+    }
+
+    // Stamp correlation key values onto the namespaced row so they survive
+    // select extraction. This allows flushIncludesState to read them directly
+    // without requiring the correlation field to be in the user's select.
+    if (includesEntries.length > 0) {
+      const compiledCorrelations = includesEntries.map(({ subquery }) => ({
+        fieldName: subquery.fieldName,
+        compiled: compileExpression(subquery.correlationField),
+      }))
+      pipeline = pipeline.pipe(
+        map(([key, nsRow]: any) => {
+          const correlationKeys: Record<string, unknown> = {}
+          for (const { fieldName: fn, compiled } of compiledCorrelations) {
+            correlationKeys[fn] = compiled(nsRow)
+          }
+          return [key, { ...nsRow, __includesCorrelationKeys: correlationKeys }]
         }),
       )
     }
@@ -317,6 +449,15 @@ export function compileQuery(
 
   // Process orderBy parameter if it exists
   if (query.orderBy && query.orderBy.length > 0) {
+    // When in includes mode with limit/offset, use grouped ordering so that
+    // the limit is applied per parent (per correlation key), not globally.
+    const includesGroupKeyFn =
+      parentKeyStream &&
+      (query.limit !== undefined || query.offset !== undefined)
+        ? (_key: unknown, row: unknown) =>
+            (row as any)?.[mainSource]?.__correlationKey
+        : undefined
+
     const orderedPipeline = processOrderBy(
       rawQuery,
       pipeline,
@@ -327,26 +468,39 @@ export function compileQuery(
       setWindowFn,
       query.limit,
       query.offset,
+      includesGroupKeyFn,
     )
 
     // Final step: extract the $selected and include orderBy index
-    const resultPipeline = orderedPipeline.pipe(
+    const resultPipeline: ResultStream = orderedPipeline.pipe(
       map(([key, [row, orderByIndex]]) => {
         // Extract the final results from $selected and include orderBy index
         const raw = (row as any).$selected
         const finalResults = unwrapValue(raw)
+        // Stamp includes correlation keys onto the result for child routing
+        if ((row as any).__includesCorrelationKeys) {
+          finalResults.__includesCorrelationKeys = (
+            row as any
+          ).__includesCorrelationKeys
+        }
+        // When in includes mode, embed the correlation key as third element
+        if (parentKeyStream) {
+          const correlationKey = (row as any)[mainSource]?.__correlationKey
+          return [key, [finalResults, orderByIndex, correlationKey]] as any
+        }
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       }),
-    )
+    ) as ResultStream
 
     const result = resultPipeline
     // Cache the result before returning (use original query as key)
-    const compilationResult = {
+    const compilationResult: CompilationResult = {
       collectionId: mainCollectionId,
       pipeline: result,
       sourceWhereClauses,
       aliasToCollectionId,
       aliasRemapping,
+      includes: includesResults.length > 0 ? includesResults : undefined,
     }
     cache.set(rawQuery, compilationResult)
 
@@ -362,6 +516,17 @@ export function compileQuery(
       // Extract the final results from $selected and return [key, [results, undefined]]
       const raw = (row as any).$selected
       const finalResults = unwrapValue(raw)
+      // Stamp includes correlation keys onto the result for child routing
+      if ((row as any).__includesCorrelationKeys) {
+        finalResults.__includesCorrelationKeys = (
+          row as any
+        ).__includesCorrelationKeys
+      }
+      // When in includes mode, embed the correlation key as third element
+      if (parentKeyStream) {
+        const correlationKey = (row as any)[mainSource]?.__correlationKey
+        return [key, [finalResults, undefined, correlationKey]] as any
+      }
       return [key, [finalResults, undefined]] as [
         unknown,
         [any, string | undefined],
@@ -371,12 +536,13 @@ export function compileQuery(
 
   const result = resultPipeline
   // Cache the result before returning (use original query as key)
-  const compilationResult = {
+  const compilationResult: CompilationResult = {
     collectionId: mainCollectionId,
     pipeline: result,
     sourceWhereClauses,
     aliasToCollectionId,
     aliasRemapping,
+    includes: includesResults.length > 0 ? includesResults : undefined,
   }
   cache.set(rawQuery, compilationResult)
 
@@ -702,6 +868,46 @@ export function followRef(
       return { collection: aliasRef.collection, path: rest }
     }
   }
+}
+
+/**
+ * Walks a Select object to find IncludesSubquery entries.
+ * Returns array of {key, subquery} for each found includes.
+ */
+function extractIncludesFromSelect(
+  select: Record<string, any>,
+): Array<{ key: string; subquery: IncludesSubquery }> {
+  const results: Array<{ key: string; subquery: IncludesSubquery }> = []
+  for (const [key, value] of Object.entries(select)) {
+    if (value instanceof IncludesSubquery) {
+      results.push({ key, subquery: value })
+    }
+  }
+  return results
+}
+
+/**
+ * Replaces an IncludesSubquery entry in the select object with a null Value placeholder.
+ * This ensures processSelect() doesn't encounter it.
+ */
+function replaceIncludesInSelect(
+  select: Record<string, any>,
+  key: string,
+): void {
+  select[key] = new ValClass(null)
+}
+
+/**
+ * Gets a nested value from an object by path segments.
+ * For v1 with single-level correlation fields (e.g., `projectId`), it's just `obj[path[0]]`.
+ */
+function getNestedValue(obj: any, path: Array<string>): any {
+  let value = obj
+  for (const segment of path) {
+    if (value == null) return value
+    value = value[segment]
+  }
+  return value
 }
 
 export type CompileQueryFn = typeof compileQuery

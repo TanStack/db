@@ -519,7 +519,7 @@ function evaluateWrappedAggregates(
  * contain an Aggregate. Safely returns false for nested Select objects.
  */
 export function containsAggregate(
-  expr: BasicExpression | Aggregate | Select,
+  expr: BasicExpression | Aggregate | Select | { type: string },
 ): boolean {
   if (!isExpressionLike(expr)) {
     return false
@@ -527,9 +527,9 @@ export function containsAggregate(
   if (expr.type === `agg`) {
     return true
   }
-  if (expr.type === `func`) {
-    return expr.args.some((arg: BasicExpression | Aggregate) =>
-      containsAggregate(arg),
+  if (expr.type === `func` && `args` in expr) {
+    return (expr.args as Array<BasicExpression | Aggregate>).some(
+      (arg: BasicExpression | Aggregate) => containsAggregate(arg),
     )
   }
   return false
