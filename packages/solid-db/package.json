@@ -40,14 +40,14 @@
     "src"
   ],
   "dependencies": {
-    "@solid-primitives/map": "^0.7.2",
+    "@solid-primitives/map": "^0.7.3",
     "@tanstack/db": "workspace:*"
   },
   "peerDependencies": {
     "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "@electric-sql/client": "^1.5.8",
+    "@electric-sql/client": "^1.5.9",
     "@solidjs/testing-library": "^0.8.10",
     "@vitest/coverage-istanbul": "^3.2.4",
     "jsdom": "^27.4.0",

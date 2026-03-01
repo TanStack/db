@@ -46,16 +46,16 @@
     "src"
   ],
   "dependencies": {
-    "@electric-sql/client": "^1.5.8",
+    "@electric-sql/client": "^1.5.9",
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.8.0",
+    "@tanstack/store": "^0.9.1",
     "debug": "^4.4.3"
   },
   "devDependencies": {
     "@types/debug": "^4.1.12",
-    "@types/pg": "^8.16.0",
+    "@types/pg": "^8.18.0",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "pg": "^8.18.0"
+    "pg": "^8.19.0"
   }
 }
