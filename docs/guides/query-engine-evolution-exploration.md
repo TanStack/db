@@ -243,13 +243,36 @@ Cons:
 - Significant complexity tax across streams/operators/runtime APIs.
 - Larger cognitive and implementation overhead for debugging/tooling.
 
+#### Critical assessment for recursive includes and aggregates
+
+When we evaluate S1 vs S2 specifically for recursive query workloads (includes that recurse, per-level aggregates, and multi-level includes), the trade-off is less about "can we make it work?" and more about "where does complexity live?"
+
+| Dimension | S1 (single dimension) | S2 (multidimensional) |
+|---|---|---|
+| Recursive fixed-point progress | Requires operator-local iteration bookkeeping layered on top of global epoch | Native representation of outer txn + inner iter progress |
+| Recursive aggregates with retractions/deletes | Correctness often needs conservative barriers or localized recompute | Delta + frontier semantics are explicit, reducing ad-hoc recompute paths |
+| Multi-level include composition | Can become conservative/global when one branch is slow | Supports finer-grained partial progress across branches/subtrees |
+| Up-query gating under out-of-order arrivals | Feasible but tends toward custom gate logic per operator | Unified obligation/frontier reasoning across operators |
+| Future expressive operators (topK/limits within recursion, advanced feedback) | Higher risk of semantic corner cases and bespoke fixes | Better long-term foundation for expressive recursive plans |
+
+Critical observation:
+
+- **S1 minimizes early runtime complexity but shifts complexity into operator-specific logic over time.**
+- **S2 increases early runtime complexity but centralizes semantics, which usually lowers total complexity for expressive recursive evolution.**
+
 #### Practical recommendation
 
-For this evolution, **S1 is the recommended first target**:
+For this evolution, with a goal of expressive recursive queries, **S2 should be the default target**:
 
-- satisfies transactional up-query gating goals,
-- keeps runtime changes tractable,
-- remains compatible with later expansion to S2 if recursion/frontier precision demands it.
+- it gives the cleanest semantic model for recursive includes, aggregates, and multi-level composition,
+- it avoids paying a migration tax later when S1 abstractions start to leak,
+- it provides clearer correctness invariants for up-query gating and eventual convergence.
+
+Adopt S2 with implementation guardrails:
+
+1. Keep the external API simple (query-level stable token/frontier summary), even if internal time is multidimensional.
+2. Scope V1 to minimal required dimensions (`[txn, iter]`), while keeping internal types extensible.
+3. Implement only the first recursive-capable operators initially (join/lookup + recursive/aggregate path), then expand.
 
 ---
 
@@ -382,21 +405,28 @@ If this direction is implemented incrementally, the likely first touchpoints are
 - Move per-query compilation into "compile-and-merge" against global graph.
 - Add reference-counted node lifecycle and cleanup.
 
-### Phase 3: single-dimensional time/frontier (Option S1)
+### Phase 3: multidimensional time/frontier core (Option S2)
 
-- Add epoch stamping and source frontier propagation.
-- Upgrade obligation gate from "ack only" to "ack + frontier >= required epoch".
-- Expose query stability token to consumers.
+- Add version vectors (initially `[txn, iter]`) and antichain frontier plumbing in runtime/operator messages.
+- Upgrade obligation gate from "ack only" to multidimensional frontier-aware satisfaction checks.
+- Expose a simplified query stability token/frontier summary to consumers.
 
-### Phase 4: partial-state join eviction
+### Phase 4: recursive includes and aggregates on S2
+
+- Implement recursive include operator path against S2 frontier semantics.
+- Implement recursive aggregate correctness tests (insert/update/delete/retract scenarios).
+- Validate multi-level include behavior with mixed loaded/unloaded branches.
+
+### Phase 5: partial-state join eviction
 
 - Introduce tiered join caches (obligation + key skeleton + evictable full rows).
 - Add adaptive eviction policy and anti-thrash controls.
+- Ensure eviction/reload correctness under recursive pipelines.
 
-### Phase 5 (optional): multidimensional time (Option S2)
+### Phase 6 (optional): dimension expansion beyond `[txn, iter]`
 
-- Re-evaluate only if recursion/feedback precision requires it.
-- Keep S1 as default for most plans.
+- Add extra dimensions only when required by concrete operators/use-cases.
+- Keep dimensionality minimal by default to control complexity.
 
 ---
 
@@ -412,6 +442,10 @@ If this direction is implemented incrementally, the likely first touchpoints are
    - Evict/reload cycles preserve correctness under concurrent writes.
 5. **Shared graph correctness**
    - Query attach/detach does not leak state or cross-contaminate outputs.
+6. **Recursive aggregate correctness**
+   - Aggregates over recursive includes remain correct under inserts, updates, and retractions.
+7. **Multi-level include progress isolation**
+   - Slow/deep branches do not unnecessarily block stable emission of unrelated branches.
 
 ---
 
@@ -422,6 +456,7 @@ If this direction is implemented incrementally, the likely first touchpoints are
 3. How should cross-source transactional guarantees be defined when sources provide incomparable LSN domains?
 4. What are the minimal frontier semantics required for non-Electric sources?
 5. Which operators should become up-query-capable first (join, order/limit, recursive operator)?
+6. Under what concrete conditions do we need dimensions beyond `[txn, iter]`?
 
 ---
 
@@ -431,6 +466,6 @@ Build toward:
 
 1. **operator-routed up-queries**,  
 2. **single global mutable graph**, and  
-3. **single-dimensional epoch/frontier semantics (S1)** as the default transaction-tracking layer.
+3. **multidimensional version/frontier semantics (S2)** as the internal default for recursive correctness.
 
-This reaches the requested guarantees with a manageable complexity step, while leaving a clear path to multidimensional time (S2) if and when recursion/frontier precision truly requires it.
+Given the goal of iterating quickly on expressive recursive queries (includes with aggregates and multi-level includes), taking on S2 complexity early is likely the lower total-cost path.
