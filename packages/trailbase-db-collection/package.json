@@ -47,9 +47,9 @@
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",
     "@tanstack/db": "workspace:*",
-    "@tanstack/store": "^0.8.0",
+    "@tanstack/store": "^0.9.1",
     "debug": "^4.4.3",
-    "trailbase": "^0.8.0"
+    "trailbase": "^0.9.1"
   },
   "peerDependencies": {
     "typescript": ">=4.7"
