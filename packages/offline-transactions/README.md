@@ -5,7 +5,7 @@ Offline-first transaction capabilities for TanStack DB that provides durable per
 ## Features
 
 - **Outbox Pattern**: Persist mutations before dispatch for zero data loss
-- **Automatic Retry**: Exponential backoff with jitter for failed transactions
+- **Automatic Retry**: Configurable retry behavior with exponential backoff + jitter by default
 - **Multi-tab Coordination**: Leader election ensures safe storage access
 - **FIFO Sequential Processing**: Transactions execute one at a time in creation order
 - **Flexible Storage**: IndexedDB with localStorage fallback
@@ -129,6 +129,7 @@ interface OfflineConfig {
   beforeRetry?: (transactions: OfflineTransaction[]) => OfflineTransaction[]
   onUnknownMutationFn?: (name: string, tx: OfflineTransaction) => void
   onLeadershipChange?: (isLeader: boolean) => void
+  onlineDetector?: OnlineDetector
 }
 ```
 
@@ -144,7 +145,6 @@ interface OfflineConfig {
 - `waitForTransactionCompletion(id)` - Wait for a specific transaction to complete
 - `removeFromOutbox(id)` - Manually remove transaction from outbox
 - `peekOutbox()` - View all pending transactions
-- `notifyOnline()` - Manually trigger retry execution
 - `dispose()` - Clean up resources
 
 ### Error Handling
@@ -179,21 +179,6 @@ import {
 const executor = startOfflineExecutor({
   // Use custom storage
   storage: new IndexedDBAdapter('my-app', 'transactions'),
-  // ... other config
-})
-```
-
-### Custom Retry Policy
-
-```typescript
-const executor = startOfflineExecutor({
-  maxConcurrency: 5,
-  jitter: true,
-  beforeRetry: (transactions) => {
-    // Filter out old transactions
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000 // 24 hours
-    return transactions.filter((tx) => tx.createdAt.getTime() > cutoff)
-  },
   // ... other config
 })
 ```

@@ -27,10 +27,19 @@ export class ReactNativeOnlineDetector implements OnlineDetector {
 
     this.isListening = true
 
+    if (typeof NetInfo.fetch === `function`) {
+      void NetInfo.fetch()
+        .then((state) => {
+          this.wasConnected = this.toConnectivityState(state)
+        })
+        .catch(() => {
+          // Ignore initial fetch failures and rely on subscription updates.
+        })
+    }
+
     // Subscribe to network state changes
     this.netInfoUnsubscribe = NetInfo.addEventListener((state) => {
-      const isConnected =
-        state.isConnected === true && state.isInternetReachable !== false
+      const isConnected = this.toConnectivityState(state)
 
       // Only notify when transitioning to online
       if (isConnected && !this.wasConnected) {
@@ -98,8 +107,19 @@ export class ReactNativeOnlineDetector implements OnlineDetector {
     this.notifyListeners()
   }
 
+  isOnline(): boolean {
+    return this.wasConnected
+  }
+
   dispose(): void {
     this.stopListening()
     this.listeners.clear()
+  }
+
+  private toConnectivityState(state: {
+    isConnected: boolean | null
+    isInternetReachable: boolean | null
+  }): boolean {
+    return state.isConnected === true && state.isInternetReachable !== false
   }
 }
