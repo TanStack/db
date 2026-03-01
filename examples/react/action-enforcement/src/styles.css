@@ -1,0 +1,104 @@
+:root {
+  color-scheme: light;
+  font-family: 'Avenir Next', Avenir, 'Segoe UI', sans-serif;
+  line-height: 1.4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(180deg, #f7f9ff 0%, #eef3ff 100%);
+  color: #1f2430;
+}
+
+.app-shell {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1rem 3rem;
+}
+
+.subtitle {
+  margin-top: 0.5rem;
+  margin-bottom: 1.5rem;
+  color: #495266;
+}
+
+.todo-card {
+  background: #fff;
+  border: 1px solid #d8deea;
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.todo-input-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.todo-input {
+  flex: 1;
+  border: 1px solid #c5cede;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+  font-size: 1rem;
+}
+
+.todo-button {
+  border: none;
+  border-radius: 8px;
+  background: #2258e5;
+  color: #fff;
+  padding: 0.6rem 0.9rem;
+  cursor: pointer;
+}
+
+.todo-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.todo-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid #e2e8f3;
+  border-radius: 8px;
+  padding: 0.6rem 0.75rem;
+}
+
+.todo-item.done .todo-text {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
+.todo-toggle {
+  border: 1px solid #c5cede;
+  border-radius: 6px;
+  background: #f7f9ff;
+  padding: 0.35rem 0.6rem;
+  cursor: pointer;
+}
+
+.error-text {
+  color: #b00020;
+  margin: 0.5rem 0 0;
+}
+
+.tip {
+  margin-top: 1rem;
+  color: #54607a;
+  font-size: 0.92rem;
+}
