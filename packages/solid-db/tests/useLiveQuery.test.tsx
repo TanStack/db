@@ -1979,11 +1979,7 @@ describe(`Query Collections`, () => {
           void props.person.name
           nameEffectCounts[id] = (nameEffectCounts[id] || 0) + 1
         })
-        return (
-          <li data-testid={`person-${id}`}>
-            {props.person.name}
-          </li>
-        )
+        return <li data-testid={`person-${id}`}>{props.person.name}</li>
       }
 
       function TestComponent() {
