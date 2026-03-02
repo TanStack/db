@@ -1031,7 +1031,7 @@ const projectsWithIssues = createLiveQueryCollection((q) =>
 )
 ```
 
-Each parent's `issues` field is a live `Collection` that updates incrementally as the underlying data changes.
+Each project's `issues` field is a live `Collection` that updates incrementally as the underlying data changes.
 
 ### Correlation Condition
 
@@ -1078,18 +1078,22 @@ Parent-referencing filters are fully reactive — if a parent's field changes, t
 Child queries support `.orderBy()` and `.limit()`, applied per parent:
 
 ```ts
-issues: q
-  .from({ i: issuesCollection })
-  .where(({ i }) => eq(i.projectId, p.id))
-  .orderBy(({ i }) => i.createdAt, 'desc')
-  .limit(5)
-  .select(({ i }) => ({
-    id: i.id,
-    title: i.title,
-  }))
+q.from({ p: projectsCollection }).select(({ p }) => ({
+  id: p.id,
+  name: p.name,
+  issues: q
+    .from({ i: issuesCollection })
+    .where(({ i }) => eq(i.projectId, p.id))
+    .orderBy(({ i }) => i.createdAt, 'desc')
+    .limit(5)
+    .select(({ i }) => ({
+      id: i.id,
+      title: i.title,
+    })),
+}))
 ```
 
-Each parent gets its own top-5 issues, not 5 issues shared across all parents.
+Each project gets its own top-5 issues, not 5 issues shared across all projects.
 
 ### toArray
 
@@ -1115,7 +1119,7 @@ const projectsWithIssues = createLiveQueryCollection((q) =>
 )
 ```
 
-With `toArray()`, the parent row is re-emitted whenever its children change. Without it, the child `Collection` updates independently.
+With `toArray()`, the project row is re-emitted whenever its issues change. Without it, the child `Collection` updates independently.
 
 ### Aggregates
 
@@ -1166,8 +1170,6 @@ const tree = createLiveQueryCollection((q) =>
 ```
 
 Each level updates independently and incrementally — adding a comment to an issue does not re-process other issues or projects.
-
-`toArray()` can be used at any level of nesting, or mixed with live Collections.
 
 ## groupBy and Aggregations
 
