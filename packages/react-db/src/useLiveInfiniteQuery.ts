@@ -256,7 +256,8 @@ export function useLiveInfiniteQuery<TContext extends Context>(
       setIsFetchingNextPage(true)
       result
         .catch((error: unknown) => {
-          if (!cancelled) console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
+          if (!cancelled)
+            console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
         })
         .finally(() => {
           if (!cancelled) setIsFetchingNextPage(false)
