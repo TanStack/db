@@ -160,7 +160,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     depsKey = JSON.stringify(deps)
   } catch {
     throw new Error(
-      `useLiveInfiniteQuery: deps array contains values that cannot be serialized (e.g. circular references). ` +
+      `useLiveInfiniteQuery: dependency array contains values that cannot be serialized (e.g. circular references). ` +
         `Ensure all dependency values are JSON-serializable.`,
     )
   }
