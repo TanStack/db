@@ -120,6 +120,6 @@ export class ReactNativeOnlineDetector implements OnlineDetector {
     isConnected: boolean | null
     isInternetReachable: boolean | null
   }): boolean {
-    return state.isConnected === true && state.isInternetReachable !== false
+    return !!state.isConnected && state.isInternetReachable !== false
   }
 }
