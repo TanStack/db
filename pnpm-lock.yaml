@@ -862,8 +862,8 @@ importers:
   packages/electric-db-collection:
     dependencies:
       '@electric-sql/client':
-        specifier: ^1.5.8
-        version: 1.5.9
+        specifier: ^1.5.10
+        version: 1.5.10
       '@standard-schema/spec':
         specifier: ^1.1.0
         version: 1.1.0
@@ -2001,6 +2001,9 @@ packages:
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
+
+  '@electric-sql/client@1.5.10':
+    resolution: {integrity: sha512-AMXaGhGSUYPZSQHvtUIYoW0IQVW5MSAT1Oc2jDb1KyAPQa5wypoW6NzGqaUR7jKkNh9vJiqKjT56nH+fh1bu0g==}
 
   '@electric-sql/client@1.5.9':
     resolution: {integrity: sha512-6NthYpg8rFMEIKSXs5NvpqQx0tdrtt0XszWCC0LBhX5GzyhHbpOj4Gjy2rmUymu3edRQfnRsgp87Dbyxvk4cpg==}
@@ -11687,6 +11690,12 @@ snapshots:
   '@csstools/css-tokenizer@3.0.4': {}
 
   '@drizzle-team/brocli@0.10.2': {}
+
+  '@electric-sql/client@1.5.10':
+    dependencies:
+      '@microsoft/fetch-event-source': 2.0.1
+    optionalDependencies:
+      '@rollup/rollup-darwin-arm64': 4.59.0
 
   '@electric-sql/client@1.5.9':
     dependencies:
