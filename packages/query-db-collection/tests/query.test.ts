@@ -3500,6 +3500,32 @@ describe(`QueryCollection`, () => {
       // Clean up
       customQueryClient.clear()
     })
+
+    it(`should forward structuralSharing option to QueryObserver`, async () => {
+      const queryKey = [`structuralSharingTest`]
+      const queryFn = vi.fn().mockResolvedValue([])
+
+      const options = queryCollectionOptions({
+        id: `test`,
+        queryClient,
+        queryKey,
+        queryFn,
+        getKey,
+        structuralSharing: false,
+        startSync: true,
+      })
+
+      createCollection(options)
+
+      await vi.waitFor(() => {
+        expect(queryFn).toHaveBeenCalled()
+      })
+
+      const query = queryClient.getQueryCache().find({ queryKey })
+
+      expect(query).toBeDefined()
+      expect(query!.options.structuralSharing).toBe(false)
+    })
   })
 
   describe(`Query Garbage Collection`, () => {
