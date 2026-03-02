@@ -23,7 +23,12 @@ function isLiveQueryCollectionUtils(
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
   pageSize?: number
   initialPageParam?: number
-  getNextPageParam: (
+  /**
+   * @deprecated This callback is not used by the current implementation.
+   * Pagination is determined internally via a peek-ahead strategy.
+   * Provided for API compatibility with TanStack Query conventions.
+   */
+  getNextPageParam?: (
     lastPage: Array<InferResultType<TContext>[number]>,
     allPages: Array<Array<InferResultType<TContext>[number]>>,
     lastPageParam: number,
