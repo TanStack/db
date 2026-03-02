@@ -4,7 +4,11 @@ import { NonRetriableError } from '../types'
 import { withNestedSpan } from '../telemetry/tracer'
 import type { KeyScheduler } from './KeyScheduler'
 import type { OutboxManager } from '../outbox/OutboxManager'
-import type { OfflineConfig, OfflineTransaction } from '../types'
+import type {
+  OfflineConfig,
+  OfflineTransaction,
+  TransactionSignaler,
+} from '../types'
 
 const HANDLED_EXECUTION_ERROR = Symbol(`HandledExecutionError`)
 
@@ -15,19 +19,22 @@ export class TransactionExecutor {
   private retryPolicy: DefaultRetryPolicy
   private isExecuting = false
   private executionPromise: Promise<void> | null = null
-  private offlineExecutor: any // Reference to OfflineExecutor for signaling
+  private offlineExecutor: TransactionSignaler
   private retryTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(
     scheduler: KeyScheduler,
     outbox: OutboxManager,
     config: OfflineConfig,
-    offlineExecutor: any,
+    offlineExecutor: TransactionSignaler,
   ) {
     this.scheduler = scheduler
     this.outbox = outbox
     this.config = config
-    this.retryPolicy = new DefaultRetryPolicy(10, config.jitter ?? true)
+    this.retryPolicy = new DefaultRetryPolicy(
+      Number.POSITIVE_INFINITY,
+      config.jitter ?? true,
+    )
     this.offlineExecutor = offlineExecutor
   }
 
@@ -54,6 +61,10 @@ export class TransactionExecutor {
 
   private async runExecution(): Promise<void> {
     while (this.scheduler.getPendingCount() > 0) {
+      if (!this.isOnline()) {
+        break
+      }
+
       const transaction = this.scheduler.getNext()
 
       if (!transaction) {
@@ -178,7 +189,10 @@ export class TransactionExecutor {
           return
         }
 
-        const delay = this.retryPolicy.calculateDelay(transaction.retryCount)
+        const delay = Math.max(
+          0,
+          this.retryPolicy.calculateDelay(transaction.retryCount),
+        )
         const updatedTransaction: OfflineTransaction = {
           ...transaction,
           retryCount: transaction.retryCount + 1,
@@ -320,6 +334,10 @@ export class TransactionExecutor {
     // Clear existing timer
     this.clearRetryTimer()
 
+    if (!this.isOnline()) {
+      return
+    }
+
     // Find the earliest retry time among pending transactions
     const earliestRetryTime = this.getEarliestRetryTime()
 
@@ -351,6 +369,10 @@ export class TransactionExecutor {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
+  }
+
+  private isOnline(): boolean {
+    return this.offlineExecutor.isOnline()
   }
 
   getRunningCount(): number {
