@@ -917,6 +917,58 @@ export class CollectionImpl<
   }
 
   /**
+   * Get the synced (server-side) value for a key, without any optimistic overlays.
+   *
+   * This returns the authoritative server state for an entity, ignoring any
+   * pending optimistic mutations. Useful for detecting server-side changes
+   * during paced mutation persistence — compare `mutation.original` against
+   * the current synced value to decide whether to persist, merge, or skip.
+   *
+   * @param key - The key to look up
+   * @returns The synced value, or undefined if no synced data exists for this key
+   * @example
+   * // In a paced mutation's mutationFn, check for server-side conflicts
+   * mutationFn: async ({ transaction }) => {
+   *   for (const mutation of transaction.mutations) {
+   *     const serverValue = collection.getSyncedValue(mutation.key)
+   *     if (serverValue && !deepEquals(serverValue, mutation.original)) {
+   *       // Server data changed since this mutation was created — reconcile
+   *       return
+   *     }
+   *   }
+   *   await api.save(transaction.mutations)
+   * }
+   */
+  public getSyncedValue(key: TKey): TOutput | undefined {
+    return this._state.syncedData.get(key)
+  }
+
+  /**
+   * Get the sync metadata for a key.
+   *
+   * Sync metadata is set by the sync layer via write operations and can
+   * contain information like revision numbers, timestamps, or ETags that
+   * are useful for conflict detection.
+   *
+   * @param key - The key to look up
+   * @returns The sync metadata, or undefined if none exists for this key
+   * @example
+   * // Check revision number before persisting
+   * mutationFn: async ({ transaction }) => {
+   *   const mutation = transaction.mutations[0]
+   *   const meta = collection.getSyncedMetadata(mutation.key)
+   *   if (meta?.revision !== mutation.syncMetadata.revision) {
+   *     // Server revision changed — skip or merge
+   *     return
+   *   }
+   *   await api.save(transaction.mutations)
+   * }
+   */
+  public getSyncedMetadata(key: TKey): unknown {
+    return this._state.syncedMetadata.get(key)
+  }
+
+  /**
    * Clean up the collection by stopping sync and clearing data
    * This can be called manually or automatically by garbage collection
    */
