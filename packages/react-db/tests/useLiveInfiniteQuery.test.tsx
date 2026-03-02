@@ -1866,6 +1866,6 @@ describe(`useLiveInfiniteQuery`, () => {
           [circular],
         )
       })
-    }).toThrow(/useLiveInfiniteQuery.*deps/)
+    }).toThrow(/useLiveInfiniteQuery.*dependency/)
   })
 })
