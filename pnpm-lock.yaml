@@ -205,7 +205,7 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))
       '@tanstack/offline-transactions':
-        specifier: ^1.0.20
+        specifier: ^1.0.21
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
         specifier: ^1.0.27
@@ -278,7 +278,7 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/offline-transactions':
-        specifier: ^1.0.20
+        specifier: ^1.0.21
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
         specifier: ^1.0.27
@@ -667,7 +667,7 @@ importers:
         version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -16130,11 +16130,6 @@ snapshots:
       kysely: 0.28.11
       pg: 8.19.0
       postgres: 3.4.8
-
-  drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76):
-    dependencies:
-      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
-      zod: 3.25.76
 
   drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6):
     dependencies:

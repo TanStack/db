@@ -1,5 +1,11 @@
 # @tanstack/offline-transactions
 
+## 1.0.21
+
+### Patch Changes
+
+- Fix retry behavior to not cap at 10 attempts and not burn retries while offline. Default retry policy now retries indefinitely with exponential backoff. Execution loop and retry timer check online status before attempting transactions. `OnlineDetector.isOnline()` is now a required method on the interface. `OfflineExecutor.notifyOnline()` has been removed — the online detector handles connectivity changes automatically. ([#1301](https://github.com/TanStack/db/pull/1301))
+
 ## 1.0.20
 
 ### Patch Changes
