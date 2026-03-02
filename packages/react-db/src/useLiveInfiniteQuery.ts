@@ -255,14 +255,11 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (result !== true) {
       setIsFetchingNextPage(true)
       result
-        .then(() => {
-          if (!cancelled) setIsFetchingNextPage(false)
-        })
         .catch((error: unknown) => {
-          if (!cancelled) {
-            setIsFetchingNextPage(false)
-            console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
-          }
+          if (!cancelled) console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
+        })
+        .finally(() => {
+          if (!cancelled) setIsFetchingNextPage(false)
         })
     } else {
       setIsFetchingNextPage(false)
