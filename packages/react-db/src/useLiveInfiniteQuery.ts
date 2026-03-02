@@ -155,7 +155,15 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const hasValidatedCollectionRef = useRef(false)
 
   // Track deps for query functions (stringify for comparison)
-  const depsKey = JSON.stringify(deps)
+  let depsKey: string
+  try {
+    depsKey = JSON.stringify(deps)
+  } catch {
+    throw new Error(
+      `useLiveInfiniteQuery: deps array contains values that cannot be serialized (e.g. circular references). ` +
+        `Ensure all dependency values are JSON-serializable.`,
+    )
+  }
   const prevDepsKeyRef = useRef(depsKey)
 
   // Reset pagination when inputs change
