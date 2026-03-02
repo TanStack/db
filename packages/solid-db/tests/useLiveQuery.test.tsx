@@ -1957,4 +1957,504 @@ describe(`Query Collections`, () => {
       expect(count.textContent).toBe(`3`)
     })
   })
+
+  describe(`Fine-grained reactivity`, () => {
+    it(`should only trigger reactive updates for the row whose field changed, not all rows`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `fine-grained-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      // Track how many times each row's name effect fires
+      const nameEffectCounts: Record<string, number> = {}
+
+      function RowComponent(props: { person: { id: string; name: string } }) {
+        const id = props.person.id
+        // createComputed fires once initially and again each time person.name changes
+        createComputed(() => {
+          // Access name to subscribe to it
+          void props.person.name
+          nameEffectCounts[id] = (nameEffectCounts[id] || 0) + 1
+        })
+        return (
+          <li data-testid={`person-${id}`}>
+            {props.person.name}
+          </li>
+        )
+      }
+
+      function TestComponent() {
+        const query = useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+        )
+
+        return (
+          <ul data-testid="list">
+            <For each={query()}>
+              {(person) => <RowComponent person={person} />}
+            </For>
+          </ul>
+        )
+      }
+
+      const { findByTestId } = render(() => <TestComponent />)
+
+      // Wait for initial render
+      await waitFor(async () => {
+        const list = await findByTestId(`list`)
+        expect(list.children.length).toBe(3)
+      })
+
+      // Record initial effect counts (each fires once during initial render)
+      const initialCounts = { ...nameEffectCounts }
+      expect(initialCounts[`1`]).toBeGreaterThanOrEqual(1)
+      expect(initialCounts[`2`]).toBeGreaterThanOrEqual(1)
+      expect(initialCounts[`3`]).toBeGreaterThanOrEqual(1)
+
+      // Update only person 1's name
+      collection.utils.begin()
+      collection.utils.write({
+        type: `update`,
+        value: {
+          id: `1`,
+          name: `John Updated`,
+          age: 30,
+          email: `john.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      // Wait for the update to propagate
+      await waitFor(async () => {
+        const person1 = await findByTestId(`person-1`)
+        expect(person1.textContent).toBe(`John Updated`)
+      })
+
+      // Person 1's name effect should have fired again (name changed)
+      expect(nameEffectCounts[`1`]).toBeGreaterThan(initialCounts[`1`]!)
+      // Persons 2 and 3's name effects should NOT have fired again
+      expect(nameEffectCounts[`2`]).toBe(initialCounts[`2`])
+      expect(nameEffectCounts[`3`]).toBe(initialCounts[`3`])
+    })
+
+    it(`should maintain correct array ordering after inserts`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `insert-order-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(3)
+      })
+
+      // Insert a person with id "0" (should sort before "1")
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `0`,
+          name: `Zero Person`,
+          age: 20,
+          email: `zero@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(4)
+      })
+
+      // Verify the order matches the collection's sorted order (by key)
+      const keys = rendered.result().map((p: any) => p.id)
+      expect(keys).toEqual([`0`, `1`, `2`, `3`])
+    })
+
+    it(`should maintain correct array ordering after deletes`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `delete-order-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(3)
+      })
+
+      // Delete person 2 (middle element)
+      collection.utils.begin()
+      collection.utils.write({
+        type: `delete`,
+        value: {
+          id: `2`,
+          name: `Jane Doe`,
+          age: 25,
+          email: `jane.doe@example.com`,
+          isActive: true,
+          team: `team2`,
+        },
+      })
+      collection.utils.commit()
+
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(2)
+      })
+
+      // Verify remaining items are in correct order
+      const keys = rendered.result().map((p: any) => p.id)
+      expect(keys).toEqual([`1`, `3`])
+    })
+
+    it(`should reflect optimistic inserts in the data array and reconcile after sync`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `optimistic-insert-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(3)
+      })
+
+      // Optimistic insert (collection.insert triggers onInsert which awaits resolveSync)
+      const tx = collection.insert({
+        id: `4`,
+        name: `Kyle Doe`,
+        age: 40,
+        email: `kyle.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      // Optimistic state should appear immediately in the data array
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(4)
+      })
+      expect(rendered.result.state.get(`4`)).toMatchObject({
+        id: `4`,
+        name: `Kyle Doe`,
+      })
+
+      // Verify data array contains the optimistic item
+      const ids = rendered.result().map((p: any) => p.id)
+      expect(ids).toContain(`4`)
+
+      // Now sync the data from the server (simulating server confirming the insert)
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `4`,
+          name: `Kyle Doe`,
+          age: 40,
+          email: `kyle.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      // Resolve the pending sync to complete the transaction
+      collection.utils.resolveSync()
+      await tx.isPersisted.promise
+
+      // After sync, should still have 4 items (no duplicates)
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(4)
+      })
+      expect(rendered.result.state.size).toBe(4)
+
+      // Verify correct ordering
+      const finalIds = rendered.result().map((p: any) => p.id)
+      expect(finalIds).toEqual([`1`, `2`, `3`, `4`])
+    })
+
+    it(`should reflect optimistic updates in the data array and reconcile after sync`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `optimistic-update-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+            age: persons.age,
+          })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(3)
+      })
+
+      // Optimistic update
+      const tx = collection.update(`1`, (draft) => {
+        draft.name = `John Updated`
+      })
+
+      // Optimistic state should be reflected immediately
+      await waitFor(() => {
+        expect(rendered.result.state.get(`1`)).toMatchObject({
+          id: `1`,
+          name: `John Updated`,
+        })
+      })
+
+      // Check the data array also has the update
+      const person1 = rendered.result().find((p: any) => p.id === `1`)
+      expect(person1).toMatchObject({ id: `1`, name: `John Updated` })
+
+      // Total items should remain 3
+      expect(rendered.result().length).toBe(3)
+
+      // Now sync the update from the server
+      collection.utils.begin()
+      collection.utils.write({
+        type: `update`,
+        value: {
+          id: `1`,
+          name: `John Updated`,
+          age: 30,
+          email: `john.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      // Resolve the pending sync
+      collection.utils.resolveSync()
+      await tx.isPersisted.promise
+
+      // After sync, should still have 3 items with the update persisted
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(3)
+      })
+      expect(rendered.result.state.get(`1`)).toMatchObject({
+        id: `1`,
+        name: `John Updated`,
+      })
+
+      // Verify ordering is preserved
+      const finalIds = rendered.result().map((p: any) => p.id)
+      expect(finalIds).toEqual([`1`, `2`, `3`])
+    })
+
+    it(`should reflect optimistic deletes in the data array and reconcile after sync`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `optimistic-delete-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(3)
+      })
+
+      // Optimistic delete
+      const tx = collection.delete(`2`)
+
+      // Optimistic state should remove the item immediately
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(2)
+      })
+      expect(rendered.result.state.get(`2`)).toBeUndefined()
+
+      // Verify data array no longer contains person 2
+      const ids = rendered.result().map((p: any) => p.id)
+      expect(ids).not.toContain(`2`)
+      expect(ids).toEqual([`1`, `3`])
+
+      // Now sync the delete from the server
+      collection.utils.begin()
+      collection.utils.write({
+        type: `delete`,
+        value: {
+          id: `2`,
+          name: `Jane Doe`,
+          age: 25,
+          email: `jane.doe@example.com`,
+          isActive: true,
+          team: `team2`,
+        },
+      })
+      collection.utils.commit()
+
+      // Resolve the pending sync
+      collection.utils.resolveSync()
+      await tx.isPersisted.promise
+
+      // After sync, should still have 2 items
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(2)
+      })
+      expect(rendered.result.state.size).toBe(2)
+
+      // Verify correct ordering
+      const finalIds = rendered.result().map((p: any) => p.id)
+      expect(finalIds).toEqual([`1`, `3`])
+    })
+
+    it(`should handle multiple concurrent optimistic operations`, async () => {
+      const collection = createCollection(
+        mockSyncCollectionOptions<Person>({
+          id: `optimistic-concurrent-test`,
+          getKey: (person: Person) => person.id,
+          initialData: initialPersons,
+        }),
+      )
+
+      const rendered = renderHook(() => {
+        return useLiveQuery((q) =>
+          q.from({ persons: collection }).select(({ persons }) => ({
+            id: persons.id,
+            name: persons.name,
+          })),
+        )
+      })
+
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(3)
+      })
+
+      // Optimistic insert
+      const txInsert = collection.insert({
+        id: `4`,
+        name: `Kyle Doe`,
+        age: 40,
+        email: `kyle.doe@example.com`,
+        isActive: true,
+        team: `team1`,
+      })
+
+      // Optimistic update on an existing item
+      // Both onInsert and onUpdate share the same awaitSync() promise
+      const txUpdate = collection.update(`1`, (draft) => {
+        draft.name = `John Updated`
+      })
+
+      // Both optimistic changes should be reflected
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(4)
+        expect(rendered.result.state.get(`1`)).toMatchObject({
+          name: `John Updated`,
+        })
+        expect(rendered.result.state.get(`4`)).toMatchObject({
+          name: `Kyle Doe`,
+        })
+      })
+
+      // Verify the data array reflects both changes
+      const person1 = rendered.result().find((p: any) => p.id === `1`)
+      expect(person1).toMatchObject({ name: `John Updated` })
+      const person4 = rendered.result().find((p: any) => p.id === `4`)
+      expect(person4).toMatchObject({ name: `Kyle Doe` })
+
+      // Sync both changes from the server in a single batch
+      collection.utils.begin()
+      collection.utils.write({
+        type: `insert`,
+        value: {
+          id: `4`,
+          name: `Kyle Doe`,
+          age: 40,
+          email: `kyle.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.write({
+        type: `update`,
+        value: {
+          id: `1`,
+          name: `John Updated`,
+          age: 30,
+          email: `john.doe@example.com`,
+          isActive: true,
+          team: `team1`,
+        },
+      })
+      collection.utils.commit()
+
+      // Resolve the shared sync promise — both onInsert and onUpdate complete
+      collection.utils.resolveSync()
+      await txInsert.isPersisted.promise
+      await txUpdate.isPersisted.promise
+
+      // After sync complete, should have 4 items with correct data
+      await waitFor(() => {
+        expect(rendered.result().length).toBe(4)
+      })
+      expect(rendered.result.state.size).toBe(4)
+      expect(rendered.result.state.get(`1`)).toMatchObject({
+        name: `John Updated`,
+      })
+      expect(rendered.result.state.get(`4`)).toMatchObject({
+        name: `Kyle Doe`,
+      })
+
+      // Verify ordering
+      const finalIds = rendered.result().map((p: any) => p.id)
+      expect(finalIds).toEqual([`1`, `2`, `3`, `4`])
+    })
+  })
 })
