@@ -2189,9 +2189,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
                   orderCount: count(row.orders.id),
                 })),
           }),
-        ).toThrow(
-          `fn.select() cannot be used with groupBy()`,
-        )
+        ).toThrow(`fn.select() cannot be used with groupBy()`)
       })
     })
   })
