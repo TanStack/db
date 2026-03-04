@@ -277,6 +277,15 @@ importers:
 
   examples/react/offline-transactions:
     dependencies:
+      '@journeyapps/wa-sqlite':
+        specifier: ^1.4.1
+        version: 1.4.1
+      '@tanstack/db':
+        specifier: workspace:*
+        version: link:../../../packages/db
+      '@tanstack/db-browser-wa-sqlite-persisted-collection':
+        specifier: workspace:*
+        version: link:../../../packages/db-browser-wa-sqlite-persisted-collection
       '@tanstack/offline-transactions':
         specifier: ^1.0.21
         version: link:../../../packages/offline-transactions
