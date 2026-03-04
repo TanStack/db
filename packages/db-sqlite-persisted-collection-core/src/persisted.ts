@@ -200,6 +200,11 @@ export interface PersistenceAdapter<
     spec: PersistedIndexSpec,
   ) => Promise<void>
   markIndexRemoved?: (collectionId: string, signature: string) => Promise<void>
+  getStreamPosition?: (collectionId: string) => Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }>
 }
 
 export interface SQLiteDriver {
@@ -821,6 +826,20 @@ class PersistedCollectionRuntime<
     }
 
     this.started = true
+
+    // Restore stream position from the database so that new mutations
+    // don't collide with previously applied transactions.
+    if (this.persistence.adapter.getStreamPosition) {
+      const position = await this.persistence.adapter.getStreamPosition(
+        this.collectionId,
+      )
+      this.observeStreamPosition(
+        position.latestTerm,
+        position.latestSeq,
+        position.latestRowVersion,
+      )
+    }
+
     const indexBootstrapSnapshot = this.collection?.getIndexMetadata() ?? []
     this.attachIndexLifecycleListeners()
     await this.bootstrapPersistedIndexes(indexBootstrapSnapshot)

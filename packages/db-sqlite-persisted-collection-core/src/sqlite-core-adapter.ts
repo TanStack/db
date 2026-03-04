@@ -1297,6 +1297,43 @@ export class SQLiteCorePersistenceAdapter<
     }
   }
 
+  async getStreamPosition(
+    collectionId: string,
+  ): Promise<{ latestTerm: number; latestSeq: number; latestRowVersion: number }> {
+    await this.ensureCollectionReady(collectionId)
+
+    const [termRows, versionRows, seqRows] = await Promise.all([
+      this.driver.query<{ latest_term: number }>(
+        `SELECT latest_term
+         FROM leader_term
+         WHERE collection_id = ?
+         LIMIT 1`,
+        [collectionId],
+      ),
+      this.driver.query<{ latest_row_version: number }>(
+        `SELECT latest_row_version
+         FROM collection_version
+         WHERE collection_id = ?
+         LIMIT 1`,
+        [collectionId],
+      ),
+      this.driver.query<{ max_seq: number }>(
+        `SELECT MAX(seq) AS max_seq
+         FROM applied_tx
+         WHERE collection_id = ? AND term = (
+           SELECT latest_term FROM leader_term WHERE collection_id = ? LIMIT 1
+         )`,
+        [collectionId, collectionId],
+      ),
+    ])
+
+    return {
+      latestTerm: termRows[0]?.latest_term ?? 0,
+      latestSeq: seqRows[0]?.max_seq ?? 0,
+      latestRowVersion: versionRows[0]?.latest_row_version ?? 0,
+    }
+  }
+
   async pullSince(
     collectionId: string,
     fromRowVersion: number,
