@@ -22,7 +22,7 @@ For comprehensive documentation on writing queries (filtering, joins, aggregatio
 The `useLiveQuery` hook creates a live query that automatically updates your component when data changes:
 
 ```tsx
-import { useLiveQuery } from '@tanstack/react-db'
+import { useLiveQuery, eq } from '@tanstack/react-db'
 
 function TodoList() {
   const { data, isLoading } = useLiveQuery((q) =>
