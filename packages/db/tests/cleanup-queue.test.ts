@@ -104,4 +104,28 @@ describe('CleanupQueue', () => {
     expect(cb2).toHaveBeenCalledTimes(1)
     expect(cb3).toHaveBeenCalledTimes(1)
   })
+
+  it('continues processing tasks if one throws an error', async () => {
+    const queue = CleanupQueue.getInstance()
+    const cb1 = vi.fn().mockImplementation(() => {
+      throw new Error('Test error')
+    })
+    const cb2 = vi.fn()
+
+    const spyConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    queue.schedule('key1', 1000, cb1)
+    queue.schedule('key2', 1000, cb2)
+    
+    await Promise.resolve()
+
+    vi.advanceTimersByTime(1000)
+    
+    expect(cb1).toHaveBeenCalledTimes(1)
+    expect(spyConsoleError).toHaveBeenCalledWith('Error in CleanupQueue task:', expect.any(Error))
+    // cb2 should still be called even though cb1 threw an error
+    expect(cb2).toHaveBeenCalledTimes(1)
+
+    spyConsoleError.mockRestore()
+  })
 })

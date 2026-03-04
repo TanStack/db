@@ -65,7 +65,11 @@ export class CleanupQueue {
     for (const [key, task] of this.tasks.entries()) {
       if (now >= task.executeAt) {
         this.tasks.delete(key)
-        task.callback()
+        try {
+          task.callback()
+        } catch (error) {
+          console.error('Error in CleanupQueue task:', error)
+        }
       }
     }
 

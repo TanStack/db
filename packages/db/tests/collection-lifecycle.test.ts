@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createCollection } from '../src/collection/index.js'
+import { CleanupQueue } from '../src/collection/cleanup-queue.js'
 
 // Mock setTimeout and clearTimeout for testing GC behavior
 const originalSetTimeout = global.setTimeout
@@ -10,6 +11,8 @@ describe(`Collection Lifecycle Management`, () => {
   let mockClearTimeout: ReturnType<typeof vi.fn>
   let timeoutCallbacks: Map<number, () => void>
   let timeoutId = 1
+  let scheduleSpy: ReturnType<typeof vi.spyOn>
+  let cancelSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     timeoutCallbacks = new Map()
@@ -31,21 +34,17 @@ describe(`Collection Lifecycle Management`, () => {
 
     global.setTimeout = mockSetTimeout as any
     global.clearTimeout = mockClearTimeout as any
+
+    scheduleSpy = vi.spyOn(CleanupQueue.prototype, 'schedule').mockImplementation(() => {})
+    cancelSpy = vi.spyOn(CleanupQueue.prototype, 'cancel').mockImplementation(() => {})
   })
 
   afterEach(() => {
     global.setTimeout = originalSetTimeout
     global.clearTimeout = originalClearTimeout
     vi.clearAllMocks()
+    CleanupQueue.resetInstance()
   })
-
-  const triggerTimeout = (id: number) => {
-    const callback = timeoutCallbacks.get(id)
-    if (callback) {
-      callback()
-      timeoutCallbacks.delete(id)
-    }
-  }
 
   const triggerAllTimeouts = () => {
     const callbacks = Array.from(timeoutCallbacks.entries())
@@ -247,10 +246,10 @@ describe(`Collection Lifecycle Management`, () => {
         expect(collection.subscriberCount).toBe(0)
 
         // Should start GC timer each time
-        expect(mockSetTimeout).toHaveBeenCalledWith(expect.any(Function), 1000)
+        expect(scheduleSpy).toHaveBeenCalledWith(expect.any(Object), 1000, expect.any(Function))
       }
 
-      expect(mockSetTimeout).toHaveBeenCalledTimes(5)
+      expect(scheduleSpy).toHaveBeenCalledTimes(5)
     })
   })
 
@@ -268,12 +267,12 @@ describe(`Collection Lifecycle Management`, () => {
       const subscription = collection.subscribeChanges(() => {})
 
       // Should not have GC timer while there are subscribers
-      expect(mockSetTimeout).not.toHaveBeenCalled()
+      expect(scheduleSpy).not.toHaveBeenCalled()
 
       subscription.unsubscribe()
 
       // Should start GC timer when last subscriber is removed
-      expect(mockSetTimeout).toHaveBeenCalledWith(expect.any(Function), 5000)
+      expect(scheduleSpy).toHaveBeenCalledWith(expect.any(Object), 5000, expect.any(Function))
     })
 
     it(`should cancel GC timer when new subscriber is added`, () => {
@@ -289,12 +288,11 @@ describe(`Collection Lifecycle Management`, () => {
       const subscription1 = collection.subscribeChanges(() => {})
       subscription1.unsubscribe()
 
-      expect(mockSetTimeout).toHaveBeenCalledTimes(1)
-      const timerId = mockSetTimeout.mock.results[0]?.value
+      expect(scheduleSpy).toHaveBeenCalledTimes(1)
 
       // Add new subscriber should cancel GC timer
       const subscription2 = collection.subscribeChanges(() => {})
-      expect(mockClearTimeout).toHaveBeenCalledWith(timerId)
+      expect(cancelSpy).toHaveBeenCalledWith(expect.any(Object))
 
       subscription2.unsubscribe()
     })
@@ -315,9 +313,11 @@ describe(`Collection Lifecycle Management`, () => {
       expect(collection.status).toBe(`loading`)
 
       // Trigger GC timeout - this will schedule the idle cleanup
-      const gcTimerId = mockSetTimeout.mock.results[0]?.value
-      if (gcTimerId) {
-        triggerTimeout(gcTimerId)
+      const gcCallback = scheduleSpy.mock.calls[0]?.[2] as
+        | (() => void)
+        | undefined
+      if (gcCallback) {
+        gcCallback()
       }
 
       // Now trigger all remaining timeouts to handle the idle callback
@@ -340,7 +340,7 @@ describe(`Collection Lifecycle Management`, () => {
       subscription.unsubscribe()
 
       // Should use default 5 minutes (300000ms)
-      expect(mockSetTimeout).toHaveBeenCalledWith(expect.any(Function), 300000)
+      expect(scheduleSpy).toHaveBeenCalledWith(expect.any(Object), 300000, expect.any(Function))
     })
 
     it(`should disable GC when gcTime is 0`, () => {
@@ -357,7 +357,7 @@ describe(`Collection Lifecycle Management`, () => {
       subscription.unsubscribe()
 
       // Should not start any timer when GC is disabled
-      expect(mockSetTimeout).not.toHaveBeenCalled()
+      expect(scheduleSpy).not.toHaveBeenCalled()
       expect(collection.status).not.toBe(`cleaned-up`)
     })
 
@@ -377,7 +377,7 @@ describe(`Collection Lifecycle Management`, () => {
       // Should not start any timer when gcTime is Infinity
       // Note: Without this fix, setTimeout(fn, Infinity) would coerce to 0,
       // causing immediate GC instead of never collecting
-      expect(mockSetTimeout).not.toHaveBeenCalled()
+      expect(scheduleSpy).not.toHaveBeenCalled()
       expect(collection.status).not.toBe(`cleaned-up`)
     })
   })
@@ -525,9 +525,11 @@ describe(`Collection Lifecycle Management`, () => {
       })
 
       // Trigger GC timeout to schedule cleanup
-      const gcTimerId = mockSetTimeout.mock.results[0]?.value
-      if (gcTimerId) {
-        triggerTimeout(gcTimerId)
+      const gcCallback = scheduleSpy.mock.calls[0]?.[2] as
+        | (() => void)
+        | undefined
+      if (gcCallback) {
+        gcCallback()
       }
 
       // Trigger all remaining timeouts to handle the idle callback
