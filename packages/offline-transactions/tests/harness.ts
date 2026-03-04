@@ -228,6 +228,7 @@ export function createTestOfflineEnvironment(
   }
 
   const config: OfflineConfig = {
+    ...options.config,
     collections: {
       ...(options.config?.collections ?? {}),
       [collection.id]: collection,
@@ -237,11 +238,6 @@ export function createTestOfflineEnvironment(
       [mutationFnName]: wrappedMutation,
     },
     storage,
-    maxConcurrency: options.config?.maxConcurrency,
-    jitter: options.config?.jitter,
-    beforeRetry: options.config?.beforeRetry,
-    onUnknownMutationFn: options.config?.onUnknownMutationFn,
-    onLeadershipChange: options.config?.onLeadershipChange,
     leaderElection: options.config?.leaderElection ?? leader,
   }
 
