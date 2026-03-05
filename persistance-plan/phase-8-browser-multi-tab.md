@@ -41,8 +41,8 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 ### Workstream A - Leadership and Heartbeats
 
 - [ ] Acquire per-collection Web Lock (`tsdb:leader:<dbName>:<collectionId>`).
-- [x] Increment durable `leader_term` transactionally on leadership gain. *(storage-level `leader_term` table exists in `sqlite-core-adapter.ts:1804-1809` with MAX-based increment logic; needs browser coordinator to call it on leadership gain)*
-- [ ] Emit leader heartbeat with latest seq/rowVersion. *(protocol type `LeaderHeartbeat` defined in `persisted.ts:55-61` but no emitter exists)*
+- [x] Increment durable `leader_term` transactionally on leadership gain. _(storage-level `leader_term` table exists in `sqlite-core-adapter.ts:1804-1809` with MAX-based increment logic; needs browser coordinator to call it on leadership gain)_
+- [ ] Emit leader heartbeat with latest seq/rowVersion. _(protocol type `LeaderHeartbeat` defined in `persisted.ts:55-61` but no emitter exists)_
 - [ ] Detect heartbeat timeout and trigger takeover attempts.
 - [ ] Implement hidden-tab cooperative stepdown and cooldown.
 
@@ -53,13 +53,13 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream B - Protocol Transport and RPC
 
-- [ ] Implement BroadcastChannel envelope transport per collection. *(protocol `ProtocolEnvelope` type defined in `persisted.ts:46-53`; no transport implemented)*
-- [ ] Implement request/response correlation via `rpcId`. *(RPC types with `rpcId` fields defined; no correlation machinery implemented)*
+- [ ] Implement BroadcastChannel envelope transport per collection. _(protocol `ProtocolEnvelope` type defined in `persisted.ts:46-53`; no transport implemented)_
+- [ ] Implement request/response correlation via `rpcId`. _(RPC types with `rpcId` fields defined; no correlation machinery implemented)_
 - [ ] Implement RPC handlers:
-  - `ensureRemoteSubset` *(request/response types defined; `requestEnsureRemoteSubset` in coordinator interface; no browser handler)*
-  - `ensurePersistedIndex` *(in coordinator interface; `SingleProcessCoordinator` has no-op stub)*
-  - `applyLocalMutations` *(request/response types defined; caller logic in `persisted.ts:1325-1365`; no browser handler)*
-  - `pullSince` *(request/response types defined; caller logic in `persisted.ts:1668-1682`; no browser handler)*
+  - `ensureRemoteSubset` _(request/response types defined; `requestEnsureRemoteSubset` in coordinator interface; no browser handler)_
+  - `ensurePersistedIndex` _(in coordinator interface; `SingleProcessCoordinator` has no-op stub)_
+  - `applyLocalMutations` _(request/response types defined; caller logic in `persisted.ts:1325-1365`; no browser handler)_
+  - `pullSince` _(request/response types defined; caller logic in `persisted.ts:1668-1682`; no browser handler)_
 - [ ] Implement retry/backoff and timeout behavior.
 
 **Acceptance criteria**
@@ -68,10 +68,10 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream C - Mutation Routing and Acknowledgment
 
-- [ ] Route follower sync-absent mutations to current leader. *(caller side exists in `persisted.ts:1325-1365` using `requestApplyLocalMutations`; no transport)*
-- [ ] Dedupe mutation envelopes by `envelopeId` at leader. *(`envelopeId` field defined in `ApplyLocalMutationsRequest`; no dedup logic)*
-- [ ] Return accepted mutation ids and resulting `(term, seq, rowVersion)`. *(response type defined; no handler)*
-- [ ] Confirm/rollback optimistic local entries in follower based on response. *(partial: acceptance path in `persisted.ts:976-982`; no rollback on failure)*
+- [ ] Route follower sync-absent mutations to current leader. _(caller side exists in `persisted.ts:1325-1365` using `requestApplyLocalMutations`; no transport)_
+- [ ] Dedupe mutation envelopes by `envelopeId` at leader. _(`envelopeId` field defined in `ApplyLocalMutationsRequest`; no dedup logic)_
+- [ ] Return accepted mutation ids and resulting `(term, seq, rowVersion)`. _(response type defined; no handler)_
+- [ ] Confirm/rollback optimistic local entries in follower based on response. _(partial: acceptance path in `persisted.ts:976-982`; no rollback on failure)_
 
 **Acceptance criteria**
 
@@ -79,11 +79,11 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream D - Commit Ordering and Recovery
 
-- [x] Broadcast `tx:committed` after DB commit only. *(implemented in `persisted.ts:1201-1215` and `persisted.ts:1376-1389` — publishes via coordinator after `applyCommittedTx`)*
-- [x] Track follower last seen `(term, seq)` and rowVersion. *(implemented in `persisted.ts:1449-1474` via `observeStreamPosition`; restored from DB on startup via `getStreamPosition`)*
-- [x] On seq gap, invoke `pullSince(lastSeenRowVersion)`. *(implemented in `persisted.ts:1642-1651` gap detection and `persisted.ts:1662-1684` recovery)*
-- [x] Apply targeted invalidation when key count is within limit. *(implemented in `persisted.ts:1705-1738` with `TARGETED_INVALIDATION_KEY_LIMIT` and inline row data in `changedRows`)*
-- [x] Trigger full reload when required or when pull fails. *(implemented in `persisted.ts:1708-1711` for `requiresFullReload`, `persisted.ts:1715-1718` for over-limit, and `persisted.ts:1684` as fallback)*
+- [x] Broadcast `tx:committed` after DB commit only. _(implemented in `persisted.ts:1201-1215` and `persisted.ts:1376-1389` — publishes via coordinator after `applyCommittedTx`)_
+- [x] Track follower last seen `(term, seq)` and rowVersion. _(implemented in `persisted.ts:1449-1474` via `observeStreamPosition`; restored from DB on startup via `getStreamPosition`)_
+- [x] On seq gap, invoke `pullSince(lastSeenRowVersion)`. _(implemented in `persisted.ts:1642-1651` gap detection and `persisted.ts:1662-1684` recovery)_
+- [x] Apply targeted invalidation when key count is within limit. _(implemented in `persisted.ts:1705-1738` with `TARGETED_INVALIDATION_KEY_LIMIT` and inline row data in `changedRows`)_
+- [x] Trigger full reload when required or when pull fails. _(implemented in `persisted.ts:1708-1711` for `requiresFullReload`, `persisted.ts:1715-1718` for over-limit, and `persisted.ts:1684` as fallback)_
 
 **Acceptance criteria**
 
