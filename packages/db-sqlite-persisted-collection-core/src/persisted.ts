@@ -406,21 +406,6 @@ export class SingleProcessCoordinator implements PersistedCollectionCoordinator 
 
   public async requestEnsurePersistedIndex(): Promise<void> {}
 
-  public requestApplyLocalMutations(
-    _collectionId: string,
-    mutations: Array<PersistedMutationEnvelope>,
-  ): Promise<ApplyLocalMutationsResponse> {
-    return Promise.resolve({
-      type: `rpc:applyLocalMutations:res`,
-      rpcId: crypto.randomUUID(),
-      ok: true,
-      term: 1,
-      seq: mutations.length,
-      latestRowVersion: mutations.length,
-      acceptedMutationIds: mutations.map((mutation) => mutation.mutationId),
-    })
-  }
-
   public pullSince(): Promise<PullSinceResponse> {
     return Promise.resolve({
       type: `rpc:pullSince:res`,
@@ -1321,10 +1306,13 @@ class PersistedCollectionRuntime<
   private async persistCollectionMutationsUnsafe(
     mutations: Array<PendingMutation<T>>,
   ): Promise<Array<string>> {
-    if (
-      this.persistence.coordinator.requestApplyLocalMutations &&
-      !this.persistence.coordinator.isLeader(this.collectionId)
-    ) {
+    // When a coordinator with requestApplyLocalMutations is available, always
+    // route through it — even on the leader tab. This ensures the coordinator's
+    // seq/rowVersion counters stay in sync with actual writes. Without this,
+    // the leader's direct-path writes would increment the runtime's localSeq
+    // but leave the coordinator's state.latestSeq stale, causing seq collisions
+    // when follower RPCs later arrive.
+    if (this.persistence.coordinator.requestApplyLocalMutations) {
       const envelopeMutations = mutations.map((mutation) =>
         toPersistedMutationEnvelope(
           mutation as unknown as PendingMutation<Record<string, unknown>>,
@@ -1368,6 +1356,8 @@ class PersistedCollectionRuntime<
       return uniqueAcceptedMutationIds
     }
 
+    // Fallback: no coordinator with requestApplyLocalMutations (e.g.
+    // SingleProcessCoordinator). Apply directly and broadcast.
     const streamPosition = this.nextLocalStreamPosition()
     const tx = this.createPersistedTxFromMutations(mutations, streamPosition)
     await this.persistence.adapter.applyCommittedTx(this.collectionId, tx)
