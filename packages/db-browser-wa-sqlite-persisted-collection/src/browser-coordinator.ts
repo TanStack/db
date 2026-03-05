@@ -352,8 +352,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
             // Restore stream position from DB before claiming leadership
             const adapter = this.requireAdapter()
             if (adapter.getStreamPosition) {
-              const pos =
-                await adapter.getStreamPosition(collectionId)
+              const pos = await adapter.getStreamPosition(collectionId)
               state.latestTerm = pos.latestTerm
               state.latestSeq = pos.latestSeq
               state.latestRowVersion = pos.latestRowVersion
@@ -613,7 +612,11 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     },
   ): Promise<RPCResponse> {
     await this.withWriterLock(() =>
-      this.requireAdapter().ensureIndex(collectionId, request.signature, request.spec),
+      this.requireAdapter().ensureIndex(
+        collectionId,
+        request.signature,
+        request.spec,
+      ),
     )
     return {
       type: `rpc:ensurePersistedIndex:res`,
@@ -748,10 +751,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       }
     }
 
-    const result = await adapter.pullSince(
-      collectionId,
-      request.fromRowVersion,
-    )
+    const result = await adapter.pullSince(collectionId, request.fromRowVersion)
 
     if (result.requiresFullReload) {
       return {
