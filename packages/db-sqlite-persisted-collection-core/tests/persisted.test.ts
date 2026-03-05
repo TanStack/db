@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createCollection, createTransaction } from '@tanstack/db'
+import { IR, createCollection, createTransaction } from '@tanstack/db'
 import {
   InvalidPersistedCollectionCoordinatorError,
   InvalidPersistedStorageKeyEncodingError,
@@ -617,7 +617,7 @@ describe(`persistedCollectionOptions`, () => {
       txId: `tx-1`,
       latestRowVersion: 1,
       requiresFullReload: false,
-      changedKeys: [`1`],
+      changedRows: [{ key: `1`, value: { id: `1`, title: `Initial` } }],
       deletedKeys: [],
     })
 
@@ -628,7 +628,7 @@ describe(`persistedCollectionOptions`, () => {
       txId: `tx-3`,
       latestRowVersion: 3,
       requiresFullReload: false,
-      changedKeys: [`2`],
+      changedRows: [{ key: `2`, value: { id: `2`, title: `Recovered` } }],
       deletedKeys: [],
     })
 
@@ -678,7 +678,7 @@ describe(`persistedCollectionOptions`, () => {
       txId: `tx-delete`,
       latestRowVersion: 1,
       requiresFullReload: false,
-      changedKeys: [],
+      changedRows: [],
       deletedKeys: [`2`],
     })
 
@@ -774,6 +774,167 @@ describe(`persistedCollectionOptions`, () => {
       /partial acceptance is not supported/,
     )
     expect(collection.get(`ack-mismatch`)).toBeUndefined()
+  })
+
+  it(`targeted update avoids full loadSubset call`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Original` },
+    ])
+    const coordinator = createCoordinatorHarness()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    await collection.preload()
+    await flushAsyncWork()
+    const loadSubsetCallsAfterPreload = adapter.loadSubsetCalls.length
+
+    // Update the row in the adapter backing store
+    adapter.rows.set(`1`, { id: `1`, title: `Updated` })
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-targeted`,
+      latestRowVersion: 1,
+      requiresFullReload: false,
+      changedRows: [{ key: `1`, value: { id: `1`, title: `Updated` } }],
+      deletedKeys: [],
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    // Targeted path should NOT have called loadSubset again
+    expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload)
+    expect(collection.get(`1`)).toEqual({ id: `1`, title: `Updated` })
+  })
+
+  it(`targeted update removes row that no longer matches WHERE`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Keep` },
+      { id: `2`, title: `Keep` },
+    ])
+    const coordinator = createCoordinatorHarness()
+
+    const whereExpr = new IR.Func(`eq`, [
+      new IR.PropRef([`title`]),
+      new IR.Value(`Keep`),
+    ])
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await flushAsyncWork()
+
+    // Load a filtered subset with WHERE title = 'Keep'
+    await (collection as any)._sync.loadSubset({ where: whereExpr })
+    await flushAsyncWork()
+    expect(collection.get(`2`)).toEqual({ id: `2`, title: `Keep` })
+
+    // Change the row so it no longer matches WHERE title = 'Keep'
+    adapter.rows.set(`2`, { id: `2`, title: `Changed` })
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-where`,
+      latestRowVersion: 1,
+      requiresFullReload: false,
+      changedRows: [{ key: `2`, value: { id: `2`, title: `Changed` } }],
+      deletedKeys: [],
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    // Row no longer matches WHERE — should be removed from collection
+    expect(collection.get(`2`)).toBeUndefined()
+  })
+
+  it(`paginated subset falls back to full reload`, async () => {
+    const adapter = createRecordingAdapter([
+      { id: `1`, title: `Row 1` },
+    ])
+    const coordinator = createCoordinatorHarness()
+
+    const collection = createCollection(
+      persistedCollectionOptions<Todo, string>({
+        id: `sync-present`,
+        syncMode: `on-demand`,
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ markReady }) => {
+            markReady()
+          },
+        },
+        persistence: {
+          adapter,
+          coordinator,
+        },
+      }),
+    )
+
+    collection.startSyncImmediate()
+    await flushAsyncWork()
+
+    // Add a paginated subset (limit)
+    await (collection as any)._sync.loadSubset({ limit: 10 })
+    await flushAsyncWork()
+    const loadSubsetCallsAfterPaginated = adapter.loadSubsetCalls.length
+
+    // Update the row in the adapter backing store
+    adapter.rows.set(`1`, { id: `1`, title: `Updated` })
+
+    coordinator.emit({
+      type: `tx:committed`,
+      term: 1,
+      seq: 1,
+      txId: `tx-paginated`,
+      latestRowVersion: 1,
+      requiresFullReload: false,
+      changedRows: [{ key: `1`, value: { id: `1`, title: `Updated` } }],
+      deletedKeys: [],
+    })
+
+    await flushAsyncWork()
+    await flushAsyncWork()
+
+    // With a paginated subset active, should fall back to full reload
+    expect(adapter.loadSubsetCalls.length).toBeGreaterThan(
+      loadSubsetCallsAfterPaginated,
+    )
+    expect(collection.get(`1`)).toEqual({ id: `1`, title: `Updated` })
   })
 })
 
