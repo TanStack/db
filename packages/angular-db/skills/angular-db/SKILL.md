@@ -5,8 +5,8 @@ description: >
   Angular signals (Signal<T>) for all return values. Reactive params pattern
   ({ params: () => T, query: ({ params, q }) => QueryBuilder }) for dynamic
   queries. Must be called in injection context. Angular 17+ control flow
-  (@if, @for) and signal inputs supported. Import from @tanstack/angular-db
-  (re-exports all of @tanstack/db).
+  (@if, @for) and signal inputs supported. Import from
+  @tanstack/angular-db (re-exports all of @tanstack/db).
 type: framework
 library: db
 framework: angular
@@ -26,8 +26,7 @@ This skill builds on db-core. Read it first for collection setup, query builder,
 
 ```typescript
 import { Component } from '@angular/core'
-import { injectLiveQuery } from '@tanstack/angular-db'
-import { eq, not } from '@tanstack/db'
+import { injectLiveQuery, eq, not } from '@tanstack/angular-db'
 
 @Component({
   selector: 'app-todo-list',
@@ -69,6 +68,7 @@ const query = injectLiveQuery((q) =>
 // query.data()       → Array<T>
 // query.status()     → CollectionStatus | 'disabled'
 // query.isLoading(), query.isReady(), query.isError()
+// query.isIdle(), query.isCleanedUp()  (seldom used)
 // query.state()      → Map<TKey, T>
 // query.collection() → Collection | null
 

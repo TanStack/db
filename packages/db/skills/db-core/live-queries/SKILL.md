@@ -3,7 +3,7 @@ name: db-core/live-queries
 description: >
   Query builder fluent API: from, where, join, leftJoin, rightJoin, innerJoin,
   fullJoin, select, fn.select, groupBy, having, orderBy, limit, offset, distinct,
-  findOne. Operators: eq, ne, gt, gte, lt, lte, like, ilike, inArray, isNull,
+  findOne. Operators: eq, gt, gte, lt, lte, like, ilike, inArray, isNull,
   isUndefined, and, or, not. Aggregates: count, sum, avg, min, max. String
   functions: upper, lower, length, concat, coalesce. Math: add. $selected
   namespace. createLiveQueryCollection. Derived collections. Predicate push-down.

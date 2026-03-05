@@ -62,6 +62,7 @@ const query = useLiveQuery((q) =>
   q.from({ todo: todoCollection })
 )
 // query()        → Array<T> (data)
+// query.data     → DEPRECATED — use query() instead. Migrate any existing code.
 // query.status   → CollectionStatus
 // query.isLoading, query.isReady, query.isError
 // query.state    → ReactiveMap<TKey, T>
@@ -150,6 +151,26 @@ const query = useLiveQuery((q) =>
 Solid's reactivity tracks signal reads inside reactive contexts. Reading outside the query function captures the value at creation time — changes won't trigger re-execution.
 
 Source: docs/framework/solid/overview.md
+
+### MEDIUM Using deprecated query.data instead of query()
+
+Wrong:
+
+```tsx
+<For each={todosQuery.data}>
+  {(todo) => <li>{todo.text}</li>}
+</For>
+```
+
+Correct:
+
+```tsx
+<For each={todosQuery()}>
+  {(todo) => <li>{todo.text}</li>}
+</For>
+```
+
+`query.data` is deprecated. Always use `query()` to access data. If you encounter existing code using `.data`, migrate it to the function call form.
 
 See also: db-core/live-queries/SKILL.md — for query builder API.
 

@@ -5,7 +5,7 @@ All operators are imported from `@tanstack/db` (also re-exported by `@tanstack/r
 ```ts
 import {
   // Comparison
-  eq, ne, gt, gte, lt, lte, like, ilike, inArray, isNull, isUndefined,
+  eq, gt, gte, lt, lte, like, ilike, inArray, isNull, isUndefined,
   // Logical
   and, or, not,
   // Aggregate
@@ -32,12 +32,12 @@ eq(user.id, 1)
 eq(user.name, 'Alice')
 ```
 
-### ne(left, right) -> BasicExpression\<boolean\>
+### not(eq(left, right)) — not-equal pattern
 
-Not-equal comparison. Inverse of `eq`.
+There is no `ne` operator. Use `not(eq(...))` for not-equal:
 
 ```ts
-ne(user.role, 'banned')
+not(eq(user.role, 'banned'))
 ```
 
 ### gt, gte, lt, lte (left, right) -> BasicExpression\<boolean\>

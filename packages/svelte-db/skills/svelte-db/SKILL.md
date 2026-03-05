@@ -113,7 +113,7 @@ const { data, isLoading } = $derived(query)
 
 ## Common Mistakes
 
-### MEDIUM Passing values instead of getter functions in deps
+### CRITICAL Passing values instead of getter functions in deps
 
 Wrong:
 

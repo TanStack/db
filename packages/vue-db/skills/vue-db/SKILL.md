@@ -39,7 +39,7 @@ const { data: todos, isLoading } = useLiveQuery((q) =>
 <template>
   <div v-if="isLoading">Loading...</div>
   <ul v-else>
-    <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
+    <li v-for="todo in todos" :key="todo.id">{{ todo.text }}</li>
   </ul>
 </template>
 ```

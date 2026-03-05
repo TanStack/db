@@ -42,8 +42,7 @@
   "files": [
     "dist",
     "src",
-    "skills",
-    "!skills/_artifacts"
+    "skills"
   ],
   "dependencies": {
     "@standard-schema/spec": "^1.1.0",

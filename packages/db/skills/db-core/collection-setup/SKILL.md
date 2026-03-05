@@ -213,7 +213,7 @@ const todoCollection = createCollection(
 
 Each backend has a dedicated adapter that handles sync, mutation handlers, and utilities. Using `localOnlyCollectionOptions` or bare `createCollection` for a real backend bypasses all of this.
 
-Source: maintainer interview
+Source: docs/overview.md
 
 ### CRITICAL Electric txid queried outside mutation transaction
 

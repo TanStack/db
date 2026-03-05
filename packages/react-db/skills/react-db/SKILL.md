@@ -60,7 +60,7 @@ function TodoList() {
 
 ```tsx
 // Query function with dependency array
-const { data, state, collection, status, isLoading, isReady, isError } =
+const { data, state, collection, status, isLoading, isReady, isError, isIdle, isCleanedUp } =
   useLiveQuery(
     (q) =>
       q

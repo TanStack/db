@@ -64,11 +64,13 @@ await executor.waitForInit()
 ```ts
 const tx = executor.createOfflineTransaction({
   mutationFnName: 'createTodo',
-  autoCommit: true,
 })
 
-// Use like a normal TanStack DB transaction
-todoCollection.insert(tx, { id: crypto.randomUUID(), text: 'New todo' })
+// Mutations run inside tx.mutate() — uses ambient transaction context
+tx.mutate(() => {
+  todoCollection.insert({ id: crypto.randomUUID(), text: 'New todo' })
+})
+tx.commit()
 ```
 
 If the executor is not the leader tab, falls back to `createTransaction` directly (no offline persistence).
@@ -79,7 +81,7 @@ If the executor is not the leader tab, falls back to `createTransaction` directl
 const addTodo = executor.createOfflineAction({
   mutationFnName: 'createTodo',
   onMutate: (variables) => {
-    todoCollection.insert(undefined, {
+    todoCollection.insert({
       id: crypto.randomUUID(),
       text: variables.text,
     })

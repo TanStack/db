@@ -20,8 +20,10 @@ collections from any backend (REST APIs, sync engines, local storage), provides
 sub-millisecond live queries via differential dataflow, and supports instant
 optimistic mutations with automatic rollback.
 
-In React projects, import from `@tanstack/react-db` — it re-exports everything
-from `@tanstack/db` plus React hooks.
+Framework packages (`@tanstack/react-db`, `@tanstack/vue-db`, `@tanstack/svelte-db`,
+`@tanstack/solid-db`) re-export everything from `@tanstack/db` plus framework-specific
+hooks. In framework projects, import from the framework package directly.
+`@tanstack/angular-db` is the exception -- import operators from `@tanstack/db` separately.
 
 ## Sub-Skills
 

@@ -269,10 +269,8 @@ Sync data must be written within a transaction (`begin` → `write` → `commit`
 
 Source: packages/db/src/collection/sync.ts:110
 
-### HIGH Tension: simplicity vs. correctness in sync
+## Tension: Simplicity vs. Correctness in Sync
 
-This domain's patterns conflict with collection-setup. Getting-started simplicity (localOnly, eager mode) conflicts with production correctness (on-demand sync, race condition prevention, proper markReady handling). Agents optimizing for quick setup tend to skip buffering, markReady, and cleanup functions.
+Getting-started simplicity (localOnly, eager mode) conflicts with production correctness (on-demand sync, race condition prevention, proper markReady handling). Agents optimizing for quick setup tend to skip buffering, markReady, and cleanup functions.
 
-See also: db-core/collection-setup/SKILL.md § Common Mistakes
-
-See also: db-core/collection-setup/SKILL.md — for built-in adapter patterns to model after.
+See also: db-core/collection-setup/SKILL.md -- for built-in adapter patterns to model after.
