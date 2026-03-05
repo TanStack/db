@@ -529,10 +529,12 @@ export function localStorageCollectionOptions(
   }
 
   // Extract standard Collection config properties
+  // Remove localStorage-specific properties so they don't leak into the CollectionConfig
   const {
     storageKey: _storageKey,
     storage: _storage,
     storageEventApi: _storageEventApi,
+    parser: _parser,
     onInsert: _onInsert,
     onUpdate: _onUpdate,
     onDelete: _onDelete,
