@@ -88,15 +88,18 @@ type AdapterWithPullSince = PersistenceAdapter<
   pullSince?: (
     collectionId: string,
     fromRowVersion: number,
-  ) => Promise<{
-    latestRowVersion: number
-    requiresFullReload: true
-  } | {
-    latestRowVersion: number
-    requiresFullReload: false
-    changedKeys: Array<string | number>
-    deletedKeys: Array<string | number>
-  }>
+  ) => Promise<
+    | {
+        latestRowVersion: number
+        requiresFullReload: true
+      }
+    | {
+        latestRowVersion: number
+        requiresFullReload: false
+        changedKeys: Array<string | number>
+        deletedKeys: Array<string | number>
+      }
+  >
   getStreamPosition?: (collectionId: string) => Promise<{
     latestTerm: number
     latestSeq: number
@@ -117,9 +120,7 @@ export type BrowserCollectionCoordinatorOptions = {
 // BrowserCollectionCoordinator
 // ---------------------------------------------------------------------------
 
-export class BrowserCollectionCoordinator
-  implements PersistedCollectionCoordinator
-{
+export class BrowserCollectionCoordinator implements PersistedCollectionCoordinator {
   private readonly nodeId = crypto.randomUUID()
   private readonly dbName: string
   private readonly adapter: AdapterWithPullSince
@@ -162,10 +163,7 @@ export class BrowserCollectionCoordinator
     }
   }
 
-  publish(
-    _collectionId: string,
-    message: ProtocolEnvelope<unknown>,
-  ): void {
+  publish(_collectionId: string, message: ProtocolEnvelope<unknown>): void {
     this.channel.postMessage(message)
   }
 
@@ -336,8 +334,7 @@ export class BrowserCollectionCoordinator
 
           // Restore stream position from DB
           if (this.adapter.getStreamPosition) {
-            const pos =
-              await this.adapter.getStreamPosition(collectionId)
+            const pos = await this.adapter.getStreamPosition(collectionId)
             state.latestTerm = pos.latestTerm
             state.latestSeq = pos.latestSeq
             state.latestRowVersion = pos.latestRowVersion
@@ -371,16 +368,10 @@ export class BrowserCollectionCoordinator
         },
       )
     } catch (error) {
-      if (
-        error instanceof DOMException &&
-        error.name === `AbortError`
-      ) {
+      if (error instanceof DOMException && error.name === `AbortError`) {
         return
       }
-      console.warn(
-        `Failed to acquire leadership for ${collectionId}:`,
-        error,
-      )
+      console.warn(`Failed to acquire leadership for ${collectionId}:`, error)
     }
 
     // Re-acquire if not disposed (leadership was released by another means)
@@ -404,10 +395,7 @@ export class BrowserCollectionCoordinator
     state.isLeader = false
   }
 
-  private emitHeartbeat(
-    collectionId: string,
-    state: CollectionState,
-  ): void {
+  private emitHeartbeat(collectionId: string, state: CollectionState): void {
     const envelope: ProtocolEnvelope<unknown> = {
       v: 1,
       dbName: this.dbName,
@@ -440,9 +428,7 @@ export class BrowserCollectionCoordinator
     const payload = envelope.payload
     if (!payload || typeof payload !== `object`) return
 
-    const type = (payload as Record<string, unknown>).type as
-      | string
-      | undefined
+    const type = (payload as Record<string, unknown>).type as string | undefined
 
     // Handle RPC responses (for pending outbound RPCs)
     if (type && type.endsWith(`:res`)) {
@@ -508,7 +494,9 @@ export class BrowserCollectionCoordinator
 
       const timer = setTimeout(() => {
         this.pendingRPCs.delete(rpcId)
-        reject(new Error(`RPC ${request.type} timed out after ${RPC_TIMEOUT_MS}ms`))
+        reject(
+          new Error(`RPC ${request.type} timed out after ${RPC_TIMEOUT_MS}ms`),
+        )
       }, RPC_TIMEOUT_MS)
 
       this.pendingRPCs.set(rpcId, {
@@ -542,10 +530,7 @@ export class BrowserCollectionCoordinator
     try {
       switch (request.type) {
         case `rpc:ensureRemoteSubset:req`:
-          response = await this.handleEnsureRemoteSubset(
-            collectionId,
-            request,
-          )
+          response = await this.handleEnsureRemoteSubset(collectionId, request)
           break
         case `rpc:ensurePersistedIndex:req`:
           response = await this.handleEnsurePersistedIndex(
@@ -554,10 +539,7 @@ export class BrowserCollectionCoordinator
           )
           break
         case `rpc:applyLocalMutations:req`:
-          response = await this.handleApplyLocalMutations(
-            collectionId,
-            request,
-          )
+          response = await this.handleApplyLocalMutations(collectionId, request)
           break
         case `rpc:pullSince:req`:
           response = await this.handlePullSince(collectionId, request)
@@ -785,17 +767,12 @@ export class BrowserCollectionCoordinator
       try {
         return await navigator.locks.request(lockName, async () => fn())
       } catch (error) {
-        if (
-          error instanceof DOMException &&
-          error.name === `AbortError`
-        ) {
+        if (error instanceof DOMException && error.name === `AbortError`) {
           throw error
         }
 
         if (attempt < WRITER_LOCK_MAX_RETRIES) {
-          await sleep(
-            WRITER_LOCK_BUSY_RETRY_MS * Math.min(attempt + 1, 5),
-          )
+          await sleep(WRITER_LOCK_BUSY_RETRY_MS * Math.min(attempt + 1, 5))
           continue
         }
 

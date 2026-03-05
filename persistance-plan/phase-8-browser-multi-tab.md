@@ -35,11 +35,11 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream A - Leadership and Heartbeats
 
-- [x] Acquire per-collection Web Lock (`tsdb:leader:<dbName>:<collectionId>`). *(implemented in `browser-coordinator.ts` via `navigator.locks.request` with abort signal)*
-- [x] Increment durable `leader_term` transactionally on leadership gain. *(storage-level `leader_term` table in `sqlite-core-adapter.ts`; coordinator increments in-memory term on lock acquisition after restoring from `getStreamPosition`)*
-- [x] Emit leader heartbeat with latest seq/rowVersion. *(implemented in `browser-coordinator.ts` via `emitHeartbeat` on interval `HEARTBEAT_INTERVAL_MS=3000`)*
-- [ ] Detect heartbeat timeout and trigger takeover attempts. *(not needed for Web Locks approach — lock release is automatic on tab close/crash; deferred to future iteration if needed)*
-- [ ] Implement hidden-tab cooperative stepdown and cooldown. *(deferred — Web Locks handle crash/close; Visibility API stepdown is a future optimization)*
+- [x] Acquire per-collection Web Lock (`tsdb:leader:<dbName>:<collectionId>`). _(implemented in `browser-coordinator.ts` via `navigator.locks.request` with abort signal)_
+- [x] Increment durable `leader_term` transactionally on leadership gain. _(storage-level `leader_term` table in `sqlite-core-adapter.ts`; coordinator increments in-memory term on lock acquisition after restoring from `getStreamPosition`)_
+- [x] Emit leader heartbeat with latest seq/rowVersion. _(implemented in `browser-coordinator.ts` via `emitHeartbeat` on interval `HEARTBEAT_INTERVAL_MS=3000`)_
+- [ ] Detect heartbeat timeout and trigger takeover attempts. _(not needed for Web Locks approach — lock release is automatic on tab close/crash; deferred to future iteration if needed)_
+- [ ] Implement hidden-tab cooperative stepdown and cooldown. _(deferred — Web Locks handle crash/close; Visibility API stepdown is a future optimization)_
 
 **Acceptance criteria**
 
@@ -48,14 +48,14 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream B - Protocol Transport and RPC
 
-- [x] Implement BroadcastChannel envelope transport per collection. *(single `BroadcastChannel` per coordinator instance `tsdb:coord:<dbName>`, messages routed by `collectionId` field)*
-- [x] Implement request/response correlation via `rpcId`. *(implemented in `sendRPCOnce` with `pendingRPCs` map and timeout)*
+- [x] Implement BroadcastChannel envelope transport per collection. _(single `BroadcastChannel` per coordinator instance `tsdb:coord:<dbName>`, messages routed by `collectionId` field)_
+- [x] Implement request/response correlation via `rpcId`. _(implemented in `sendRPCOnce` with `pendingRPCs` map and timeout)_
 - [x] Implement RPC handlers:
-  - `ensureRemoteSubset` *(leader handler returns ok — leader's own sync handles the subset)*
-  - `ensurePersistedIndex` *(leader handler calls `adapter.ensureIndex` under writer lock)*
-  - `applyLocalMutations` *(leader handler applies tx, broadcasts `tx:committed`, returns accepted ids)*
-  - `pullSince` *(leader handler delegates to `adapter.pullSince` and returns result)*
-- [x] Implement retry/backoff and timeout behavior. *(RPC_TIMEOUT_MS=10000, RPC_RETRY_ATTEMPTS=2, RPC_RETRY_DELAY_MS=200 with linear backoff)*
+  - `ensureRemoteSubset` _(leader handler returns ok — leader's own sync handles the subset)_
+  - `ensurePersistedIndex` _(leader handler calls `adapter.ensureIndex` under writer lock)_
+  - `applyLocalMutations` _(leader handler applies tx, broadcasts `tx:committed`, returns accepted ids)_
+  - `pullSince` _(leader handler delegates to `adapter.pullSince` and returns result)_
+- [x] Implement retry/backoff and timeout behavior. _(RPC_TIMEOUT_MS=10000, RPC_RETRY_ATTEMPTS=2, RPC_RETRY_DELAY_MS=200 with linear backoff)_
 
 **Acceptance criteria**
 
@@ -63,10 +63,10 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream C - Mutation Routing and Acknowledgment
 
-- [x] Route follower sync-absent mutations to current leader. *(follower calls `requestApplyLocalMutations` which sends RPC to leader via BroadcastChannel)*
-- [x] Dedupe mutation envelopes by `envelopeId` at leader. *(`appliedEnvelopeIds` map with 60s TTL pruning)*
-- [x] Return accepted mutation ids and resulting `(term, seq, rowVersion)`. *(leader handler returns full `ApplyLocalMutationsResponse`)*
-- [x] Confirm/rollback optimistic local entries in follower based on response. *(caller side in `persisted.ts:1340-1368` handles ok/error responses and validates accepted mutation ids)*
+- [x] Route follower sync-absent mutations to current leader. _(follower calls `requestApplyLocalMutations` which sends RPC to leader via BroadcastChannel)_
+- [x] Dedupe mutation envelopes by `envelopeId` at leader. _(`appliedEnvelopeIds` map with 60s TTL pruning)_
+- [x] Return accepted mutation ids and resulting `(term, seq, rowVersion)`. _(leader handler returns full `ApplyLocalMutationsResponse`)_
+- [x] Confirm/rollback optimistic local entries in follower based on response. _(caller side in `persisted.ts:1340-1368` handles ok/error responses and validates accepted mutation ids)_
 
 **Acceptance criteria**
 
@@ -74,11 +74,11 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream D - Commit Ordering and Recovery
 
-- [x] Broadcast `tx:committed` after DB commit only. *(implemented in `persisted.ts:1201-1215` and `persisted.ts:1376-1389`; leader handler in coordinator broadcasts after `applyCommittedTx`)*
-- [x] Track follower last seen `(term, seq)` and rowVersion. *(implemented in `persisted.ts:1449-1474` via `observeStreamPosition`; restored from DB on startup via `getStreamPosition`)*
-- [x] On seq gap, invoke `pullSince(lastSeenRowVersion)`. *(implemented in `persisted.ts:1642-1651` gap detection and `persisted.ts:1662-1684` recovery)*
-- [x] Apply targeted invalidation when key count is within limit. *(implemented in `persisted.ts:1705-1738` with `TARGETED_INVALIDATION_KEY_LIMIT` and inline row data in `changedRows`)*
-- [x] Trigger full reload when required or when pull fails. *(implemented in `persisted.ts:1708-1711` for `requiresFullReload`, `persisted.ts:1715-1718` for over-limit, and `persisted.ts:1684` as fallback)*
+- [x] Broadcast `tx:committed` after DB commit only. _(implemented in `persisted.ts:1201-1215` and `persisted.ts:1376-1389`; leader handler in coordinator broadcasts after `applyCommittedTx`)_
+- [x] Track follower last seen `(term, seq)` and rowVersion. _(implemented in `persisted.ts:1449-1474` via `observeStreamPosition`; restored from DB on startup via `getStreamPosition`)_
+- [x] On seq gap, invoke `pullSince(lastSeenRowVersion)`. _(implemented in `persisted.ts:1642-1651` gap detection and `persisted.ts:1662-1684` recovery)_
+- [x] Apply targeted invalidation when key count is within limit. _(implemented in `persisted.ts:1705-1738` with `TARGETED_INVALIDATION_KEY_LIMIT` and inline row data in `changedRows`)_
+- [x] Trigger full reload when required or when pull fails. _(implemented in `persisted.ts:1708-1711` for `requiresFullReload`, `persisted.ts:1715-1718` for over-limit, and `persisted.ts:1684` as fallback)_
 
 **Acceptance criteria**
 
@@ -87,9 +87,9 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream E - DB Write Serialization
 
-- [x] Implement DB writer lock (`tsdb:writer:<dbName>`). *(implemented in `browser-coordinator.ts` via `withWriterLock` using `navigator.locks.request`)*
-- [x] Serialize physical SQLite write transactions across collection leaders. *(all leader-side adapter writes go through `withWriterLock`)*
-- [x] Apply bounded busy retries and backoff policy. *(WRITER_LOCK_MAX_RETRIES=20, WRITER_LOCK_BUSY_RETRY_MS=50 with capped linear backoff)*
+- [x] Implement DB writer lock (`tsdb:writer:<dbName>`). _(implemented in `browser-coordinator.ts` via `withWriterLock` using `navigator.locks.request`)_
+- [x] Serialize physical SQLite write transactions across collection leaders. _(all leader-side adapter writes go through `withWriterLock`)_
+- [x] Apply bounded busy retries and backoff policy. _(WRITER_LOCK_MAX_RETRIES=20, WRITER_LOCK_BUSY_RETRY_MS=50 with capped linear backoff)_
 
 **Acceptance criteria**
 
@@ -107,6 +107,7 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 ### Unit Tests (Completed)
 
 Tests in `tests/browser-coordinator.test.ts` using Web Locks and BroadcastChannel mocks:
+
 1. Leadership acquisition and release.
 2. Leadership takeover on dispose.
 3. Independent leadership per collection.
