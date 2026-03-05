@@ -1297,9 +1297,7 @@ export class SQLiteCorePersistenceAdapter<
     }
   }
 
-  async getStreamPosition(
-    collectionId: string,
-  ): Promise<{
+  async getStreamPosition(collectionId: string): Promise<{
     latestTerm: number
     latestSeq: number
     latestRowVersion: number
