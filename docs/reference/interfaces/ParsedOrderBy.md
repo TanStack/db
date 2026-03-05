@@ -5,7 +5,7 @@ title: ParsedOrderBy
 
 # Interface: ParsedOrderBy
 
-Defined in: [packages/db/src/query/expression-helpers.ts:82](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L82)
+Defined in: packages/db/src/query/expression-helpers.ts:82
 
 Result of parsing an ORDER BY expression
 
@@ -17,7 +17,7 @@ Result of parsing an ORDER BY expression
 direction: "asc" | "desc";
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:84](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L84)
+Defined in: packages/db/src/query/expression-helpers.ts:84
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/query/expression-helpers.ts:84](https://github.com/
 field: FieldPath;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:83](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L83)
+Defined in: packages/db/src/query/expression-helpers.ts:83
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/query/expression-helpers.ts:83](https://github.com/
 optional locale: string;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:89](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L89)
+Defined in: packages/db/src/query/expression-helpers.ts:89
 
 Locale for locale-aware string sorting (e.g., 'en-US')
 
@@ -49,7 +49,7 @@ Locale for locale-aware string sorting (e.g., 'en-US')
 optional localeOptions: object;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:91](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L91)
+Defined in: packages/db/src/query/expression-helpers.ts:91
 
 Additional options for locale-aware sorting
 
@@ -61,7 +61,7 @@ Additional options for locale-aware sorting
 nulls: "first" | "last";
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:85](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L85)
+Defined in: packages/db/src/query/expression-helpers.ts:85
 
 ***
 
@@ -71,6 +71,6 @@ Defined in: [packages/db/src/query/expression-helpers.ts:85](https://github.com/
 optional stringSort: "lexical" | "locale";
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L87)
+Defined in: packages/db/src/query/expression-helpers.ts:87
 
 String sorting method: 'lexical' (default) or 'locale' (locale-aware)

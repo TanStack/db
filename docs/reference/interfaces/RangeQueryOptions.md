@@ -5,7 +5,7 @@ title: RangeQueryOptions
 
 # Interface: RangeQueryOptions
 
-Defined in: [packages/db/src/indexes/btree-index.ts:24](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L24)
+Defined in: packages/db/src/indexes/btree-index.ts:24
 
 Options for range queries
 
@@ -17,7 +17,7 @@ Options for range queries
 optional from: any;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:25](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L25)
+Defined in: packages/db/src/indexes/btree-index.ts:25
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:25](https://github.com/TanSt
 optional fromInclusive: boolean;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:27](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L27)
+Defined in: packages/db/src/indexes/btree-index.ts:27
 
 ***
 
@@ -37,7 +37,7 @@ Defined in: [packages/db/src/indexes/btree-index.ts:27](https://github.com/TanSt
 optional to: any;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:26](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L26)
+Defined in: packages/db/src/indexes/btree-index.ts:26
 
 ***
 
@@ -47,4 +47,4 @@ Defined in: [packages/db/src/indexes/btree-index.ts:26](https://github.com/TanSt
 optional toInclusive: boolean;
 ```
 
-Defined in: [packages/db/src/indexes/btree-index.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/indexes/btree-index.ts#L28)
+Defined in: packages/db/src/indexes/btree-index.ts:28

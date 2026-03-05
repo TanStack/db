@@ -9,7 +9,7 @@ title: TransactorOptions
 type TransactorOptions = object;
 ```
 
-Defined in: [PowerSyncTransactor.ts:15](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L15)
+Defined in: PowerSyncTransactor.ts:15
 
 ## Properties
 
@@ -19,4 +19,4 @@ Defined in: [PowerSyncTransactor.ts:15](https://github.com/TanStack/db/blob/main
 database: AbstractPowerSyncDatabase;
 ```
 
-Defined in: [PowerSyncTransactor.ts:16](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L16)
+Defined in: PowerSyncTransactor.ts:16

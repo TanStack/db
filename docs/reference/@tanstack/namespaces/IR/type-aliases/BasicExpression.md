@@ -12,7 +12,7 @@ type BasicExpression<T> =
 | Func<T>;
 ```
 
-Defined in: [packages/db/src/query/ir.ts:123](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L123)
+Defined in: packages/db/src/query/ir.ts:123
 
 ## Type Parameters
 

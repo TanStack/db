@@ -8,10 +8,10 @@ title: localOnlyCollectionOptions
 ## Call Signature
 
 ```ts
-function localOnlyCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, UtilsRecord> & object & object;
+function localOnlyCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, LocalOnlyCollectionUtils> & object & object;
 ```
 
-Defined in: [packages/db/src/local-only.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L149)
+Defined in: packages/db/src/local-only.ts:149
 
 Creates Local-only collection options for use with a standard Collection
 
@@ -49,7 +49,7 @@ Configuration options for the Local-only collection
 
 ### Returns
 
-[`CollectionConfig`](../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`UtilsRecord`](../type-aliases/UtilsRecord.md)\> & `object` & `object`
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<[`InferSchemaOutput`](../type-aliases/InferSchemaOutput.md)\<`T`\>, `TKey`, `T`, [`LocalOnlyCollectionUtils`](../interfaces/LocalOnlyCollectionUtils.md)\> & `object` & `object`
 
 Collection options with utilities including acceptMutations
 
@@ -120,10 +120,10 @@ await tx.commit()
 ## Call Signature
 
 ```ts
-function localOnlyCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, UtilsRecord> & object & object;
+function localOnlyCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, LocalOnlyCollectionUtils> & object & object;
 ```
 
-Defined in: [packages/db/src/local-only.ts:162](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L162)
+Defined in: packages/db/src/local-only.ts:162
 
 Creates Local-only collection options for use with a standard Collection
 
@@ -161,7 +161,7 @@ Configuration options for the Local-only collection
 
 ### Returns
 
-[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`UtilsRecord`](../type-aliases/UtilsRecord.md)\> & `object` & `object`
+[`CollectionConfig`](../interfaces/CollectionConfig.md)\<`T`, `TKey`, `never`, [`LocalOnlyCollectionUtils`](../interfaces/LocalOnlyCollectionUtils.md)\> & `object` & `object`
 
 Collection options with utilities including acceptMutations
 

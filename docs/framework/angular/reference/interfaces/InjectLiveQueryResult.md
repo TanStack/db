@@ -5,7 +5,7 @@ title: InjectLiveQueryResult
 
 # Interface: InjectLiveQueryResult\<TResult, TKey, TUtils\>
 
-Defined in: [index.ts:26](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L26)
+Defined in: index.ts:26
 
 The result of calling `injectLiveQuery`.
 Contains reactive signals for the query state and data.
@@ -35,7 +35,7 @@ collection: Signal<
 | null>;
 ```
 
-Defined in: [index.ts:36](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L36)
+Defined in: index.ts:36
 
 A signal containing the underlying collection instance (null for disabled queries)
 
@@ -47,7 +47,7 @@ A signal containing the underlying collection instance (null for disabled querie
 data: Signal<TResult[]>;
 ```
 
-Defined in: [index.ts:34](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L34)
+Defined in: index.ts:34
 
 A signal containing the results as an array
 
@@ -59,7 +59,7 @@ A signal containing the results as an array
 isCleanedUp: Signal<boolean>;
 ```
 
-Defined in: [index.ts:48](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L48)
+Defined in: index.ts:48
 
 A signal indicating whether the collection has been cleaned up
 
@@ -71,7 +71,7 @@ A signal indicating whether the collection has been cleaned up
 isError: Signal<boolean>;
 ```
 
-Defined in: [index.ts:46](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L46)
+Defined in: index.ts:46
 
 A signal indicating whether the collection has an error
 
@@ -83,7 +83,7 @@ A signal indicating whether the collection has an error
 isIdle: Signal<boolean>;
 ```
 
-Defined in: [index.ts:44](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L44)
+Defined in: index.ts:44
 
 A signal indicating whether the collection is idle
 
@@ -95,7 +95,7 @@ A signal indicating whether the collection is idle
 isLoading: Signal<boolean>;
 ```
 
-Defined in: [index.ts:40](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L40)
+Defined in: index.ts:40
 
 A signal indicating whether the collection is currently loading
 
@@ -107,7 +107,7 @@ A signal indicating whether the collection is currently loading
 isReady: Signal<boolean>;
 ```
 
-Defined in: [index.ts:42](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L42)
+Defined in: index.ts:42
 
 A signal indicating whether the collection is ready
 
@@ -119,7 +119,7 @@ A signal indicating whether the collection is ready
 state: Signal<Map<TKey, TResult>>;
 ```
 
-Defined in: [index.ts:32](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L32)
+Defined in: index.ts:32
 
 A signal containing the complete state map of results keyed by their ID
 
@@ -131,6 +131,6 @@ A signal containing the complete state map of results keyed by their ID
 status: Signal<CollectionStatus | "disabled">;
 ```
 
-Defined in: [index.ts:38](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L38)
+Defined in: index.ts:38
 
 A signal containing the current status of the collection

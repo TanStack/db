@@ -11,7 +11,7 @@ title: useLiveQuery
 function useLiveQuery<TContext>(queryFn): Accessor<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:98](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L98)
+Defined in: useLiveQuery.ts:98
 
 Create a live query using a query function
 
@@ -111,7 +111,7 @@ return (
 function useLiveQuery<TContext>(queryFn): Accessor<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:117](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L117)
+Defined in: useLiveQuery.ts:117
 
 Create a live query using a query function
 
@@ -211,7 +211,7 @@ return (
 function useLiveQuery<TContext>(config): Accessor<{ [K in string | number | symbol]: (TContext["result"] extends object ? any[any] : TContext["hasJoins"] extends true ? TContext["schema"] : TContext["schema"][TContext["fromSourceName"]])[K] }[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:178](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L178)
+Defined in: useLiveQuery.ts:178
 
 Create a live query using configuration object
 
@@ -280,7 +280,7 @@ return (
 function useLiveQuery<TResult, TKey, TUtils>(liveQueryCollection): Accessor<TResult[]> & object;
 ```
 
-Defined in: [useLiveQuery.ts:232](https://github.com/TanStack/db/blob/main/packages/solid-db/src/useLiveQuery.ts#L232)
+Defined in: useLiveQuery.ts:232
 
 Subscribe to an existing live query collection
 

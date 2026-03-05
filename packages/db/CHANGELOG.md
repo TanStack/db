@@ -1,5 +1,44 @@
 # @tanstack/db
 
+## 0.5.28
+
+### Patch Changes
+
+- Fix isNull predicate causing LiveQuery to never become ready when offline. Reorder predicate checks in `isWhereSubsetInternal` so OR superset handling runs before AND subset decomposition, allowing `and(eq, isNull)` to match structurally equal disjuncts. Also separate `forceDisconnectAndRefresh` error handling into its own try-catch with correct error attribution. ([#1275](https://github.com/TanStack/db/pull/1275))
+
+## 0.5.27
+
+### Patch Changes
+
+- fix(db): don't push WHERE clauses to nullable side of outer joins ([#1254](https://github.com/TanStack/db/pull/1254))
+
+  The query optimizer incorrectly pushed single-source WHERE clauses into subqueries and collection index optimization for the nullable side of outer joins. This pre-filtered the data before the join, converting rows that should have been excluded by the WHERE into unmatched outer-join rows that incorrectly survived the residual filter.
+
+- Fixed `acceptMutations` not persisting data in local-only collections with manual transactions. The mutation filter was comparing against a stale `null` collection reference instead of using the collection ID, causing all mutations to be silently dropped after the transaction's `mutationFn` resolved. ([#1253](https://github.com/TanStack/db/pull/1253))
+
+- Fix like/ilike `%` and `_` not matching newline characters ([#1263](https://github.com/TanStack/db/pull/1263))
+
+- Make type of collection utils more precise for localOnly, PowerSync, Trailbase, and Electric collections ([#1236](https://github.com/TanStack/db/pull/1236))
+
+## 0.5.26
+
+### Patch Changes
+
+- fix: export types used in public API signatures for declaration emit compatibility ([#1231](https://github.com/TanStack/db/pull/1231))
+
+  Types like `SchemaFromSource`, `MergeContextWithJoinType`, `WithResult`, `ResultTypeFromSelect`, and others
+  are used in the public method signatures of `BaseQueryBuilder` (e.g. `from()`, `join()`, `select()`) but
+  were not re-exported from the package's public API. This caused TypeScript error TS2742 when consumers used
+  `declaration: true` in their tsconfig, as TypeScript could not name the inferred types in generated `.d.ts` files.
+
+  Fixes #1012
+
+- Fix `useLiveInfiniteQuery` peek-ahead detection for `hasNextPage`. The initial query now correctly requests `pageSize + 1` items to detect whether additional pages exist, matching the behavior of subsequent page loads. ([#1209](https://github.com/TanStack/db/pull/1209))
+
+  Fix async on-demand pagination by ensuring the graph callback fires at least once even when there is no pending graph work, so that `loadMoreIfNeeded` is triggered after `setWindow()` increases the limit.
+
+- Fix `eq()` with Date objects in join conditions and `inArray()` with Date values in WHERE clauses by normalizing values via `normalizeValue` (#934) ([#1229](https://github.com/TanStack/db/pull/1229))
+
 ## 0.5.25
 
 ### Patch Changes

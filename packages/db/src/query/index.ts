@@ -7,11 +7,28 @@ export {
   type InitialQueryBuilder,
   type QueryBuilder,
   type Context,
+  type ContextSchema,
   type Source,
   type GetResult,
   type InferResultType,
   type ExtractContext,
   type QueryResult,
+  // Types needed for declaration emit (https://github.com/TanStack/db/issues/1012)
+  type SchemaFromSource,
+  type InferCollectionType,
+  type MergeContextWithJoinType,
+  type MergeContextForJoinCallback,
+  type ApplyJoinOptionalityToMergedSchema,
+  type ResultTypeFromSelect,
+  type WithResult,
+  type JoinOnCallback,
+  type RefsForContext,
+  type WhereCallback,
+  type OrderByCallback,
+  type GroupByCallback,
+  type SelectObject,
+  type FunctionalHavingRow,
+  type Prettify,
 } from './builder/index.js'
 
 // Expression functions exports

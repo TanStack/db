@@ -9,7 +9,7 @@ title: usePacedMutations
 function usePacedMutations<TVariables, T>(config): (variables) => Transaction<T>;
 ```
 
-Defined in: [usePacedMutations.ts:93](https://github.com/TanStack/db/blob/main/packages/react-db/src/usePacedMutations.ts#L93)
+Defined in: usePacedMutations.ts:93
 
 React hook for managing paced mutations with timing strategies.
 

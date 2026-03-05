@@ -5,7 +5,7 @@ title: QueryCollectionConfig
 
 # Interface: QueryCollectionConfig\<T, TQueryFn, TError, TQueryKey, TKey, TSchema, TQueryData\>
 
-Defined in: [packages/query-db-collection/src/query.ts:60](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L60)
+Defined in: packages/query-db-collection/src/query.ts:60
 
 Configuration options for creating a Query Collection
 
@@ -63,7 +63,7 @@ The schema type for validation
 optional enabled: boolean;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:86](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L86)
+Defined in: packages/query-db-collection/src/query.ts:86
 
 Whether the query should automatically run (default: true)
 
@@ -75,7 +75,7 @@ Whether the query should automatically run (default: true)
 optional meta: Record<string, unknown>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:136](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L136)
+Defined in: packages/query-db-collection/src/query.ts:136
 
 Metadata to pass to the query.
 Available in queryFn via context.meta
@@ -107,7 +107,7 @@ meta: {
 queryClient: QueryClient;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:82](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L82)
+Defined in: packages/query-db-collection/src/query.ts:82
 
 The TanStack Query client instance
 
@@ -119,7 +119,7 @@ The TanStack Query client instance
 queryFn: TQueryFn extends (context) => Promise<any[]> ? (context) => Promise<T[]> : TQueryFn;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:74](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L74)
+Defined in: packages/query-db-collection/src/query.ts:74
 
 Function that fetches data from the server. Must return the complete collection state
 
@@ -131,7 +131,7 @@ Function that fetches data from the server. Must return the complete collection 
 queryKey: TQueryKey | TQueryKeyBuilder<TQueryKey>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:72](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L72)
+Defined in: packages/query-db-collection/src/query.ts:72
 
 The query key used by TanStack Query to identify this query
 
@@ -143,7 +143,7 @@ The query key used by TanStack Query to identify this query
 optional refetchInterval: number | false | (query) => number | false | undefined;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:87](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L87)
+Defined in: packages/query-db-collection/src/query.ts:87
 
 ***
 
@@ -153,7 +153,7 @@ Defined in: [packages/query-db-collection/src/query.ts:87](https://github.com/Ta
 optional retry: RetryValue<TError>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:94](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L94)
+Defined in: packages/query-db-collection/src/query.ts:94
 
 ***
 
@@ -163,7 +163,7 @@ Defined in: [packages/query-db-collection/src/query.ts:94](https://github.com/Ta
 optional retryDelay: RetryDelayValue<TError>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:101](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L101)
+Defined in: packages/query-db-collection/src/query.ts:101
 
 ***
 
@@ -173,7 +173,7 @@ Defined in: [packages/query-db-collection/src/query.ts:101](https://github.com/T
 optional select: (data) => T[];
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:80](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L80)
+Defined in: packages/query-db-collection/src/query.ts:80
 
 #### Parameters
 
@@ -193,4 +193,4 @@ Defined in: [packages/query-db-collection/src/query.ts:80](https://github.com/Ta
 optional staleTime: StaleTimeFunction<T[], TError, T[], TQueryKey>;
 ```
 
-Defined in: [packages/query-db-collection/src/query.ts:108](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/query.ts#L108)
+Defined in: packages/query-db-collection/src/query.ts:108

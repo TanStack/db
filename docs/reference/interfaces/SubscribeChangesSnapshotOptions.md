@@ -5,7 +5,7 @@ title: SubscribeChangesSnapshotOptions
 
 # Interface: SubscribeChangesSnapshotOptions\<T\>
 
-Defined in: [packages/db/src/types.ts:830](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L830)
+Defined in: packages/db/src/types.ts:830
 
 ## Extends
 
@@ -25,7 +25,7 @@ Defined in: [packages/db/src/types.ts:830](https://github.com/TanStack/db/blob/m
 optional limit: number;
 ```
 
-Defined in: [packages/db/src/types.ts:834](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L834)
+Defined in: packages/db/src/types.ts:834
 
 **`Internal`**
 
@@ -33,7 +33,9 @@ Optional limit to include in loadSubset for query-specific cache keys.
 
 #### Overrides
 
-[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`limit`](SubscribeChangesOptions.md#limit)
+```ts
+Omit.limit
+```
 
 ***
 
@@ -43,7 +45,7 @@ Optional limit to include in loadSubset for query-specific cache keys.
 optional onLoadSubsetResult: (result) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:827](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L827)
+Defined in: packages/db/src/types.ts:827
 
 **`Internal`**
 
@@ -74,7 +76,7 @@ Omit.onLoadSubsetResult
 optional onStatusChange: (event) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:811](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L811)
+Defined in: packages/db/src/types.ts:811
 
 **`Internal`**
 
@@ -105,7 +107,7 @@ Omit.onStatusChange
 optional orderBy: OrderBy;
 ```
 
-Defined in: [packages/db/src/types.ts:833](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L833)
+Defined in: packages/db/src/types.ts:833
 
 **`Internal`**
 
@@ -113,7 +115,9 @@ Optional orderBy to include in loadSubset for query-specific cache keys.
 
 #### Overrides
 
-[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`orderBy`](SubscribeChangesOptions.md#orderby)
+```ts
+Omit.orderBy
+```
 
 ***
 
@@ -123,7 +127,7 @@ Optional orderBy to include in loadSubset for query-specific cache keys.
 optional where: (row) => any;
 ```
 
-Defined in: [packages/db/src/types.ts:803](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L803)
+Defined in: packages/db/src/types.ts:803
 
 Callback function for filtering changes using a row proxy.
 The callback receives a proxy object that records property access,
@@ -163,10 +167,12 @@ Omit.where
 optional whereExpression: BasicExpression<boolean>;
 ```
 
-Defined in: [packages/db/src/types.ts:805](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L805)
+Defined in: packages/db/src/types.ts:805
 
 Pre-compiled expression for filtering changes
 
 #### Inherited from
 
-[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`whereExpression`](SubscribeChangesOptions.md#whereexpression)
+```ts
+Omit.whereExpression
+```

@@ -5,7 +5,7 @@ title: SimpleComparison
 
 # Interface: SimpleComparison
 
-Defined in: [packages/db/src/query/expression-helpers.ts:44](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L44)
+Defined in: packages/db/src/query/expression-helpers.ts:44
 
 Represents a simple comparison operation
 
@@ -17,7 +17,7 @@ Represents a simple comparison operation
 field: FieldPath;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L45)
+Defined in: packages/db/src/query/expression-helpers.ts:45
 
 ***
 
@@ -27,7 +27,7 @@ Defined in: [packages/db/src/query/expression-helpers.ts:45](https://github.com/
 operator: string;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L46)
+Defined in: packages/db/src/query/expression-helpers.ts:46
 
 ***
 
@@ -37,4 +37,4 @@ Defined in: [packages/db/src/query/expression-helpers.ts:46](https://github.com/
 optional value: any;
 ```
 
-Defined in: [packages/db/src/query/expression-helpers.ts:47](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L47)
+Defined in: packages/db/src/query/expression-helpers.ts:47

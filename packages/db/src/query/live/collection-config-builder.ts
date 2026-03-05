@@ -336,12 +336,21 @@ export class CollectionConfigBuilder<
 
       // Always run the graph if subscribed (eager execution)
       if (syncState.subscribedToAllCollections) {
+        let callbackCalled = false
         while (syncState.graph.pendingWork()) {
           syncState.graph.run()
           // Flush accumulated changes after each graph step to commit them as one transaction.
           // This ensures intermediate join states (like null on one side) don't cause
           // duplicate key errors when the full join result arrives in the same step.
           syncState.flushPendingChanges?.()
+          callback?.()
+          callbackCalled = true
+        }
+
+        // Ensure the callback runs at least once even when the graph has no pending work.
+        // This handles lazy loading scenarios where setWindow() increases the limit or
+        // an async loadSubset completes and we need to re-check if more data is needed.
+        if (!callbackCalled) {
           callback?.()
         }
 
@@ -719,8 +728,37 @@ export class CollectionConfigBuilder<
       if (pendingChanges.size === 0) {
         return
       }
+
+      let changesToApply = pendingChanges
+
+      // When a custom getKey is provided, multiple D2 internal keys may map
+      // to the same user-visible key. Re-accumulate by custom key so that a
+      // retract + insert for the same logical row merges into an UPDATE
+      // instead of a separate DELETE and INSERT that can race.
+      if (this.config.getKey) {
+        const merged = new Map<unknown, Changes<TResult>>()
+        for (const [, changes] of pendingChanges) {
+          const customKey = this.config.getKey(changes.value)
+          const existing = merged.get(customKey)
+          if (existing) {
+            existing.inserts += changes.inserts
+            existing.deletes += changes.deletes
+            // Keep the value from the insert side (the new value)
+            if (changes.inserts > 0) {
+              existing.value = changes.value
+              if (changes.orderByIndex !== undefined) {
+                existing.orderByIndex = changes.orderByIndex
+              }
+            }
+          } else {
+            merged.set(customKey, { ...changes })
+          }
+        }
+        changesToApply = merged
+      }
+
       begin()
-      pendingChanges.forEach(this.applyChanges.bind(this, config))
+      changesToApply.forEach(this.applyChanges.bind(this, config))
       commit()
       pendingChanges = new Map()
     }

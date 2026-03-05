@@ -481,7 +481,7 @@ describe(`LocalOnly Collection`, () => {
   })
 
   describe(`Manual transactions with acceptMutations`, () => {
-    it(`should accept and persist mutations from manual transactions`, () => {
+    it(`should accept and persist mutations from manual transactions`, async () => {
       const tx = createTransaction({
         mutationFn: async ({ transaction }: any) => {
           // Simulate API call success
@@ -510,6 +510,39 @@ describe(`LocalOnly Collection`, () => {
         id: 101,
         name: `Manual Tx Insert 2`,
       })
+
+      // Verify that the item is still present after async operations complete
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      expect(collection.get(100)).toEqual({ id: 100, name: `Manual Tx Insert` })
+    })
+
+    it(`should work without explicit collection ID`, async () => {
+      // Create a collection without an explicit ID
+      const noIdCollection = createCollection<
+        TestItem,
+        number,
+        LocalOnlyCollectionUtils
+      >(
+        localOnlyCollectionOptions({
+          getKey: (item) => item.id,
+        }),
+      )
+
+      const tx = createTransaction({
+        mutationFn: async ({ transaction }: any) => {
+          noIdCollection.utils.acceptMutations(transaction)
+        },
+        autoCommit: false,
+      })
+
+      tx.mutate(() => {
+        noIdCollection.insert({ id: 999, name: `No ID Test` })
+      })
+
+      await tx.commit()
+
+      // Data should persist even without explicit ID
+      expect(noIdCollection.get(999)).toEqual({ id: 999, name: `No ID Test` })
     })
 
     it(`should only accept mutations for the specific collection`, () => {

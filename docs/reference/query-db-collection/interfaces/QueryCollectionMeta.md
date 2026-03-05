@@ -5,7 +5,7 @@ title: QueryCollectionMeta
 
 # Interface: QueryCollectionMeta
 
-Defined in: [packages/query-db-collection/src/global.ts:30](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/global.ts#L30)
+Defined in: packages/query-db-collection/src/global.ts:30
 
 Base interface for Query Collection meta properties.
 Users can extend this interface to add their own custom properties while
@@ -34,10 +34,10 @@ declare module "@tanstack/query-db-collection" {
 
 ## Properties
 
-### loadSubsetOptions
+### loadSubsetOptions?
 
 ```ts
-loadSubsetOptions: LoadSubsetOptions;
+optional loadSubsetOptions: LoadSubsetOptions;
 ```
 
-Defined in: [packages/query-db-collection/src/global.ts:31](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/global.ts#L31)
+Defined in: packages/query-db-collection/src/global.ts:31

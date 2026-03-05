@@ -910,8 +910,26 @@ export type QueryResult<T> = GetResult<ExtractContext<T>>
 // Export the types from types.ts for convenience
 export type {
   Context,
+  ContextSchema,
   Source,
   GetResult,
   RefLeaf as Ref,
   InferResultType,
+  // Types used in public method signatures that must be exported
+  // for declaration emit to work (see https://github.com/TanStack/db/issues/1012)
+  SchemaFromSource,
+  InferCollectionType,
+  MergeContextWithJoinType,
+  MergeContextForJoinCallback,
+  ApplyJoinOptionalityToMergedSchema,
+  ResultTypeFromSelect,
+  WithResult,
+  JoinOnCallback,
+  RefsForContext,
+  WhereCallback,
+  OrderByCallback,
+  GroupByCallback,
+  SelectObject,
+  FunctionalHavingRow,
+  Prettify,
 } from './types.js'

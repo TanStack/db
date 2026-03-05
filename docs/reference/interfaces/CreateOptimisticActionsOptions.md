@@ -5,7 +5,7 @@ title: CreateOptimisticActionsOptions
 
 # Interface: CreateOptimisticActionsOptions\<TVars, T\>
 
-Defined in: [packages/db/src/types.ts:179](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L179)
+Defined in: packages/db/src/types.ts:179
 
 Options for the createOptimisticAction helper
 
@@ -31,7 +31,7 @@ Options for the createOptimisticAction helper
 optional autoCommit: boolean;
 ```
 
-Defined in: [packages/db/src/types.ts:170](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L170)
+Defined in: packages/db/src/types.ts:170
 
 #### Inherited from
 
@@ -45,15 +45,13 @@ Defined in: [packages/db/src/types.ts:170](https://github.com/TanStack/db/blob/m
 optional id: string;
 ```
 
-Defined in: [packages/db/src/types.ts:168](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L168)
+Defined in: packages/db/src/types.ts:168
 
 Unique identifier for the transaction
 
 #### Inherited from
 
-```ts
-Omit.id
-```
+[`TransactionConfig`](TransactionConfig.md).[`id`](TransactionConfig.md#id)
 
 ***
 
@@ -63,15 +61,13 @@ Omit.id
 optional metadata: Record<string, unknown>;
 ```
 
-Defined in: [packages/db/src/types.ts:173](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L173)
+Defined in: packages/db/src/types.ts:173
 
 Custom metadata to associate with the transaction
 
 #### Inherited from
 
-```ts
-Omit.metadata
-```
+[`TransactionConfig`](TransactionConfig.md).[`metadata`](TransactionConfig.md#metadata)
 
 ***
 
@@ -81,7 +77,7 @@ Omit.metadata
 mutationFn: (vars, params) => Promise<any>;
 ```
 
-Defined in: [packages/db/src/types.ts:186](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L186)
+Defined in: packages/db/src/types.ts:186
 
 Function to execute the mutation on the server
 
@@ -107,7 +103,7 @@ Function to execute the mutation on the server
 onMutate: (vars) => void;
 ```
 
-Defined in: [packages/db/src/types.ts:184](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L184)
+Defined in: packages/db/src/types.ts:184
 
 Function to apply optimistic updates locally before the mutation completes
 
