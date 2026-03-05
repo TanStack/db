@@ -1,11 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import type {PersistedTodosHandle} from '~/db/persisted-todos';
+import type { PersistedTodosHandle } from '~/db/persisted-todos'
 import { PersistedTodoDemo } from '~/components/PersistedTodoDemo'
-import {
-  
-  createPersistedTodoCollection
-} from '~/db/persisted-todos'
+import { createPersistedTodoCollection } from '~/db/persisted-todos'
 
 export const Route = createFileRoute(`/wa-sqlite`)({
   component: WASQLiteDemo,
@@ -32,7 +29,9 @@ function WASQLiteDemo() {
         if (!disposed) {
           console.error(`Failed to initialize wa-sqlite persistence:`, err)
           setError(
-            err instanceof Error ? err.message : `Failed to initialize persistence`,
+            err instanceof Error
+              ? err.message
+              : `Failed to initialize persistence`,
           )
         }
       })
@@ -64,8 +63,8 @@ function WASQLiteDemo() {
             </div>
             <p className="mt-4 text-sm text-gray-500">
               This feature requires a browser with OPFS support (Chrome 102+,
-              Edge 102+, Firefox 111+, Safari 15.2+) and a secure context
-              (HTTPS or localhost).
+              Edge 102+, Firefox 111+, Safari 15.2+) and a secure context (HTTPS
+              or localhost).
             </p>
           </div>
         </div>
@@ -79,7 +78,9 @@ function WASQLiteDemo() {
         <div className="max-w-2xl mx-auto p-6">
           <div className="bg-white rounded-lg shadow-lg p-6 text-center">
             <div className="animate-spin w-6 h-6 border-2 border-blue-500 border-t-transparent rounded-full mx-auto mb-2" />
-            <p className="text-gray-600">Initializing wa-sqlite persistence...</p>
+            <p className="text-gray-600">
+              Initializing wa-sqlite persistence...
+            </p>
           </div>
         </div>
       </div>

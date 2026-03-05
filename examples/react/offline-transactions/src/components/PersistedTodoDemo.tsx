@@ -12,9 +12,7 @@ export function PersistedTodoDemo({ collection }: PersistedTodoDemoProps) {
   const [error, setError] = useState<string | null>(null)
 
   const { data: todoList = [] } = useLiveQuery((q) =>
-    q
-      .from({ todo: collection })
-      .orderBy(({ todo }) => todo.createdAt, `desc`),
+    q.from({ todo: collection }).orderBy(({ todo }) => todo.createdAt, `desc`),
   )
 
   const handleAddTodo = () => {
@@ -171,10 +169,10 @@ export function PersistedTodoDemo({ collection }: PersistedTodoDemoProps) {
           <ol className="text-sm text-gray-600 space-y-1">
             <li>1. Add some todos</li>
             <li>2. Refresh the page (Ctrl+R / Cmd+R)</li>
-            <li>3. Your todos are still here - persisted in SQLite via OPFS!</li>
             <li>
-              4. This uses wa-sqlite with OPFSCoopSyncVFS in a Web Worker
+              3. Your todos are still here - persisted in SQLite via OPFS!
             </li>
+            <li>4. This uses wa-sqlite with OPFSCoopSyncVFS in a Web Worker</li>
           </ol>
         </div>
       </div>
