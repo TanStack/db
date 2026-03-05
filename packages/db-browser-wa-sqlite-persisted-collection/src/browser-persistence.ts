@@ -2,6 +2,7 @@ import {
   SingleProcessCoordinator,
   createSQLiteCorePersistenceAdapter,
 } from '@tanstack/db-sqlite-persisted-collection-core'
+import { BrowserCollectionCoordinator } from './browser-coordinator'
 import { BrowserWASQLiteDriver } from './wa-sqlite-driver'
 import type {
   PersistedCollectionCoordinator,
@@ -135,6 +136,13 @@ export function createBrowserWASQLitePersistence<
       ...(schemaVersion === undefined ? {} : { schemaVersion }),
     })
     adapterCache.set(cacheKey, adapter)
+
+    // Wire the adapter into the multi-tab coordinator so it can handle
+    // leader-side RPCs (applyCommittedTx, pullSince, ensureIndex, etc.)
+    if (resolvedCoordinator instanceof BrowserCollectionCoordinator) {
+      resolvedCoordinator.setAdapter(adapter)
+    }
+
     return adapter
   }
 
