@@ -9,14 +9,14 @@ pnpm add @tanstack/electric-db-collection @tanstack/react-db
 ## Required Config
 
 ```typescript
-import { createCollection } from "@tanstack/react-db"
-import { electricCollectionOptions } from "@tanstack/electric-db-collection"
+import { createCollection } from '@tanstack/react-db'
+import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 
 const collection = createCollection(
   electricCollectionOptions({
-    shapeOptions: { url: "/api/todos" },
+    shapeOptions: { url: '/api/todos' },
     getKey: (item) => item.id,
-  })
+  }),
 )
 ```
 
@@ -25,14 +25,14 @@ const collection = createCollection(
 
 ## Optional Config
 
-| Option | Default | Description |
-|---|---|---|
-| `id` | (none) | Unique collection identifier |
-| `schema` | (none) | StandardSchema validator |
-| `shapeOptions.params` | (none) | Additional shape params (e.g. `{ table: 'todos' }`) |
-| `onInsert` | (none) | Persistence handler; should return `{ txid }` |
-| `onUpdate` | (none) | Persistence handler; should return `{ txid }` |
-| `onDelete` | (none) | Persistence handler; should return `{ txid }` |
+| Option                | Default | Description                                         |
+| --------------------- | ------- | --------------------------------------------------- |
+| `id`                  | (none)  | Unique collection identifier                        |
+| `schema`              | (none)  | StandardSchema validator                            |
+| `shapeOptions.params` | (none)  | Additional shape params (e.g. `{ table: 'todos' }`) |
+| `onInsert`            | (none)  | Persistence handler; should return `{ txid }`       |
+| `onUpdate`            | (none)  | Persistence handler; should return `{ txid }`       |
+| `onDelete`            | (none)  | Persistence handler; should return `{ txid }`       |
 
 ## Three Sync Strategies
 
@@ -84,7 +84,10 @@ onInsert: async ({ transaction }) => {
 ### Helper Exports
 
 ```typescript
-import { isChangeMessage, isControlMessage } from "@tanstack/electric-db-collection"
+import {
+  isChangeMessage,
+  isControlMessage,
+} from '@tanstack/electric-db-collection'
 // isChangeMessage(msg) -- true for insert/update/delete
 // isControlMessage(msg) -- true for up-to-date/must-refetch
 ```
@@ -97,7 +100,7 @@ The txid **must** be queried inside the same Postgres transaction as the mutatio
 async function generateTxId(tx: any): Promise<number> {
   const result = await tx`SELECT pg_current_xact_id()::xid::text as txid`
   const txid = result[0]?.txid
-  if (txid === undefined) throw new Error("Failed to get transaction ID")
+  if (txid === undefined) throw new Error('Failed to get transaction ID')
   return parseInt(txid, 10)
 }
 
@@ -117,15 +120,15 @@ Querying txid outside the transaction produces a mismatched txid -- `awaitTxId` 
 ## Debug Logging
 
 ```javascript
-localStorage.debug = "ts/db:electric"
+localStorage.debug = 'ts/db:electric'
 ```
 
 ## Complete Example
 
 ```typescript
-import { createCollection } from "@tanstack/react-db"
-import { electricCollectionOptions } from "@tanstack/electric-db-collection"
-import { z } from "zod"
+import { createCollection } from '@tanstack/react-db'
+import { electricCollectionOptions } from '@tanstack/electric-db-collection'
+import { z } from 'zod'
 
 const todoSchema = z.object({
   id: z.string(),
@@ -136,23 +139,26 @@ const todoSchema = z.object({
 
 const todosCollection = createCollection(
   electricCollectionOptions({
-    id: "todos",
+    id: 'todos',
     schema: todoSchema,
     getKey: (item) => item.id,
-    shapeOptions: { url: "/api/todos", params: { table: "todos" } },
+    shapeOptions: { url: '/api/todos', params: { table: 'todos' } },
     onInsert: async ({ transaction }) => {
       const response = await api.todos.create(transaction.mutations[0].modified)
       return { txid: response.txid }
     },
     onUpdate: async ({ transaction }) => {
       const { original, changes } = transaction.mutations[0]
-      const response = await api.todos.update({ where: { id: original.id }, data: changes })
+      const response = await api.todos.update({
+        where: { id: original.id },
+        data: changes,
+      })
       return { txid: response.txid }
     },
     onDelete: async ({ transaction }) => {
       const response = await api.todos.delete(transaction.mutations[0].key)
       return { txid: response.txid }
     },
-  })
+  }),
 )
 ```

@@ -10,11 +10,11 @@ description: >
   Incremental view maintenance via differential dataflow (d2ts).
 type: sub-skill
 library: db
-library_version: "0.5.30"
+library_version: '0.5.30'
 sources:
-  - "TanStack/db:docs/guides/live-queries.md"
-  - "TanStack/db:packages/db/src/query/builder/index.ts"
-  - "TanStack/db:packages/db/src/query/compiler/index.ts"
+  - 'TanStack/db:docs/guides/live-queries.md'
+  - 'TanStack/db:packages/db/src/query/builder/index.ts'
+  - 'TanStack/db:packages/db/src/query/compiler/index.ts'
 ---
 
 # Live Queries
@@ -48,7 +48,7 @@ const activeUsers = createLiveQueryCollection((q) =>
       id: user.id,
       name: user.name,
       email: user.email,
-    }))
+    })),
 )
 
 // Option 2: full options via liveQueryCollectionOptions
@@ -63,7 +63,7 @@ const activeUsers2 = createCollection(
           name: user.name,
         })),
     getKey: (user) => user.id,
-  })
+  }),
 )
 
 // The result is a live collection -- iterate, subscribe, or use as source
@@ -89,9 +89,9 @@ const results = createLiveQueryCollection((q) =>
       and(
         gt(user.age, 18),
         or(eq(user.role, 'admin'), eq(user.role, 'moderator')),
-        not(inArray(user.id, bannedIds))
-      )
-    )
+        not(inArray(user.id, bannedIds)),
+      ),
+    ),
 )
 ```
 
@@ -113,12 +113,12 @@ const userPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: usersCollection })
     .innerJoin({ post: postsCollection }, ({ user, post }) =>
-      eq(user.id, post.userId)
+      eq(user.id, post.userId),
     )
     .select(({ user, post }) => ({
       userName: user.name,
       postTitle: post.title,
-    }))
+    })),
 )
 ```
 
@@ -126,11 +126,9 @@ Multiple joins:
 
 ```ts
 q.from({ user: usersCollection })
-  .join({ post: postsCollection }, ({ user, post }) =>
-    eq(user.id, post.userId)
-  )
+  .join({ post: postsCollection }, ({ user, post }) => eq(user.id, post.userId))
   .join({ comment: commentsCollection }, ({ post, comment }) =>
-    eq(post.id, comment.postId)
+    eq(post.id, comment.postId),
   )
 ```
 
@@ -152,7 +150,7 @@ const topCustomers = createLiveQueryCollection((q) =>
     }))
     .having(({ $selected }) => gt($selected.totalSpent, 1000))
     .orderBy(({ $selected }) => $selected.totalSpent, 'desc')
-    .limit(10)
+    .limit(10),
 )
 ```
 
@@ -160,12 +158,10 @@ Without `groupBy`, aggregates in `select` treat the entire collection as one gro
 
 ```ts
 const stats = createLiveQueryCollection((q) =>
-  q
-    .from({ user: usersCollection })
-    .select(({ user }) => ({
-      totalUsers: count(user.id),
-      avgAge: avg(user.age),
-    }))
+  q.from({ user: usersCollection }).select(({ user }) => ({
+    totalUsers: count(user.id),
+    avgAge: avg(user.age),
+  })),
 )
 ```
 
@@ -176,9 +172,7 @@ Derived collections are themselves collections. Use one as a source for another 
 ```ts
 // Base derived collection
 const activeUsers = createLiveQueryCollection((q) =>
-  q
-    .from({ user: usersCollection })
-    .where(({ user }) => eq(user.active, true))
+  q.from({ user: usersCollection }).where(({ user }) => eq(user.active, true)),
 )
 
 // Second query uses the derived collection as its source
@@ -186,12 +180,12 @@ const activeUserPosts = createLiveQueryCollection((q) =>
   q
     .from({ user: activeUsers })
     .join({ post: postsCollection }, ({ user, post }) =>
-      eq(user.id, post.userId)
+      eq(user.id, post.userId),
     )
     .select(({ user, post }) => ({
       userName: user.name,
       postTitle: post.title,
-    }))
+    })),
 )
 ```
 
@@ -205,12 +199,10 @@ JavaScript `===` in a where callback returns a boolean primitive, not an express
 
 ```ts
 // WRONG
-q.from({ user: usersCollection })
-  .where(({ user }) => user.active === true)
+q.from({ user: usersCollection }).where(({ user }) => user.active === true)
 
 // CORRECT
-q.from({ user: usersCollection })
-  .where(({ user }) => eq(user.active, true))
+q.from({ user: usersCollection }).where(({ user }) => eq(user.active, true))
 ```
 
 ### CRITICAL: Filtering in JS instead of query operators
@@ -226,7 +218,7 @@ const active = data.filter((t) => t.completed === false)
 const { data } = useLiveQuery((q) =>
   q
     .from({ todos: todosCollection })
-    .where(({ todos }) => eq(todos.completed, false))
+    .where(({ todos }) => eq(todos.completed, false)),
 )
 ```
 
@@ -268,8 +260,9 @@ q.from({ user: usersCollection })
 
 ```ts
 // WRONG
-q.from({ order: ordersCollection })
-  .having(({ order }) => gt(count(order.id), 5))
+q.from({ order: ordersCollection }).having(({ order }) =>
+  gt(count(order.id), 5),
+)
 
 // CORRECT
 q.from({ order: ordersCollection })
@@ -297,16 +290,16 @@ The differential dataflow join operator only supports equality joins. Using `gt(
 
 ```ts
 // WRONG
-q.from({ user: usersCollection })
-  .join({ post: postsCollection }, ({ user, post }) =>
-    gt(user.id, post.userId)
-  )
+q.from({ user: usersCollection }).join(
+  { post: postsCollection },
+  ({ user, post }) => gt(user.id, post.userId),
+)
 
 // CORRECT
-q.from({ user: usersCollection })
-  .join({ post: postsCollection }, ({ user, post }) =>
-    eq(user.id, post.userId)
-  )
+q.from({ user: usersCollection }).join(
+  { post: postsCollection },
+  ({ user, post }) => eq(user.id, post.userId),
+)
 ```
 
 ### MEDIUM: Passing source directly instead of {alias: collection}
@@ -324,6 +317,7 @@ q.from({ users: usersCollection })
 ## Tension: Query expressiveness vs. IVM constraints
 
 The query builder looks like SQL but has constraints that SQL does not:
+
 - **Equality joins only** -- `eq()` is the only allowed join condition operator.
 - **orderBy required for limit/offset** -- non-deterministic pagination cannot be incrementally maintained.
 - **distinct requires select** -- deduplication needs an explicit projection.

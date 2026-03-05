@@ -9,12 +9,12 @@ description: >
   onInsert/onUpdate/onDelete handlers. PendingMutation type. Transaction.isPersisted.
 type: sub-skill
 library: db
-library_version: "0.5.30"
+library_version: '0.5.30'
 sources:
-  - "TanStack/db:docs/guides/mutations.md"
-  - "TanStack/db:packages/db/src/transactions.ts"
-  - "TanStack/db:packages/db/src/optimistic-action.ts"
-  - "TanStack/db:packages/db/src/paced-mutations.ts"
+  - 'TanStack/db:docs/guides/mutations.md'
+  - 'TanStack/db:packages/db/src/transactions.ts'
+  - 'TanStack/db:packages/db/src/optimistic-action.ts'
+  - 'TanStack/db:packages/db/src/paced-mutations.ts'
 ---
 
 # Mutations & Optimistic State
@@ -37,18 +37,18 @@ Optimistic state is applied in the current tick and dropped when the handler res
 // Single item
 todoCollection.insert({
   id: crypto.randomUUID(),
-  text: "Buy groceries",
+  text: 'Buy groceries',
   completed: false,
 })
 
 // Multiple items
 todoCollection.insert([
-  { id: crypto.randomUUID(), text: "Buy groceries", completed: false },
-  { id: crypto.randomUUID(), text: "Walk dog", completed: false },
+  { id: crypto.randomUUID(), text: 'Buy groceries', completed: false },
+  { id: crypto.randomUUID(), text: 'Walk dog', completed: false },
 ])
 
 // With metadata / non-optimistic
-todoCollection.insert(item, { metadata: { source: "import" } })
+todoCollection.insert(item, { metadata: { source: 'import' } })
 todoCollection.insert(item, { optimistic: false })
 ```
 
@@ -63,14 +63,18 @@ todoCollection.update(todo.id, (draft) => {
 
 // Multiple items
 todoCollection.update([id1, id2], (drafts) => {
-  drafts.forEach((d) => { d.completed = true })
+  drafts.forEach((d) => {
+    d.completed = true
+  })
 })
 
 // With metadata
 todoCollection.update(
   todo.id,
-  { metadata: { reason: "user-edit" } },
-  (draft) => { draft.text = "Updated" }
+  { metadata: { reason: 'user-edit' } },
+  (draft) => {
+    draft.text = 'Updated'
+  },
 )
 ```
 
@@ -79,7 +83,7 @@ todoCollection.update(
 ```ts
 todoCollection.delete(todo.id)
 todoCollection.delete([id1, id2])
-todoCollection.delete(todo.id, { metadata: { reason: "completed" } })
+todoCollection.delete(todo.id, { metadata: { reason: 'completed' } })
 ```
 
 All three return a `Transaction` object. Use `tx.isPersisted.promise` to await
@@ -91,11 +95,11 @@ persistence or catch rollback errors.
 
 ### 1. createOptimisticAction -- intent-based mutations
 
-Use when the optimistic change is a *guess* at how the server will transform
+Use when the optimistic change is a _guess_ at how the server will transform
 the data, or when you need to mutate multiple collections atomically.
 
 ```ts
-import { createOptimisticAction } from "@tanstack/db"
+import { createOptimisticAction } from '@tanstack/db'
 
 const likePost = createOptimisticAction<string>({
   // MUST be synchronous -- applied in the current tick
@@ -120,29 +124,35 @@ await tx.isPersisted.promise
 Multi-collection example:
 
 ```ts
-const createProject = createOptimisticAction<{ name: string; ownerId: string }>({
-  onMutate: ({ name, ownerId }) => {
-    projectCollection.insert({ id: crypto.randomUUID(), name, ownerId })
-    userCollection.update(ownerId, (d) => { d.projectCount += 1 })
+const createProject = createOptimisticAction<{ name: string; ownerId: string }>(
+  {
+    onMutate: ({ name, ownerId }) => {
+      projectCollection.insert({ id: crypto.randomUUID(), name, ownerId })
+      userCollection.update(ownerId, (d) => {
+        d.projectCount += 1
+      })
+    },
+    mutationFn: async ({ name, ownerId }) => {
+      await api.projects.create({ name, ownerId })
+      await Promise.all([
+        projectCollection.utils.refetch(),
+        userCollection.utils.refetch(),
+      ])
+    },
   },
-  mutationFn: async ({ name, ownerId }) => {
-    await api.projects.create({ name, ownerId })
-    await Promise.all([
-      projectCollection.utils.refetch(),
-      userCollection.utils.refetch(),
-    ])
-  },
-})
+)
 ```
 
 ### 2. createPacedMutations -- auto-save with debounce / throttle / queue
 
 ```ts
-import { createPacedMutations, debounceStrategy } from "@tanstack/db"
+import { createPacedMutations, debounceStrategy } from '@tanstack/db'
 
 const autoSaveNote = createPacedMutations<string>({
   onMutate: (text) => {
-    noteCollection.update(noteId, (draft) => { draft.body = text })
+    noteCollection.update(noteId, (draft) => {
+      draft.body = text
+    })
   },
   mutationFn: async ({ transaction }) => {
     const mutation = transaction.mutations[0]
@@ -153,14 +163,14 @@ const autoSaveNote = createPacedMutations<string>({
 })
 
 // Each call resets the debounce timer; mutations merge into one transaction
-autoSaveNote("Hello")
-autoSaveNote("Hello, world")   // only this version persists
+autoSaveNote('Hello')
+autoSaveNote('Hello, world') // only this version persists
 ```
 
 Other strategies:
 
 ```ts
-import { throttleStrategy, queueStrategy } from "@tanstack/db"
+import { throttleStrategy, queueStrategy } from '@tanstack/db'
 
 // Evenly spaced (sliders, scroll)
 throttleStrategy({ wait: 200, leading: true, trailing: true })
@@ -172,18 +182,22 @@ queueStrategy({ wait: 0, maxSize: 100 })
 ### 3. createTransaction -- manual batching
 
 ```ts
-import { createTransaction } from "@tanstack/db"
+import { createTransaction } from '@tanstack/db'
 
 const tx = createTransaction({
-  autoCommit: false,            // wait for explicit commit()
+  autoCommit: false, // wait for explicit commit()
   mutationFn: async ({ transaction }) => {
     await api.batchUpdate(transaction.mutations)
   },
 })
 
 tx.mutate(() => {
-  todoCollection.update(id1, (d) => { d.status = "reviewed" })
-  todoCollection.update(id2, (d) => { d.status = "reviewed" })
+  todoCollection.update(id1, (d) => {
+    d.status = 'reviewed'
+  })
+  todoCollection.update(id2, (d) => {
+    d.status = 'reviewed'
+  })
 })
 
 // User reviews... then commits or rolls back
@@ -200,12 +214,12 @@ automatically via `getActiveTransaction()`.
 ```ts
 const todoCollection = createCollection(
   queryCollectionOptions({
-    queryKey: ["todos"],
+    queryKey: ['todos'],
     queryFn: () => api.todos.getAll(),
     getKey: (t) => t.id,
     onInsert: async ({ transaction }) => {
       await Promise.all(
-        transaction.mutations.map((m) => api.todos.create(m.modified))
+        transaction.mutations.map((m) => api.todos.create(m.modified)),
       )
       // IMPORTANT: handler must not resolve until server state is synced back
       // QueryCollection auto-refetches after handler completes
@@ -213,16 +227,16 @@ const todoCollection = createCollection(
     onUpdate: async ({ transaction }) => {
       await Promise.all(
         transaction.mutations.map((m) =>
-          api.todos.update(m.original.id, m.changes)
-        )
+          api.todos.update(m.original.id, m.changes),
+        ),
       )
     },
     onDelete: async ({ transaction }) => {
       await Promise.all(
-        transaction.mutations.map((m) => api.todos.delete(m.original.id))
+        transaction.mutations.map((m) => api.todos.delete(m.original.id)),
       )
     },
-  })
+  }),
 )
 ```
 
@@ -234,7 +248,7 @@ onUpdate: async ({ transaction }) => {
     transaction.mutations.map(async (m) => {
       const res = await api.todos.update(m.original.id, m.changes)
       return res.txid
-    })
+    }),
   )
   return { txid: txids }
 }
@@ -248,15 +262,18 @@ onUpdate: async ({ transaction }) => {
 
 ```ts
 // WRONG -- silently fails or throws
-collection.update(id, { ...item, title: "new" })
+collection.update(id, { ...item, title: 'new' })
 
 // CORRECT -- mutate the draft proxy
-collection.update(id, (draft) => { draft.title = "new" })
+collection.update(id, (draft) => {
+  draft.title = 'new'
+})
 ```
 
 ### CRITICAL: Hallucinating mutation API signatures
 
 The most common AI-generated errors:
+
 - Inventing handler signatures (e.g. `onMutate` on a collection config)
 - Confusing `createOptimisticAction` with `createTransaction`
 - Wrong PendingMutation property names (`mutation.data` does not exist --
@@ -292,6 +309,7 @@ createOptimisticAction({
 ### CRITICAL: Mutations without handler or ambient transaction
 
 Collection mutations require either:
+
 1. An `onInsert`/`onUpdate`/`onDelete` handler on the collection, OR
 2. An ambient transaction from `createTransaction`/`createOptimisticAction`
 
@@ -342,6 +360,7 @@ onInsert: async ({ transaction }) => {
 Instant optimistic updates create a window where client state diverges from
 server state. If the handler fails, the rollback removes the optimistic state --
 which can discard user work the user thought was saved. Consider:
+
 - Showing pending/saving indicators so users know state is unconfirmed
 - Using `{ optimistic: false }` for destructive operations
 - Designing idempotent server endpoints so retries are safe

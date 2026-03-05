@@ -12,16 +12,16 @@ description: >
   Electric txid tracking and Query direct writes.
 type: sub-skill
 library: db
-library_version: "0.5.30"
+library_version: '0.5.30'
 sources:
-  - "TanStack/db:docs/overview.md"
-  - "TanStack/db:docs/guides/schemas.md"
-  - "TanStack/db:docs/collections/query-collection.md"
-  - "TanStack/db:docs/collections/electric-collection.md"
-  - "TanStack/db:docs/collections/powersync-collection.md"
-  - "TanStack/db:docs/collections/rxdb-collection.md"
-  - "TanStack/db:docs/collections/trailbase-collection.md"
-  - "TanStack/db:packages/db/src/collection/index.ts"
+  - 'TanStack/db:docs/overview.md'
+  - 'TanStack/db:docs/guides/schemas.md'
+  - 'TanStack/db:docs/collections/query-collection.md'
+  - 'TanStack/db:docs/collections/electric-collection.md'
+  - 'TanStack/db:docs/collections/powersync-collection.md'
+  - 'TanStack/db:docs/collections/rxdb-collection.md'
+  - 'TanStack/db:docs/collections/trailbase-collection.md'
+  - 'TanStack/db:packages/db/src/collection/index.ts'
 ---
 
 This skill builds on db-core. Read it first for the overall mental model.
@@ -31,10 +31,10 @@ This skill builds on db-core. Read it first for the overall mental model.
 ## Setup
 
 ```ts
-import { createCollection } from "@tanstack/react-db"
-import { queryCollectionOptions } from "@tanstack/query-db-collection"
-import { QueryClient } from "@tanstack/query-core"
-import { z } from "zod"
+import { createCollection } from '@tanstack/react-db'
+import { queryCollectionOptions } from '@tanstack/query-db-collection'
+import { QueryClient } from '@tanstack/query-core'
+import { z } from 'zod'
 
 const queryClient = new QueryClient()
 
@@ -42,15 +42,16 @@ const todoSchema = z.object({
   id: z.number(),
   text: z.string(),
   completed: z.boolean().default(false),
-  created_at: z.union([z.string(), z.date()])
-    .transform(val => typeof val === "string" ? new Date(val) : val),
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
 })
 
 const todoCollection = createCollection(
   queryCollectionOptions({
-    queryKey: ["todos"],
+    queryKey: ['todos'],
     queryFn: async () => {
-      const res = await fetch("/api/todos")
+      const res = await fetch('/api/todos')
       return res.json()
     },
     queryClient,
@@ -69,21 +70,21 @@ const todoCollection = createCollection(
       await api.todos.delete(transaction.mutations[0].key)
       await todoCollection.utils.refetch()
     },
-  })
+  }),
 )
 ```
 
 ## Choosing an Adapter
 
-| Backend | Adapter | Package |
-|---------|---------|---------|
-| REST API / TanStack Query | `queryCollectionOptions` | `@tanstack/query-db-collection` |
-| ElectricSQL (real-time Postgres) | `electricCollectionOptions` | `@tanstack/electric-db-collection` |
-| PowerSync (SQLite offline) | `powerSyncCollectionOptions` | `@tanstack/powersync-db-collection` |
-| RxDB (reactive database) | `rxdbCollectionOptions` | `@tanstack/rxdb-db-collection` |
-| TrailBase (event streaming) | `trailbaseCollectionOptions` | `@tanstack/trailbase-db-collection` |
-| No backend (UI state) | `localOnlyCollectionOptions` | `@tanstack/db` |
-| Browser localStorage | `localStorageCollectionOptions` | `@tanstack/db` |
+| Backend                          | Adapter                         | Package                             |
+| -------------------------------- | ------------------------------- | ----------------------------------- |
+| REST API / TanStack Query        | `queryCollectionOptions`        | `@tanstack/query-db-collection`     |
+| ElectricSQL (real-time Postgres) | `electricCollectionOptions`     | `@tanstack/electric-db-collection`  |
+| PowerSync (SQLite offline)       | `powerSyncCollectionOptions`    | `@tanstack/powersync-db-collection` |
+| RxDB (reactive database)         | `rxdbCollectionOptions`         | `@tanstack/rxdb-db-collection`      |
+| TrailBase (event streaming)      | `trailbaseCollectionOptions`    | `@tanstack/trailbase-db-collection` |
+| No backend (UI state)            | `localOnlyCollectionOptions`    | `@tanstack/db`                      |
+| Browser localStorage             | `localStorageCollectionOptions` | `@tanstack/db`                      |
 
 Use `localOnlyCollectionOptions` for prototyping — the collection API is uniform, so swapping to a real backend later only changes the options creator.
 
@@ -91,32 +92,33 @@ Use `localOnlyCollectionOptions` for prototyping — the collection API is unifo
 
 ```ts
 queryCollectionOptions({
-  syncMode: "eager",        // default — loads all data upfront
+  syncMode: 'eager', // default — loads all data upfront
   // syncMode: "on-demand", // loads only what live queries request
   // syncMode: "progressive", // (Electric only) query subset first, full sync in background
 })
 ```
 
-| Mode | Best for | Data size |
-|------|----------|-----------|
-| `eager` | Mostly-static datasets | <10k rows |
-| `on-demand` | Search, catalogs, large tables | >50k rows |
-| `progressive` | Collaborative apps needing instant first paint | Any |
+| Mode          | Best for                                       | Data size |
+| ------------- | ---------------------------------------------- | --------- |
+| `eager`       | Mostly-static datasets                         | <10k rows |
+| `on-demand`   | Search, catalogs, large tables                 | >50k rows |
+| `progressive` | Collaborative apps needing instant first paint | Any       |
 
 ## Core Patterns
 
 ### Local-only collection for prototyping
 
 ```ts
-import { createCollection, localOnlyCollectionOptions } from "@tanstack/react-db"
+import {
+  createCollection,
+  localOnlyCollectionOptions,
+} from '@tanstack/react-db'
 
 const todoCollection = createCollection(
   localOnlyCollectionOptions({
     getKey: (item) => item.id,
-    initialData: [
-      { id: 1, text: "Learn TanStack DB", completed: false },
-    ],
-  })
+    initialData: [{ id: 1, text: 'Learn TanStack DB', completed: false }],
+  }),
 )
 ```
 
@@ -126,8 +128,9 @@ const todoCollection = createCollection(
 const schema = z.object({
   id: z.number(),
   title: z.string(),
-  due_date: z.union([z.string(), z.date()])
-    .transform(val => typeof val === "string" ? new Date(val) : val),
+  due_date: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
   priority: z.number().default(0),
 })
 ```
@@ -137,17 +140,17 @@ Use `z.union([z.string(), z.date()])` for transformed fields — this ensures `T
 ### ElectricSQL with txid tracking
 
 ```ts
-import { electricCollectionOptions } from "@tanstack/electric-db-collection"
+import { electricCollectionOptions } from '@tanstack/electric-db-collection'
 
 const todoCollection = createCollection(
   electricCollectionOptions({
-    shapeOptions: { url: "/api/electric/todos" },
+    shapeOptions: { url: '/api/electric/todos' },
     getKey: (item) => item.id,
     onInsert: async ({ transaction }) => {
       const res = await api.todos.create(transaction.mutations[0].modified)
       return { txid: res.txid }
     },
-  })
+  }),
 )
 ```
 
@@ -162,7 +165,7 @@ Wrong:
 ```ts
 queryCollectionOptions({
   queryFn: async () => {
-    const res = await fetch("/api/todos?status=active")
+    const res = await fetch('/api/todos?status=active')
     return res.json() // returns [] when no active todos — deletes everything
   },
 })
@@ -173,11 +176,11 @@ Correct:
 ```ts
 queryCollectionOptions({
   queryFn: async () => {
-    const res = await fetch("/api/todos") // fetch complete state
+    const res = await fetch('/api/todos') // fetch complete state
     return res.json()
   },
   // Use on-demand mode + live query where() for filtering
-  syncMode: "on-demand",
+  syncMode: 'on-demand',
 })
 ```
 
@@ -193,7 +196,7 @@ Wrong:
 const todoCollection = createCollection(
   localOnlyCollectionOptions({
     getKey: (item) => item.id,
-  })
+  }),
 )
 // Manually fetching and inserting...
 ```
@@ -203,11 +206,11 @@ Correct:
 ```ts
 const todoCollection = createCollection(
   queryCollectionOptions({
-    queryKey: ["todos"],
-    queryFn: async () => fetch("/api/todos").then(r => r.json()),
+    queryKey: ['todos'],
+    queryFn: async () => fetch('/api/todos').then((r) => r.json()),
     queryClient,
     getKey: (item) => item.id,
-  })
+  }),
 )
 ```
 
@@ -221,8 +224,8 @@ Wrong:
 
 ```ts
 // Backend handler
-app.post("/api/todos", async (req, res) => {
-  const txid = await generateTxId(sql)  // WRONG: separate transaction
+app.post('/api/todos', async (req, res) => {
+  const txid = await generateTxId(sql) // WRONG: separate transaction
   await sql`INSERT INTO todos ${sql(req.body)}`
   res.json({ txid })
 })
@@ -231,10 +234,10 @@ app.post("/api/todos", async (req, res) => {
 Correct:
 
 ```ts
-app.post("/api/todos", async (req, res) => {
+app.post('/api/todos', async (req, res) => {
   let txid
   await sql.begin(async (tx) => {
-    txid = await generateTxId(tx)  // CORRECT: same transaction
+    txid = await generateTxId(tx) // CORRECT: same transaction
     await tx`INSERT INTO todos ${tx(req.body)}`
   })
   res.json({ txid })
@@ -252,7 +255,7 @@ Wrong:
 ```ts
 queryCollectionOptions({
   queryFn: async () => {
-    const newItems = await fetch("/api/todos?since=" + lastSync)
+    const newItems = await fetch('/api/todos?since=' + lastSync)
     return newItems.json() // only new items — everything else deleted
   },
 })
@@ -263,8 +266,10 @@ Correct:
 ```ts
 queryCollectionOptions({
   queryFn: async (ctx) => {
-    const existing = ctx.queryClient.getQueryData(["todos"]) || []
-    const newItems = await fetch("/api/todos?since=" + lastSync).then(r => r.json())
+    const existing = ctx.queryClient.getQueryData(['todos']) || []
+    const newItems = await fetch('/api/todos?since=' + lastSync).then((r) =>
+      r.json(),
+    )
     return [...existing, ...newItems]
   },
 })
@@ -305,17 +310,21 @@ Source: packages/db/src/collection/mutations.ts:101
 Wrong:
 
 ```ts
-createCollection(queryCollectionOptions({
-  getKey: (item) => item.metadata.id,  // undefined if metadata missing
-}))
+createCollection(
+  queryCollectionOptions({
+    getKey: (item) => item.metadata.id, // undefined if metadata missing
+  }),
+)
 ```
 
 Correct:
 
 ```ts
-createCollection(queryCollectionOptions({
-  getKey: (item) => item.id,  // always present
-}))
+createCollection(
+  queryCollectionOptions({
+    getKey: (item) => item.id, // always present
+  }),
+)
 ```
 
 `getKey` must return a defined value for every item. Throws `UndefinedKeyError` otherwise.
@@ -328,7 +337,7 @@ Wrong:
 
 ```ts
 const schema = z.object({
-  created_at: z.string().transform(val => new Date(val)),
+  created_at: z.string().transform((val) => new Date(val)),
 })
 // update() fails — draft.created_at is Date but schema only accepts string
 ```
@@ -337,8 +346,9 @@ Correct:
 
 ```ts
 const schema = z.object({
-  created_at: z.union([z.string(), z.date()])
-    .transform(val => typeof val === "string" ? new Date(val) : val),
+  created_at: z
+    .union([z.string(), z.date()])
+    .transform((val) => (typeof val === 'string' ? new Date(val) : val)),
 })
 ```
 

@@ -5,13 +5,31 @@ All operators are imported from `@tanstack/db` (also re-exported by `@tanstack/r
 ```ts
 import {
   // Comparison
-  eq, gt, gte, lt, lte, like, ilike, inArray, isNull, isUndefined,
+  eq,
+  gt,
+  gte,
+  lt,
+  lte,
+  like,
+  ilike,
+  inArray,
+  isNull,
+  isUndefined,
   // Logical
-  and, or, not,
+  and,
+  or,
+  not,
   // Aggregate
-  count, sum, avg, min, max,
+  count,
+  sum,
+  avg,
+  min,
+  max,
   // String
-  upper, lower, length, concat,
+  upper,
+  lower,
+  length,
+  concat,
   // Math
   add,
   // Utility
@@ -45,10 +63,10 @@ not(eq(user.role, 'banned'))
 Ordering comparisons. Work with numbers, strings, dates.
 
 ```ts
-gt(user.age, 18)              // greater than
-gte(user.salary, 50000)       // greater than or equal
-lt(user.age, 65)              // less than
-lte(user.rating, 5)           // less than or equal
+gt(user.age, 18) // greater than
+gte(user.salary, 50000) // greater than or equal
+lt(user.age, 65) // less than
+lte(user.rating, 5) // less than or equal
 gt(user.createdAt, new Date('2024-01-01'))
 ```
 
@@ -57,8 +75,8 @@ gt(user.createdAt, new Date('2024-01-01'))
 Case-sensitive string pattern matching. Use `%` as wildcard.
 
 ```ts
-like(user.name, 'John%')       // starts with John
-like(user.email, '%@corp.com')  // ends with @corp.com
+like(user.name, 'John%') // starts with John
+like(user.email, '%@corp.com') // ends with @corp.com
 ```
 
 ### ilike(left, right) -> BasicExpression\<boolean\>
@@ -91,7 +109,7 @@ isNull(user.bio)
 Check if value is `undefined` (absent). Especially useful after left joins where unmatched rows produce `undefined`.
 
 ```ts
-isUndefined(profile)  // no matching profile in left join
+isUndefined(profile) // no matching profile in left join
 ```
 
 ---
@@ -165,8 +183,8 @@ max(user.createdAt)
 Convert string case.
 
 ```ts
-upper(user.name)   // 'ALICE'
-lower(user.email)  // 'alice@example.com'
+upper(user.name) // 'ALICE'
+lower(user.email) // 'alice@example.com'
 ```
 
 ### length(value) -> BasicExpression\<number\>
@@ -174,8 +192,8 @@ lower(user.email)  // 'alice@example.com'
 Get string or array length.
 
 ```ts
-length(user.name)  // string length
-length(user.tags)  // array length
+length(user.name) // string length
+length(user.tags) // array length
 ```
 
 ### concat(...values) -> BasicExpression\<string\>
@@ -241,12 +259,11 @@ Escape hatches for logic that cannot be expressed with declarative operators. Th
 ### fn.select(callback)
 
 ```ts
-q.from({ user: usersCollection })
-  .fn.select((row) => ({
-    id: row.user.id,
-    domain: row.user.email.split('@')[1],
-    tier: row.user.salary > 100000 ? 'senior' : 'junior',
-  }))
+q.from({ user: usersCollection }).fn.select((row) => ({
+  id: row.user.id,
+  domain: row.user.email.split('@')[1],
+  tier: row.user.salary > 100000 ? 'senior' : 'junior',
+}))
 ```
 
 **Limitation**: `fn.select()` cannot be used with `groupBy()`. The compiler must statically analyze select to discover aggregate functions.
@@ -254,10 +271,9 @@ q.from({ user: usersCollection })
 ### fn.where(callback)
 
 ```ts
-q.from({ user: usersCollection })
-  .fn.where((row) =>
-    row.user.active && row.user.email.endsWith('@company.com')
-  )
+q.from({ user: usersCollection }).fn.where(
+  (row) => row.user.active && row.user.email.endsWith('@company.com'),
+)
 ```
 
 ### fn.having(callback)
@@ -272,8 +288,8 @@ q.from({ order: ordersCollection })
     totalSpent: sum(order.amount),
     orderCount: count(order.id),
   }))
-  .fn.having(({ $selected }) =>
-    $selected.totalSpent > 1000 && $selected.orderCount >= 3
+  .fn.having(
+    ({ $selected }) => $selected.totalSpent > 1000 && $selected.orderCount >= 3,
   )
 ```
 

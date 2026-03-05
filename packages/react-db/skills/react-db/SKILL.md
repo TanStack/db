@@ -13,14 +13,14 @@ description: >
 type: framework
 library: db
 framework: react
-library_version: "0.5.30"
+library_version: '0.5.30'
 requires:
   - db-core
 sources:
-  - "TanStack/db:docs/framework/react/overview.md"
-  - "TanStack/db:docs/guides/live-queries.md"
-  - "TanStack/db:packages/react-db/src/useLiveQuery.ts"
-  - "TanStack/db:packages/react-db/src/useLiveInfiniteQuery.ts"
+  - 'TanStack/db:docs/framework/react/overview.md'
+  - 'TanStack/db:docs/guides/live-queries.md'
+  - 'TanStack/db:packages/react-db/src/useLiveQuery.ts'
+  - 'TanStack/db:packages/react-db/src/useLiveInfiniteQuery.ts'
 ---
 
 This skill builds on db-core. Read it first for collection setup, query builder, and mutation patterns.
@@ -30,14 +30,14 @@ This skill builds on db-core. Read it first for collection setup, query builder,
 ## Setup
 
 ```tsx
-import { useLiveQuery, eq, not } from "@tanstack/react-db"
+import { useLiveQuery, eq, not } from '@tanstack/react-db'
 
 function TodoList() {
   const { data: todos, isLoading } = useLiveQuery((q) =>
     q
       .from({ todo: todoCollection })
       .where(({ todo }) => not(todo.completed))
-      .orderBy(({ todo }) => todo.created_at, "asc")
+      .orderBy(({ todo }) => todo.created_at, 'asc'),
   )
 
   if (isLoading) return <div>Loading...</div>
@@ -60,14 +60,23 @@ function TodoList() {
 
 ```tsx
 // Query function with dependency array
-const { data, state, collection, status, isLoading, isReady, isError, isIdle, isCleanedUp } =
-  useLiveQuery(
-    (q) =>
-      q
-        .from({ todo: todoCollection })
-        .where(({ todo }) => eq(todo.userId, userId)),
-    [userId]
-  )
+const {
+  data,
+  state,
+  collection,
+  status,
+  isLoading,
+  isReady,
+  isError,
+  isIdle,
+  isCleanedUp,
+} = useLiveQuery(
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.userId, userId)),
+  [userId],
+)
 
 // Config object
 const { data } = useLiveQuery({
@@ -82,9 +91,11 @@ const { data } = useLiveQuery(preloadedCollection)
 const { data, status } = useLiveQuery(
   (q) => {
     if (!userId) return undefined
-    return q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.userId, userId))
+    return q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.userId, userId))
   },
-  [userId]
+  [userId],
 )
 // When disabled: status='disabled', data=undefined
 ```
@@ -96,16 +107,25 @@ const { data, status } = useLiveQuery(
 // Must wrap in <Suspense> and <ErrorBoundary>
 function TodoList() {
   const { data: todos } = useLiveSuspenseQuery((q) =>
-    q.from({ todo: todoCollection })
+    q.from({ todo: todoCollection }),
   )
 
-  return <ul>{todos.map((t) => <li key={t.id}>{t.text}</li>)}</ul>
+  return (
+    <ul>
+      {todos.map((t) => (
+        <li key={t.id}>{t.text}</li>
+      ))}
+    </ul>
+  )
 }
 
 // With deps — re-suspends when deps change
 const { data } = useLiveSuspenseQuery(
-  (q) => q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.category, category)),
-  [category]
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.category, category)),
+  [category],
 )
 ```
 
@@ -117,9 +137,9 @@ const { data, fetchNextPage, hasNextPage, isFetchingNextPage } =
     (q) =>
       q
         .from({ posts: postsCollection })
-        .orderBy(({ posts }) => posts.createdAt, "desc"),
+        .orderBy(({ posts }) => posts.createdAt, 'desc'),
     { pageSize: 20 },
-    [category]
+    [category],
   )
 
 // data is the flat array of all loaded pages
@@ -156,17 +176,16 @@ const mutate = usePacedMutations({
 // Include ALL external reactive values
 const { data } = useLiveQuery(
   (q) =>
-    q.from({ todo: todoCollection }).where(({ todo }) =>
-      and(eq(todo.userId, userId), eq(todo.status, filter))
-    ),
-  [userId, filter]
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) =>
+        and(eq(todo.userId, userId), eq(todo.status, filter)),
+      ),
+  [userId, filter],
 )
 
 // Empty array = static query, never re-runs
-const { data } = useLiveQuery(
-  (q) => q.from({ todo: todoCollection }),
-  []
-)
+const { data } = useLiveQuery((q) => q.from({ todo: todoCollection }), [])
 
 // No array = re-runs on every render (usually wrong)
 ```
@@ -201,7 +220,7 @@ Wrong:
 
 ```tsx
 const { data } = useLiveQuery((q) =>
-  q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.userId, userId))
+  q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.userId, userId)),
 )
 ```
 
@@ -209,8 +228,11 @@ Correct:
 
 ```tsx
 const { data } = useLiveQuery(
-  (q) => q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.userId, userId)),
-  [userId]
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.userId, userId)),
+  [userId],
 )
 ```
 

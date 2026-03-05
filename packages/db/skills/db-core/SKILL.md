@@ -10,7 +10,7 @@ description: >
   createPacedMutations. Entry point for all TanStack DB skills.
 type: core
 library: db
-library_version: "0.5.30"
+library_version: '0.5.30'
 ---
 
 # TanStack DB — Core Concepts
@@ -27,24 +27,24 @@ hooks. In framework projects, import from the framework package directly.
 
 ## Sub-Skills
 
-| Need to...                                      | Read                                    |
-| ----------------------------------------------- | --------------------------------------- |
-| Create a collection, pick an adapter, add schema | db-core/collection-setup/SKILL.md       |
-| Query data with where, join, groupBy, select     | db-core/live-queries/SKILL.md           |
-| Insert, update, delete with optimistic UI        | db-core/mutations-optimistic/SKILL.md   |
-| Build a custom sync adapter                      | db-core/custom-adapter/SKILL.md         |
-| Preload collections in route loaders             | meta-framework/SKILL.md                 |
+| Need to...                                       | Read                                                 |
+| ------------------------------------------------ | ---------------------------------------------------- |
+| Create a collection, pick an adapter, add schema | db-core/collection-setup/SKILL.md                    |
+| Query data with where, join, groupBy, select     | db-core/live-queries/SKILL.md                        |
+| Insert, update, delete with optimistic UI        | db-core/mutations-optimistic/SKILL.md                |
+| Build a custom sync adapter                      | db-core/custom-adapter/SKILL.md                      |
+| Preload collections in route loaders             | meta-framework/SKILL.md                              |
 | Add offline transaction queueing                 | offline/SKILL.md (in @tanstack/offline-transactions) |
 
 For framework-specific hooks:
 
-| Framework | Read                         |
-| --------- | ---------------------------- |
-| React     | react-db/SKILL.md            |
-| Vue       | vue-db/SKILL.md              |
-| Svelte    | svelte-db/SKILL.md           |
-| Solid     | solid-db/SKILL.md            |
-| Angular   | angular-db/SKILL.md          |
+| Framework | Read                |
+| --------- | ------------------- |
+| React     | react-db/SKILL.md   |
+| Vue       | vue-db/SKILL.md     |
+| Svelte    | svelte-db/SKILL.md  |
+| Solid     | solid-db/SKILL.md   |
+| Angular   | angular-db/SKILL.md |
 
 ## Quick Decision Tree
 

@@ -9,13 +9,13 @@ pnpm add @tanstack/rxdb-db-collection rxdb @tanstack/react-db
 ## Required Config
 
 ```typescript
-import { createCollection } from "@tanstack/react-db"
-import { rxdbCollectionOptions } from "@tanstack/rxdb-db-collection"
+import { createCollection } from '@tanstack/react-db'
+import { rxdbCollectionOptions } from '@tanstack/rxdb-db-collection'
 
 const todosCollection = createCollection(
   rxdbCollectionOptions({
     rxCollection: db.todos,
-  })
+  }),
 )
 ```
 
@@ -23,15 +23,15 @@ const todosCollection = createCollection(
 
 ## Optional Config (with defaults)
 
-| Option | Default | Description |
-|---|---|---|
-| `id` | (none) | Unique collection identifier |
-| `schema` | (none) | StandardSchema validator (RxDB has its own validation; this adds TanStack DB-side validation) |
-| `startSync` | `true` | Start ingesting RxDB data immediately |
-| `syncBatchSize` | `1000` | Max documents per batch during initial sync from RxDB; only affects initial load, not live updates |
-| `onInsert` | (default: `bulkUpsert`) | Override default insert persistence |
-| `onUpdate` | (default: `patch`) | Override default update persistence |
-| `onDelete` | (default: `bulkRemove`) | Override default delete persistence |
+| Option          | Default                 | Description                                                                                        |
+| --------------- | ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `id`            | (none)                  | Unique collection identifier                                                                       |
+| `schema`        | (none)                  | StandardSchema validator (RxDB has its own validation; this adds TanStack DB-side validation)      |
+| `startSync`     | `true`                  | Start ingesting RxDB data immediately                                                              |
+| `syncBatchSize` | `1000`                  | Max documents per batch during initial sync from RxDB; only affects initial load, not live updates |
+| `onInsert`      | (default: `bulkUpsert`) | Override default insert persistence                                                                |
+| `onUpdate`      | (default: `patch`)      | Override default update persistence                                                                |
+| `onDelete`      | (default: `bulkRemove`) | Override default delete persistence                                                                |
 
 ## Key Behavior: String Keys
 
@@ -40,27 +40,27 @@ RxDB primary keys are always strings. The `getKey` function is derived from the 
 ## RxDB Setup (prerequisite)
 
 ```typescript
-import { createRxDatabase } from "rxdb/plugins/core"
-import { getRxStorageLocalstorage } from "rxdb/plugins/storage-localstorage"
+import { createRxDatabase } from 'rxdb/plugins/core'
+import { getRxStorageLocalstorage } from 'rxdb/plugins/storage-localstorage'
 
 const db = await createRxDatabase({
-  name: "my-app",
+  name: 'my-app',
   storage: getRxStorageLocalstorage(),
 })
 
 await db.addCollections({
   todos: {
     schema: {
-      title: "todos",
+      title: 'todos',
       version: 0,
-      type: "object",
-      primaryKey: "id",
+      type: 'object',
+      primaryKey: 'id',
       properties: {
-        id: { type: "string", maxLength: 100 },
-        text: { type: "string" },
-        completed: { type: "boolean" },
+        id: { type: 'string', maxLength: 100 },
+        text: { type: 'string' },
+        completed: { type: 'boolean' },
       },
-      required: ["id", "text", "completed"],
+      required: ['id', 'text', 'completed'],
     },
   },
 })
@@ -71,7 +71,7 @@ await db.addCollections({
 Replication is configured directly on the RxDB collection, independent of TanStack DB. Changes from replication flow into the TanStack DB collection via RxDB's change stream automatically.
 
 ```typescript
-import { replicateRxCollection } from "rxdb/plugins/replication"
+import { replicateRxCollection } from 'rxdb/plugins/replication'
 
 const replicationState = replicateRxCollection({
   collection: db.todos,
@@ -94,32 +94,32 @@ RxDB schema indexes do not affect TanStack DB query performance (queries run in-
 ## Complete Example
 
 ```typescript
-import { createRxDatabase } from "rxdb/plugins/core"
-import { getRxStorageLocalstorage } from "rxdb/plugins/storage-localstorage"
-import { createCollection } from "@tanstack/react-db"
-import { rxdbCollectionOptions } from "@tanstack/rxdb-db-collection"
-import { z } from "zod"
+import { createRxDatabase } from 'rxdb/plugins/core'
+import { getRxStorageLocalstorage } from 'rxdb/plugins/storage-localstorage'
+import { createCollection } from '@tanstack/react-db'
+import { rxdbCollectionOptions } from '@tanstack/rxdb-db-collection'
+import { z } from 'zod'
 
 type Todo = { id: string; text: string; completed: boolean }
 
 const db = await createRxDatabase({
-  name: "my-todos",
+  name: 'my-todos',
   storage: getRxStorageLocalstorage(),
 })
 
 await db.addCollections({
   todos: {
     schema: {
-      title: "todos",
+      title: 'todos',
       version: 0,
-      type: "object",
-      primaryKey: "id",
+      type: 'object',
+      primaryKey: 'id',
       properties: {
-        id: { type: "string", maxLength: 100 },
-        text: { type: "string" },
-        completed: { type: "boolean" },
+        id: { type: 'string', maxLength: 100 },
+        text: { type: 'string' },
+        completed: { type: 'boolean' },
       },
-      required: ["id", "text", "completed"],
+      required: ['id', 'text', 'completed'],
     },
   },
 })
@@ -136,11 +136,17 @@ const todosCollection = createCollection(
     schema: todoSchema,
     startSync: true,
     syncBatchSize: 500,
-  })
+  }),
 )
 
 // Usage
-todosCollection.insert({ id: crypto.randomUUID(), text: "Buy milk", completed: false })
-todosCollection.update("some-id", (draft) => { draft.completed = true })
-todosCollection.delete("some-id")
+todosCollection.insert({
+  id: crypto.randomUUID(),
+  text: 'Buy milk',
+  completed: false,
+})
+todosCollection.update('some-id', (draft) => {
+  draft.completed = true
+})
+todosCollection.delete('some-id')
 ```

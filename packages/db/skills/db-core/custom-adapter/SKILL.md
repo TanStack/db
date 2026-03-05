@@ -10,10 +10,10 @@ description: >
   (partial vs full). Subscription lifecycle and cleanup functions.
 type: sub-skill
 library: db
-library_version: "0.5.30"
+library_version: '0.5.30'
 sources:
-  - "TanStack/db:docs/guides/collection-options-creator.md"
-  - "TanStack/db:packages/db/src/collection/sync.ts"
+  - 'TanStack/db:docs/guides/collection-options-creator.md'
+  - 'TanStack/db:packages/db/src/collection/sync.ts'
 ---
 
 This skill builds on db-core and db-core/collection-setup. Read those first.
@@ -23,8 +23,8 @@ This skill builds on db-core and db-core/collection-setup. Read those first.
 ## Setup
 
 ```ts
-import { createCollection } from "@tanstack/db"
-import type { SyncConfig, CollectionConfig } from "@tanstack/db"
+import { createCollection } from '@tanstack/db'
+import type { SyncConfig, CollectionConfig } from '@tanstack/db'
 
 interface MyItem {
   id: string
@@ -58,7 +58,7 @@ function myBackendCollectionOptions<T>(config: {
           const items = await res.json()
           begin()
           for (const item of items) {
-            write({ type: "insert", value: item })
+            write({ type: 'insert', value: item })
           }
           commit()
 
@@ -79,24 +79,24 @@ function myBackendCollectionOptions<T>(config: {
           unsubscribe()
         }
       },
-      rowUpdateMode: "partial",
+      rowUpdateMode: 'partial',
     },
     onInsert: async ({ transaction }) => {
       await fetch(config.endpoint, {
-        method: "POST",
+        method: 'POST',
         body: JSON.stringify(transaction.mutations[0].modified),
       })
     },
     onUpdate: async ({ transaction }) => {
       const mut = transaction.mutations[0]
       await fetch(`${config.endpoint}/${mut.key}`, {
-        method: "PATCH",
+        method: 'PATCH',
         body: JSON.stringify(mut.changes),
       })
     },
     onDelete: async ({ transaction }) => {
       await fetch(`${config.endpoint}/${transaction.mutations[0].key}`, {
-        method: "DELETE",
+        method: 'DELETE',
       })
     },
   }
@@ -109,17 +109,17 @@ function myBackendCollectionOptions<T>(config: {
 
 ```ts
 // Insert
-write({ type: "insert", value: item })
+write({ type: 'insert', value: item })
 
 // Update (partial — only changed fields)
-write({ type: "update", key: itemId, value: partialItem })
+write({ type: 'update', key: itemId, value: partialItem })
 
 // Update (full row replacement)
-write({ type: "update", key: itemId, value: fullItem })
+write({ type: 'update', key: itemId, value: fullItem })
 // Set rowUpdateMode: "full" in sync config
 
 // Delete
-write({ type: "delete", key: itemId, value: item })
+write({ type: 'delete', key: itemId, value: item })
 ```
 
 ### On-demand sync with loadSubset
@@ -164,7 +164,7 @@ import {
   parseWhereExpression,
   parseOrderByExpression,
   extractSimpleComparisons,
-} from "@tanstack/db"
+} from '@tanstack/db'
 
 // In loadSubset or queryFn:
 const comparisons = extractSimpleComparisons(options.where)
@@ -182,9 +182,9 @@ Wrong:
 
 ```ts
 sync: ({ begin, write, commit }) => {
-  fetchData().then(items => {
+  fetchData().then((items) => {
     begin()
-    items.forEach(item => write({ type: "insert", value: item }))
+    items.forEach((item) => write({ type: 'insert', value: item }))
     commit()
     // forgot markReady()!
   })
@@ -195,9 +195,9 @@ Correct:
 
 ```ts
 sync: ({ begin, write, commit, markReady }) => {
-  fetchData().then(items => {
+  fetchData().then((items) => {
     begin()
-    items.forEach(item => write({ type: "insert", value: item }))
+    items.forEach((item) => write({ type: 'insert', value: item }))
     commit()
     markReady()
   })
@@ -214,7 +214,7 @@ Wrong:
 
 ```ts
 sync: ({ begin, write, commit, markReady }) => {
-  fetchAll().then(data => {
+  fetchAll().then((data) => {
     writeAll(data)
     subscribe(onChange) // changes during fetch are LOST
     markReady()
@@ -228,13 +228,22 @@ Correct:
 sync: ({ begin, write, commit, markReady }) => {
   const buffer = []
   subscribe((event) => {
-    if (!ready) { buffer.push(event); return }
-    begin(); write(event); commit()
+    if (!ready) {
+      buffer.push(event)
+      return
+    }
+    begin()
+    write(event)
+    commit()
   })
-  fetchAll().then(data => {
+  fetchAll().then((data) => {
     writeAll(data)
     ready = true
-    buffer.forEach(e => { begin(); write(e); commit() })
+    buffer.forEach((e) => {
+      begin()
+      write(e)
+      commit()
+    })
     markReady()
   })
 }

@@ -10,12 +10,12 @@ description: >
 type: framework
 library: db
 framework: svelte
-library_version: "0.5.30"
+library_version: '0.5.30'
 requires:
   - db-core
 sources:
-  - "TanStack/db:docs/framework/svelte/overview.md"
-  - "TanStack/db:packages/svelte-db/src/useLiveQuery.svelte.ts"
+  - 'TanStack/db:docs/framework/svelte/overview.md'
+  - 'TanStack/db:packages/svelte-db/src/useLiveQuery.svelte.ts'
 ---
 
 This skill builds on db-core. Read it first for collection setup, query builder, and mutation patterns.
@@ -57,17 +57,17 @@ Returns a reactive object with getter properties:
 
 ```ts
 // Query function — access via dot notation
-const query = useLiveQuery((q) =>
-  q.from({ todo: todoCollection })
-)
+const query = useLiveQuery((q) => q.from({ todo: todoCollection }))
 // query.data, query.isLoading, query.status, etc.
 
 // With reactive deps — use GETTER FUNCTIONS
 let minPriority = $state(5)
 const query = useLiveQuery(
-  (q) => q.from({ todo: todoCollection })
-           .where(({ todo }) => gt(todo.priority, minPriority)),
-  [() => minPriority]
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => gt(todo.priority, minPriority)),
+  [() => minPriority],
 )
 
 // Config object
@@ -118,20 +118,26 @@ const { data, isLoading } = $derived(query)
 Wrong:
 
 ```ts
-let filter = $state("active")
+let filter = $state('active')
 const query = useLiveQuery(
-  (q) => q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.status, filter)),
-  [filter]
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.status, filter)),
+  [filter],
 )
 ```
 
 Correct:
 
 ```ts
-let filter = $state("active")
+let filter = $state('active')
 const query = useLiveQuery(
-  (q) => q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.status, filter)),
-  [() => filter]
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.status, filter)),
+  [() => filter],
 )
 ```
 
@@ -144,7 +150,9 @@ Source: docs/framework/svelte/overview.md
 Wrong:
 
 ```ts
-const { data, isLoading } = useLiveQuery((q) => q.from({ todo: todoCollection }))
+const { data, isLoading } = useLiveQuery((q) =>
+  q.from({ todo: todoCollection }),
+)
 ```
 
 Correct:

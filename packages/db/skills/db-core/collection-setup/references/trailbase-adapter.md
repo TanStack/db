@@ -9,18 +9,18 @@ pnpm add @tanstack/trailbase-db-collection @tanstack/react-db trailbase
 ## Required Config
 
 ```typescript
-import { createCollection } from "@tanstack/react-db"
-import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
-import { initClient } from "trailbase"
+import { createCollection } from '@tanstack/react-db'
+import { trailBaseCollectionOptions } from '@tanstack/trailbase-db-collection'
+import { initClient } from 'trailbase'
 
-const trailBaseClient = initClient("https://your-trailbase-instance.com")
+const trailBaseClient = initClient('https://your-trailbase-instance.com')
 
 const todosCollection = createCollection(
   trailBaseCollectionOptions({
-    id: "todos",
-    recordApi: trailBaseClient.records("todos"),
+    id: 'todos',
+    recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
-  })
+  }),
 )
 ```
 
@@ -30,14 +30,14 @@ const todosCollection = createCollection(
 
 ## Optional Config
 
-| Option | Default | Description |
-|---|---|---|
-| `schema` | (none) | StandardSchema validator |
-| `parse` | (none) | Object mapping field names to functions that transform data coming FROM TrailBase |
-| `serialize` | (none) | Object mapping field names to functions that transform data going TO TrailBase |
-| `onInsert` | (none) | Handler called on insert |
-| `onUpdate` | (none) | Handler called on update |
-| `onDelete` | (none) | Handler called on delete |
+| Option      | Default | Description                                                                       |
+| ----------- | ------- | --------------------------------------------------------------------------------- |
+| `schema`    | (none)  | StandardSchema validator                                                          |
+| `parse`     | (none)  | Object mapping field names to functions that transform data coming FROM TrailBase |
+| `serialize` | (none)  | Object mapping field names to functions that transform data going TO TrailBase    |
+| `onInsert`  | (none)  | Handler called on insert                                                          |
+| `onUpdate`  | (none)  | Handler called on update                                                          |
+| `onDelete`  | (none)  | Handler called on delete                                                          |
 
 ## Conversions (parse/serialize)
 
@@ -60,8 +60,8 @@ type Todo = {
 
 const collection = createCollection<SelectTodo, Todo>(
   trailBaseCollectionOptions({
-    id: "todos",
-    recordApi: trailBaseClient.records("todos"),
+    id: 'todos',
+    recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
     parse: {
       created_at: (ts) => new Date(ts * 1000),
@@ -69,7 +69,7 @@ const collection = createCollection<SelectTodo, Todo>(
     serialize: {
       created_at: (date) => Math.floor(date.valueOf() / 1000),
     },
-  })
+  }),
 )
 ```
 
@@ -96,12 +96,12 @@ TrailBase handles persistence through the Record API automatically. Custom handl
 ## Complete Example
 
 ```typescript
-import { createCollection } from "@tanstack/react-db"
-import { trailBaseCollectionOptions } from "@tanstack/trailbase-db-collection"
-import { initClient } from "trailbase"
-import { z } from "zod"
+import { createCollection } from '@tanstack/react-db'
+import { trailBaseCollectionOptions } from '@tanstack/trailbase-db-collection'
+import { initClient } from 'trailbase'
+import { z } from 'zod'
 
-const trailBaseClient = initClient("https://your-trailbase-instance.com")
+const trailBaseClient = initClient('https://your-trailbase-instance.com')
 
 const todoSchema = z.object({
   id: z.string(),
@@ -121,8 +121,8 @@ type Todo = z.infer<typeof todoSchema>
 
 const todosCollection = createCollection<SelectTodo, Todo>(
   trailBaseCollectionOptions({
-    id: "todos",
-    recordApi: trailBaseClient.records("todos"),
+    id: 'todos',
+    recordApi: trailBaseClient.records('todos'),
     getKey: (item) => item.id,
     schema: todoSchema,
     parse: {
@@ -132,15 +132,15 @@ const todosCollection = createCollection<SelectTodo, Todo>(
       created_at: (date) => Math.floor(date.valueOf() / 1000),
     },
     onInsert: async ({ transaction }) => {
-      console.log("Created:", transaction.mutations[0].modified)
+      console.log('Created:', transaction.mutations[0].modified)
     },
-  })
+  }),
 )
 
 // Usage
 todosCollection.insert({
   id: crypto.randomUUID(),
-  text: "Review PR",
+  text: 'Review PR',
   completed: false,
   created_at: new Date(),
 })

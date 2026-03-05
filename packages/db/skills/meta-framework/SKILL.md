@@ -9,14 +9,14 @@ description: >
   loader APIs.
 type: composition
 library: db
-library_version: "0.5.30"
+library_version: '0.5.30'
 requires:
   - db-core
   - db-core/collection-setup
 sources:
-  - "TanStack/db:examples/react/todo/src/routes/electric.tsx"
-  - "TanStack/db:examples/react/todo/src/routes/query.tsx"
-  - "TanStack/db:examples/react/todo/src/start.tsx"
+  - 'TanStack/db:examples/react/todo/src/routes/electric.tsx'
+  - 'TanStack/db:examples/react/todo/src/routes/query.tsx'
+  - 'TanStack/db:examples/react/todo/src/start.tsx'
 ---
 
 This skill builds on db-core. Read it first for collection setup and query builder.
@@ -62,10 +62,14 @@ export const Route = createFileRoute('/todos')({
 })
 
 function TodoPage() {
-  const { data: todos } = useLiveQuery((q) =>
-    q.from({ todo: todoCollection })
+  const { data: todos } = useLiveQuery((q) => q.from({ todo: todoCollection }))
+  return (
+    <ul>
+      {todos.map((t) => (
+        <li key={t.id}>{t.text}</li>
+      ))}
+    </ul>
   )
-  return <ul>{todos.map(t => <li key={t.id}>{t.text}</li>)}</ul>
 }
 ```
 
@@ -75,10 +79,7 @@ function TodoPage() {
 export const Route = createFileRoute('/electric')({
   ssr: false,
   loader: async () => {
-    await Promise.all([
-      todoCollection.preload(),
-      configCollection.preload(),
-    ])
+    await Promise.all([todoCollection.preload(), configCollection.preload()])
     return null
   },
   component: ElectricPage,
@@ -98,11 +99,17 @@ import { useLiveQuery } from '@tanstack/react-db'
 
 export default function TodoPage() {
   const { data: todos, isLoading } = useLiveQuery((q) =>
-    q.from({ todo: todoCollection })
+    q.from({ todo: todoCollection }),
   )
 
   if (isLoading) return <div>Loading...</div>
-  return <ul>{todos.map(t => <li key={t.id}>{t.text}</li>)}</ul>
+  return (
+    <ul>
+      {todos.map((t) => (
+        <li key={t.id}>{t.text}</li>
+      ))}
+    </ul>
+  )
 }
 ```
 
@@ -121,10 +128,14 @@ import { useLiveQuery } from '@tanstack/react-db'
 const preloadPromise = todoCollection.preload()
 
 export default function TodoPage() {
-  const { data: todos } = useLiveQuery((q) =>
-    q.from({ todo: todoCollection })
+  const { data: todos } = useLiveQuery((q) => q.from({ todo: todoCollection }))
+  return (
+    <ul>
+      {todos.map((t) => (
+        <li key={t.id}>{t.text}</li>
+      ))}
+    </ul>
   )
-  return <ul>{todos.map(t => <li key={t.id}>{t.text}</li>)}</ul>
 }
 ```
 
@@ -146,10 +157,14 @@ export const clientLoader = async ({ request }: ClientLoaderFunctionArgs) => {
 export const loader = () => null
 
 export default function TodoPage() {
-  const { data: todos } = useLiveQuery((q) =>
-    q.from({ todo: todoCollection })
+  const { data: todos } = useLiveQuery((q) => q.from({ todo: todoCollection }))
+  return (
+    <ul>
+      {todos.map((t) => (
+        <li key={t.id}>{t.text}</li>
+      ))}
+    </ul>
   )
-  return <ul>{todos.map(t => <li key={t.id}>{t.text}</li>)}</ul>
 }
 ```
 
@@ -163,7 +178,7 @@ export default function TodoPage() {
 import { useLiveQuery } from '@tanstack/vue-db'
 
 const { data: todos, isLoading } = useLiveQuery((q) =>
-  q.from({ todo: todoCollection })
+  q.from({ todo: todoCollection }),
 )
 </script>
 

@@ -1,37 +1,37 @@
 # _artifacts/skill_tree.yaml
 library:
-  name: "@tanstack/db"
-  version: "0.5.30"
-  repository: "https://github.com/TanStack/db"
-  description: "Reactive client store with normalized collections, sub-millisecond live queries, and instant optimistic mutations"
+  name: '@tanstack/db'
+  version: '0.5.30'
+  repository: 'https://github.com/TanStack/db'
+  description: 'Reactive client store with normalized collections, sub-millisecond live queries, and instant optimistic mutations'
 generated_from:
-  domain_map: "domain_map.yaml"
-  skill_spec: "skill_spec.md"
-generated_at: "2026-03-04"
+  domain_map: 'domain_map.yaml'
+  skill_spec: 'skill_spec.md'
+generated_at: '2026-03-04'
 
 skills:
   # ─── Core overview (entry point) ───
-  - name: "db-core"
-    slug: "db-core"
-    type: "core"
-    domain: "collection-setup"
-    path: "skills/db-core/SKILL.md"
-    package: "packages/db"
+  - name: 'db-core'
+    slug: 'db-core'
+    type: 'core'
+    domain: 'collection-setup'
+    path: 'skills/db-core/SKILL.md'
+    package: 'packages/db'
     description: >
       TanStack DB core concepts: createCollection, live queries via query builder,
       optimistic mutations with draft proxy, transaction lifecycle. Entry point
       for all TanStack DB skills with sub-skill routing table.
     sources:
-      - "TanStack/db:docs/overview.md"
-      - "TanStack/db:packages/db/src/index.ts"
+      - 'TanStack/db:docs/overview.md'
+      - 'TanStack/db:packages/db/src/index.ts'
 
   # ─── Core sub-skills ───
-  - name: "Collection Setup"
-    slug: "db-core/collection-setup"
-    type: "sub-skill"
-    domain: "collection-setup"
-    path: "skills/db-core/collection-setup/SKILL.md"
-    package: "packages/db"
+  - name: 'Collection Setup'
+    slug: 'db-core/collection-setup'
+    type: 'sub-skill'
+    domain: 'collection-setup'
+    path: 'skills/db-core/collection-setup/SKILL.md'
+    package: 'packages/db'
     description: >
       Creating typed collections with createCollection, queryCollectionOptions,
       electricCollectionOptions, powerSyncCollectionOptions, rxdbCollectionOptions,
@@ -40,41 +40,41 @@ skills:
       StandardSchema validation with Zod/Valibot/ArkType. Collection lifecycle
       (idle/loading/ready/error/cleaned-up). Adapter-specific sync patterns.
     requires:
-      - "db-core"
+      - 'db-core'
     sources:
-      - "TanStack/db:docs/overview.md"
-      - "TanStack/db:docs/guides/schemas.md"
-      - "TanStack/db:docs/collections/query-collection.md"
-      - "TanStack/db:docs/collections/electric-collection.md"
-      - "TanStack/db:docs/collections/powersync-collection.md"
-      - "TanStack/db:docs/collections/rxdb-collection.md"
-      - "TanStack/db:docs/collections/trailbase-collection.md"
-      - "TanStack/db:docs/collections/local-only-collection.md"
-      - "TanStack/db:docs/collections/local-storage-collection.md"
-      - "TanStack/db:packages/db/src/collection/index.ts"
+      - 'TanStack/db:docs/overview.md'
+      - 'TanStack/db:docs/guides/schemas.md'
+      - 'TanStack/db:docs/collections/query-collection.md'
+      - 'TanStack/db:docs/collections/electric-collection.md'
+      - 'TanStack/db:docs/collections/powersync-collection.md'
+      - 'TanStack/db:docs/collections/rxdb-collection.md'
+      - 'TanStack/db:docs/collections/trailbase-collection.md'
+      - 'TanStack/db:docs/collections/local-only-collection.md'
+      - 'TanStack/db:docs/collections/local-storage-collection.md'
+      - 'TanStack/db:packages/db/src/collection/index.ts'
     subsystems:
-      - "TanStack Query adapter"
-      - "ElectricSQL adapter"
-      - "PowerSync adapter"
-      - "RxDB adapter"
-      - "TrailBase adapter"
-      - "Local-only"
-      - "localStorage"
+      - 'TanStack Query adapter'
+      - 'ElectricSQL adapter'
+      - 'PowerSync adapter'
+      - 'RxDB adapter'
+      - 'TrailBase adapter'
+      - 'Local-only'
+      - 'localStorage'
     references:
-      - "references/query-adapter.md"
-      - "references/electric-adapter.md"
-      - "references/powersync-adapter.md"
-      - "references/rxdb-adapter.md"
-      - "references/trailbase-adapter.md"
-      - "references/local-adapters.md"
-      - "references/schema-patterns.md"
+      - 'references/query-adapter.md'
+      - 'references/electric-adapter.md'
+      - 'references/powersync-adapter.md'
+      - 'references/rxdb-adapter.md'
+      - 'references/trailbase-adapter.md'
+      - 'references/local-adapters.md'
+      - 'references/schema-patterns.md'
 
-  - name: "Live Queries"
-    slug: "db-core/live-queries"
-    type: "sub-skill"
-    domain: "live-queries"
-    path: "skills/db-core/live-queries/SKILL.md"
-    package: "packages/db"
+  - name: 'Live Queries'
+    slug: 'db-core/live-queries'
+    type: 'sub-skill'
+    domain: 'live-queries'
+    path: 'skills/db-core/live-queries/SKILL.md'
+    package: 'packages/db'
     description: >
       Query builder fluent API: from, where, join, leftJoin, rightJoin, innerJoin,
       fullJoin, select, fn.select, groupBy, having, orderBy, limit, offset, distinct,
@@ -85,21 +85,21 @@ skills:
       standalone queries. Derived collections. Predicate push-down. IVM via
       differential dataflow (d2ts).
     requires:
-      - "db-core"
+      - 'db-core'
     sources:
-      - "TanStack/db:docs/guides/live-queries.md"
-      - "TanStack/db:packages/db/src/query/builder/index.ts"
-      - "TanStack/db:packages/db/src/query/compiler/index.ts"
-      - "TanStack/db:packages/db-ivm/src/index.ts"
+      - 'TanStack/db:docs/guides/live-queries.md'
+      - 'TanStack/db:packages/db/src/query/builder/index.ts'
+      - 'TanStack/db:packages/db/src/query/compiler/index.ts'
+      - 'TanStack/db:packages/db-ivm/src/index.ts'
     references:
-      - "references/operators.md"
+      - 'references/operators.md'
 
-  - name: "Mutations & Optimistic State"
-    slug: "db-core/mutations-optimistic"
-    type: "sub-skill"
-    domain: "mutations-optimistic"
-    path: "skills/db-core/mutations-optimistic/SKILL.md"
-    package: "packages/db"
+  - name: 'Mutations & Optimistic State'
+    slug: 'db-core/mutations-optimistic'
+    type: 'sub-skill'
+    domain: 'mutations-optimistic'
+    path: 'skills/db-core/mutations-optimistic/SKILL.md'
+    package: 'packages/db'
     description: >
       collection.insert, collection.update (Immer-style draft proxy),
       collection.delete. createOptimisticAction (onMutate + mutationFn).
@@ -110,22 +110,22 @@ skills:
       handlers. PendingMutation (original, modified, changes, globalKey).
       Transaction.isPersisted promise. TanStack Pacer integration.
     requires:
-      - "db-core"
+      - 'db-core'
     sources:
-      - "TanStack/db:docs/guides/mutations.md"
-      - "TanStack/db:packages/db/src/transactions.ts"
-      - "TanStack/db:packages/db/src/optimistic-action.ts"
-      - "TanStack/db:packages/db/src/paced-mutations.ts"
-      - "TanStack/db:packages/db/src/collection/mutations.ts"
+      - 'TanStack/db:docs/guides/mutations.md'
+      - 'TanStack/db:packages/db/src/transactions.ts'
+      - 'TanStack/db:packages/db/src/optimistic-action.ts'
+      - 'TanStack/db:packages/db/src/paced-mutations.ts'
+      - 'TanStack/db:packages/db/src/collection/mutations.ts'
     references:
-      - "references/transaction-api.md"
+      - 'references/transaction-api.md'
 
-  - name: "Custom Adapter Authoring"
-    slug: "db-core/custom-adapter"
-    type: "sub-skill"
-    domain: "custom-adapter"
-    path: "skills/db-core/custom-adapter/SKILL.md"
-    package: "packages/db"
+  - name: 'Custom Adapter Authoring'
+    slug: 'db-core/custom-adapter'
+    type: 'sub-skill'
+    domain: 'custom-adapter'
+    path: 'skills/db-core/custom-adapter/SKILL.md'
+    package: 'packages/db'
     description: >
       Building custom collection adapters. SyncConfig interface: sync function
       receiving begin, write, commit, markReady, truncate primitives. ChangeMessage
@@ -134,20 +134,20 @@ skills:
       parseOrderByExpression, extractSimpleComparisons, parseLoadSubsetOptions.
       Collection options creator pattern. Subscription lifecycle and cleanup.
     requires:
-      - "db-core"
-      - "db-core/collection-setup"
+      - 'db-core'
+      - 'db-core/collection-setup'
     sources:
-      - "TanStack/db:docs/guides/collection-options-creator.md"
-      - "TanStack/db:packages/db/src/collection/sync.ts"
-      - "TanStack/db:packages/db/src/query/ir.ts"
+      - 'TanStack/db:docs/guides/collection-options-creator.md'
+      - 'TanStack/db:packages/db/src/collection/sync.ts'
+      - 'TanStack/db:packages/db/src/query/ir.ts'
 
   # ─── Framework skills (one per adapter package) ───
-  - name: "React DB"
-    slug: "react-db"
-    type: "framework"
-    domain: "framework-integration"
-    path: "skills/react-db/SKILL.md"
-    package: "packages/react-db"
+  - name: 'React DB'
+    slug: 'react-db'
+    type: 'framework'
+    domain: 'framework-integration'
+    path: 'skills/react-db/SKILL.md'
+    package: 'packages/react-db'
     description: >
       React bindings for TanStack DB. useLiveQuery hook with dependency arrays
       and 8 overloads (query function, config object, pre-created collection,
@@ -156,84 +156,84 @@ skills:
       hasNextPage). usePacedMutations for debounced React state. Return shape:
       data, state, collection, status, isLoading, isReady, isError.
     requires:
-      - "db-core"
+      - 'db-core'
     sources:
-      - "TanStack/db:docs/framework/react/overview.md"
-      - "TanStack/db:packages/react-db/src/useLiveQuery.ts"
-      - "TanStack/db:packages/react-db/src/useLiveInfiniteQuery.ts"
-      - "TanStack/db:packages/react-db/src/usePacedMutations.ts"
+      - 'TanStack/db:docs/framework/react/overview.md'
+      - 'TanStack/db:packages/react-db/src/useLiveQuery.ts'
+      - 'TanStack/db:packages/react-db/src/useLiveInfiniteQuery.ts'
+      - 'TanStack/db:packages/react-db/src/usePacedMutations.ts'
 
-  - name: "Vue DB"
-    slug: "vue-db"
-    type: "framework"
-    domain: "framework-integration"
-    path: "skills/vue-db/SKILL.md"
-    package: "packages/vue-db"
+  - name: 'Vue DB'
+    slug: 'vue-db'
+    type: 'framework'
+    domain: 'framework-integration'
+    path: 'skills/vue-db/SKILL.md'
+    package: 'packages/vue-db'
     description: >
       Vue bindings for TanStack DB. useLiveQuery composable with
       MaybeRefOrGetter query functions and ComputedRef return values.
       Reactive deps via Vue refs and computed properties.
     requires:
-      - "db-core"
+      - 'db-core'
     sources:
-      - "TanStack/db:docs/framework/vue/overview.md"
-      - "TanStack/db:packages/vue-db/src/useLiveQuery.ts"
+      - 'TanStack/db:docs/framework/vue/overview.md'
+      - 'TanStack/db:packages/vue-db/src/useLiveQuery.ts'
 
-  - name: "Svelte DB"
-    slug: "svelte-db"
-    type: "framework"
-    domain: "framework-integration"
-    path: "skills/svelte-db/SKILL.md"
-    package: "packages/svelte-db"
+  - name: 'Svelte DB'
+    slug: 'svelte-db'
+    type: 'framework'
+    domain: 'framework-integration'
+    path: 'skills/svelte-db/SKILL.md'
+    package: 'packages/svelte-db'
     description: >
       Svelte 5 bindings for TanStack DB. useLiveQuery with Svelte 5 runes
       ($state reactivity). Dependency arrays with getter functions for props.
     requires:
-      - "db-core"
+      - 'db-core'
     sources:
-      - "TanStack/db:docs/framework/svelte/overview.md"
-      - "TanStack/db:packages/svelte-db/src/useLiveQuery.svelte.ts"
+      - 'TanStack/db:docs/framework/svelte/overview.md'
+      - 'TanStack/db:packages/svelte-db/src/useLiveQuery.svelte.ts'
 
-  - name: "Solid DB"
-    slug: "solid-db"
-    type: "framework"
-    domain: "framework-integration"
-    path: "skills/solid-db/SKILL.md"
-    package: "packages/solid-db"
+  - name: 'Solid DB'
+    slug: 'solid-db'
+    type: 'framework'
+    domain: 'framework-integration'
+    path: 'skills/solid-db/SKILL.md'
+    package: 'packages/solid-db'
     description: >
       SolidJS bindings for TanStack DB. useLiveQuery with fine-grained
       reactivity (Accessor, createSignal). Signal reads must happen inside
       the query function for tracking.
     requires:
-      - "db-core"
+      - 'db-core'
     sources:
-      - "TanStack/db:docs/framework/solid/overview.md"
-      - "TanStack/db:packages/solid-db/src/useLiveQuery.ts"
+      - 'TanStack/db:docs/framework/solid/overview.md'
+      - 'TanStack/db:packages/solid-db/src/useLiveQuery.ts'
 
-  - name: "Angular DB"
-    slug: "angular-db"
-    type: "framework"
-    domain: "framework-integration"
-    path: "skills/angular-db/SKILL.md"
-    package: "packages/angular-db"
+  - name: 'Angular DB'
+    slug: 'angular-db'
+    type: 'framework'
+    domain: 'framework-integration'
+    path: 'skills/angular-db/SKILL.md'
+    package: 'packages/angular-db'
     description: >
       Angular bindings for TanStack DB. injectLiveQuery with Angular Signals.
       Must be called in injection context. Supports reactive params via
       { params: () => T, query: ({ params, q }) => QueryBuilder } pattern.
       Uses inject(DestroyRef) for cleanup.
     requires:
-      - "db-core"
+      - 'db-core'
     sources:
-      - "TanStack/db:docs/framework/angular/overview.md"
-      - "TanStack/db:packages/angular-db/src/inject-live-query.ts"
+      - 'TanStack/db:docs/framework/angular/overview.md'
+      - 'TanStack/db:packages/angular-db/src/inject-live-query.ts'
 
   # ─── Composition skills ───
-  - name: "Meta-Framework Integration"
-    slug: "meta-framework"
-    type: "composition"
-    domain: "meta-framework"
-    path: "skills/meta-framework/SKILL.md"
-    package: "packages/db"
+  - name: 'Meta-Framework Integration'
+    slug: 'meta-framework'
+    type: 'composition'
+    domain: 'meta-framework'
+    path: 'skills/meta-framework/SKILL.md'
+    package: 'packages/db'
     description: >
       Client-side preloading of TanStack DB collections in route loaders.
       collection.preload(), stateWhenReady(), toArrayWhenReady(), onFirstReady().
@@ -241,20 +241,20 @@ skills:
       routes (SSR not yet supported). TanStack Start and TanStack Router loader
       patterns. Coordinating collection lifecycle with route transitions.
     requires:
-      - "db-core"
-      - "db-core/collection-setup"
+      - 'db-core'
+      - 'db-core/collection-setup'
     sources:
-      - "TanStack/db:docs/guides/live-queries.md"
-      - "TanStack/db:examples/react/projects/src/routes/_authenticated/project/$projectId.tsx"
-      - "TanStack/db:examples/react/projects/README.md"
+      - 'TanStack/db:docs/guides/live-queries.md'
+      - 'TanStack/db:examples/react/projects/src/routes/_authenticated/project/$projectId.tsx'
+      - 'TanStack/db:examples/react/projects/README.md'
 
   # ─── Offline skill ───
-  - name: "Offline Transactions"
-    slug: "offline"
-    type: "composition"
-    domain: "offline"
-    path: "skills/offline/SKILL.md"
-    package: "packages/offline-transactions"
+  - name: 'Offline Transactions'
+    slug: 'offline'
+    type: 'composition'
+    domain: 'offline'
+    path: 'skills/offline/SKILL.md'
+    package: 'packages/offline-transactions'
     description: >
       Offline-first transaction queueing with @tanstack/offline-transactions.
       OfflineExecutor, startOfflineExecutor, OfflineConfig (collections,
@@ -264,10 +264,10 @@ skills:
       Online detection (WebOnlineDetector). OutboxManager, KeyScheduler,
       TransactionSerializer. React Native support via @react-native-community/netinfo.
     requires:
-      - "db-core"
-      - "db-core/mutations-optimistic"
+      - 'db-core'
+      - 'db-core/mutations-optimistic'
     sources:
-      - "TanStack/db:packages/offline-transactions/src/index.ts"
-      - "TanStack/db:packages/offline-transactions/src/offline-executor.ts"
-      - "TanStack/db:packages/offline-transactions/src/outbox.ts"
-      - "TanStack/db:packages/offline-transactions/src/leader/"
+      - 'TanStack/db:packages/offline-transactions/src/index.ts'
+      - 'TanStack/db:packages/offline-transactions/src/offline-executor.ts'
+      - 'TanStack/db:packages/offline-transactions/src/outbox.ts'
+      - 'TanStack/db:packages/offline-transactions/src/leader/'

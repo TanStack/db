@@ -18,7 +18,7 @@ const tx = createTransaction<T>({
 ```ts
 interface Transaction<T> {
   id: string
-  state: "pending" | "persisting" | "completed" | "failed"
+  state: 'pending' | 'persisting' | 'completed' | 'failed'
   mutations: Array<PendingMutation<T>>
   autoCommit: boolean
   createdAt: Date
@@ -55,20 +55,20 @@ interface Transaction<T> {
 ## PendingMutation Type
 
 ```ts
-interface PendingMutation<T, TOperation = "insert" | "update" | "delete"> {
-  mutationId: string                              // unique id for this mutation
-  original: TOperation extends "insert" ? {} : T  // state before mutation
-  modified: T                                      // state after mutation
-  changes: Partial<T>                              // only the changed fields
-  key: any                                         // collection-local key
-  globalKey: string                                // globally unique key (collectionId + key)
-  type: TOperation                                 // "insert" | "update" | "delete"
-  metadata: unknown                                // user-provided metadata
-  syncMetadata: Record<string, unknown>            // adapter-specific metadata
-  optimistic: boolean                              // whether applied optimistically (default true)
+interface PendingMutation<T, TOperation = 'insert' | 'update' | 'delete'> {
+  mutationId: string // unique id for this mutation
+  original: TOperation extends 'insert' ? {} : T // state before mutation
+  modified: T // state after mutation
+  changes: Partial<T> // only the changed fields
+  key: any // collection-local key
+  globalKey: string // globally unique key (collectionId + key)
+  type: TOperation // "insert" | "update" | "delete"
+  metadata: unknown // user-provided metadata
+  syncMetadata: Record<string, unknown> // adapter-specific metadata
+  optimistic: boolean // whether applied optimistically (default true)
   createdAt: Date
   updatedAt: Date
-  collection: Collection                           // reference to the source collection
+  collection: Collection // reference to the source collection
 }
 ```
 
@@ -77,14 +77,14 @@ interface PendingMutation<T, TOperation = "insert" | "update" | "delete"> {
 When multiple mutations target the same item (same `globalKey`) within a
 transaction, they merge:
 
-| Existing | Incoming | Result | Notes |
-|----------|----------|--------|-------|
-| insert | update | insert | Merge changes, keep empty original |
-| insert | delete | *removed* | Both mutations cancel out |
-| update | update | update | Union changes, keep first original |
-| update | delete | delete | Delete dominates |
-| delete | delete | delete | Replace with latest |
-| insert | insert | insert | Replace with latest |
+| Existing | Incoming | Result    | Notes                              |
+| -------- | -------- | --------- | ---------------------------------- |
+| insert   | update   | insert    | Merge changes, keep empty original |
+| insert   | delete   | _removed_ | Both mutations cancel out          |
+| update   | update   | update    | Union changes, keep first original |
+| update   | delete   | delete    | Delete dominates                   |
+| delete   | delete   | delete    | Replace with latest                |
+| insert   | insert   | insert    | Replace with latest                |
 
 `(delete, update)` and `(delete, insert)` cannot occur -- the collection
 prevents operations on deleted items within the same transaction.
@@ -92,7 +92,7 @@ prevents operations on deleted items within the same transaction.
 ## getActiveTransaction / Ambient Transaction Context
 
 ```ts
-import { getActiveTransaction } from "@tanstack/db"
+import { getActiveTransaction } from '@tanstack/db'
 
 const tx = getActiveTransaction() // Transaction | undefined
 ```
@@ -190,13 +190,13 @@ starts. Failed transactions do not block subsequent ones.
 ## Transaction.isPersisted.promise
 
 ```ts
-const tx = collection.insert({ id: "1", text: "Hello" })
+const tx = collection.insert({ id: '1', text: 'Hello' })
 
 try {
-  await tx.isPersisted.promise   // resolves with the Transaction on success
-  console.log(tx.state)          // "completed"
+  await tx.isPersisted.promise // resolves with the Transaction on success
+  console.log(tx.state) // "completed"
 } catch (error) {
-  console.log(tx.state)          // "failed"
+  console.log(tx.state) // "failed"
   // optimistic state has been rolled back
 }
 ```

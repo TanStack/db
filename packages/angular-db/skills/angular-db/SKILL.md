@@ -10,12 +10,12 @@ description: >
 type: framework
 library: db
 framework: angular
-library_version: "0.5.30"
+library_version: '0.5.30'
 requires:
   - db-core
 sources:
-  - "TanStack/db:docs/framework/angular/overview.md"
-  - "TanStack/db:packages/angular-db/src/index.ts"
+  - 'TanStack/db:docs/framework/angular/overview.md'
+  - 'TanStack/db:packages/angular-db/src/index.ts'
 ---
 
 This skill builds on db-core. Read it first for collection setup, query builder, and mutation patterns.
@@ -41,13 +41,14 @@ import { injectLiveQuery, eq, not } from '@tanstack/angular-db'
         }
       </ul>
     }
-  `
+  `,
 })
 export class TodoListComponent {
   query = injectLiveQuery((q) =>
-    q.from({ todos: todosCollection })
-     .where(({ todos }) => not(todos.completed))
-     .orderBy(({ todos }) => todos.created_at, "asc")
+    q
+      .from({ todos: todosCollection })
+      .where(({ todos }) => not(todos.completed))
+      .orderBy(({ todos }) => todos.created_at, 'asc'),
   )
 }
 ```
@@ -62,9 +63,7 @@ Returns an object with Angular `Signal<T>` properties — call with `()` in temp
 
 ```typescript
 // Static query — no reactive dependencies
-const query = injectLiveQuery((q) =>
-  q.from({ todo: todoCollection })
-)
+const query = injectLiveQuery((q) => q.from({ todo: todoCollection }))
 // query.data()       → Array<T>
 // query.status()     → CollectionStatus | 'disabled'
 // query.isLoading(), query.isReady(), query.isError()
@@ -76,8 +75,9 @@ const query = injectLiveQuery((q) =>
 const query = injectLiveQuery({
   params: () => ({ minPriority: this.minPriority() }),
   query: ({ params, q }) =>
-    q.from({ todo: todoCollection })
-     .where(({ todo }) => gt(todo.priority, params.minPriority))
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => gt(todo.priority, params.minPriority)),
 })
 
 // Config object
@@ -94,9 +94,10 @@ const query = injectLiveQuery({
   params: () => ({ userId: this.userId() }),
   query: ({ params, q }) => {
     if (!params.userId) return undefined
-    return q.from({ todo: todoCollection })
-             .where(({ todo }) => eq(todo.userId, params.userId))
-  }
+    return q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.userId, params.userId))
+  },
 })
 ```
 
@@ -108,7 +109,7 @@ const query = injectLiveQuery({
 @Component({
   selector: 'app-filtered-todos',
   standalone: true,
-  template: `<div>{{ query.data().length }} todos</div>`
+  template: `<div>{{ query.data().length }} todos</div>`,
 })
 export class FilteredTodosComponent {
   minPriority = signal(5)
@@ -116,8 +117,9 @@ export class FilteredTodosComponent {
   query = injectLiveQuery({
     params: () => ({ minPriority: this.minPriority() }),
     query: ({ params, q }) =>
-      q.from({ todos: todosCollection })
-       .where(({ todos }) => gt(todos.priority, params.minPriority))
+      q
+        .from({ todos: todosCollection })
+        .where(({ todos }) => gt(todos.priority, params.minPriority)),
   })
 }
 ```
@@ -130,7 +132,7 @@ When `params()` return value changes, the previous collection is disposed and a 
 @Component({
   selector: 'app-user-todos',
   standalone: true,
-  template: `<div>{{ query.data().length }} todos</div>`
+  template: `<div>{{ query.data().length }} todos</div>`,
 })
 export class UserTodosComponent {
   userId = input.required<number>()
@@ -138,8 +140,9 @@ export class UserTodosComponent {
   query = injectLiveQuery({
     params: () => ({ userId: this.userId() }),
     query: ({ params, q }) =>
-      q.from({ todo: todoCollection })
-       .where(({ todo }) => eq(todo.userId, params.userId))
+      q
+        .from({ todo: todoCollection })
+        .where(({ todo }) => eq(todo.userId, params.userId)),
   })
 }
 ```
@@ -153,8 +156,9 @@ export class UserTodosComponent {
   query = injectLiveQuery({
     params: () => ({ userId: this.userId }),
     query: ({ params, q }) =>
-      q.from({ todo: todoCollection })
-       .where(({ todo }) => eq(todo.userId, params.userId))
+      q
+        .from({ todo: todoCollection })
+        .where(({ todo }) => eq(todo.userId, params.userId)),
   })
 }
 ```
@@ -165,12 +169,10 @@ Angular 17+ control flow:
 
 ```html
 @if (query.isLoading()) {
-  <div>Loading...</div>
-} @else {
-  @for (todo of query.data(); track todo.id) {
-    <li>{{ todo.text }}</li>
-  }
-}
+<div>Loading...</div>
+} @else { @for (todo of query.data(); track todo.id) {
+<li>{{ todo.text }}</li>
+} }
 ```
 
 Angular 16 structural directives:
@@ -215,8 +217,9 @@ export class FilteredComponent {
   status = signal('active')
 
   query = injectLiveQuery((q) =>
-    q.from({ todo: todoCollection })
-     .where(({ todo }) => eq(todo.status, this.status()))
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.status, this.status())),
   )
 }
 ```
@@ -230,8 +233,9 @@ export class FilteredComponent {
   query = injectLiveQuery({
     params: () => ({ status: this.status() }),
     query: ({ params, q }) =>
-      q.from({ todo: todoCollection })
-       .where(({ todo }) => eq(todo.status, params.status))
+      q
+        .from({ todo: todoCollection })
+        .where(({ todo }) => eq(todo.status, params.status)),
   })
 }
 ```

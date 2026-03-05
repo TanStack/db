@@ -10,14 +10,14 @@ description: >
   React Native support via separate entry point.
 type: composition
 library: db
-library_version: "0.5.30"
+library_version: '0.5.30'
 requires:
   - db-core
   - db-core/mutations-optimistic
 sources:
-  - "TanStack/db:packages/offline-transactions/src/OfflineExecutor.ts"
-  - "TanStack/db:packages/offline-transactions/src/types.ts"
-  - "TanStack/db:packages/offline-transactions/src/index.ts"
+  - 'TanStack/db:packages/offline-transactions/src/OfflineExecutor.ts'
+  - 'TanStack/db:packages/offline-transactions/src/types.ts'
+  - 'TanStack/db:packages/offline-transactions/src/index.ts'
 ---
 
 This skill builds on db-core and mutations-optimistic. Read those first.
@@ -98,14 +98,14 @@ If the executor is not the leader tab, falls back to `createOptimisticAction` di
 
 ### Components
 
-| Component | Purpose | Default |
-|-----------|---------|---------|
-| **Storage** | Persist transactions to survive page reload | IndexedDB → localStorage fallback |
-| **OutboxManager** | FIFO queue of pending transactions | Automatic |
-| **KeyScheduler** | Serialize transactions touching same keys | Automatic |
-| **TransactionExecutor** | Execute with retry + backoff | Automatic |
-| **LeaderElection** | Only one tab processes the outbox | WebLocks → BroadcastChannel |
-| **OnlineDetector** | Pause/resume on connectivity changes | navigator.onLine + events |
+| Component               | Purpose                                     | Default                           |
+| ----------------------- | ------------------------------------------- | --------------------------------- |
+| **Storage**             | Persist transactions to survive page reload | IndexedDB → localStorage fallback |
+| **OutboxManager**       | FIFO queue of pending transactions          | Automatic                         |
+| **KeyScheduler**        | Serialize transactions touching same keys   | Automatic                         |
+| **TransactionExecutor** | Execute with retry + backoff                | Automatic                         |
+| **LeaderElection**      | Only one tab processes the outbox           | WebLocks → BroadcastChannel       |
+| **OnlineDetector**      | Pause/resume on connectivity changes        | navigator.onLine + events         |
 
 ### Transaction lifecycle
 
@@ -124,7 +124,11 @@ Only one tab processes the outbox to prevent duplicate execution. Non-leader tab
 const executor = startOfflineExecutor({
   // ...
   onLeadershipChange: (isLeader) => {
-    console.log(isLeader ? 'This tab is processing offline transactions' : 'Another tab is leader')
+    console.log(
+      isLeader
+        ? 'This tab is processing offline transactions'
+        : 'Another tab is leader',
+    )
   },
 })
 
@@ -145,7 +149,7 @@ const executor = startOfflineExecutor({
   },
 })
 
-executor.mode           // 'offline' | 'online-only'
+executor.mode // 'offline' | 'online-only'
 executor.storageDiagnostic // Full diagnostic info
 ```
 
@@ -155,17 +159,17 @@ When storage is unavailable (private browsing, quota exceeded), the executor ope
 
 ```ts
 interface OfflineConfig {
-  collections: Record<string, Collection>     // Collections for optimistic state restoration
-  mutationFns: Record<string, OfflineMutationFn>  // Named mutation functions
-  storage?: StorageAdapter                    // Custom storage (default: auto-detect)
-  maxConcurrency?: number                     // Parallel execution limit
-  jitter?: boolean                            // Add jitter to retry delays
-  beforeRetry?: (txs) => txs                  // Transform/filter before retry
-  onUnknownMutationFn?: (name, tx) => void    // Handle orphaned transactions
-  onLeadershipChange?: (isLeader) => void     // Leadership state callback
-  onStorageFailure?: (diagnostic) => void     // Storage probe failure callback
-  leaderElection?: LeaderElection             // Custom leader election
-  onlineDetector?: OnlineDetector             // Custom connectivity detection
+  collections: Record<string, Collection> // Collections for optimistic state restoration
+  mutationFns: Record<string, OfflineMutationFn> // Named mutation functions
+  storage?: StorageAdapter // Custom storage (default: auto-detect)
+  maxConcurrency?: number // Parallel execution limit
+  jitter?: boolean // Add jitter to retry delays
+  beforeRetry?: (txs) => txs // Transform/filter before retry
+  onUnknownMutationFn?: (name, tx) => void // Handle orphaned transactions
+  onLeadershipChange?: (isLeader) => void // Leadership state callback
+  onStorageFailure?: (diagnostic) => void // Storage probe failure callback
+  leaderElection?: LeaderElection // Custom leader election
+  onlineDetector?: OnlineDetector // Custom connectivity detection
 }
 ```
 
@@ -238,8 +242,8 @@ const executor = startOfflineExecutor({ ... })
 const pending = await executor.peekOutbox()
 
 // Get counts
-executor.getPendingCount()  // Queued transactions
-executor.getRunningCount()  // Currently executing
+executor.getPendingCount() // Queued transactions
+executor.getRunningCount() // Currently executing
 
 // Clear all pending transactions
 await executor.clearOutbox()

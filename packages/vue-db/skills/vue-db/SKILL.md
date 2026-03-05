@@ -10,12 +10,12 @@ description: >
 type: framework
 library: db
 framework: vue
-library_version: "0.5.30"
+library_version: '0.5.30'
 requires:
   - db-core
 sources:
-  - "TanStack/db:docs/framework/vue/overview.md"
-  - "TanStack/db:packages/vue-db/src/useLiveQuery.ts"
+  - 'TanStack/db:docs/framework/vue/overview.md'
+  - 'TanStack/db:packages/vue-db/src/useLiveQuery.ts'
 ---
 
 This skill builds on db-core. Read it first for collection setup, query builder, and mutation patterns.
@@ -26,13 +26,13 @@ This skill builds on db-core. Read it first for collection setup, query builder,
 
 ```vue
 <script setup lang="ts">
-import { useLiveQuery, eq, not } from "@tanstack/vue-db"
+import { useLiveQuery, eq, not } from '@tanstack/vue-db'
 
 const { data: todos, isLoading } = useLiveQuery((q) =>
   q
     .from({ todo: todoCollection })
     .where(({ todo }) => not(todo.completed))
-    .orderBy(({ todo }) => todo.created_at, "asc")
+    .orderBy(({ todo }) => todo.created_at, 'asc'),
 )
 </script>
 
@@ -56,9 +56,11 @@ All return values are `ComputedRef`:
 // Query function with reactive deps
 const minPriority = ref(5)
 const { data, isLoading, isReady, status } = useLiveQuery(
-  (q) => q.from({ todo: todoCollection })
-           .where(({ todo }) => gt(todo.priority, minPriority.value)),
-  [minPriority]
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => gt(todo.priority, minPriority.value)),
+  [minPriority],
 )
 
 // Config object
@@ -75,9 +77,11 @@ const userId = ref<number | null>(null)
 const { data, status } = useLiveQuery(
   (q) => {
     if (!userId.value) return undefined
-    return q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.userId, userId.value))
+    return q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.userId, userId.value))
   },
-  [userId]
+  [userId],
 )
 ```
 
@@ -86,11 +90,13 @@ const { data, status } = useLiveQuery(
 ### Reactive dependencies with refs
 
 ```ts
-const filter = ref("active")
+const filter = ref('active')
 const { data } = useLiveQuery(
-  (q) => q.from({ todo: todoCollection })
-           .where(({ todo }) => eq(todo.status, filter.value)),
-  [filter]
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.status, filter.value)),
+  [filter],
 )
 // Query re-runs when filter.value changes
 ```
@@ -114,7 +120,9 @@ Wrong:
 ```ts
 const userId = ref(1)
 const { data } = useLiveQuery((q) =>
-  q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.userId, userId.value))
+  q
+    .from({ todo: todoCollection })
+    .where(({ todo }) => eq(todo.userId, userId.value)),
 )
 ```
 
@@ -123,8 +131,11 @@ Correct:
 ```ts
 const userId = ref(1)
 const { data } = useLiveQuery(
-  (q) => q.from({ todo: todoCollection }).where(({ todo }) => eq(todo.userId, userId.value)),
-  [userId]
+  (q) =>
+    q
+      .from({ todo: todoCollection })
+      .where(({ todo }) => eq(todo.userId, userId.value)),
+  [userId],
 )
 ```
 
