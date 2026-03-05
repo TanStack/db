@@ -87,9 +87,16 @@ async function resolveAsyncLocalStorageCtor(): Promise<AsyncLocalStorageCtor | n
     }
 
     try {
-      const asyncHooksModule = (await import(getNodeAsyncHooksSpecifier())) as {
+      // Use Function constructor to hide the dynamic import from React Native
+      // bundlers — Metro rejects non-literal dynamic import() at transform time.
+      // On React Native this code path is never reached (guarded above).
+      const importFn = new Function(
+        `s`,
+        `return import(s)`,
+      ) as (specifier: string) => Promise<{
         AsyncLocalStorage?: AsyncLocalStorageCtor
-      }
+      }>
+      const asyncHooksModule = await importFn(getNodeAsyncHooksSpecifier())
 
       return typeof asyncHooksModule.AsyncLocalStorage === `function`
         ? asyncHooksModule.AsyncLocalStorage
