@@ -19,6 +19,12 @@ export default function RootLayout() {
               title: `Offline Transactions`,
             }}
           />
+          <Stack.Screen
+            name="sqlite"
+            options={{
+              title: `SQLite Persistence`,
+            }}
+          />
         </Stack>
       </QueryClientProvider>
     </SafeAreaProvider>
