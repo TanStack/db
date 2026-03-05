@@ -1,3 +1,4 @@
+import { compileSingleRowExpression, toBooleanPredicate } from '@tanstack/db'
 import {
   InvalidPersistedCollectionConfigError,
   InvalidPersistedCollectionCoordinatorError,
@@ -71,7 +72,7 @@ export type TxCommitted = {
     }
   | {
       requiresFullReload: false
-      changedKeys: Array<string | number>
+      changedRows: Array<{ key: string | number; value: Record<string, unknown> }>
       deletedKeys: Array<string | number>
     }
 )
@@ -691,7 +692,7 @@ function isTxCommittedPayload(payload: unknown): payload is TxCommitted {
   }
 
   return (
-    Array.isArray(payload.changedKeys) && Array.isArray(payload.deletedKeys)
+    Array.isArray(payload.changedRows) && Array.isArray(payload.deletedKeys)
   )
 }
 
@@ -1180,7 +1181,7 @@ class PersistedCollectionRuntime<
           seq: streamPosition.seq,
           txId: crypto.randomUUID(),
           latestRowVersion: streamPosition.rowVersion,
-          changedKeys: [],
+          changedRows: [],
           deletedKeys: [],
           requiresFullReload: true,
         }),
@@ -1200,9 +1201,9 @@ class PersistedCollectionRuntime<
         seq: tx.seq,
         txId: tx.txId,
         latestRowVersion: tx.rowVersion,
-        changedKeys: transaction.operations
+        changedRows: transaction.operations
           .filter((operation) => operation.type === `update`)
-          .map((operation) => operation.key),
+          .map((operation) => ({ key: operation.key, value: operation.value })),
         deletedKeys: transaction.operations
           .filter((operation) => operation.type === `delete`)
           .map((operation) => operation.key),
@@ -1374,9 +1375,9 @@ class PersistedCollectionRuntime<
         seq: tx.seq,
         txId: tx.txId,
         latestRowVersion: tx.rowVersion,
-        changedKeys: mutations
+        changedRows: mutations
           .filter((mutation) => mutation.type !== `delete`)
-          .map((mutation) => mutation.key as TKey),
+          .map((mutation) => ({ key: mutation.key as TKey, value: mutation.modified })),
         deletedKeys: mutations
           .filter((mutation) => mutation.type === `delete`)
           .map((mutation) => mutation.key as TKey),
@@ -1391,13 +1392,13 @@ class PersistedCollectionRuntime<
     seq: number
     txId: string
     latestRowVersion: number
-    changedKeys: Array<TKey>
+    changedRows: Array<{ key: TKey; value: T }>
     deletedKeys: Array<TKey>
     requiresFullReload?: boolean
   }): TxCommitted {
     const requiresFullReload =
       args.requiresFullReload === true ||
-      args.changedKeys.length + args.deletedKeys.length >
+      args.changedRows.length + args.deletedKeys.length >
         TARGETED_INVALIDATION_KEY_LIMIT
 
     if (requiresFullReload) {
@@ -1418,7 +1419,7 @@ class PersistedCollectionRuntime<
       txId: args.txId,
       latestRowVersion: args.latestRowVersion,
       requiresFullReload: false,
-      changedKeys: args.changedKeys,
+      changedRows: args.changedRows as Array<{ key: string | number; value: Record<string, unknown> }>,
       deletedKeys: args.deletedKeys,
     }
   }
@@ -1706,15 +1707,58 @@ class PersistedCollectionRuntime<
     }
 
     const changedKeyCount =
-      txCommitted.changedKeys.length + txCommitted.deletedKeys.length
+      txCommitted.changedRows.length + txCommitted.deletedKeys.length
     if (changedKeyCount > TARGETED_INVALIDATION_KEY_LIMIT) {
       await this.reloadActiveSubsetsUnsafe()
       return
     }
 
-    // Best-effort invalidation: correctness over precision.
-    // We conservatively reload all active subsets to avoid stale reads.
+    const hasPaginatedSubset = Array.from(this.activeSubsets.values()).some(
+      (opt) =>
+        opt.limit != null || opt.offset != null || opt.cursor != null,
+    )
+
+    if (!hasPaginatedSubset) {
+      await this.applyTargetedInvalidationUnsafe(txCommitted)
+      return
+    }
+
+    // Has paginated subsets — fall back to full reload.
+    // Targeted invalidation for paginated subsets is deferred to a future iteration.
     await this.reloadActiveSubsetsUnsafe()
+  }
+
+  private async applyTargetedInvalidationUnsafe(
+    txCommitted: TxCommitted & { requiresFullReload: false },
+  ): Promise<void> {
+    const subsetEvaluators = Array.from(this.activeSubsets.values()).map(
+      (opt) => (opt.where ? compileSingleRowExpression(opt.where) : null),
+    )
+
+    this.withInternalApply(() => {
+      this.syncControls.begin?.({ immediate: true })
+
+      for (const { key: changedKey, value: newValue } of txCommitted.changedRows) {
+        const matchesAnySubset = subsetEvaluators.some((evaluator) => {
+          if (!evaluator) return true
+          return toBooleanPredicate(
+            evaluator(newValue) as boolean | null,
+          )
+        })
+
+        if (matchesAnySubset) {
+          this.syncControls.write?.({ type: `update`, value: newValue as T })
+        } else if (this.collection?.get(changedKey as TKey) !== undefined) {
+          this.syncControls.write?.({ type: `delete`, key: changedKey as TKey })
+        }
+      }
+
+      for (const deletedKey of txCommitted.deletedKeys) {
+        this.syncControls.write?.({ type: `delete`, key: deletedKey as TKey })
+      }
+
+      this.syncControls.commit?.()
+    })
   }
 
   private async reloadActiveSubsetsUnsafe(): Promise<void> {
