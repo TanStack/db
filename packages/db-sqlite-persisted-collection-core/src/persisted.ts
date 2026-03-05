@@ -72,7 +72,10 @@ export type TxCommitted = {
     }
   | {
       requiresFullReload: false
-      changedRows: Array<{ key: string | number; value: Record<string, unknown> }>
+      changedRows: Array<{
+        key: string | number
+        value: Record<string, unknown>
+      }>
       deletedKeys: Array<string | number>
     }
 )
@@ -1377,7 +1380,10 @@ class PersistedCollectionRuntime<
         latestRowVersion: tx.rowVersion,
         changedRows: mutations
           .filter((mutation) => mutation.type !== `delete`)
-          .map((mutation) => ({ key: mutation.key as TKey, value: mutation.modified })),
+          .map((mutation) => ({
+            key: mutation.key as TKey,
+            value: mutation.modified,
+          })),
         deletedKeys: mutations
           .filter((mutation) => mutation.type === `delete`)
           .map((mutation) => mutation.key as TKey),
@@ -1419,7 +1425,10 @@ class PersistedCollectionRuntime<
       txId: args.txId,
       latestRowVersion: args.latestRowVersion,
       requiresFullReload: false,
-      changedRows: args.changedRows as Array<{ key: string | number; value: Record<string, unknown> }>,
+      changedRows: args.changedRows as Array<{
+        key: string | number
+        value: Record<string, unknown>
+      }>,
       deletedKeys: args.deletedKeys,
     }
   }
@@ -1714,8 +1723,7 @@ class PersistedCollectionRuntime<
     }
 
     const hasPaginatedSubset = Array.from(this.activeSubsets.values()).some(
-      (opt) =>
-        opt.limit != null || opt.offset != null || opt.cursor != null,
+      (opt) => opt.limit != null || opt.offset != null || opt.cursor != null,
     )
 
     if (!hasPaginatedSubset) {
@@ -1738,12 +1746,13 @@ class PersistedCollectionRuntime<
     this.withInternalApply(() => {
       this.syncControls.begin?.({ immediate: true })
 
-      for (const { key: changedKey, value: newValue } of txCommitted.changedRows) {
+      for (const {
+        key: changedKey,
+        value: newValue,
+      } of txCommitted.changedRows) {
         const matchesAnySubset = subsetEvaluators.some((evaluator) => {
           if (!evaluator) return true
-          return toBooleanPredicate(
-            evaluator(newValue) as boolean | null,
-          )
+          return toBooleanPredicate(evaluator(newValue) as boolean | null)
         })
 
         if (matchesAnySubset) {
