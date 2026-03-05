@@ -9,6 +9,9 @@
     "start": "node .output/server/index.mjs"
   },
   "dependencies": {
+    "@journeyapps/wa-sqlite": "^1.4.1",
+    "@tanstack/db": "workspace:*",
+    "@tanstack/db-browser-wa-sqlite-persisted-collection": "workspace:*",
     "@tanstack/offline-transactions": "^1.0.21",
     "@tanstack/query-db-collection": "^1.0.27",
     "@tanstack/react-db": "^0.1.74",
