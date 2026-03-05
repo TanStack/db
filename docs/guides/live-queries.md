@@ -1048,8 +1048,11 @@ const departmentStats = createCollection(liveQueryCollectionOptions({
 > In `groupBy` queries, the properties in your `select` clause must either be:
 > - An aggregate function (like `count`, `sum`, `avg`)
 > - A property that was used in the `groupBy` clause
-> 
+>
 > You cannot select properties that are neither aggregated nor grouped.
+
+> [!WARNING]
+> `fn.select()` cannot be used with `groupBy()`. The `groupBy` operator needs to statically analyze the `select` clause to discover which aggregate functions (`count`, `sum`, `max`, etc.) to compute for each group. Since `fn.select()` is an opaque JavaScript function, the compiler cannot inspect it. Use the standard `.select()` API when combining with `groupBy()`.
 
 ### Multiple Column Grouping
 
@@ -1889,6 +1892,9 @@ The functional variant API provides an alternative to the standard API, offering
 > The functional variant API cannot be optimized by the query optimizer or use collection indexes. It is intended for use in rare cases where the standard API is not sufficient.
 
 ### Functional Select
+
+> [!WARNING]
+> `fn.select()` cannot be used with `groupBy()`. The `groupBy` operator needs to statically analyze the `select` clause to discover which aggregate functions to compute, which is not possible with an opaque JavaScript function. Use the standard `.select()` API for grouped queries.
 
 Use `fn.select()` for complex transformations with JavaScript logic:
 

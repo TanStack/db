@@ -11,7 +11,7 @@ title: rxdbCollectionOptions
 function rxdbCollectionOptions<T>(config): CollectionConfig<InferSchemaOutput<T>, string, T, UtilsRecord> & object;
 ```
 
-Defined in: rxdb.ts:89
+Defined in: [rxdb.ts:89](https://github.com/TanStack/db/blob/main/packages/rxdb-db-collection/src/rxdb.ts#L89)
 
 Creates RxDB collection options for use with a standard Collection
 
@@ -41,7 +41,7 @@ Collection options with utilities
 function rxdbCollectionOptions<T>(config): CollectionConfig<T, string, never, UtilsRecord> & object;
 ```
 
-Defined in: rxdb.ts:96
+Defined in: [rxdb.ts:96](https://github.com/TanStack/db/blob/main/packages/rxdb-db-collection/src/rxdb.ts#L96)
 
 Creates RxDB collection options for use with a standard Collection
 

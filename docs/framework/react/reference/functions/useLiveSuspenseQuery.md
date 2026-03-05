@@ -11,7 +11,7 @@ title: useLiveSuspenseQuery
 function useLiveSuspenseQuery<TContext>(queryFn, deps?): object;
 ```
 
-Defined in: useLiveSuspenseQuery.ts:109
+Defined in: [useLiveSuspenseQuery.ts:109](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L109)
 
 Create a live query with React Suspense support
 
@@ -167,7 +167,7 @@ const { data, isEnabled } = useLiveQuery(
 function useLiveSuspenseQuery<TContext>(config, deps?): object;
 ```
 
-Defined in: useLiveSuspenseQuery.ts:119
+Defined in: [useLiveSuspenseQuery.ts:119](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L119)
 
 Create a live query with React Suspense support
 
@@ -321,7 +321,7 @@ const { data, isEnabled } = useLiveQuery(
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: useLiveSuspenseQuery.ts:129
+Defined in: [useLiveSuspenseQuery.ts:129](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L129)
 
 Create a live query with React Suspense support
 
@@ -476,7 +476,7 @@ const { data, isEnabled } = useLiveQuery(
 function useLiveSuspenseQuery<TResult, TKey, TUtils>(liveQueryCollection): object;
 ```
 
-Defined in: useLiveSuspenseQuery.ts:142
+Defined in: [useLiveSuspenseQuery.ts:142](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveSuspenseQuery.ts#L142)
 
 Create a live query with React Suspense support
 

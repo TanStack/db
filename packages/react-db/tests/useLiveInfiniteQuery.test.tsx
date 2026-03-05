@@ -1837,4 +1837,35 @@ describe(`useLiveInfiniteQuery`, () => {
       expect(result.current.data).toHaveLength(40)
     })
   })
+
+  it(`throws a descriptive error when deps contain non-serializable values`, () => {
+    const posts = createMockPosts(10)
+    const collection = createCollection(
+      mockSyncCollectionOptions<Post>({
+        id: `circular-deps-test`,
+        getKey: (post: Post) => post.id,
+        initialData: posts,
+      }),
+    )
+
+    const circular: Record<string, unknown> = { a: 1 }
+    circular.self = circular
+
+    expect(() => {
+      renderHook(() => {
+        return useLiveInfiniteQuery(
+          (q) =>
+            q
+              .from({ posts: collection })
+              .orderBy(({ posts: p }) => p.createdAt, `desc`),
+          {
+            pageSize: 5,
+            getNextPageParam: (lastPage) =>
+              lastPage.length === 5 ? lastPage.length : undefined,
+          },
+          [circular],
+        )
+      })
+    }).toThrow(/useLiveInfiniteQuery.*dependency/)
+  })
 })

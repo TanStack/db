@@ -1,5 +1,27 @@
 # @tanstack/offline-transactions
 
+## 1.0.21
+
+### Patch Changes
+
+- Fix retry behavior to not cap at 10 attempts and not burn retries while offline. Default retry policy now retries indefinitely with exponential backoff. Execution loop and retry timer check online status before attempting transactions. `OnlineDetector.isOnline()` is now a required method on the interface. `OfflineExecutor.notifyOnline()` has been removed — the online detector handles connectivity changes automatically. ([#1301](https://github.com/TanStack/db/pull/1301))
+
+## 1.0.20
+
+### Patch Changes
+
+- Fix KeyScheduler to enforce strict FIFO ordering on retries. Previously, the scheduler could skip past a transaction waiting for retry and execute a later one, causing dependent UPDATE-before-INSERT failures. Also refactored `getNextBatch` to `getNext` to reflect that it always returns at most one transaction. ([#1300](https://github.com/TanStack/db/pull/1300))
+
+- Updated dependencies [[`e9d0fd8`](https://github.com/TanStack/db/commit/e9d0fd8f0db18a7dc8a0f2b3eacd50a94f6258f7)]:
+  - @tanstack/db@0.5.30
+
+## 1.0.19
+
+### Patch Changes
+
+- Updated dependencies [[`77b815e`](https://github.com/TanStack/db/commit/77b815ee52e91ca8d03110a551a4cb8bab4f2daa), [`ac4ce67`](https://github.com/TanStack/db/commit/ac4ce6790e906f5cfb086b063c8d7daa7681ceb9)]:
+  - @tanstack/db@0.5.29
+
 ## 1.0.18
 
 ### Patch Changes

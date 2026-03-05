@@ -9,7 +9,7 @@ title: PowerSyncCollectionMeta
 type PowerSyncCollectionMeta<TTable> = object;
 ```
 
-Defined in: definitions.ts:235
+Defined in: [definitions.ts:235](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L235)
 
 Metadata for the PowerSync Collection.
 
@@ -27,7 +27,7 @@ Metadata for the PowerSync Collection.
 metadataIsTracked: boolean;
 ```
 
-Defined in: definitions.ts:253
+Defined in: [definitions.ts:253](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L253)
 
 Whether the PowerSync table tracks metadata.
 
@@ -39,7 +39,7 @@ Whether the PowerSync table tracks metadata.
 serializeValue: (value) => ExtractedTable<TTable>;
 ```
 
-Defined in: definitions.ts:248
+Defined in: [definitions.ts:248](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L248)
 
 Serializes a collection value to the SQLite type
 
@@ -61,7 +61,7 @@ Serializes a collection value to the SQLite type
 tableName: string;
 ```
 
-Defined in: definitions.ts:239
+Defined in: [definitions.ts:239](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L239)
 
 The SQLite table representing the collection.
 
@@ -73,6 +73,6 @@ The SQLite table representing the collection.
 trackedTableName: string;
 ```
 
-Defined in: definitions.ts:243
+Defined in: [definitions.ts:243](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L243)
 
 The internal table used to track diffs for the collection.

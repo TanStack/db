@@ -9,7 +9,7 @@ title: MergeContextWithJoinType
 type MergeContextWithJoinType<TContext, TNewSchema, TJoinType> = object & PreserveSingleResultFlag<TContext["singleResult"]>;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:573
+Defined in: [packages/db/src/query/builder/types.ts:573](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L573)
 
 MergeContextWithJoinType - Creates a new context after a join operation
 

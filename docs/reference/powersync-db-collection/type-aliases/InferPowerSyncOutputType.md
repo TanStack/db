@@ -9,7 +9,7 @@ title: InferPowerSyncOutputType
 type InferPowerSyncOutputType<TTable, TSchema> = TSchema extends never ? ExtractedTable<TTable> : InferSchemaOutput<TSchema>;
 ```
 
-Defined in: definitions.ts:20
+Defined in: [definitions.ts:20](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L20)
 
 Small helper which determines the output type if:
 - Standard SQLite types are to be used OR

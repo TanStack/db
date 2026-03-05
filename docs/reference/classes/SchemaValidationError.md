@@ -5,7 +5,7 @@ title: SchemaValidationError
 
 # Class: SchemaValidationError
 
-Defined in: packages/db/src/errors.ts:18
+Defined in: [packages/db/src/errors.ts:18](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L18)
 
 ## Extends
 
@@ -22,7 +22,7 @@ new SchemaValidationError(
    message?): SchemaValidationError;
 ```
 
-Defined in: packages/db/src/errors.ts:25
+Defined in: [packages/db/src/errors.ts:25](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L25)
 
 #### Parameters
 
@@ -68,7 +68,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 issues: readonly object[];
 ```
 
-Defined in: packages/db/src/errors.ts:20
+Defined in: [packages/db/src/errors.ts:20](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L20)
 
 ***
 
@@ -120,7 +120,7 @@ Defined in: node\_modules/.pnpm/typescript@5.9.3/node\_modules/typescript/lib/li
 type: "insert" | "update";
 ```
 
-Defined in: packages/db/src/errors.ts:19
+Defined in: [packages/db/src/errors.ts:19](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L19)
 
 ***
 
