@@ -777,9 +777,7 @@ describe(`persistedCollectionOptions`, () => {
   })
 
   it(`targeted update avoids full loadSubset call`, async () => {
-    const adapter = createRecordingAdapter([
-      { id: `1`, title: `Original` },
-    ])
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Original` }])
     const coordinator = createCoordinatorHarness()
 
     const collection = createCollection(
@@ -883,9 +881,7 @@ describe(`persistedCollectionOptions`, () => {
   })
 
   it(`paginated subset falls back to full reload`, async () => {
-    const adapter = createRecordingAdapter([
-      { id: `1`, title: `Row 1` },
-    ])
+    const adapter = createRecordingAdapter([{ id: `1`, title: `Row 1` }])
     const coordinator = createCoordinatorHarness()
 
     const collection = createCollection(

@@ -1299,7 +1299,11 @@ export class SQLiteCorePersistenceAdapter<
 
   async getStreamPosition(
     collectionId: string,
-  ): Promise<{ latestTerm: number; latestSeq: number; latestRowVersion: number }> {
+  ): Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }> {
     await this.ensureCollectionReady(collectionId)
 
     const [termRows, versionRows, seqRows] = await Promise.all([
