@@ -113,7 +113,7 @@ type AdapterWithPullSince = PersistenceAdapter<
 
 export type BrowserCollectionCoordinatorOptions = {
   dbName: string
-  adapter: AdapterWithPullSince
+  adapter?: AdapterWithPullSince
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +123,7 @@ export type BrowserCollectionCoordinatorOptions = {
 export class BrowserCollectionCoordinator implements PersistedCollectionCoordinator {
   private readonly nodeId = crypto.randomUUID()
   private readonly dbName: string
-  private readonly adapter: AdapterWithPullSince
+  private adapter: AdapterWithPullSince | null
   private readonly channel: BroadcastChannel
   private readonly collections = new Map<string, CollectionState>()
   private readonly pendingRPCs = new Map<string, PendingRPC>()
@@ -135,13 +135,31 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     return this.disposed
   }
 
+  private requireAdapter(): AdapterWithPullSince {
+    if (!this.adapter) {
+      throw new Error(
+        `BrowserCollectionCoordinator: adapter not set. Call setAdapter() before using leader-side operations.`,
+      )
+    }
+    return this.adapter
+  }
+
   constructor(options: BrowserCollectionCoordinatorOptions) {
     this.dbName = options.dbName
-    this.adapter = options.adapter
+    this.adapter = options.adapter ?? null
     this.channel = new BroadcastChannel(`tsdb:coord:${this.dbName}`)
     this.channel.onmessage = (event: MessageEvent) => {
       this.onChannelMessage(event.data)
     }
+  }
+
+  /**
+   * Set or replace the persistence adapter used for leader-side RPC handling.
+   * Called by `createBrowserWASQLitePersistence` to wire the internally-created
+   * adapter into the coordinator.
+   */
+  setAdapter(adapter: AdapterWithPullSince): void {
+    this.adapter = adapter
   }
 
   // -----------------------------------------------------------------------
@@ -207,7 +225,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     spec: PersistedIndexSpec,
   ): Promise<void> {
     if (this.isLeader(collectionId)) {
-      await this.adapter.ensureIndex(collectionId, signature, spec)
+      await this.requireAdapter().ensureIndex(collectionId, signature, spec)
       return
     }
 
@@ -328,26 +346,27 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
         lockName,
         { signal: abortController.signal },
         async () => {
-          if (this.disposed) return
-
-          state.isLeader = true
-
-          // Restore stream position from DB
-          if (this.adapter.getStreamPosition) {
-            const pos = await this.adapter.getStreamPosition(collectionId)
-            state.latestTerm = pos.latestTerm
-            state.latestSeq = pos.latestSeq
-            state.latestRowVersion = pos.latestRowVersion
-          }
-
-          state.latestTerm++
-
-          this.emitHeartbeat(collectionId, state)
-          state.heartbeatTimer = setInterval(() => {
-            this.emitHeartbeat(collectionId, state)
-          }, HEARTBEAT_INTERVAL_MS)
+          if (this.isDisposed()) return
 
           try {
+            // Restore stream position from DB before claiming leadership
+            const adapter = this.requireAdapter()
+            if (adapter.getStreamPosition) {
+              const pos =
+                await adapter.getStreamPosition(collectionId)
+              state.latestTerm = pos.latestTerm
+              state.latestSeq = pos.latestSeq
+              state.latestRowVersion = pos.latestRowVersion
+            }
+
+            state.latestTerm++
+            state.isLeader = true
+
+            this.emitHeartbeat(collectionId, state)
+            state.heartbeatTimer = setInterval(() => {
+              this.emitHeartbeat(collectionId, state)
+            }, HEARTBEAT_INTERVAL_MS)
+
             // Hold the lock until disposed or aborted
             await new Promise<void>((resolve) => {
               const onAbort = () => {
@@ -362,8 +381,10 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
             })
           } finally {
             state.isLeader = false
-            clearInterval(state.heartbeatTimer)
-            state.heartbeatTimer = null
+            if (state.heartbeatTimer) {
+              clearInterval(state.heartbeatTimer)
+              state.heartbeatTimer = null
+            }
           }
         },
       )
@@ -592,7 +613,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     },
   ): Promise<RPCResponse> {
     await this.withWriterLock(() =>
-      this.adapter.ensureIndex(collectionId, request.signature, request.spec),
+      this.requireAdapter().ensureIndex(collectionId, request.signature, request.spec),
     )
     return {
       type: `rpc:ensurePersistedIndex:res`,
@@ -654,7 +675,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
     }
 
     await this.withWriterLock(() =>
-      this.adapter.applyCommittedTx(collectionId, tx),
+      this.requireAdapter().applyCommittedTx(collectionId, tx),
     )
 
     // Track envelope for dedup
@@ -714,7 +735,8 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
   ): Promise<PullSinceResponse> {
     const state = this.collections.get(collectionId)
 
-    if (!this.adapter.pullSince) {
+    const adapter = this.requireAdapter()
+    if (!adapter.pullSince) {
       return {
         type: `rpc:pullSince:res`,
         rpcId: request.rpcId,
@@ -726,7 +748,7 @@ export class BrowserCollectionCoordinator implements PersistedCollectionCoordina
       }
     }
 
-    const result = await this.adapter.pullSince(
+    const result = await adapter.pullSince(
       collectionId,
       request.fromRowVersion,
     )
