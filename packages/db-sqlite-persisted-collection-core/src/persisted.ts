@@ -1581,12 +1581,12 @@ class PersistedCollectionRuntime<
       return
     }
 
-    if (message.senderId === this.persistence.coordinator.getNodeId()) {
-      return
-    }
-
     const { payload } = message
+    const isSelf = message.senderId === this.persistence.coordinator.getNodeId()
 
+    // Allow tx:committed from self — the coordinator produces these on behalf
+    // of both local and remote mutations. The seq dedup in
+    // processCommittedTxUnsafe prevents double-processing of our own writes.
     if (isTxCommittedPayload(payload)) {
       if (this.isHydrating) {
         this.queuedTxCommitted.push(payload)
@@ -1598,6 +1598,11 @@ class PersistedCollectionRuntime<
         .catch((error) => {
           console.warn(`Failed to process tx:committed message:`, error)
         })
+      return
+    }
+
+    // Skip remaining message types from self (e.g. heartbeats, resets)
+    if (isSelf) {
       return
     }
 
