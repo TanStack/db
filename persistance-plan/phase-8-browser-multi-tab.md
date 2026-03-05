@@ -23,13 +23,26 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 - SharedWorker architecture
 - Global single-writer ownership across all collections
 
+## Implementation Status
+
+> **Overall: NOT STARTED** — No `BrowserCollectionCoordinator` class exists.
+> The core coordinator interface, protocol types, and message handling skeleton
+> exist in `packages/db-sqlite-persisted-collection-core/src/persisted.ts` from
+> earlier phases, but no browser-specific multi-tab implementation has been written.
+> The browser package (`db-browser-wa-sqlite-persisted-collection`) only uses
+> `SingleProcessCoordinator`.
+>
+> Note: Web Locks and BroadcastChannel implementations exist in
+> `packages/offline-transactions/src/coordination/` but serve a different purpose
+> (transaction-level leadership, not collection-level coordination).
+
 ## Detailed Workstreams
 
 ### Workstream A - Leadership and Heartbeats
 
 - [ ] Acquire per-collection Web Lock (`tsdb:leader:<dbName>:<collectionId>`).
-- [ ] Increment durable `leader_term` transactionally on leadership gain.
-- [ ] Emit leader heartbeat with latest seq/rowVersion.
+- [x] Increment durable `leader_term` transactionally on leadership gain. *(storage-level `leader_term` table exists in `sqlite-core-adapter.ts:1804-1809` with MAX-based increment logic; needs browser coordinator to call it on leadership gain)*
+- [ ] Emit leader heartbeat with latest seq/rowVersion. *(protocol type `LeaderHeartbeat` defined in `persisted.ts:55-61` but no emitter exists)*
 - [ ] Detect heartbeat timeout and trigger takeover attempts.
 - [ ] Implement hidden-tab cooperative stepdown and cooldown.
 
@@ -40,13 +53,13 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream B - Protocol Transport and RPC
 
-- [ ] Implement BroadcastChannel envelope transport per collection.
-- [ ] Implement request/response correlation via `rpcId`.
+- [ ] Implement BroadcastChannel envelope transport per collection. *(protocol `ProtocolEnvelope` type defined in `persisted.ts:46-53`; no transport implemented)*
+- [ ] Implement request/response correlation via `rpcId`. *(RPC types with `rpcId` fields defined; no correlation machinery implemented)*
 - [ ] Implement RPC handlers:
-  - `ensureRemoteSubset`
-  - `ensurePersistedIndex`
-  - `applyLocalMutations`
-  - `pullSince`
+  - `ensureRemoteSubset` *(request/response types defined; `requestEnsureRemoteSubset` in coordinator interface; no browser handler)*
+  - `ensurePersistedIndex` *(in coordinator interface; `SingleProcessCoordinator` has no-op stub)*
+  - `applyLocalMutations` *(request/response types defined; caller logic in `persisted.ts:1325-1365`; no browser handler)*
+  - `pullSince` *(request/response types defined; caller logic in `persisted.ts:1668-1682`; no browser handler)*
 - [ ] Implement retry/backoff and timeout behavior.
 
 **Acceptance criteria**
@@ -55,10 +68,10 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream C - Mutation Routing and Acknowledgment
 
-- [ ] Route follower sync-absent mutations to current leader.
-- [ ] Dedupe mutation envelopes by `envelopeId` at leader.
-- [ ] Return accepted mutation ids and resulting `(term, seq, rowVersion)`.
-- [ ] Confirm/rollback optimistic local entries in follower based on response.
+- [ ] Route follower sync-absent mutations to current leader. *(caller side exists in `persisted.ts:1325-1365` using `requestApplyLocalMutations`; no transport)*
+- [ ] Dedupe mutation envelopes by `envelopeId` at leader. *(`envelopeId` field defined in `ApplyLocalMutationsRequest`; no dedup logic)*
+- [ ] Return accepted mutation ids and resulting `(term, seq, rowVersion)`. *(response type defined; no handler)*
+- [ ] Confirm/rollback optimistic local entries in follower based on response. *(partial: acceptance path in `persisted.ts:976-982`; no rollback on failure)*
 
 **Acceptance criteria**
 
@@ -66,11 +79,11 @@ Implement robust multi-tab coordination using Web Locks, Visibility API, and Bro
 
 ### Workstream D - Commit Ordering and Recovery
 
-- [ ] Broadcast `tx:committed` after DB commit only.
-- [ ] Track follower last seen `(term, seq)` and rowVersion.
-- [ ] On seq gap, invoke `pullSince(lastSeenRowVersion)`.
-- [ ] Apply targeted invalidation when key count is within limit.
-- [ ] Trigger full reload when required or when pull fails.
+- [x] Broadcast `tx:committed` after DB commit only. *(implemented in `persisted.ts:1201-1215` and `persisted.ts:1376-1389` — publishes via coordinator after `applyCommittedTx`)*
+- [x] Track follower last seen `(term, seq)` and rowVersion. *(implemented in `persisted.ts:1449-1474` via `observeStreamPosition`; restored from DB on startup via `getStreamPosition`)*
+- [x] On seq gap, invoke `pullSince(lastSeenRowVersion)`. *(implemented in `persisted.ts:1642-1651` gap detection and `persisted.ts:1662-1684` recovery)*
+- [x] Apply targeted invalidation when key count is within limit. *(implemented in `persisted.ts:1705-1738` with `TARGETED_INVALIDATION_KEY_LIMIT` and inline row data in `changedRows`)*
+- [x] Trigger full reload when required or when pull fails. *(implemented in `persisted.ts:1708-1711` for `requiresFullReload`, `persisted.ts:1715-1718` for over-limit, and `persisted.ts:1684` as fallback)*
 
 **Acceptance criteria**
 
