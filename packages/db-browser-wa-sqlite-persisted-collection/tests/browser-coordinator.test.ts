@@ -8,8 +8,10 @@ import type { PersistenceAdapter } from '@tanstack/db-sqlite-persisted-collectio
 // ---------------------------------------------------------------------------
 
 type MessageHandler = (event: { data: unknown }) => void
-const channels: Map<string, Set<{ onmessage: MessageHandler | null }>> =
-  new Map()
+const channels: Map<
+  string,
+  Set<{ onmessage: MessageHandler | null }>
+> = new Map()
 
 class MockBroadcastChannel {
   readonly name: string
@@ -48,7 +50,15 @@ class MockBroadcastChannel {
 type LockGrantedCallback = (lock: { name: string }) => Promise<unknown>
 
 const heldLocks = new Map<string, { release: () => void }>()
-const lockQueues = new Map<string, Array<{ callback: LockGrantedCallback; signal?: AbortSignal; resolve: (v: unknown) => void; reject: (e: Error) => void }>>()
+const lockQueues = new Map<
+  string,
+  Array<{
+    callback: LockGrantedCallback
+    signal?: AbortSignal
+    resolve: (v: unknown) => void
+    reject: (e: Error) => void
+  }>
+>()
 
 function tryGrantNextLock(name: string): void {
   if (heldLocks.has(name)) return
@@ -98,7 +108,9 @@ const mockNavigatorLocks = {
         ? optionsOrCallback
         : maybeCallback!
     const signal =
-      typeof optionsOrCallback === `object` ? optionsOrCallback.signal : undefined
+      typeof optionsOrCallback === `object`
+        ? optionsOrCallback.signal
+        : undefined
 
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
@@ -139,7 +151,9 @@ function installGlobals(): void {
     MockBroadcastChannel as unknown
   Object.defineProperty(globalThis, `navigator`, {
     value: {
-      ...((globalThis as Record<string, unknown>).navigator as object | undefined ?? {}),
+      ...(((globalThis as Record<string, unknown>).navigator as
+        | object
+        | undefined) ?? {}),
       locks: mockNavigatorLocks,
     },
     writable: true,
@@ -319,15 +333,20 @@ describe(`BrowserCollectionCoordinator`, () => {
         collectionId: `todos`,
         senderId: coord1.getNodeId(),
         ts: Date.now(),
-        payload: { type: `tx:committed`, term: 1, seq: 1, txId: `tx-1`, latestRowVersion: 1, requiresFullReload: true },
+        payload: {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `tx-1`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
       })
 
       await flush()
 
       expect(received.length).toBe(1)
-      expect((received[0] as Record<string, unknown>).type).toBe(
-        `tx:committed`,
-      )
+      expect((received[0] as Record<string, unknown>).type).toBe(`tx:committed`)
 
       coord1.dispose()
       coord2.dispose()
@@ -347,7 +366,14 @@ describe(`BrowserCollectionCoordinator`, () => {
         collectionId: `todos`,
         senderId: coord.getNodeId(),
         ts: Date.now(),
-        payload: { type: `tx:committed`, term: 1, seq: 1, txId: `tx-1`, latestRowVersion: 1, requiresFullReload: true },
+        payload: {
+          type: `tx:committed`,
+          term: 1,
+          seq: 1,
+          txId: `tx-1`,
+          latestRowVersion: 1,
+          requiresFullReload: true,
+        },
       })
 
       await flush()
