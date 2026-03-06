@@ -23,6 +23,8 @@ import type {
 } from '@tanstack/db'
 import type { Signal } from '@angular/core'
 
+export * from '@tanstack/db'
+
 /**
  * The result of calling `injectLiveQuery`.
  * Contains reactive signals for the query state and data.
