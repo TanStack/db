@@ -1,5 +1,14 @@
 # @tanstack/react-db
 
+## 0.2.11
+
+### Patch Changes
+
+- Add Intent agent skills (SKILL.md files) to guide AI coding agents. Include skills for core DB concepts, all 5 framework bindings, meta-framework integration, and offline transactions. Also add `export * from '@tanstack/db'` to angular-db for consistency with other framework packages. ([#1330](https://github.com/TanStack/db/pull/1330))
+
+- Updated dependencies [[`bf1d078`](https://github.com/TanStack/db/commit/bf1d078627de150bfca02e2ae2ad8b0289c19b37)]:
+  - @tanstack/db@0.5.31
+
 ## 0.2.10
 
 ### Patch Changes
