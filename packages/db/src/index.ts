@@ -26,6 +26,17 @@ export { type IndexOptions } from './indexes/index-options.js'
 // Expression helpers
 export * from './query/expression-helpers.js'
 
+// Reactive effects
+export {
+  createEffect,
+  type DeltaEvent,
+  type DeltaType,
+  type EffectConfig,
+  type EffectContext,
+  type Effect,
+  type EffectQueryInput,
+} from './query/effect.js'
+
 // Re-export some stuff explicitly to ensure the type & value is exported
 export type { Collection } from './collection/index.js'
 export { IR }
