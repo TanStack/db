@@ -1830,7 +1830,7 @@ describe(`Proxy Library`, () => {
 
         // Use find() to get an array item and modify it
         const order = proxy.job.orders.find(
-          (order) => order.orderId === `order-1`,
+          (o) => o.orderId === `order-1`,
         )
         if (order) {
           order.orderBinInt = 99

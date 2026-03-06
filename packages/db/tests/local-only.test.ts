@@ -529,6 +529,7 @@ describe(`LocalOnly Collection`, () => {
       )
 
       const tx = createTransaction({
+        // eslint-disable-next-line @typescript-eslint/require-await
         mutationFn: async ({ transaction }: any) => {
           noIdCollection.utils.acceptMutations(transaction)
         },
