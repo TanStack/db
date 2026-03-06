@@ -5,7 +5,7 @@ title: InjectLiveQueryResultWithCollection
 
 # Interface: InjectLiveQueryResultWithCollection\<TResult, TKey, TUtils\>
 
-Defined in: [index.ts:55](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L55)
+Defined in: [index.ts:57](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L57)
 
 ## Type Parameters
 
@@ -32,7 +32,7 @@ collection: Signal<
 | null>;
 ```
 
-Defined in: [index.ts:62](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L62)
+Defined in: [index.ts:64](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L64)
 
 ***
 
@@ -42,7 +42,7 @@ Defined in: [index.ts:62](https://github.com/TanStack/db/blob/main/packages/angu
 data: Signal<TResult[]>;
 ```
 
-Defined in: [index.ts:61](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L61)
+Defined in: [index.ts:63](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L63)
 
 ***
 
@@ -52,7 +52,7 @@ Defined in: [index.ts:61](https://github.com/TanStack/db/blob/main/packages/angu
 isCleanedUp: Signal<boolean>;
 ```
 
-Defined in: [index.ts:68](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L68)
+Defined in: [index.ts:70](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L70)
 
 ***
 
@@ -62,7 +62,7 @@ Defined in: [index.ts:68](https://github.com/TanStack/db/blob/main/packages/angu
 isError: Signal<boolean>;
 ```
 
-Defined in: [index.ts:67](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L67)
+Defined in: [index.ts:69](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L69)
 
 ***
 
@@ -72,7 +72,7 @@ Defined in: [index.ts:67](https://github.com/TanStack/db/blob/main/packages/angu
 isIdle: Signal<boolean>;
 ```
 
-Defined in: [index.ts:66](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L66)
+Defined in: [index.ts:68](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L68)
 
 ***
 
@@ -82,7 +82,7 @@ Defined in: [index.ts:66](https://github.com/TanStack/db/blob/main/packages/angu
 isLoading: Signal<boolean>;
 ```
 
-Defined in: [index.ts:64](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L64)
+Defined in: [index.ts:66](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L66)
 
 ***
 
@@ -92,7 +92,7 @@ Defined in: [index.ts:64](https://github.com/TanStack/db/blob/main/packages/angu
 isReady: Signal<boolean>;
 ```
 
-Defined in: [index.ts:65](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L65)
+Defined in: [index.ts:67](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L67)
 
 ***
 
@@ -102,7 +102,7 @@ Defined in: [index.ts:65](https://github.com/TanStack/db/blob/main/packages/angu
 state: Signal<Map<TKey, TResult>>;
 ```
 
-Defined in: [index.ts:60](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L60)
+Defined in: [index.ts:62](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L62)
 
 ***
 
@@ -112,4 +112,4 @@ Defined in: [index.ts:60](https://github.com/TanStack/db/blob/main/packages/angu
 status: Signal<CollectionStatus | "disabled">;
 ```
 
-Defined in: [index.ts:63](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L63)
+Defined in: [index.ts:65](https://github.com/TanStack/db/blob/main/packages/angular-db/src/index.ts#L65)
