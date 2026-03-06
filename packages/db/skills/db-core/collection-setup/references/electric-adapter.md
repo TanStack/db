@@ -132,29 +132,29 @@ const todosCollection = createCollection(
     schema: z.object({
       id: z.string(),
       text: z.string(),
-      completed: z.boolean(),           // Electric auto-parses bools
-      created_at: z.coerce.date(),      // mutation path: coerce string → Date
+      completed: z.boolean(), // Electric auto-parses bools
+      created_at: z.coerce.date(), // mutation path: coerce string → Date
     }),
     shapeOptions: {
-      url: "/api/todos",
+      url: '/api/todos',
       parser: {
-        timestamptz: (value: string) => new Date(value),  // sync path: parse incoming strings
+        timestamptz: (value: string) => new Date(value), // sync path: parse incoming strings
       },
     },
     getKey: (item) => item.id,
-  })
+  }),
 )
 ```
 
 ### Postgres → Electric type handling
 
-| PG type | Electric auto-parses? | Schema needed? | Parser needed? |
-|---------|----------------------|----------------|----------------|
-| `text`, `uuid` | Yes (string) | `z.string()` | No |
-| `int4`, `int8` | Yes (number) | `z.number()` | No |
-| `bool` | Yes (boolean) | `z.boolean()` | No |
-| `timestamptz` | No (stays string) | `z.coerce.date()` | Yes — `parser: { timestamptz: (v) => new Date(v) }` |
-| `jsonb` | Yes (parsed object) | As needed | No |
+| PG type        | Electric auto-parses? | Schema needed?    | Parser needed?                                      |
+| -------------- | --------------------- | ----------------- | --------------------------------------------------- |
+| `text`, `uuid` | Yes (string)          | `z.string()`      | No                                                  |
+| `int4`, `int8` | Yes (number)          | `z.number()`      | No                                                  |
+| `bool`         | Yes (boolean)         | `z.boolean()`     | No                                                  |
+| `timestamptz`  | No (stays string)     | `z.coerce.date()` | Yes — `parser: { timestamptz: (v) => new Date(v) }` |
+| `jsonb`        | Yes (parsed object)   | As needed         | No                                                  |
 
 Note: `z.coerce.date()` is Zod-specific. Other StandardSchema libraries have their own coercion patterns.
 
@@ -197,7 +197,7 @@ const todosCollection = createCollection(
       url: '/api/todos',
       params: { table: 'todos' },
       parser: {
-        timestamptz: (value: string) => new Date(value),  // sync path
+        timestamptz: (value: string) => new Date(value), // sync path
       },
     },
     onInsert: async ({ transaction }) => {

@@ -124,6 +124,7 @@ try {
 **Schemas validate client mutations only** (`insert()`, `update()`). Synced data from backends (Electric, PowerSync, etc.) bypasses the schema entirely.
 
 This means for types that need transformation (e.g., `timestamptz`):
+
 - **Sync path**: handled by the adapter's parser (e.g., Electric's `shapeOptions.parser`)
 - **Mutation path**: handled by the Zod schema
 

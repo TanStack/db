@@ -279,7 +279,8 @@ const createTodo = createServerFn({ method: 'POST' })
     let txid!: number
     const todo = await sql.begin(async (tx) => {
       // txid MUST be queried inside the same Postgres transaction
-      const [{ txid: rawTxid }] = await tx`SELECT pg_current_xact_id()::text as txid`
+      const [{ txid: rawTxid }] =
+        await tx`SELECT pg_current_xact_id()::text as txid`
       txid = Number(rawTxid)
       const [row] = await tx`INSERT INTO todos ${tx(data)} RETURNING *`
       return row
