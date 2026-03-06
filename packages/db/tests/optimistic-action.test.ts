@@ -70,6 +70,7 @@ describe(`createOptimisticAction`, () => {
     })
 
     const addTodo = createOptimisticAction<string>({
+      // eslint-disable-next-line @typescript-eslint/require-await
       onMutate: async (text) => {
         collection.insert({ id: `1`, text })
       },
