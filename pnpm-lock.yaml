@@ -527,7 +527,7 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.2.38
+        specifier: ^0.2.39
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.20
@@ -648,7 +648,7 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.2.38
+        specifier: ^0.2.39
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.20
