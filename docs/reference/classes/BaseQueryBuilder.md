@@ -102,8 +102,7 @@ select<TFuncSelectResult>(callback): QueryBuilder<WithResult<TContext, TFuncSele
 ```
 
 Select fields using a function that operates on each row
-Warning: This cannot be optimized by the query compiler.
-Cannot be used with `groupBy()` — use the standard `.select()` API for grouped queries.
+Warning: This cannot be optimized by the query compiler
 
 ###### Type Parameters
 
