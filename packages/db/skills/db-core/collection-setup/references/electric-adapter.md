@@ -158,6 +158,14 @@ const todosCollection = createCollection(
 
 Note: `z.coerce.date()` is Zod-specific. Other StandardSchema libraries have their own coercion patterns.
 
+## Electric Client Skills
+
+For deeper Electric-specific guidance (ShapeStream config, shape filtering, etc.), load the Electric client's built-in skills:
+
+```bash
+npx @electric-sql/client intent list
+```
+
 ## Debug Logging
 
 ```javascript
