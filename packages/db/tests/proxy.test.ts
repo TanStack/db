@@ -1829,9 +1829,7 @@ describe(`Proxy Library`, () => {
         const { proxy, getChanges } = createChangeProxy(obj)
 
         // Use find() to get an array item and modify it
-        const order = proxy.job.orders.find(
-          (o) => o.orderId === `order-1`,
-        )
+        const order = proxy.job.orders.find((o) => o.orderId === `order-1`)
         if (order) {
           order.orderBinInt = 99
         }
