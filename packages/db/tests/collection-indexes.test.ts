@@ -14,6 +14,7 @@ import {
   or,
 } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
+import { BTreeIndex } from '../src/indexes/btree-index.js'
 import { expectIndexUsage, withIndexTracking } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
@@ -181,6 +182,144 @@ describe(`Collection Indexes`, () => {
       // undefined should be first in ordered entries
       const firstValue = scoreIndex.orderedEntriesArray[0]?.[0]
       expect(firstValue).toBeUndefined()
+    })
+  })
+
+  describe(`Index Removal`, () => {
+    it(`should remove indexes by proxy and by id`, () => {
+      const ageIndex = collection.createIndex((row) => row.age)
+      const statusIndex = collection.createIndex((row) => row.status)
+
+      expect(collection.removeIndex(ageIndex)).toBe(true)
+      expect(collection.removeIndex(statusIndex.id)).toBe(true)
+      expect(collection.removeIndex(ageIndex.id)).toBe(false)
+    })
+
+    it(`should ignore removeIndex calls from other collections`, async () => {
+      const otherCollection = createCollection<TestItem, string>({
+        getKey: (item) => item.id,
+        startSync: true,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            write({
+              type: `insert`,
+              value: testData[0]!,
+            })
+            commit()
+            markReady()
+          },
+        },
+      })
+      await otherCollection.stateWhenReady()
+
+      const otherIndex = otherCollection.createIndex((row) => row.status)
+
+      collection.createIndex((row) => row.status)
+      expect(collection.removeIndex(otherIndex)).toBe(false)
+      expect(collection.indexes.size).toBe(1)
+    })
+
+    it(`should emit one auto-index lifecycle event per auto-created index`, () => {
+      const addedEvents: Array<string | undefined> = []
+      collection.on(`index:added`, (event) => {
+        addedEvents.push(event.index.name)
+      })
+
+      const activeItems: Array<any> = []
+      const subscription = collection.subscribeChanges(
+        (items) => {
+          activeItems.push(...items)
+        },
+        {
+          includeInitialState: true,
+          whereExpression: eq(new PropRef([`status`]), `active`),
+        },
+      )
+      subscription.unsubscribe()
+
+      expect(activeItems).toHaveLength(3)
+      expect(addedEvents.filter((name) => name === `auto:status`)).toHaveLength(
+        1,
+      )
+    })
+
+    it(`should expose index metadata snapshot for pre-sync bootstrap`, () => {
+      const lazyCollection = createCollection<TestItem, string>({
+        getKey: (item) => item.id,
+        sync: {
+          sync: ({ begin, write, commit, markReady }) => {
+            begin()
+            for (const item of testData) {
+              write({
+                type: `insert`,
+                value: item,
+              })
+            }
+            commit()
+            markReady()
+          },
+        },
+      })
+
+      const preSyncIndex = lazyCollection.createIndex((row) => row.status, {
+        name: `statusIndex`,
+      })
+      const snapshot = lazyCollection.getIndexMetadata()
+
+      expect(snapshot).toHaveLength(1)
+      expect(snapshot[0]).toMatchObject({
+        indexId: preSyncIndex.id,
+        name: `statusIndex`,
+        signatureVersion: 1,
+      })
+    })
+
+    it(`should return a defensive metadata snapshot copy`, () => {
+      collection.createIndex((row) => row.status, {
+        name: `statusIndex`,
+      })
+
+      const snapshotA = collection.getIndexMetadata()
+      expect(snapshotA).toHaveLength(1)
+
+      const originalSignature = snapshotA[0]!.signature
+      snapshotA[0]!.signature = `tampered`
+      snapshotA[0]!.resolver.kind = `async`
+
+      const snapshotB = collection.getIndexMetadata()
+      expect(snapshotB[0]!.signature).toBe(originalSignature)
+      expect(snapshotB[0]!.resolver.kind).toBe(`constructor`)
+    })
+
+    it(`should invalidate removed index proxies`, async () => {
+      const statusIndex = collection.createIndex((row) => row.status)
+
+      expect(collection.removeIndex(statusIndex)).toBe(true)
+      expect(statusIndex.isReady).toBe(false)
+      expect(() => statusIndex.indexedKeysSet).toThrow(
+        `has been removed from its collection`,
+      )
+      await expect(statusIndex.whenReady()).rejects.toThrow(
+        `has been removed from its collection`,
+      )
+    })
+
+    it(`should not resurrect async indexes removed before they resolve`, async () => {
+      const delayedIndex = collection.createIndex((row) => row.age, {
+        indexType: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20))
+          return BTreeIndex
+        },
+      })
+
+      expect(collection.removeIndex(delayedIndex)).toBe(true)
+      await new Promise((resolve) => setTimeout(resolve, 35))
+
+      expect(collection.indexes.has(delayedIndex.id)).toBe(false)
+      await expect(delayedIndex.whenReady()).rejects.toThrow(
+        `has been removed from its collection`,
+      )
     })
   })
 
