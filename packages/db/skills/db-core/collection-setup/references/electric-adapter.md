@@ -117,6 +117,47 @@ async function createTodo(data) {
 
 Querying txid outside the transaction produces a mismatched txid -- `awaitTxId` stalls indefinitely.
 
+## Schema vs Parser: Two Separate Paths
+
+When using Electric with a schema, data enters the collection via **two independent paths**:
+
+1. **Sync path** — Electric's `ShapeStream` applies the `parser` from `shapeOptions`. The schema is NOT applied to synced data.
+2. **Mutation path** — `insert()` and `update()` run through the collection schema. The parser is not involved.
+
+For types that need transformation (e.g., `timestamptz`), you need BOTH configured:
+
+```typescript
+const todosCollection = createCollection(
+  electricCollectionOptions({
+    schema: z.object({
+      id: z.string(),
+      text: z.string(),
+      completed: z.boolean(),           // Electric auto-parses bools
+      created_at: z.coerce.date(),      // mutation path: coerce string → Date
+    }),
+    shapeOptions: {
+      url: "/api/todos",
+      parser: {
+        timestamptz: (value: string) => new Date(value),  // sync path: parse incoming strings
+      },
+    },
+    getKey: (item) => item.id,
+  })
+)
+```
+
+### Postgres → Electric type handling
+
+| PG type | Electric auto-parses? | Schema needed? | Parser needed? |
+|---------|----------------------|----------------|----------------|
+| `text`, `uuid` | Yes (string) | `z.string()` | No |
+| `int4`, `int8` | Yes (number) | `z.number()` | No |
+| `bool` | Yes (boolean) | `z.boolean()` | No |
+| `timestamptz` | No (stays string) | `z.coerce.date()` | Yes — `parser: { timestamptz: (v) => new Date(v) }` |
+| `jsonb` | Yes (parsed object) | As needed | No |
+
+Note: `z.coerce.date()` is Zod-specific. Other StandardSchema libraries have their own coercion patterns.
+
 ## Debug Logging
 
 ```javascript
@@ -124,6 +165,8 @@ localStorage.debug = 'ts/db:electric'
 ```
 
 ## Complete Example
+
+Always use a schema — types are inferred automatically, avoiding generic placement confusion.
 
 ```typescript
 import { createCollection } from '@tanstack/react-db'
@@ -134,7 +177,7 @@ const todoSchema = z.object({
   id: z.string(),
   text: z.string().min(1),
   completed: z.boolean(),
-  created_at: z.string(),
+  created_at: z.coerce.date(),
 })
 
 const todosCollection = createCollection(
@@ -142,7 +185,13 @@ const todosCollection = createCollection(
     id: 'todos',
     schema: todoSchema,
     getKey: (item) => item.id,
-    shapeOptions: { url: '/api/todos', params: { table: 'todos' } },
+    shapeOptions: {
+      url: '/api/todos',
+      params: { table: 'todos' },
+      parser: {
+        timestamptz: (value: string) => new Date(value),  // sync path
+      },
+    },
     onInsert: async ({ transaction }) => {
       const response = await api.todos.create(transaction.mutations[0].modified)
       return { txid: response.txid }

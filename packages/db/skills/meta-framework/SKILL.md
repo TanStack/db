@@ -186,7 +186,7 @@ const { data: todos, isLoading } = useLiveQuery((q) =>
   <ClientOnly>
     <div v-if="isLoading">Loading...</div>
     <ul v-else>
-      <li v-for="todo in data" :key="todo.id">{{ todo.text }}</li>
+      <li v-for="todo in todos" :key="todo.id">{{ todo.text }}</li>
     </ul>
   </ClientOnly>
 </template>
@@ -265,6 +265,49 @@ export const Route = createFileRoute('/todos')({
   },
 })
 ```
+
+### TanStack Start server functions for Electric write path
+
+When using Electric collections with TanStack Start, use `createServerFn` for mutations that return `txid`:
+
+```tsx
+import { createServerFn } from '@tanstack/react-start'
+
+const createTodo = createServerFn({ method: 'POST' })
+  .validator(z.object({ text: z.string(), id: z.string() }))
+  .handler(async ({ data }) => {
+    let txid!: number
+    const todo = await sql.begin(async (tx) => {
+      // txid MUST be queried inside the same Postgres transaction
+      const [{ txid: rawTxid }] = await tx`SELECT pg_current_xact_id()::text as txid`
+      txid = Number(rawTxid)
+      const [row] = await tx`INSERT INTO todos ${tx(data)} RETURNING *`
+      return row
+    })
+    return { todo, txid }
+  })
+```
+
+See electric-adapter reference for how `txid` is used with `awaitTxId`.
+
+### Duplicate @tanstack/db instances
+
+When third-party packages bundle their own copy of `@tanstack/db`, the `instanceof` check in `useLiveInfiniteQuery` can fail. In dev mode, TanStack DB throws `DuplicateDbInstanceError` if two instances are detected.
+
+Fix with Vite `resolve.alias`:
+
+```ts
+// vite.config.ts
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@tanstack/db': path.resolve('./node_modules/@tanstack/db'),
+    },
+  },
+})
+```
+
+This forces all imports of `@tanstack/db` to resolve to a single copy. The root cause is typically a dependency that doesn't declare `@tanstack/db` as a `peerDependency`.
 
 ## Common Mistakes
 

@@ -119,11 +119,35 @@ try {
 }
 ```
 
-## Scope
+## Scope: Schema vs Sync — Two Separate Paths
 
-- Schemas validate **client mutations only** (`insert()`, `update()`)
-- Server/sync data is NOT validated by the schema
+**Schemas validate client mutations only** (`insert()`, `update()`). Synced data from backends (Electric, PowerSync, etc.) bypasses the schema entirely.
+
+This means for types that need transformation (e.g., `timestamptz`):
+- **Sync path**: handled by the adapter's parser (e.g., Electric's `shapeOptions.parser`)
+- **Mutation path**: handled by the Zod schema
+
+You need BOTH configured for full type safety. See electric-adapter.md for the dual-path pattern.
+
+### Simpler date coercion (Zod-specific)
+
+With Zod, `z.coerce.date()` is simpler than the `z.union([z.string(), z.date()]).transform(...)` pattern:
+
+```typescript
+// Zod-specific: z.coerce.date() accepts string, number, or Date as input
+const schema = z.object({
+  created_at: z.coerce.date(),
+})
+// TInput: { created_at: string | number | Date }  (coerce accepts many types)
+// TOutput: { created_at: Date }
+```
+
+This satisfies the TInput-superset-of-TOutput requirement automatically. Other StandardSchema libraries have their own coercion patterns — consult library docs.
+
+### Important
+
 - Validation is synchronous, runs on every mutation
+- Keep transforms simple for performance
 
 ## Where TOutput Appears
 
