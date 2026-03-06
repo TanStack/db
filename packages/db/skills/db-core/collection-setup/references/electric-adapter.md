@@ -163,6 +163,7 @@ Note: `z.coerce.date()` is Zod-specific. Other StandardSchema libraries have the
 Electric collections connect to a proxy URL (`shapeOptions.url`), not directly to Electric. Your app server must forward shape requests to Electric, passing through the Electric protocol query params.
 
 The proxy route must:
+
 1. Accept GET requests at the URL you specify in `shapeOptions.url`
 2. Forward all query parameters (these are Electric protocol params like `offset`, `handle`, `live`, etc.)
 3. Proxy the response (SSE stream) back to the client
