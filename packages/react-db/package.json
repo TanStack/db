@@ -53,7 +53,7 @@
     "react": ">=16.8.0"
   },
   "devDependencies": {
-    "@electric-sql/client": "^1.5.10",
+    "@electric-sql/client": "^1.5.12",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
