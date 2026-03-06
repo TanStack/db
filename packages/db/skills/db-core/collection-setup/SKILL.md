@@ -86,7 +86,7 @@ const todoCollection = createCollection(
 | No backend (UI state)            | `localOnlyCollectionOptions`    | `@tanstack/db`                      |
 | Browser localStorage             | `localStorageCollectionOptions` | `@tanstack/db`                      |
 
-Use `localOnlyCollectionOptions` for prototyping — the collection API is uniform, so swapping to a real backend later only changes the options creator.
+If the user specifies a backend (e.g. Electric, PowerSync), use that adapter directly. Only use `localOnlyCollectionOptions` when there is no backend yet — the collection API is uniform, so swapping to a real adapter later only changes the options creator.
 
 ## Sync Modes
 
@@ -139,11 +139,22 @@ Use `z.union([z.string(), z.date()])` for transformed fields — this ensures `T
 
 ### ElectricSQL with txid tracking
 
+Always use a schema with Electric — without one, the collection types as `Record<string, unknown>`.
+
 ```ts
 import { electricCollectionOptions } from '@tanstack/electric-db-collection'
+import { z } from 'zod'
+
+const todoSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  completed: z.boolean(),
+  created_at: z.coerce.date(),
+})
 
 const todoCollection = createCollection(
   electricCollectionOptions({
+    schema: todoSchema,
     shapeOptions: { url: '/api/electric/todos' },
     getKey: (item) => item.id,
     onInsert: async ({ transaction }) => {
@@ -154,7 +165,7 @@ const todoCollection = createCollection(
 )
 ```
 
-The returned `txid` tells the collection to hold optimistic state until Electric streams back that transaction.
+The returned `txid` tells the collection to hold optimistic state until Electric streams back that transaction. See the [Electric adapter reference](references/electric-adapter.md) for the full dual-path pattern (schema + parser).
 
 ## Common Mistakes
 

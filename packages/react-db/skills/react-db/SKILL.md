@@ -264,6 +264,48 @@ Correct:
 
 Source: docs/guides/live-queries.md
 
+### HIGH "Not a Collection" error from duplicate @tanstack/db
+
+If `useLiveQuery` throws `InvalidSourceError: The value provided for alias "todo" is not a Collection`, it usually means two copies of `@tanstack/db` are installed. The collection was created by one copy, but `useLiveQuery` checks `instanceof` against the other.
+
+In dev mode, TanStack DB also throws `DuplicateDbInstanceError` if two instances are detected.
+
+**Diagnose:**
+
+```bash
+pnpm ls @tanstack/db
+```
+
+If multiple versions appear, fix with one of:
+
+**pnpm overrides** (in root package.json):
+
+```json
+{
+  "pnpm": {
+    "overrides": {
+      "@tanstack/db": "^0.5.30"
+    }
+  }
+}
+```
+
+**Vite resolve.alias** (in vite.config.ts):
+
+```ts
+import path from 'path'
+
+export default defineConfig({
+  resolve: {
+    alias: {
+      '@tanstack/db': path.resolve('./node_modules/@tanstack/db'),
+    },
+  },
+})
+```
+
+The root cause is typically a dependency that bundles its own copy instead of declaring `@tanstack/db` as a `peerDependency`.
+
 ### HIGH Tension: Query expressiveness vs. IVM constraints
 
 The query builder looks like SQL but has constraints that SQL doesn't — equality joins only, orderBy required for limit/offset, no distinct without select. Agents write SQL-style queries that violate these constraints. See db-core/live-queries/SKILL.md § Common Mistakes for all constraints.

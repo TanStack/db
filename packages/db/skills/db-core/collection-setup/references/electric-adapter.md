@@ -158,6 +158,22 @@ const todosCollection = createCollection(
 
 Note: `z.coerce.date()` is Zod-specific. Other StandardSchema libraries have their own coercion patterns.
 
+## Proxy Route
+
+Electric collections connect to a proxy URL (`shapeOptions.url`), not directly to Electric. Your app server must forward shape requests to Electric, passing through the Electric protocol query params.
+
+The proxy route must:
+1. Accept GET requests at the URL you specify in `shapeOptions.url`
+2. Forward all query parameters (these are Electric protocol params like `offset`, `handle`, `live`, etc.)
+3. Proxy the response (SSE stream) back to the client
+4. Optionally add authentication headers or filter params
+
+Implementation depends on your framework — use `createServerFn` in TanStack Start, API routes in Next.js, `loader` in Remix, etc. See the `@electric-sql/client` skills for proxy route examples:
+
+```bash
+npx @electric-sql/client intent list
+```
+
 ## Electric Client Skills
 
 For deeper Electric-specific guidance (ShapeStream config, shape filtering, etc.), load the Electric client's built-in skills:
