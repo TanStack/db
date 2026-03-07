@@ -41,7 +41,7 @@
     "skills"
   ],
   "dependencies": {
-    "@solid-primitives/map": "^0.7.2",
+    "@solid-primitives/map": "^0.7.3",
     "@tanstack/db": "workspace:*"
   },
   "peerDependencies": {
