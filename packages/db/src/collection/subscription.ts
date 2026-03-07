@@ -476,7 +476,20 @@ export class CollectionSubscription
     // For multi-column orderBy, we use the first column value for index operations (wide bounds)
     // This may load some duplicates but ensures we never miss any rows.
     let keys: Array<string | number> = []
-    if (hasMinValue) {
+
+    // FIX: Skip local data for first snapshot to prevent cross-query contamination.
+    // When loadSubset has been called on this collection by ANY subscription,
+    // the local index may contain data from a DIFFERENT query
+    // (e.g., user viewed Inbox first, then navigated to All Emails).
+    // In that case, let loadSubset provide the correct data for this query instead.
+    //
+    // However, if no loadSubset has been called yet, the data came from the sync
+    // layer's initial write() calls, which is valid for all queries.
+    const isFirstSnapshot = this.loadedSubsets.length === 0
+    const hasContaminatedData =
+      isFirstSnapshot && this.collection._sync.hasLoadSubsetBeenCalled
+
+    if (!hasContaminatedData && hasMinValue) {
       // First, get all items with the same FIRST COLUMN value as minValue
       // This provides wide bounds for the local index
       const { expression } = orderBy[0]!
@@ -502,10 +515,11 @@ export class CollectionSubscription
       } else {
         keys = index.take(limit, minValueForIndex!, filterFn)
       }
-    } else {
+    } else if (!hasContaminatedData) {
       // No min value provided, start from the beginning
       keys = index.takeFromStart(limit, filterFn)
     }
+    // else: hasContaminatedData is true, keys stays empty - loadSubset will provide the data
 
     const valuesNeeded = () => Math.max(limit - changes.length, 0)
     const collectionExhausted = () => keys.length === 0
