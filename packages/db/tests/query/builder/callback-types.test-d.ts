@@ -150,7 +150,7 @@ describe(`Query Builder Callback Types`, () => {
           BasicExpression<number>
         >()
         expectTypeOf(coalesce(user.name, `Unknown`)).toEqualTypeOf<
-          BasicExpression<any>
+          BasicExpression<string>
         >()
 
         return {
