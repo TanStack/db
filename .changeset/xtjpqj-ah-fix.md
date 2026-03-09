@@ -1,6 +1,6 @@
 ---
-"@tanstack/db": patch
-"@tanstack/react-db": patch
+'@tanstack/db': patch
+'@tanstack/react-db': patch
 ---
 
 fix(db): reject preload() promise when collection transitions to error state

@@ -199,9 +199,7 @@ export function useLiveSuspenseQuery(
     const lastError = (result.collection as any).utils?.lastError
     throw lastError instanceof Error
       ? lastError
-      : new Error(
-          `Collection "${result.collection.id}" failed to load`,
-        )
+      : new Error(`Collection "${result.collection.id}" failed to load`)
   }
 
   if (result.status === `loading` || result.status === `idle`) {
