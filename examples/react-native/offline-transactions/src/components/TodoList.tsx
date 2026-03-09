@@ -1,69 +1,40 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import {
-  View,
+  ActivityIndicator,
+  FlatList,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
+  View,
 } from 'react-native'
 import NetInfo from '@react-native-community/netinfo'
 import { useLiveQuery } from '@tanstack/react-db'
-import {
-  todoCollection,
-  createOfflineExecutor,
-  createTodoActions,
-} from '../db/todos'
+import { createTodoActions } from '../db/todos'
+import type { Todo, TodosHandle  } from '../db/todos'
+import type { Collection } from '@tanstack/db'
 
-export function TodoList() {
+interface TodoListProps {
+  collection: Collection<Todo, string>
+  executor: TodosHandle[`executor`]
+}
+
+export function TodoList({ collection, executor }: TodoListProps) {
   const [newTodoText, setNewTodoText] = useState(``)
   const [error, setError] = useState<string | null>(null)
   const [isOnline, setIsOnline] = useState(true)
   const [pendingCount, setPendingCount] = useState(0)
-  const [offline, setOffline] = useState<ReturnType<
-    typeof createOfflineExecutor
-  > | null>(null)
-  const [initError, setInitError] = useState<string | null>(null)
-  const [isInitialized, setIsInitialized] = useState(false)
 
-  // Initialize offline executor
-  useEffect(() => {
-    console.log(`[TodoList] Initializing...`)
-    try {
-      const executor = createOfflineExecutor()
-      setOffline(executor)
-      setIsInitialized(true)
-      console.log(`[TodoList] Executor created successfully`)
+  const actions = useMemo(
+    () => createTodoActions(executor, collection),
+    [executor, collection],
+  )
 
-      return () => {
-        executor.dispose()
-      }
-    } catch (err) {
-      console.error(`[TodoList] Failed to create executor:`, err)
-      setInitError(err instanceof Error ? err.message : `Failed to initialize`)
-      setIsInitialized(true)
-    }
-  }, [])
-
-  // Create actions based on offline executor
-  const actions = useMemo(() => createTodoActions(offline), [offline])
-
-  // Use live query to get todos
-  const queryResult = useLiveQuery((q) =>
+  const { data: todoList = [] } = useLiveQuery((q) =>
     q
-      .from({ todo: todoCollection })
+      .from({ todo: collection })
       .orderBy(({ todo }) => todo.createdAt, `desc`),
   )
-  const todoList = queryResult.data ?? []
-  const isLoading = queryResult.isLoading
-
-  useEffect(() => {
-    console.log(`[TodoList] Query state:`, {
-      todoCount: todoList.length,
-      isLoading,
-    })
-  }, [todoList.length, isLoading])
 
   // Monitor network status
   useEffect(() => {
@@ -72,27 +43,25 @@ export function TodoList() {
         state.isConnected === true && state.isInternetReachable !== false
       setIsOnline(connected)
 
-      if (connected && offline) {
-        offline.notifyOnline()
+      if (connected) {
+        executor.notifyOnline()
       }
     })
 
     return () => unsubscribe()
-  }, [offline])
+  }, [executor])
 
   // Monitor pending transactions
   useEffect(() => {
-    if (!offline) return
-
     const interval = setInterval(() => {
-      setPendingCount(offline.getPendingCount())
+      setPendingCount(executor.getPendingCount())
     }, 100)
 
     return () => clearInterval(interval)
-  }, [offline])
+  }, [executor])
 
   const handleAddTodo = async () => {
-    if (!newTodoText.trim() || !actions.addTodo) return
+    if (!newTodoText.trim()) return
 
     try {
       setError(null)
@@ -104,8 +73,6 @@ export function TodoList() {
   }
 
   const handleToggleTodo = async (id: string) => {
-    if (!actions.toggleTodo) return
-
     try {
       setError(null)
       await actions.toggleTodo(id)
@@ -115,8 +82,6 @@ export function TodoList() {
   }
 
   const handleDeleteTodo = async (id: string) => {
-    if (!actions.deleteTodo) return
-
     try {
       setError(null)
       await actions.deleteTodo(id)
@@ -125,40 +90,11 @@ export function TodoList() {
     }
   }
 
-  // Show init error if any
-  if (initError) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Initialization Error</Text>
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>{initError}</Text>
-        </View>
-      </View>
-    )
-  }
-
-  // Show loading while initializing
-  if (!isInitialized) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.title}>Offline Transactions Demo</Text>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-          <Text style={styles.loadingText}>Initializing...</Text>
-        </View>
-      </View>
-    )
-  }
-
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Offline Transactions Demo</Text>
-      <Text style={styles.subtitle}>TanStack DB on React Native</Text>
-
-      {/* Debug info */}
-      <Text style={{ fontSize: 12, color: `#666`, marginBottom: 8 }}>
-        Init: {isInitialized ? `yes` : `no`} | Offline: {offline ? `yes` : `no`}{' '}
-        | Loading: {isLoading ? `yes` : `no`} | Todos: {todoList.length}
+      <Text style={styles.subtitle}>
+        SQLite persistence + offline sync to server
       </Text>
 
       {/* Status indicators */}
@@ -180,22 +116,27 @@ export function TodoList() {
           </Text>
         </View>
 
+        <View style={[styles.statusBadge, styles.persisted]}>
+          <View style={[styles.statusDot, styles.persistedDot]} />
+          <Text style={styles.statusText}>SQLite Persistence</Text>
+        </View>
+
         <View
           style={[
             styles.statusBadge,
-            offline?.isOfflineEnabled ? styles.enabled : styles.disabled,
+            executor.isOfflineEnabled ? styles.enabled : styles.disabled,
           ]}
         >
           <View
             style={[
               styles.statusDot,
-              offline?.isOfflineEnabled
+              executor.isOfflineEnabled
                 ? styles.enabledDot
                 : styles.disabledDot,
             ]}
           />
           <Text style={styles.statusText}>
-            {offline?.isOfflineEnabled ? `Offline Mode` : `Online Only`}
+            {executor.isOfflineEnabled ? `Offline Mode` : `Online Only`}
           </Text>
         </View>
 
@@ -222,31 +163,25 @@ export function TodoList() {
           onChangeText={setNewTodoText}
           placeholder="Add a new todo..."
           onSubmitEditing={handleAddTodo}
-          editable={!isLoading}
         />
         <TouchableOpacity
           style={[
             styles.addButton,
-            (!newTodoText.trim() || isLoading) && styles.addButtonDisabled,
+            !newTodoText.trim() && styles.addButtonDisabled,
           ]}
           onPress={handleAddTodo}
-          disabled={!newTodoText.trim() || isLoading}
+          disabled={!newTodoText.trim()}
         >
           <Text style={styles.addButtonText}>Add</Text>
         </TouchableOpacity>
       </View>
 
       {/* Todo list */}
-      {isLoading && todoList.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#3b82f6" />
-          <Text style={styles.loadingText}>Loading todos...</Text>
-        </View>
-      ) : todoList.length === 0 ? (
+      {todoList.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Text style={styles.emptyText}>No todos yet. Add one above!</Text>
           <Text style={styles.emptySubtext}>
-            Try going offline to test offline mode
+            Todos persist in SQLite and sync to server when online
           </Text>
         </View>
       ) : (
@@ -293,14 +228,16 @@ export function TodoList() {
       <View style={styles.instructions}>
         <Text style={styles.instructionsTitle}>Try this:</Text>
         <Text style={styles.instructionsText}>
-          1. Add some todos while online
-        </Text>
-        <Text style={styles.instructionsText}>2. Enable airplane mode</Text>
-        <Text style={styles.instructionsText}>
-          3. Add more todos (queued locally)
+          1. Add some todos (persisted to SQLite + queued for server)
         </Text>
         <Text style={styles.instructionsText}>
-          4. Disable airplane mode to sync
+          2. Close and reopen the app (data still there from SQLite)
+        </Text>
+        <Text style={styles.instructionsText}>
+          3. Enable airplane mode, add more todos
+        </Text>
+        <Text style={styles.instructionsText}>
+          4. Disable airplane mode (queued mutations sync to server)
         </Text>
       </View>
     </View>
@@ -359,11 +296,17 @@ const styles = StyleSheet.create({
   offlineDot: {
     backgroundColor: `#ef4444`,
   },
-  enabled: {
+  persisted: {
     backgroundColor: `#dbeafe`,
   },
-  enabledDot: {
+  persistedDot: {
     backgroundColor: `#3b82f6`,
+  },
+  enabled: {
+    backgroundColor: `#e0e7ff`,
+  },
+  enabledDot: {
+    backgroundColor: `#6366f1`,
   },
   disabled: {
     backgroundColor: `#e5e5e5`,
@@ -415,16 +358,6 @@ const styles = StyleSheet.create({
     color: `#fff`,
     fontWeight: `600`,
     fontSize: 16,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: `center`,
-    alignItems: `center`,
-    gap: 12,
-  },
-  loadingText: {
-    color: `#666`,
-    fontSize: 14,
   },
   emptyContainer: {
     flex: 1,
