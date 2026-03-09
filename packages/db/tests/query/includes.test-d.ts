@@ -159,6 +159,7 @@ describe(`includes subquery types`, () => {
     })
   })
 
+
   describe(`toArray`, () => {
     test(`toArray includes infers child result as Array`, () => {
       const collection = createLiveQueryCollection((q) =>
