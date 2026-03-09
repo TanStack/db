@@ -23,6 +23,7 @@ import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
 import type {
+  ChangeMessage,
   CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
@@ -1786,12 +1787,17 @@ function flushIncludesState(
       }
     }
 
-    // For toArray entries: re-emit affected parents with updated array snapshots
+    // For toArray entries: re-emit affected parents with updated array snapshots.
+    // We mutate items in-place (so collection.get() reflects changes immediately)
+    // and emit UPDATE events directly. We bypass the sync methods because
+    // commitPendingTransactions compares previous vs new visible state using
+    // deepEquals, but in-place mutation means both sides reference the same
+    // object, so the comparison always returns true and suppresses the event.
     const toArrayReEmitKeys = state.materializeAsArray
       ? new Set([...(affectedCorrelationKeys || []), ...dirtyFromBuffers])
       : null
     if (parentSyncMethods && toArrayReEmitKeys && toArrayReEmitKeys.size > 0) {
-      parentSyncMethods.begin()
+      const events: Array<ChangeMessage<any>> = []
       for (const correlationKey of toArrayReEmitKeys) {
         const parentKeys = state.correlationToParentKeys.get(correlationKey)
         if (!parentKeys) continue
@@ -1799,14 +1805,33 @@ function flushIncludesState(
         for (const parentKey of parentKeys) {
           const item = parentCollection.get(parentKey as any)
           if (item) {
+            const key =
+              parentSyncMethods.collection.getKeyFromItem(item)
+            // Capture previous value before in-place mutation
+            const previousValue = { ...item }
             if (entry) {
               item[state.fieldName] = [...entry.collection.toArray]
             }
-            parentSyncMethods.write({ value: item, type: `update` })
+            events.push({
+              type: `update`,
+              key,
+              value: item,
+              previousValue,
+            })
           }
         }
       }
-      parentSyncMethods.commit()
+      if (events.length > 0) {
+        // Emit directly — the in-place mutation already updated the data in
+        // syncedData, so we only need to notify subscribers.
+        const changesManager = (parentCollection as any)._changes as {
+          emitEvents: (
+            changes: Array<ChangeMessage<any>>,
+            forceEmit?: boolean,
+          ) => void
+        }
+        changesManager.emitEvents(events, true)
+      }
     }
 
     // Phase 5: Parent DELETEs — dispose child Collections and clean up
