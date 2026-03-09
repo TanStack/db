@@ -1,5 +1,9 @@
 import { describe, expectTypeOf, test } from 'vitest'
-import { createLiveQueryCollection, eq, toArray } from '../../src/query/index.js'
+import {
+  createLiveQueryCollection,
+  eq,
+  toArray,
+} from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
 
@@ -91,9 +95,7 @@ describe(`includes subquery types`, () => {
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
           issues: toArray(
-            q
-              .from({ i: issues })
-              .where(({ i }) => eq(i.projectId, p.id)),
+            q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
           ),
         })),
       )
