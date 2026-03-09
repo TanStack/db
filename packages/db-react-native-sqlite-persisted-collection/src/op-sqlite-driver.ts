@@ -66,7 +66,9 @@ function canAttemptNodeAsyncLocalStorageLoad(): boolean {
   if (typeof process === `undefined`) {
     return false
   }
-  return typeof process.versions.node === `string`
+  // In React Native, process is polyfilled but process.versions may not exist
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  return typeof process.versions?.node === `string`
 }
 
 function getNodeAsyncHooksSpecifier(): string {

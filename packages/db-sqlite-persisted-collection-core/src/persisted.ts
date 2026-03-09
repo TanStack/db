@@ -927,6 +927,25 @@ class PersistedCollectionRuntime<
       }
     }
 
+    // Handle delete messages that include the full value instead of just a key
+    // (e.g. from queryCollectionOptions which sends { type: 'delete', value: oldItem })
+    if (message.type === `delete`) {
+      const key = this.collection.getKeyFromItem(message.value)
+      const previousValue = this.collection.get(key) ?? message.value
+
+      return {
+        forwardMessage: {
+          type: `delete`,
+          key,
+        },
+        operation: {
+          type: `delete`,
+          key,
+          value: previousValue,
+        },
+      }
+    }
+
     const key = this.collection.getKeyFromItem(message.value)
     return {
       forwardMessage: {
