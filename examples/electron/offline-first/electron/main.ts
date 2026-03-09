@@ -32,7 +32,9 @@ ipcMain.handle('kv:get', (_e, key: string) => {
   const row = database
     .prepare('SELECT value FROM kv_store WHERE key = ?')
     .get(key) as { value: string } | undefined
-  console.log(`[KV] get "${key}" → ${row ? `found (${row.value.length} chars)` : 'null'}`)
+  console.log(
+    `[KV] get "${key}" → ${row ? `found (${row.value.length} chars)` : 'null'}`,
+  )
   return row?.value ?? null
 })
 
@@ -51,9 +53,9 @@ ipcMain.handle('kv:delete', (_e, key: string) => {
 })
 
 ipcMain.handle('kv:keys', () => {
-  const rows = database
-    .prepare('SELECT key FROM kv_store')
-    .all() as Array<{ key: string }>
+  const rows = database.prepare('SELECT key FROM kv_store').all() as Array<{
+    key: string
+  }>
   console.log(`[KV] keys → [${rows.map((r) => `"${r.key}"`).join(', ')}]`)
   return rows.map((r) => r.key)
 })
