@@ -79,16 +79,18 @@ export function TodoList({ collection, executor }: TodoListProps) {
       <h1>TanStack DB – Electron Offline-First</h1>
 
       <div className="status-bar">
-        <span className={`badge ${isOnline ? 'badge-online' : 'badge-offline'}`}>
+        <span
+          className={`badge ${isOnline ? 'badge-online' : 'badge-offline'}`}
+        >
           {isOnline ? 'Online' : 'Offline'}
         </span>
-        <span className={`badge ${executor.isOfflineEnabled ? 'badge-offline-enabled' : 'badge-offline-disabled'}`}>
+        <span
+          className={`badge ${executor.isOfflineEnabled ? 'badge-offline-enabled' : 'badge-offline-disabled'}`}
+        >
           {executor.isOfflineEnabled ? 'Offline Mode' : 'Online Only'}
         </span>
         {pendingCount > 0 && (
-          <span className="badge badge-pending">
-            {pendingCount} pending
-          </span>
+          <span className="badge badge-pending">{pendingCount} pending</span>
         )}
         <span className="badge badge-count">
           {todos.length} todo{todos.length !== 1 ? 's' : ''}
@@ -96,7 +98,12 @@ export function TodoList({ collection, executor }: TodoListProps) {
         <button
           className="reset-btn"
           onClick={async () => {
-            if (!confirm('Reset everything? This clears all todos and local data.')) return
+            if (
+              !confirm(
+                'Reset everything? This clears all todos and local data.',
+              )
+            )
+              return
             try {
               await todoApi.deleteAll()
             } catch {
@@ -126,14 +133,21 @@ export function TodoList({ collection, executor }: TodoListProps) {
           onKeyDown={handleKeyDown}
           placeholder="What needs to be done?"
         />
-        <button className="add-btn" onClick={handleAddTodo} disabled={!inputText.trim()}>
+        <button
+          className="add-btn"
+          onClick={handleAddTodo}
+          disabled={!inputText.trim()}
+        >
           Add
         </button>
       </div>
 
       <ul className="todo-list">
         {todos.map((todo) => (
-          <li key={todo.id} className={`todo-item ${todo.completed ? 'completed' : ''}`}>
+          <li
+            key={todo.id}
+            className={`todo-item ${todo.completed ? 'completed' : ''}`}
+          >
             <button
               className="toggle-btn"
               onClick={() => actions.toggleTodo(todo.id)}
@@ -158,9 +172,20 @@ export function TodoList({ collection, executor }: TodoListProps) {
       <div className="instructions">
         <h3>Try it out</h3>
         <ul>
-          <li><strong>Persistence:</strong> Add todos, quit the app, reopen — data is still there</li>
-          <li><strong>Multiple windows:</strong> Press Cmd+N (or File → New Window) to open a second window — each window syncs independently with the server</li>
-          <li><strong>Offline mode:</strong> Stop the server (<code>pnpm dev:server</code>), add todos, restart — they sync automatically</li>
+          <li>
+            <strong>Persistence:</strong> Add todos, quit the app, reopen — data
+            is still there
+          </li>
+          <li>
+            <strong>Multiple windows:</strong> Press Cmd+N (or File → New
+            Window) to open a second window — each window syncs independently
+            with the server
+          </li>
+          <li>
+            <strong>Offline mode:</strong> Stop the server (
+            <code>pnpm dev:server</code>), add todos, restart — they sync
+            automatically
+          </li>
         </ul>
       </div>
     </div>

@@ -151,10 +151,7 @@ async function syncTodos({
 }) {
   const mutations = transaction.mutations
 
-  console.log(
-    `[Sync] Processing ${mutations.length} mutations`,
-    idempotencyKey,
-  )
+  console.log(`[Sync] Processing ${mutations.length} mutations`, idempotencyKey)
 
   for (const mutation of mutations) {
     try {
@@ -182,20 +179,17 @@ async function syncTodos({
         case 'update': {
           const todoData = mutation.modified as Partial<Todo>
           const id = (mutation.modified as Todo).id
-          const response = await fetchWithRetry(
-            `${BASE_URL}/api/todos/${id}`,
-            {
-              method: 'PUT',
-              headers: {
-                'Content-Type': 'application/json',
-                'Idempotency-Key': idempotencyKey,
-              },
-              body: JSON.stringify({
-                text: todoData.text,
-                completed: todoData.completed,
-              }),
+          const response = await fetchWithRetry(`${BASE_URL}/api/todos/${id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Idempotency-Key': idempotencyKey,
             },
-          )
+            body: JSON.stringify({
+              text: todoData.text,
+              completed: todoData.completed,
+            }),
+          })
           if (!response.ok) {
             throw new Error(`Failed to sync update: ${response.statusText}`)
           }
@@ -204,15 +198,12 @@ async function syncTodos({
 
         case 'delete': {
           const id = (mutation.original as Todo).id
-          const response = await fetchWithRetry(
-            `${BASE_URL}/api/todos/${id}`,
-            {
-              method: 'DELETE',
-              headers: {
-                'Idempotency-Key': idempotencyKey,
-              },
+          const response = await fetchWithRetry(`${BASE_URL}/api/todos/${id}`, {
+            method: 'DELETE',
+            headers: {
+              'Idempotency-Key': idempotencyKey,
             },
-          )
+          })
           if (!response.ok) {
             throw new Error(`Failed to sync delete: ${response.statusText}`)
           }
@@ -257,12 +248,18 @@ export function createTodos() {
   console.log('[Offline] Executor mode:', executor.mode)
 
   // Log when initialization completes and pending transactions are loaded
-  executor.waitForInit().then(() => {
-    console.log('[Offline] Init complete. isOfflineEnabled:', executor.isOfflineEnabled)
-    console.log('[Offline] Pending count:', executor.getPendingCount())
-  }).catch((err) => {
-    console.error('[Offline] Init failed:', err)
-  })
+  executor
+    .waitForInit()
+    .then(() => {
+      console.log(
+        '[Offline] Init complete. isOfflineEnabled:',
+        executor.isOfflineEnabled,
+      )
+      console.log('[Offline] Pending count:', executor.getPendingCount())
+    })
+    .catch((err) => {
+      console.error('[Offline] Init failed:', err)
+    })
 
   return {
     collection,
