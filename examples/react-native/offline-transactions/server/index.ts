@@ -1,8 +1,12 @@
-import express from 'express'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import cors from 'cors'
+import express from 'express'
 
 const app = express()
 const PORT = 3001
+const DATA_FILE = join(dirname(fileURLToPath(import.meta.url)), 'todos.json')
 
 app.use(cors())
 app.use(express.json())
@@ -24,21 +28,23 @@ function generateId(): string {
   return Math.random().toString(36).substring(2) + Date.now().toString(36)
 }
 
-// Add some initial data
-const initialTodos = [
-  { id: '1', text: 'Learn TanStack DB', completed: false },
-  { id: '2', text: 'Build offline-first app', completed: false },
-  { id: '3', text: 'Test on React Native', completed: true },
-]
+// Load persisted data or seed with initial data
+function loadData() {
+  try {
+    const raw = readFileSync(DATA_FILE, 'utf-8')
+    const todos: Array<Todo> = JSON.parse(raw)
+    todos.forEach((todo) => todosStore.set(todo.id, todo))
+    console.log(`Loaded ${todos.length} todos from ${DATA_FILE}`)
+  } catch {
+    console.log(`No existing data file, starting empty`)
+  }
+}
 
-initialTodos.forEach((todo) => {
-  const now = new Date().toISOString()
-  todosStore.set(todo.id, {
-    ...todo,
-    createdAt: now,
-    updatedAt: now,
-  })
-})
+function saveData() {
+  writeFileSync(DATA_FILE, JSON.stringify(Array.from(todosStore.values()), null, 2))
+}
+
+loadData()
 
 // Simulate network delay
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -58,20 +64,21 @@ app.post('/api/todos', async (req, res) => {
   console.log('POST /api/todos', req.body)
   await delay(200)
 
-  const { text, completed } = req.body
+  const { id, text, completed } = req.body
   if (!text || text.trim() === '') {
     return res.status(400).json({ error: 'Todo text is required' })
   }
 
   const now = new Date().toISOString()
   const todo: Todo = {
-    id: generateId(),
+    id: id || generateId(),
     text,
     completed: completed ?? false,
     createdAt: now,
     updatedAt: now,
   }
   todosStore.set(todo.id, todo)
+  saveData()
   res.status(201).json(todo)
 })
 
@@ -91,6 +98,7 @@ app.put('/api/todos/:id', async (req, res) => {
     updatedAt: new Date().toISOString(),
   }
   todosStore.set(req.params.id, updated)
+  saveData()
   res.json(updated)
 })
 
@@ -102,6 +110,7 @@ app.delete('/api/todos/:id', async (req, res) => {
   if (!todosStore.delete(req.params.id)) {
     return res.status(404).json({ error: 'Todo not found' })
   }
+  saveData()
   res.json({ success: true })
 })
 

@@ -27,14 +27,17 @@ for (const pkg of singletonPackages) {
 
 const defaultResolveRequest = config.resolver.resolveRequest
 config.resolver.resolveRequest = (context, moduleName, platform) => {
-  // Check if this is a singleton package or a subpath of one (e.g. react/jsx-runtime)
+  // Force singleton packages to resolve from the app's local node_modules,
+  // regardless of where the import originates. This prevents workspace
+  // packages (e.g. react-db) from pulling in their own copy of React.
   for (const pkg of singletonPackages) {
     if (moduleName === pkg || moduleName.startsWith(pkg + '/')) {
-      return context.resolveRequest(
-        { ...context, resolveRequest: undefined },
-        moduleName,
-        platform,
-      )
+      try {
+        const filePath = require.resolve(moduleName, {
+          paths: [projectRoot],
+        })
+        return { type: 'sourceFile', filePath }
+      } catch {}
     }
   }
 
