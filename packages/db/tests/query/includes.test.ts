@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createLiveQueryCollection,
   eq,
@@ -270,6 +270,93 @@ describe(`includes subqueries`, () => {
       expect(childItems((collection.get(3) as any).issues)).toEqual([
         { id: 30, title: `Gamma issue` },
       ])
+    })
+  })
+
+  describe(`change propagation`, () => {
+    it(`Collection includes: child change does not re-emit the parent row`, async () => {
+      const collection = buildIncludesQuery()
+      await collection.preload()
+
+      const changeCallback = vi.fn()
+      const subscription = collection.subscribeChanges(changeCallback, {
+        includeInitialState: false,
+      })
+      changeCallback.mockClear()
+
+      // Add a child issue to project Alpha
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 12, projectId: 1, title: `New Alpha issue` },
+      })
+      issues.utils.commit()
+
+      // Wait for async change propagation
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // The child Collection updates in place — the parent row should NOT be re-emitted
+      expect(changeCallback).not.toHaveBeenCalled()
+
+      // But the child data is there
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+        { id: 12, title: `New Alpha issue` },
+      ])
+
+      subscription.unsubscribe()
+    })
+
+    it(`toArray includes: child change re-emits the parent row`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: toArray(
+            q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, p.id))
+              .select(({ i }) => ({
+                id: i.id,
+                title: i.title,
+              })),
+          ),
+        })),
+      )
+
+      await collection.preload()
+
+      const changeCallback = vi.fn()
+      const subscription = collection.subscribeChanges(changeCallback, {
+        includeInitialState: false,
+      })
+      changeCallback.mockClear()
+
+      // Add a child issue to project Alpha
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 12, projectId: 1, title: `New Alpha issue` },
+      })
+      issues.utils.commit()
+
+      // Wait for async change propagation
+      await new Promise((resolve) => setTimeout(resolve, 10))
+
+      // The parent row SHOULD be re-emitted with the updated array
+      expect(changeCallback).toHaveBeenCalled()
+
+      // Verify the parent row has the updated array
+      const alpha = collection.get(1) as any
+      expect(Array.isArray(alpha.issues)).toBe(true)
+      expect(alpha.issues.sort((a: any, b: any) => a.id - b.id)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+        { id: 12, title: `New Alpha issue` },
+      ])
+
+      subscription.unsubscribe()
     })
   })
 
