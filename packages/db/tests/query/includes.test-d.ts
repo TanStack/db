@@ -77,7 +77,7 @@ describe(`includes subquery types`, () => {
         })),
       )
 
-      type Expected = {
+      type ProjectWithIssueArray = {
         id: number
         name: string
         issues: Array<{
@@ -87,7 +87,7 @@ describe(`includes subquery types`, () => {
       }
 
       const result = collection.toArray[0]!
-      expectTypeOf(result).toEqualTypeOf<Expected>()
+      expectTypeOf(result).toEqualTypeOf<ProjectWithIssueArray>()
     })
 
     test(`toArray includes without select infers child type`, () => {
@@ -100,13 +100,13 @@ describe(`includes subquery types`, () => {
         })),
       )
 
-      type Expected = {
+      type ProjectWithFullIssueArray = {
         id: number
         issues: Array<Issue>
       }
 
       const result = collection.toArray[0]!
-      expectTypeOf(result).toEqualTypeOf<Expected>()
+      expectTypeOf(result).toEqualTypeOf<ProjectWithFullIssueArray>()
     })
 
     test(`nested toArray infers nested arrays`, () => {
@@ -134,7 +134,7 @@ describe(`includes subquery types`, () => {
         })),
       )
 
-      type Expected = {
+      type ProjectWithNestedArrays = {
         id: number
         issues: Array<{
           id: number
@@ -147,7 +147,7 @@ describe(`includes subquery types`, () => {
       }
 
       const result = collection.toArray[0]!
-      expectTypeOf(result).toEqualTypeOf<Expected>()
+      expectTypeOf(result).toEqualTypeOf<ProjectWithNestedArrays>()
     })
   })
 })
