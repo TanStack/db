@@ -229,30 +229,32 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
   Prettify<{
     [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true
       ? ExtractExpressionType<TSelectObject[K]>
-      : TSelectObject[K] extends Ref<infer _T>
-        ? ExtractRef<TSelectObject[K]>
-        : TSelectObject[K] extends RefLeaf<infer T>
-          ? T
-          : TSelectObject[K] extends RefLeaf<infer T> | undefined
-            ? T | undefined
-            : TSelectObject[K] extends RefLeaf<infer T> | null
-              ? T | null
-              : TSelectObject[K] extends Ref<infer _T> | undefined
-                ? ExtractRef<TSelectObject[K]> | undefined
-                : TSelectObject[K] extends Ref<infer _T> | null
-                  ? ExtractRef<TSelectObject[K]> | null
-                  : TSelectObject[K] extends Aggregate<infer T>
-                    ? T
-                    : TSelectObject[K] extends
-                          | string
-                          | number
-                          | boolean
-                          | null
-                          | undefined
-                      ? TSelectObject[K]
-                      : TSelectObject[K] extends Record<string, any>
-                        ? ResultTypeFromSelect<TSelectObject[K]>
-                        : never
+      : TSelectObject[K] extends ToArrayWrapper<infer T>
+        ? Array<T>
+        : TSelectObject[K] extends Ref<infer _T>
+          ? ExtractRef<TSelectObject[K]>
+          : TSelectObject[K] extends RefLeaf<infer T>
+            ? T
+            : TSelectObject[K] extends RefLeaf<infer T> | undefined
+              ? T | undefined
+              : TSelectObject[K] extends RefLeaf<infer T> | null
+                ? T | null
+                : TSelectObject[K] extends Ref<infer _T> | undefined
+                  ? ExtractRef<TSelectObject[K]> | undefined
+                  : TSelectObject[K] extends Ref<infer _T> | null
+                    ? ExtractRef<TSelectObject[K]> | null
+                    : TSelectObject[K] extends Aggregate<infer T>
+                      ? T
+                      : TSelectObject[K] extends
+                            | string
+                            | number
+                            | boolean
+                            | null
+                            | undefined
+                        ? TSelectObject[K]
+                        : TSelectObject[K] extends Record<string, any>
+                          ? ResultTypeFromSelect<TSelectObject[K]>
+                          : never
   }>
 >
 
