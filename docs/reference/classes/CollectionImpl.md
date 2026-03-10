@@ -603,9 +603,7 @@ Check if a key exists in the collection (virtual derived state)
 ### insert()
 
 ```ts
-insert(data, config?): 
-  | Transaction<Record<string, unknown>>
-| Transaction<TOutput>;
+insert(data, config?): Transaction<Record<string, unknown>>;
 ```
 
 Defined in: [packages/db/src/collection/index.ts:621](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts#L621)
@@ -626,8 +624,7 @@ Optional configuration including metadata
 
 #### Returns
 
-  \| [`Transaction`](../interfaces/Transaction.md)\<`Record`\<`string`, `unknown`\>\>
-  \| [`Transaction`](../interfaces/Transaction.md)\<`TOutput`\>
+[`Transaction`](../interfaces/Transaction.md)\<`Record`\<`string`, `unknown`\>\>
 
 A Transaction object representing the insert operation(s)
 
@@ -762,10 +759,10 @@ Unsubscribe from a collection event
 ##### T
 
 `T` *extends* 
+  \| `"status:error"`
   \| `"status:idle"`
   \| `"status:loading"`
   \| `"status:ready"`
-  \| `"status:error"`
   \| `"status:cleaned-up"`
   \| `"status:change"`
   \| `"subscribers:change"`
@@ -803,10 +800,10 @@ Subscribe to a collection event
 ##### T
 
 `T` *extends* 
+  \| `"status:error"`
   \| `"status:idle"`
   \| `"status:loading"`
   \| `"status:ready"`
-  \| `"status:error"`
   \| `"status:cleaned-up"`
   \| `"status:change"`
   \| `"subscribers:change"`
@@ -850,10 +847,10 @@ Subscribe to a collection event once
 ##### T
 
 `T` *extends* 
+  \| `"status:error"`
   \| `"status:idle"`
   \| `"status:loading"`
   \| `"status:ready"`
-  \| `"status:error"`
   \| `"status:cleaned-up"`
   \| `"status:change"`
   \| `"subscribers:change"`
@@ -1419,10 +1416,10 @@ Wait for a collection event
 ##### T
 
 `T` *extends* 
+  \| `"status:error"`
   \| `"status:idle"`
   \| `"status:loading"`
   \| `"status:ready"`
-  \| `"status:error"`
   \| `"status:cleaned-up"`
   \| `"status:change"`
   \| `"subscribers:change"`

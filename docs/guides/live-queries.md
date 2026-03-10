@@ -44,6 +44,7 @@ query outputs automatically and should not be persisted back to storage.
 ## Table of Contents
 
 - [Creating Live Query Collections](#creating-live-query-collections)
+- [One-shot Queries with queryOnce](#one-shot-queries-with-queryonce)
 - [From Clause](#from-clause)
 - [Where Clauses](#where-clauses)
 - [Select Projections](#select)
@@ -125,6 +126,36 @@ const activeUsers = createLiveQueryCollection((q) =>
     }))
 )
 ```
+
+## One-shot Queries with queryOnce
+
+If you need a one-time snapshot (no ongoing reactivity), use `queryOnce`. It
+creates a live query collection, preloads it, extracts the results, and cleans
+up automatically so you do not have to remember to call `cleanup()`.
+
+```ts
+import { eq, queryOnce } from '@tanstack/db'
+
+// Basic one-shot query
+const activeUsers = await queryOnce((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.active, true))
+    .select(({ user }) => ({ id: user.id, name: user.name }))
+)
+
+// Single result with findOne()
+const user = await queryOnce((q) =>
+  q
+    .from({ user: usersCollection })
+    .where(({ user }) => eq(user.id, userId))
+    .findOne()
+)
+```
+
+Use `queryOnce` for scripts, background tasks, data export, or AI/LLM context
+building. `findOne()` resolves to `undefined` when no rows match. For UI
+bindings and reactive updates, use live queries instead.
 
 ### Using with Frameworks
 
@@ -1060,8 +1091,11 @@ const departmentStats = createCollection(liveQueryCollectionOptions({
 > In `groupBy` queries, the properties in your `select` clause must either be:
 > - An aggregate function (like `count`, `sum`, `avg`)
 > - A property that was used in the `groupBy` clause
-> 
+>
 > You cannot select properties that are neither aggregated nor grouped.
+
+> [!WARNING]
+> `fn.select()` cannot be used with `groupBy()`. The `groupBy` operator needs to statically analyze the `select` clause to discover which aggregate functions (`count`, `sum`, `max`, etc.) to compute for each group. Since `fn.select()` is an opaque JavaScript function, the compiler cannot inspect it. Use the standard `.select()` API when combining with `groupBy()`.
 
 ### Multiple Column Grouping
 
@@ -1901,6 +1935,9 @@ The functional variant API provides an alternative to the standard API, offering
 > The functional variant API cannot be optimized by the query optimizer or use collection indexes. It is intended for use in rare cases where the standard API is not sufficient.
 
 ### Functional Select
+
+> [!WARNING]
+> `fn.select()` cannot be used with `groupBy()`. The `groupBy` operator needs to statically analyze the `select` clause to discover which aggregate functions to compute, which is not possible with an opaque JavaScript function. Use the standard `.select()` API for grouped queries.
 
 Use `fn.select()` for complex transformations with JavaScript logic:
 

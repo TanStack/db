@@ -219,8 +219,11 @@ export function optimizeQuery(query: QueryIR): OptimizationResult {
 
 /**
  * Extracts collection-specific WHERE clauses from a query for index optimization.
- * This analyzes the original query to identify WHERE clauses that can be pushed down
- * to specific collections, but only for simple queries without joins.
+ * This analyzes the original query to identify single-source WHERE clauses that
+ * reference collection sources (not subqueries), including joined collections.
+ *
+ * For outer joins, clauses referencing the nullable side are excluded because
+ * using them to pre-filter collection data would change join semantics.
  *
  * @param query - The original QueryIR to analyze
  * @returns Map of source aliases to their WHERE clauses
@@ -246,10 +249,19 @@ function extractSourceWhereClauses(
   // Group clauses by single-source vs multi-source
   const groupedClauses = groupWhereClauses(analyzedClauses)
 
+  // Determine which source aliases are on the nullable side of outer joins.
+  // WHERE clauses for these sources must not be used for index optimization
+  // because they should filter the final joined result, not the input data.
+  const nullableSources = getNullableJoinSources(query)
+
   // Only include single-source clauses that reference collections directly
+  // and are not on the nullable side of an outer join
   for (const [sourceAlias, whereClause] of groupedClauses.singleSource) {
     // Check if this source alias corresponds to a collection reference
-    if (isCollectionReference(query, sourceAlias)) {
+    if (
+      isCollectionReference(query, sourceAlias) &&
+      !nullableSources.has(sourceAlias)
+    ) {
       sourceWhereClauses.set(sourceAlias, whereClause)
     }
   }
@@ -281,6 +293,36 @@ function isCollectionReference(query: QueryIR, sourceAlias: string): boolean {
   }
 
   return false
+}
+
+/**
+ * Returns the set of source aliases that are on the nullable side of outer joins.
+ *
+ * For a LEFT join the joined (right) side is nullable.
+ * For a RIGHT join the main (left/from) side is nullable.
+ * For a FULL join both sides are nullable.
+ *
+ * WHERE clauses that reference only a nullable source must not be pushed down
+ * into that source's subquery or used for index optimization, because doing so
+ * changes the join semantics: rows that should be excluded by the WHERE become
+ * unmatched outer-join rows (with the nullable side set to undefined) and
+ * incorrectly survive residual filtering.
+ */
+function getNullableJoinSources(query: QueryIR): Set<string> {
+  const nullable = new Set<string>()
+  if (query.join) {
+    const mainAlias = query.from.alias
+    for (const join of query.join) {
+      const joinedAlias = join.from.alias
+      if (join.type === `left` || join.type === `full`) {
+        nullable.add(joinedAlias)
+      }
+      if (join.type === `right` || join.type === `full`) {
+        nullable.add(mainAlias)
+      }
+    }
+  }
+  return nullable
 }
 
 /**
@@ -635,10 +677,25 @@ function applyOptimizations(
   // Track which single-source clauses were actually optimized
   const actuallyOptimized = new Set<string>()
 
+  // Determine which source aliases are on the nullable side of outer joins.
+  const nullableSources = getNullableJoinSources(query)
+
+  // Build a filtered copy of singleSource that excludes nullable-side clauses.
+  // Pushing a WHERE clause into the nullable side's subquery pre-filters the
+  // data before the join, converting "matched but WHERE-excluded" rows into
+  // "unmatched" outer-join rows.  These are indistinguishable from genuinely
+  // unmatched rows, so the residual WHERE cannot correct the result.
+  const pushableSingleSource = new Map<string, BasicExpression<boolean>>()
+  for (const [source, clause] of groupedClauses.singleSource) {
+    if (!nullableSources.has(source)) {
+      pushableSingleSource.set(source, clause)
+    }
+  }
+
   // Optimize the main FROM clause and track what was optimized
   const optimizedFrom = optimizeFromWithTracking(
     query.from,
-    groupedClauses.singleSource,
+    pushableSingleSource,
     actuallyOptimized,
   )
 
@@ -648,7 +705,7 @@ function applyOptimizations(
         ...joinClause,
         from: optimizeFromWithTracking(
           joinClause.from,
-          groupedClauses.singleSource,
+          pushableSingleSource,
           actuallyOptimized,
         ),
       }))
@@ -663,12 +720,7 @@ function applyOptimizations(
   }
 
   // Determine if we need residual clauses (when query has outer JOINs)
-  const hasOuterJoins =
-    query.join &&
-    query.join.some(
-      (join) =>
-        join.type === `left` || join.type === `right` || join.type === `full`,
-    )
+  const hasOuterJoins = nullableSources.size > 0
 
   // Add single-source clauses
   for (const [source, clause] of groupedClauses.singleSource) {

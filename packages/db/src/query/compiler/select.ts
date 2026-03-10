@@ -2,6 +2,7 @@ import { map } from '@tanstack/db-ivm'
 import { PropRef, Value as ValClass, isExpressionLike } from '../ir.js'
 import { AggregateNotSupportedError } from '../../errors.js'
 import { compileExpression } from './evaluators.js'
+import { containsAggregate } from './group-by.js'
 import type { Aggregate, BasicExpression, Select } from '../ir.js'
 import type {
   KeyedStream,
@@ -226,8 +227,10 @@ function addFromObject(
       continue
     }
 
-    if (isAggregateExpression(expression)) {
-      // Placeholder for group-by processing later
+    if (isAggregateExpression(expression) || containsAggregate(expression)) {
+      // Placeholder for group-by processing later.
+      // Both plain aggregates (count(...)) and expressions wrapping
+      // aggregates (coalesce(count(...), 0)) are deferred to processGroupBy.
       ops.push({
         kind: `field`,
         alias: [...prefixPath, key].join(`.`),

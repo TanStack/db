@@ -104,7 +104,7 @@ describe(`createLiveQueryCollection`, () => {
   })
 
   describe(`compareOptions inheritance`, () => {
-    it(`should inherit compareOptions from FROM collection`, async () => {
+    it(`should inherit compareOptions from FROM collection`, () => {
       // Create a collection with non-default compareOptions
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -131,7 +131,7 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
 
-    it(`should inherit compareOptions from FROM collection via subquery`, async () => {
+    it(`should inherit compareOptions from FROM collection via subquery`, () => {
       // Create a collection with non-default compareOptions
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -168,7 +168,7 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
 
-    it(`should use default compareOptions when FROM collection has no compareOptions`, async () => {
+    it(`should use default compareOptions when FROM collection has no compareOptions`, () => {
       // Create a collection without compareOptions (uses defaults)
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -200,7 +200,7 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
 
-    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, async () => {
+    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, () => {
       // Create a collection with non-default compareOptions
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({

@@ -20,6 +20,7 @@ import {
 import {
   createRefProxy,
   createRefProxyWithSelected,
+  isRefProxy,
   toExpression,
 } from './ref-proxy.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
@@ -366,7 +367,14 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   where(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
-    const expression = callback(refProxy)
+    const rawExpression = callback(refProxy)
+
+    // Allow bare boolean column references like `.where(({ u }) => u.active)`
+    // by converting ref proxies to PropRef expressions, the same way helper
+    // functions like `not()` and `eq()` do via `toExpression()`.
+    const expression = isRefProxy(rawExpression)
+      ? toExpression(rawExpression)
+      : rawExpression
 
     // Validate that the callback returned a valid expression
     // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
@@ -419,7 +427,14 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
         ? createRefProxyWithSelected(aliases)
         : createRefProxy(aliases)
     ) as RefsForContext<TContext>
-    const expression = callback(refProxy)
+    const rawExpression = callback(refProxy)
+
+    // Allow bare boolean column references like `.having(({ $selected }) => $selected.isActive)`
+    // by converting ref proxies to PropRef expressions, the same way helper
+    // functions like `not()` and `eq()` do via `toExpression()`.
+    const expression = isRefProxy(rawExpression)
+      ? toExpression(rawExpression)
+      : rawExpression
 
     // Validate that the callback returned a valid expression
     // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
@@ -910,8 +925,26 @@ export type QueryResult<T> = GetResult<ExtractContext<T>>
 // Export the types from types.ts for convenience
 export type {
   Context,
+  ContextSchema,
   Source,
   GetResult,
   RefLeaf as Ref,
   InferResultType,
+  // Types used in public method signatures that must be exported
+  // for declaration emit to work (see https://github.com/TanStack/db/issues/1012)
+  SchemaFromSource,
+  InferCollectionType,
+  MergeContextWithJoinType,
+  MergeContextForJoinCallback,
+  ApplyJoinOptionalityToMergedSchema,
+  ResultTypeFromSelect,
+  WithResult,
+  JoinOnCallback,
+  RefsForContext,
+  WhereCallback,
+  OrderByCallback,
+  GroupByCallback,
+  SelectObject,
+  FunctionalHavingRow,
+  Prettify,
 } from './types.js'

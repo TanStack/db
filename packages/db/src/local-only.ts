@@ -64,7 +64,7 @@ type LocalOnlyCollectionOptionsResult<
   T extends object,
   TKey extends string | number,
   TSchema extends StandardSchemaV1 | never = never,
-> = CollectionConfig<T, TKey, TSchema> & {
+> = CollectionConfig<T, TKey, TSchema, LocalOnlyCollectionUtils> & {
   utils: LocalOnlyCollectionUtils
 }
 
@@ -179,7 +179,10 @@ export function localOnlyCollectionOptions<
 ): LocalOnlyCollectionOptionsResult<T, TKey, TSchema> & {
   schema?: StandardSchemaV1
 } {
-  const { initialData, onInsert, onUpdate, onDelete, ...restConfig } = config
+  const { initialData, onInsert, onUpdate, onDelete, id, ...restConfig } =
+    config
+
+  const collectionId = id ?? crypto.randomUUID()
 
   // Create the sync configuration with transaction confirmation capability
   const syncResult = createLocalOnlySync<T, TKey>(initialData)
@@ -247,9 +250,7 @@ export function localOnlyCollectionOptions<
   }) => {
     // Filter mutations that belong to this collection
     const collectionMutations = transaction.mutations.filter(
-      (m) =>
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        m.collection === syncResult.collection,
+      (m) => m.collection.id === collectionId,
     )
 
     if (collectionMutations.length === 0) {
@@ -264,6 +265,7 @@ export function localOnlyCollectionOptions<
 
   return {
     ...restConfig,
+    id: collectionId,
     sync: syncResult.sync,
     onInsert: wrappedOnInsert,
     onUpdate: wrappedOnUpdate,

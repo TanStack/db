@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { createCollection } from '../src/index'
 import { localOnlyCollectionOptions } from '../src/local-only'
 import type { OutputWithVirtual } from './utils'
+import type { LocalOnlyCollectionUtils } from '../src/local-only'
 
 interface TestItem extends Record<string, unknown> {
   id: number
@@ -269,5 +270,19 @@ describe(`LocalOnly Collection Types`, () => {
     expectTypeOf(collection.toArray).toEqualTypeOf<
       Array<OutputWithVirtual<ExpectedType, string>>
     >()
+  })
+
+  it(`should type collection.utils as LocalOnlyCollectionUtils`, () => {
+    const collection = createCollection(
+      localOnlyCollectionOptions({
+        id: `test-utils-typing`,
+        getKey: (item: TestItem) => item.id,
+      }),
+    )
+
+    // Verify that collection.utils is typed as LocalOnlyCollectionUtils, not UtilsRecord
+    const utils: LocalOnlyCollectionUtils = collection.utils
+    expectTypeOf(utils.acceptMutations).toBeFunction()
+    expectTypeOf(collection.utils.acceptMutations).toBeFunction()
   })
 })

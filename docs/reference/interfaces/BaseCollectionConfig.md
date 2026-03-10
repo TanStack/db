@@ -39,7 +39,7 @@ Defined in: [packages/db/src/types.ts:499](https://github.com/TanStack/db/blob/m
 ### autoIndex?
 
 ```ts
-optional autoIndex: "eager" | "off";
+optional autoIndex: "off" | "eager";
 ```
 
 Defined in: [packages/db/src/types.ts:548](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L548)

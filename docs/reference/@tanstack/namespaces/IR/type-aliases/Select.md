@@ -15,7 +15,7 @@ Defined in: [packages/db/src/query/ir.ts:30](https://github.com/TanStack/db/blob
 
 ```ts
 [alias: string]: 
-  | Aggregate<any>
   | BasicExpression<any>
+  | Aggregate<any>
   | Select
 ```

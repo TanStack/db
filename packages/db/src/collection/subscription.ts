@@ -571,20 +571,20 @@ export class CollectionSubscription
 
       if (whereFromCursor) {
         const { expression } = orderBy[0]!
-        const minValue = minValues[0]
+        const cursorMinValue = minValues[0]
 
         // Build the whereCurrent expression for the first orderBy column
         // For Date values, we need to handle precision differences between JS (ms) and backends (μs)
         // A JS Date represents a 1ms range, so we query for all values within that range
         let whereCurrentCursor: BasicExpression<boolean>
-        if (minValue instanceof Date) {
-          const minValuePlus1ms = new Date(minValue.getTime() + 1)
+        if (cursorMinValue instanceof Date) {
+          const cursorMinValuePlus1ms = new Date(cursorMinValue.getTime() + 1)
           whereCurrentCursor = and(
-            gte(expression, new Value(minValue)),
-            lt(expression, new Value(minValuePlus1ms)),
+            gte(expression, new Value(cursorMinValue)),
+            lt(expression, new Value(cursorMinValuePlus1ms)),
           )
         } else {
-          whereCurrentCursor = eq(expression, new Value(minValue))
+          whereCurrentCursor = eq(expression, new Value(cursorMinValue))
         }
 
         cursorExpressions = {

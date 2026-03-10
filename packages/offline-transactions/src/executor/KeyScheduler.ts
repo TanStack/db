@@ -22,30 +22,27 @@ export class KeyScheduler {
     )
   }
 
-  getNextBatch(_maxConcurrency: number): Array<OfflineTransaction> {
+  getNext(): OfflineTransaction | undefined {
     return withSyncSpan(
-      `scheduler.getNextBatch`,
+      `scheduler.getNext`,
       { pendingCount: this.pendingTransactions.length },
       (span) => {
-        // For sequential processing, we ignore maxConcurrency and only process one transaction at a time
         if (this.isRunning || this.pendingTransactions.length === 0) {
           span.setAttribute(`result`, `empty`)
-          return []
+          return undefined
         }
 
-        // Find the first transaction that's ready to run
-        const readyTransaction = this.pendingTransactions.find((tx) =>
-          this.isReadyToRun(tx),
-        )
+        const firstTransaction = this.pendingTransactions[0]!
 
-        if (readyTransaction) {
-          span.setAttribute(`result`, `found`)
-          span.setAttribute(`transaction.id`, readyTransaction.id)
-        } else {
-          span.setAttribute(`result`, `none_ready`)
+        if (!this.isReadyToRun(firstTransaction)) {
+          span.setAttribute(`result`, `waiting_for_first`)
+          span.setAttribute(`transaction.id`, firstTransaction.id)
+          return undefined
         }
 
-        return readyTransaction ? [readyTransaction] : []
+        span.setAttribute(`result`, `found`)
+        span.setAttribute(`transaction.id`, firstTransaction.id)
+        return firstTransaction
       },
     )
   }

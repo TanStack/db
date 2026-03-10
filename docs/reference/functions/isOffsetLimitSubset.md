@@ -9,7 +9,7 @@ title: isOffsetLimitSubset
 function isOffsetLimitSubset(subset, superset): boolean;
 ```
 
-Defined in: [packages/db/src/query/predicate-utils.ts:811](https://github.com/TanStack/db/blob/main/packages/db/src/query/predicate-utils.ts#L811)
+Defined in: [packages/db/src/query/predicate-utils.ts:813](https://github.com/TanStack/db/blob/main/packages/db/src/query/predicate-utils.ts#L813)
 
 Check if one offset+limit range is a subset of another.
 Returns true if the subset range is fully contained within the superset range.

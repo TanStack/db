@@ -431,6 +431,25 @@ function createLoadSubsetDedupe<T extends Row<unknown>>({
 
     const { cursor, where, orderBy, limit } = opts
 
+    // When the stream is already up-to-date, it may be in a long-poll wait.
+    // Forcing a disconnect-and-refresh ensures requestSnapshot gets a response
+    // from a fresh server round-trip rather than waiting for the current poll to end.
+    // If the refresh fails (e.g., PauseLock held during subscriber processing in
+    // join pipelines), we fall through to requestSnapshot which still works.
+    if (stream.isUpToDate) {
+      try {
+        await stream.forceDisconnectAndRefresh()
+      } catch (error) {
+        if (handleSnapshotError(error, `forceDisconnectAndRefresh`)) {
+          return
+        }
+        debug(
+          `${logPrefix}forceDisconnectAndRefresh failed, proceeding to requestSnapshot: %o`,
+          error,
+        )
+      }
+    }
+
     try {
       if (cursor) {
         const whereCurrentOpts: LoadSubsetOptions = {
@@ -511,22 +530,33 @@ export function electricCollectionOptions<T extends StandardSchemaV1>(
   config: ElectricCollectionConfig<InferSchemaOutput<T>, T> & {
     schema: T
   },
-): Omit<CollectionConfig<InferSchemaOutput<T>, string | number, T>, `utils`> & {
-  id?: string
-  utils: ElectricCollectionUtils<InferSchemaOutput<T>>
-  schema: T
-}
+): Omit<
+  CollectionConfig<InferSchemaOutput<T>, string | number, T>,
+  `utils` | `onInsert` | `onUpdate` | `onDelete`
+> &
+  Pick<
+    ElectricCollectionConfig<InferSchemaOutput<T>, T>,
+    `onInsert` | `onUpdate` | `onDelete`
+  > & {
+    id?: string
+    utils: ElectricCollectionUtils<InferSchemaOutput<T>>
+    schema: T
+  }
 
 // Overload for when no schema is provided
 export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T> & {
     schema?: never // prohibit schema
   },
-): Omit<CollectionConfig<T, string | number>, `utils`> & {
-  id?: string
-  utils: ElectricCollectionUtils<T>
-  schema?: never // no schema in the result
-}
+): Omit<
+  CollectionConfig<T, string | number>,
+  `utils` | `onInsert` | `onUpdate` | `onDelete`
+> &
+  Pick<ElectricCollectionConfig<T>, `onInsert` | `onUpdate` | `onDelete`> & {
+    id?: string
+    utils: ElectricCollectionUtils<T>
+    schema?: never // no schema in the result
+  }
 
 export function electricCollectionOptions<T extends Row<unknown>>(
   config: ElectricCollectionConfig<T, any>,

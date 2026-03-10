@@ -33,7 +33,9 @@ Optional limit to include in loadSubset for query-specific cache keys.
 
 #### Overrides
 
-[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`limit`](SubscribeChangesOptions.md#limit)
+```ts
+Omit.limit
+```
 
 ***
 
@@ -113,7 +115,9 @@ Optional orderBy to include in loadSubset for query-specific cache keys.
 
 #### Overrides
 
-[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`orderBy`](SubscribeChangesOptions.md#orderby)
+```ts
+Omit.orderBy
+```
 
 ***
 
@@ -169,4 +173,6 @@ Pre-compiled expression for filtering changes
 
 #### Inherited from
 
-[`SubscribeChangesOptions`](SubscribeChangesOptions.md).[`whereExpression`](SubscribeChangesOptions.md#whereexpression)
+```ts
+Omit.whereExpression
+```

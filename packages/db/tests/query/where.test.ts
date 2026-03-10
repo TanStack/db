@@ -669,6 +669,52 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
 
         expect(complexQuery.size).toBe(2) // Alice (dept 1, 75k), Eve (dept 2, age 25)
       })
+
+      test(`bare boolean column reference as where filter`, () => {
+        // Using a boolean column directly (without eq()) should filter truthy rows
+        const activeEmployees = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) => emp.active)
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                active: emp.active,
+              })),
+        })
+
+        expect(activeEmployees.size).toBe(4) // Alice, Bob, Diana, Eve
+        expect(activeEmployees.toArray.every((emp) => emp.active)).toBe(true)
+
+        // Verify the correct employees are included
+        const ids = activeEmployees.toArray.map((emp) => emp.id).sort()
+        expect(ids).toEqual([1, 2, 4, 5])
+      })
+
+      test(`negated boolean column reference as where filter`, () => {
+        // Using not() with a bare boolean column should filter falsy rows
+        const inactiveEmployees = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) => not(emp.active))
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                active: emp.active,
+              })),
+        })
+
+        expect(inactiveEmployees.size).toBe(2) // Charlie, Frank
+        expect(inactiveEmployees.toArray.every((emp) => !emp.active)).toBe(true)
+
+        // Verify the correct employees are included
+        const ids = inactiveEmployees.toArray.map((emp) => emp.id).sort()
+        expect(ids).toEqual([3, 6])
+      })
     })
 
     describe(`String Operators`, () => {
@@ -784,6 +830,31 @@ function createWhereTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(salaryRanges.size).toBe(3) // Alice (75k), Diana (95k), Eve (55k)
+      })
+
+      test(`inArray operator - filters Date fields by timestamp value`, () => {
+        // Alice and Bob both have hire_date 2020-01-15, Charlie has 2018-07-10
+        const hiredOnDates = createLiveQueryCollection({
+          startSync: true,
+          query: (q) =>
+            q
+              .from({ emp: employeesCollection })
+              .where(({ emp }) =>
+                inArray(emp.hire_date, [
+                  new Date(`2020-01-15`),
+                  new Date(`2018-07-10`),
+                ]),
+              )
+              .select(({ emp }) => ({
+                id: emp.id,
+                name: emp.name,
+                hire_date: emp.hire_date,
+              })),
+        })
+
+        expect(hiredOnDates.size).toBe(3) // Alice, Bob, Charlie
+        const names = hiredOnDates.toArray.map((e) => e.name).sort()
+        expect(names).toEqual([`Alice Johnson`, `Bob Smith`, `Charlie Brown`])
       })
     })
 

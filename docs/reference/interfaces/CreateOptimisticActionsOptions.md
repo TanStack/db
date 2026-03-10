@@ -51,9 +51,7 @@ Unique identifier for the transaction
 
 #### Inherited from
 
-```ts
-Omit.id
-```
+[`TransactionConfig`](TransactionConfig.md).[`id`](TransactionConfig.md#id)
 
 ***
 
@@ -69,9 +67,7 @@ Custom metadata to associate with the transaction
 
 #### Inherited from
 
-```ts
-Omit.metadata
-```
+[`TransactionConfig`](TransactionConfig.md).[`metadata`](TransactionConfig.md#metadata)
 
 ***
 

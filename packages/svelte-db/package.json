@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/svelte-db",
-  "version": "0.1.68",
+  "version": "0.1.74",
   "description": "Svelte integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -36,7 +36,8 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
-    "!dist/**/*.spec.*"
+    "!dist/**/*.spec.*",
+    "skills"
   ],
   "dependencies": {
     "@tanstack/db": "workspace:*"
@@ -46,10 +47,10 @@
   },
   "devDependencies": {
     "@sveltejs/package": "^2.5.7",
-    "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@sveltejs/vite-plugin-svelte": "^6.2.4",
     "@vitest/coverage-istanbul": "^3.2.4",
-    "publint": "^0.3.16",
-    "svelte": "^5.46.1",
-    "svelte-check": "^4.3.5"
+    "publint": "^0.3.17",
+    "svelte": "^5.50.0",
+    "svelte-check": "^4.3.6"
   }
 }

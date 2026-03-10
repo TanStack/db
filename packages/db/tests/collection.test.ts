@@ -1591,7 +1591,7 @@ describe(`Collection`, () => {
     expect(state.size).toBe(3)
   })
 
-  it(`should allow deleting a row by passing only the key to write function`, async () => {
+  it(`should allow deleting a row by passing only the key to write function`, () => {
     let testSyncFunctions: any = null
 
     const collection = createCollection<{ id: number; value: string }>({
@@ -1656,7 +1656,7 @@ describe(`Collection`, () => {
     expect(Array.from(collection.state.keys())).toEqual([3])
   })
 
-  it(`should allow deleting a row by key with string keys`, async () => {
+  it(`should allow deleting a row by key with string keys`, () => {
     let testSyncFunctions: any = null
 
     const collection = createCollection<{ id: string; name: string }>({

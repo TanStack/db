@@ -1341,7 +1341,8 @@ describe(`Collection.subscribeChanges`, () => {
           commit()
         },
       },
-      onDelete: ({ transaction }) => {
+       
+      onDelete: async ({ transaction }) => {
         emitter.emit(`sync`, transaction.mutations)
         return Promise.resolve()
       },

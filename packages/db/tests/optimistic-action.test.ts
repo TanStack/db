@@ -1,11 +1,11 @@
 import { describe, expect, expectTypeOf, it, vi } from 'vitest'
 import { createCollection, createOptimisticAction } from '../src'
+import { stripVirtualProps } from './utils'
 import type {
   MutationFnParams,
   Transaction,
   TransactionWithMutations,
 } from '../src'
-import { stripVirtualProps } from './utils'
 
 describe(`createOptimisticAction`, () => {
   // Runtime tests
@@ -74,6 +74,7 @@ describe(`createOptimisticAction`, () => {
     })
 
     const addTodo = createOptimisticAction<string>({
+      // eslint-disable-next-line @typescript-eslint/require-await
       onMutate: async (text) => {
         collection.insert({ id: `1`, text })
       },

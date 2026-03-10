@@ -345,6 +345,71 @@ describe(`isWhereSubset`, () => {
     })
   })
 
+  describe(`AND subset with OR superset`, () => {
+    it(`should recognize and(eq, isNull) as subset of or(and(eq, isNull), and(eq, isNull))`, () => {
+      const projectX = `4e164373-31b4-4b42-95c9-9c395cfb4916`
+      const projectY = `2fd4c147-2547-4b02-9554-9cd067187409`
+
+      const queryX = and(
+        eq(ref(`project_id`), val(projectX)),
+        func(`isNull`, ref(`soft_deleted_at`)),
+      )
+      const queryY = and(
+        eq(ref(`project_id`), val(projectY)),
+        func(`isNull`, ref(`soft_deleted_at`)),
+      )
+
+      const unionPredicate = or(queryX, queryY)
+
+      expect(isWhereSubset(queryX, unionPredicate)).toBe(true)
+      expect(isWhereSubset(queryY, unionPredicate)).toBe(true)
+    })
+
+    it(`should recognize and(A, B) as subset of or(and(A, B), and(C, D))`, () => {
+      const subsetExpr = and(eq(ref(`id`), val(1)), gt(ref(`age`), val(20)))
+      const supersetExpr = or(
+        and(eq(ref(`id`), val(1)), gt(ref(`age`), val(20))),
+        and(eq(ref(`id`), val(2)), gt(ref(`age`), val(30))),
+      )
+      expect(isWhereSubset(subsetExpr, supersetExpr)).toBe(true)
+    })
+
+    it(`should return false when and(A, B) matches no disjunct`, () => {
+      const subsetExpr = and(eq(ref(`id`), val(3)), gt(ref(`age`), val(20)))
+      const supersetExpr = or(
+        and(eq(ref(`id`), val(1)), gt(ref(`age`), val(20))),
+        and(eq(ref(`id`), val(2)), gt(ref(`age`), val(30))),
+      )
+      expect(isWhereSubset(subsetExpr, supersetExpr)).toBe(false)
+    })
+  })
+
+  describe(`isNull predicates`, () => {
+    it(`should return true for identical isNull expressions`, () => {
+      const a = func(`isNull`, ref(`deleted_at`))
+      const b = func(`isNull`, ref(`deleted_at`))
+      expect(isWhereSubset(a, b)).toBe(true)
+    })
+
+    it(`should return false for isNull on different fields`, () => {
+      const a = func(`isNull`, ref(`deleted_at`))
+      const b = func(`isNull`, ref(`created_at`))
+      expect(isWhereSubset(a, b)).toBe(false)
+    })
+
+    it(`should return true for and(eq, isNull) subset of identical and(eq, isNull)`, () => {
+      const subset = and(
+        eq(ref(`project_id`), val(`abc`)),
+        func(`isNull`, ref(`soft_deleted_at`)),
+      )
+      const superset = and(
+        eq(ref(`project_id`), val(`abc`)),
+        func(`isNull`, ref(`soft_deleted_at`)),
+      )
+      expect(isWhereSubset(subset, superset)).toBe(true)
+    })
+  })
+
   describe(`different fields`, () => {
     it(`should return false for different fields with no relationship`, () => {
       expect(
