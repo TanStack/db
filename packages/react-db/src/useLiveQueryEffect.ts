@@ -31,11 +31,11 @@ export function useLiveQueryEffect<
   TRow extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
 >(config: EffectConfig<TRow, TKey>, deps: React.DependencyList = []): void {
-  const configRef = useRef(config)
+  const configRef = useRef<EffectConfig<TRow, TKey>>(config)
   configRef.current = config
 
   useEffect(() => {
-    const effect: Effect = createEffect({
+    const effect: Effect = createEffect<TRow, TKey>({
       id: config.id,
       query: config.query,
       skipInitial: config.skipInitial,
