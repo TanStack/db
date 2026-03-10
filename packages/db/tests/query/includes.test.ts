@@ -1094,6 +1094,74 @@ describe(`includes subqueries`, () => {
       ])
     })
 
+    it(`produces distinct child sets when parents share a correlation key but differ in filtered parent fields`, async () => {
+      // Two parents share the same groupId (correlation key) but have different
+      // createdBy values. The parent-referencing filter on createdBy must
+      // produce separate child results per parent, not a shared union.
+      type GroupParent = {
+        id: number
+        groupId: number
+        createdBy: string
+      }
+
+      type GroupChild = {
+        id: number
+        groupId: number
+        createdBy: string
+      }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<GroupParent>({
+          id: `shared-corr-parents`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, groupId: 1, createdBy: `alice` },
+            { id: 2, groupId: 1, createdBy: `bob` },
+          ],
+        }),
+      )
+
+      const children = createCollection(
+        mockSyncCollectionOptions<GroupChild>({
+          id: `shared-corr-children`,
+          getKey: (c) => c.id,
+          initialData: [
+            { id: 10, groupId: 1, createdBy: `alice` },
+          ],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: parents }).select(({ p }) => ({
+          id: p.id,
+          createdBy: p.createdBy,
+          items: q
+            .from({ c: children })
+            .where(({ c }) => eq(c.groupId, p.groupId))
+            .where(({ c }) => eq(c.createdBy, p.createdBy))
+            .select(({ c }) => ({
+              id: c.id,
+              createdBy: c.createdBy,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          createdBy: `alice`,
+          items: [{ id: 10, createdBy: `alice` }],
+        },
+        {
+          id: 2,
+          createdBy: `bob`,
+          items: [],
+        },
+      ])
+    })
+
     it(`extracts correlation from and() with more than 2 args`, async () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ p: projectsWC }).select(({ p }) => ({
