@@ -1513,32 +1513,44 @@ function updateRoutingIndex(
   for (const setup of state.nestedSetups) {
     for (const [, change] of childChanges) {
       if (change.inserts > 0) {
-        // Read the nested correlation key from the INCLUDES_ROUTING stamp
+        // Read the nested routing key from the INCLUDES_ROUTING stamp.
+        // Must use the composite routing key (not raw correlationKey) to match
+        // how nested buffers are keyed by computeRoutingKey.
         const nestedRouting =
           change.value[INCLUDES_ROUTING]?.[setup.compilationResult.fieldName]
         const nestedCorrelationKey = nestedRouting?.correlationKey
+        const nestedParentContext = nestedRouting?.parentContext ?? null
+        const nestedRoutingKey = computeRoutingKey(
+          nestedCorrelationKey,
+          nestedParentContext,
+        )
 
         if (nestedCorrelationKey != null) {
-          state.nestedRoutingIndex!.set(nestedCorrelationKey, correlationKey)
+          state.nestedRoutingIndex!.set(nestedRoutingKey, correlationKey)
           let reverseSet = state.nestedRoutingReverseIndex!.get(correlationKey)
           if (!reverseSet) {
             reverseSet = new Set()
             state.nestedRoutingReverseIndex!.set(correlationKey, reverseSet)
           }
-          reverseSet.add(nestedCorrelationKey)
+          reverseSet.add(nestedRoutingKey)
         }
       } else if (change.deletes > 0 && change.inserts === 0) {
         // Remove from routing index
         const nestedRouting2 =
           change.value[INCLUDES_ROUTING]?.[setup.compilationResult.fieldName]
         const nestedCorrelationKey = nestedRouting2?.correlationKey
+        const nestedParentContext2 = nestedRouting2?.parentContext ?? null
+        const nestedRoutingKey = computeRoutingKey(
+          nestedCorrelationKey,
+          nestedParentContext2,
+        )
 
         if (nestedCorrelationKey != null) {
-          state.nestedRoutingIndex!.delete(nestedCorrelationKey)
+          state.nestedRoutingIndex!.delete(nestedRoutingKey)
           const reverseSet =
             state.nestedRoutingReverseIndex!.get(correlationKey)
           if (reverseSet) {
-            reverseSet.delete(nestedCorrelationKey)
+            reverseSet.delete(nestedRoutingKey)
             if (reverseSet.size === 0) {
               state.nestedRoutingReverseIndex!.delete(correlationKey)
             }
