@@ -3285,7 +3285,7 @@ describe(`QueryCollection`, () => {
         const deletedItem = transaction.mutations[0]?.original
         // Call writeDelete inside onDelete handler - this should work without throwing
         collection.utils.writeDelete(deletedItem.id)
-        return { refetch: false }
+        return Promise.resolve({ refetch: false })
       })
 
       const config: QueryCollectionConfig<TestItem> = {
@@ -4197,7 +4197,7 @@ describe(`QueryCollection`, () => {
         getKey: (item) => item.id,
         startSync: true,
         syncMode: `on-demand`,
-        onInsert: () => ({ refetch: false }),
+        onInsert: () => Promise.resolve({ refetch: false }),
       }
 
       const options = queryCollectionOptions(config)
