@@ -1700,9 +1700,9 @@ This is useful for triggering side effects — sending notifications, syncing to
 |----------|----------|
 | Display query results in UI | Live query collection + `useLiveQuery` |
 | React to changes (side effects) | `createEffect` / `useLiveQueryEffect` |
-| Track new items entering a result set | `createEffect` with `on: 'enter'` |
-| Monitor items leaving a result set | `createEffect` with `on: 'exit'` |
-| Respond to updates within a result set | `createEffect` with `on: 'update'` |
+| Track new items entering a result set | `createEffect` with `onEnter` |
+| Monitor items leaving a result set | `createEffect` with `onExit` |
+| Respond to updates within a result set | `createEffect` with `onUpdate` |
 
 ### Basic Usage
 
@@ -1714,8 +1714,7 @@ const effect = createEffect({
     q
       .from({ msg: messagesCollection })
       .where(({ msg }) => eq(msg.role, 'user')),
-  on: 'enter',
-  handler: async (event) => {
+  onEnter: async (event) => {
     console.log('New user message:', event.value)
     await generateResponse(event.value)
   },
@@ -1731,14 +1730,15 @@ await effect.dispose()
 
 ```ts
 const effect = createEffect({
-  id: 'my-effect',           // Optional: auto-generated if not provided
+  id: 'my-effect',            // Optional: auto-generated if not provided
   query: (q) => q.from(...), // Query to watch
-  on: 'delta',               // Which delta types to handle
-  handler: (event, ctx) => { ... },       // Per-row handler
-  batchHandler: (events, ctx) => { ... }, // Per-batch handler
-  onError: (error, event) => { ... },     // Handler error callback
-  onSourceError: (error) => { ... },      // Source collection error callback
-  skipInitial: false,         // Skip deltas during initial load
+  onEnter: (event, ctx) => { ... },  // Per-enter callback
+  onUpdate: (event, ctx) => { ... }, // Per-update callback
+  onExit: (event, ctx) => { ... },   // Per-exit callback
+  onBatch: (events, ctx) => { ... }, // Full batch callback
+  onError: (error, event) => { ... }, // Callback error handler
+  onSourceError: (error) => { ... },  // Source collection error callback
+  skipInitial: false,          // Skip deltas during initial load
 })
 ```
 
@@ -1746,10 +1746,11 @@ const effect = createEffect({
 |--------|------|-------------|
 | `id` | `string` (optional) | Identifier for debugging/tracing. Auto-generated as `live-query-effect-{n}` if not provided. |
 | `query` | `QueryBuilder` or function | The query to watch. Accepts the same builder function or `QueryBuilder` instance as live query collections. |
-| `on` | `DeltaType \| DeltaType[] \| 'delta'` | Which delta types to fire handlers for. Use `'delta'` for all types, or specify one or more of `'enter'`, `'exit'`, `'update'`. |
-| `handler` | `(event, ctx) => void \| Promise<void>` (optional) | Called once for each matching delta event. |
-| `batchHandler` | `(events, ctx) => void \| Promise<void>` (optional) | Called once per batch with all matching delta events. |
-| `onError` | `(error, event) => void` (optional) | Called when `handler` or `batchHandler` throws or rejects. |
+| `onEnter` | `(event, ctx) => void \| Promise<void>` (optional) | Called once for each row entering the query result. |
+| `onUpdate` | `(event, ctx) => void \| Promise<void>` (optional) | Called once for each row updating within the query result. |
+| `onExit` | `(event, ctx) => void \| Promise<void>` (optional) | Called once for each row exiting the query result. |
+| `onBatch` | `(events, ctx) => void \| Promise<void>` (optional) | Called once per graph run with the full unfiltered batch of delta events. |
+| `onError` | `(error, event) => void` (optional) | Called when `onEnter`, `onUpdate`, `onExit`, or `onBatch` throws or rejects. |
 | `onSourceError` | `(error) => void` (optional) | Called when a source collection enters an error or cleaned-up state. The effect is automatically disposed after this fires. If not provided, the error is logged to `console.error`. |
 | `skipInitial` | `boolean` (optional) | When `true`, deltas from the initial data load are suppressed. Only subsequent changes fire handlers. Defaults to `false`. |
 
@@ -1772,43 +1773,41 @@ interface DeltaEvent<TRow, TKey> {
 | `exit` | Row left the query result | The exiting row | — |
 | `update` | Row changed but stayed in the result | The new row | The row before the change |
 
-### The `on` Parameter
+### Named Callbacks
 
-Control which delta types your handlers receive:
+Use the callback that matches the query-result transition you care about:
 
 ```ts
 // Only new rows entering the result
-createEffect({ on: 'enter', ... })
+createEffect({ onEnter: (event) => { ... }, ... })
 
 // Only rows leaving the result
-createEffect({ on: 'exit', ... })
+createEffect({ onExit: (event) => { ... }, ... })
 
 // Only rows that changed but stayed in the result
-createEffect({ on: 'update', ... })
+createEffect({ onUpdate: (event) => { ... }, ... })
 
-// Multiple specific types
-createEffect({ on: ['enter', 'exit'], ... })
-
-// All delta types
-createEffect({ on: 'delta', ... })
+// Inspect the full mixed batch for a graph run
+createEffect({ onBatch: (events) => { ... }, ... })
 ```
 
-### Per-Row vs Batch Handlers
+### Per-Row Callbacks vs `onBatch`
 
-You can provide a `handler` (called once per event), a `batchHandler` (called once per batch with all events), or both:
+You can provide per-row callbacks, `onBatch`, or both:
 
 ```ts
 createEffect({
   query: (q) => q.from({ user: usersCollection }),
-  on: 'delta',
 
-  // Called once for each delta event
-  handler: (event, ctx) => {
-    console.log(`${event.type}: ${event.key}`)
+  onEnter: (event, ctx) => {
+    console.log(`enter: ${event.key}`)
   },
 
-  // Called once per batch with all events
-  batchHandler: (events, ctx) => {
+  onExit: (event, ctx) => {
+    console.log(`exit: ${event.key}`)
+  },
+
+  onBatch: (events, ctx) => {
     console.log(`Batch of ${events.length} events`)
   },
 })
@@ -1828,8 +1827,7 @@ The `signal` is useful for cancelling in-flight async work when the effect is di
 ```ts
 createEffect({
   query: (q) => q.from({ task: tasksCollection }),
-  on: 'enter',
-  handler: async (event, ctx) => {
+  onEnter: async (event, ctx) => {
     const result = await fetch('/api/process', {
       method: 'POST',
       body: JSON.stringify(event.value),
@@ -1850,9 +1848,8 @@ const effect = createEffect({
   query: (q) =>
     q.from({ msg: messagesCollection })
      .where(({ msg }) => eq(msg.role, 'user')),
-  on: 'enter',
   skipInitial: true,
-  handler: async (event) => {
+  onEnter: async (event) => {
     await sendNotification(event.value)
   },
 })
@@ -1860,13 +1857,12 @@ const effect = createEffect({
 
 ### Error Handling
 
-Errors thrown by `handler` or `batchHandler` (sync or async) are caught and routed to `onError`. If no `onError` is provided, they are logged to `console.error`:
+Errors thrown by `onEnter`, `onUpdate`, `onExit`, or `onBatch` (sync or async) are caught and routed to `onError`. If no `onError` is provided, they are logged to `console.error`:
 
 ```ts
 createEffect({
   query: (q) => q.from({ order: ordersCollection }),
-  on: 'enter',
-  handler: async (event) => {
+  onEnter: async (event) => {
     await processOrder(event.value)
   },
   onError: (error, event) => {
@@ -1881,8 +1877,7 @@ If a source collection enters an error or cleaned-up state, the effect automatic
 ```ts
 createEffect({
   query: (q) => q.from({ data: dataCollection }),
-  on: 'delta',
-  handler: (event) => { ... },
+  onBatch: (events) => { ... },
   onSourceError: (error) => {
     console.warn('Data source failed, effect disposed:', error.message)
   },
@@ -1925,8 +1920,7 @@ createEffect({
         userName: user.name,
         postTitle: post.title,
       })),
-  on: 'enter',
-  handler: (event) => {
+  onEnter: (event) => {
     console.log(`${event.value.userName} published "${event.value.postTitle}"`)
   },
 })
@@ -1937,8 +1931,7 @@ createEffect({
     q
       .from({ user: usersCollection })
       .where(({ user }) => eq(user.role, 'admin')),
-  on: 'enter',
-  handler: (event) => {
+  onEnter: (event) => {
     console.log(`New admin: ${event.value.name}`)
   },
 })
@@ -1950,10 +1943,11 @@ createEffect({
       .from({ score: scoresCollection })
       .orderBy(({ score }) => score.points, 'desc')
       .limit(10),
-  on: 'delta',
-  handler: (event) => {
-    // Fires when items enter or exit the top 10
-    console.log(`${event.type}: ${event.value.name} (${event.value.points} pts)`)
+  onBatch: (events) => {
+    // Fires once per graph run with all enter/update/exit events
+    for (const event of events) {
+      console.log(`${event.type}: ${event.value.name} (${event.value.points} pts)`)
+    }
   },
 })
 ```
@@ -1967,8 +1961,7 @@ When multiple changes occur within a single transaction, effects coalesce them i
 ```ts
 createEffect({
   query: (q) => q.from({ item: itemsCollection }),
-  on: 'enter',
-  batchHandler: (events) => {
+  onBatch: (events) => {
     // If 3 items are inserted in one transaction,
     // this fires once with all 3 events
     console.log(`${events.length} items added`)
@@ -1991,9 +1984,8 @@ function ChatComponent({ channelId }: { channelId: string }) {
         q
           .from({ msg: messagesCollection })
           .where(({ msg }) => eq(msg.channelId, channelId)),
-      on: 'enter',
       skipInitial: true,
-      handler: async (event) => {
+      onEnter: async (event) => {
         await playNotificationSound()
       },
     },
@@ -2027,10 +2019,9 @@ const orderEffect = createEffect({
         customerEmail: customer.email,
         trackingNumber: order.trackingNumber,
       })),
-  on: 'enter',
   skipInitial: true,
 
-  handler: async (event, ctx) => {
+  onEnter: async (event, ctx) => {
     await sendShipmentEmail({
       to: event.value.customerEmail,
       orderId: event.value.orderId,

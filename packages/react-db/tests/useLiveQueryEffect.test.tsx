@@ -37,8 +37,7 @@ describe(`useLiveQueryEffect`, () => {
       useLiveQueryEffect<User, number>(
         {
           query: (q) => q.from({ user: users }),
-          on: `enter`,
-          handler: (event) => {
+          onEnter: (event) => {
             events.push(event)
           },
         },
@@ -83,8 +82,7 @@ describe(`useLiveQueryEffect`, () => {
         useLiveQueryEffect<User, number>(
           {
             query: (q) => q.from({ user: users }),
-            on: `enter`,
-            handler: (_event, ctx) => {
+            onEnter: (_event, ctx) => {
               if (!effectIds.includes(ctx.effectId)) {
                 effectIds.push(ctx.effectId)
               }
@@ -123,11 +121,10 @@ describe(`useLiveQueryEffect`, () => {
         {
           query: (q) =>
             q.from({ user: users }).where(({ user }) => eq(user.active, true)),
-          on: `delta`,
-          skipInitial: true,
-          handler: (event) => {
-            events.push(event)
+          onBatch: (batch) => {
+            events.push(...batch)
           },
+          skipInitial: true,
         },
         [],
       )

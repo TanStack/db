@@ -61,6 +61,22 @@ export type EffectQueryInput<TContext extends Context> =
   | ((q: InitialQueryBuilder) => QueryBuilder<TContext>)
   | QueryBuilder<TContext>
 
+type EffectEventHandler<
+  TRow extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = (
+  event: DeltaEvent<TRow, TKey>,
+  ctx: EffectContext,
+) => void | Promise<void>
+
+type EffectBatchHandler<
+  TRow extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = (
+  events: Array<DeltaEvent<TRow, TKey>>,
+  ctx: EffectContext,
+) => void | Promise<void>
+
 /** Effect configuration */
 export interface EffectConfig<
   TRow extends object = Record<string, unknown>,
@@ -72,22 +88,19 @@ export interface EffectConfig<
   /** Query to watch for deltas */
   query: EffectQueryInput<any>
 
-  /** Which delta types to handle */
-  on: DeltaType | Array<DeltaType> | 'delta'
+  /** Called once for each row entering the query result */
+  onEnter?: EffectEventHandler<TRow, TKey>
 
-  /** Per-row handler (called once per matching delta event) */
-  handler?: (
-    event: DeltaEvent<TRow, TKey>,
-    ctx: EffectContext,
-  ) => void | Promise<void>
+  /** Called once for each row updating within the query result */
+  onUpdate?: EffectEventHandler<TRow, TKey>
 
-  /** Per-batch handler (called once per graph run with all matching events) */
-  batchHandler?: (
-    events: Array<DeltaEvent<TRow, TKey>>,
-    ctx: EffectContext,
-  ) => void | Promise<void>
+  /** Called once for each row exiting the query result */
+  onExit?: EffectEventHandler<TRow, TKey>
 
-  /** Error handler for exceptions thrown by handler/batchHandler */
+  /** Called once per graph run with all delta events from that batch */
+  onBatch?: EffectBatchHandler<TRow, TKey>
+
+  /** Error handler for exceptions thrown by effect callbacks */
   onError?: (error: Error, event: DeltaEvent<TRow, TKey>) => void
 
   /**
@@ -147,8 +160,7 @@ let effectCounter = 0
  * const effect = createEffect({
  *   query: (q) => q.from({ msg: messagesCollection })
  *     .where(({ msg }) => eq(msg.role, 'user')),
- *   on: 'enter',
- *   handler: async (event) => {
+ *   onEnter: async (event) => {
  *     await generateResponse(event.value)
  *   },
  * })
@@ -162,9 +174,6 @@ export function createEffect<
   TKey extends string | number = string | number,
 >(config: EffectConfig<TRow, TKey>): Effect {
   const id = config.id ?? `live-query-effect-${++effectCounter}`
-
-  // Normalise the `on` parameter into a set of delta types
-  const deltaTypes = normaliseDeltaTypes(config.on)
 
   // AbortController for signalling disposal to handlers
   const abortController = new AbortController()
@@ -181,42 +190,40 @@ export function createEffect<
   // Callback invoked by the pipeline runner with each batch of delta events
   const onBatchProcessed = (events: Array<DeltaEvent<TRow, TKey>>) => {
     if (disposed) return
-
-    // Filter to only the requested delta types
-    const filtered = events.filter((e) => deltaTypes.has(e.type))
-    if (filtered.length === 0) return
+    if (events.length === 0) return
 
     // Batch handler
-    if (config.batchHandler) {
+    if (config.onBatch) {
       try {
-        const result = config.batchHandler(filtered, ctx)
+        const result = config.onBatch(events, ctx)
         if (result instanceof Promise) {
           const tracked = result.catch((error) => {
-            reportError(error, filtered[0]!, config.onError)
+            reportError(error, events[0]!, config.onError)
           })
           trackPromise(tracked, inFlightHandlers)
         }
       } catch (error) {
         // For batch handler errors, report with first event as context
-        reportError(error, filtered[0]!, config.onError)
+        reportError(error, events[0]!, config.onError)
       }
     }
 
-    // Per-row handler
-    if (config.handler) {
-      for (const event of filtered) {
-        if (abortController.signal.aborted) break
-        try {
-          const result = config.handler(event, ctx)
-          if (result instanceof Promise) {
-            const tracked = result.catch((error) => {
-              reportError(error, event, config.onError)
-            })
-            trackPromise(tracked, inFlightHandlers)
-          }
-        } catch (error) {
-          reportError(error, event, config.onError)
+    for (const event of events) {
+      if (abortController.signal.aborted) break
+
+      const handler = getHandlerForEvent(event, config)
+      if (!handler) continue
+
+      try {
+        const result = handler(event, ctx)
+        if (result instanceof Promise) {
+          const tracked = result.catch((error) => {
+            reportError(error, event, config.onError)
+          })
+          trackPromise(tracked, inFlightHandlers)
         }
+      } catch (error) {
+        reportError(error, event, config.onError)
       }
     }
   }
@@ -982,17 +989,21 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Normalise the `on` config value into a Set of DeltaTypes */
-function normaliseDeltaTypes(
-  on: DeltaType | Array<DeltaType> | 'delta',
-): Set<DeltaType> {
-  if (on === `delta`) {
-    return new Set<DeltaType>([`enter`, `exit`, `update`])
+function getHandlerForEvent<
+  TRow extends object,
+  TKey extends string | number,
+>(
+  event: DeltaEvent<TRow, TKey>,
+  config: EffectConfig<TRow, TKey>,
+): EffectEventHandler<TRow, TKey> | undefined {
+  switch (event.type) {
+    case `enter`:
+      return config.onEnter
+    case `exit`:
+      return config.onExit
+    case `update`:
+      return config.onUpdate
   }
-  if (Array.isArray(on)) {
-    return new Set<DeltaType>(on)
-  }
-  return new Set<DeltaType>([on])
 }
 
 /**

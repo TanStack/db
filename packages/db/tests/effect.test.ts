@@ -66,6 +66,15 @@ function collectEvents<T extends object = Record<string, unknown>>(
   }
 }
 
+/** Collect all events from a batch callback into an array */
+function collectBatchEvents<T extends object = Record<string, unknown>>(
+  events: Array<DeltaEvent<T, any>>,
+) {
+  return (batch: Array<DeltaEvent<T, any>>) => {
+    events.push(...batch)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -78,8 +87,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: collectEvents(events),
+        onEnter: collectEvents(events),
       })
 
       await flushPromises()
@@ -101,9 +109,8 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
+        onEnter: collectEvents(events),
         skipInitial: true,
-        handler: collectEvents(events),
       })
 
       await flushPromises()
@@ -133,8 +140,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `exit`,
-        handler: collectEvents(events),
+        onExit: collectEvents(events),
       })
 
       await flushPromises()
@@ -165,8 +171,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `update`,
-        handler: collectEvents(events),
+        onUpdate: collectEvents(events),
       })
 
       await flushPromises()
@@ -202,8 +207,7 @@ describe(`createEffect`, () => {
       const effect = createEffect<User, number>({
         query: (q) =>
           q.from({ user: users }).where(({ user }) => eq(user.active, true)),
-        on: `enter`,
-        handler: collectEvents(events),
+        onEnter: collectEvents(events),
       })
 
       await flushPromises()
@@ -222,8 +226,7 @@ describe(`createEffect`, () => {
       const effect = createEffect<User, number>({
         query: (q) =>
           q.from({ user: users }).where(({ user }) => eq(user.active, true)),
-        on: `delta`,
-        handler: collectEvents(events),
+        onBatch: collectBatchEvents(events),
       })
 
       await flushPromises()
@@ -254,8 +257,7 @@ describe(`createEffect`, () => {
       const effect = createEffect<User, number>({
         query: (q) =>
           q.from({ user: users }).where(({ user }) => eq(user.active, true)),
-        on: `delta`,
-        handler: collectEvents(events),
+        onBatch: collectBatchEvents(events),
       })
 
       await flushPromises()
@@ -280,15 +282,14 @@ describe(`createEffect`, () => {
     })
   })
 
-  describe(`on parameter`, () => {
-    it(`should support on: 'delta' for all event types`, async () => {
+  describe(`named callbacks`, () => {
+    it(`should support onBatch for all event types`, async () => {
       const users = createUsersCollection()
       const events: Array<DeltaEvent<User, number>> = []
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
-        handler: collectEvents(events),
+        onBatch: collectBatchEvents(events),
       })
 
       await flushPromises()
@@ -321,14 +322,14 @@ describe(`createEffect`, () => {
       await effect.dispose()
     })
 
-    it(`should support on as an array of delta types`, async () => {
+    it(`should combine onEnter and onExit without handling updates`, async () => {
       const users = createUsersCollection()
       const events: Array<DeltaEvent<User, number>> = []
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: [`enter`, `exit`],
-        handler: collectEvents(events),
+        onEnter: collectEvents(events),
+        onExit: collectEvents(events),
       })
 
       await flushPromises()
@@ -363,15 +364,14 @@ describe(`createEffect`, () => {
     })
   })
 
-  describe(`batchHandler`, () => {
+  describe(`onBatch`, () => {
     it(`should receive all events in a single batch per graph run`, async () => {
       const users = createUsersCollection([])
       const batches: Array<Array<DeltaEvent<User, number>>> = []
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        batchHandler: (events) => {
+        onBatch: (events) => {
           batches.push([...events])
         },
       })
@@ -407,9 +407,8 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
+        onEnter: collectEvents(events),
         skipInitial: true,
-        handler: collectEvents(events),
       })
 
       await flushPromises()
@@ -438,8 +437,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: collectEvents(events),
+        onEnter: collectEvents(events),
       })
 
       await flushPromises()
@@ -459,8 +457,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: () => {
+        onEnter: () => {
           throw new Error(`handler error`)
         },
         onError: (error, event) => {
@@ -484,8 +481,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: () => {
+        onEnter: () => {
           return Promise.reject(new Error(`async error`))
         },
         onError: (error, event) => {
@@ -507,8 +503,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: () => {
+        onEnter: () => {
           throw new Error(`unhandled error`)
         },
       })
@@ -529,9 +524,8 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
+        onBatch: collectBatchEvents(events),
         skipInitial: true,
-        handler: collectEvents(events),
       })
 
       await flushPromises()
@@ -565,8 +559,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: async () => {
+        onEnter: async () => {
           await handlerPromise
           handlerCompleted = true
         },
@@ -593,8 +586,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: (_event, ctx) => {
+        onEnter: (_event, ctx) => {
           capturedSignal = ctx.signal
         },
       })
@@ -612,8 +604,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: () => {},
+        onEnter: () => {},
       })
 
       await effect.dispose()
@@ -629,8 +620,7 @@ describe(`createEffect`, () => {
 
       const effect1 = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: (_event, ctx) => {
+        onEnter: (_event, ctx) => {
           capturedIds.push(ctx.effectId)
         },
       })
@@ -639,8 +629,7 @@ describe(`createEffect`, () => {
 
       const effect2 = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: (_event, ctx) => {
+        onEnter: (_event, ctx) => {
           capturedIds.push(ctx.effectId)
         },
       })
@@ -664,8 +653,7 @@ describe(`createEffect`, () => {
       const effect = createEffect<User, number>({
         id: `my-custom-effect`,
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        handler: (_event, ctx) => {
+        onEnter: (_event, ctx) => {
           capturedId = ctx.effectId
         },
       })
@@ -689,8 +677,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: queryBuilder,
-        on: `enter`,
-        handler: collectEvents(events),
+        onEnter: collectEvents(events),
       })
 
       await flushPromises()
@@ -720,8 +707,7 @@ describe(`createEffect`, () => {
               title: issue.title,
               userName: user!.name,
             })),
-        on: `enter`,
-        handler: collectEvents(events),
+        onEnter: collectEvents(events),
       })
 
       await flushPromises()
@@ -745,8 +731,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
-        handler: collectEvents(events),
+        onBatch: collectBatchEvents(events),
       })
 
       await flushPromises()
@@ -795,8 +780,7 @@ describe(`createEffect`, () => {
               id: user.id,
               name: user.name,
             })),
-        on: `enter`,
-        handler: collectEvents(events),
+        onEnter: collectEvents(events),
       })
 
       await flushPromises()
@@ -820,8 +804,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
-        batchHandler: (events) => {
+        onBatch: (events) => {
           batches.push([...events])
         },
       })
@@ -877,8 +860,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
-        batchHandler: (events) => {
+        onBatch: (events) => {
           batches.push([...events])
         },
       })
@@ -941,11 +923,8 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
+        onBatch: collectBatchEvents(events),
         skipInitial: true,
-        handler: (event) => {
-          events.push(event)
-        },
       })
 
       await flushPromises()
@@ -1022,11 +1001,8 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
+        onBatch: collectBatchEvents(events),
         skipInitial: true,
-        handler: (event) => {
-          events.push(event)
-        },
       })
 
       await flushPromises()
@@ -1070,11 +1046,8 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
+        onBatch: collectBatchEvents(events),
         skipInitial: true,
-        handler: (event) => {
-          events.push(event)
-        },
       })
 
       await flushPromises()
@@ -1123,10 +1096,7 @@ describe(`createEffect`, () => {
             .from({ user: users })
             .orderBy(({ user }) => user.name, `asc`)
             .limit(3),
-        on: `delta`,
-        handler: (event) => {
-          events.push(event)
-        },
+        onBatch: collectBatchEvents(events),
       })
 
       await flushPromises()
@@ -1154,11 +1124,8 @@ describe(`createEffect`, () => {
             .from({ user: users })
             .orderBy(({ user }) => user.name, `asc`)
             .limit(3),
-        on: `delta`,
+        onBatch: collectBatchEvents(events),
         skipInitial: true,
-        handler: (event) => {
-          events.push(event)
-        },
       })
 
       await flushPromises()
@@ -1202,11 +1169,8 @@ describe(`createEffect`, () => {
             .from({ user: users })
             .orderBy(({ user }) => user.name, `asc`)
             .limit(3),
-        on: `delta`,
+        onBatch: collectBatchEvents(events),
         skipInitial: true,
-        handler: (event) => {
-          events.push(event)
-        },
       })
 
       await flushPromises()
@@ -1249,10 +1213,7 @@ describe(`createEffect`, () => {
             .from({ user: users })
             .orderBy(({ user }) => user.name, `desc`)
             .limit(2),
-        on: `delta`,
-        handler: (event) => {
-          events.push(event)
-        },
+        onBatch: collectBatchEvents(events),
       })
 
       await flushPromises()
@@ -1280,11 +1241,8 @@ describe(`createEffect`, () => {
             .from({ user: users })
             .orderBy(({ user }) => user.name, `asc`)
             .limit(3),
-        on: `delta`,
+        onBatch: collectBatchEvents(events),
         skipInitial: true,
-        handler: (event) => {
-          events.push(event)
-        },
       })
 
       await flushPromises()
@@ -1350,8 +1308,7 @@ describe(`createEffect`, () => {
             .where(({ user }) => eq(user.active, true))
             .orderBy(({ user }) => user.name, `asc`)
             .limit(3),
-        on: `enter`,
-        handler: (event) => {
+        onEnter: (event) => {
           events.push(event)
         },
       })
@@ -1383,8 +1340,7 @@ describe(`createEffect`, () => {
             .from({ user: users })
             .orderBy(({ user }) => user.name, `asc`)
             .limit(2),
-        on: `enter`,
-        handler: (event) => {
+        onEnter: (event) => {
           events.push(event)
         },
       })
@@ -1415,11 +1371,8 @@ describe(`createEffect`, () => {
             .where(({ user }) => eq(user.active, true))
             .orderBy(({ user }) => user.name, `asc`)
             .limit(3),
-        on: `delta`,
+        onBatch: collectBatchEvents(events),
         skipInitial: true,
-        handler: (event) => {
-          events.push(event)
-        },
       })
 
       await flushPromises()
@@ -1459,10 +1412,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
-        handler: (event) => {
-          events.push(event)
-        },
+        onBatch: collectBatchEvents(events),
       })
 
       await flushPromises()
@@ -1490,10 +1440,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
-        handler: (event) => {
-          events.push(event)
-        },
+        onBatch: collectBatchEvents(events),
       })
 
       await flushPromises()
@@ -1520,8 +1467,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `delta`,
-        handler: () => {},
+        onBatch: () => {},
         onSourceError: (error) => {
           sourceErrors.push(error)
         },
@@ -1549,8 +1495,7 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        batchHandler: () => Promise.reject(new Error(`batch boom`)),
+        onBatch: () => Promise.reject(new Error(`batch boom`)),
         onError: (error) => {
           errors.push(error)
         },
@@ -1570,13 +1515,12 @@ describe(`createEffect`, () => {
 
       const effectHandle = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `enter`,
-        skipInitial: true,
-        handler: (event) => {
+        onEnter: (event) => {
           events.push(event)
           // Dispose inside the handler — should not crash
           effectHandle.dispose()
         },
+        skipInitial: true,
       })
 
       await flushPromises()
@@ -1606,11 +1550,10 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `update`,
-        skipInitial: true,
-        handler: (event) => {
+        onUpdate: (event) => {
           events.push(event)
         },
+        skipInitial: true,
       })
 
       await flushPromises()
@@ -1648,11 +1591,10 @@ describe(`createEffect`, () => {
 
       const effect = createEffect<User, number>({
         query: (q) => q.from({ user: users }),
-        on: `exit`,
-        skipInitial: true,
-        handler: (event) => {
+        onExit: (event) => {
           events.push(event)
         },
+        skipInitial: true,
       })
 
       await flushPromises()

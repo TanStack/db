@@ -15,9 +15,8 @@ import type { Effect, EffectConfig } from '@tanstack/db'
  *   useLiveQueryEffect(
  *     {
  *       query: (q) => q.from({ msg: messages }).where(({ msg }) => eq(msg.role, 'user')),
- *       on: 'enter',
  *       skipInitial: true,
- *       handler: async (event) => {
+ *       onEnter: async (event) => {
  *         await generateResponse(event.value)
  *       },
  *     },
