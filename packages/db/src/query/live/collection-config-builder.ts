@@ -1515,9 +1515,7 @@ function updateRoutingIndex(
       if (change.inserts > 0) {
         // Read the nested correlation key from the INCLUDES_ROUTING stamp
         const nestedRouting =
-          change.value[INCLUDES_ROUTING]?.[
-            setup.compilationResult.fieldName
-          ]
+          change.value[INCLUDES_ROUTING]?.[setup.compilationResult.fieldName]
         const nestedCorrelationKey = nestedRouting?.correlationKey
 
         if (nestedCorrelationKey != null) {
@@ -1532,9 +1530,7 @@ function updateRoutingIndex(
       } else if (change.deletes > 0 && change.inserts === 0) {
         // Remove from routing index
         const nestedRouting2 =
-          change.value[INCLUDES_ROUTING]?.[
-            setup.compilationResult.fieldName
-          ]
+          change.value[INCLUDES_ROUTING]?.[setup.compilationResult.fieldName]
         const nestedCorrelationKey = nestedRouting2?.correlationKey
 
         if (nestedCorrelationKey != null) {
@@ -1800,8 +1796,7 @@ function flushIncludesState(
     if (parentChanges) {
       for (const [parentKey, changes] of parentChanges) {
         if (changes.deletes > 0 && changes.inserts === 0) {
-          const routing =
-            changes.value[INCLUDES_ROUTING]?.[state.fieldName]
+          const routing = changes.value[INCLUDES_ROUTING]?.[state.fieldName]
           const correlationKey = routing?.correlationKey
           const parentContext = routing?.parentContext ?? null
           const routingKey = computeRoutingKey(correlationKey, parentContext)
@@ -1809,8 +1804,7 @@ function flushIncludesState(
             cleanRoutingIndexOnDelete(state, routingKey)
             state.childRegistry.delete(routingKey)
             // Clean up reverse index
-            const parentKeys =
-              state.correlationToParentKeys.get(routingKey)
+            const parentKeys = state.correlationToParentKeys.get(routingKey)
             if (parentKeys) {
               parentKeys.delete(parentKey)
               if (parentKeys.size === 0) {
