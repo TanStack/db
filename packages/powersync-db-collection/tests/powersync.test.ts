@@ -41,7 +41,6 @@ describe(`PowerSync Integration`, () => {
       database: {
         dbFilename: `test-${randomUUID()}.sqlite`,
         dbLocation: tmpdir(),
-        implementation: { type: `node:sqlite` },
       },
       schema: APP_SCHEMA,
     })
