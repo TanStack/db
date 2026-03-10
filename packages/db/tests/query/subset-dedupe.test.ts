@@ -637,8 +637,13 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(loadWhere.name).toBe(`not`)
       expect(loadWhere.args[0].name).toBe(`in`)
       expect(loadWhere.args[0].args[0].path).toEqual([`task_id`])
-      const loadedUuids = (loadWhere.args[0].args[1].value as Array<string>).sort()
-      const expectedUuids = Array.from({ length: 10 }, (_, i) => `uuid-${i}`).sort()
+      const loadedUuids = (
+        loadWhere.args[0].args[1].value as Array<string>
+      ).sort()
+      const expectedUuids = Array.from(
+        { length: 10 },
+        (_, i) => `uuid-${i}`,
+      ).sort()
       expect(loadedUuids).toEqual(expectedUuids)
 
       // Critical: after loading all data, subsequent requests should be deduplicated
