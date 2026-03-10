@@ -1,5 +1,5 @@
 import { D2, output, serializeValue } from '@tanstack/db-ivm'
-import { compileQuery } from '../compiler/index.js'
+import { INCLUDES_ROUTING, compileQuery } from '../compiler/index.js'
 import { createCollection } from '../../collection/index.js'
 import { IncludesSubquery } from '../ir.js'
 import { buildQuery, getQueryIR } from '../builder/index.js'
@@ -831,14 +831,21 @@ export class CollectionConfigBuilder<
           syncState.messagesCount += messages.length
 
           for (const [[childKey, tupleData], multiplicity] of messages) {
-            const [childResult, _orderByIndex, correlationKey] =
-              tupleData as unknown as [any, string | undefined, unknown]
+            const [childResult, _orderByIndex, correlationKey, parentContext] =
+              tupleData as unknown as [
+                any,
+                string | undefined,
+                unknown,
+                Record<string, any> | null,
+              ]
 
-            // Accumulate by [correlationKey, childKey]
-            let byChild = state.pendingChildChanges.get(correlationKey)
+            const routingKey = computeRoutingKey(correlationKey, parentContext)
+
+            // Accumulate by [routingKey, childKey]
+            let byChild = state.pendingChildChanges.get(routingKey)
             if (!byChild) {
               byChild = new Map()
-              state.pendingChildChanges.set(correlationKey, byChild)
+              state.pendingChildChanges.set(routingKey, byChild)
             }
 
             const existing = byChild.get(childKey) || {
@@ -1351,13 +1358,20 @@ function setupNestedPipelines(
         syncState.messagesCount += messages.length
 
         for (const [[childKey, tupleData], multiplicity] of messages) {
-          const [childResult, _orderByIndex, correlationKey] =
-            tupleData as unknown as [any, string | undefined, unknown]
+          const [childResult, _orderByIndex, correlationKey, parentContext] =
+            tupleData as unknown as [
+              any,
+              string | undefined,
+              unknown,
+              Record<string, any> | null,
+            ]
 
-          let byChild = buffer.get(correlationKey)
+          const routingKey = computeRoutingKey(correlationKey, parentContext)
+
+          let byChild = buffer.get(routingKey)
           if (!byChild) {
             byChild = new Map()
-            buffer.set(correlationKey, byChild)
+            buffer.set(routingKey, byChild)
           }
 
           const existing = byChild.get(childKey) || {
@@ -1499,11 +1513,12 @@ function updateRoutingIndex(
   for (const setup of state.nestedSetups) {
     for (const [, change] of childChanges) {
       if (change.inserts > 0) {
-        // Read the pre-computed nested correlation key from the compiler stamp
-        const nestedCorrelationKey =
-          change.value.__includesCorrelationKeys?.[
+        // Read the nested correlation key from the INCLUDES_ROUTING stamp
+        const nestedRouting =
+          change.value[INCLUDES_ROUTING]?.[
             setup.compilationResult.fieldName
           ]
+        const nestedCorrelationKey = nestedRouting?.correlationKey
 
         if (nestedCorrelationKey != null) {
           state.nestedRoutingIndex!.set(nestedCorrelationKey, correlationKey)
@@ -1516,10 +1531,11 @@ function updateRoutingIndex(
         }
       } else if (change.deletes > 0 && change.inserts === 0) {
         // Remove from routing index
-        const nestedCorrelationKey =
-          change.value.__includesCorrelationKeys?.[
+        const nestedRouting2 =
+          change.value[INCLUDES_ROUTING]?.[
             setup.compilationResult.fieldName
           ]
+        const nestedCorrelationKey = nestedRouting2?.correlationKey
 
         if (nestedCorrelationKey != null) {
           state.nestedRoutingIndex!.delete(nestedCorrelationKey)
@@ -1566,6 +1582,19 @@ function hasNestedBufferChanges(setups: Array<NestedIncludesSetup>): boolean {
       return true
   }
   return false
+}
+
+/**
+ * Computes a composite routing key from correlation key and parent context.
+ * When parentContext is null (no parent filters), returns the raw correlationKey
+ * for zero behavioral change on existing queries.
+ */
+function computeRoutingKey(
+  correlationKey: unknown,
+  parentContext: Record<string, any> | null,
+): unknown {
+  if (parentContext == null) return correlationKey
+  return JSON.stringify([correlationKey, parentContext])
 }
 
 /**
@@ -1640,33 +1669,35 @@ function flushIncludesState(
       for (const [parentKey, changes] of parentChanges) {
         if (changes.inserts > 0) {
           const parentResult = changes.value
-          // Read the pre-computed correlation key from the compiler stamp
-          const correlationKey =
-            parentResult.__includesCorrelationKeys?.[state.fieldName]
+          // Extract routing info from INCLUDES_ROUTING symbol (set by compiler)
+          const routing = parentResult[INCLUDES_ROUTING]?.[state.fieldName]
+          const correlationKey = routing?.correlationKey
+          const parentContext = routing?.parentContext ?? null
+          const routingKey = computeRoutingKey(correlationKey, parentContext)
 
           if (correlationKey != null) {
-            // Ensure child Collection exists for this correlation key
-            if (!state.childRegistry.has(correlationKey)) {
+            // Ensure child Collection exists for this routing key
+            if (!state.childRegistry.has(routingKey)) {
               const entry = createChildCollectionEntry(
                 parentId,
                 state.fieldName,
-                correlationKey,
+                routingKey,
                 state.hasOrderBy,
                 state.nestedSetups,
               )
-              state.childRegistry.set(correlationKey, entry)
+              state.childRegistry.set(routingKey, entry)
             }
-            // Update reverse index: correlation key → parent keys
-            let parentKeys = state.correlationToParentKeys.get(correlationKey)
+            // Update reverse index: routing key → parent keys
+            let parentKeys = state.correlationToParentKeys.get(routingKey)
             if (!parentKeys) {
               parentKeys = new Set()
-              state.correlationToParentKeys.set(correlationKey, parentKeys)
+              state.correlationToParentKeys.set(routingKey, parentKeys)
             }
             parentKeys.add(parentKey)
 
             // Attach child Collection to the parent result
             parentResult[state.fieldName] =
-              state.childRegistry.get(correlationKey)!.collection
+              state.childRegistry.get(routingKey)!.collection
           }
         }
       }
@@ -1769,17 +1800,21 @@ function flushIncludesState(
     if (parentChanges) {
       for (const [parentKey, changes] of parentChanges) {
         if (changes.deletes > 0 && changes.inserts === 0) {
-          const correlationKey =
-            changes.value.__includesCorrelationKeys?.[state.fieldName]
+          const routing =
+            changes.value[INCLUDES_ROUTING]?.[state.fieldName]
+          const correlationKey = routing?.correlationKey
+          const parentContext = routing?.parentContext ?? null
+          const routingKey = computeRoutingKey(correlationKey, parentContext)
           if (correlationKey != null) {
-            cleanRoutingIndexOnDelete(state, correlationKey)
-            state.childRegistry.delete(correlationKey)
+            cleanRoutingIndexOnDelete(state, routingKey)
+            state.childRegistry.delete(routingKey)
             // Clean up reverse index
-            const parentKeys = state.correlationToParentKeys.get(correlationKey)
+            const parentKeys =
+              state.correlationToParentKeys.get(routingKey)
             if (parentKeys) {
               parentKeys.delete(parentKey)
               if (parentKeys.size === 0) {
-                state.correlationToParentKeys.delete(correlationKey)
+                state.correlationToParentKeys.delete(routingKey)
               }
             }
           }
@@ -1788,10 +1823,10 @@ function flushIncludesState(
     }
   }
 
-  // Clean up the internal stamp from parent/child results so it doesn't leak to the user
+  // Clean up the internal routing stamp from parent/child results
   if (parentChanges) {
     for (const [, changes] of parentChanges) {
-      delete changes.value.__includesCorrelationKeys
+      delete changes.value[INCLUDES_ROUTING]
     }
   }
 }

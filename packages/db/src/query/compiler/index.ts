@@ -38,6 +38,9 @@ import type { QueryCache, QueryMapping, WindowOptions } from './types.js'
 
 export type { WindowOptions } from './types.js'
 
+/** Symbol used to tag parent $selected with routing metadata for includes */
+export const INCLUDES_ROUTING = Symbol(`includesRouting`)
+
 /**
  * Result of compiling an includes subquery, including the child pipeline
  * and metadata needed to route child results to parent-scoped Collections.
@@ -55,6 +58,8 @@ export interface IncludesCompilationResult {
   hasOrderBy: boolean
   /** Full compilation result for the child query (for nested includes + alias tracking) */
   childCompilationResult: CompilationResult
+  /** Parent-side projection refs for parent-referencing filters */
+  parentProjection?: Array<PropRef>
 }
 
 /**
@@ -213,7 +218,11 @@ export function compileQuery(
         if (parentSide != null) {
           tagged.__parentContext = parentSide
         }
-        return [childKey, tagged]
+        const effectiveKey =
+          parentSide != null
+            ? `${String(childKey)}::${JSON.stringify(parentSide)}`
+            : childKey
+        return [effectiveKey, tagged]
       }),
     )
 
@@ -231,6 +240,7 @@ export function compileQuery(
       const nsRow: Record<string, any> = { [mainSource]: cleanRow }
       if (__parentContext) {
         Object.assign(nsRow, __parentContext)
+        ;(nsRow as any).__parentContext = __parentContext
       }
       const ret = [key, nsRow] as [string, Record<string, typeof row>]
       return ret
@@ -291,6 +301,13 @@ export function compileQuery(
   // This must happen AFTER WHERE (so parent pipeline is filtered) but BEFORE processSelect
   // (so IncludesSubquery nodes are stripped before select compilation).
   const includesResults: Array<IncludesCompilationResult> = []
+  const includesRoutingFns: Array<{
+    fieldName: string
+    getRouting: (nsRow: any) => {
+      correlationKey: unknown
+      parentContext: Record<string, any> | null
+    }
+  }> = []
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
     for (const { key, subquery } of includesEntries) {
@@ -374,30 +391,52 @@ export function compileQuery(
           subquery.query.orderBy && subquery.query.orderBy.length > 0
         ),
         childCompilationResult: childResult,
+        parentProjection: subquery.parentProjection,
       })
+
+      // Capture routing function for INCLUDES_ROUTING tagging
+      if (subquery.parentProjection && subquery.parentProjection.length > 0) {
+        const compiledProjs = subquery.parentProjection.map((ref) => ({
+          alias: ref.path[0]!,
+          field: ref.path.slice(1),
+          compiled: compileExpression(ref),
+        }))
+        const compiledCorr = compiledCorrelation
+        includesRoutingFns.push({
+          fieldName: subquery.fieldName,
+          getRouting: (nsRow: any) => {
+            const parentContext: Record<string, Record<string, any>> = {}
+            for (const proj of compiledProjs) {
+              if (!parentContext[proj.alias]) {
+                parentContext[proj.alias] = {}
+              }
+              const value = proj.compiled(nsRow)
+              let target = parentContext[proj.alias]!
+              for (let i = 0; i < proj.field.length - 1; i++) {
+                if (!target[proj.field[i]!]) {
+                  target[proj.field[i]!] = {}
+                }
+                target = target[proj.field[i]!]
+              }
+              target[proj.field[proj.field.length - 1]!] = value
+            }
+            return { correlationKey: compiledCorr(nsRow), parentContext }
+          },
+        })
+      } else {
+        includesRoutingFns.push({
+          fieldName: subquery.fieldName,
+          getRouting: (nsRow: any) => ({
+            correlationKey: compiledCorrelation(nsRow),
+            parentContext: null,
+          }),
+        })
+      }
 
       // Replace includes entry in select with a null placeholder
       replaceIncludesInSelect(query.select, key)
     }
 
-    // Stamp correlation key values onto the namespaced row so they survive
-    // select extraction. This allows flushIncludesState to read them directly
-    // without requiring the correlation field to be in the user's select.
-    if (includesEntries.length > 0) {
-      const compiledCorrelations = includesEntries.map(({ subquery }) => ({
-        fieldName: subquery.fieldName,
-        compiled: compileExpression(subquery.correlationField),
-      }))
-      pipeline = pipeline.pipe(
-        map(([key, nsRow]: any) => {
-          const correlationKeys: Record<string, unknown> = {}
-          for (const { fieldName: fn, compiled } of compiledCorrelations) {
-            correlationKeys[fn] = compiled(nsRow)
-          }
-          return [key, { ...nsRow, __includesCorrelationKeys: correlationKeys }]
-        }),
-      )
-    }
   }
 
   if (query.distinct && !query.fnSelect && !query.select) {
@@ -438,6 +477,25 @@ export function compileQuery(
             $selected: selectResults,
           },
         ] as [string, typeof namespacedRow & { $selected: any }]
+      }),
+    )
+  }
+
+  // Tag $selected with routing metadata for includes.
+  // This lets collection-config-builder extract routing info (correlationKey + parentContext)
+  // from parent results without depending on the user's select.
+  if (includesRoutingFns.length > 0) {
+    pipeline = pipeline.pipe(
+      map(([key, namespacedRow]: any) => {
+        const routing: Record<
+          string,
+          { correlationKey: unknown; parentContext: Record<string, any> | null }
+        > = {}
+        for (const { fieldName, getRouting } of includesRoutingFns) {
+          routing[fieldName] = getRouting(namespacedRow)
+        }
+        namespacedRow.$selected[INCLUDES_ROUTING] = routing
+        return [key, namespacedRow]
       }),
     )
   }
@@ -531,16 +589,14 @@ export function compileQuery(
         // Extract the final results from $selected and include orderBy index
         const raw = (row as any).$selected
         const finalResults = unwrapValue(raw)
-        // Stamp includes correlation keys onto the result for child routing
-        if ((row as any).__includesCorrelationKeys) {
-          finalResults.__includesCorrelationKeys = (
-            row as any
-          ).__includesCorrelationKeys
-        }
-        // When in includes mode, embed the correlation key as third element
+        // When in includes mode, embed the correlation key and parentContext
         if (parentKeyStream) {
           const correlationKey = (row as any)[mainSource]?.__correlationKey
-          return [key, [finalResults, orderByIndex, correlationKey]] as any
+          const parentContext = (row as any).__parentContext ?? null
+          return [
+            key,
+            [finalResults, orderByIndex, correlationKey, parentContext],
+          ] as any
         }
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
       }),
@@ -570,16 +626,14 @@ export function compileQuery(
       // Extract the final results from $selected and return [key, [results, undefined]]
       const raw = (row as any).$selected
       const finalResults = unwrapValue(raw)
-      // Stamp includes correlation keys onto the result for child routing
-      if ((row as any).__includesCorrelationKeys) {
-        finalResults.__includesCorrelationKeys = (
-          row as any
-        ).__includesCorrelationKeys
-      }
-      // When in includes mode, embed the correlation key as third element
+      // When in includes mode, embed the correlation key and parentContext
       if (parentKeyStream) {
         const correlationKey = (row as any)[mainSource]?.__correlationKey
-        return [key, [finalResults, undefined, correlationKey]] as any
+        const parentContext = (row as any).__parentContext ?? null
+        return [
+          key,
+          [finalResults, undefined, correlationKey, parentContext],
+        ] as any
       }
       return [key, [finalResults, undefined]] as [
         unknown,
