@@ -23,6 +23,7 @@ export type ElectronPersistenceMethod =
   | `ensureIndex`
   | `markIndexRemoved`
   | `pullSince`
+  | `getStreamPosition`
 
 export type ElectronPersistencePayloadMap = {
   loadSubset: {
@@ -42,6 +43,7 @@ export type ElectronPersistencePayloadMap = {
   pullSince: {
     fromRowVersion: number
   }
+  getStreamPosition: {}
 }
 
 export type ElectronPersistenceResultMap = {
@@ -50,6 +52,11 @@ export type ElectronPersistenceResultMap = {
   ensureIndex: null
   markIndexRemoved: null
   pullSince: SQLitePullSinceResult<ElectronPersistedKey>
+  getStreamPosition: {
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }
 }
 
 export type ElectronSerializedError = {

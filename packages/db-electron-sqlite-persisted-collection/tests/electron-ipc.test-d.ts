@@ -24,6 +24,18 @@ test(`renderer persistence requires invoke transport`, () => {
             requiresFullReload: true,
           },
         })
+      case `getStreamPosition`:
+        return Promise.resolve({
+          v: 1,
+          requestId: request.requestId,
+          method: request.method,
+          ok: true,
+          result: {
+            latestTerm: 0,
+            latestSeq: 0,
+            latestRowVersion: 0,
+          },
+        })
       default:
         return Promise.resolve({
           v: 1,
