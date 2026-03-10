@@ -251,12 +251,7 @@ function createResolvedRendererAdapter<
       latestSeq: number
       latestRowVersion: number
     }> => {
-      return executeRequest(
-        `getStreamPosition`,
-        collectionId,
-        {},
-        resolution,
-      )
+      return executeRequest(`getStreamPosition`, collectionId, {}, resolution)
     },
   }
 }
