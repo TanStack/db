@@ -14,7 +14,10 @@ import {
 } from '@tanstack/db'
 import { useEffect } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
-import { mockSyncCollectionOptions, stripVirtualProps } from '../../db/tests/utils'
+import {
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+} from '../../db/tests/utils'
 
 type Person = {
   id: string
@@ -2381,11 +2384,15 @@ describe(`Query Collections`, () => {
       })
 
       const results = result.current.data
-      expect(stripVirtualProps(results.find((r) => r.team === `team1`))).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team1`)),
+      ).toEqual({
         team: `team1`,
         memberCount: 2, // John Doe + John Smith
       })
-      expect(stripVirtualProps(results.find((r) => r.team === `team2`))).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team2`)),
+      ).toEqual({
         team: `team2`,
         memberCount: 1, // Jane Doe
       })
@@ -2475,11 +2482,15 @@ describe(`Query Collections`, () => {
       })
 
       const results = result.current.data
-      expect(stripVirtualProps(results.find((r) => r.team === `team1`))).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team1`)),
+      ).toEqual({
         team: `team1`,
         totalAge: 65, // 30 + 35
       })
-      expect(stripVirtualProps(results.find((r) => r.team === `team2`))).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team2`)),
+      ).toEqual({
         team: `team2`,
         totalAge: 25,
       })
