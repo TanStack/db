@@ -2,6 +2,7 @@ import { createCollection } from '@tanstack/react-db'
 import { queryCollectionOptions } from '@tanstack/query-db-collection'
 import { startOfflineExecutor } from '@tanstack/offline-transactions'
 import {
+  ElectronCollectionCoordinator,
   createElectronSQLitePersistence,
   persistedCollectionOptions,
 } from '@tanstack/db-electron-sqlite-persisted-collection'
@@ -117,9 +118,16 @@ const todoSchema = z.object({
   updatedAt: z.string(),
 })
 
+// Multi-window coordinator: uses BroadcastChannel + Web Locks for
+// leader election and cross-window notification (both available in Electron)
+const coordinator = new ElectronCollectionCoordinator({
+  dbName: 'electron-todos',
+})
+
 // Create persistence via IPC bridge to the main process SQLite database
 const persistence = createElectronSQLitePersistence({
   invoke: window.electronAPI.invoke,
+  coordinator,
 })
 
 const BASE_URL = 'http://localhost:3001'
