@@ -223,8 +223,8 @@ describe(`Join Types - Type Safety`, () => {
           )
           .select(({ user, dept }) => ({
             userName: user.name,
-            deptName: dept?.name, // This should still be accessible in select
-            deptBudget: dept?.budget,
+            deptName: dept.name, // This should still be accessible in select
+            deptBudget: dept.budget,
           })),
     })
 
@@ -409,8 +409,8 @@ describe(`Join Alias Methods - Type Safety`, () => {
           )
           .select(({ user, dept }) => ({
             userName: user.name,
-            deptName: dept?.name, // This should be string | undefined due to left join
-            deptBudget: dept?.budget,
+            deptName: dept.name, // This should be string | undefined due to left join
+            deptBudget: dept.budget,
           })),
     })
 
@@ -487,7 +487,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
           )
           .join(
             { project: projectsCollection },
-            ({ dept, project }) => eq(dept?.id, project.department_id),
+            ({ dept, project }) => eq(dept.id, project.department_id),
             `inner`,
           ),
     })
@@ -727,7 +727,7 @@ describe(`Join Alias Methods - Type Safety`, () => {
           )
           .select(({ post, user }) => ({
             postTitle: post.title,
-            authorName: user?.name, // This will be string | undefined due to left join
+            authorName: user.name, // This will be string | undefined due to left join
           })),
     })
 
@@ -737,6 +737,135 @@ describe(`Join Alias Methods - Type Safety`, () => {
         OutputWithVirtual<{
           postTitle: string
           authorName: string | undefined
+        }>
+      >
+    >()
+  })
+})
+
+describe(`Declarative select refs should not use union with undefined for nullable joins`, () => {
+  test(`left-joined ref in declarative select should allow direct property access without optional chaining`, () => {
+    const usersCollection = createUsersCollection()
+    const departmentsCollection = createDepartmentsCollection()
+
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .leftJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
+          )
+          .select(({ user, dept }) => ({
+            userName: user.name,
+            // dept is a proxy ref that is always present at build time,
+            // so direct property access should work without optional chaining
+            deptName: dept.name,
+            deptBudget: dept.budget,
+          })),
+    })
+
+    const results = query.toArray
+
+    // Result fields from left-joined tables should still produce T | undefined
+    // because the actual data may have no matching row
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          userName: string
+          deptName: string | undefined
+          deptBudget: number | undefined
+        }>
+      >
+    >()
+  })
+
+  test(`right-joined ref in declarative select should allow direct property access on nullable left table`, () => {
+    const usersCollection = createUsersCollection()
+    const departmentsCollection = createDepartmentsCollection()
+
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .rightJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
+          )
+          .select(({ user, dept }) => ({
+            // user is the nullable side in a right join
+            userName: user.name,
+            deptName: dept.name,
+          })),
+    })
+
+    const results = query.toArray
+
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          userName: string | undefined
+          deptName: string
+        }>
+      >
+    >()
+  })
+
+  test(`full-joined refs in declarative select should allow direct property access on both nullable tables`, () => {
+    const usersCollection = createUsersCollection()
+    const departmentsCollection = createDepartmentsCollection()
+
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .fullJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
+          )
+          .select(({ user, dept }) => ({
+            userName: user.name,
+            deptName: dept.name,
+          })),
+    })
+
+    const results = query.toArray
+
+    // Both sides are nullable in a full join
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          userName: string | undefined
+          deptName: string | undefined
+        }>
+      >
+    >()
+  })
+
+  test(`inner-joined ref in declarative select should allow direct property access with non-optional result`, () => {
+    const usersCollection = createUsersCollection()
+    const departmentsCollection = createDepartmentsCollection()
+
+    const query = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ user: usersCollection })
+          .innerJoin({ dept: departmentsCollection }, ({ user, dept }) =>
+            eq(user.department_id, dept.id),
+          )
+          .select(({ user, dept }) => ({
+            userName: user.name,
+            deptName: dept.name,
+            deptBudget: dept.budget,
+          })),
+    })
+
+    const results = query.toArray
+
+    // Inner join fields should never be undefined
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          userName: string
+          deptName: string
+          deptBudget: number
         }>
       >
     >()
@@ -881,7 +1010,7 @@ describe(`Join with ArkType Schemas`, () => {
           )
           .select(({ post, user }) => ({
             postTitle: post.title,
-            authorName: user?.name, // This will be string | undefined due to left join
+            authorName: user.name, // This will be string | undefined due to left join
           })),
     })
 
