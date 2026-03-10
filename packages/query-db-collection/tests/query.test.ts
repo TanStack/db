@@ -2301,8 +2301,8 @@ describe(`QueryCollection`, () => {
 
       const serverBrands: Array<Brand> = [{ id: `123`, brandName: `A` }]
 
-      const queryFn = vi.fn().mockImplementation(async () => {
-        return [...serverBrands]
+      const queryFn = vi.fn().mockImplementation(() => {
+        return Promise.resolve([...serverBrands])
       })
 
       // Track syncedData state immediately after writeUpsert
@@ -3281,7 +3281,7 @@ describe(`QueryCollection`, () => {
 
       const queryFn = vi.fn().mockResolvedValue(items)
 
-      const onDelete = vi.fn(async ({ transaction, collection }) => {
+      const onDelete = vi.fn(({ transaction, collection }) => {
         const deletedItem = transaction.mutations[0]?.original
         // Call writeDelete inside onDelete handler - this should work without throwing
         collection.utils.writeDelete(deletedItem.id)
@@ -4197,7 +4197,7 @@ describe(`QueryCollection`, () => {
         getKey: (item) => item.id,
         startSync: true,
         syncMode: `on-demand`,
-        onInsert: async () => ({ refetch: false }),
+        onInsert: () => ({ refetch: false }),
       }
 
       const options = queryCollectionOptions(config)

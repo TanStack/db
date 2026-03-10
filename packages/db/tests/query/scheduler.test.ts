@@ -61,8 +61,8 @@ function setupLiveQueryCollections(id: string) {
         .join({ task: tasks }, ({ user, task }) => eq(user.id, task.userId))
         .select(({ user, task }) => ({
           userId: user.id,
-          taskId: task?.id,
-          title: task?.title,
+          taskId: task.id,
+          title: task.title,
         })),
   })
 
@@ -277,8 +277,8 @@ describe(`live query scheduler`, () => {
             `full`,
           )
           .select(({ left, right }) => ({
-            left: left?.value,
-            right: right?.value,
+            left: left.value,
+            right: right.value,
           })),
     })
 
@@ -364,8 +364,8 @@ describe(`live query scheduler`, () => {
             `full`,
           )
           .select(({ left, right }) => ({
-            left: left?.value,
-            right: right?.value,
+            left: left.value,
+            right: right.value,
           })),
     })
 
@@ -447,8 +447,8 @@ describe(`live query scheduler`, () => {
             `full`,
           )
           .select(({ left, right }) => ({
-            left: left?.value,
-            right: right?.value,
+            left: left.value,
+            right: right.value,
           })),
     })
 
@@ -600,7 +600,7 @@ describe(`live query scheduler`, () => {
           )
           .select(({ account, user }) => ({
             account: account,
-            profile: user?.profile,
+            profile: user.profile,
           })),
     })
 
@@ -626,7 +626,7 @@ describe(`live query scheduler`, () => {
           .select(({ accountWithUser, team }) => ({
             account: accountWithUser.account,
             profile: accountWithUser.profile,
-            team: team?.team,
+            team: team.team,
           })),
     })
 
@@ -721,7 +721,7 @@ describe(`live query scheduler`, () => {
           .select(({ a, b }) => ({
             id: a.id,
             aValue: a.value,
-            bValue: b?.value ?? null,
+            bValue: b.value,
           })),
     })
 

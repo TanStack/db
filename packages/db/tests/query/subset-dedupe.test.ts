@@ -659,7 +659,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(callCount).toBe(11) // Still no additional call
     })
 
-    it(`should not produce unbounded WHERE expressions with synchronous loadSubset`, async () => {
+    it(`should not produce unbounded WHERE expressions with synchronous loadSubset`, () => {
       // Same scenario as the async accumulation test, but with a sync mock
       // to exercise the sync return path (line 150 of subset-dedupe.ts)
       let callCount = 0

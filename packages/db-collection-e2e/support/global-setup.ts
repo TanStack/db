@@ -1,5 +1,6 @@
+import { Client  } from 'pg'
+import type {ClientConfig} from 'pg';
 import type { GlobalSetupContext } from 'vitest/node'
-import { Client, type ClientConfig } from 'pg'
 
 const ELECTRIC_URL = process.env.ELECTRIC_URL ?? 'http://localhost:3000'
 const POSTGRES_HOST = process.env.POSTGRES_HOST ?? 'localhost'

@@ -403,9 +403,9 @@ describe(`CollectionSubscriber duplicate insert prevention`, () => {
           eq(u.id, o.userId),
         )
         .select(({ users: u2, orders: o2 }) => ({
-          orderId: o2!.id,
+          orderId: o2.id,
           userName: u2.name,
-          amount: o2!.amount,
+          amount: o2.amount,
         })),
     )
 

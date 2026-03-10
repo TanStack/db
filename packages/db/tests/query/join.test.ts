@@ -121,9 +121,9 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType,
             )
             .select(({ user, dept }) => ({
-              user_name: user?.name,
-              department_name: dept?.name,
-              budget: dept?.budget,
+              user_name: user.name,
+              department_name: dept.name,
+              budget: dept.budget,
             })),
       })
 
@@ -302,8 +302,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType,
             )
             .select(({ user, dept }) => ({
-              user_name: user?.name,
-              department_name: dept?.name,
+              user_name: user.name,
+              department_name: dept.name,
             })),
       })
 
@@ -345,8 +345,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               joinType,
             )
             .select(({ user, dept }) => ({
-              user_name: user?.name,
-              department_name: dept?.name,
+              user_name: user.name,
+              department_name: dept.name,
             })),
       })
 
@@ -384,8 +384,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 joinType,
               )
               .select(({ user, dept }) => ({
-                user_name: user?.name,
-                department_name: dept?.name,
+                user_name: user.name,
+                department_name: dept.name,
               })),
         })
 
@@ -433,8 +433,8 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 joinType,
               )
               .select(({ user, dept }) => ({
-                user_name: user?.name,
-                department_name: dept?.name,
+                user_name: user.name,
+                department_name: dept.name,
               })),
         })
 
@@ -533,12 +533,12 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .leftJoin({ member: teamMembersCollection }, ({ team, member }) =>
                 eq(team.id, member.team_id),
               )
-              .where(({ member }) => eq(member?.user_id, 100))
+              .where(({ member }) => eq(member.user_id, 100))
               .select(({ team, member }) => ({
                 team_id: team.id,
                 team_name: team.name,
-                user_id: member?.user_id,
-                role: member?.role,
+                user_id: member.user_id,
+                role: member.role,
               })),
         })
       } else if (joinType === `right`) {
@@ -553,10 +553,10 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
                 { member: teamMembersCollection },
                 ({ team, member }) => eq(team.id, member.team_id),
               )
-              .where(({ team }) => eq(team?.active, true))
+              .where(({ team }) => eq(team.active, true))
               .select(({ team, member }) => ({
-                team_id: team?.id,
-                team_name: team?.name,
+                team_id: team.id,
+                team_name: team.name,
                 user_id: member.user_id,
                 role: member.role,
               })),
@@ -572,12 +572,12 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
               .fullJoin({ member: teamMembersCollection }, ({ team, member }) =>
                 eq(team.id, member.team_id),
               )
-              .where(({ member }) => eq(member?.role, `admin`))
+              .where(({ member }) => eq(member.role, `admin`))
               .select(({ team, member }) => ({
-                team_id: team?.id,
-                team_name: team?.name,
-                user_id: member?.user_id,
-                role: member?.role,
+                team_id: team.id,
+                team_name: team.name,
+                user_id: member.user_id,
+                role: member.role,
               })),
         })
       } else {
@@ -736,13 +736,13 @@ function testJoinType(joinType: JoinType, autoIndex: `off` | `eager`) {
             )
             .join(
               { task: tasksCollection },
-              ({ task, project }) => eq(task.project_id, project?.id),
+              ({ task, project }) => eq(task.project_id, project.id),
               joinType,
             )
             .select(({ company, project, task }) => ({
-              company_name: company?.name,
-              project_name: project?.name,
-              task_name: task?.name,
+              company_name: company.name,
+              project_name: project.name,
+              task_name: task.name,
             })),
       })
 
@@ -941,7 +941,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
                 user_id: user.id,
                 user_name: user.name,
                 department_id: user.department_id,
-                department_name: dept?.name,
+                department_name: dept.name,
               })),
         })
 
@@ -1653,7 +1653,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               id: event.id,
               parent_id: event.parent_id,
               parent: {
-                id: parent?.id,
+                id: parent.id,
               },
             })),
       })
@@ -1715,15 +1715,15 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               `left`,
             )
             .where(({ manager }) =>
-              or(isNull(manager?.id), gt(manager?.age, 35)),
+              or(isNull(manager.id), gt(manager.age, 35)),
             )
             .select(({ employee, manager }) => ({
               employeeId: employee.id,
               employeeName: employee.name,
               employeeAge: employee.age,
-              managerId: manager?.id,
-              managerName: manager?.name,
-              managerAge: manager?.age,
+              managerId: manager.id,
+              managerName: manager.name,
+              managerAge: manager.age,
             })),
       })
 
@@ -1888,7 +1888,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
         q
           .from({ l: leftCollection })
           .leftJoin({ r: rightCollection }, ({ l, r }) => eq(l.rightId, r.id))
-          .where(({ r }) => isUndefined(r?.payload))
+          .where(({ r }) => isUndefined(r.payload))
           .select(({ l, r }) => ({ leftId: l.id, right: r })),
     })
 
@@ -1985,13 +1985,13 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
           )
           .join(
             { balance: balancesCollection },
-            ({ balance, client }) => eq(balance.client, client?.name),
+            ({ balance, client }) => eq(balance.client, client.name),
             `left`,
           )
           .select(({ player, client, balance }) => ({
             player_name: player.name,
-            client_name: client?.name,
-            balance_amount: balance?.amount,
+            client_name: client.name,
+            balance_amount: balance.amount,
           })),
     })
 
