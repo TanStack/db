@@ -24,6 +24,11 @@ type ElectronMainPersistenceAdapter = PersistenceAdapter<
     collectionId: string,
     fromRowVersion: number,
   ) => Promise<SQLitePullSinceResult<ElectronPersistedKey>>
+  getStreamPosition?: (collectionId: string) => Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }>
 }
 
 function serializeError(error: unknown): ElectronSerializedError {
@@ -166,6 +171,22 @@ async function executeRequestAgainstAdapter(
         method: request.method,
         ok: true,
         result,
+      }
+    }
+
+    case `getStreamPosition`: {
+      if (!adapter.getStreamPosition) {
+        throw new InvalidPersistedCollectionConfigError(
+          `getStreamPosition is not supported by the configured electron persistence adapter`,
+        )
+      }
+      const position = await adapter.getStreamPosition(request.collectionId)
+      return {
+        v: ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
+        requestId: request.requestId,
+        method: request.method,
+        ok: true,
+        result: position,
       }
     }
   }

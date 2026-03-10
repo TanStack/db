@@ -8,6 +8,8 @@ export type {
   ElectronIpcRendererLike,
   ElectronSQLitePersistenceOptions,
 } from './renderer'
+export { ElectronCollectionCoordinator } from './electron-coordinator'
+export type { ElectronCollectionCoordinatorOptions } from './electron-coordinator'
 export { persistedCollectionOptions } from '@tanstack/db-sqlite-persisted-collection-core'
 export type {
   PersistedCollectionCoordinator,

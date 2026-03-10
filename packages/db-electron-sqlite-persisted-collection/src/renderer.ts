@@ -2,6 +2,7 @@ import {
   InvalidPersistedCollectionConfigError,
   SingleProcessCoordinator,
 } from '@tanstack/db-sqlite-persisted-collection-core'
+import { ElectronCollectionCoordinator } from './electron-coordinator'
 import {
   DEFAULT_ELECTRON_PERSISTENCE_CHANNEL,
   ELECTRON_PERSISTENCE_PROTOCOL_VERSION,
@@ -156,6 +157,11 @@ type ElectronRendererResolvedAdapter<
     collectionId: string,
     fromRowVersion: number,
   ) => Promise<SQLitePullSinceResult<TKey>>
+  getStreamPosition: (collectionId: string) => Promise<{
+    latestTerm: number
+    latestSeq: number
+    latestRowVersion: number
+  }>
 }
 
 function createResolvedRendererAdapter<
@@ -238,6 +244,20 @@ function createResolvedRendererAdapter<
       )
       return result as SQLitePullSinceResult<TKey>
     },
+    getStreamPosition: async (
+      collectionId: string,
+    ): Promise<{
+      latestTerm: number
+      latestSeq: number
+      latestRowVersion: number
+    }> => {
+      return executeRequest(
+        `getStreamPosition`,
+        collectionId,
+        {},
+        resolution,
+      )
+    },
   }
 }
 
@@ -310,6 +330,13 @@ export function createElectronSQLitePersistence<
       schemaVersion,
     })
     adapterCache.set(cacheKey, adapter)
+
+    // Wire the adapter into the coordinator so it can handle
+    // leader-side RPCs (applyCommittedTx, pullSince, getStreamPosition, etc.)
+    if (coordinator instanceof ElectronCollectionCoordinator) {
+      coordinator.setAdapter(adapter)
+    }
+
     return adapter
   }
 
