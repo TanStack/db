@@ -36,7 +36,9 @@ const APP_SCHEMA = new Schema({
   ),
 })
 
-const describePowerSync = TEST_DATABASE_IMPLEMENTATION ? describe : describe.skip
+const describePowerSync = TEST_DATABASE_IMPLEMENTATION
+  ? describe
+  : describe.skip
 
 describePowerSync(`PowerSync Integration`, () => {
   async function createDatabase() {

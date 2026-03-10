@@ -26,7 +26,10 @@ function canUseNodeSqlite(): boolean {
     const db = new DatabaseSync(`:memory:`)
     try {
       const stmt = db.prepare(`select 1`)
-      return typeof (stmt as { setReturnArrays?: unknown }).setReturnArrays === `function`
+      return (
+        typeof (stmt as { setReturnArrays?: unknown }).setReturnArrays ===
+        `function`
+      )
     } finally {
       db.close()
     }
