@@ -8,7 +8,11 @@ type TestDatabaseImplementation =
 
 function canLoadBetterSqlite3(): boolean {
   try {
-    require(`better-sqlite3`)
+    const Database = require(`better-sqlite3`) as new (path: string) => {
+      close: () => void
+    }
+    const db = new Database(`:memory:`)
+    db.close()
     return true
   } catch {
     return false
