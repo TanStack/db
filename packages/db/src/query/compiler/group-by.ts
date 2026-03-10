@@ -149,7 +149,7 @@ export function processGroupBy(
   // Handle empty GROUP BY (single-group aggregation)
   if (groupByClause.length === 0) {
     // For single-group aggregation, create a single group with all data
-    const aggregates: Record<string, any> = { ...virtualAggregates }
+    const aggregates: Record<string, any> = virtualAggregates
 
     // Expressions that wrap aggregates (e.g. coalesce(count(...), 0)).
     // Keys are the original SELECT aliases; values are pre-compiled evaluators
@@ -295,7 +295,7 @@ export function processGroupBy(
   }
 
   // Create aggregate functions for any aggregated columns in the SELECT clause
-  const aggregates: Record<string, any> = { ...virtualAggregates }
+  const aggregates: Record<string, any> = virtualAggregates
   const wrappedAggExprs: Record<string, (data: any) => any> = {}
   const aggCounter = { value: 0 }
 
