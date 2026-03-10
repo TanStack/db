@@ -36,9 +36,7 @@ describe(`injectLiveQuery type assertions`, () => {
         .findOne(),
     )
 
-    expectTypeOf(data()).toMatchTypeOf<
-      OutputWithVirtual<Person> | undefined
-    >()
+    expectTypeOf(data()).toMatchTypeOf<OutputWithVirtual<Person> | undefined>()
   })
 
   it(`should type findOne config object to return a single row`, () => {
@@ -59,9 +57,7 @@ describe(`injectLiveQuery type assertions`, () => {
           .findOne(),
     })
 
-    expectTypeOf(data()).toMatchTypeOf<
-      OutputWithVirtual<Person> | undefined
-    >()
+    expectTypeOf(data()).toMatchTypeOf<OutputWithVirtual<Person> | undefined>()
   })
 
   it(`should type findOne collection using liveQueryCollectionOptions to return a single row`, () => {
@@ -87,9 +83,7 @@ describe(`injectLiveQuery type assertions`, () => {
 
     const { data } = injectLiveQuery(liveQueryCollection)
 
-    expectTypeOf(data()).toMatchTypeOf<
-      OutputWithVirtual<Person> | undefined
-    >()
+    expectTypeOf(data()).toMatchTypeOf<OutputWithVirtual<Person> | undefined>()
   })
 
   it(`should type findOne collection using createLiveQueryCollection to return a single row`, () => {
@@ -113,9 +107,7 @@ describe(`injectLiveQuery type assertions`, () => {
 
     const { data } = injectLiveQuery(liveQueryCollection)
 
-    expectTypeOf(data()).toMatchTypeOf<
-      OutputWithVirtual<Person> | undefined
-    >()
+    expectTypeOf(data()).toMatchTypeOf<OutputWithVirtual<Person> | undefined>()
   })
 
   it(`should type regular query to return an array`, () => {
