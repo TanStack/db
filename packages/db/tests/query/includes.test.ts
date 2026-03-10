@@ -1125,9 +1125,7 @@ describe(`includes subqueries`, () => {
         mockSyncCollectionOptions<GroupChild>({
           id: `shared-corr-children`,
           getKey: (c) => c.id,
-          initialData: [
-            { id: 10, groupId: 1, createdBy: `alice` },
-          ],
+          initialData: [{ id: 10, groupId: 1, createdBy: `alice` }],
         }),
       )
 
