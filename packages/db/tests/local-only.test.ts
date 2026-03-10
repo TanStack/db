@@ -576,7 +576,10 @@ describe(`LocalOnly Collection`, () => {
 
       // Verify that the item is still present after async operations complete
       await new Promise((resolve) => setTimeout(resolve, 1))
-      expect(collection.get(100)).toEqual({ id: 100, name: `Manual Tx Insert` })
+      expect(stripVirtualProps(collection.get(100))).toEqual({
+        id: 100,
+        name: `Manual Tx Insert`,
+      })
     })
 
     it(`should work without explicit collection ID`, async () => {
@@ -606,7 +609,10 @@ describe(`LocalOnly Collection`, () => {
       await tx.commit()
 
       // Data should persist even without explicit ID
-      expect(noIdCollection.get(999)).toEqual({ id: 999, name: `No ID Test` })
+      expect(stripVirtualProps(noIdCollection.get(999))).toEqual({
+        id: 999,
+        name: `No ID Test`,
+      })
     })
 
     it(`should only accept mutations for the specific collection`, () => {

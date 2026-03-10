@@ -1832,15 +1832,15 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-        expect(customerSummary.get(1)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
           customer_id: 1,
           order_count: 3,
         })
-        expect(customerSummary.get(2)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(2))).toEqual({
           customer_id: 2,
           order_count: 2,
         })
-        expect(customerSummary.get(3)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(3))).toEqual({
           customer_id: 3,
           order_count: 2,
         })
@@ -1860,7 +1860,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-        expect(customerSummary.get(1)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
           customer_id: 1,
           total_amount: 700,
         })
@@ -1881,7 +1881,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         expect(customerSummary.size).toBe(3)
         // Customer 1: sum(amount)=700, count(id)=3 => 703
-        expect(customerSummary.get(1)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
           customer_id: 1,
           amount_plus_count: 703,
         })
@@ -1902,7 +1902,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         })
 
         expect(customerSummary.size).toBe(3)
-        expect(customerSummary.get(1)).toEqual({
+        expect(stripVirtualProps(customerSummary.get(1))).toEqual({
           customer_id: 1,
           order_count: 3,
           safe_total: 700,
@@ -1951,15 +1951,15 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         const results = result.toArray
         expect(results).toHaveLength(3)
-        expect(results.find((r) => r.name === `John`)).toEqual({
+        expect(stripVirtualProps(results.find((r) => r.name === `John`))).toEqual({
           name: `John`,
           orderCount: 3,
         })
-        expect(results.find((r) => r.name === `Jane`)).toEqual({
+        expect(stripVirtualProps(results.find((r) => r.name === `Jane`))).toEqual({
           name: `Jane`,
           orderCount: 2,
         })
-        expect(results.find((r) => r.name === `Bob`)).toEqual({
+        expect(stripVirtualProps(results.find((r) => r.name === `Bob`))).toEqual({
           name: `Bob`,
           orderCount: 2,
         })

@@ -107,7 +107,7 @@ export async function queryOnce<TContext extends Context>(
         | undefined
       return first as InferResultType<TContext>
     }
-    return collection.toArray as InferResultType<TContext>
+    return collection.toArray as unknown as InferResultType<TContext>
   } finally {
     // Always cleanup, even on error
     await collection.cleanup()
