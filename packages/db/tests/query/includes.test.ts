@@ -1264,5 +1264,92 @@ describe(`includes subqueries`, () => {
       expect(childItems((collection.get(2) as any).issues)).toEqual([])
       expect(childItems((collection.get(3) as any).issues)).toEqual([])
     })
+
+    it(`nested includes with parent-referencing filters at both levels`, async () => {
+      // Regression: nested routing index must use composite routing keys
+      // (matching the nested buffer keys) so that grandchild changes are
+      // routed correctly when parent-referencing filters exist at both levels.
+      type NProject = { id: number; groupId: number; createdBy: string }
+      type NIssue = {
+        id: number
+        groupId: number
+        createdBy: string
+        categoryId: number
+      }
+      type NComment = {
+        id: number
+        categoryId: number
+        createdBy: string
+        body: string
+      }
+
+      const nProjects = createCollection(
+        mockSyncCollectionOptions<NProject>({
+          id: `nested-pref-projects`,
+          getKey: (p) => p.id,
+          initialData: [{ id: 1, groupId: 1, createdBy: `alice` }],
+        }),
+      )
+
+      const nIssues = createCollection(
+        mockSyncCollectionOptions<NIssue>({
+          id: `nested-pref-issues`,
+          getKey: (i) => i.id,
+          initialData: [
+            { id: 10, groupId: 1, createdBy: `alice`, categoryId: 7 },
+          ],
+        }),
+      )
+
+      const nComments = createCollection(
+        mockSyncCollectionOptions<NComment>({
+          id: `nested-pref-comments`,
+          getKey: (c) => c.id,
+          initialData: [
+            { id: 100, categoryId: 7, createdBy: `alice`, body: `a` },
+          ],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: nProjects }).select(({ p }) => ({
+          id: p.id,
+          issues: q
+            .from({ i: nIssues })
+            .where(({ i }) => eq(i.groupId, p.groupId))
+            .where(({ i }) => eq(i.createdBy, p.createdBy))
+            .select(({ i }) => ({
+              id: i.id,
+              createdBy: i.createdBy,
+              categoryId: i.categoryId,
+              comments: q
+                .from({ c: nComments })
+                .where(({ c }) => eq(c.categoryId, i.categoryId))
+                .where(({ c }) => eq(c.createdBy, i.createdBy))
+                .select(({ c }) => ({
+                  id: c.id,
+                  createdBy: c.createdBy,
+                  body: c.body,
+                })),
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          issues: [
+            {
+              id: 10,
+              createdBy: `alice`,
+              categoryId: 7,
+              comments: [{ id: 100, createdBy: `alice`, body: `a` }],
+            },
+          ],
+        },
+      ])
+    })
   })
 })
