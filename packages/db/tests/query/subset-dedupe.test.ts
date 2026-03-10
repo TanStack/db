@@ -4,7 +4,6 @@ import {
   cloneOptions,
 } from '../../src/query/subset-dedupe'
 import { Func, PropRef, Value } from '../../src/query/ir'
-import { minusWherePredicates } from '../../src/query/predicate-utils'
 import type { BasicExpression, OrderBy } from '../../src/query/ir'
 import type { LoadSubsetOptions } from '../../src/types'
 
@@ -517,9 +516,6 @@ describe(`createDeduplicatedLoadSubset`, () => {
         eq(ref(`status`), val(`active`)),
       )
 
-      const test = minusWherePredicates(secondPredicate, firstPredicate)
-      console.log(`test`, test)
-
       await deduplicated.loadSubset({ where: secondPredicate })
       expect(callCount).toBe(2)
       expect(calls[1]).toEqual({
@@ -596,21 +592,20 @@ describe(`createDeduplicatedLoadSubset`, () => {
       // i.e. should request NOT (age > 20)
       await deduplicated.loadSubset({})
       expect(callCount).toBe(2)
-      expect(calls[1]).toEqual({ where: not(gt(ref(`age`), val(20))) }) // Should request all data except what we already loaded
+      expect(calls[1]).toEqual({ where: not(gt(ref(`age`), val(20))) })
 
-      // After loading all data (undefined where), subsequent calls should be deduplicated
+      // After loading all data, subsequent calls should be deduplicated
       const result = await deduplicated.loadSubset({
         where: gt(ref(`age`), val(5)),
       })
-      expect(result).toBe(true) // Should be covered since we loaded all data
-      expect(callCount).toBe(2) // No additional call needed
+      expect(result).toBe(true)
+      expect(callCount).toBe(2)
     })
 
     it(`should not produce unbounded WHERE expressions when loading all data after eq accumulation`, async () => {
-      // This test reproduces the production bug where navigating to many tasks
-      // (each adding eq(task_id, uuid) to the accumulator) and then loading all data
-      // (no WHERE clause) caused exponentially growing expressions instead of
-      // correctly setting hasLoadedAllData=true.
+      // This test reproduces the production bug where accumulating many eq predicates
+      // and then loading all data (no WHERE clause) caused unboundedly growing
+      // expressions instead of correctly setting hasLoadedAllData=true.
       let callCount = 0
       const calls: Array<LoadSubsetOptions> = []
       const mockLoadSubset = (options: LoadSubsetOptions) => {
@@ -632,14 +627,19 @@ describe(`createDeduplicatedLoadSubset`, () => {
       // After 10 eq calls, unlimitedWhere should be IN(task_id, [uuid-0, ..., uuid-9])
       expect(callCount).toBe(10)
 
-      // Now load all data (sessions index page with no WHERE clause)
+      // Now load all data (no WHERE clause)
       // This should send NOT(IN(...)) to the backend but track as "all data loaded"
       await deduplicated.loadSubset({})
       expect(callCount).toBe(11)
 
-      // The load request should be NOT(accumulated predicate)
-      expect(calls[10]!.where).toBeDefined()
-      expect((calls[10]!.where as any).name).toBe(`not`)
+      // The load request should be NOT(IN(task_id, [all accumulated uuids]))
+      const loadWhere = calls[10]!.where as any
+      expect(loadWhere.name).toBe(`not`)
+      expect(loadWhere.args[0].name).toBe(`in`)
+      expect(loadWhere.args[0].args[0].path).toEqual([`task_id`])
+      const loadedUuids = (loadWhere.args[0].args[1].value as Array<string>).sort()
+      const expectedUuids = Array.from({ length: 10 }, (_, i) => `uuid-${i}`).sort()
+      expect(loadedUuids).toEqual(expectedUuids)
 
       // Critical: after loading all data, subsequent requests should be deduplicated
       const result1 = await deduplicated.loadSubset({
@@ -654,14 +654,47 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(callCount).toBe(11) // Still no additional call
     })
 
-    it(`should handle multiple all-data loads without expression growth`, async () => {
-      // Regression test: repeated "load all" requests should not cause
-      // the tracked predicate to grow unboundedly
+    it(`should not produce unbounded WHERE expressions with synchronous loadSubset`, async () => {
+      // Same scenario as the async accumulation test, but with a sync mock
+      // to exercise the sync return path (line 150 of subset-dedupe.ts)
       let callCount = 0
-      const calls: Array<LoadSubsetOptions> = []
-      const mockLoadSubset = (options: LoadSubsetOptions) => {
+      const mockLoadSubset = () => {
         callCount++
-        calls.push(cloneOptions(options))
+        return true as const
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      // Accumulate eq predicates via sync returns
+      for (let i = 0; i < 10; i++) {
+        deduplicated.loadSubset({
+          where: eq(ref(`task_id`), val(`uuid-${i}`)),
+        })
+      }
+      expect(callCount).toBe(10)
+
+      // Load all data (no WHERE clause) — should track as "all data loaded"
+      deduplicated.loadSubset({})
+      expect(callCount).toBe(11)
+
+      // Subsequent requests should be deduplicated
+      const result1 = deduplicated.loadSubset({
+        where: eq(ref(`task_id`), val(`uuid-999`)),
+      })
+      expect(result1).toBe(true)
+      expect(callCount).toBe(11)
+
+      const result2 = deduplicated.loadSubset({})
+      expect(result2).toBe(true)
+      expect(callCount).toBe(11)
+    })
+
+    it(`should handle multiple all-data loads without expression growth`, async () => {
+      let callCount = 0
+      const mockLoadSubset = () => {
+        callCount++
         return Promise.resolve()
       }
 

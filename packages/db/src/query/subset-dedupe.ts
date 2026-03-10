@@ -126,17 +126,10 @@ export class DeduplicatedLoadSubset {
       return prom
     }
 
-    // Not fully covered by existing data
-    // Compute the subset of data that is not covered by the existing data
-    // such that we only have to load that subset of missing data
-    // We clone options twice:
-    // - trackingOptions: preserves the original predicate for accurate tracking
-    // - loadOptions: may be modified with the difference expression for the actual request
-    // This separation is critical: tracking must reflect what data was REQUESTED
-    // (e.g., where=undefined means "all data"), not the optimized query that was sent
-    // to the backend (e.g., NOT(already_loaded)). Without this, a "load all" request
-    // would track the difference expression instead of setting hasLoadedAllData=true,
-    // causing unbounded expression growth on subsequent requests.
+    // Not fully covered by existing data — load the missing subset.
+    // We need two clones: trackingOptions preserves the original predicate for
+    // accurate tracking (e.g., where=undefined means "all data"), while loadOptions
+    // may be narrowed with a difference expression for the actual backend request.
     const trackingOptions = cloneOptions(options)
     const loadOptions = cloneOptions(options)
     if (this.unlimitedWhere !== undefined && options.limit === undefined) {
@@ -154,9 +147,7 @@ export class DeduplicatedLoadSubset {
 
     // Handle both sync (true) and async (Promise<void>) return values
     if (resultPromise === true) {
-      // Sync return - update tracking synchronously
-      // Use trackingOptions (original predicate) so tracking accurately reflects
-      // what was requested, not the optimized difference query
+      // Sync return - update tracking with the original predicate
       this.updateTracking(trackingOptions)
       return true
     } else {
@@ -175,8 +166,6 @@ export class DeduplicatedLoadSubset {
             // If reset() was called, the generation will have incremented and we should
             // not repopulate the state that was just cleared
             if (capturedGeneration === this.generation) {
-              // Use trackingOptions (original predicate) so tracking accurately reflects
-              // what was requested, not the optimized difference query
               this.updateTracking(trackingOptions)
             }
             return result
