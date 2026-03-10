@@ -1160,6 +1160,78 @@ describe(`includes subqueries`, () => {
       ])
     })
 
+    it(`shared correlation key with parent filter + orderBy + limit`, async () => {
+      // Regression: grouped ordering for limit must use the composite routing
+      // key, not the raw correlation key. Otherwise two parents that share the
+      // same correlation key but differ on the parent-referenced filter get
+      // their children merged before the limit is applied.
+      type GroupParent = {
+        id: number
+        groupId: number
+        createdBy: string
+      }
+
+      type GroupChild = {
+        id: number
+        groupId: number
+        createdBy: string
+      }
+
+      const parents = createCollection(
+        mockSyncCollectionOptions<GroupParent>({
+          id: `limit-corr-parents`,
+          getKey: (p) => p.id,
+          initialData: [
+            { id: 1, groupId: 1, createdBy: `alice` },
+            { id: 2, groupId: 1, createdBy: `bob` },
+          ],
+        }),
+      )
+
+      const children = createCollection(
+        mockSyncCollectionOptions<GroupChild>({
+          id: `limit-corr-children`,
+          getKey: (c) => c.id,
+          initialData: [
+            { id: 10, groupId: 1, createdBy: `alice` },
+            { id: 11, groupId: 1, createdBy: `bob` },
+          ],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: parents }).select(({ p }) => ({
+          id: p.id,
+          createdBy: p.createdBy,
+          items: q
+            .from({ c: children })
+            .where(({ c }) => eq(c.groupId, p.groupId))
+            .where(({ c }) => eq(c.createdBy, p.createdBy))
+            .orderBy(({ c }) => c.id, `asc`)
+            .limit(1)
+            .select(({ c }) => ({
+              id: c.id,
+              createdBy: c.createdBy,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          createdBy: `alice`,
+          items: [{ id: 10, createdBy: `alice` }],
+        },
+        {
+          id: 2,
+          createdBy: `bob`,
+          items: [{ id: 11, createdBy: `bob` }],
+        },
+      ])
+    })
+
     it(`extracts correlation from and() with more than 2 args`, async () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ p: projectsWC }).select(({ p }) => ({
