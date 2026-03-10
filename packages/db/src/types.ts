@@ -2,7 +2,7 @@ import type { IStreamBuilder } from '@tanstack/db-ivm'
 import type { Collection } from './collection/index.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Transaction } from './transactions'
-import type { BasicExpression, OrderBy } from './query/ir.js'
+import type { BasicExpression, GroupBy, OrderBy, Select } from './query/ir.js'
 import type { EventEmitter } from './event-emitter.js'
 import type { SingleRowRefProxy } from './query/builder/ref-proxy.js'
 
@@ -309,6 +309,17 @@ export type LoadSubsetOptions = {
    * @optional Available when called from CollectionSubscription, may be undefined for direct calls
    */
   subscription?: Subscription
+  /**
+   * The SELECT clause from the query, if available.
+   * Sync layers can use this to optimize server-side projections or
+   * to know which columns/aggregates are being requested.
+   */
+  select?: Select
+  /**
+   * The GROUP BY clause from the query, if available.
+   * Sync layers can use this to push aggregation down to the server.
+   */
+  groupBy?: GroupBy
 }
 
 export type LoadSubsetFn = (options: LoadSubsetOptions) => true | Promise<void>
@@ -825,6 +836,16 @@ export interface SubscribeChangesOptions<
    * @internal
    */
   onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /**
+   * Optional SELECT clause to include in loadSubset for server-side projection optimization.
+   * @internal
+   */
+  select?: Select
+  /**
+   * Optional GROUP BY clause to include in loadSubset for server-side aggregation.
+   * @internal
+   */
+  groupBy?: GroupBy
 }
 
 export interface SubscribeChangesSnapshotOptions<

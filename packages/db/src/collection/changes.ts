@@ -140,6 +140,8 @@ export class CollectionChangesManager<
         orderBy: options.orderBy,
         limit: options.limit,
         onLoadSubsetResult: options.onLoadSubsetResult,
+        select: options.select,
+        groupBy: options.groupBy,
       })
     } else if (options.includeInitialState === false) {
       // When explicitly set to false (not just undefined), mark all state as "seen"

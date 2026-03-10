@@ -201,10 +201,11 @@ export class CollectionSubscriber<
       this.sendChangesToPipeline(changes)
     }
 
-    // Get the query's orderBy and limit to pass to loadSubset.
+    // Get the query's orderBy, limit, select, and groupBy to pass to loadSubset.
     // Only include orderBy when it is scoped to this alias and uses simple refs,
     // to avoid leaking cross-collection paths into backend-specific compilers.
-    const { orderBy, limit, offset } = this.collectionConfigBuilder.query
+    const { orderBy, limit, offset, select, groupBy } =
+      this.collectionConfigBuilder.query
     const effectiveLimit =
       limit !== undefined && offset !== undefined ? limit + offset : limit
     const normalizedOrderBy = orderBy
@@ -244,6 +245,8 @@ export class CollectionSubscriber<
       orderBy: orderByForSubscription,
       limit: limitForSubscription,
       onLoadSubsetResult,
+      select,
+      groupBy,
     })
 
     return subscription

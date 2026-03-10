@@ -31,6 +31,8 @@ import type { IR, OperatorName } from '../index.js'
 
 type BasicExpression<T = any> = IR.BasicExpression<T>
 type OrderBy = IR.OrderBy
+type Select = IR.Select
+type GroupBy = IR.GroupBy
 
 /**
  * Represents a simple field path extracted from an expression.
@@ -502,6 +504,8 @@ export function parseLoadSubsetOptions(
         where?: BasicExpression<boolean>
         orderBy?: OrderBy
         limit?: number
+        select?: Select
+        groupBy?: GroupBy
       }
     | undefined
     | null,
@@ -509,6 +513,8 @@ export function parseLoadSubsetOptions(
   filters: Array<SimpleComparison>
   sorts: Array<ParsedOrderBy>
   limit?: number
+  select?: Select
+  groupBy?: GroupBy
 } {
   if (!options) {
     return { filters: [], sorts: [] }
@@ -518,5 +524,7 @@ export function parseLoadSubsetOptions(
     filters: extractSimpleComparisons(options.where),
     sorts: parseOrderByExpression(options.orderBy),
     limit: options.limit,
+    select: options.select,
+    groupBy: options.groupBy,
   }
 }

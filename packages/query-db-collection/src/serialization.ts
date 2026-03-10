@@ -50,6 +50,10 @@ export function serializeLoadSubsetOptions(
     result.offset = options.offset
   }
 
+  // Note: select and groupBy are intentionally NOT serialized into the query key.
+  // They are informational (passed to queryFn via meta.loadSubsetOptions) and do not
+  // vary per-subscription, so they should not create separate cache entries.
+
   return Object.keys(result).length === 0 ? undefined : JSON.stringify(result)
 }
 

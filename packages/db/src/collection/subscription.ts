@@ -8,7 +8,7 @@ import {
   createFilterFunctionFromExpression,
   createFilteredCallback,
 } from './change-events.js'
-import type { BasicExpression, OrderBy } from '../query/ir.js'
+import type { BasicExpression, GroupBy, OrderBy, Select } from '../query/ir.js'
 import type { IndexInterface } from '../indexes/base-index.js'
 import type {
   ChangeMessage,
@@ -30,6 +30,10 @@ type RequestSnapshotOptions = {
   limit?: number
   /** Callback that receives the raw loadSubset result for external tracking */
   onLoadSubsetResult?: (result: Promise<void> | true) => void
+  /** Optional SELECT clause to pass to loadSubset for backend optimization */
+  select?: Select
+  /** Optional GROUP BY clause to pass to loadSubset for backend optimization */
+  groupBy?: GroupBy
 }
 
 type RequestLimitedSnapshotOptions = {
@@ -51,6 +55,10 @@ type CollectionSubscriptionOptions = {
   whereExpression?: BasicExpression<boolean>
   /** Callback to call when the subscription is unsubscribed */
   onUnsubscribe?: (event: SubscriptionUnsubscribedEvent) => void
+  /** Optional SELECT clause to pass through to loadSubset */
+  select?: Select
+  /** Optional GROUP BY clause to pass through to loadSubset */
+  groupBy?: GroupBy
 }
 
 export class CollectionSubscription
@@ -368,6 +376,9 @@ export class CollectionSubscription
       // Include orderBy and limit if provided so sync layer can optimize the query
       orderBy: opts?.orderBy,
       limit: opts?.limit,
+      // Include select and groupBy if available so sync layer can optimize projections/aggregations
+      select: opts?.select ?? this.options.select,
+      groupBy: opts?.groupBy ?? this.options.groupBy,
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 
@@ -606,6 +617,9 @@ export class CollectionSubscription
       cursor: cursorExpressions, // Cursor expressions passed separately
       offset: offset ?? currentOffset, // Use provided offset, or auto-tracked offset
       subscription: this,
+      // Include select and groupBy if available so sync layer can optimize projections/aggregations
+      select: this.options.select,
+      groupBy: this.options.groupBy,
     }
     const syncResult = this.collection._sync.loadSubset(loadOptions)
 
