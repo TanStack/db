@@ -1381,27 +1381,21 @@ describe(`includes subqueries`, () => {
         mockSyncCollectionOptions<L1>({
           id: `deep-l1`,
           getKey: (r) => r.id,
-          initialData: [
-            { id: 10, groupId: 1, owner: `alice`, tagId: 5 },
-          ],
+          initialData: [{ id: 10, groupId: 1, owner: `alice`, tagId: 5 }],
         }),
       )
       const l2 = createCollection(
         mockSyncCollectionOptions<L2>({
           id: `deep-l2`,
           getKey: (r) => r.id,
-          initialData: [
-            { id: 100, tagId: 5, owner: `alice`, flagId: 9 },
-          ],
+          initialData: [{ id: 100, tagId: 5, owner: `alice`, flagId: 9 }],
         }),
       )
       const l3 = createCollection(
         mockSyncCollectionOptions<L3>({
           id: `deep-l3`,
           getKey: (r) => r.id,
-          initialData: [
-            { id: 1000, flagId: 9, owner: `alice`, text: `deep` },
-          ],
+          initialData: [{ id: 1000, flagId: 9, owner: `alice`, text: `deep` }],
         }),
       )
 
