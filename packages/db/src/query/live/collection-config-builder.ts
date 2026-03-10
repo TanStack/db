@@ -1805,8 +1805,7 @@ function flushIncludesState(
         for (const parentKey of parentKeys) {
           const item = parentCollection.get(parentKey as any)
           if (item) {
-            const key =
-              parentSyncMethods.collection.getKeyFromItem(item)
+            const key = parentSyncMethods.collection.getKeyFromItem(item)
             // Capture previous value before in-place mutation
             const previousValue = { ...item }
             if (entry) {
