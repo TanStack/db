@@ -7,6 +7,7 @@ import {
   liveQueryCollectionOptions,
 } from '../../db/src/query/index'
 import { injectLiveQuery } from '../src/index'
+import type { OutputWithVirtual } from '../../db/tests/utils'
 import type { SingleResult } from '../../db/src/types'
 
 type Person = {
@@ -35,8 +36,9 @@ describe(`injectLiveQuery type assertions`, () => {
         .findOne(),
     )
 
-    // findOne returns a single result or undefined
-    expectTypeOf(data()).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(data()).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type findOne config object to return a single row`, () => {
@@ -57,8 +59,9 @@ describe(`injectLiveQuery type assertions`, () => {
           .findOne(),
     })
 
-    // findOne returns a single result or undefined
-    expectTypeOf(data()).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(data()).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type findOne collection using liveQueryCollectionOptions to return a single row`, () => {
@@ -84,8 +87,9 @@ describe(`injectLiveQuery type assertions`, () => {
 
     const { data } = injectLiveQuery(liveQueryCollection)
 
-    // findOne returns a single result or undefined
-    expectTypeOf(data()).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(data()).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type findOne collection using createLiveQueryCollection to return a single row`, () => {
@@ -109,8 +113,9 @@ describe(`injectLiveQuery type assertions`, () => {
 
     const { data } = injectLiveQuery(liveQueryCollection)
 
-    // findOne returns a single result or undefined
-    expectTypeOf(data()).toEqualTypeOf<Person | undefined>()
+    expectTypeOf(data()).toMatchTypeOf<
+      OutputWithVirtual<Person> | undefined
+    >()
   })
 
   it(`should type regular query to return an array`, () => {
@@ -132,7 +137,8 @@ describe(`injectLiveQuery type assertions`, () => {
         })),
     )
 
-    // Regular queries should return an array
-    expectTypeOf(data()).toEqualTypeOf<Array<{ id: string; name: string }>>()
+    expectTypeOf(data()).toMatchTypeOf<
+      Array<OutputWithVirtual<{ id: string; name: string }>>
+    >()
   })
 })
