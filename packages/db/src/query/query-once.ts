@@ -105,7 +105,7 @@ export async function queryOnce<TContext extends Context>(
       const first = collection.values().next().value as
         | InferResultType<TContext>
         | undefined
-      return (first ?? undefined) as InferResultType<TContext>
+      return first as InferResultType<TContext>
     }
     return collection.toArray as InferResultType<TContext>
   } finally {
