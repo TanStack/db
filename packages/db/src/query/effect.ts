@@ -64,10 +64,7 @@ export type EffectQueryInput<TContext extends Context> =
 type EffectEventHandler<
   TRow extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-> = (
-  event: DeltaEvent<TRow, TKey>,
-  ctx: EffectContext,
-) => void | Promise<void>
+> = (event: DeltaEvent<TRow, TKey>, ctx: EffectContext) => void | Promise<void>
 
 type EffectBatchHandler<
   TRow extends object = Record<string, unknown>,
@@ -989,10 +986,7 @@ class EffectPipelineRunner<TRow extends object, TKey extends string | number> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getHandlerForEvent<
-  TRow extends object,
-  TKey extends string | number,
->(
+function getHandlerForEvent<TRow extends object, TKey extends string | number>(
   event: DeltaEvent<TRow, TKey>,
   config: EffectConfig<TRow, TKey>,
 ): EffectEventHandler<TRow, TKey> | undefined {
