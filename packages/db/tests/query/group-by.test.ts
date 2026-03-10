@@ -1951,15 +1951,21 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
 
         const results = result.toArray
         expect(results).toHaveLength(3)
-        expect(stripVirtualProps(results.find((r) => r.name === `John`))).toEqual({
+        expect(
+          stripVirtualProps(results.find((r) => r.name === `John`)),
+        ).toEqual({
           name: `John`,
           orderCount: 3,
         })
-        expect(stripVirtualProps(results.find((r) => r.name === `Jane`))).toEqual({
+        expect(
+          stripVirtualProps(results.find((r) => r.name === `Jane`)),
+        ).toEqual({
           name: `Jane`,
           orderCount: 2,
         })
-        expect(stripVirtualProps(results.find((r) => r.name === `Bob`))).toEqual({
+        expect(
+          stripVirtualProps(results.find((r) => r.name === `Bob`)),
+        ).toEqual({
           name: `Bob`,
           orderCount: 2,
         })
