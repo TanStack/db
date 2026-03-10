@@ -1171,6 +1171,61 @@ const tree = createLiveQueryCollection((q) =>
 
 Each level updates independently and incrementally — adding a comment to an issue does not re-process other issues or projects.
 
+### Using Includes with React
+
+When using includes with React, each child `Collection` needs its own `useLiveQuery` subscription to receive reactive updates. Pass the child collection to a subcomponent that calls `useLiveQuery(childCollection)`:
+
+```tsx
+import { useLiveQuery } from '@tanstack/react-db'
+import { eq } from '@tanstack/db'
+
+function ProjectList() {
+  const { data: projects } = useLiveQuery((q) =>
+    q.from({ p: projectsCollection }).select(({ p }) => ({
+      id: p.id,
+      name: p.name,
+      issues: q
+        .from({ i: issuesCollection })
+        .where(({ i }) => eq(i.projectId, p.id))
+        .select(({ i }) => ({
+          id: i.id,
+          title: i.title,
+        })),
+    })),
+  )
+
+  return (
+    <ul>
+      {projects.map((project) => (
+        <li key={project.id}>
+          {project.name}
+          {/* Pass the child collection to a subcomponent */}
+          <IssueList issuesCollection={project.issues} />
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function IssueList({ issuesCollection }) {
+  // Subscribe to the child collection for reactive updates
+  const { data: issues } = useLiveQuery(issuesCollection)
+
+  return (
+    <ul>
+      {issues.map((issue) => (
+        <li key={issue.id}>{issue.title}</li>
+      ))}
+    </ul>
+  )
+}
+```
+
+Each `IssueList` component independently subscribes to its project's issues. When an issue is added or removed, only the affected `IssueList` re-renders — the parent `ProjectList` does not.
+
+> [!NOTE]
+> You must pass the child collection to a subcomponent and subscribe with `useLiveQuery`. Reading `project.issues` directly in the parent without subscribing will give you the collection object, but the component won't re-render when the child data changes.
+
 ## groupBy and Aggregations
 
 Use `groupBy` to group your data and apply aggregate functions. When you use aggregates in `select` without `groupBy`, the entire result set is treated as a single group.
