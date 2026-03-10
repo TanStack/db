@@ -9,6 +9,7 @@ export default [
       `**/.nitro/**`,
       `**/traildepot/**`,
       `examples/angular/**`,
+      `packages/db-collection-e2e/vite.config.ts`,
     ],
   },
   {

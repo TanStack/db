@@ -190,7 +190,7 @@ describe(`queryOnce`, () => {
       const user = await queryOnce((q) =>
         q
           .from({ user: usersCollection })
-          .where(({ user }) => eq(user.id, 1))
+          .where(({ user: u }) => eq(u.id, 1))
           .findOne(),
       )
 
@@ -202,7 +202,7 @@ describe(`queryOnce`, () => {
       const user = await queryOnce((q) =>
         q
           .from({ user: usersCollection })
-          .where(({ user }) => eq(user.id, 999))
+          .where(({ user: u }) => eq(u.id, 999))
           .findOne(),
       )
 
