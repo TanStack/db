@@ -565,8 +565,14 @@ export function compileQuery(
     const includesGroupKeyFn =
       parentKeyStream &&
       (query.limit !== undefined || query.offset !== undefined)
-        ? (_key: unknown, row: unknown) =>
-            (row as any)?.[mainSource]?.__correlationKey
+        ? (_key: unknown, row: unknown) => {
+            const correlationKey = (row as any)?.[mainSource]?.__correlationKey
+            const parentContext = (row as any)?.__parentContext
+            if (parentContext != null) {
+              return JSON.stringify([correlationKey, parentContext])
+            }
+            return correlationKey
+          }
         : undefined
 
     const orderedPipeline = processOrderBy(
