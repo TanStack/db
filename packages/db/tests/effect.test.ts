@@ -190,10 +190,14 @@ describe(`createEffect`, () => {
       await flushPromises()
 
       expect(events.length).toBe(1)
-      expect(events[0]!.type).toBe(`update`)
-      expect(events[0]!.key).toBe(1)
-      expect(events[0]!.value.name).toBe(`Alice Updated`)
-      expect(events[0]!.previousValue?.name).toBe(`Alice`)
+      const updateEvent = events[0]!
+      expect(updateEvent.type).toBe(`update`)
+      expect(updateEvent.key).toBe(1)
+      expect(updateEvent.value.name).toBe(`Alice Updated`)
+      if (updateEvent.type !== `update`) {
+        throw new Error(`Expected update event`)
+      }
+      expect(updateEvent.previousValue.name).toBe(`Alice`)
 
       await effect.dispose()
     })
@@ -513,6 +517,35 @@ describe(`createEffect`, () => {
       expect(consoleSpy).toHaveBeenCalled()
       consoleSpy.mockRestore()
 
+      await effect.dispose()
+    })
+
+    it(`should log both errors when onError throws`, async () => {
+      const users = createUsersCollection([sampleUsers[0]!])
+      const consoleSpy = vi.spyOn(console, `error`).mockImplementation(() => {})
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onEnter: () => {
+          throw new Error(`handler error`)
+        },
+        onError: () => {
+          throw new Error(`onError failed`)
+        },
+      })
+
+      await flushPromises()
+
+      expect(consoleSpy).toHaveBeenCalledWith(
+        `[Effect] Error in onError handler:`,
+        expect.objectContaining({ message: `onError failed` }),
+      )
+      expect(consoleSpy).toHaveBeenCalledWith(
+        `[Effect] Original error:`,
+        expect.objectContaining({ message: `handler error` }),
+      )
+
+      consoleSpy.mockRestore()
       await effect.dispose()
     })
   })
@@ -954,10 +987,7 @@ describe(`createEffect`, () => {
       const updates = events.filter((e) => e.type === `update`)
 
       // Bob should have exited
-      expect(
-        exits.some((e) => e.value.name === `Bob`) ||
-          exits.some((e) => e.value.name === `Bob`),
-      ).toBe(true)
+      expect(exits.some((e) => e.value.name === `Bob`)).toBe(true)
 
       // Charlie should have entered
       expect(enters.some((e) => e.value.name === `Charlie`)).toBe(true)
@@ -1260,9 +1290,13 @@ describe(`createEffect`, () => {
       await flushPromises()
 
       expect(events.length).toBe(1)
-      expect(events[0]!.type).toBe(`update`)
-      expect(events[0]!.value.active).toBe(false)
-      expect(events[0]!.previousValue?.active).toBe(true)
+      const updateEvent = events[0]!
+      expect(updateEvent.type).toBe(`update`)
+      expect(updateEvent.value.active).toBe(false)
+      if (updateEvent.type !== `update`) {
+        throw new Error(`Expected update event`)
+      }
+      expect(updateEvent.previousValue.active).toBe(true)
 
       await effect.dispose()
     })
@@ -1486,6 +1520,34 @@ describe(`createEffect`, () => {
 
       consoleErrorSpy.mockRestore()
     })
+
+    it(`should still dispose when onSourceError throws`, async () => {
+      const users = createUsersCollection()
+      const consoleErrorSpy = vi
+        .spyOn(console, `error`)
+        .mockImplementation(() => {})
+
+      const effect = createEffect<User, number>({
+        query: (q) => q.from({ user: users }),
+        onBatch: () => {},
+        onSourceError: () => {
+          throw new Error(`source callback failed`)
+        },
+      })
+
+      await flushPromises()
+
+      await users.cleanup()
+      await flushPromises()
+
+      expect(effect.disposed).toBe(true)
+      expect(consoleErrorSpy).toHaveBeenCalledWith(
+        expect.stringContaining(`onSourceError callback threw:`),
+        expect.objectContaining({ message: `source callback failed` }),
+      )
+
+      consoleErrorSpy.mockRestore()
+    })
   })
 
   describe(`correctness edge cases`, () => {
@@ -1575,10 +1637,14 @@ describe(`createEffect`, () => {
       await flushPromises()
 
       expect(events.length).toBe(1)
+      const updateEvent = events[0]!
+      if (updateEvent.type !== `update`) {
+        throw new Error(`Expected update event`)
+      }
       // previousValue should be the original value (Alice), not the intermediate (Bob)
-      expect(events[0]!.previousValue?.name).toBe(`Alice`)
+      expect(updateEvent.previousValue.name).toBe(`Alice`)
       // value should be the final value (Charlie)
-      expect(events[0]!.value.name).toBe(`Charlie`)
+      expect(updateEvent.value.name).toBe(`Charlie`)
 
       await effect.dispose()
     })
@@ -1609,10 +1675,11 @@ describe(`createEffect`, () => {
       await flushPromises()
 
       expect(events.length).toBe(1)
-      expect(events[0]!.type).toBe(`exit`)
-      expect(events[0]!.value.name).toBe(`Alice`)
+      const exitEvent = events[0]!
+      expect(exitEvent.type).toBe(`exit`)
+      expect(exitEvent.value.name).toBe(`Alice`)
       // previousValue should be undefined for exit events
-      expect(events[0]!.previousValue).toBeUndefined()
+      expect(`previousValue` in exitEvent).toBe(false)
 
       await effect.dispose()
     })

@@ -167,4 +167,43 @@ describe(`useLiveQueryEffect`, () => {
     expect(events[1]!.type).toBe(`exit`)
     expect(events[1]!.value.name).toBe(`Alice`)
   })
+
+  it(`should use the latest callback without recreating the effect`, async () => {
+    const users = createUsersCollection()
+    const labels: Array<string> = []
+
+    const { rerender } = renderHook(
+      ({ label }: { label: string }) => {
+        useLiveQueryEffect<User, number>(
+          {
+            query: (q) => q.from({ user: users }),
+            skipInitial: true,
+            onEnter: (event) => {
+              labels.push(`${label}:${event.value.name}`)
+            },
+          },
+          [],
+        )
+      },
+      { initialProps: { label: `first` } },
+    )
+
+    await act(async () => {
+      await flushPromises()
+    })
+
+    rerender({ label: `second` })
+
+    await act(async () => {
+      users.utils.begin()
+      users.utils.write({
+        type: `insert`,
+        value: { id: 3, name: `Charlie`, active: true },
+      })
+      users.utils.commit()
+      await flushPromises()
+    })
+
+    expect(labels).toEqual([`second:Charlie`])
+  })
 })

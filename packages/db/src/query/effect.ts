@@ -35,18 +35,33 @@ import type { ChangeMessage, KeyedStream, ResultStream } from '../types.js'
 export type DeltaType = 'enter' | 'exit' | 'update'
 
 /** Delta event emitted when a row enters, exits, or updates within a query result */
-export interface DeltaEvent<
+export type DeltaEvent<
   TRow extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
-> {
-  type: DeltaType
-  key: TKey
-  /** Current value (new value for enter/update, exiting value for exit) */
-  value: TRow
-  /** Previous value before the batch (only present for update events) */
-  previousValue?: TRow
-  metadata?: Record<string, unknown>
-}
+> =
+  | {
+      type: 'enter'
+      key: TKey
+      /** Current value for the entering row */
+      value: TRow
+      metadata?: Record<string, unknown>
+    }
+  | {
+      type: 'exit'
+      key: TKey
+      /** Current value for the exiting row */
+      value: TRow
+      metadata?: Record<string, unknown>
+    }
+  | {
+      type: 'update'
+      key: TKey
+      /** Current value after the update */
+      value: TRow
+      /** Previous value before the batch */
+      previousValue: TRow
+      metadata?: Record<string, unknown>
+    }
 
 /** Context passed to effect handlers */
 export interface EffectContext {
@@ -252,7 +267,14 @@ export function createEffect<
       if (disposed) return
 
       if (config.onSourceError) {
-        config.onSourceError(error)
+        try {
+          config.onSourceError(error)
+        } catch (callbackError) {
+          console.error(
+            `[Effect '${id}'] onSourceError callback threw:`,
+            callbackError,
+          )
+        }
       } else {
         console.error(`[Effect '${id}'] ${error.message}. Disposing effect.`)
       }
@@ -1057,7 +1079,7 @@ function classifyDelta<TRow extends object, TKey extends string | number>(
       type: `update`,
       key,
       value: insertValue!,
-      previousValue: deleteValue,
+      previousValue: deleteValue!,
     }
   }
 
@@ -1086,9 +1108,10 @@ function reportError<TRow extends object, TKey extends string | number>(
   if (onError) {
     try {
       onError(normalised, event)
-    } catch {
+    } catch (onErrorError) {
       // Don't let onError errors propagate
-      console.error(`[Effect] Error in onError handler:`, normalised)
+      console.error(`[Effect] Error in onError handler:`, onErrorError)
+      console.error(`[Effect] Original error:`, normalised)
     }
   } else {
     console.error(`[Effect] Unhandled error in handler:`, normalised)
