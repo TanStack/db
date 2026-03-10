@@ -160,6 +160,7 @@ export class PowerSyncTransactor {
       mutation,
       context,
       waitForCompletion,
+      // eslint-disable-next-line no-shadow
       async (tableName, mutation, serializeValue) => {
         const values = serializeValue(mutation.modified)
         const keys = Object.keys(values).map((key) => sanitizeSQL`${key}`)
@@ -173,9 +174,9 @@ export class PowerSyncTransactor {
 
         await context.execute(
           `
-        INSERT into ${tableName} 
-            (${keys.join(`, `)}) 
-        VALUES 
+        INSERT into ${tableName}
+            (${keys.join(`, `)})
+        VALUES
             (${keys.map((_) => `?`).join(`, `)})
         `,
           queryParameters,
@@ -195,6 +196,7 @@ export class PowerSyncTransactor {
       mutation,
       context,
       waitForCompletion,
+      // eslint-disable-next-line no-shadow
       async (tableName, mutation, serializeValue) => {
         const values = serializeValue(mutation.modified)
         const keys = Object.keys(values).map((key) => sanitizeSQL`${key}`)
@@ -208,7 +210,7 @@ export class PowerSyncTransactor {
 
         await context.execute(
           `
-        UPDATE ${tableName} 
+        UPDATE ${tableName}
         SET ${keys.map((key) => `${key} = ?`).join(`, `)}
         WHERE id = ?
         `,
@@ -229,6 +231,7 @@ export class PowerSyncTransactor {
       mutation,
       context,
       waitForCompletion,
+      // eslint-disable-next-line no-shadow
       async (tableName, mutation) => {
         const metadataValue = this.processMutationMetadata(mutation)
         if (metadataValue != null) {

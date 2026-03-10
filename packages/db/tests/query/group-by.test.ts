@@ -1944,7 +1944,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ customer, oc }) => ({
                 name: customer.name,
-                orderCount: oc?.orderCount,
+                orderCount: oc.orderCount,
               }))
           },
         })

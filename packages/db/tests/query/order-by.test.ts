@@ -777,12 +777,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
               ({ employees, departments }) =>
                 eq(employees.department_id, departments.id),
             )
-            .orderBy(({ departments }) => departments?.name, `asc`)
+            .orderBy(({ departments }) => departments.name, `asc`)
             .orderBy(({ employees }) => employees.salary, `desc`)
             .select(({ employees, departments }) => ({
               id: employees.id,
               employee_name: employees.name,
-              department_name: departments?.name,
+              department_name: departments.name,
               salary: employees.salary,
             })),
         )
@@ -1846,12 +1846,12 @@ function createOrderByTests(autoIndex: `off` | `eager`): void {
                   ({ employees, departments }) =>
                     eq(employees.department_id, departments.id),
                 )
-                .orderBy(({ departments }) => departments?.name, `asc`)
+                .orderBy(({ departments }) => departments.name, `asc`)
                 .limit(5)
                 .select(({ employees, departments }) => ({
                   employeeId: employees.id,
                   employeeName: employees.name,
-                  departmentName: departments?.name,
+                  departmentName: departments.name,
                 })),
             )
 
