@@ -1351,5 +1351,114 @@ describe(`includes subqueries`, () => {
         },
       ])
     })
+
+    it(`three levels of nested includes with parent-referencing filters`, async () => {
+      // Verifies that composite routing keys work at arbitrary nesting depth,
+      // not just the first two levels.
+      type L0 = { id: number; groupId: number; owner: string }
+      type L1 = {
+        id: number
+        groupId: number
+        owner: string
+        tagId: number
+      }
+      type L2 = {
+        id: number
+        tagId: number
+        owner: string
+        flagId: number
+      }
+      type L3 = { id: number; flagId: number; owner: string; text: string }
+
+      const l0 = createCollection(
+        mockSyncCollectionOptions<L0>({
+          id: `deep-l0`,
+          getKey: (r) => r.id,
+          initialData: [{ id: 1, groupId: 1, owner: `alice` }],
+        }),
+      )
+      const l1 = createCollection(
+        mockSyncCollectionOptions<L1>({
+          id: `deep-l1`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 10, groupId: 1, owner: `alice`, tagId: 5 },
+          ],
+        }),
+      )
+      const l2 = createCollection(
+        mockSyncCollectionOptions<L2>({
+          id: `deep-l2`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 100, tagId: 5, owner: `alice`, flagId: 9 },
+          ],
+        }),
+      )
+      const l3 = createCollection(
+        mockSyncCollectionOptions<L3>({
+          id: `deep-l3`,
+          getKey: (r) => r.id,
+          initialData: [
+            { id: 1000, flagId: 9, owner: `alice`, text: `deep` },
+          ],
+        }),
+      )
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ a: l0 }).select(({ a }) => ({
+          id: a.id,
+          children: q
+            .from({ b: l1 })
+            .where(({ b }) => eq(b.groupId, a.groupId))
+            .where(({ b }) => eq(b.owner, a.owner))
+            .select(({ b }) => ({
+              id: b.id,
+              tagId: b.tagId,
+              owner: b.owner,
+              grandchildren: q
+                .from({ c: l2 })
+                .where(({ c }) => eq(c.tagId, b.tagId))
+                .where(({ c }) => eq(c.owner, b.owner))
+                .select(({ c }) => ({
+                  id: c.id,
+                  flagId: c.flagId,
+                  owner: c.owner,
+                  leaves: q
+                    .from({ d: l3 })
+                    .where(({ d }) => eq(d.flagId, c.flagId))
+                    .where(({ d }) => eq(d.owner, c.owner))
+                    .select(({ d }) => ({
+                      id: d.id,
+                      text: d.text,
+                    })),
+                })),
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          children: [
+            {
+              id: 10,
+              tagId: 5,
+              owner: `alice`,
+              grandchildren: [
+                {
+                  id: 100,
+                  flagId: 9,
+                  owner: `alice`,
+                  leaves: [{ id: 1000, text: `deep` }],
+                },
+              ],
+            },
+          ],
+        },
+      ])
+    })
   })
 })
