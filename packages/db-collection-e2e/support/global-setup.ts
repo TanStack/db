@@ -1,5 +1,5 @@
-import { Client  } from 'pg'
-import type {ClientConfig} from 'pg';
+import { Client } from 'pg'
+import type { ClientConfig } from 'pg'
 import type { GlobalSetupContext } from 'vitest/node'
 
 const ELECTRIC_URL = process.env.ELECTRIC_URL ?? 'http://localhost:3000'

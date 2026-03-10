@@ -10,7 +10,7 @@ export class OutboxManager {
 
   constructor(
     storage: StorageAdapter,
-     
+
     collections: Record<string, Collection<any, any, any, any, any>>,
   ) {
     this.storage = storage

@@ -1714,9 +1714,7 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
               ({ employee, manager }) => eq(employee.manager_id, manager.id),
               `left`,
             )
-            .where(({ manager }) =>
-              or(isNull(manager.id), gt(manager.age, 35)),
-            )
+            .where(({ manager }) => or(isNull(manager.id), gt(manager.age, 35)))
             .select(({ employee, manager }) => ({
               employeeId: employee.id,
               employeeName: employee.name,
