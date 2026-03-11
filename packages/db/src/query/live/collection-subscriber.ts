@@ -1,4 +1,4 @@
-import { MultiSet, serializeValue } from '@tanstack/db-ivm'
+import { MultiSet } from '@tanstack/db-ivm'
 import {
   normalizeExpressionPaths,
   normalizeOrderByPaths,
@@ -26,11 +26,6 @@ export class CollectionSubscriber<
   // Keep track of the biggest value we've sent so far (needed for orderBy optimization)
   private biggest: any = undefined
 
-  // Track the most recent ordered load request key (cursor + window).
-  // This avoids infinite loops from cached data re-writes while still allowing
-  // window moves or new keys at the same cursor value to trigger new requests.
-  private lastLoadRequestKey: string | undefined
-
   // Track deferred promises for subscription loading states
   private subscriptionLoadingPromises = new Map<
     CollectionSubscription,
@@ -42,9 +37,6 @@ export class CollectionSubscriber<
   // can potentially send the same item to D2 multiple times.
   private sentToD2Keys = new Set<string | number>()
 
-  // Direct load tracking callback for ordered path (set during subscribeToOrderedChanges,
-  // used by loadNextItems for subsequent requestLimitedSnapshot calls)
-  private orderedLoadSubsetResult?: (result: Promise<void> | true) => void
   private pendingOrderedLoadPromise: Promise<void> | undefined
 
   constructor(
@@ -272,8 +264,6 @@ export class CollectionSubscriber<
       onLoadSubsetResult(result)
     }
 
-    this.orderedLoadSubsetResult = handleLoadSubsetResult
-
     // Use a holder to forward-reference subscription in the callback
     const subscriptionHolder: { current?: CollectionSubscription } = {}
 
@@ -305,7 +295,6 @@ export class CollectionSubscriber<
     // and allow re-inserts of previously sent keys
     const truncateUnsubscribe = this.collection.on(`truncate`, () => {
       this.biggest = undefined
-      this.lastLoadRequestKey = undefined
       this.pendingOrderedLoadPromise = undefined
       this.sentToD2Keys.clear()
     })
@@ -415,52 +404,46 @@ export class CollectionSubscriber<
     if (!orderByInfo) {
       return
     }
-    const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
-    const biggestSentRow = this.biggest
-
-    // Extract all orderBy column values from the biggest sent row
-    // For single-column: returns single value, for multi-column: returns array
-    const extractedValues = biggestSentRow
-      ? valueExtractorForRawRow(biggestSentRow)
-      : undefined
-
-    // Normalize to array format for minValues
-    let minValues: Array<unknown> | undefined
-    if (extractedValues !== undefined) {
-      minValues = Array.isArray(extractedValues)
-        ? extractedValues
-        : [extractedValues]
-    }
-
-    const loadRequestKey = this.getLoadRequestKey({
-      minValues,
-      offset,
-      limit: n,
-    })
-
-    // Skip if we already requested a load for this cursor+window.
-    // This prevents infinite loops from cached data re-writes while still allowing
-    // window moves (offset/limit changes) to trigger new requests.
-    if (this.lastLoadRequestKey === loadRequestKey) {
-      return
-    }
+    const { orderBy, offset } = orderByInfo
 
     // Normalize the orderBy clauses such that the references are relative to the collection
     const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
 
-    // Take the `n` items after the biggest sent value
-    // Pass the current window offset to ensure proper deduplication
-    subscription.requestLimitedSnapshot({
-      orderBy: normalizedOrderBy,
-      limit: n,
-      minValues,
-      // Omit offset so requestLimitedSnapshot can advance the offset based on
-      // the number of rows already loaded (supports offset-based backends).
-      trackLoadSubsetPromise: false,
-      onLoadSubsetResult: this.orderedLoadSubsetResult,
-    })
+    // If we have an index, use the optimized limited snapshot with cursor-based pagination
+    if (subscription.hasOrderByIndex()) {
+      const { valueExtractorForRawRow } = orderByInfo
+      const biggestSentRow = this.biggest
 
-    this.lastLoadRequestKey = loadRequestKey
+      // Extract all orderBy column values from the biggest sent row
+      // For single-column: returns single value, for multi-column: returns array
+      const extractedValues = biggestSentRow
+        ? valueExtractorForRawRow(biggestSentRow)
+        : undefined
+
+      // Normalize to array format for minValues
+      const minValues =
+        extractedValues !== undefined
+          ? Array.isArray(extractedValues)
+            ? extractedValues
+            : [extractedValues]
+          : undefined
+
+      // Take the `n` items after the biggest sent value
+      // Pass the current window offset to ensure proper deduplication
+      subscription.requestLimitedSnapshot({
+        orderBy: normalizedOrderBy,
+        limit: n,
+        minValues,
+        offset,
+      })
+    } else {
+      // No index available - use requestSnapshot with the total limit needed
+      // This requests the sync layer to load more data with the expanded window
+      subscription.requestSnapshot({
+        orderBy: normalizedOrderBy,
+        limit: offset + orderByInfo.limit,
+      })
+    }
   }
 
   private getWhereClauseForAlias(): BasicExpression<boolean> | undefined {
@@ -492,18 +475,11 @@ export class CollectionSubscriber<
         continue
       }
 
-      const isNewKey = !this.sentToD2Keys.has(change.key)
-
       // Only track inserts/updates for cursor positioning, not deletes
       if (!this.biggest) {
         this.biggest = change.value
-        this.lastLoadRequestKey = undefined
       } else if (comparator(this.biggest, change.value) < 0) {
         this.biggest = change.value
-        this.lastLoadRequestKey = undefined
-      } else if (isNewKey) {
-        // New key with same orderBy value - allow another load if needed
-        this.lastLoadRequestKey = undefined
       }
     }
   }
@@ -526,17 +502,6 @@ export class CollectionSubscriber<
     )
   }
 
-  private getLoadRequestKey(options: {
-    minValues: Array<unknown> | undefined
-    offset: number
-    limit: number
-  }): string {
-    return serializeValue({
-      minValues: options.minValues ?? null,
-      offset: options.offset,
-      limit: options.limit,
-    })
-  }
 }
 
 /**

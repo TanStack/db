@@ -4,6 +4,7 @@ import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { Transaction } from './transactions'
 import type { BasicExpression, OrderBy } from './query/ir.js'
 import type { EventEmitter } from './event-emitter.js'
+import type { IndexConstructor } from './indexes/base-index.js'
 import type { SingleRowRefProxy } from './query/builder/ref-proxy.js'
 
 /**
@@ -540,12 +541,27 @@ export interface BaseCollectionConfig<
   /**
    * Auto-indexing mode for the collection.
    * When enabled, indexes will be automatically created for simple where expressions.
-   * @default "eager"
+   * @default "off"
    * @description
-   * - "off": No automatic indexing
-   * - "eager": Automatically create indexes for simple where expressions in subscribeChanges (default)
+   * - "off": No automatic indexing (default). Use explicit indexes for better bundle size.
+   * - "eager": Automatically create indexes for simple where expressions in subscribeChanges.
+   *            Requires setting defaultIndexType.
    */
   autoIndex?: `off` | `eager`
+  /**
+   * Default index type to use when creating indexes without an explicit type.
+   * Required for auto-indexing. Import from '@tanstack/db/indexing'.
+   * @example
+   * ```ts
+   * import { BasicIndex } from '@tanstack/db/indexing'
+   * const collection = createCollection({
+   *   defaultIndexType: BasicIndex,
+   *   autoIndex: 'eager',
+   *   // ...
+   * })
+   * ```
+   */
+  defaultIndexType?: IndexConstructor<TKey>
   /**
    * Optional function to compare two items.
    * This is used to order the items in the collection.

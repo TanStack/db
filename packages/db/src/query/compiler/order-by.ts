@@ -277,15 +277,14 @@ export function processOrderBy(
       optimizableOrderByCollections[targetCollectionId] =
         orderByOptimizationInfo
 
-      // Set up lazy loading callback if we have an index
-      if (index) {
-        setSizeCallback = (getSize: () => number) => {
-          optimizableOrderByCollections[targetCollectionId]![`dataNeeded`] =
-            () => {
-              const size = getSize()
-              return Math.max(0, orderByOptimizationInfo!.limit - size)
-            }
-        }
+      // Set up lazy loading callback to track how much more data is needed
+      // This is used by loadMoreIfNeeded to determine if more data should be loaded
+      setSizeCallback = (getSize: () => number) => {
+        optimizableOrderByCollections[targetCollectionId]![`dataNeeded`] =
+          () => {
+            const size = getSize()
+            return Math.max(0, orderByOptimizationInfo!.limit - size)
+          }
       }
     }
   }
