@@ -602,6 +602,196 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(callCount).toBe(2)
     })
 
+    describe(`hasLoadedAllData after loading filtered + unfiltered data`, () => {
+      it(`should set hasLoadedAllData after a filtered load followed by an unfiltered load`, async () => {
+        let callCount = 0
+        const calls: Array<LoadSubsetOptions> = []
+        const mockLoadSubset = (options: LoadSubsetOptions) => {
+          callCount++
+          calls.push(cloneOptions(options))
+          return Promise.resolve()
+        }
+
+        const deduplicated = new DeduplicatedLoadSubset({
+          loadSubset: mockLoadSubset,
+        })
+
+        await deduplicated.loadSubset({
+          where: inOp(ref(`task_id`), [`id1`, `id2`, `id3`]),
+        })
+        expect(callCount).toBe(1)
+
+        await deduplicated.loadSubset({})
+        expect(callCount).toBe(2)
+        expect(calls[1]).toEqual({
+          where: not(inOp(ref(`task_id`), [`id1`, `id2`, `id3`])),
+        })
+
+        const result = await deduplicated.loadSubset({})
+        expect(result).toBe(true)
+        expect(callCount).toBe(2)
+      })
+
+      it(`should set hasLoadedAllData after a filtered load followed by an unfiltered load (with eq)`, async () => {
+        let callCount = 0
+        const mockLoadSubset = () => {
+          callCount++
+          return Promise.resolve()
+        }
+
+        const deduplicated = new DeduplicatedLoadSubset({
+          loadSubset: mockLoadSubset,
+        })
+
+        await deduplicated.loadSubset({
+          where: eq(ref(`task_id`), val(`single-id`)),
+        })
+        expect(callCount).toBe(1)
+
+        await deduplicated.loadSubset({})
+        expect(callCount).toBe(2)
+
+        const result1 = await deduplicated.loadSubset({})
+        expect(result1).toBe(true)
+        expect(callCount).toBe(2)
+
+        const result2 = await deduplicated.loadSubset({
+          where: eq(ref(`task_id`), val(`other-id`)),
+        })
+        expect(result2).toBe(true)
+        expect(callCount).toBe(2)
+      })
+
+      it(`should not produce exponentially growing predicates on repeated unfiltered loads`, async () => {
+        let callCount = 0
+        const calls: Array<LoadSubsetOptions> = []
+        const mockLoadSubset = (options: LoadSubsetOptions) => {
+          callCount++
+          calls.push(cloneOptions(options))
+          return Promise.resolve()
+        }
+
+        const deduplicated = new DeduplicatedLoadSubset({
+          loadSubset: mockLoadSubset,
+        })
+
+        await deduplicated.loadSubset({
+          where: inOp(ref(`task_id`), [`id1`, `id2`, `id3`]),
+        })
+        expect(callCount).toBe(1)
+
+        await deduplicated.loadSubset({})
+        expect(callCount).toBe(2)
+
+        const rounds: Array<{ round: number; whereSize: number }> = []
+        for (let i = 0; i < 10; i++) {
+          const result = await deduplicated.loadSubset({})
+          if (result !== true) {
+            const whereJson = JSON.stringify(calls[calls.length - 1]?.where)
+            rounds.push({ round: i + 1, whereSize: whereJson.length })
+          }
+        }
+
+        expect(callCount).toBe(2)
+        expect(rounds).toEqual([])
+      })
+    })
+
+    it(`should mark all data as loaded after a narrowed all-data request`, async () => {
+      const calls: Array<LoadSubsetOptions> = []
+      const mockLoadSubset = (options: LoadSubsetOptions) => {
+        calls.push(cloneOptions(options))
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      await deduplicated.loadSubset({
+        where: eq(ref(`task_id`), val(`uuid-1`)),
+      })
+      await deduplicated.loadSubset({
+        where: eq(ref(`task_id`), val(`uuid-2`)),
+      })
+
+      await deduplicated.loadSubset({})
+
+      expect(calls[2]).toEqual({
+        where: not(
+          inOp(ref(`task_id`), [`uuid-1`, `uuid-2`]),
+        ),
+      })
+
+      expect((deduplicated as any).hasLoadedAllData).toBe(true)
+      expect((deduplicated as any).unlimitedWhere).toBeUndefined()
+    })
+
+    it(`should not keep issuing increasingly nested all-data predicates`, async () => {
+      const calls: Array<LoadSubsetOptions> = []
+      const mockLoadSubset = (options: LoadSubsetOptions) => {
+        calls.push(cloneOptions(options))
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      await deduplicated.loadSubset({
+        where: eq(ref(`task_id`), val(`uuid-1`)),
+      })
+      await deduplicated.loadSubset({
+        where: eq(ref(`task_id`), val(`uuid-2`)),
+      })
+
+      await deduplicated.loadSubset({})
+      await deduplicated.loadSubset({})
+
+      expect(calls[3]).toBeUndefined()
+    })
+
+    it(`should deduplicate identical all-data requests while a narrowed all-data request is in flight`, async () => {
+      let resolveAllDataLoad: (() => void) | undefined
+      let callCount = 0
+      const calls: Array<LoadSubsetOptions> = []
+      const allDataLoadPromise = new Promise<void>((resolve) => {
+        resolveAllDataLoad = resolve
+      })
+
+      const mockLoadSubset = (options: LoadSubsetOptions) => {
+        callCount++
+        calls.push(cloneOptions(options))
+
+        if (callCount === 2) {
+          return allDataLoadPromise
+        }
+
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      await deduplicated.loadSubset({
+        where: eq(ref(`task_id`), val(`uuid-1`)),
+      })
+
+      const firstAllDataLoad = deduplicated.loadSubset({})
+      const secondAllDataLoad = deduplicated.loadSubset({})
+
+      expect(callCount).toBe(2)
+      expect(calls[1]).toEqual({
+        where: not(eq(ref(`task_id`), val(`uuid-1`))),
+      })
+      expect(secondAllDataLoad).toBe(firstAllDataLoad)
+
+      resolveAllDataLoad?.()
+      await firstAllDataLoad
+      await secondAllDataLoad
+    })
+
     it(`should not produce unbounded WHERE expressions when loading all data after eq accumulation`, async () => {
       // This test reproduces the production bug where accumulating many eq predicates
       // and then loading all data (no WHERE clause) caused unboundedly growing
@@ -1002,6 +1192,58 @@ describe(`createDeduplicatedLoadSubset`, () => {
         orderBy: orderByCreatedAt,
         limit: 5,
       })
+      expect(result).toBe(true)
+      expect(callCount).toBe(1)
+    })
+
+    it(`should not let caller mutations change stored limited call orderBy`, async () => {
+      let callCount = 0
+      const mockLoadSubset = () => {
+        callCount++
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      const mutableOrderBy: OrderBy = [
+        {
+          expression: ref(`created_at`),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+          },
+        },
+      ]
+
+      await deduplicated.loadSubset({
+        where: eq(ref(`status`), val(`active`)),
+        orderBy: mutableOrderBy,
+        limit: 10,
+      })
+      expect(callCount).toBe(1)
+
+      mutableOrderBy[0]!.compareOptions.direction = `desc`
+
+      const originalOrderBy: OrderBy = [
+        {
+          expression: ref(`created_at`),
+          compareOptions: {
+            direction: `asc`,
+            nulls: `last`,
+            stringSort: `lexical`,
+          },
+        },
+      ]
+
+      const result = await deduplicated.loadSubset({
+        where: eq(ref(`status`), val(`active`)),
+        orderBy: originalOrderBy,
+        limit: 5,
+      })
+
       expect(result).toBe(true)
       expect(callCount).toBe(1)
     })
