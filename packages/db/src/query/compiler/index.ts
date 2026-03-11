@@ -1,4 +1,10 @@
-import { distinct, filter, join as joinOperator, map } from '@tanstack/db-ivm'
+import {
+  distinct,
+  filter,
+  join as joinOperator,
+  map,
+  reduce,
+} from '@tanstack/db-ivm'
 import { optimizeQuery } from '../optimizer.js'
 import {
   CollectionInputNotFoundError,
@@ -349,6 +355,15 @@ export function compileQuery(
           ),
         )
       }
+
+      // Deduplicate: when multiple parents share the same correlation key (and
+      // parentContext), clamp multiplicity to 1 so the inner join doesn't
+      // produce duplicate child entries that cause incorrect deletions.
+      parentKeys = parentKeys.pipe(
+        reduce((values: Array<[any, number]>) =>
+          values.map(([v, mult]) => [v, mult > 0 ? 1 : 0] as [any, number]),
+        ),
+      )
 
       // If parent filters exist, append them to the child query's WHERE
       const childQuery =

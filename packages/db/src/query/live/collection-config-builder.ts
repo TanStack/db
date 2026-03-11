@@ -1813,13 +1813,14 @@ function flushIncludesState(
           const parentContext = routing?.parentContext ?? null
           const routingKey = computeRoutingKey(correlationKey, parentContext)
           if (correlationKey != null) {
-            cleanRoutingIndexOnDelete(state, routingKey)
-            state.childRegistry.delete(routingKey)
-            // Clean up reverse index
+            // Clean up reverse index first, only delete child collection
+            // when the last parent referencing it is removed
             const parentKeys = state.correlationToParentKeys.get(routingKey)
             if (parentKeys) {
               parentKeys.delete(parentKey)
               if (parentKeys.size === 0) {
+                cleanRoutingIndexOnDelete(state, routingKey)
+                state.childRegistry.delete(routingKey)
                 state.correlationToParentKeys.delete(routingKey)
               }
             }
