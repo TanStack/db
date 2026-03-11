@@ -24,9 +24,7 @@ export default function HomeScreen() {
     } catch (err) {
       if (!(disposed as boolean)) {
         console.error(`Failed to initialize:`, err)
-        setError(
-          err instanceof Error ? err.message : `Failed to initialize`,
-        )
+        setError(err instanceof Error ? err.message : `Failed to initialize`)
       }
     }
 

@@ -46,7 +46,11 @@ export const todoApi = {
     return data.map(parseTodo)
   },
 
-  async create(data: { id?: string; text: string; completed?: boolean }): Promise<Todo> {
+  async create(data: {
+    id?: string
+    text: string
+    completed?: boolean
+  }): Promise<Todo> {
     const response = await fetch(`${BASE_URL}/api/todos`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

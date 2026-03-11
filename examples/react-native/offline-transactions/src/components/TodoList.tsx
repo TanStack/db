@@ -11,7 +11,7 @@ import {
 import NetInfo from '@react-native-community/netinfo'
 import { useLiveQuery } from '@tanstack/react-db'
 import { createTodoActions } from '../db/todos'
-import type { Todo, TodosHandle  } from '../db/todos'
+import type { Todo, TodosHandle } from '../db/todos'
 import type { Collection } from '@tanstack/db'
 
 interface TodoListProps {
@@ -31,9 +31,7 @@ export function TodoList({ collection, executor }: TodoListProps) {
   )
 
   const { data: todoList = [] } = useLiveQuery((q) =>
-    q
-      .from({ todo: collection })
-      .orderBy(({ todo }) => todo.createdAt, `desc`),
+    q.from({ todo: collection }).orderBy(({ todo }) => todo.createdAt, `desc`),
   )
 
   // Monitor network status
