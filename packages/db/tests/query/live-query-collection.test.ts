@@ -2140,6 +2140,7 @@ describe(`createLiveQueryCollection`, () => {
         getKey: (item) => item.id,
         syncMode: `on-demand`,
         startSync: true,
+        defaultIndexType: BTreeIndex,
         autoIndex: `eager`,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
@@ -2205,6 +2206,7 @@ describe(`createLiveQueryCollection`, () => {
         getKey: (item) => item.id,
         syncMode: `on-demand`,
         startSync: true,
+        defaultIndexType: BTreeIndex,
         autoIndex: `eager`,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
