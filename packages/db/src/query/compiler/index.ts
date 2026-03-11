@@ -613,6 +613,9 @@ export function compileQuery(
         if (parentKeyStream) {
           const correlationKey = (row as any)[mainSource]?.__correlationKey
           const parentContext = (row as any).__parentContext ?? null
+          // Strip internal routing properties that may leak via spread selects
+          delete finalResults.__correlationKey
+          delete finalResults.__parentContext
           return [
             key,
             [finalResults, orderByIndex, correlationKey, parentContext],
@@ -650,6 +653,9 @@ export function compileQuery(
       if (parentKeyStream) {
         const correlationKey = (row as any)[mainSource]?.__correlationKey
         const parentContext = (row as any).__parentContext ?? null
+        // Strip internal routing properties that may leak via spread selects
+        delete finalResults.__correlationKey
+        delete finalResults.__parentContext
         return [
           key,
           [finalResults, undefined, correlationKey, parentContext],
