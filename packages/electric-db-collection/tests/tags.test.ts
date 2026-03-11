@@ -74,8 +74,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should track tags when rows are inserted with tags`, () => {
-    const tag1 = `hash1|hash2|hash3`
-    const tag2 = `hash4|hash5|hash6`
+    const tag1 = `hash1/hash2/hash3`
+    const tag2 = `hash4/hash5/hash6`
 
     // Insert row with tags
     subscriber([
@@ -135,7 +135,7 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should track tags when rows are updated with new tags`, () => {
-    const tag1 = `hash1|hash2|hash3`
+    const tag1 = `hash1/hash2/hash3`
 
     // Insert row with tags
     subscriber([
@@ -157,7 +157,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     )
 
     // Update with additional tags
-    const tag2 = `hash4|hash5|hash6`
+    const tag2 = `hash4/hash5/hash6`
     subscriber([
       {
         key: `1`,
@@ -214,8 +214,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should track tags that are structurally equal`, () => {
-    const tag1 = `hash1|hash2|hash3`
-    const tag1Copy = `hash1|hash2|hash3`
+    const tag1 = `hash1/hash2/hash3`
+    const tag1Copy = `hash1/hash2/hash3`
 
     // Insert row with tags
     subscriber([
@@ -255,10 +255,10 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should not interfere between rows with distinct tags`, () => {
-    const tag1 = `hash1|hash2|hash3`
-    const tag2 = `hash4|hash5|hash6`
-    const tag3 = `hash7|hash8|hash9`
-    const tag4 = `hash10|hash11|hash12`
+    const tag1 = `hash1/hash2/hash3`
+    const tag2 = `hash4/hash5/hash6`
+    const tag3 = `hash7/hash8/hash9`
+    const tag4 = `hash10/hash11/hash12`
 
     // Insert multiple rows with some shared tags
     // Row 1: tag1, tag2
@@ -389,9 +389,9 @@ describe(`Electric Tag Tracking and GC`, () => {
     expect(collection.state.get(3)).toEqual({ id: 3, name: `User 3` })
   })
 
-  it(`should require exact match in removed_tags for tags with wildcards (underscore)`, () => {
-    const tagWithWildcard = `hash1|_|hash3`
-    const tagWithoutWildcard = `hash1|hash2|hash3`
+  it(`should require exact match in removed_tags for tags with nil positions (empty segments)`, () => {
+    const tagWithNil = `hash1//hash3`
+    const tagWithoutNil = `hash1/hash2/hash3`
 
     // Insert row with wildcard tag
     subscriber([
@@ -400,7 +400,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         value: { id: 1, name: `User 1` },
         headers: {
           operation: `insert`,
-          tags: [tagWithWildcard],
+          tags: [tagWithNil],
         },
       },
       {
@@ -410,7 +410,7 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1` })
 
-    // Try to remove with non-matching tag (has specific value instead of wildcard)
+    // Try to remove with non-matching tag (has specific value instead of nil)
     // Should NOT remove because it doesn't match exactly
     subscriber([
       {
@@ -418,7 +418,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         value: { id: 1, name: `User 1` },
         headers: {
           operation: `update`,
-          removed_tags: [tagWithoutWildcard],
+          removed_tags: [tagWithoutNil],
         },
       },
       {
@@ -429,14 +429,14 @@ describe(`Electric Tag Tracking and GC`, () => {
     // Row should still exist because the tag didn't match exactly
     expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1` })
 
-    // Remove with exact match (wildcard tag)
+    // Remove with exact match (nil-position tag)
     subscriber([
       {
         key: `1`,
         value: { id: 1, name: `User 1` },
         headers: {
           operation: `delete`,
-          removed_tags: [tagWithWildcard],
+          removed_tags: [tagWithNil],
         },
       },
       {
@@ -455,7 +455,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         value: { id: 2, name: `User 2` },
         headers: {
           operation: `insert`,
-          tags: [tagWithoutWildcard],
+          tags: [tagWithoutNil],
         },
       },
       {
@@ -465,14 +465,14 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     expect(collection.state.get(2)).toEqual({ id: 2, name: `User 2` })
 
-    // Try to remove with wildcard tag - should NOT match
+    // Try to remove with nil-position tag - should NOT match
     subscriber([
       {
         key: `2`,
         value: { id: 2, name: `User 2` },
         headers: {
           operation: `update`,
-          removed_tags: [tagWithWildcard],
+          removed_tags: [tagWithNil],
         },
       },
       {
@@ -480,7 +480,7 @@ describe(`Electric Tag Tracking and GC`, () => {
       },
     ])
 
-    // Row should still exist because wildcard doesn't match specific value
+    // Row should still exist because nil-position tag doesn't match specific value tag
     expect(collection.state.get(2)).toEqual({ id: 2, name: `User 2` })
 
     // Remove with exact match (specific value tag)
@@ -490,7 +490,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         value: { id: 2, name: `User 2` },
         headers: {
           operation: `delete`,
-          removed_tags: [tagWithoutWildcard],
+          removed_tags: [tagWithoutNil],
         },
       },
       {
@@ -502,10 +502,10 @@ describe(`Electric Tag Tracking and GC`, () => {
     expect(collection.state.size).toBe(0)
     expect(collection.state.has(2)).toBe(false)
 
-    // Test with multiple tags including wildcards
-    const tagWildcard1 = `hash1|_|hash3`
-    const tagWildcard2 = `hash4|_|hash6`
-    const tagSpecific = `hash1|hash2|hash3`
+    // Test with multiple tags including nil positions
+    const tagNil1 = `hash1//hash3`
+    const tagNil2 = `hash4//hash6`
+    const tagSpecific = `hash1/hash2/hash3`
 
     subscriber([
       {
@@ -513,7 +513,7 @@ describe(`Electric Tag Tracking and GC`, () => {
         value: { id: 3, name: `User 3` },
         headers: {
           operation: `insert`,
-          tags: [tagWildcard1, tagWildcard2, tagSpecific],
+          tags: [tagNil1, tagNil2, tagSpecific],
         },
       },
       {
@@ -523,14 +523,14 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     expect(collection.state.get(3)).toEqual({ id: 3, name: `User 3` })
 
-    // Remove one wildcard tag with exact match
+    // Remove one nil-position tag with exact match
     subscriber([
       {
         key: `3`,
         value: { id: 3, name: `User 3` },
         headers: {
           operation: `update`,
-          removed_tags: [tagWildcard1],
+          removed_tags: [tagNil1],
         },
       },
       {
@@ -538,17 +538,17 @@ describe(`Electric Tag Tracking and GC`, () => {
       },
     ])
 
-    // Row should still exist (has tagWildcard2 and tagSpecific)
+    // Row should still exist (has tagNil2 and tagSpecific)
     expect(collection.state.get(3)).toEqual({ id: 3, name: `User 3` })
 
-    // Try to remove wildcard tag with non-matching specific value
+    // Try to remove nil-position tag with non-matching specific value
     subscriber([
       {
         key: `3`,
         value: { id: 3, name: `User 3` },
         headers: {
           operation: `update`,
-          removed_tags: [tagWithoutWildcard],
+          removed_tags: [tagWithoutNil],
         },
       },
       {
@@ -556,7 +556,7 @@ describe(`Electric Tag Tracking and GC`, () => {
       },
     ])
 
-    // Row should still exist because tagWithoutWildcard doesn't match tagWildcard2
+    // Row should still exist because tagWithoutNil doesn't match tagNil2 exactly
     expect(collection.state.get(3)).toEqual({ id: 3, name: `User 3` })
 
     // Remove specific tag with exact match
@@ -574,17 +574,17 @@ describe(`Electric Tag Tracking and GC`, () => {
       },
     ])
 
-    // Row should still exist (has tagWildcard2)
+    // Row should still exist (has tagNil2)
     expect(collection.state.get(3)).toEqual({ id: 3, name: `User 3` })
 
-    // Remove last wildcard tag with exact match
+    // Remove last nil-position tag with exact match
     subscriber([
       {
         key: `3`,
         value: { id: 3, name: `User 3` },
         headers: {
           operation: `delete`,
-          removed_tags: [tagWildcard2],
+          removed_tags: [tagNil2],
         },
       },
       {
@@ -598,9 +598,9 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should handle move-out events that remove matching tags`, () => {
-    const tag1 = `hash1|hash2|hash3`
-    const tag2 = `hash1|hash2|hash4`
-    const tag3 = `hash5|hash6|hash1`
+    const tag1 = `hash1/hash2/hash3`
+    const tag2 = `hash1/hash2/hash4`
+    const tag3 = `hash5/hash6/hash1`
 
     // Insert rows with tags
     subscriber([
@@ -662,10 +662,10 @@ describe(`Electric Tag Tracking and GC`, () => {
 
   it(`should remove shared tags from all rows when move-out pattern matches`, () => {
     // Create tags where some are shared between rows
-    const sharedTag1 = `hash1|hash2|hash3` // Shared by rows 1 and 2
-    const sharedTag2 = `hash4|hash5|hash6` // Shared by rows 2 and 3
-    const uniqueTag1 = `hash7|hash8|hash9` // Only in row 1
-    const uniqueTag2 = `hash10|hash11|hash12` // Only in row 3
+    const sharedTag1 = `hash1/hash2/hash3` // Shared by rows 1 and 2
+    const sharedTag2 = `hash4/hash5/hash6` // Shared by rows 2 and 3
+    const uniqueTag1 = `hash7/hash8/hash9` // Only in row 1
+    const uniqueTag2 = `hash10/hash11/hash12` // Only in row 3
 
     // Insert rows with multiple tags, some shared
     // Row 1: sharedTag1, uniqueTag1
@@ -789,19 +789,19 @@ describe(`Electric Tag Tracking and GC`, () => {
     expect(collection.state.get(3)).toEqual({ id: 3, name: `User 3` })
   })
 
-  it(`should not remove tags with underscores when pattern matches non-indexed position`, () => {
-    // Tag with underscore at position 1: a|_|c
-    // This tag is NOT indexed at position 1 (because of underscore)
-    const tagWithUnderscore = `a|_|c`
+  it(`should not remove tags with nil positions when pattern matches non-indexed position`, () => {
+    // Tag with nil at position 1: a//c
+    // This tag is NOT indexed at position 1 (because of nil/empty segment)
+    const tagWithNilPos = `a//c`
 
-    // Insert row with tag containing underscore
+    // Insert row with tag containing nil position
     subscriber([
       {
         key: `1`,
         value: { id: 1, name: `User 1` },
         headers: {
           operation: `insert`,
-          tags: [tagWithUnderscore],
+          tags: [tagWithNilPos],
         },
       },
       {
@@ -812,7 +812,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     expect(collection.state.size).toBe(1)
     expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1` })
 
-    // Send move-out event with pattern matching position 1 (where underscore is)
+    // Send move-out event with pattern matching position 1 (where nil is)
     // Since the tag is not indexed at position 1, it won't be found in the index
     // and the tag should remain
     const patternNonIndexed: MoveOutPattern = {
@@ -838,7 +838,7 @@ describe(`Electric Tag Tracking and GC`, () => {
 
     // Send move-out event with pattern matching position 2 (where 'c' is)
     // Position 2 is indexed (has value 'c'), so it will be found in the index
-    // The pattern matching position 2 with value 'c' matches the tag a|_|c, so the tag is removed
+    // The pattern matching position 2 with value 'c' matches the tag a//c, so the tag is removed
     const patternIndexed: MoveOutPattern = {
       pos: 2,
       value: `c`,
@@ -863,9 +863,9 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should handle move-out events with multiple patterns`, () => {
-    const tag1 = `hash1|hash2|hash3`
-    const tag2 = `hash4|hash5|hash6`
-    const tag3 = `hash7|hash8|hash9`
+    const tag1 = `hash1/hash2/hash3`
+    const tag2 = `hash4/hash5/hash6`
+    const tag3 = `hash7/hash8/hash9`
 
     // Insert rows with tags
     subscriber([
@@ -928,8 +928,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should clear tag state on must-refetch`, () => {
-    const tag1 = `hash1|hash2|hash3`
-    const tag2 = `hash4|hash5|hash6`
+    const tag1 = `hash1/hash2/hash3`
+    const tag2 = `hash4/hash5/hash6`
 
     // Insert row with tag
     subscriber([
@@ -1064,7 +1064,7 @@ describe(`Electric Tag Tracking and GC`, () => {
     )
 
     // Insert a row with tags
-    const tag = `hash1|hash2|hash3`
+    const tag = `hash1/hash2/hash3`
     subscriber([
       {
         key: `2`,
@@ -1113,8 +1113,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should handle adding and removing tags in same update`, () => {
-    const tag1 = `hash1|hash2|hash3`
-    const tag2 = `hash4|hash5|hash6`
+    const tag1 = `hash1/hash2/hash3`
+    const tag2 = `hash4/hash5/hash6`
 
     // Insert row with tag1
     subscriber([
@@ -1158,8 +1158,8 @@ describe(`Electric Tag Tracking and GC`, () => {
   })
 
   it(`should not recover old tags when row is deleted and re-inserted`, () => {
-    const tag1 = `hash1|hash2|hash3`
-    const tag2 = `hash4|hash5|hash6`
+    const tag1 = `hash1/hash2/hash3`
+    const tag2 = `hash4/hash5/hash6`
 
     // Insert row with tag1
     subscriber([
@@ -1237,5 +1237,321 @@ describe(`Electric Tag Tracking and GC`, () => {
     // Row should be gone because tag2 was removed and it doesn't have old tag1
     expect(collection.state.size).toBe(0)
     expect(collection.state.has(1)).toBe(false)
+  })
+
+  it(`should store active_conditions from headers and keep row visible`, () => {
+    // Insert row with tags and active_conditions
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1` })
+  })
+
+  it(`should keep row visible when only one disjunct is deactivated (DNF partial)`, () => {
+    // Row with two disjuncts: ["hash_a/", "/hash_b"]
+    // Disjunct 0 uses position 0, disjunct 1 uses position 1
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/`, `/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at position 0 — disjunct 0 fails, but disjunct 1 (position 1) still satisfied
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row should stay (disjunct 1 still satisfied via position 1)
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1` })
+  })
+
+  it(`should delete row when all disjuncts are deactivated (DNF full)`, () => {
+    // Row with two disjuncts: ["hash_a/", "/hash_b"]
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/`, `/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at position 0 — disjunct 0 fails
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row stays (disjunct 1 still satisfied)
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at position 1 — disjunct 1 also fails
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 1, value: `hash_b` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row deleted — no satisfied disjunct
+    expect(collection.state.size).toBe(0)
+    expect(collection.state.has(1)).toBe(false)
+  })
+
+  it(`should keep row alive when one disjunct lost but another keeps it visible (multi-disjunct)`, () => {
+    // Row with tags ["hash_a/hash_b/", "//hash_c"]
+    // active_conditions: [true, true, true]
+    // Disjunct 0 covers positions [0, 1], disjunct 1 covers position [2]
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/hash_b/`, `//hash_c`],
+          active_conditions: [true, true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at position 0 → disjunct 0 fails (needs [0,1]), but disjunct 1 (position 2) still satisfied
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row stays (disjunct 1 still satisfied)
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1` })
+
+    // Move-out at position 2 → disjunct 1 also fails, no disjunct satisfied
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 2, value: `hash_c` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row deleted — no satisfied disjunct
+    expect(collection.state.size).toBe(0)
+    expect(collection.state.has(1)).toBe(false)
+  })
+
+  it(`should overwrite active_conditions when server re-sends row (move-in overwrite)`, () => {
+    // Insert row with active_conditions: [true, false]
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/hash_b`],
+          active_conditions: [true, false],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Server re-sends the same row with updated active_conditions
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1 updated` },
+        headers: {
+          operation: `update`,
+          tags: [`hash_a/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row should still exist with updated value
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `User 1 updated` })
+
+    // Verify the overwritten active_conditions work correctly:
+    // If the old [true, false] was still in effect, move-out at pos 1 would have no effect
+    // since pos 1 was already false. With [true, true], move-out at pos 0 should keep row
+    // (position 1 still true for the single disjunct [0, 1])... actually with one disjunct [0,1]
+    // and active_conditions [false, true], the disjunct is NOT satisfied because pos 0 is false.
+    // Let's verify: move-out at pos 0 should delete the row because the single disjunct [0,1]
+    // requires both positions to be true.
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // Row deleted because single disjunct [0,1] requires both pos 0 and 1 to be true
+    expect(collection.state.size).toBe(0)
+  })
+
+  it(`should delete on empty tag set for simple shapes (no active_conditions)`, () => {
+    const tag1 = `hash1/hash2/hash3`
+
+    // Insert row with tags but NO active_conditions
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `User 1` },
+        headers: {
+          operation: `insert`,
+          tags: [tag1],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(1)
+
+    // Move-out at position 0 — no active_conditions: tag removed, tag set empty → delete
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash1` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(0)
+    expect(collection.state.has(1)).toBe(false)
+  })
+
+  it(`should handle mixed rows: some with active_conditions, some without`, () => {
+    // Row 1: DNF shape (with active_conditions)
+    // Row 2: simple shape (no active_conditions)
+    subscriber([
+      {
+        key: `1`,
+        value: { id: 1, name: `DNF User` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/`, `/hash_b`],
+          active_conditions: [true, true],
+        },
+      },
+      {
+        key: `2`,
+        value: { id: 2, name: `Simple User` },
+        headers: {
+          operation: `insert`,
+          tags: [`hash_a/hash_c`],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    expect(collection.state.size).toBe(2)
+
+    // Move-out at position 0 with value hash_a
+    // DNF row: disjunct 0 ([0]) fails, but disjunct 1 ([1]) still satisfied → stays
+    // Simple row: tag "hash_a/hash_c" matches (has hash_a at pos 0), removed, tag set empty → deleted
+    subscriber([
+      {
+        headers: {
+          event: `move-out`,
+          patterns: [{ pos: 0, value: `hash_a` }],
+        },
+      },
+      {
+        headers: { control: `up-to-date` },
+      },
+    ])
+
+    // DNF row stays, simple row deleted
+    expect(collection.state.size).toBe(1)
+    expect(collection.state.get(1)).toEqual({ id: 1, name: `DNF User` })
+    expect(collection.state.has(2)).toBe(false)
   })
 })
