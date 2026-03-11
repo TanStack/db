@@ -41,7 +41,10 @@ function loadData() {
 }
 
 function saveData() {
-  writeFileSync(DATA_FILE, JSON.stringify(Array.from(todosStore.values()), null, 2))
+  writeFileSync(
+    DATA_FILE,
+    JSON.stringify(Array.from(todosStore.values()), null, 2),
+  )
 }
 
 loadData()
