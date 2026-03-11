@@ -588,6 +588,48 @@ describe(`includes subqueries`, () => {
       ])
     })
 
+    it(`deleting one parent preserves sibling parent's child collection`, async () => {
+      const teams = createTeamsCollection()
+      const members = createMembersCollection()
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ t: teams }).select(({ t }) => ({
+          id: t.id,
+          name: t.name,
+          departmentId: t.departmentId,
+          members: q
+            .from({ m: members })
+            .where(({ m }) => eq(m.departmentId, t.departmentId))
+            .select(({ m }) => ({
+              id: m.id,
+              name: m.name,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      // Both Frontend and Backend share departmentId 100
+      expect(childItems((collection.get(1) as any).members)).toHaveLength(2)
+      expect(childItems((collection.get(2) as any).members)).toHaveLength(2)
+
+      // Delete the Frontend team
+      teams.utils.begin()
+      teams.utils.write({
+        type: `delete`,
+        value: sampleTeams[0]!,
+      })
+      teams.utils.commit()
+
+      expect(collection.get(1)).toBeUndefined()
+
+      // Backend should still have its child collection with all members
+      expect(childItems((collection.get(2) as any).members)).toEqual([
+        { id: 10, name: `Alice` },
+        { id: 11, name: `Bob` },
+      ])
+    })
+
     it(`correlation field does not need to be in the parent select`, async () => {
       const teams = createTeamsCollection()
       const members = createMembersCollection()
