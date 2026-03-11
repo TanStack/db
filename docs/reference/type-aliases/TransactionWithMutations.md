@@ -9,7 +9,7 @@ title: TransactionWithMutations
 type TransactionWithMutations<T, TOperation> = Omit<Transaction<T>, "mutations"> & object;
 ```
 
-Defined in: packages/db/src/types.ts:140
+Defined in: [packages/db/src/types.ts:140](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L140)
 
 Utility type for a Transaction with at least one mutation
 This is used internally by the Transaction.commit method

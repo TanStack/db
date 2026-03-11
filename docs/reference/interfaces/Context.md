@@ -5,7 +5,7 @@ title: Context
 
 # Interface: Context
 
-Defined in: packages/db/src/query/builder/types.ts:35
+Defined in: [packages/db/src/query/builder/types.ts:35](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L35)
 
 Context - The central state container for query builder operations
 
@@ -36,7 +36,7 @@ The context evolves through the query builder chain:
 baseSchema: ContextSchema;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:37
+Defined in: [packages/db/src/query/builder/types.ts:37](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L37)
 
 ***
 
@@ -46,7 +46,7 @@ Defined in: packages/db/src/query/builder/types.ts:37
 fromSourceName: string;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:41
+Defined in: [packages/db/src/query/builder/types.ts:41](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L41)
 
 ***
 
@@ -56,7 +56,7 @@ Defined in: packages/db/src/query/builder/types.ts:41
 optional hasJoins: boolean;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:43
+Defined in: [packages/db/src/query/builder/types.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L43)
 
 ***
 
@@ -66,7 +66,7 @@ Defined in: packages/db/src/query/builder/types.ts:43
 optional joinTypes: Record<string, "inner" | "left" | "right" | "full" | "outer" | "cross">;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:45
+Defined in: [packages/db/src/query/builder/types.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L45)
 
 ***
 
@@ -76,7 +76,7 @@ Defined in: packages/db/src/query/builder/types.ts:45
 optional result: any;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:50
+Defined in: [packages/db/src/query/builder/types.ts:50](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L50)
 
 ***
 
@@ -86,7 +86,7 @@ Defined in: packages/db/src/query/builder/types.ts:50
 schema: ContextSchema;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:39
+Defined in: [packages/db/src/query/builder/types.ts:39](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L39)
 
 ***
 
@@ -96,4 +96,4 @@ Defined in: packages/db/src/query/builder/types.ts:39
 optional singleResult: boolean;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:52
+Defined in: [packages/db/src/query/builder/types.ts:52](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L52)

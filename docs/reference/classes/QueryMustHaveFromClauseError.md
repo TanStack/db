@@ -5,7 +5,7 @@ title: QueryMustHaveFromClauseError
 
 # Class: QueryMustHaveFromClauseError
 
-Defined in: packages/db/src/errors.ts:403
+Defined in: [packages/db/src/errors.ts:403](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L403)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:403
 new QueryMustHaveFromClauseError(): QueryMustHaveFromClauseError;
 ```
 
-Defined in: packages/db/src/errors.ts:404
+Defined in: [packages/db/src/errors.ts:404](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L404)
 
 #### Returns
 

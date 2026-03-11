@@ -5,7 +5,7 @@ title: InvalidItemStructureError
 
 # Class: InvalidItemStructureError
 
-Defined in: packages/query-db-collection/src/errors.ts:48
+Defined in: [packages/query-db-collection/src/errors.ts:48](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L48)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/query-db-collection/src/errors.ts:48
 new InvalidItemStructureError(message): InvalidItemStructureError;
 ```
 
-Defined in: packages/query-db-collection/src/errors.ts:49
+Defined in: [packages/query-db-collection/src/errors.ts:49](https://github.com/TanStack/db/blob/main/packages/query-db-collection/src/errors.ts#L49)
 
 #### Parameters
 

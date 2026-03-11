@@ -2,6 +2,7 @@ import type {
   Collection,
   MutationFnParams,
   PendingMutation,
+  Transaction,
 } from '@tanstack/db'
 
 // Extended mutation function that includes idempotency key
@@ -104,7 +105,7 @@ export interface OfflineConfig {
   /**
    * Custom online detector implementation.
    * Defaults to WebOnlineDetector for browser environments.
-   * Use ReactNativeOnlineDetector from '@tanstack/offline-transactions/react-native' for RN/Expo.
+   * The '@tanstack/offline-transactions/react-native' entry point uses ReactNativeOnlineDetector automatically.
    */
   onlineDetector?: OnlineDetector
 }
@@ -129,9 +130,20 @@ export interface LeaderElection {
   onLeadershipChange: (callback: (isLeader: boolean) => void) => () => void
 }
 
+export interface TransactionSignaler {
+  resolveTransaction: (transactionId: string, result: any) => void
+  rejectTransaction: (transactionId: string, error: Error) => void
+  registerRestorationTransaction: (
+    offlineTransactionId: string,
+    restorationTransaction: Transaction,
+  ) => void
+  isOnline: () => boolean
+}
+
 export interface OnlineDetector {
   subscribe: (callback: () => void) => () => void
   notifyOnline: () => void
+  isOnline: () => boolean
   dispose: () => void
 }
 

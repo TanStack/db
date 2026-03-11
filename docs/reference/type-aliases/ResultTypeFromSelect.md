@@ -9,7 +9,7 @@ title: ResultTypeFromSelect
 type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<Prettify<{ [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true ? ExtractExpressionType<TSelectObject[K]> : TSelectObject[K] extends Ref<infer _T> ? ExtractRef<TSelectObject[K]> : TSelectObject[K] extends RefLeaf<infer T> ? T : TSelectObject[K] extends RefLeaf<infer T> | undefined ? T | undefined : TSelectObject[K] extends RefLeaf<infer T> | null ? T | null : TSelectObject[K] extends Ref<(...)> | undefined ? ExtractRef<(...)> | undefined : (...)[(...)] extends (...) | (...) ? (...) | (...) : (...) extends (...) ? (...) : (...) }>>;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:226
+Defined in: [packages/db/src/query/builder/types.ts:226](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L226)
 
 ResultTypeFromSelect - Infers the result type from a select object
 

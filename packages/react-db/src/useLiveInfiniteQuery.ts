@@ -23,7 +23,12 @@ function isLiveQueryCollectionUtils(
 export type UseLiveInfiniteQueryConfig<TContext extends Context> = {
   pageSize?: number
   initialPageParam?: number
-  getNextPageParam: (
+  /**
+   * @deprecated This callback is not used by the current implementation.
+   * Pagination is determined internally via a peek-ahead strategy.
+   * Provided for API compatibility with TanStack Query conventions.
+   */
+  getNextPageParam?: (
     lastPage: Array<InferResultType<TContext>[number]>,
     allPages: Array<Array<InferResultType<TContext>[number]>>,
     lastPageParam: number,
@@ -155,7 +160,15 @@ export function useLiveInfiniteQuery<TContext extends Context>(
   const hasValidatedCollectionRef = useRef(false)
 
   // Track deps for query functions (stringify for comparison)
-  const depsKey = JSON.stringify(deps)
+  let depsKey: string
+  try {
+    depsKey = JSON.stringify(deps)
+  } catch {
+    throw new Error(
+      `useLiveInfiniteQuery: dependency array contains values that cannot be serialized (e.g. circular references). ` +
+        `Ensure all dependency values are JSON-serializable.`,
+    )
+  }
   const prevDepsKeyRef = useRef(depsKey)
 
   // Reset pagination when inputs change
@@ -233,6 +246,7 @@ export function useLiveInfiniteQuery<TContext extends Context>(
     if (!isCollection && !queryResult.isReady) return
 
     // Adjust the window
+    let cancelled = false
     const result = utils.setWindow({
       offset: expectedOffset,
       limit: expectedLimit,
@@ -240,11 +254,20 @@ export function useLiveInfiniteQuery<TContext extends Context>(
 
     if (result !== true) {
       setIsFetchingNextPage(true)
-      result.then(() => {
-        setIsFetchingNextPage(false)
-      })
+      result
+        .catch((error: unknown) => {
+          if (!cancelled)
+            console.error(`useLiveInfiniteQuery: setWindow failed:`, error)
+        })
+        .finally(() => {
+          if (!cancelled) setIsFetchingNextPage(false)
+        })
     } else {
       setIsFetchingNextPage(false)
+    }
+
+    return () => {
+      cancelled = true
     }
   }, [
     isCollection,

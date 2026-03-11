@@ -1,5 +1,19 @@
 # @tanstack/db
 
+## 0.5.30
+
+### Patch Changes
+
+- Support bare boolean column references in `where()` and `having()` clauses. Previously, filtering on a boolean column required `eq(col.active, true)`. Now you can write `.where(({ u }) => u.active)` and `.where(({ u }) => not(u.active))` directly. ([#1304](https://github.com/TanStack/db/pull/1304))
+
+## 0.5.29
+
+### Patch Changes
+
+- fix: avoid DuplicateKeySyncError in join live queries when custom getKey only considers the identity of one of the joined collections ([#1290](https://github.com/TanStack/db/pull/1290))
+
+- fix: support aggregates nested inside expressions (e.g. `coalesce(count(...), 0)`) ([#1274](https://github.com/TanStack/db/pull/1274))
+
 ## 0.5.28
 
 ### Patch Changes

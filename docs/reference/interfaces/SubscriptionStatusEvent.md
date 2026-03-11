@@ -5,7 +5,7 @@ title: SubscriptionStatusEvent
 
 # Interface: SubscriptionStatusEvent\<T\>
 
-Defined in: packages/db/src/types.ts:223
+Defined in: [packages/db/src/types.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L223)
 
 Event emitted when subscription status changes to a specific status
 
@@ -23,7 +23,7 @@ Event emitted when subscription status changes to a specific status
 previousStatus: SubscriptionStatus;
 ```
 
-Defined in: packages/db/src/types.ts:226
+Defined in: [packages/db/src/types.ts:226](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L226)
 
 ***
 
@@ -33,7 +33,7 @@ Defined in: packages/db/src/types.ts:226
 status: T;
 ```
 
-Defined in: packages/db/src/types.ts:227
+Defined in: [packages/db/src/types.ts:227](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L227)
 
 ***
 
@@ -43,7 +43,7 @@ Defined in: packages/db/src/types.ts:227
 subscription: Subscription;
 ```
 
-Defined in: packages/db/src/types.ts:225
+Defined in: [packages/db/src/types.ts:225](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L225)
 
 ***
 
@@ -53,4 +53,4 @@ Defined in: packages/db/src/types.ts:225
 type: `status:${T}`;
 ```
 
-Defined in: packages/db/src/types.ts:224
+Defined in: [packages/db/src/types.ts:224](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L224)

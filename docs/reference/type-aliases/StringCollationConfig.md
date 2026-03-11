@@ -17,7 +17,7 @@ type StringCollationConfig =
 };
 ```
 
-Defined in: packages/db/src/types.ts:30
+Defined in: [packages/db/src/types.ts:30](https://github.com/TanStack/db/blob/main/packages/db/src/types.ts#L30)
 
 StringSortOpts - Options for string sorting behavior
 

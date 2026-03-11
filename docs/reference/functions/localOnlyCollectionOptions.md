@@ -11,7 +11,7 @@ title: localOnlyCollectionOptions
 function localOnlyCollectionOptions<T, TKey>(config): CollectionConfig<InferSchemaOutput<T>, TKey, T, LocalOnlyCollectionUtils> & object & object;
 ```
 
-Defined in: packages/db/src/local-only.ts:149
+Defined in: [packages/db/src/local-only.ts:149](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L149)
 
 Creates Local-only collection options for use with a standard Collection
 
@@ -123,7 +123,7 @@ await tx.commit()
 function localOnlyCollectionOptions<T, TKey>(config): CollectionConfig<T, TKey, never, LocalOnlyCollectionUtils> & object & object;
 ```
 
-Defined in: packages/db/src/local-only.ts:162
+Defined in: [packages/db/src/local-only.ts:162](https://github.com/TanStack/db/blob/main/packages/db/src/local-only.ts#L162)
 
 Creates Local-only collection options for use with a standard Collection
 

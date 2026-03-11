@@ -5,7 +5,7 @@ title: UpdateKeyNotFoundError
 
 # Class: UpdateKeyNotFoundError
 
-Defined in: packages/db/src/errors.ts:223
+Defined in: [packages/db/src/errors.ts:223](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L223)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:223
 new UpdateKeyNotFoundError(key): UpdateKeyNotFoundError;
 ```
 
-Defined in: packages/db/src/errors.ts:224
+Defined in: [packages/db/src/errors.ts:224](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L224)
 
 #### Parameters
 
