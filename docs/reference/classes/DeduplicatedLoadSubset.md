@@ -106,7 +106,7 @@ true if data is already loaded, or a Promise that resolves when data is loaded
 reset(): void;
 ```
 
-Defined in: [packages/db/src/query/subset-dedupe.ts:198](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L198)
+Defined in: [packages/db/src/query/subset-dedupe.ts:197](https://github.com/TanStack/db/blob/main/packages/db/src/query/subset-dedupe.ts#L197)
 
 Reset all tracking state.
 Clears the history of loaded predicates and in-flight calls.
