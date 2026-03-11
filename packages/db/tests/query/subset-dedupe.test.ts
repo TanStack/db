@@ -718,9 +718,7 @@ describe(`createDeduplicatedLoadSubset`, () => {
       await deduplicated.loadSubset({})
 
       expect(calls[2]).toEqual({
-        where: not(
-          inOp(ref(`task_id`), [`uuid-1`, `uuid-2`]),
-        ),
+        where: not(inOp(ref(`task_id`), [`uuid-1`, `uuid-2`])),
       })
 
       expect((deduplicated as any).hasLoadedAllData).toBe(true)
