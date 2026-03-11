@@ -257,6 +257,34 @@ describe(`includes subqueries`, () => {
         { id: 30, title: `Gamma issue` },
       ])
     })
+
+    it(`spread select on child does not leak internal properties`, async () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({
+              ...i,
+            })),
+        })),
+      )
+
+      await collection.preload()
+
+      const alpha = collection.get(1) as any
+      const childIssues = childItems(alpha.issues)
+      // Should contain only the real Issue fields, no internal __correlationKey
+      expect(childIssues[0]).toEqual({
+        id: 10,
+        projectId: 1,
+        title: `Bug in Alpha`,
+      })
+      expect(childIssues[0]).not.toHaveProperty(`__correlationKey`)
+      expect(childIssues[0]).not.toHaveProperty(`__parentContext`)
+    })
   })
 
   describe(`inner join filtering`, () => {
