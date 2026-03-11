@@ -501,7 +501,6 @@ export class CollectionSubscriber<
       promise,
     )
   }
-
 }
 
 /**
