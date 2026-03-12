@@ -6,6 +6,7 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import { mockSyncCollectionOptions } from '../utils.js'
+import type { Collection } from '../../src/collection/index.js'
 
 type Project = {
   id: number
@@ -58,6 +59,107 @@ describe(`includes subquery types`, () => {
   const projects = createProjectsCollection()
   const issues = createIssuesCollection()
   const comments = createCommentsCollection()
+
+  describe(`Collection includes`, () => {
+    test(`includes with select infers child result as Collection`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+            })),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.id).toEqualTypeOf<number>()
+      expectTypeOf(result.name).toEqualTypeOf<string>()
+      expectTypeOf(result.issues).toMatchTypeOf<
+        Collection<{ id: number; title: string }>
+      >()
+    })
+
+    test(`includes without select infers full child type as Collection`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id)),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.id).toEqualTypeOf<number>()
+      expectTypeOf(result.issues).toMatchTypeOf<Collection<Issue>>()
+    })
+
+    test(`multiple sibling includes each infer their own Collection type`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+            })),
+          comments: q
+            .from({ c: comments })
+            .where(({ c }) => eq(c.issueId, p.id))
+            .select(({ c }) => ({
+              id: c.id,
+              body: c.body,
+            })),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.issues).toMatchTypeOf<
+        Collection<{ id: number; title: string }>
+      >()
+      expectTypeOf(result.comments).toMatchTypeOf<
+        Collection<{ id: number; body: string }>
+      >()
+    })
+
+    test(`nested Collection includes infer correctly`, () => {
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({
+              id: i.id,
+              title: i.title,
+              comments: q
+                .from({ c: comments })
+                .where(({ c }) => eq(c.issueId, i.id))
+                .select(({ c }) => ({
+                  id: c.id,
+                  body: c.body,
+                })),
+            })),
+        })),
+      )
+
+      const result = collection.toArray[0]!
+      expectTypeOf(result.issues).toMatchTypeOf<
+        Collection<{
+          id: number
+          title: string
+          comments: Collection<{ id: number; body: string }>
+        }>
+      >()
+    })
+  })
 
   describe(`toArray`, () => {
     test(`toArray includes infers child result as Array`, () => {
