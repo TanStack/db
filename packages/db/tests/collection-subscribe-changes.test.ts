@@ -1284,6 +1284,7 @@ describe(`Collection.subscribeChanges`, () => {
           commit()
         },
       },
+      // eslint-disable-next-line @typescript-eslint/require-await
       onDelete: async ({ transaction }) => {
         emitter.emit(`sync`, transaction.mutations)
       },

@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/solid-db",
-  "version": "0.2.10",
+  "version": "0.2.12",
   "description": "Solid integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -37,7 +37,8 @@
   "sideEffects": false,
   "files": [
     "dist",
-    "src"
+    "src",
+    "skills"
   ],
   "dependencies": {
     "@solid-primitives/map": "^0.7.2",
@@ -47,7 +48,7 @@
     "solid-js": ">=1.9.0"
   },
   "devDependencies": {
-    "@electric-sql/client": "^1.5.10",
+    "@electric-sql/client": "^1.5.12",
     "@solidjs/testing-library": "^0.8.10",
     "@vitest/coverage-istanbul": "^3.2.4",
     "jsdom": "^27.4.0",

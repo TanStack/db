@@ -19,13 +19,13 @@ Defined in: [useLiveInfiniteQuery.ts:23](https://github.com/TanStack/db/blob/mai
 
 ## Properties
 
-### getNextPageParam()
+### ~~getNextPageParam()?~~
 
 ```ts
-getNextPageParam: (lastPage, allPages, lastPageParam, allPageParams) => number | undefined;
+optional getNextPageParam: (lastPage, allPages, lastPageParam, allPageParams) => number | undefined;
 ```
 
-Defined in: [useLiveInfiniteQuery.ts:26](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L26)
+Defined in: [useLiveInfiniteQuery.ts:31](https://github.com/TanStack/db/blob/main/packages/react-db/src/useLiveInfiniteQuery.ts#L31)
 
 #### Parameters
 
@@ -48,6 +48,12 @@ Defined in: [useLiveInfiniteQuery.ts:26](https://github.com/TanStack/db/blob/mai
 #### Returns
 
 `number` \| `undefined`
+
+#### Deprecated
+
+This callback is not used by the current implementation.
+Pagination is determined internally via a peek-ahead strategy.
+Provided for API compatibility with TanStack Query conventions.
 
 ***
 

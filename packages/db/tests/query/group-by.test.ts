@@ -1944,7 +1944,7 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ customer, oc }) => ({
                 name: customer.name,
-                orderCount: oc?.orderCount,
+                orderCount: oc.orderCount,
               }))
           },
         })
@@ -2165,6 +2165,31 @@ function createGroupByTests(autoIndex: `off` | `eager`): void {
         expect(result?.taskId).toBe(1)
         expect(result?.sessionCount).toBe(3)
         expect(result?.totalAmount).toBe(700)
+      })
+    })
+
+    describe(`fn.select with groupBy throws error`, () => {
+      let ordersCollection: ReturnType<typeof createOrdersCollection>
+
+      beforeEach(() => {
+        ordersCollection = createOrdersCollection(autoIndex)
+      })
+
+      test(`fn.select with groupBy should throw FnSelectWithGroupByError`, () => {
+        expect(() =>
+          createLiveQueryCollection({
+            startSync: true,
+            query: (q) =>
+              q
+                .from({ orders: ordersCollection })
+                .groupBy(({ orders }) => orders.customer_id)
+                .fn.select((row) => ({
+                  customerId: row.orders.customer_id,
+                  totalAmount: sum(row.orders.amount),
+                  orderCount: count(row.orders.id),
+                })),
+          }),
+        ).toThrow(`fn.select() cannot be used with groupBy()`)
       })
     })
   })

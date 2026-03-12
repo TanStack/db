@@ -4,6 +4,7 @@ import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
   DuplicateAliasInSubqueryError,
+  FnSelectWithGroupByError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
@@ -216,6 +217,10 @@ export function compileQuery(
 
   if (query.distinct && !query.fnSelect && !query.select) {
     throw new DistinctRequiresSelectError()
+  }
+
+  if (query.fnSelect && query.groupBy && query.groupBy.length > 0) {
+    throw new FnSelectWithGroupByError()
   }
 
   // Process the SELECT clause early - always create $selected
