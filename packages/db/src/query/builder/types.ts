@@ -1,4 +1,4 @@
-import type { CollectionImpl } from '../../collection/index.js'
+import type { Collection, CollectionImpl } from '../../collection/index.js'
 import type { SingleResult, StringCollationConfig } from '../../types.js'
 import type {
   Aggregate,
@@ -176,6 +176,7 @@ type SelectValue =
   | { [key: string]: SelectValue }
   | Array<RefLeaf<any>>
   | ToArrayWrapper // toArray() wrapped subquery
+  | QueryBuilder<any> // includes subquery (produces a child Collection)
 
 // Recursive shape for select objects allowing nested projections
 type SelectShape = { [key: string]: SelectValue | SelectShape }
@@ -231,7 +232,10 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
       ? ExtractExpressionType<TSelectObject[K]>
       : TSelectObject[K] extends ToArrayWrapper<infer T>
         ? Array<T>
-        : // Ref (full object ref or spread with RefBrand) - recursively process properties
+        : // includes subquery (bare QueryBuilder) — produces a child Collection
+          TSelectObject[K] extends QueryBuilder<infer TChildContext>
+          ? Collection<GetResult<TChildContext>>
+          : // Ref (full object ref or spread with RefBrand) - recursively process properties
           TSelectObject[K] extends Ref<infer _T>
           ? ExtractRef<TSelectObject[K]>
           : // RefLeaf (simple property ref like user.name)
