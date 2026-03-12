@@ -334,7 +334,7 @@ export function compileQuery(
       })
 
       // Replace includes entry in select with a null placeholder
-      replaceIncludesInSelect(query.select, key)
+      replaceIncludesInSelect(query.select!, key)
     }
 
     // Stamp correlation key values onto the namespaced row so they survive
@@ -897,6 +897,7 @@ function extractIncludesFromSelect(
 ): Array<{ key: string; subquery: IncludesSubquery }> {
   const results: Array<{ key: string; subquery: IncludesSubquery }> = []
   for (const [key, value] of Object.entries(select)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
     if (value instanceof IncludesSubquery) {
       results.push({ key, subquery: value })
     } else if (isNestedSelectObject(value)) {
@@ -922,6 +923,7 @@ function assertNoNestedIncludes(
   parentPath: string,
 ): void {
   for (const [key, value] of Object.entries(obj)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
     if (value instanceof IncludesSubquery) {
       throw new Error(
         `Includes subqueries must be at the top level of select(). ` +
