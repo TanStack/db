@@ -109,6 +109,15 @@ function RootDocument({ children }: { children: React.ReactNode }) {
                   >
                     💾 localStorage
                   </Link>
+                  <Link
+                    to="/wa-sqlite"
+                    activeProps={{
+                      className: `font-bold text-blue-600`,
+                    }}
+                    className="text-gray-600 hover:text-gray-900"
+                  >
+                    🗃️ wa-sqlite
+                  </Link>
                 </div>
               </div>
             </div>
