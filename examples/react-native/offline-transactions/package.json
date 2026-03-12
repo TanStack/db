@@ -27,7 +27,7 @@
     "expo-router": "~5.1.11",
     "expo-status-bar": "~2.2.0",
     "metro": "0.82.5",
-    "react": "19.0.0",
+    "react": "^19.2.4",
     "react-native": "0.79.6",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
