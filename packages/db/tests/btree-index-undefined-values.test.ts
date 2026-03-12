@@ -34,6 +34,7 @@ describe(`BTreeIndex - Issue #1186: Infinite loop with undefined indexed values`
     collection = createCollection<TaskItem, string>({
       id: `test-collection`,
       getKey: (item) => item.id,
+      defaultIndexType: BTreeIndex,
       startSync: true,
       sync: {
         sync: ({ begin, write, commit, markReady }) => {

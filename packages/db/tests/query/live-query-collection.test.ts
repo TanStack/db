@@ -16,6 +16,7 @@ import {
   mockSyncCollectionOptionsNoInitialState,
 } from '../utils.js'
 import { createDeferred } from '../../src/deferred'
+import { BTreeIndex } from '../../src/indexes/btree-index'
 import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
 
 // Sample user type for tests
@@ -2016,6 +2017,8 @@ describe(`createLiveQueryCollection`, () => {
           getKey: (item) => item.id,
           syncMode: `on-demand`,
           startSync: true,
+          autoIndex: `eager`, // Enable auto-indexing for orderBy optimization
+          defaultIndexType: BTreeIndex,
           sync: {
             sync: ({ markReady, begin, write, commit }) => {
               // Provide minimal initial data
@@ -2137,6 +2140,7 @@ describe(`createLiveQueryCollection`, () => {
         getKey: (item) => item.id,
         syncMode: `on-demand`,
         startSync: true,
+        defaultIndexType: BTreeIndex,
         autoIndex: `eager`,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
@@ -2202,6 +2206,7 @@ describe(`createLiveQueryCollection`, () => {
         getKey: (item) => item.id,
         syncMode: `on-demand`,
         startSync: true,
+        defaultIndexType: BTreeIndex,
         autoIndex: `eager`,
         sync: {
           sync: ({ begin, write, commit, markReady }) => {
