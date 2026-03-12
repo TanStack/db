@@ -903,25 +903,6 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
 
-  packages/db-node-sqlite-persisted-collection:
-    dependencies:
-      '@tanstack/db-sqlite-persisted-collection-core':
-        specifier: workspace:*
-        version: link:../db-sqlite-persisted-collection-core
-      better-sqlite3:
-        specifier: ^12.6.2
-        version: 12.6.2
-      typescript:
-        specifier: '>=4.7'
-        version: 5.9.3
-    devDependencies:
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
-      '@vitest/coverage-istanbul':
-        specifier: ^3.2.4
-        version: 3.2.4(vitest@3.2.4)
-
   packages/db-react-native-sqlite-persisted-collection:
     dependencies:
       '@op-engineering/op-sqlite':
