@@ -888,8 +888,9 @@ export function followRef(
 }
 
 /**
- * Walks a Select object to find IncludesSubquery entries.
- * Returns array of {key, subquery} for each found includes.
+ * Walks a Select object to find IncludesSubquery entries at the top level.
+ * Throws if an IncludesSubquery is found nested inside a sub-object, since
+ * the compiler only supports includes at the top level of a select.
  */
 function extractIncludesFromSelect(
   select: Record<string, any>,
@@ -898,9 +899,39 @@ function extractIncludesFromSelect(
   for (const [key, value] of Object.entries(select)) {
     if (value instanceof IncludesSubquery) {
       results.push({ key, subquery: value })
+    } else if (isNestedSelectObject(value)) {
+      // Check nested objects for IncludesSubquery — not supported yet
+      assertNoNestedIncludes(value, key)
     }
   }
   return results
+}
+
+/** Check if a value is a nested plain object in a select (not an IR expression node) */
+function isNestedSelectObject(value: any): value is Record<string, any> {
+  return (
+    value != null &&
+    typeof value === `object` &&
+    !Array.isArray(value) &&
+    typeof value.type !== `string`
+  )
+}
+
+function assertNoNestedIncludes(
+  obj: Record<string, any>,
+  parentPath: string,
+): void {
+  for (const [key, value] of Object.entries(obj)) {
+    if (value instanceof IncludesSubquery) {
+      throw new Error(
+        `Includes subqueries must be at the top level of select(). ` +
+          `Found nested includes at "${parentPath}.${key}".`,
+      )
+    }
+    if (isNestedSelectObject(value)) {
+      assertNoNestedIncludes(value, `${parentPath}.${key}`)
+    }
+  }
 }
 
 /**
