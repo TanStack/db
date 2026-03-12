@@ -27,6 +27,7 @@ import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
 import type {
+  ChangeMessage,
   CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
@@ -792,6 +793,7 @@ export class CollectionConfigBuilder<
         config.collection,
         this.id,
         hasParentChanges ? changesToApply : null,
+        config,
       )
     }
 
@@ -823,6 +825,7 @@ export class CollectionConfigBuilder<
         fieldName: entry.fieldName,
         childCorrelationField: entry.childCorrelationField,
         hasOrderBy: entry.hasOrderBy,
+        materializeAsArray: entry.materializeAsArray,
         childRegistry: new Map(),
         pendingChildChanges: new Map(),
         correlationToParentKeys: new Map(),
@@ -1134,6 +1137,8 @@ type IncludesOutputState = {
   childCorrelationField: PropRef
   /** Whether the child query has an ORDER BY clause */
   hasOrderBy: boolean
+  /** When true, parent gets Array<T> instead of Collection<T> */
+  materializeAsArray: boolean
   /** Maps correlation key value → child Collection entry */
   childRegistry: Map<unknown, ChildCollectionEntry>
   /** Pending child changes: correlationKey → Map<childKey, Changes> */
@@ -1233,6 +1238,7 @@ function createPerEntryIncludesStates(
       fieldName: setup.compilationResult.fieldName,
       childCorrelationField: setup.compilationResult.childCorrelationField,
       hasOrderBy: setup.compilationResult.hasOrderBy,
+      materializeAsArray: setup.compilationResult.materializeAsArray,
       childRegistry: new Map(),
       pendingChildChanges: new Map(),
       correlationToParentKeys: new Map(),
@@ -1458,6 +1464,7 @@ function flushIncludesState(
   parentCollection: Collection<any, any, any>,
   parentId: string,
   parentChanges: Map<unknown, Changes<any>> | null,
+  parentSyncMethods: SyncMethods<any> | null,
 ): void {
   for (const state of includesState) {
     // Phase 1: Parent INSERTs — ensure a child Collection exists for every parent
@@ -1489,13 +1496,24 @@ function flushIncludesState(
             }
             parentKeys.add(parentKey)
 
-            // Attach child Collection to the parent result
-            parentResult[state.fieldName] =
-              state.childRegistry.get(correlationKey)!.collection
+            // Attach child Collection (or array snapshot for toArray) to the parent result
+            if (state.materializeAsArray) {
+              parentResult[state.fieldName] = [
+                ...state.childRegistry.get(correlationKey)!.collection.toArray,
+              ]
+            } else {
+              parentResult[state.fieldName] =
+                state.childRegistry.get(correlationKey)!.collection
+            }
           }
         }
       }
     }
+
+    // Track affected correlation keys for toArray re-emit (before clearing pendingChildChanges)
+    const affectedCorrelationKeys = state.materializeAsArray
+      ? new Set<unknown>(state.pendingChildChanges.keys())
+      : null
 
     // Phase 2: Child changes — apply to child Collections
     // Track which entries had child changes and capture their childChanges maps
@@ -1503,7 +1521,6 @@ function flushIncludesState(
       unknown,
       { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }
     >()
-
     if (state.pendingChildChanges.size > 0) {
       for (const [correlationKey, childChanges] of state.pendingChildChanges) {
         // Ensure child Collection exists for this correlation key
@@ -1519,14 +1536,17 @@ function flushIncludesState(
           state.childRegistry.set(correlationKey, entry)
         }
 
-        // Attach the child Collection to ANY parent that has this correlation key
-        attachChildCollectionToParent(
-          parentCollection,
-          state.fieldName,
-          correlationKey,
-          state.correlationToParentKeys,
-          entry.collection,
-        )
+        // For non-toArray: attach the child Collection to ANY parent that has this correlation key
+        // For toArray: skip — the array snapshot is set during re-emit below
+        if (!state.materializeAsArray) {
+          attachChildCollectionToParent(
+            parentCollection,
+            state.fieldName,
+            correlationKey,
+            state.correlationToParentKeys,
+            entry.collection,
+          )
+        }
 
         // Apply child changes to the child Collection
         if (entry.syncMethods) {
@@ -1573,6 +1593,7 @@ function flushIncludesState(
           entry.collection,
           entry.collection.id,
           childChanges,
+          entry.syncMethods,
         )
       }
     }
@@ -1586,7 +1607,54 @@ function flushIncludesState(
           entry.collection,
           entry.collection.id,
           null,
+          entry.syncMethods,
         )
+      }
+    }
+
+    // For toArray entries: re-emit affected parents with updated array snapshots.
+    // We mutate items in-place (so collection.get() reflects changes immediately)
+    // and emit UPDATE events directly. We bypass the sync methods because
+    // commitPendingTransactions compares previous vs new visible state using
+    // deepEquals, but in-place mutation means both sides reference the same
+    // object, so the comparison always returns true and suppresses the event.
+    const toArrayReEmitKeys = state.materializeAsArray
+      ? new Set([...(affectedCorrelationKeys || []), ...dirtyFromBuffers])
+      : null
+    if (parentSyncMethods && toArrayReEmitKeys && toArrayReEmitKeys.size > 0) {
+      const events: Array<ChangeMessage<any>> = []
+      for (const correlationKey of toArrayReEmitKeys) {
+        const parentKeys = state.correlationToParentKeys.get(correlationKey)
+        if (!parentKeys) continue
+        const entry = state.childRegistry.get(correlationKey)
+        for (const parentKey of parentKeys) {
+          const item = parentCollection.get(parentKey as any)
+          if (item) {
+            const key = parentSyncMethods.collection.getKeyFromItem(item)
+            // Capture previous value before in-place mutation
+            const previousValue = { ...item }
+            if (entry) {
+              item[state.fieldName] = [...entry.collection.toArray]
+            }
+            events.push({
+              type: `update`,
+              key,
+              value: item,
+              previousValue,
+            })
+          }
+        }
+      }
+      if (events.length > 0) {
+        // Emit directly — the in-place mutation already updated the data in
+        // syncedData, so we only need to notify subscribers.
+        const changesManager = (parentCollection as any)._changes as {
+          emitEvents: (
+            changes: Array<ChangeMessage<any>>,
+            forceEmit?: boolean,
+          ) => void
+        }
+        changesManager.emitEvents(events, true)
       }
     }
 
