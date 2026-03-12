@@ -719,7 +719,7 @@ const liveQuery = createLiveQueryCollection({
 })
 ```
 
-## Incororating Sync Streams With OnLoad/OnLoadSubset Hooks
+## Incorporating Sync Streams With OnLoad/OnLoadSubset Hooks
 Sync Streams can be used through the data loading hooks for both `eager` and `on-demand` sync modes that allow a user to call Sync Streams when a collection is defined (eager mode) or when a collection's data boundary changes based on the live queries predicates (on-demand).
 
 These examples assume the following Sync Stream definition exists:
@@ -925,7 +925,7 @@ const liveQuery = createLiveQueryCollection({
 })
 ```
 
-## 3 On-Demand Mode with Sync Streams using `extractSimpleComparisons`
+## 3 On-Demand Mode with Simple Predicates
 
 In the previous example, the Sync Stream subscription parameters were hardcoded. In practice, you'll often want to derive those parameters dynamically from the live query's where clause. That way, changing the query automatically adjusts which data is synced from the PowerSync Service. `extractSimpleComparisons` is a convenience helper that parses the expression tree from `onLoadSubset` into a flat list of `{ field, operator, value }` objects. 
 
@@ -1047,7 +1047,7 @@ const liveQuery = createLiveQueryCollection({
 })
 ```
 
-## 4. On-Demand Mode with Sync Streams using `parseWhereExpression`
+## 4. On-Demand Mode with Complex Predicates
 While `extractSimpleComparisons` works well for simple, single-condition filters. However, live queries often combine multiple conditions using `and`, `or`, or other nested expressions. `parseWhereExpression` lets you provide custom handler functions for each operator (eq, and, etc.). This gives you full control over how a compound expression tree is unpacked and transformed into the parameters object passed to `syncStream()`. It's useful when your Sync Stream accepts multiple parameters and you need to extract all of them from a single composite where clause. For example, filtering by both `list_id` and `completed` status simultaneously.
 
 Assume a small adjustment to the Sync Stream definition of todos (adding the `completed` subscription parameter)
