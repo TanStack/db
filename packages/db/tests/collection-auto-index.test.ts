@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { CollectionConfigurationError } from '../src/errors'
 import { createCollection } from '../src/collection/index.js'
 import {
   and,
@@ -162,6 +163,43 @@ describe(`Collection Auto-Indexing`, () => {
     expect(autoIndexCollection.indexes.size).toBe(0)
 
     subscription.unsubscribe()
+  })
+
+  it(`should throw CollectionConfigurationError when autoIndex is "eager" without defaultIndexType`, () => {
+    expect(() =>
+      createCollection<TestItem, string>({
+        getKey: (item) => item.id,
+        autoIndex: `eager`,
+        startSync: true,
+        sync: {
+          sync: ({ begin, commit, markReady }) => {
+            begin()
+            commit()
+            markReady()
+          },
+        },
+      }),
+    ).toThrow(CollectionConfigurationError)
+  })
+
+  it(`should throw CollectionConfigurationError when createIndex is called without indexType or defaultIndexType`, async () => {
+    const collection = createCollection<TestItem, string>({
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady }) => {
+          begin()
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    expect(() => collection.createIndex((row) => row.age)).toThrow(
+      CollectionConfigurationError,
+    )
   })
 
   it(`should create auto-indexes for simple where expressions when autoIndex is "eager"`, async () => {
