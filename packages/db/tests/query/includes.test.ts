@@ -208,6 +208,29 @@ describe(`includes subqueries`, () => {
       ])
     })
 
+    it(`updating a child reflects the change in the parent's child collection`, async () => {
+      const collection = buildIncludesQuery()
+      await collection.preload()
+
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+
+      // Update an existing child's title
+      issues.utils.begin()
+      issues.utils.write({
+        type: `update`,
+        value: { id: 10, projectId: 1, title: `Bug in Alpha (fixed)` },
+      })
+      issues.utils.commit()
+
+      expect(childItems((collection.get(1) as any).issues)).toEqual([
+        { id: 10, title: `Bug in Alpha (fixed)` },
+        { id: 11, title: `Feature for Alpha` },
+      ])
+    })
+
     it(`removing and re-adding a parent resets its child collection`, async () => {
       const collection = buildIncludesQuery()
       await collection.preload()
