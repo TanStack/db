@@ -462,7 +462,6 @@ export function compileQuery(
       // Replace includes entry in select with a null placeholder
       replaceIncludesInSelect(query.select!, key)
     }
-
   }
 
   if (query.distinct && !query.fnSelect && !query.select) {
