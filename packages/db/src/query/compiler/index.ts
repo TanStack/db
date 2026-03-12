@@ -139,7 +139,9 @@ export function compileQuery(
   validateQueryStructure(rawQuery)
 
   // Optimize the query before compilation
-  const { optimizedQuery: query, sourceWhereClauses } = optimizeQuery(rawQuery)
+  const { optimizedQuery, sourceWhereClauses } = optimizeQuery(rawQuery)
+  // Use a mutable binding so we can shallow-clone select before includes mutation
+  let query = optimizedQuery
 
   // Create mapping from optimized query to original for caching
   queryMapping.set(query, rawQuery)
@@ -287,6 +289,11 @@ export function compileQuery(
   const includesResults: Array<IncludesCompilationResult> = []
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
+    // Shallow-clone select before mutating so we don't modify the shared IR
+    // (the optimizer copies select by reference, so rawQuery.select === query.select)
+    if (includesEntries.length > 0) {
+      query = { ...query, select: { ...query.select } }
+    }
     for (const { key, subquery } of includesEntries) {
       // Branch parent pipeline: map to [correlationValue, null]
       const compiledCorrelation = compileExpression(subquery.correlationField)
