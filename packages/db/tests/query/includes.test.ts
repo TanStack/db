@@ -1804,4 +1804,176 @@ describe(`includes subqueries`, () => {
       expect(issue11.comments).toEqual([{ id: 110, body: `Great feature` }])
     })
   })
+
+  describe(`validation errors`, () => {
+    it(`throws when child query has no WHERE clause`, () => {
+      expect(() =>
+        createLiveQueryCollection((q) =>
+          q.from({ p: projects }).select(({ p }) => ({
+            id: p.id,
+            issues: q
+              .from({ i: issues })
+              .select(({ i }) => ({ id: i.id, title: i.title })),
+          })),
+        ),
+      ).toThrow(/must have a WHERE clause with an eq\(\) condition/)
+    })
+
+    it(`throws when child WHERE has no eq() correlation`, () => {
+      expect(() =>
+        createLiveQueryCollection((q) =>
+          q.from({ p: projects }).select(({ p }) => ({
+            id: p.id,
+            issues: q
+              .from({ i: issues })
+              .where(({ i }) => i.projectId)
+              .select(({ i }) => ({ id: i.id, title: i.title })),
+          })),
+        ),
+      ).toThrow(/must have a WHERE clause with an eq\(\) condition/)
+    })
+
+    it(`throws when eq() references two child-side aliases`, () => {
+      expect(() =>
+        createLiveQueryCollection((q) =>
+          q.from({ p: projects }).select(({ p }) => ({
+            id: p.id,
+            issues: q
+              .from({ i: issues })
+              .where(({ i }) => eq(i.projectId, i.id))
+              .select(({ i }) => ({ id: i.id, title: i.title })),
+          })),
+        ),
+      ).toThrow(/must have a WHERE clause with an eq\(\) condition/)
+    })
+  })
+
+  describe(`multiple sibling includes`, () => {
+    type Milestone = {
+      id: number
+      projectId: number
+      name: string
+    }
+
+    const sampleMilestones: Array<Milestone> = [
+      { id: 1, projectId: 1, name: `v1.0` },
+      { id: 2, projectId: 1, name: `v2.0` },
+      { id: 3, projectId: 2, name: `Beta release` },
+    ]
+
+    function createMilestonesCollection() {
+      return createCollection(
+        mockSyncCollectionOptions<Milestone>({
+          id: `includes-milestones`,
+          getKey: (m) => m.id,
+          initialData: sampleMilestones,
+        }),
+      )
+    }
+
+    it(`parent with two sibling includes produces independent child collections`, async () => {
+      const milestones = createMilestonesCollection()
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({ id: i.id, title: i.title })),
+          milestones: q
+            .from({ m: milestones })
+            .where(({ m }) => eq(m.projectId, p.id))
+            .select(({ m }) => ({ id: m.id, name: m.name })),
+        })),
+      )
+
+      await collection.preload()
+
+      expect(toTree(collection)).toEqual([
+        {
+          id: 1,
+          name: `Alpha`,
+          issues: [
+            { id: 10, title: `Bug in Alpha` },
+            { id: 11, title: `Feature for Alpha` },
+          ],
+          milestones: [
+            { id: 1, name: `v1.0` },
+            { id: 2, name: `v2.0` },
+          ],
+        },
+        {
+          id: 2,
+          name: `Beta`,
+          issues: [{ id: 20, title: `Bug in Beta` }],
+          milestones: [{ id: 3, name: `Beta release` }],
+        },
+        {
+          id: 3,
+          name: `Gamma`,
+          issues: [],
+          milestones: [],
+        },
+      ])
+    })
+
+    it(`adding a child to one sibling does not affect the other`, async () => {
+      const milestones = createMilestonesCollection()
+
+      const collection = createLiveQueryCollection((q) =>
+        q.from({ p: projects }).select(({ p }) => ({
+          id: p.id,
+          name: p.name,
+          issues: q
+            .from({ i: issues })
+            .where(({ i }) => eq(i.projectId, p.id))
+            .select(({ i }) => ({ id: i.id, title: i.title })),
+          milestones: q
+            .from({ m: milestones })
+            .where(({ m }) => eq(m.projectId, p.id))
+            .select(({ m }) => ({ id: m.id, name: m.name })),
+        })),
+      )
+
+      await collection.preload()
+
+      // Add an issue to Alpha — milestones should be unaffected
+      issues.utils.begin()
+      issues.utils.write({
+        type: `insert`,
+        value: { id: 12, projectId: 1, title: `New Alpha issue` },
+      })
+      issues.utils.commit()
+
+      const alpha = collection.get(1) as any
+      expect(childItems(alpha.issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+        { id: 11, title: `Feature for Alpha` },
+        { id: 12, title: `New Alpha issue` },
+      ])
+      expect(childItems(alpha.milestones)).toEqual([
+        { id: 1, name: `v1.0` },
+        { id: 2, name: `v2.0` },
+      ])
+
+      // Add a milestone to Beta — issues should be unaffected
+      milestones.utils.begin()
+      milestones.utils.write({
+        type: `insert`,
+        value: { id: 4, projectId: 2, name: `Beta v2` },
+      })
+      milestones.utils.commit()
+
+      const beta = collection.get(2) as any
+      expect(childItems(beta.issues)).toEqual([
+        { id: 20, title: `Bug in Beta` },
+      ])
+      expect(childItems(beta.milestones)).toEqual([
+        { id: 3, name: `Beta release` },
+        { id: 4, name: `Beta v2` },
+      ])
+    })
+  })
 })
