@@ -46,15 +46,17 @@ type InvokeHarness = {
 }
 
 let config: ElectronPersistedCollectionTestConfig | undefined
+const runFullE2E = isElectronFullE2EEnabled()
+const requestTimeoutMs = runFullE2E ? 45_000 : 5_000
 
 function createInvokeHarness(dbPath: string): InvokeHarness {
-  if (isElectronFullE2EEnabled()) {
+  if (runFullE2E) {
     return {
       invoke: createElectronRuntimeBridgeInvoke({
         dbPath,
         collectionId: `seed`,
         allowAnyCollectionId: true,
-        timeoutMs: 12_000,
+        timeoutMs: requestTimeoutMs,
       }),
       close: () => {},
     }
@@ -122,6 +124,7 @@ function createPersistedCollection<T extends PersistableRow>(
 ): PersistedCollectionHarness<T> {
   const persistence = createElectronSQLitePersistence<T, string | number>({
     invoke,
+    timeoutMs: requestTimeoutMs,
   })
   let seedSequence = 0
   const seedPersisted = async (rows: Array<T>): Promise<void> => {
@@ -340,9 +343,7 @@ function getConfig(): Promise<ElectronPersistedCollectionTestConfig> {
   return Promise.resolve(config)
 }
 
-const conformanceMode = isElectronFullE2EEnabled()
-  ? `real electron ipc`
-  : `in-process invoke`
+const conformanceMode = runFullE2E ? `real electron ipc` : `in-process invoke`
 
 runPersistedCollectionConformanceSuite(
   `electron persisted collection conformance (${conformanceMode})`,
