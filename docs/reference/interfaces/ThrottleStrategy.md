@@ -5,7 +5,7 @@ title: ThrottleStrategy
 
 # Interface: ThrottleStrategy
 
-Defined in: packages/db/src/strategies/types.ts:86
+Defined in: [packages/db/src/strategies/types.ts:86](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L86)
 
 Throttle strategy that spaces executions evenly over time
 
@@ -21,7 +21,7 @@ Throttle strategy that spaces executions evenly over time
 _type: "throttle";
 ```
 
-Defined in: packages/db/src/strategies/types.ts:8
+Defined in: [packages/db/src/strategies/types.ts:8](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L8)
 
 Type discriminator for strategy identification
 
@@ -37,7 +37,7 @@ Type discriminator for strategy identification
 cleanup: () => void;
 ```
 
-Defined in: packages/db/src/strategies/types.ts:23
+Defined in: [packages/db/src/strategies/types.ts:23](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L23)
 
 Clean up any resources held by the strategy
 Should be called when the strategy is no longer needed
@@ -58,7 +58,7 @@ Should be called when the strategy is no longer needed
 execute: <T>(fn) => void | Promise<void>;
 ```
 
-Defined in: packages/db/src/strategies/types.ts:15
+Defined in: [packages/db/src/strategies/types.ts:15](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L15)
 
 Execute a function according to the strategy's timing rules
 
@@ -94,4 +94,4 @@ The result of the function execution (if applicable)
 options: ThrottleStrategyOptions;
 ```
 
-Defined in: packages/db/src/strategies/types.ts:87
+Defined in: [packages/db/src/strategies/types.ts:87](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/types.ts#L87)

@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/svelte-db",
-  "version": "0.1.71",
+  "version": "0.1.75",
   "description": "Svelte integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
@@ -36,7 +36,8 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
-    "!dist/**/*.spec.*"
+    "!dist/**/*.spec.*",
+    "skills"
   ],
   "dependencies": {
     "@tanstack/db": "workspace:*"

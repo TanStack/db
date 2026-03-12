@@ -11,7 +11,7 @@ title: lte
 function lte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: packages/db/src/query/builder/functions.ts:167
+Defined in: [packages/db/src/query/builder/functions.ts:167](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L167)
 
 ### Type Parameters
 
@@ -39,7 +39,7 @@ Defined in: packages/db/src/query/builder/functions.ts:167
 function lte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: packages/db/src/query/builder/functions.ts:171
+Defined in: [packages/db/src/query/builder/functions.ts:171](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L171)
 
 ### Type Parameters
 
@@ -67,7 +67,7 @@ Defined in: packages/db/src/query/builder/functions.ts:171
 function lte<T>(left, right): BasicExpression<boolean>;
 ```
 
-Defined in: packages/db/src/query/builder/functions.ts:175
+Defined in: [packages/db/src/query/builder/functions.ts:175](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/functions.ts#L175)
 
 ### Type Parameters
 

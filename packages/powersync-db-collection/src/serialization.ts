@@ -51,6 +51,7 @@ export function serializeForSQLite<
   > = {},
 ): ExtractedTable<TTable> {
   return Object.fromEntries(
+    // eslint-disable-next-line no-shadow
     Object.entries(value).map(([key, value]) => {
       // First get the output schema type
       const outputType =

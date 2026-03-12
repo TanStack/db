@@ -399,13 +399,13 @@ describe(`CollectionSubscriber duplicate insert prevention`, () => {
     const liveQueryCollection = createLiveQueryCollection((q) =>
       q
         .from({ users: usersCollection })
-        .join({ orders: ordersCollection }, ({ users, orders }) =>
-          eq(users.id, orders.userId),
+        .join({ orders: ordersCollection }, ({ users: u, orders: o }) =>
+          eq(u.id, o.userId),
         )
-        .select(({ users, orders }) => ({
-          orderId: orders!.id,
-          userName: users.name,
-          amount: orders!.amount,
+        .select(({ users: u2, orders: o2 }) => ({
+          orderId: o2.id,
+          userName: u2.name,
+          amount: o2.amount,
         })),
     )
 

@@ -5,7 +5,7 @@ title: SubscriptionNotFoundError
 
 # Class: SubscriptionNotFoundError
 
-Defined in: packages/db/src/errors.ts:694
+Defined in: [packages/db/src/errors.ts:705](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L705)
 
 Error when a subscription cannot be found during lazy join processing.
 For subqueries, aliases may be remapped (e.g., 'activeUser' → 'user').
@@ -26,7 +26,7 @@ new SubscriptionNotFoundError(
    availableAliases): SubscriptionNotFoundError;
 ```
 
-Defined in: packages/db/src/errors.ts:695
+Defined in: [packages/db/src/errors.ts:706](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L706)
 
 #### Parameters
 

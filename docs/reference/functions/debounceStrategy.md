@@ -9,7 +9,7 @@ title: debounceStrategy
 function debounceStrategy(options): DebounceStrategy;
 ```
 
-Defined in: packages/db/src/strategies/debounceStrategy.ts:28
+Defined in: [packages/db/src/strategies/debounceStrategy.ts:28](https://github.com/TanStack/db/blob/main/packages/db/src/strategies/debounceStrategy.ts#L28)
 
 Creates a debounce strategy that delays transaction execution until after
 a period of inactivity.

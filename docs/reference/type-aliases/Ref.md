@@ -3,13 +3,13 @@ id: Ref
 title: Ref
 ---
 
-# Type Alias: Ref\<T\>
+# Type Alias: Ref\<T, Nullable\>
 
 ```ts
-type Ref<T> = { [K in keyof T]: IsNonExactOptional<T[K]> extends true ? IsNonExactNullable<T[K]> extends true ? IsPlainObject<NonNullable<T[K]>> extends true ? Ref<NonNullable<T[K]>> | undefined : RefLeaf<NonNullable<T[K]>> | undefined : IsPlainObject<NonUndefined<T[K]>> extends true ? Ref<NonUndefined<T[K]>> | undefined : RefLeaf<NonUndefined<T[K]>> | undefined : IsNonExactNullable<T[K]> extends true ? IsPlainObject<NonNull<T[K]>> extends true ? Ref<NonNull<T[K]>> | null : RefLeaf<NonNull<T[K]>> | null : IsPlainObject<T[K]> extends true ? Ref<T[K]> : RefLeaf<T[K]> } & RefLeaf<T>;
+type Ref<T, Nullable> = { [K in keyof T]: IsNonExactOptional<T[K]> extends true ? IsNonExactNullable<T[K]> extends true ? IsPlainObject<NonNullable<T[K]>> extends true ? Ref<NonNullable<T[K]>, Nullable> | undefined : RefLeaf<NonNullable<T[K]>, Nullable> | undefined : IsPlainObject<NonUndefined<T[K]>> extends true ? Ref<NonUndefined<T[K]>, Nullable> | undefined : RefLeaf<NonUndefined<T[K]>, Nullable> | undefined : IsNonExactNullable<T[K]> extends true ? IsPlainObject<NonNull<T[K]>> extends true ? Ref<NonNull<T[K]>, Nullable> | null : RefLeaf<NonNull<T[K]>, Nullable> | null : IsPlainObject<T[K]> extends true ? Ref<T[K], Nullable> : RefLeaf<T[K], Nullable> } & RefLeaf<T, Nullable>;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:496
+Defined in: [packages/db/src/query/builder/types.ts:502](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L502)
 
 Ref - The user-facing ref interface for the query builder
 
@@ -18,15 +18,18 @@ designed for optimal IDE experience without internal implementation details.
 It provides a recursive interface that allows nested property access while
 preserving optionality and nullability correctly.
 
-When spread in select clauses, it correctly produces the underlying data type
-without Ref wrappers, enabling clean spread operations.
+The `Nullable` parameter indicates whether this ref comes from a nullable
+join side (left/right/full). When `true`, the `Nullable` flag propagates
+through all nested property accesses, ensuring the result type includes
+`| undefined` for all fields accessed through this ref.
 
 Example usage:
 ```typescript
-// Clean interface - no internal properties visible
-const users: Ref<{ id: number; profile?: { bio: string } }> = { ... }
-users.id // Ref<number> - clean display
-users.profile?.bio // Ref<string> - nested optional access works
+// Non-nullable ref (inner join or from table):
+select(({ user }) => ({ name: user.name })) // result: string
+
+// Nullable ref (left join right side):
+select(({ dept }) => ({ name: dept.name })) // result: string | undefined
 
 // Spread operations work cleanly:
 select(({ user }) => ({ ...user })) // Returns User type, not Ref types
@@ -37,3 +40,7 @@ select(({ user }) => ({ ...user })) // Returns User type, not Ref types
 ### T
 
 `T` = `any`
+
+### Nullable
+
+`Nullable` *extends* `boolean` = `false`

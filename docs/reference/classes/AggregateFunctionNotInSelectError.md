@@ -5,7 +5,7 @@ title: AggregateFunctionNotInSelectError
 
 # Class: AggregateFunctionNotInSelectError
 
-Defined in: packages/db/src/errors.ts:594
+Defined in: [packages/db/src/errors.ts:605](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L605)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:594
 new AggregateFunctionNotInSelectError(functionName): AggregateFunctionNotInSelectError;
 ```
 
-Defined in: packages/db/src/errors.ts:595
+Defined in: [packages/db/src/errors.ts:606](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L606)
 
 #### Parameters
 

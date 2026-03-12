@@ -5,7 +5,7 @@ title: QueryCompilationError
 
 # Class: QueryCompilationError
 
-Defined in: packages/db/src/errors.ts:423
+Defined in: [packages/db/src/errors.ts:423](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L423)
 
 ## Extends
 
@@ -14,6 +14,7 @@ Defined in: packages/db/src/errors.ts:423
 ## Extended by
 
 - [`DistinctRequiresSelectError`](DistinctRequiresSelectError.md)
+- [`FnSelectWithGroupByError`](FnSelectWithGroupByError.md)
 - [`HavingRequiresGroupByError`](HavingRequiresGroupByError.md)
 - [`LimitOffsetRequireOrderByError`](LimitOffsetRequireOrderByError.md)
 - [`CollectionInputNotFoundError`](CollectionInputNotFoundError.md)
@@ -36,7 +37,7 @@ Defined in: packages/db/src/errors.ts:423
 new QueryCompilationError(message): QueryCompilationError;
 ```
 
-Defined in: packages/db/src/errors.ts:424
+Defined in: [packages/db/src/errors.ts:424](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L424)
 
 #### Parameters
 
