@@ -141,6 +141,7 @@ export class IncludesSubquery extends BaseExpression {
     public fieldName: string, // Result field name (e.g., "issues")
     public parentFilters?: Array<Where>, // WHERE clauses referencing parent aliases (applied post-join)
     public parentProjection?: Array<PropRef>, // Parent field refs used by parentFilters
+    public materializeAsArray: boolean = false, // When true, parent gets Array<T> instead of Collection<T>
   ) {
     super()
   }

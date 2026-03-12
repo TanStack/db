@@ -14,4 +14,4 @@ type Where =
 };
 ```
 
-Defined in: packages/db/src/query/ir.ts:43
+Defined in: [packages/db/src/query/ir.ts:43](https://github.com/TanStack/db/blob/main/packages/db/src/query/ir.ts#L43)

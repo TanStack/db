@@ -9,7 +9,7 @@ title: createOptimisticAction
 function createOptimisticAction<TVariables>(options): (variables) => Transaction;
 ```
 
-Defined in: packages/db/src/optimistic-action.ts:54
+Defined in: [packages/db/src/optimistic-action.ts:54](https://github.com/TanStack/db/blob/main/packages/db/src/optimistic-action.ts#L54)
 
 Creates an optimistic action function that applies local optimistic updates immediately
 before executing the actual mutation on the server.

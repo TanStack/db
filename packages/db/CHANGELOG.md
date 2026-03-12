@@ -1,5 +1,39 @@
 # @tanstack/db
 
+## 0.5.32
+
+### Patch Changes
+
+- fix(db): use `Ref<T, Nullable>` brand instead of `Ref<T> | undefined` for nullable join refs in declarative select ([#1262](https://github.com/TanStack/db/pull/1262))
+
+  The declarative `select()` callback receives proxy objects that record property accesses. These proxies are always truthy at build time, but nullable join sides (left/right/full) were typed as `Ref<T> | undefined`, misleading users into using `?.` and `??` operators that have no effect at runtime. Nullable join refs are now typed as `Ref<T, true>`, which allows direct property access without optional chaining while correctly producing `T | undefined` in the result type.
+
+- Fix unbounded WHERE expression growth in `DeduplicatedLoadSubset` when loading all data after accumulating specific predicates. The deduplication layer now correctly tracks the original request predicate (e.g., `where: undefined` for "load all") instead of the optimized difference query sent to the backend, ensuring `hasLoadedAllData` is properly set and subsequent requests are deduplicated. ([#1348](https://github.com/TanStack/db/pull/1348))
+
+- fix(db): throw error when fn.select() is used with groupBy() ([#1324](https://github.com/TanStack/db/pull/1324))
+
+- Add `queryOnce` helper for one-shot query execution, including `findOne()` support and optional QueryBuilder configs. ([#1211](https://github.com/TanStack/db/pull/1211))
+
+## 0.5.31
+
+### Patch Changes
+
+- Add Intent agent skills (SKILL.md files) to guide AI coding agents. Include skills for core DB concepts, all 5 framework bindings, meta-framework integration, and offline transactions. Also add `export * from '@tanstack/db'` to angular-db for consistency with other framework packages. ([#1330](https://github.com/TanStack/db/pull/1330))
+
+## 0.5.30
+
+### Patch Changes
+
+- Support bare boolean column references in `where()` and `having()` clauses. Previously, filtering on a boolean column required `eq(col.active, true)`. Now you can write `.where(({ u }) => u.active)` and `.where(({ u }) => not(u.active))` directly. ([#1304](https://github.com/TanStack/db/pull/1304))
+
+## 0.5.29
+
+### Patch Changes
+
+- fix: avoid DuplicateKeySyncError in join live queries when custom getKey only considers the identity of one of the joined collections ([#1290](https://github.com/TanStack/db/pull/1290))
+
+- fix: support aggregates nested inside expressions (e.g. `coalesce(count(...), 0)`) ([#1274](https://github.com/TanStack/db/pull/1274))
+
 ## 0.5.28
 
 ### Patch Changes

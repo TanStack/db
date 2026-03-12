@@ -3,6 +3,7 @@ import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../../src/collection/index.js'
 import {
   and,
+  coalesce,
   createLiveQueryCollection,
   eq,
   ilike,
@@ -103,7 +104,7 @@ describe(`createLiveQueryCollection`, () => {
   })
 
   describe(`compareOptions inheritance`, () => {
-    it(`should inherit compareOptions from FROM collection`, async () => {
+    it(`should inherit compareOptions from FROM collection`, () => {
       // Create a collection with non-default compareOptions
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -130,7 +131,7 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
 
-    it(`should inherit compareOptions from FROM collection via subquery`, async () => {
+    it(`should inherit compareOptions from FROM collection via subquery`, () => {
       // Create a collection with non-default compareOptions
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -167,7 +168,7 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
 
-    it(`should use default compareOptions when FROM collection has no compareOptions`, async () => {
+    it(`should use default compareOptions when FROM collection has no compareOptions`, () => {
       // Create a collection without compareOptions (uses defaults)
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -199,7 +200,7 @@ describe(`createLiveQueryCollection`, () => {
       })
     })
 
-    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, async () => {
+    it(`should use explicitly provided compareOptions instead of inheriting from FROM collection`, () => {
       // Create a collection with non-default compareOptions
       const sourceCollection = createCollection(
         mockSyncCollectionOptions<User>({
@@ -2284,7 +2285,7 @@ describe(`createLiveQueryCollection`, () => {
             .select(({ base: b, related: r }) => ({
               id: b.id,
               name: b.name,
-              value: r?.value,
+              value: r.value,
             })),
         getKey: (item) => item.id, // Valid for 1:1 joins with unique keys
       })
@@ -2324,9 +2325,9 @@ describe(`createLiveQueryCollection`, () => {
             .join({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id))
             .select(({ comments: c, users: u }) => ({
               id: c.id,
-              userId: u?.id ?? c.userId,
+              userId: coalesce(u.id, c.userId),
               text: c.text,
-              userName: u?.name,
+              userName: u.name,
             })),
         getKey: (item) => item.userId,
         startSync: true,

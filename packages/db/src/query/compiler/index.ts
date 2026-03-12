@@ -10,6 +10,7 @@ import {
   CollectionInputNotFoundError,
   DistinctRequiresSelectError,
   DuplicateAliasInSubqueryError,
+  FnSelectWithGroupByError,
   HavingRequiresGroupByError,
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
@@ -66,6 +67,8 @@ export interface IncludesCompilationResult {
   childCompilationResult: CompilationResult
   /** Parent-side projection refs for parent-referencing filters */
   parentProjection?: Array<PropRef>
+  /** When true, the output layer materializes children as Array<T> instead of Collection<T> */
+  materializeAsArray: boolean
 }
 
 /**
@@ -407,6 +410,7 @@ export function compileQuery(
         ),
         childCompilationResult: childResult,
         parentProjection: subquery.parentProjection,
+        materializeAsArray: subquery.materializeAsArray,
       })
 
       // Capture routing function for INCLUDES_ROUTING tagging
@@ -455,6 +459,10 @@ export function compileQuery(
 
   if (query.distinct && !query.fnSelect && !query.select) {
     throw new DistinctRequiresSelectError()
+  }
+
+  if (query.fnSelect && query.groupBy && query.groupBy.length > 0) {
+    throw new FnSelectWithGroupByError()
   }
 
   // Process the SELECT clause early - always create $selected

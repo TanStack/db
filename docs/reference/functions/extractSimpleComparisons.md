@@ -9,7 +9,7 @@ title: extractSimpleComparisons
 function extractSimpleComparisons(expr): SimpleComparison[];
 ```
 
-Defined in: packages/db/src/query/expression-helpers.ts:327
+Defined in: [packages/db/src/query/expression-helpers.ts:327](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L327)
 
 Extracts all simple comparisons from a WHERE expression.
 This is useful for simple APIs that only support basic filters.

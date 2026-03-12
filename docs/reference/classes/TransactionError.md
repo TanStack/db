@@ -5,7 +5,7 @@ title: TransactionError
 
 # Class: TransactionError
 
-Defined in: packages/db/src/errors.ts:286
+Defined in: [packages/db/src/errors.ts:286](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L286)
 
 ## Extends
 
@@ -31,7 +31,7 @@ Defined in: packages/db/src/errors.ts:286
 new TransactionError(message): TransactionError;
 ```
 
-Defined in: packages/db/src/errors.ts:287
+Defined in: [packages/db/src/errors.ts:287](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L287)
 
 #### Parameters
 

@@ -5,7 +5,7 @@ title: CollectionConfigurationError
 
 # Class: CollectionConfigurationError
 
-Defined in: packages/db/src/errors.ts:71
+Defined in: [packages/db/src/errors.ts:71](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L71)
 
 ## Extends
 
@@ -26,7 +26,7 @@ Defined in: packages/db/src/errors.ts:71
 new CollectionConfigurationError(message): CollectionConfigurationError;
 ```
 
-Defined in: packages/db/src/errors.ts:72
+Defined in: [packages/db/src/errors.ts:72](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L72)
 
 #### Parameters
 

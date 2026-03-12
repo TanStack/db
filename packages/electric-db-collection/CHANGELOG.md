@@ -1,5 +1,43 @@
 # @tanstack/electric-db-collection
 
+## 0.2.40
+
+### Patch Changes
+
+- Updated dependencies [[`eeb5321`](https://github.com/TanStack/db/commit/eeb5321c578ffa2fbdfb7b0b3d64f579d1933522), [`495abc2`](https://github.com/TanStack/db/commit/495abc29fe8c088783b43402c7eeed35566d8524), [`a55e2bf`](https://github.com/TanStack/db/commit/a55e2bf54dbe78128adf5ce26d524a13dedf8145), [`41c0ea2`](https://github.com/TanStack/db/commit/41c0ea2d956f9de37d0216af371f58a461be6f1f)]:
+  - @tanstack/db@0.5.32
+
+## 0.2.39
+
+### Patch Changes
+
+- fix(electric-db-collection): Upgrade to latest electric client version ([#1337](https://github.com/TanStack/db/pull/1337))
+
+## 0.2.38
+
+### Patch Changes
+
+- fix(electric-db-collection): Upgrade to latest electric client version ([#1321](https://github.com/TanStack/db/pull/1321))
+
+- Updated dependencies [[`bf1d078`](https://github.com/TanStack/db/commit/bf1d078627de150bfca02e2ae2ad8b0289c19b37)]:
+  - @tanstack/db@0.5.31
+
+## 0.2.37
+
+### Patch Changes
+
+- Updated dependencies [[`e9d0fd8`](https://github.com/TanStack/db/commit/e9d0fd8f0db18a7dc8a0f2b3eacd50a94f6258f7)]:
+  - @tanstack/db@0.5.30
+
+## 0.2.36
+
+### Patch Changes
+
+- Upgrade `@electric-sql/client` dependency from `^1.5.3` to `^1.5.8` ([#1291](https://github.com/TanStack/db/pull/1291))
+
+- Updated dependencies [[`77b815e`](https://github.com/TanStack/db/commit/77b815ee52e91ca8d03110a551a4cb8bab4f2daa), [`ac4ce67`](https://github.com/TanStack/db/commit/ac4ce6790e906f5cfb086b063c8d7daa7681ceb9)]:
+  - @tanstack/db@0.5.29
+
 ## 0.2.35
 
 ### Patch Changes

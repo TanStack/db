@@ -9,7 +9,7 @@ title: parseLoadSubsetOptions
 function parseLoadSubsetOptions(options): object;
 ```
 
-Defined in: packages/db/src/query/expression-helpers.ts:499
+Defined in: [packages/db/src/query/expression-helpers.ts:499](https://github.com/TanStack/db/blob/main/packages/db/src/query/expression-helpers.ts#L499)
 
 Convenience function to get all LoadSubsetOptions in a pre-parsed format.
 Good starting point for simple use cases.

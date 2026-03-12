@@ -433,6 +433,17 @@ export class DistinctRequiresSelectError extends QueryCompilationError {
   }
 }
 
+export class FnSelectWithGroupByError extends QueryCompilationError {
+  constructor() {
+    super(
+      `fn.select() cannot be used with groupBy(). ` +
+        `groupBy requires the compiler to statically analyze aggregate functions (count, sum, max, etc.) in the SELECT clause, ` +
+        `which is not possible with fn.select() since it is an opaque function. ` +
+        `Use .select() instead of .fn.select() when combining with groupBy().`,
+    )
+  }
+}
+
 export class HavingRequiresGroupByError extends QueryCompilationError {
   constructor() {
     super(`HAVING clause requires GROUP BY clause`)
