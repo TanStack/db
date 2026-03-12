@@ -88,9 +88,7 @@ describe(`includes subquery types`, () => {
       const collection = createLiveQueryCollection((q) =>
         q.from({ p: projects }).select(({ p }) => ({
           id: p.id,
-          issues: q
-            .from({ i: issues })
-            .where(({ i }) => eq(i.projectId, p.id)),
+          issues: q.from({ i: issues }).where(({ i }) => eq(i.projectId, p.id)),
         })),
       )
 
