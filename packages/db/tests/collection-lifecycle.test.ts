@@ -35,8 +35,12 @@ describe(`Collection Lifecycle Management`, () => {
     global.setTimeout = mockSetTimeout as any
     global.clearTimeout = mockClearTimeout as any
 
-    scheduleSpy = vi.spyOn(CleanupQueue.prototype, 'schedule').mockImplementation(() => {})
-    cancelSpy = vi.spyOn(CleanupQueue.prototype, 'cancel').mockImplementation(() => {})
+    scheduleSpy = vi
+      .spyOn(CleanupQueue.prototype, 'schedule')
+      .mockImplementation(() => {})
+    cancelSpy = vi
+      .spyOn(CleanupQueue.prototype, 'cancel')
+      .mockImplementation(() => {})
   })
 
   afterEach(() => {
@@ -246,7 +250,11 @@ describe(`Collection Lifecycle Management`, () => {
         expect(collection.subscriberCount).toBe(0)
 
         // Should start GC timer each time
-        expect(scheduleSpy).toHaveBeenCalledWith(expect.any(Object), 1000, expect.any(Function))
+        expect(scheduleSpy).toHaveBeenCalledWith(
+          expect.any(Object),
+          1000,
+          expect.any(Function),
+        )
       }
 
       expect(scheduleSpy).toHaveBeenCalledTimes(5)
@@ -272,7 +280,11 @@ describe(`Collection Lifecycle Management`, () => {
       subscription.unsubscribe()
 
       // Should start GC timer when last subscriber is removed
-      expect(scheduleSpy).toHaveBeenCalledWith(expect.any(Object), 5000, expect.any(Function))
+      expect(scheduleSpy).toHaveBeenCalledWith(
+        expect.any(Object),
+        5000,
+        expect.any(Function),
+      )
     })
 
     it(`should cancel GC timer when new subscriber is added`, () => {
@@ -340,7 +352,11 @@ describe(`Collection Lifecycle Management`, () => {
       subscription.unsubscribe()
 
       // Should use default 5 minutes (300000ms)
-      expect(scheduleSpy).toHaveBeenCalledWith(expect.any(Object), 300000, expect.any(Function))
+      expect(scheduleSpy).toHaveBeenCalledWith(
+        expect.any(Object),
+        300000,
+        expect.any(Function),
+      )
     })
 
     it(`should disable GC when gcTime is 0`, () => {

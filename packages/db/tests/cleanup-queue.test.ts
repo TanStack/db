@@ -36,7 +36,7 @@ describe('CleanupQueue', () => {
     const cb1 = vi.fn()
 
     queue.schedule('key1', 1000, cb1)
-    
+
     await Promise.resolve()
 
     expect(cb1).not.toHaveBeenCalled()
@@ -53,7 +53,7 @@ describe('CleanupQueue', () => {
     const cb1 = vi.fn()
 
     queue.schedule('key1', 1000, cb1)
-    
+
     await Promise.resolve()
 
     queue.cancel('key1')
@@ -69,7 +69,7 @@ describe('CleanupQueue', () => {
 
     queue.schedule('key1', 1000, cb1)
     queue.schedule('key2', 2000, cb2)
-    
+
     await Promise.resolve()
 
     queue.cancel('key1')
@@ -93,7 +93,7 @@ describe('CleanupQueue', () => {
     queue.schedule('key1', 1000, cb1)
     queue.schedule('key2', 1500, cb2)
     queue.schedule('key3', 1500, cb3)
-    
+
     await Promise.resolve()
 
     vi.advanceTimersByTime(1000)
@@ -112,17 +112,22 @@ describe('CleanupQueue', () => {
     })
     const cb2 = vi.fn()
 
-    const spyConsoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const spyConsoleError = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => {})
 
     queue.schedule('key1', 1000, cb1)
     queue.schedule('key2', 1000, cb2)
-    
+
     await Promise.resolve()
 
     vi.advanceTimersByTime(1000)
-    
+
     expect(cb1).toHaveBeenCalledTimes(1)
-    expect(spyConsoleError).toHaveBeenCalledWith('Error in CleanupQueue task:', expect.any(Error))
+    expect(spyConsoleError).toHaveBeenCalledWith(
+      'Error in CleanupQueue task:',
+      expect.any(Error),
+    )
     // cb2 should still be called even though cb1 threw an error
     expect(cb2).toHaveBeenCalledTimes(1)
 
