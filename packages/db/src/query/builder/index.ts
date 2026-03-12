@@ -23,6 +23,7 @@ import {
   createRefProxyWithSelected,
   toExpression,
 } from './ref-proxy.js'
+import { ToArrayWrapper } from './functions.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
@@ -863,7 +864,14 @@ function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
       continue
     }
     if (v instanceof BaseQueryBuilder) {
-      out[k] = buildIncludesSubquery(v, k, parentAliases)
+      out[k] = buildIncludesSubquery(v, k, parentAliases, false)
+      continue
+    }
+    if (v instanceof ToArrayWrapper) {
+      if (!(v.query instanceof BaseQueryBuilder)) {
+        throw new Error(`toArray() must wrap a subquery builder`)
+      }
+      out[k] = buildIncludesSubquery(v.query, k, parentAliases, true)
       continue
     }
     out[k] = buildNestedSelect(v, parentAliases)
@@ -880,6 +888,7 @@ function buildIncludesSubquery(
   childBuilder: BaseQueryBuilder,
   fieldName: string,
   parentAliases: Array<string>,
+  materializeAsArray: boolean,
 ): IncludesSubquery {
   const childQuery = childBuilder._getQuery()
 
@@ -943,7 +952,13 @@ function buildIncludesSubquery(
     where: modifiedWhere.length > 0 ? modifiedWhere : undefined,
   }
 
-  return new IncludesSubquery(modifiedQuery, parentRef, childRef, fieldName)
+  return new IncludesSubquery(
+    modifiedQuery,
+    parentRef,
+    childRef,
+    fieldName,
+    materializeAsArray,
+  )
 }
 
 /**

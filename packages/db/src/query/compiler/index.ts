@@ -55,6 +55,8 @@ export interface IncludesCompilationResult {
   hasOrderBy: boolean
   /** Full compilation result for the child query (for nested includes + alias tracking) */
   childCompilationResult: CompilationResult
+  /** When true, the output layer materializes children as Array<T> instead of Collection<T> */
+  materializeAsArray: boolean
 }
 
 /**
@@ -320,6 +322,7 @@ export function compileQuery(
           subquery.query.orderBy && subquery.query.orderBy.length > 0
         ),
         childCompilationResult: childResult,
+        materializeAsArray: subquery.materializeAsArray,
       })
 
       // Replace includes entry in select with a null placeholder

@@ -60,6 +60,8 @@ export {
   sum,
   min,
   max,
+  // Includes helpers
+  toArray,
 } from './builder/functions.js'
 
 // Ref proxy utilities
