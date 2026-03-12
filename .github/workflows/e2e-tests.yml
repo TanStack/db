@@ -62,7 +62,6 @@ jobs:
         env:
           ELECTRIC_URL: http://localhost:3000
 
-
       - name: Run React Native/Expo persisted collection E2E tests
         run: |
           cd packages/db-react-native-sqlite-persisted-collection
