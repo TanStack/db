@@ -5,7 +5,7 @@ title: DuplicateDbInstanceError
 
 # Class: DuplicateDbInstanceError
 
-Defined in: packages/db/src/errors.ts:45
+Defined in: [packages/db/src/errors.ts:45](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L45)
 
 ## Extends
 
@@ -19,7 +19,7 @@ Defined in: packages/db/src/errors.ts:45
 new DuplicateDbInstanceError(): DuplicateDbInstanceError;
 ```
 
-Defined in: packages/db/src/errors.ts:46
+Defined in: [packages/db/src/errors.ts:46](https://github.com/TanStack/db/blob/main/packages/db/src/errors.ts#L46)
 
 #### Returns
 

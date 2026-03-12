@@ -9,7 +9,7 @@ title: BasePowerSyncCollectionConfig
 type BasePowerSyncCollectionConfig<TTable, TSchema> = Omit<BaseCollectionConfig<ExtractedTable<TTable>, string, TSchema>, "onInsert" | "onUpdate" | "onDelete" | "getKey"> & object;
 ```
 
-Defined in: definitions.ts:165
+Defined in: [definitions.ts:165](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/definitions.ts#L165)
 
 ## Type Declaration
 

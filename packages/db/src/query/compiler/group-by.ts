@@ -80,6 +80,7 @@ export function processGroupBy(
   havingClauses?: Array<Having>,
   selectClause?: Select,
   fnHavingClauses?: Array<(row: any) => any>,
+  mainSource?: string,
 ): NamespacedAndKeyedStream {
   // Handle empty GROUP BY (single-group aggregation)
   if (groupByClause.length === 0) {
@@ -110,8 +111,15 @@ export function processGroupBy(
       }
     }
 
-    // Use a constant key for single group
-    const keyExtractor = () => ({ __singleGroup: true })
+    // Use a constant key for single group.
+    // When mainSource is set (includes mode), include __correlationKey so that
+    // rows from different parents aggregate separately.
+    const keyExtractor = mainSource
+      ? ([, row]: [string, NamespacedRow]) => ({
+          __singleGroup: true,
+          __correlationKey: (row as any)?.[mainSource]?.__correlationKey,
+        })
+      : () => ({ __singleGroup: true })
 
     // Apply the groupBy operator with single group
     pipeline = pipeline.pipe(
@@ -139,14 +147,24 @@ export function processGroupBy(
           )
         }
 
-        // Use a single key for the result and update $selected
-        return [
-          `single_group`,
-          {
-            ...aggregatedRow,
-            $selected: finalResults,
-          },
-        ] as [unknown, Record<string, any>]
+        // Use a single key for the result and update $selected.
+        // When in includes mode, restore the namespaced source structure with
+        // __correlationKey so output extraction can route results per-parent.
+        const correlationKey = mainSource
+          ? (aggregatedRow as any).__correlationKey
+          : undefined
+        const resultKey =
+          correlationKey !== undefined
+            ? `single_group_${serializeValue(correlationKey)}`
+            : `single_group`
+        const resultRow: Record<string, any> = {
+          ...aggregatedRow,
+          $selected: finalResults,
+        }
+        if (mainSource && correlationKey !== undefined) {
+          resultRow[mainSource] = { __correlationKey: correlationKey }
+        }
+        return [resultKey, resultRow] as [unknown, Record<string, any>]
       }),
     )
 
@@ -196,7 +214,9 @@ export function processGroupBy(
     compileExpression(e),
   )
 
-  // Create a key extractor function using simple __key_X format
+  // Create a key extractor function using simple __key_X format.
+  // When mainSource is set (includes mode), include __correlationKey so that
+  // rows from different parents with the same group key aggregate separately.
   const keyExtractor = ([, row]: [
     string,
     NamespacedRow & { $selected?: any },
@@ -212,6 +232,10 @@ export function processGroupBy(
       const compiledExpr = compiledGroupByExpressions[i]!
       const value = compiledExpr(namespacedRow)
       key[`__key_${i}`] = value
+    }
+
+    if (mainSource) {
+      key.__correlationKey = (row as any)?.[mainSource]?.__correlationKey
     }
 
     return key
@@ -278,25 +302,32 @@ export function processGroupBy(
         }
       }
 
-      // Generate a simple key for the live collection using group values
-      let finalKey: unknown
-      if (groupByClause.length === 1) {
-        finalKey = aggregatedRow[`__key_0`]
-      } else {
-        const keyParts: Array<unknown> = []
-        for (let i = 0; i < groupByClause.length; i++) {
-          keyParts.push(aggregatedRow[`__key_${i}`])
-        }
-        finalKey = serializeValue(keyParts)
+      // Generate a simple key for the live collection using group values.
+      // When in includes mode, include the correlation key so that groups
+      // from different parents don't collide.
+      const correlationKey = mainSource
+        ? (aggregatedRow as any).__correlationKey
+        : undefined
+      const keyParts: Array<unknown> = []
+      for (let i = 0; i < groupByClause.length; i++) {
+        keyParts.push(aggregatedRow[`__key_${i}`])
       }
+      if (correlationKey !== undefined) {
+        keyParts.push(correlationKey)
+      }
+      const finalKey =
+        keyParts.length === 1 ? keyParts[0] : serializeValue(keyParts)
 
-      return [
-        finalKey,
-        {
-          ...aggregatedRow,
-          $selected: finalResults,
-        },
-      ] as [unknown, Record<string, any>]
+      // When in includes mode, restore the namespaced source structure with
+      // __correlationKey so output extraction can route results per-parent.
+      const resultRow: Record<string, any> = {
+        ...aggregatedRow,
+        $selected: finalResults,
+      }
+      if (mainSource && correlationKey !== undefined) {
+        resultRow[mainSource] = { __correlationKey: correlationKey }
+      }
+      return [finalKey, resultRow] as [unknown, Record<string, any>]
     }),
   )
 

@@ -9,7 +9,7 @@ title: SchemaFromSource
 type SchemaFromSource<T> = Prettify<{ [K in keyof T]: T[K] extends CollectionImpl<any, any, any, any, any> ? InferCollectionType<T[K]> : T[K] extends QueryBuilder<infer TContext> ? GetResult<TContext> : never }>;
 ```
 
-Defined in: packages/db/src/query/builder/types.ts:98
+Defined in: [packages/db/src/query/builder/types.ts:98](https://github.com/TanStack/db/blob/main/packages/db/src/query/builder/types.ts#L98)
 
 SchemaFromSource - Converts a Source definition into a ContextSchema
 

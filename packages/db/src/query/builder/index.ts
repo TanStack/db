@@ -21,8 +21,10 @@ import {
 import {
   createRefProxy,
   createRefProxyWithSelected,
+  isRefProxy,
   toExpression,
 } from './ref-proxy.js'
+import { ToArrayWrapper } from './functions.js'
 import type { NamespacedRow, SingleResult } from '../../types.js'
 import type {
   Aggregate,
@@ -368,7 +370,14 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
   where(callback: WhereCallback<TContext>): QueryBuilder<TContext> {
     const aliases = this._getCurrentAliases()
     const refProxy = createRefProxy(aliases) as RefsForContext<TContext>
-    const expression = callback(refProxy)
+    const rawExpression = callback(refProxy)
+
+    // Allow bare boolean column references like `.where(({ u }) => u.active)`
+    // by converting ref proxies to PropRef expressions, the same way helper
+    // functions like `not()` and `eq()` do via `toExpression()`.
+    const expression = isRefProxy(rawExpression)
+      ? toExpression(rawExpression)
+      : rawExpression
 
     // Validate that the callback returned a valid expression
     // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
@@ -421,7 +430,14 @@ export class BaseQueryBuilder<TContext extends Context = Context> {
         ? createRefProxyWithSelected(aliases)
         : createRefProxy(aliases)
     ) as RefsForContext<TContext>
-    const expression = callback(refProxy)
+    const rawExpression = callback(refProxy)
+
+    // Allow bare boolean column references like `.having(({ $selected }) => $selected.isActive)`
+    // by converting ref proxies to PropRef expressions, the same way helper
+    // functions like `not()` and `eq()` do via `toExpression()`.
+    const expression = isRefProxy(rawExpression)
+      ? toExpression(rawExpression)
+      : rawExpression
 
     // Validate that the callback returned a valid expression
     // This catches common mistakes like using JavaScript comparison operators (===, !==, etc.)
@@ -864,7 +880,14 @@ function buildNestedSelect(obj: any, parentAliases: Array<string> = []): any {
       continue
     }
     if (v instanceof BaseQueryBuilder) {
-      out[k] = buildIncludesSubquery(v, k, parentAliases)
+      out[k] = buildIncludesSubquery(v, k, parentAliases, false)
+      continue
+    }
+    if (v instanceof ToArrayWrapper) {
+      if (!(v.query instanceof BaseQueryBuilder)) {
+        throw new Error(`toArray() must wrap a subquery builder`)
+      }
+      out[k] = buildIncludesSubquery(v.query, k, parentAliases, true)
       continue
     }
     out[k] = buildNestedSelect(v, parentAliases)
@@ -914,6 +937,7 @@ function buildIncludesSubquery(
   childBuilder: BaseQueryBuilder,
   fieldName: string,
   parentAliases: Array<string>,
+  materializeAsArray: boolean,
 ): IncludesSubquery {
   const childQuery = childBuilder._getQuery()
 
@@ -1076,6 +1100,7 @@ function buildIncludesSubquery(
     fieldName,
     parentFilters.length > 0 ? parentFilters : undefined,
     parentProjection,
+    materializeAsArray,
   )
 }
 
