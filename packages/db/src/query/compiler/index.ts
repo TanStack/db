@@ -150,7 +150,9 @@ export function compileQuery(
   validateQueryStructure(rawQuery)
 
   // Optimize the query before compilation
-  const { optimizedQuery: query, sourceWhereClauses } = optimizeQuery(rawQuery)
+  const { optimizedQuery, sourceWhereClauses } = optimizeQuery(rawQuery)
+  // Use a mutable binding so we can shallow-clone select before includes mutation
+  let query = optimizedQuery
 
   // Create mapping from optimized query to original for caching
   queryMapping.set(query, rawQuery)
@@ -319,6 +321,11 @@ export function compileQuery(
   }> = []
   if (query.select) {
     const includesEntries = extractIncludesFromSelect(query.select)
+    // Shallow-clone select before mutating so we don't modify the shared IR
+    // (the optimizer copies select by reference, so rawQuery.select === query.select)
+    if (includesEntries.length > 0) {
+      query = { ...query, select: { ...query.select } }
+    }
     for (const { key, subquery } of includesEntries) {
       // Branch parent pipeline: map to [correlationValue, parentContext]
       // When parentProjection exists, project referenced parent fields; otherwise null (zero overhead)
@@ -453,8 +460,9 @@ export function compileQuery(
       }
 
       // Replace includes entry in select with a null placeholder
-      replaceIncludesInSelect(query.select, key)
+      replaceIncludesInSelect(query.select!, key)
     }
+
   }
 
   if (query.distinct && !query.fnSelect && !query.select) {
@@ -1013,19 +1021,52 @@ export function followRef(
 }
 
 /**
- * Walks a Select object to find IncludesSubquery entries.
- * Returns array of {key, subquery} for each found includes.
+ * Walks a Select object to find IncludesSubquery entries at the top level.
+ * Throws if an IncludesSubquery is found nested inside a sub-object, since
+ * the compiler only supports includes at the top level of a select.
  */
 function extractIncludesFromSelect(
   select: Record<string, any>,
 ): Array<{ key: string; subquery: IncludesSubquery }> {
   const results: Array<{ key: string; subquery: IncludesSubquery }> = []
   for (const [key, value] of Object.entries(select)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
     if (value instanceof IncludesSubquery) {
       results.push({ key, subquery: value })
+    } else if (isNestedSelectObject(value)) {
+      // Check nested objects for IncludesSubquery — not supported yet
+      assertNoNestedIncludes(value, key)
     }
   }
   return results
+}
+
+/** Check if a value is a nested plain object in a select (not an IR expression node) */
+function isNestedSelectObject(value: any): value is Record<string, any> {
+  return (
+    value != null &&
+    typeof value === `object` &&
+    !Array.isArray(value) &&
+    typeof value.type !== `string`
+  )
+}
+
+function assertNoNestedIncludes(
+  obj: Record<string, any>,
+  parentPath: string,
+): void {
+  for (const [key, value] of Object.entries(obj)) {
+    if (key.startsWith(`__SPREAD_SENTINEL__`)) continue
+    if (value instanceof IncludesSubquery) {
+      throw new Error(
+        `Includes subqueries must be at the top level of select(). ` +
+          `Found nested includes at "${parentPath}.${key}".`,
+      )
+    }
+    if (isNestedSelectObject(value)) {
+      assertNoNestedIncludes(value, `${parentPath}.${key}`)
+    }
+  }
 }
 
 /**
