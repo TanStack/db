@@ -82,6 +82,7 @@ export class BasicIndex<
     } catch (error) {
       throw new Error(
         `Failed to evaluate index expression for key ${key}: ${error}`,
+        { cause: error },
       )
     }
 
@@ -119,6 +120,8 @@ export class BasicIndex<
         `Failed to evaluate index expression for key ${key} during removal:`,
         error,
       )
+      this.indexedKeys.delete(key)
+      this.updateTimestamp()
       return
     }
 
@@ -162,6 +165,7 @@ export class BasicIndex<
       } catch (error) {
         throw new Error(
           `Failed to evaluate index expression for key ${key}: ${error}`,
+          { cause: error },
         )
       }
       entriesArray.push({ key, value: normalizeValue(indexedValue) })

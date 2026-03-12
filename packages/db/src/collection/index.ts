@@ -1,4 +1,5 @@
 import {
+  CollectionConfigurationError,
   CollectionRequiresConfigError,
   CollectionRequiresSyncConfigError,
 } from '../errors'
@@ -321,6 +322,15 @@ export class CollectionImpl<
     this.config = {
       ...config,
       autoIndex: config.autoIndex ?? `off`,
+    }
+
+    if (this.config.autoIndex === `eager` && !config.defaultIndexType) {
+      throw new CollectionConfigurationError(
+        `autoIndex: 'eager' requires defaultIndexType to be set. ` +
+          `Import an index type and set it:\n` +
+          `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
+          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
+      )
     }
 
     this._changes = new CollectionChangesManager()

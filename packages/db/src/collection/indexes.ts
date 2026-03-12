@@ -2,6 +2,7 @@ import {
   createSingleRowRefProxy,
   toExpression,
 } from '../query/builder/ref-proxy'
+import { CollectionConfigurationError } from '../errors'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type { BaseIndex, IndexConstructor } from '../indexes/base-index'
 import type { ChangeMessage } from '../types'
@@ -62,7 +63,7 @@ export class CollectionIndexesManager<
     // Use provided index type, or fall back to collection's default
     const IndexType = config.indexType ?? this.defaultIndexType
     if (!IndexType) {
-      throw new Error(
+      throw new CollectionConfigurationError(
         `No index type specified and no defaultIndexType set on collection. ` +
           `Either pass indexType in config, or set defaultIndexType on the collection:\n` +
           `  import { BasicIndex } from '@tanstack/db/indexing'\n` +

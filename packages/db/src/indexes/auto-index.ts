@@ -10,24 +10,9 @@ export interface AutoIndexConfig {
 
 function shouldAutoIndex(collection: CollectionImpl<any, any, any, any, any>) {
   // Only proceed if auto-indexing is enabled
-  if (collection.config.autoIndex !== `eager`) {
-    return false
-  }
-
-  // Check if defaultIndexType is set on the collection
-  if (!collection.config.defaultIndexType) {
-    if (isDevModeEnabled()) {
-      console.warn(
-        `[TanStack DB] Auto-indexing is disabled because no defaultIndexType is set. ` +
-          `Set defaultIndexType on the collection:\n` +
-          `  import { BasicIndex } from '@tanstack/db/indexing'\n` +
-          `  createCollection({ defaultIndexType: BasicIndex, autoIndex: 'eager', ... })`,
-      )
-    }
-    return false
-  }
-
-  return true
+  // Note: autoIndex: 'eager' without defaultIndexType is caught at construction time
+  // in CollectionImpl, so we don't need to check for it here.
+  return collection.config.autoIndex === `eager`
 }
 
 export function ensureIndexForField<

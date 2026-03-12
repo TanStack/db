@@ -74,7 +74,11 @@ export function emitIndexSuggestion(suggestion: IndexSuggestion): void {
   if (!isDevModeEnabled()) return
 
   if (devModeConfig.onSuggestion) {
-    devModeConfig.onSuggestion(suggestion)
+    try {
+      devModeConfig.onSuggestion(suggestion)
+    } catch {
+      // Don't let a buggy callback crash query execution
+    }
   } else {
     // Default: log to console with helpful formatting
     console.warn(

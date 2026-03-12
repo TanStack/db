@@ -381,6 +381,7 @@ describe(`currentStateAsChanges`, () => {
           id: `test-collection-empty-${autoIndex}`,
           getKey: (user) => user.id,
           autoIndex: autoIndex as `eager` | `off`,
+          defaultIndexType: autoIndex === `eager` ? BTreeIndex : undefined,
           sync: {
             sync: mockSync,
           },
