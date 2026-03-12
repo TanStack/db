@@ -1093,7 +1093,6 @@ function buildIncludesSubquery(
     where: pureChildWhere.length > 0 ? pureChildWhere : undefined,
   }
 
-
   return new IncludesSubquery(
     modifiedQuery,
     parentRef,
