@@ -492,8 +492,10 @@ export function compileQuery(
           ).__includesCorrelationKeys
         }
         // When in includes mode, embed the correlation key as third element
+        // and strip the internal __correlationKey stamp so it doesn't leak to the user
         if (parentKeyStream) {
           const correlationKey = (row as any)[mainSource]?.__correlationKey
+          delete finalResults.__correlationKey
           return [key, [finalResults, orderByIndex, correlationKey]] as any
         }
         return [key, [finalResults, orderByIndex]] as [unknown, [any, string]]
