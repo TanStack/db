@@ -17,6 +17,7 @@ import {
   UndefinedKeyError,
   UpdateKeyNotFoundError,
 } from '../errors'
+import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
 import type { Collection, CollectionImpl } from './index.js'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -153,6 +154,14 @@ export class CollectionMutationsManager<
     return `KEY::${this.id}/${key}`
   }
 
+  private markPendingLocalOrigins(
+    mutations: Array<PendingMutation<TOutput>>,
+  ): void {
+    for (const mutation of mutations) {
+      this.state.pendingLocalOrigins.add(mutation.key as TKey)
+    }
+  }
+
   /**
    * Inserts one or more items into the collection
    */
@@ -222,6 +231,9 @@ export class CollectionMutationsManager<
     } else {
       // Create a new transaction with a mutation function that calls the onInsert handler
       const directOpTransaction = createTransaction<TOutput>({
+        metadata: {
+          [DIRECT_TRANSACTION_METADATA_KEY]: true,
+        },
         mutationFn: async (params) => {
           // Call the onInsert handler with the transaction and collection
           return await this.config.onInsert!({
@@ -237,6 +249,7 @@ export class CollectionMutationsManager<
 
       // Apply mutations to the new transaction
       directOpTransaction.applyMutations(mutations)
+      this.markPendingLocalOrigins(mutations)
       // Errors still reject tx.isPersisted.promise; this catch only prevents global unhandled rejections
       directOpTransaction.commit().catch(() => undefined)
 
@@ -417,6 +430,9 @@ export class CollectionMutationsManager<
 
     // Create a new transaction with a mutation function that calls the onUpdate handler
     const directOpTransaction = createTransaction<TOutput>({
+      metadata: {
+        [DIRECT_TRANSACTION_METADATA_KEY]: true,
+      },
       mutationFn: async (params) => {
         // Call the onUpdate handler with the transaction and collection
         return this.config.onUpdate!({
@@ -432,6 +448,7 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
+    this.markPendingLocalOrigins(mutations)
     // Errors still hit tx.isPersisted.promise; avoid leaking an unhandled rejection from the fire-and-forget commit
     directOpTransaction.commit().catch(() => undefined)
 
@@ -519,6 +536,9 @@ export class CollectionMutationsManager<
     // Create a new transaction with a mutation function that calls the onDelete handler
     const directOpTransaction = createTransaction<TOutput>({
       autoCommit: true,
+      metadata: {
+        [DIRECT_TRANSACTION_METADATA_KEY]: true,
+      },
       mutationFn: async (params) => {
         // Call the onDelete handler with the transaction and collection
         return this.config.onDelete!({
@@ -534,6 +554,7 @@ export class CollectionMutationsManager<
 
     // Apply mutations to the new transaction
     directOpTransaction.applyMutations(mutations)
+    this.markPendingLocalOrigins(mutations)
     // Errors still reject tx.isPersisted.promise; silence the internal commit promise to prevent test noise
     directOpTransaction.commit().catch(() => undefined)
 

@@ -23,6 +23,7 @@ import type {
   LoadSubsetOptions,
   UpdateMutationFnParams,
 } from '@tanstack/db'
+import type { OutputWithVirtual } from '../../db/tests/utils'
 
 describe(`Query collection type resolution tests`, () => {
   // Define test types
@@ -129,7 +130,9 @@ describe(`Query collection type resolution tests`, () => {
     const usersCollection = createCollection(queryOptions)
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
+    >()
 
     // Test that the getKey function has the correct parameter type
     expectTypeOf(queryOptions.getKey).parameters.toEqualTypeOf<[UserType]>()
@@ -176,18 +179,22 @@ describe(`Query collection type resolution tests`, () => {
 
     // Test that the query results have the correct inferred types
     const results = activeUsersQuery.toArray
-    expectTypeOf(results).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-        email: string
-        isActive: boolean
-      }>
+    expectTypeOf(results).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+          email: string
+          isActive: boolean
+        }>
+      >
     >()
 
     // Test that the collection itself has the correct type
-    expectTypeOf(usersCollection.toArray).toEqualTypeOf<Array<UserType>>()
+    expectTypeOf(usersCollection.toArray).toMatchTypeOf<
+      Array<OutputWithVirtual<UserType>>
+    >()
 
     // Test that we can access schema-inferred fields in the query with WHERE conditions
     const ageFilterQuery = createLiveQueryCollection({
@@ -203,12 +210,14 @@ describe(`Query collection type resolution tests`, () => {
     })
 
     const ageFilterResults = ageFilterQuery.toArray
-    expectTypeOf(ageFilterResults).toEqualTypeOf<
-      Array<{
-        id: string
-        name: string
-        age: number
-      }>
+    expectTypeOf(ageFilterResults).toMatchTypeOf<
+      Array<
+        OutputWithVirtual<{
+          id: string
+          name: string
+          age: number
+        }>
+      >
     >()
 
     // Test that the getKey function has the correct parameter type
@@ -325,7 +334,9 @@ describe(`Query collection type resolution tests`, () => {
       })
 
       const collection = createCollection(options)
-      expectTypeOf(collection.toArray).toEqualTypeOf<Array<TodoType>>()
+      expectTypeOf(collection.toArray).toEqualTypeOf<
+        Array<OutputWithVirtual<TodoType, string>>
+      >()
     })
   })
 

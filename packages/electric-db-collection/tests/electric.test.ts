@@ -5,6 +5,7 @@ import {
   createTransaction,
 } from '@tanstack/db'
 import { electricCollectionOptions, isChangeMessage } from '../src/electric'
+import { stripVirtualProps } from '../../db/tests/utils'
 import type { ElectricCollectionUtils } from '../src/electric'
 import type {
   Collection,
@@ -47,6 +48,14 @@ describe(`Electric Integration`, () => {
     Row
   >
   let subscriber: (messages: Array<Message<Row>>) => void
+
+  const stripCollectionState = (state: Map<string | number, Row>) =>
+    new Map(
+      Array.from(state.entries(), ([key, value]) => [
+        key,
+        stripVirtualProps(value),
+      ]),
+    )
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -120,7 +129,7 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.state).toEqual(
+    expect(stripCollectionState(collection.state)).toEqual(
       new Map([[1, { id: 1, name: `Test User` }]]),
     )
   })
@@ -155,7 +164,7 @@ describe(`Electric Integration`, () => {
     ])
     expect(collection.status).toEqual(`ready`)
 
-    expect(collection.state).toEqual(
+    expect(stripCollectionState(collection.state)).toEqual(
       new Map([
         [1, { id: 1, name: `Test User` }],
         [2, { id: 2, name: `Another User` }],
@@ -189,7 +198,7 @@ describe(`Electric Integration`, () => {
       },
     ])
 
-    expect(collection.state).toEqual(
+    expect(stripCollectionState(collection.state)).toEqual(
       new Map([[1, { id: 1, name: `Updated User` }]]),
     )
   })
@@ -292,7 +301,10 @@ describe(`Electric Integration`, () => {
 
     // The collection should now have the new data
     expect(collection.state.size).toBe(1)
-    expect(collection.state.get(3)).toEqual({ id: 3, name: `New User` })
+    expect(stripVirtualProps(collection.state.get(3))).toEqual({
+      id: 3,
+      name: `New User`,
+    })
     expect(collection.status).toBe(`ready`)
   })
 
@@ -659,7 +671,7 @@ describe(`Electric Integration`, () => {
 
       // Verify that the data was added to the collection via the sync process
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
         id: 1,
         name: `Direct Persistence User`,
       })
@@ -2498,7 +2510,10 @@ describe(`Electric Integration`, () => {
 
       // Verify snapshot data was applied
       expect(testCollection.has(2)).toBe(true)
-      expect(testCollection.get(2)).toEqual({ id: 2, name: `Snapshot User` })
+      expect(stripVirtualProps(testCollection.get(2))).toEqual({
+        id: 2,
+        name: `Snapshot User`,
+      })
     })
 
     it(`should not request snapshots when loadSubset is called in eager mode`, async () => {
@@ -2791,7 +2806,10 @@ describe(`Electric Integration`, () => {
       // The snapshot data should be IGNORED because sync already completed
       expect(testCollection.has(2)).toBe(false)
       expect(testCollection.size).toBe(1) // Still only the buffered user
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Buffered User` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `Buffered User`,
+      })
     })
 
     it(`should default offset to 'now' in on-demand mode when no offset provided`, async () => {
@@ -2948,7 +2966,7 @@ describe(`Electric Integration`, () => {
 
       // Verify initial data is present
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
         id: 1,
         name: `User 1`,
         updated_at: `2024-01-01T00:00:00Z`,
@@ -2978,7 +2996,7 @@ describe(`Electric Integration`, () => {
 
       // The row should be updated with the new value
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
         id: 1,
         name: `User 1`,
         updated_at: `2024-01-01T00:00:01Z`,
@@ -3018,12 +3036,12 @@ describe(`Electric Integration`, () => {
       ])
 
       expect(testCollection.size).toBe(2)
-      expect(testCollection.get(1)).toEqual({
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
         id: 1,
         name: `User 1`,
         version: 1,
       })
-      expect(testCollection.get(2)).toEqual({
+      expect(stripVirtualProps(testCollection.get(2))).toEqual({
         id: 2,
         name: `User 2`,
         version: 1,
@@ -3053,17 +3071,17 @@ describe(`Electric Integration`, () => {
 
       // All rows should be present with updated values
       expect(testCollection.size).toBe(3)
-      expect(testCollection.get(1)).toEqual({
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
         id: 1,
         name: `User 1`,
         version: 2,
       })
-      expect(testCollection.get(2)).toEqual({
+      expect(stripVirtualProps(testCollection.get(2))).toEqual({
         id: 2,
         name: `User 2`,
         version: 2,
       })
-      expect(testCollection.get(3)).toEqual({
+      expect(stripVirtualProps(testCollection.get(3))).toEqual({
         id: 3,
         name: `User 3`,
         version: 1,
@@ -3120,7 +3138,7 @@ describe(`Electric Integration`, () => {
       ])
 
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
         id: 1,
         name: `User 1 After Refetch`,
       })
@@ -3182,7 +3200,10 @@ describe(`Electric Integration`, () => {
       ])
 
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `User 1 Recreated` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `User 1 Recreated`,
+      })
     })
 
     it(`should handle duplicate inserts within the same batch`, () => {
@@ -3220,7 +3241,7 @@ describe(`Electric Integration`, () => {
 
       // Should have the latest value
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
         id: 1,
         name: `User 1`,
         version: 2,
@@ -3287,7 +3308,10 @@ describe(`Electric Integration`, () => {
 
       // Now data should be visible after atomic swap
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `Test User`,
+      })
       expect(testCollection.status).toBe(`ready`)
     })
 
@@ -3320,7 +3344,10 @@ describe(`Electric Integration`, () => {
 
       // Data should be committed and collection ready
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `Test User`,
+      })
       expect(testCollection.status).toBe(`ready`)
     })
 
@@ -3400,7 +3427,10 @@ describe(`Electric Integration`, () => {
 
       // Data should be committed (available in state)
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `Test User`,
+      })
 
       // Collection SHOULD be marked as ready in on-demand mode
       expect(testCollection.status).toBe(`ready`)
@@ -3463,7 +3493,10 @@ describe(`Electric Integration`, () => {
 
       // Now data should be visible after atomic swap
       expect(testCollection.has(1)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Test User` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `Test User`,
+      })
 
       // And it should be ready
       expect(testCollection.status).toBe(`ready`)
@@ -3683,8 +3716,14 @@ describe(`Electric Integration`, () => {
       expect(testCollection._state.pendingSyncedTransactions.length).toBe(0)
 
       // Verify data is correct (not undefined from orphan transaction)
-      expect(testCollection.get(3)).toEqual({ id: 3, name: `User 3` })
-      expect(testCollection.get(4)).toEqual({ id: 4, name: `User 4` })
+      expect(stripVirtualProps(testCollection.get(3))).toEqual({
+        id: 3,
+        name: `User 3`,
+      })
+      expect(stripVirtualProps(testCollection.get(4))).toEqual({
+        id: 4,
+        name: `User 4`,
+      })
     })
 
     it(`should handle must-refetch in progressive mode with txid tracking`, () => {
@@ -3833,7 +3872,10 @@ describe(`Electric Integration`, () => {
       expect(testCollection.status).toBe(`ready`)
       expect(testCollection.size).toBe(1)
       expect(testCollection.has(2)).toBe(true)
-      expect(testCollection.get(2)).toEqual({ id: 2, name: `User 2` })
+      expect(stripVirtualProps(testCollection.get(2))).toEqual({
+        id: 2,
+        name: `User 2`,
+      })
     })
 
     it(`should handle multiple batches after must-refetch in progressive mode`, () => {
@@ -4016,8 +4058,14 @@ describe(`Electric Integration`, () => {
       expect(testCollection.status).toBe(`ready`)
       expect(testCollection.has(1)).toBe(true)
       expect(testCollection.has(3)).toBe(true)
-      expect(testCollection.get(1)).toEqual({ id: 1, name: `Updated User` })
-      expect(testCollection.get(3)).toEqual({ id: 3, name: `Resynced User` })
+      expect(stripVirtualProps(testCollection.get(1))).toEqual({
+        id: 1,
+        name: `Updated User`,
+      })
+      expect(stripVirtualProps(testCollection.get(3))).toEqual({
+        id: 3,
+        name: `Resynced User`,
+      })
       expect(testCollection.size).toBe(2)
 
       // Old data should not be present (collection was cleaned)
