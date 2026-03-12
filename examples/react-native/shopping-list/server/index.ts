@@ -83,8 +83,7 @@ app.get('/api/lists', async (_req, res) => {
   console.log('GET /api/lists')
   await delay(200)
   const lists = Array.from(listsStore.values()).sort(
-    (a, b) =>
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   )
   res.json(lists)
 })
@@ -148,8 +147,7 @@ app.get('/api/items', async (_req, res) => {
   console.log('GET /api/items')
   await delay(200)
   const items = Array.from(itemsStore.values()).sort(
-    (a, b) =>
-      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
   )
   res.json(items)
 })
@@ -160,9 +158,7 @@ app.post('/api/items', async (req, res) => {
 
   const { id, listId, text, checked } = req.body
   if (!listId || !text || text.trim() === '') {
-    return res
-      .status(400)
-      .json({ error: 'listId and text are required' })
+    return res.status(400).json({ error: 'listId and text are required' })
   }
 
   const item: ShoppingItem = {

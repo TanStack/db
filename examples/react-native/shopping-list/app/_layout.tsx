@@ -15,14 +15,8 @@ export default function RootLayout() {
         <ShoppingProvider>
           <StatusBar style="auto" />
           <Stack>
-            <Stack.Screen
-              name="index"
-              options={{ title: `Shopping Lists` }}
-            />
-            <Stack.Screen
-              name="list/[id]"
-              options={{ title: `List` }}
-            />
+            <Stack.Screen name="index" options={{ title: `Shopping Lists` }} />
+            <Stack.Screen name="list/[id]" options={{ title: `List` }} />
           </Stack>
         </ShoppingProvider>
       </QueryClientProvider>

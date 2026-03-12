@@ -1,4 +1,10 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
 import NetInfo from '@react-native-community/netinfo'
 import {
   createOfflineExecutor,
@@ -76,7 +82,15 @@ export function ShoppingProvider({ children }: { children: React.ReactNode }) {
       isInitialized,
       initError,
     }),
-    [offline, listActions, itemActions, isOnline, pendingCount, isInitialized, initError],
+    [
+      offline,
+      listActions,
+      itemActions,
+      isOnline,
+      pendingCount,
+      isInitialized,
+      initError,
+    ],
   )
 
   return (

@@ -28,7 +28,10 @@ export type ShoppingItem = {
 
 // ─── SQLite Persistence (shared) ────────────────────────
 
-const database = open({ name: `shopping-list.sqlite`, location: `default` }) as unknown as OpSQLiteDatabaseLike
+const database = open({
+  name: `shopping-list.sqlite`,
+  location: `default`,
+}) as unknown as OpSQLiteDatabaseLike
 const persistence = createReactNativeSQLitePersistence({ database })
 
 // ─── Collections ────────────────────────────────────────
@@ -186,7 +189,8 @@ export function createListActions(
       if (list) {
         listsCollection.delete(id)
         // Also delete all items in this list
-        const allItems = itemsCollection.toArray as unknown as Array<ShoppingItem>
+        const allItems =
+          itemsCollection.toArray as unknown as Array<ShoppingItem>
         for (const item of allItems) {
           if (item.listId === id) {
             itemsCollection.delete(item.id)

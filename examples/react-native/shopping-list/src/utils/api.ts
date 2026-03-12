@@ -50,21 +50,20 @@ function parseItem(item: ShoppingItemResponse): ShoppingItem {
 export const listsApi = {
   async getAll(): Promise<Array<ShoppingList>> {
     const response = await fetch(`${BASE_URL}/api/lists`)
-    if (!response.ok) throw new Error(`Failed to fetch lists: ${response.status}`)
+    if (!response.ok)
+      throw new Error(`Failed to fetch lists: ${response.status}`)
     const data: Array<ShoppingListResponse> = await response.json()
     return data.map(parseList)
   },
 
-  async create(data: {
-    id?: string
-    name: string
-  }): Promise<ShoppingList> {
+  async create(data: { id?: string; name: string }): Promise<ShoppingList> {
     const response = await fetch(`${BASE_URL}/api/lists`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
-    if (!response.ok) throw new Error(`Failed to create list: ${response.status}`)
+    if (!response.ok)
+      throw new Error(`Failed to create list: ${response.status}`)
     return parseList(await response.json())
   },
 
@@ -78,7 +77,8 @@ export const listsApi = {
       body: JSON.stringify(data),
     })
     if (response.status === 404) return null
-    if (!response.ok) throw new Error(`Failed to update list: ${response.status}`)
+    if (!response.ok)
+      throw new Error(`Failed to update list: ${response.status}`)
     return parseList(await response.json())
   },
 
@@ -87,7 +87,8 @@ export const listsApi = {
       method: 'DELETE',
     })
     if (response.status === 404) return false
-    if (!response.ok) throw new Error(`Failed to delete list: ${response.status}`)
+    if (!response.ok)
+      throw new Error(`Failed to delete list: ${response.status}`)
     return true
   },
 }
@@ -97,7 +98,8 @@ export const listsApi = {
 export const itemsApi = {
   async getAll(): Promise<Array<ShoppingItem>> {
     const response = await fetch(`${BASE_URL}/api/items`)
-    if (!response.ok) throw new Error(`Failed to fetch items: ${response.status}`)
+    if (!response.ok)
+      throw new Error(`Failed to fetch items: ${response.status}`)
     const data: Array<ShoppingItemResponse> = await response.json()
     return data.map(parseItem)
   },
@@ -113,7 +115,8 @@ export const itemsApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
-    if (!response.ok) throw new Error(`Failed to create item: ${response.status}`)
+    if (!response.ok)
+      throw new Error(`Failed to create item: ${response.status}`)
     return parseItem(await response.json())
   },
 
@@ -127,7 +130,8 @@ export const itemsApi = {
       body: JSON.stringify(data),
     })
     if (response.status === 404) return null
-    if (!response.ok) throw new Error(`Failed to update item: ${response.status}`)
+    if (!response.ok)
+      throw new Error(`Failed to update item: ${response.status}`)
     return parseItem(await response.json())
   },
 
@@ -136,7 +140,8 @@ export const itemsApi = {
       method: 'DELETE',
     })
     if (response.status === 404) return false
-    if (!response.ok) throw new Error(`Failed to delete item: ${response.status}`)
+    if (!response.ok)
+      throw new Error(`Failed to delete item: ${response.status}`)
     return true
   },
 }
