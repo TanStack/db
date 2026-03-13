@@ -8,7 +8,6 @@ const config = defineConfig({
     include: [`tests/**/*.test.ts`],
     exclude: [`e2e/**/*.e2e.test.ts`],
     environment: `node`,
-    setupFiles: [`./tests/helpers/capacitor-runtime-test-setup.ts`],
     coverage: { enabled: true, provider: `istanbul`, include: [`src/**/*`] },
     typecheck: {
       enabled: true,

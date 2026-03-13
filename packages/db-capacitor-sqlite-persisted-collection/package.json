@@ -22,7 +22,8 @@
     "dev": "vite build --watch",
     "lint": "eslint . --fix",
     "test": "vitest --run",
-    "test:e2e": "pnpm --filter @tanstack/db-ivm build && pnpm --filter @tanstack/db build && pnpm --filter @tanstack/db-sqlite-persisted-collection-core build && pnpm --filter @tanstack/db-capacitor-sqlite-persisted-collection build && vitest --config vitest.e2e.config.ts --run"
+    "test:e2e": "pnpm --filter @tanstack/db-ivm build && pnpm --filter @tanstack/db build && pnpm --filter @tanstack/db-sqlite-persisted-collection-core build && pnpm --filter @tanstack/db-capacitor-sqlite-persisted-collection build && vitest --config vitest.e2e.config.ts --run",
+    "test:e2e:ios": "pnpm exec tsx ./e2e/run-ios-e2e.ts"
   },
   "type": "module",
   "main": "dist/cjs/index.cjs",

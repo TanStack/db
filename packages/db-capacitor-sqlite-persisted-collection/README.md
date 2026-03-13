@@ -8,6 +8,12 @@ Thin SQLite persistence for Capacitor apps using
 - `createCapacitorSQLitePersistence(...)`
 - `persistedCollectionOptions(...)` (re-exported from core)
 
+## Install
+
+```bash
+pnpm add @tanstack/db-capacitor-sqlite-persisted-collection @capacitor-community/sqlite
+```
+
 ## Quick start
 
 ```ts
@@ -61,7 +67,7 @@ export const todosCollection = createCollection(
 )
 ```
 
-## Notes
+## Platform notes
 
 - `createCapacitorSQLitePersistence` is shared across collections.
 - Mode defaults (`sync-present` vs `sync-absent`) are inferred from whether a
@@ -74,3 +80,20 @@ export const todosCollection = createCollection(
   `schemaVersion`.
 - `@capacitor-community/sqlite` uses SQLCipher-backed native builds, so app
   setup may require additional platform configuration outside this package.
+- Capacitor 8 creates iOS projects with Swift Package Manager by default, but
+  `@capacitor-community/sqlite` currently links through CocoaPods on iOS. Add
+  iOS with `npx cap add ios --packagemanager CocoaPods`, or recreate an SPM
+  project in CocoaPods mode before expecting the native plugin to load.
+
+## Testing
+
+- `pnpm --filter @tanstack/db-capacitor-sqlite-persisted-collection test:e2e`
+  runs the package e2e suite against the default `better-sqlite3` harness.
+- `pnpm --filter @tanstack/db-capacitor-sqlite-persisted-collection test:e2e:ios`
+  builds the package-local Capacitor harness in `e2e/app`, launches the iOS
+  simulator, and runs the full persisted collection e2e suite inside the real
+  native Capacitor runtime.
+- `test:e2e:ios` is a repo-local validation path for this package. It depends on
+  the checked-in `e2e/app` harness plus local Capacitor/Xcode tooling.
+- The native harness lives under `e2e/app` so the same app can be extended to
+  other native targets later, including Android.
