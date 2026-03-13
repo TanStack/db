@@ -6,7 +6,9 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite",
+    "native:add:android": "cap add android",
     "native:add:ios": "cap add ios --packagemanager CocoaPods",
+    "native:sync:android": "cap sync android",
     "native:sync:ios": "cap sync ios"
   },
   "dependencies": {
@@ -16,6 +18,7 @@
     "@tanstack/db-capacitor-sqlite-persisted-collection": "workspace:*"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.2.0",
     "@capacitor/cli": "^8.2.0",
     "@capacitor/ios": "^8.2.0",
     "@types/node": "^25.2.2",

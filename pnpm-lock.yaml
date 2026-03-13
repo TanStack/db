@@ -193,43 +193,6 @@ importers:
         specifier: ^5.9.2
         version: 5.9.3
 
-  examples/capacitor/sqlite-runtime:
-    dependencies:
-      '@capacitor-community/sqlite':
-        specifier: ^8.0.1
-        version: 8.0.1(@capacitor/core@8.2.0)
-      '@capacitor/core':
-        specifier: ^8.2.0
-        version: 8.2.0
-      '@tanstack/db':
-        specifier: workspace:*
-        version: link:../../../packages/db
-      '@tanstack/db-capacitor-sqlite-persisted-collection':
-        specifier: workspace:*
-        version: link:../../../packages/db-capacitor-sqlite-persisted-collection
-    devDependencies:
-      '@capacitor/android':
-        specifier: ^8.2.0
-        version: 8.2.0(@capacitor/core@8.2.0)
-      '@capacitor/cli':
-        specifier: ^8.2.0
-        version: 8.2.0
-      '@capacitor/ios':
-        specifier: ^8.2.0
-        version: 8.2.0(@capacitor/core@8.2.0)
-      '@types/node':
-        specifier: ^25.2.2
-        version: 25.2.2
-      tsx:
-        specifier: ^4.21.0
-        version: 4.21.0
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vite:
-        specifier: ^7.3.1
-        version: 7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)
-
   examples/react-native/offline-transactions:
     dependencies:
       '@expo/metro-runtime':
@@ -903,6 +866,9 @@ importers:
         specifier: workspace:*
         version: link:../..
     devDependencies:
+      '@capacitor/android':
+        specifier: ^8.2.0
+        version: 8.2.0(@capacitor/core@8.2.0)
       '@capacitor/cli':
         specifier: ^8.2.0
         version: 8.2.0

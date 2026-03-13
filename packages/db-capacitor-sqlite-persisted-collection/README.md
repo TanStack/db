@@ -93,7 +93,15 @@ export const todosCollection = createCollection(
   builds the package-local Capacitor harness in `e2e/app`, launches the iOS
   simulator, and runs the full persisted collection e2e suite inside the real
   native Capacitor runtime.
+- `pnpm --filter @tanstack/db-capacitor-sqlite-persisted-collection test:e2e:android`
+  builds the same package-local Capacitor harness in `e2e/app`, launches an
+  Android emulator or uses a connected debug target, and runs the full
+  persisted collection e2e suite inside the real native Capacitor runtime.
 - `test:e2e:ios` is a repo-local validation path for this package. It depends on
   the checked-in `e2e/app` harness plus local Capacitor/Xcode tooling.
+- `test:e2e:android` depends on a local Android SDK. The runner auto-detects the
+  default macOS SDK location, boots the first available AVD when needed, and
+  reads the app-owned SQLite result database out of the debug sandbox with
+  `adb run-as`.
 - The native harness lives under `e2e/app` so the same app can be extended to
   other native targets later, including Android.
