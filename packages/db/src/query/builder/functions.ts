@@ -285,11 +285,13 @@ export function concat(
   )
 }
 
-export function coalesce(...args: Array<ExpressionLike>): BasicExpression<any> {
+export function coalesce<T extends Array<ExpressionLike>>(
+  ...args: T
+): BasicExpression<NonNullable<ExtractType<T[number]>>> {
   return new Func(
     `coalesce`,
     args.map((arg) => toExpression(arg)),
-  )
+  ) as BasicExpression<NonNullable<ExtractType<T[number]>>>
 }
 
 export function add<T1 extends ExpressionLike, T2 extends ExpressionLike>(
