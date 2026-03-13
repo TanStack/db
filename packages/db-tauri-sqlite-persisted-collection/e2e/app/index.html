@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0"
+    />
+    <title>Tauri SQLite E2E</title>
+  </head>
+  <body>
+    <main>
+      <p id="status">Booting Tauri persisted collection e2e runtime</p>
+      <pre id="details"></pre>
+    </main>
+    <script type="module">
+      const reportUrl = '%VITE_TANSTACK_DB_TAURI_E2E_REPORT_URL%'
+
+      if (reportUrl && !reportUrl.startsWith('%')) {
+        fetch(reportUrl, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            kind: 'status',
+            phase: 'html-loaded',
+          }),
+        }).catch(() => {})
+      }
+
+      import('/src/main.ts').catch((error) => {
+        if (reportUrl && !reportUrl.startsWith('%')) {
+          fetch(reportUrl, {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              kind: 'status',
+              phase: 'main-import-failed',
+              details: {
+                message: String(error?.message ?? error),
+              },
+            }),
+          }).catch(() => {})
+        }
+      })
+    </script>
+  </body>
+</html>
