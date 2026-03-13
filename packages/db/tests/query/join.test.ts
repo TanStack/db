@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, test } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import {
   concat,
   createLiveQueryCollection,
   eq,
   gt,
+  inArray,
   isNull,
   isUndefined,
   lt,
@@ -12,6 +14,7 @@ import {
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
 import {
+  flushPromises,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
 } from '../utils.js'
@@ -2021,6 +2024,76 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
     expect(
       chainedJoinQuery.toArray.every((r) => r.balance_amount !== undefined),
     ).toBe(true)
+  })
+
+  // Regression test for https://github.com/TanStack/db/issues/1367
+  // Temporal objects (PlainDate, ZonedDateTime, etc.) have no enumerable own
+  // properties, so Object.keys() returns []. Without special handling in the
+  // hash function, all Temporal instances produce identical hashes, causing the
+  // IVM join Index to treat old and new rows as equal and silently swallow updates.
+  test(`join should propagate Temporal field updates through live queries`, async () => {
+    type Task = {
+      id: number
+      name: string
+      project_id: number
+      dueDate: Temporal.PlainDate
+    }
+
+    type Project = {
+      id: number
+      name: string
+    }
+
+    const taskCollection = createCollection(
+      mockSyncCollectionOptions<Task>({
+        id: `test-temporal-join-${autoIndex}`,
+        getKey: (task) => task.id,
+        initialData: [
+          {
+            id: 1,
+            name: `Task A`,
+            project_id: 10,
+            dueDate: Temporal.PlainDate.from(`2024-01-15`),
+          },
+        ],
+        autoIndex,
+      }),
+    )
+
+    const projectCollection = createCollection(
+      mockSyncCollectionOptions<Project>({
+        id: `test-temporal-join-projects-${autoIndex}`,
+        getKey: (project) => project.id,
+        initialData: [{ id: 10, name: `Project Alpha` }],
+        autoIndex,
+      }),
+    )
+
+    const liveQuery = createLiveQueryCollection({
+      startSync: true,
+      query: (q) =>
+        q
+          .from({ task: taskCollection })
+          .where(({ task }) => inArray(task.id, [1]))
+          .innerJoin({ project: projectCollection }, ({ task, project }) =>
+            eq(task.project_id, project.id),
+          )
+          .select(({ task, project }) => ({
+            task,
+            project,
+          })),
+    })
+
+    await liveQuery.preload()
+    expect(liveQuery.toArray).toHaveLength(1)
+    expect(String(liveQuery.toArray[0]!.task.dueDate)).toBe(`2024-01-15`)
+
+    taskCollection.update(1, (draft: Task) => {
+      draft.dueDate = Temporal.PlainDate.from(`2024-06-15`)
+    })
+    await flushPromises()
+
+    expect(String(liveQuery.toArray[0]!.task.dueDate)).toBe(`2024-06-15`)
   })
 }
 

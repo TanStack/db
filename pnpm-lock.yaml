@@ -667,7 +667,7 @@ importers:
         version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6)
+        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -858,6 +858,9 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      temporal-polyfill:
+        specifier: ^0.3.0
+        version: 0.3.0
 
   packages/electric-db-collection:
     dependencies:
@@ -16131,6 +16134,11 @@ snapshots:
       kysely: 0.28.11
       pg: 8.19.0
       postgres: 3.4.8
+
+  drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76):
+    dependencies:
+      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
+      zod: 3.25.76
 
   drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6):
     dependencies:
