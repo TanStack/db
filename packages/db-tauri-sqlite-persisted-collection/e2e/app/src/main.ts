@@ -9,8 +9,7 @@ import {
 const statusElement = document.querySelector(`#status`) as HTMLParagraphElement
 const detailsElement = document.querySelector(`#details`) as HTMLPreElement
 const runtimeRunId =
-  import.meta.env.VITE_TANSTACK_DB_TAURI_E2E_RUN_ID ??
-  Date.now().toString(36)
+  import.meta.env.VITE_TANSTACK_DB_TAURI_E2E_RUN_ID ?? Date.now().toString(36)
 const reportUrl = import.meta.env.VITE_TANSTACK_DB_TAURI_E2E_REPORT_URL
 
 function setStatus(status: string, details?: unknown): void {
@@ -20,7 +19,9 @@ function setStatus(status: string, details?: unknown): void {
   }
 }
 
-async function postHarnessMessage(payload: Record<string, unknown>): Promise<void> {
+async function postHarnessMessage(
+  payload: Record<string, unknown>,
+): Promise<void> {
   if (!reportUrl) {
     return
   }
@@ -91,7 +92,9 @@ async function run(): Promise<void> {
       failed: result.failed,
     })
 
-    const failedResults = result.results.filter((entry) => entry.status === `failed`)
+    const failedResults = result.results.filter(
+      (entry) => entry.status === `failed`,
+    )
     const summary = {
       passed: result.passed,
       failed: result.failed,

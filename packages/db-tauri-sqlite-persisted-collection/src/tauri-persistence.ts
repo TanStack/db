@@ -158,7 +158,10 @@ export function createTauriSQLitePersistence<
     coordinator: resolvedCoordinator,
   })
 
-  const defaultPersistence = createCollectionPersistence(`sync-absent`, undefined)
+  const defaultPersistence = createCollectionPersistence(
+    `sync-absent`,
+    undefined,
+  )
 
   return {
     ...defaultPersistence,
