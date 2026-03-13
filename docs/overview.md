@@ -86,7 +86,7 @@ Collections are typed sets of objects that can be populated with data. They're d
 Collections can be populated in many ways, including:
 
 - fetching data, for example [from API endpoints using TanStack Query](https://tanstack.com/query/latest)
-- syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/)
+- syncing data, for example [using a sync engine like ElectricSQL](https://electric-sql.com/) or [PowerSync](https://powersync.com)
 - storing local data, for example [using localStorage for user preferences and settings](./collections/local-storage-collection.md) or [in-memory client data or UI state](./collections/local-only-collection.md)
 - from live collection queries, creating [derived collections as materialised views](#using-live-queries)
 
@@ -256,7 +256,7 @@ The collection will use the schema for its type inference. If you provide a sche
 
 You can create your own collection types by implementing the `Collection` interface found in [`../packages/db/src/collection/index.ts`](https://github.com/TanStack/db/blob/main/packages/db/src/collection/index.ts).
 
-See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection) and [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
+See the existing implementations in [`../packages/db`](https://github.com/TanStack/db/tree/main/packages/db), [`../packages/query-db-collection`](https://github.com/TanStack/db/tree/main/packages/query-db-collection), [`../packages/electric-db-collection`](https://github.com/TanStack/db/tree/main/packages/electric-db-collection), [`../packages/trailbase-db-collection`](https://github.com/TanStack/db/tree/main/packages/trailbase-db-collection) and [`../packages/powersync-db-collection`](https://github.com/TanStack/db/tree/main/packages/powersync-db-collection) for reference. Also see the [Collection Options Creator guide](./guides/collection-options-creator.md) for a pattern to create reusable collection configuration factories.
 
 ### Live queries
 
@@ -383,6 +383,7 @@ Here we illustrate two common ways of using TanStack DB:
 
 1. [using TanStack Query](#1-tanstack-query) with an existing REST API
 2. [using the ElectricSQL sync engine](#2-electricsql-sync) for real-time sync with your existing API
+3. [using PowerSync](#3-powersync-sync) for offline-first sync with SQLite-based persistence
 
 > [!TIP]
 > You can combine these patterns. One of the benefits of TanStack DB is that you can integrate different ways of loading data and handling mutations into the same app. Your components don't need to know where the data came from or goes.
@@ -515,6 +516,53 @@ const AddTodo = () => {
   )
 }
 ```
+
+### 3. PowerSync sync
+
+[PowerSync](https://powersync.com) provides offline-first sync with a SQLite-based local database and real-time synchronization with PostgreSQL, MongoDB, MySQL, and SQL Server (Alpha) backends.
+
+```tsx
+import { Schema, Table, column, PowerSyncDatabase } from "@powersync/web"
+import { createCollection } from "@tanstack/react-db"
+import { powerSyncCollectionOptions } from "@tanstack/powersync-db-collection"
+
+// Define PowerSync schema and initialize database
+const APP_SCHEMA = new Schema({
+  todos: new Table({
+    text: column.text,
+    completed: column.integer,
+  }),
+})
+
+const db = new PowerSyncDatabase({
+  database: { dbFilename: "app.sqlite" },
+  schema: APP_SCHEMA,
+})
+
+// Create a TanStack DB collection backed by PowerSync
+const todoCollection = createCollection(
+  powerSyncCollectionOptions({
+    database: db,
+    table: APP_SCHEMA.props.todos,
+  })
+)
+
+const AddTodo = () => {
+  return (
+    <Button
+      onClick={() =>
+        todoCollection.insert({
+          id: crypto.randomUUID(),
+          text: "Review PR",
+          completed: 0,
+        })
+      }
+    />
+  )
+}
+```
+
+Data is stored locally in SQLite and works offline. When connected to a PowerSync backend, changes sync automatically across all clients. See the [PowerSync Collection documentation](./collections/powersync-collection.md) for full setup details including schema validation, type transformations, and advanced transactions.
 
 ## React Native
 
