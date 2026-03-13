@@ -8,6 +8,7 @@ import {
   coalesce,
   concat,
   count,
+  divide,
   eq,
   gt,
   gte,
@@ -19,8 +20,10 @@ import {
   lte,
   max,
   min,
+  multiply,
   not,
   or,
+  subtract,
   sum,
   upper,
 } from '../../../src/query/builder/functions.js'
@@ -288,6 +291,75 @@ describe(`QueryBuilder Functions`, () => {
       const builtQuery = getQueryIR(query)
       const select = builtQuery.select!
       expect((select.salary_plus_bonus as any).name).toBe(`add`)
+    })
+
+    it(`subtract function works`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .select(({ employees }) => ({
+          id: employees.id,
+          salary_minus_tax: subtract(employees.salary, 5000),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.salary_minus_tax as any).name).toBe(`subtract`)
+    })
+
+    it(`multiply function works`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .select(({ employees }) => ({
+          id: employees.id,
+          double_salary: multiply(employees.salary, 2),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.double_salary as any).name).toBe(`multiply`)
+    })
+
+    it(`divide function works`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .select(({ employees }) => ({
+          id: employees.id,
+          monthly_salary: divide(employees.salary, 12),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.monthly_salary as any).name).toBe(`divide`)
+    })
+
+    it(`math functions can be combined for complex calculations`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .select(({ employees }) => ({
+          id: employees.id,
+          // (salary * 1.1) - 500 = 10% raise minus deductions
+          adjusted_salary: subtract(multiply(employees.salary, 1.1), 500),
+        }))
+
+      const builtQuery = getQueryIR(query)
+      const select = builtQuery.select!
+      expect((select.adjusted_salary as any).name).toBe(`subtract`)
+    })
+
+    it(`math functions can be used in orderBy`, () => {
+      const query = new Query()
+        .from({ employees: employeesCollection })
+        .orderBy(({ employees }) => multiply(employees.salary, 2), `desc`)
+        .select(({ employees }) => ({
+          id: employees.id,
+          salary: employees.salary,
+        }))
+
+      const builtQuery = getQueryIR(query)
+      expect(builtQuery.orderBy).toBeDefined()
+      expect(builtQuery.orderBy).toHaveLength(1)
+      expect((builtQuery.orderBy![0]!.expression as any).name).toBe(`multiply`)
+      expect(builtQuery.orderBy![0]!.compareOptions.direction).toBe(`desc`)
     })
   })
 })
