@@ -2086,18 +2086,14 @@ function createJoinTests(autoIndex: `off` | `eager`): void {
 
     await liveQuery.preload()
     expect(liveQuery.toArray).toHaveLength(1)
-    expect(
-      (liveQuery.toArray[0]!.task.dueDate as Temporal.PlainDate).toString(),
-    ).toBe(`2024-01-15`)
+    expect(String(liveQuery.toArray[0]!.task.dueDate)).toBe(`2024-01-15`)
 
-    taskCollection.update(1, (draft) => {
-      ;(draft as any).dueDate = Temporal.PlainDate.from(`2024-06-15`)
+    taskCollection.update(1, (draft: Task) => {
+      draft.dueDate = Temporal.PlainDate.from(`2024-06-15`)
     })
     await flushPromises()
 
-    expect(
-      (liveQuery.toArray[0]!.task.dueDate as Temporal.PlainDate).toString(),
-    ).toBe(`2024-06-15`)
+    expect(String(liveQuery.toArray[0]!.task.dueDate)).toBe(`2024-06-15`)
   })
 }
 

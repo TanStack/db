@@ -222,10 +222,16 @@ const temporalTypes = new Set([
   `Temporal.ZonedDateTime`,
 ])
 
+export interface TemporalLike {
+  [Symbol.toStringTag]: string
+  toString: () => string
+  equals?: (other: unknown) => boolean
+}
+
 /** Checks if the value is a Temporal object by checking for the Temporal brand */
-export function isTemporal(a: any): boolean {
+export function isTemporal(a: unknown): a is TemporalLike {
   if (a == null || typeof a !== `object`) return false
-  const tag = a[Symbol.toStringTag]
+  const tag = (a as Record<symbol, unknown>)[Symbol.toStringTag]
   return typeof tag === `string` && temporalTypes.has(tag)
 }
 

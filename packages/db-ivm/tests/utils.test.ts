@@ -4,7 +4,10 @@ import { hash } from '../src/hashing/index.js'
 
 // Minimal mock that mimics Temporal objects: Symbol.toStringTag + toString()
 // without requiring the temporal-polyfill dependency.
-function createTemporalLike(tag: string, value: string) {
+function createTemporalLike(
+  tag: string,
+  value: string,
+): { toString: () => string; [Symbol.toStringTag]: string } {
   return Object.create(null, {
     [Symbol.toStringTag]: { value: tag },
     toString: { value: () => value },

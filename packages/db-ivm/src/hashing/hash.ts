@@ -31,8 +31,13 @@ const temporalTypes = new Set([
   `Temporal.ZonedDateTime`,
 ])
 
-function isTemporal(input: object): boolean {
-  const tag = (input as any)[Symbol.toStringTag]
+interface TemporalLike {
+  [Symbol.toStringTag]: string
+  toString: () => string
+}
+
+function isTemporal(input: object): input is TemporalLike {
+  const tag = (input as Record<symbol, unknown>)[Symbol.toStringTag]
   return typeof tag === `string` && temporalTypes.has(tag)
 }
 
@@ -122,11 +127,11 @@ function hashUint8Array(input: Uint8Array): number {
   return hasher.digest()
 }
 
-function hashTemporal(input: object): number {
+function hashTemporal(input: TemporalLike): number {
   const hasher = new MurmurHashStream()
   hasher.update(TEMPORAL_MARKER)
-  hasher.update((input as any)[Symbol.toStringTag])
-  hasher.update((input as any).toString())
+  hasher.update(input[Symbol.toStringTag])
+  hasher.update(input.toString())
   return hasher.digest()
 }
 
