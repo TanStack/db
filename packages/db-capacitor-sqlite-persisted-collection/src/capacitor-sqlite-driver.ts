@@ -124,7 +124,7 @@ export class CapacitorSQLiteDriver implements SQLiteDriver {
     }
 
     await this.enqueue(async () => {
-      await this.database.execute(sql)
+      await this.database.execute(sql, false)
     })
   }
 
@@ -151,7 +151,7 @@ export class CapacitorSQLiteDriver implements SQLiteDriver {
     }
 
     await this.enqueue(async () => {
-      await this.database.run(sql, [...params])
+      await this.database.run(sql, [...params], false)
     })
   }
 
@@ -253,36 +253,21 @@ export class CapacitorSQLiteDriver implements SQLiteDriver {
   }
 
   private async beginTopLevelTransaction(): Promise<void> {
-    if (typeof this.database.beginTransaction === `function`) {
-      await this.database.beginTransaction()
-      return
-    }
-
-    await this.database.execute(`BEGIN IMMEDIATE`)
+    await this.database.execute(`BEGIN IMMEDIATE`, false)
   }
 
   private async commitTopLevelTransaction(): Promise<void> {
-    if (typeof this.database.commitTransaction === `function`) {
-      await this.database.commitTransaction()
-      return
-    }
-
-    await this.database.execute(`COMMIT`)
+    await this.database.execute(`COMMIT`, false)
   }
 
   private async rollbackTopLevelTransaction(): Promise<void> {
-    if (typeof this.database.rollbackTransaction === `function`) {
-      await this.database.rollbackTransaction()
-      return
-    }
-
-    await this.database.execute(`ROLLBACK`)
+    await this.database.execute(`ROLLBACK`, false)
   }
 
   private createTransactionDriver(): SQLiteDriver {
     const transactionDriver: SQLiteDriver = {
       exec: async (sql) => {
-        await this.database.execute(sql)
+        await this.database.execute(sql, false)
       },
       query: async <T>(
         sql: string,
@@ -292,7 +277,7 @@ export class CapacitorSQLiteDriver implements SQLiteDriver {
         return extractQueryRows<T>(result, sql)
       },
       run: async (sql, params = []) => {
-        await this.database.run(sql, [...params])
+        await this.database.run(sql, [...params], false)
       },
       transaction: async <T>(
         fn: (transactionDriver: SQLiteDriver) => Promise<T>,
@@ -316,18 +301,18 @@ export class CapacitorSQLiteDriver implements SQLiteDriver {
   ): Promise<T> {
     const savepointName = `tsdb_sp_${this.nextSavepointId}`
     this.nextSavepointId++
-    await this.database.execute(`SAVEPOINT ${savepointName}`)
+    await this.database.execute(`SAVEPOINT ${savepointName}`, false)
 
     try {
       const result = await this.runWithTransactionContext(
         transactionDriver,
         async () => fn(transactionDriver),
       )
-      await this.database.execute(`RELEASE SAVEPOINT ${savepointName}`)
+      await this.database.execute(`RELEASE SAVEPOINT ${savepointName}`, false)
       return result
     } catch (error) {
-      await this.database.execute(`ROLLBACK TO SAVEPOINT ${savepointName}`)
-      await this.database.execute(`RELEASE SAVEPOINT ${savepointName}`)
+      await this.database.execute(`ROLLBACK TO SAVEPOINT ${savepointName}`, false)
+      await this.database.execute(`RELEASE SAVEPOINT ${savepointName}`, false)
       throw error
     }
   }

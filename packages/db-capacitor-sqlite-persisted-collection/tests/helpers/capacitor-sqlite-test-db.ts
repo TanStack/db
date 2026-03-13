@@ -6,91 +6,76 @@ export type CapacitorSQLiteTestDatabase = CapacitorSQLiteDatabaseLike & {
   getNativeDatabase?: () => InstanceType<typeof BetterSqlite3>
 }
 
-export type CapacitorSQLiteTestDatabaseFactory = (options: {
-  filename: string
-}) => CapacitorSQLiteTestDatabase
-
-declare global {
-  var __tanstackDbCreateCapacitorSQLiteTestDatabase:
-    | CapacitorSQLiteTestDatabaseFactory
-    | undefined
-}
-
 export function createCapacitorSQLiteTestDatabase(options: {
   filename: string
 }): CapacitorSQLiteTestDatabase {
-  if (
-    typeof globalThis.__tanstackDbCreateCapacitorSQLiteTestDatabase ===
-    `function`
-  ) {
-    return globalThis.__tanstackDbCreateCapacitorSQLiteTestDatabase(options)
-  }
-
   const nativeDatabase = new BetterSqlite3(options.filename)
   let isTransactionActive = false
 
   return {
-    open: async () => {},
-    close: async () => {
+    open: () => Promise.resolve(),
+    close: () => {
       nativeDatabase.close()
+      return Promise.resolve()
     },
-    execute: async (statements: string) => {
+    execute: (statements: string) => {
       nativeDatabase.exec(statements)
-      return {
+      return Promise.resolve({
         changes: {
           changes: 0,
         },
-      }
+      })
     },
-    query: async (statement: string, values: Array<unknown> = []) => {
+    query: (statement: string, values: Array<unknown> = []) => {
       const prepared = nativeDatabase.prepare(statement)
       const rows =
         values.length > 0 ? prepared.all(...values) : prepared.all()
-      return {
+      return Promise.resolve({
         values: rows,
-      }
+      })
     },
-    run: async (statement: string, values: Array<unknown> = []) => {
+    run: (statement: string, values: Array<unknown> = []) => {
       const prepared = nativeDatabase.prepare(statement)
       const result =
         values.length > 0 ? prepared.run(...values) : prepared.run()
-      return {
+      return Promise.resolve({
         changes: {
           changes: result.changes,
           lastId: Number(result.lastInsertRowid),
         },
-      }
+      })
     },
-    beginTransaction: async () => {
+    beginTransaction: () => {
       nativeDatabase.exec(`BEGIN IMMEDIATE`)
       isTransactionActive = true
-      return {
+      return Promise.resolve({
         changes: {
           changes: 0,
         },
-      }
+      })
     },
-    commitTransaction: async () => {
+    commitTransaction: () => {
       nativeDatabase.exec(`COMMIT`)
       isTransactionActive = false
-      return {
+      return Promise.resolve({
         changes: {
           changes: 0,
         },
-      }
+      })
     },
-    rollbackTransaction: async () => {
+    rollbackTransaction: () => {
       nativeDatabase.exec(`ROLLBACK`)
       isTransactionActive = false
-      return {
+      return Promise.resolve({
         changes: {
           changes: 0,
         },
-      }
+      })
     },
-    isTransactionActive: async () => ({
-      result: isTransactionActive,
-    }),
+    isTransactionActive: () =>
+      Promise.resolve({
+        result: isTransactionActive,
+      }),
     getNativeDatabase: () => nativeDatabase,
   } as unknown as CapacitorSQLiteTestDatabase
 }
