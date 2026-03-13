@@ -519,7 +519,7 @@ const AddTodo = () => {
 
 ### 3. PowerSync sync
 
-[PowerSync](https://powersync.com) provides offline-first sync with a SQLite-based local database and real-time synchronization with PostgreSQL, MongoDB, MySQL, and SQL Server backends.
+[PowerSync](https://powersync.com) provides offline-first sync with a SQLite-based local database and real-time synchronization with PostgreSQL, MongoDB, MySQL, and SQL Server (Alpha) backends.
 
 ```tsx
 import { Schema, Table, column, PowerSyncDatabase } from "@powersync/web"

@@ -98,11 +98,23 @@ Use `trailBaseCollectionOptions` to sync records from TrailBase's Record APIs wi
 
 For offline-first sync with [PowerSync](https://powersync.com):
 
+Use `powerSyncCollectionOptions` to sync data via PowerSync's SQLite-based database with real-time synchronization to PostgreSQL, MongoDB, and MySQL backends. Install the collection package plus the platform-specific PowerSync SDK and SQLite adapter:
+
+**Web**
+
 ```sh
 npm install @tanstack/powersync-db-collection @powersync/web @journeyapps/wa-sqlite
 ```
 
-Use `powerSyncCollectionOptions` to sync data via PowerSync's SQLite-based database with real-time synchronization to PostgreSQL, MongoDB, and MySQL backends. Supports Web, React Native, and Node.js. See the [PowerSync Collection documentation](./collections/powersync-collection.md) for setup details.
+**React Native**
+
+```sh
+npm install @tanstack/powersync-db-collection @powersync/react-native @powersync/op-sqlite @op-engineering/op-sqlite
+```
+
+Or use `@journeyapps/react-native-quick-sqlite` as an alternative SQLite adapter.
+
+See the [PowerSync Collection documentation](./collections/powersync-collection.md) for setup details.
 
 ### RxDB Collection
 
