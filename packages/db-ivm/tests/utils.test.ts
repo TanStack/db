@@ -1,18 +1,7 @@
 import { describe, expect, it } from 'vitest'
+import { Temporal } from 'temporal-polyfill'
 import { DefaultMap } from '../src/utils.js'
 import { hash } from '../src/hashing/index.js'
-
-// Minimal mock that mimics Temporal objects: Symbol.toStringTag + toString()
-// without requiring the temporal-polyfill dependency.
-function createTemporalLike(
-  tag: string,
-  value: string,
-): { toString: () => string; [Symbol.toStringTag]: string } {
-  return Object.create(null, {
-    [Symbol.toStringTag]: { value: tag },
-    toString: { value: () => value },
-  })
-}
 
 describe(`DefaultMap`, () => {
   it(`should return default value for missing keys`, () => {
@@ -183,9 +172,9 @@ describe(`hash`, () => {
     })
 
     it(`should hash Temporal objects by value`, () => {
-      const date1 = createTemporalLike(`Temporal.PlainDate`, `2024-01-15`)
-      const date2 = createTemporalLike(`Temporal.PlainDate`, `2024-01-15`)
-      const date3 = createTemporalLike(`Temporal.PlainDate`, `2024-06-15`)
+      const date1 = Temporal.PlainDate.from(`2024-01-15`)
+      const date2 = Temporal.PlainDate.from(`2024-01-15`)
+      const date3 = Temporal.PlainDate.from(`2024-06-15`)
 
       const hash1 = hash(date1)
       const hash2 = hash(date2)
@@ -196,34 +185,22 @@ describe(`hash`, () => {
       expect(hash1).not.toBe(hash3) // Different Temporal dates should have different hash
 
       // Different Temporal types with overlapping string representations should differ
-      const plainDate = createTemporalLike(`Temporal.PlainDate`, `2024-01-15`)
-      const plainDateTime = createTemporalLike(
-        `Temporal.PlainDateTime`,
-        `2024-01-15T00:00:00`,
-      )
+      const plainDate = Temporal.PlainDate.from(`2024-01-15`)
+      const plainDateTime = Temporal.PlainDateTime.from(`2024-01-15T00:00:00`)
 
       expect(hash(plainDate)).not.toBe(hash(plainDateTime))
 
       // Other Temporal types should also hash correctly
-      const time1 = createTemporalLike(`Temporal.PlainTime`, `10:30:00`)
-      const time2 = createTemporalLike(`Temporal.PlainTime`, `10:30:00`)
-      const time3 = createTemporalLike(`Temporal.PlainTime`, `14:00:00`)
+      const time1 = Temporal.PlainTime.from(`10:30:00`)
+      const time2 = Temporal.PlainTime.from(`10:30:00`)
+      const time3 = Temporal.PlainTime.from(`14:00:00`)
 
       expect(hash(time1)).toBe(hash(time2))
       expect(hash(time1)).not.toBe(hash(time3))
 
-      const instant1 = createTemporalLike(
-        `Temporal.Instant`,
-        `2024-01-15T00:00:00Z`,
-      )
-      const instant2 = createTemporalLike(
-        `Temporal.Instant`,
-        `2024-01-15T00:00:00Z`,
-      )
-      const instant3 = createTemporalLike(
-        `Temporal.Instant`,
-        `2024-06-15T00:00:00Z`,
-      )
+      const instant1 = Temporal.Instant.from(`2024-01-15T00:00:00Z`)
+      const instant2 = Temporal.Instant.from(`2024-01-15T00:00:00Z`)
+      const instant3 = Temporal.Instant.from(`2024-06-15T00:00:00Z`)
 
       expect(hash(instant1)).toBe(hash(instant2))
       expect(hash(instant1)).not.toBe(hash(instant3))
