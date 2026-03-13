@@ -193,9 +193,13 @@ export function useLiveSuspenseQuery(
   // After success, errors surface as stale data (matches TanStack Query behavior)
   if (result.status === `error` && !hasBeenReadyRef.current) {
     promiseRef.current = null
-    // TODO: Once collections hold a reference to their last error object (#671),
-    // we should rethrow that actual error instead of creating a generic message
-    throw new Error(`Collection "${result.collection.id}" failed to load`)
+    // Re-throw the actual error from the collection if available (e.g. from
+    // query-db-collection's utils.lastError), otherwise fall back to a generic
+    // message. Throwing here propagates the error to the nearest ErrorBoundary.
+    const lastError = (result.collection as any).utils?.lastError
+    throw lastError instanceof Error
+      ? lastError
+      : new Error(`Collection "${result.collection.id}" failed to load`)
   }
 
   if (result.status === `loading` || result.status === `idle`) {
