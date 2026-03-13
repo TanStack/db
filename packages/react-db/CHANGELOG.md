@@ -1,5 +1,18 @@
 # @tanstack/react-db
 
+## 0.1.77
+
+### Patch Changes
+
+- Add `createEffect` API for reactive delta-driven effects and `useLiveQueryEffect` React hook. ([#1221](https://github.com/TanStack/db/pull/1221))
+
+  `createEffect` attaches callbacks to a live query's delta stream — firing `onEnter`, `onExit`, and `onUpdate` for row-level query-result transitions and `onBatch` for the full delta batch from each graph run — without materialising the full result set. Supports `skipInitial`, `orderBy` + `limit` (top-K window), joins, lazy loading, transaction coalescing, async disposal with `AbortSignal`, and `onSourceError` / `onError` callbacks.
+
+  `useLiveQueryEffect` is the React hook wrapper that manages the effect lifecycle (create on mount, dispose on unmount, recreate on dependency change).
+
+- Updated dependencies [[`c3e6a96`](https://github.com/TanStack/db/commit/c3e6a9654004ce53d429e0ec995738078ab93870)]:
+  - @tanstack/db@0.5.33
+
 ## 0.1.76
 
 ### Patch Changes
