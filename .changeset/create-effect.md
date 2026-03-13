@@ -1,6 +1,6 @@
 ---
-'@tanstack/db': minor
-'@tanstack/react-db': minor
+'@tanstack/db': patch
+'@tanstack/react-db': patch
 ---
 
 Add `createEffect` API for reactive delta-driven effects and `useLiveQueryEffect` React hook.
