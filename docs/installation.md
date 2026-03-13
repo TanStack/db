@@ -94,6 +94,16 @@ npm install @tanstack/trailbase-db-collection
 
 Use `trailBaseCollectionOptions` to sync records from TrailBase's Record APIs with built-in subscription support.
 
+#### PowerSync Collection
+
+For offline-first sync with [PowerSync](https://powersync.com):
+
+```sh
+npm install @tanstack/powersync-db-collection @powersync/web @journeyapps/wa-sqlite
+```
+
+Use `powerSyncCollectionOptions` to sync data via PowerSync's SQLite-based database with real-time synchronization to PostgreSQL, MongoDB, and MySQL backends. Supports Web, React Native, and Node.js. See the [PowerSync Collection documentation](./collections/powersync-collection.md) for setup details.
+
 ### RxDB Collection
 
 For offline-first apps and local persistence with [RxDB](https://rxdb.info):
