@@ -52,6 +52,11 @@ function runCommand(
     })
 
     if (options.stdio === `pipe`) {
+      if (!child.stdout) {
+        rejectPromise(new Error(`${command} did not expose stdout`))
+        return
+      }
+
       child.stdout.on(`data`, (chunk) => {
         stdout += String(chunk)
       })
@@ -97,13 +102,23 @@ function resolveSdkBinary(relativePath: string): string {
   return binaryPath
 }
 
+function createAndroidCommandEnv(): NodeJS.ProcessEnv {
+  const sdkRoot = resolveAndroidSdkRoot()
+  return {
+    ANDROID_HOME: sdkRoot,
+    ANDROID_SDK_ROOT: sdkRoot,
+  }
+}
+
 async function ensureNativeProject(): Promise<void> {
   const androidProjectDirectory = resolve(appDirectory, `android`)
   const androidGradlePath = resolve(androidProjectDirectory, `gradlew`)
+  const androidCommandEnv = createAndroidCommandEnv()
 
   if (!existsSync(androidGradlePath)) {
     await runCommand(`pnpm`, [`run`, `native:add:android`], {
       cwd: appDirectory,
+      env: androidCommandEnv,
     })
   }
 
@@ -115,6 +130,7 @@ async function ensureNativeProject(): Promise<void> {
   })
   await runCommand(`pnpm`, [`exec`, `cap`, `sync`, `android`], {
     cwd: appDirectory,
+    env: androidCommandEnv,
   })
 }
 
@@ -209,8 +225,10 @@ async function waitForAndroidBoot(adbPath: string, deviceId: string): Promise<vo
 
 async function buildDebugApk(): Promise<string> {
   const gradlewPath = resolve(androidDirectory, `gradlew`)
+  const androidCommandEnv = createAndroidCommandEnv()
   await runCommand(gradlewPath, [`assembleDebug`], {
     cwd: androidDirectory,
+    env: androidCommandEnv,
   })
 
   const apkPath = resolve(

@@ -148,7 +148,7 @@ export async function createCapacitorPersistedCollectionHarnessConfig<
     database,
     createPersistence,
     suiteId = Date.now().toString(36),
-    cleanup = async () => {},
+    cleanup = () => Promise.resolve(),
   } = options
   const seedData = generateSeedData()
 
@@ -203,6 +203,19 @@ export async function createCapacitorPersistedCollectionHarnessConfig<
   await onDemandPosts.seedPersisted(seedData.posts)
   await onDemandComments.seedPersisted(seedData.comments)
 
+  const teardown = async (): Promise<void> => {
+    await Promise.all([
+      eagerUsers.collection.cleanup(),
+      eagerPosts.collection.cleanup(),
+      eagerComments.collection.cleanup(),
+      onDemandUsers.collection.cleanup(),
+      onDemandPosts.collection.cleanup(),
+      onDemandComments.collection.cleanup(),
+    ])
+    await database.close()
+    await cleanup()
+  }
+
   const config: CapacitorPersistedCollectionHarnessConfig = {
     collections: {
       eager: {
@@ -251,22 +264,11 @@ export async function createCapacitorPersistedCollectionHarnessConfig<
       onDemandPosts.collection.startSyncImmediate()
       onDemandComments.collection.startSyncImmediate()
     },
-    teardown: async () => {},
+    teardown,
   }
 
   return {
     config,
-    teardown: async () => {
-      await Promise.all([
-        eagerUsers.collection.cleanup(),
-        eagerPosts.collection.cleanup(),
-        eagerComments.collection.cleanup(),
-        onDemandUsers.collection.cleanup(),
-        onDemandPosts.collection.cleanup(),
-        onDemandComments.collection.cleanup(),
-      ])
-      await database.close()
-      await cleanup()
-    },
+    teardown,
   }
 }
