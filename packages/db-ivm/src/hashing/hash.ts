@@ -18,6 +18,7 @@ const ARRAY_MARKER = randomHash()
 const MAP_MARKER = randomHash()
 const SET_MARKER = randomHash()
 const UINT8ARRAY_MARKER = randomHash()
+const TEMPORAL_MARKER = randomHash()
 
 // Maximum byte length for Uint8Arrays to hash by content instead of reference
 // Arrays smaller than this will be hashed by content, allowing proper equality comparisons
@@ -59,6 +60,11 @@ function hashObject(input: object): number {
   } else if (input instanceof File) {
     // Files are always hashed by reference due to their potentially large size
     return cachedReferenceHash(input)
+  } else if (isTemporal(input)) {
+    // Temporal objects (PlainDate, ZonedDateTime, etc.) have no enumerable own
+    // properties, so Object.keys() returns [] and hashPlainObject would produce
+    // identical hashes for all instances. Hash by toString() instead.
+    valueHash = hashTemporal(input)
   } else {
     let plainObjectInput = input
     let marker = OBJECT_MARKER
@@ -100,6 +106,30 @@ function hashUint8Array(input: Uint8Array): number {
   for (let i = 0; i < input.byteLength; i++) {
     hasher.writeByte(input[i]!)
   }
+  return hasher.digest()
+}
+
+const temporalTypes = [
+  `Temporal.PlainDate`,
+  `Temporal.PlainTime`,
+  `Temporal.PlainDateTime`,
+  `Temporal.PlainYearMonth`,
+  `Temporal.PlainMonthDay`,
+  `Temporal.ZonedDateTime`,
+  `Temporal.Instant`,
+  `Temporal.Duration`,
+]
+
+function isTemporal(input: object): boolean {
+  const tag = (input as any)[Symbol.toStringTag]
+  return typeof tag === `string` && temporalTypes.includes(tag)
+}
+
+function hashTemporal(input: object): number {
+  const hasher = new MurmurHashStream()
+  hasher.update(TEMPORAL_MARKER)
+  hasher.update((input as any)[Symbol.toStringTag])
+  hasher.update(input.toString())
   return hasher.digest()
 }
 
