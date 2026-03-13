@@ -12,6 +12,8 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react",
     "paths": {
+      "@tanstack/db": ["../db/src"],
+      "@tanstack/db-ivm": ["../db-ivm/src"],
       "@tanstack/store": ["../store/src"]
     }
   },
