@@ -16,9 +16,7 @@ afterEach(async () => {
 })
 
 function createTempSqlitePath(): string {
-  const tempDirectory = mkdtempSync(
-    join(tmpdir(), `db-capacitor-driver-test-`),
-  )
+  const tempDirectory = mkdtempSync(join(tmpdir(), `db-capacitor-driver-test-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
   activeCleanupFns.push(() => {
     rmSync(tempDirectory, { recursive: true, force: true })
@@ -67,13 +65,14 @@ it(`rolls back top-level transactions on failure`, async () => {
 
   await expect(
     driver.transactionWithDriver(async (transactionDriver) => {
-      await transactionDriver.run(`INSERT INTO tx_test (id, title) VALUES (?, ?)`, [
-        `1`,
-        `First`,
-      ])
-      await transactionDriver.run(`INSERT INTO tx_test (missing_column) VALUES (?)`, [
-        `x`,
-      ])
+      await transactionDriver.run(
+        `INSERT INTO tx_test (id, title) VALUES (?, ?)`,
+        [`1`, `First`],
+      )
+      await transactionDriver.run(
+        `INSERT INTO tx_test (missing_column) VALUES (?)`,
+        [`x`],
+      )
     }),
   ).rejects.toThrow()
 
@@ -183,7 +182,7 @@ it(`serializes unrelated operations behind an active transaction`, async () => {
 })
 
 it(`throws config error when db methods are missing`, () => {
-  expect(() => new CapacitorSQLiteDriver({ database: {} as never })).toThrowError(
-    InvalidPersistedCollectionConfigError,
-  )
+  expect(
+    () => new CapacitorSQLiteDriver({ database: {} as never }),
+  ).toThrowError(InvalidPersistedCollectionConfigError)
 })

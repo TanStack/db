@@ -28,8 +28,7 @@ export function createCapacitorSQLiteTestDatabase(options: {
     },
     query: (statement: string, values: Array<unknown> = []) => {
       const prepared = nativeDatabase.prepare(statement)
-      const rows =
-        values.length > 0 ? prepared.all(...values) : prepared.all()
+      const rows = values.length > 0 ? prepared.all(...values) : prepared.all()
       return Promise.resolve({
         values: rows,
       })

@@ -28,7 +28,9 @@ type RuntimePersistenceFactory = (options: {
 function createRuntimeDatabaseHarness(): RuntimePersistenceDatabaseHarness {
   const tempDirectory = mkdtempSync(join(tmpdir(), `db-capacitor-persistence-`))
   const dbPath = join(tempDirectory, `state.sqlite`)
-  const databases = new Set<ReturnType<typeof createCapacitorSQLiteTestDatabase>>()
+  const databases = new Set<
+    ReturnType<typeof createCapacitorSQLiteTestDatabase>
+  >()
 
   return {
     createDriver: () => {
@@ -64,19 +66,22 @@ const runtimePersistenceSuites: ReadonlyArray<{
 ]
 
 for (const suite of runtimePersistenceSuites) {
-  runRuntimePersistenceContractSuite(`${suite.name} runtime persistence helpers`, {
-    createDatabaseHarness: createRuntimeDatabaseHarness,
-    createAdapter: (driver) =>
-      suite.createPersistence({
-        database: (driver as CapacitorSQLiteDriver).getDatabase(),
-      }).adapter,
-    createPersistence: (driver, coordinator) =>
-      suite.createPersistence({
-        database: (driver as CapacitorSQLiteDriver).getDatabase(),
-        coordinator,
-      }),
-    createCoordinator: () => new SingleProcessCoordinator(),
-  })
+  runRuntimePersistenceContractSuite(
+    `${suite.name} runtime persistence helpers`,
+    {
+      createDatabaseHarness: createRuntimeDatabaseHarness,
+      createAdapter: (driver) =>
+        suite.createPersistence({
+          database: (driver as CapacitorSQLiteDriver).getDatabase(),
+        }).adapter,
+      createPersistence: (driver, coordinator) =>
+        suite.createPersistence({
+          database: (driver as CapacitorSQLiteDriver).getDatabase(),
+          coordinator,
+        }),
+      createCoordinator: () => new SingleProcessCoordinator(),
+    },
+  )
 }
 
 for (const suite of runtimePersistenceSuites) {

@@ -45,8 +45,13 @@ function createSuite(name: string, skipped = false): SuiteNode {
 }
 
 const rootSuite = createSuite(``)
-function formatSuitePath(suites: ReadonlyArray<SuiteNode>, leafName?: string): string {
-  const segments = suites.map((suite) => suite.name).filter((name) => name.length > 0)
+function formatSuitePath(
+  suites: ReadonlyArray<SuiteNode>,
+  leafName?: string,
+): string {
+  const segments = suites
+    .map((suite) => suite.name)
+    .filter((name) => name.length > 0)
   if (leafName && leafName.length > 0) {
     segments.push(leafName)
   }
@@ -60,7 +65,11 @@ function currentSuite(): SuiteNode {
   return suiteStack[suiteStack.length - 1] ?? rootSuite
 }
 
-function pushSuite(name: string, skipped: boolean, callback: AsyncCallback): void {
+function pushSuite(
+  name: string,
+  skipped: boolean,
+  callback: AsyncCallback,
+): void {
   const suite = createSuite(name, skipped)
   currentSuite().suites.push(suite)
 
@@ -102,7 +111,11 @@ function resolveTestCallback(
   throw new Error(`Test callback must be a function`)
 }
 
-function registerTest(name: string, callback: AsyncCallback, skipped: boolean): void {
+function registerTest(
+  name: string,
+  callback: AsyncCallback,
+  skipped: boolean,
+): void {
   currentSuite().tests.push({
     name,
     fn: callback,
@@ -258,7 +271,9 @@ function createMatchers(
     },
     toHaveLength(expected: number) {
       const actualLength =
-        typeof actual === `string` || Array.isArray(actual) ? actual.length : undefined
+        typeof actual === `string` || Array.isArray(actual)
+          ? actual.length
+          : undefined
 
       assert(
         actualLength === expected,
@@ -278,7 +293,10 @@ function createMatchers(
   })
 }
 
-export function expect(actual: unknown, message?: string): Record<string, unknown> {
+export function expect(
+  actual: unknown,
+  message?: string,
+): Record<string, unknown> {
   return createMatchers(actual, message)
 }
 
@@ -315,7 +333,11 @@ export const it: It = Object.assign(
     callbackOrOptions: AsyncCallback | Record<string, unknown>,
     maybeCallback?: AsyncCallback,
   ) => {
-    registerTest(name, resolveTestCallback(callbackOrOptions, maybeCallback), false)
+    registerTest(
+      name,
+      resolveTestCallback(callbackOrOptions, maybeCallback),
+      false,
+    )
   },
   {
     skip: (
@@ -363,7 +385,10 @@ export function resetRegisteredTests(): void {
 function countTests(suite: SuiteNode): number {
   return (
     suite.tests.length +
-    suite.suites.reduce((count, childSuite) => count + countTests(childSuite), 0)
+    suite.suites.reduce(
+      (count, childSuite) => count + countTests(childSuite),
+      0,
+    )
   )
 }
 
@@ -402,7 +427,11 @@ async function runSuite(
     total: number
   },
   options: {
-    onTestStart?: (context: { name: string; index: number; total: number }) => void
+    onTestStart?: (context: {
+      name: string
+      index: number
+      total: number
+    }) => void
   },
 ): Promise<void> {
   if (suite.skipped) {
@@ -460,7 +489,8 @@ async function runSuite(
             try {
               await hook()
             } catch (error) {
-              const message = error instanceof Error ? error.message : String(error)
+              const message =
+                error instanceof Error ? error.message : String(error)
               results.push({
                 name: `${testName} afterEach`,
                 status: `failed`,
@@ -484,9 +514,15 @@ async function runSuite(
   )
 }
 
-export async function runRegisteredTests(options: {
-  onTestStart?: (context: { name: string; index: number; total: number }) => void
-} = {}): Promise<RegisteredTestRunResult> {
+export async function runRegisteredTests(
+  options: {
+    onTestStart?: (context: {
+      name: string
+      index: number
+      total: number
+    }) => void
+  } = {},
+): Promise<RegisteredTestRunResult> {
   const results: Array<TestResult> = []
   const state = {
     index: 0,

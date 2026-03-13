@@ -24,7 +24,9 @@ function createDatabaseName(runId: string, filename: string): string {
 export function createNativeCapacitorSQLiteTestDatabaseFactory(options: {
   sqlite?: SQLiteConnection
   runId: string
-}): (databaseOptions: { filename: string }) => NativeCapacitorSQLiteTestDatabase {
+}): (databaseOptions: {
+  filename: string
+}) => NativeCapacitorSQLiteTestDatabase {
   const sqlite = options.sqlite ?? new SQLiteConnection(CapacitorSQLite)
 
   return ({ filename }) => {
@@ -65,13 +67,7 @@ export function createNativeCapacitorSQLiteTestDatabaseFactory(options: {
       },
       run: async (statement, values, transaction, returnMode, isSQL92) => {
         const database = await connectionPromise
-        return database.run(
-          statement,
-          values,
-          transaction,
-          returnMode,
-          isSQL92,
-        )
+        return database.run(statement, values, transaction, returnMode, isSQL92)
       },
       getDatabaseName: () => databaseName,
     }

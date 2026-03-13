@@ -46,9 +46,7 @@ function runCommand(
         ...options.env,
       },
       stdio:
-        options.stdio === `pipe`
-          ? [`ignore`, `pipe`, `inherit`]
-          : `inherit`,
+        options.stdio === `pipe` ? [`ignore`, `pipe`, `inherit`] : `inherit`,
     })
 
     if (options.stdio === `pipe`) {
@@ -135,20 +133,21 @@ async function ensureNativeProject(): Promise<void> {
 }
 
 async function resolveAndroidDeviceId(adbPath: string): Promise<string> {
-  const requestedId = process.env.TANSTACK_DB_CAPACITOR_ANDROID_DEVICE_ID?.trim()
+  const requestedId =
+    process.env.TANSTACK_DB_CAPACITOR_ANDROID_DEVICE_ID?.trim()
   if (requestedId) {
     return requestedId
   }
 
-  const devicesOutput = await runCommand(
-    adbPath,
-    [`devices`],
-    { stdio: `pipe` },
-  )
+  const devicesOutput = await runCommand(adbPath, [`devices`], {
+    stdio: `pipe`,
+  })
   const connectedDevices = devicesOutput
     .split(`\n`)
     .map((line) => line.trim())
-    .filter((line) => line.endsWith(`device`) && !line.startsWith(`List of devices`))
+    .filter(
+      (line) => line.endsWith(`device`) && !line.startsWith(`List of devices`),
+    )
     .map((line) => line.split(/\s+/)[0])
 
   if (connectedDevices.length > 0) {
@@ -156,7 +155,8 @@ async function resolveAndroidDeviceId(adbPath: string): Promise<string> {
   }
 
   const emulatorPath = resolveSdkBinary(`emulator/emulator`)
-  const requestedAvd = process.env.TANSTACK_DB_CAPACITOR_ANDROID_AVD_NAME?.trim()
+  const requestedAvd =
+    process.env.TANSTACK_DB_CAPACITOR_ANDROID_AVD_NAME?.trim()
   const avdName =
     requestedAvd ||
     (await runCommand(emulatorPath, [`-list-avds`], { stdio: `pipe` }))
@@ -168,23 +168,17 @@ async function resolveAndroidDeviceId(adbPath: string): Promise<string> {
     throw new Error(`No Android emulator available`)
   }
 
-  const emulator = spawn(
-    emulatorPath,
-    [`-avd`, avdName, `-no-snapshot-save`],
-    {
-      detached: true,
-      stdio: `ignore`,
-    },
-  )
+  const emulator = spawn(emulatorPath, [`-avd`, avdName, `-no-snapshot-save`], {
+    detached: true,
+    stdio: `ignore`,
+  })
   emulator.unref()
 
   const deadline = Date.now() + 180_000
   while (Date.now() < deadline) {
-    const updatedDevicesOutput = await runCommand(
-      adbPath,
-      [`devices`],
-      { stdio: `pipe` },
-    )
+    const updatedDevicesOutput = await runCommand(adbPath, [`devices`], {
+      stdio: `pipe`,
+    })
     const emulatorDevice = updatedDevicesOutput
       .split(`\n`)
       .map((line) => line.trim())
@@ -200,7 +194,10 @@ async function resolveAndroidDeviceId(adbPath: string): Promise<string> {
   throw new Error(`Timed out waiting for Android emulator to appear`)
 }
 
-async function waitForAndroidBoot(adbPath: string, deviceId: string): Promise<void> {
+async function waitForAndroidBoot(
+  adbPath: string,
+  deviceId: string,
+): Promise<void> {
   await runCommand(adbPath, [`-s`, deviceId, `wait-for-device`])
 
   const deadline = Date.now() + 180_000
