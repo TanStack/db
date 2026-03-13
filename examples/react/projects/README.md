@@ -201,14 +201,15 @@ export const todoCollection = createCollection(
     queryClient,
     schema: todoSchema,
     getKey: (item) => item.id,
-    onInsert: async ({ transaction }) => {
+    onInsert: async ({ transaction, collection }) => {
       const { modified: newTodo } = transaction.mutations[0]
-      const result = await trpc.todos.create.mutate({
+      await trpc.todos.create.mutate({
         text: newTodo.text,
         completed: newTodo.completed,
         project_id: newTodo.project_id,
       })
-      return { txid: result.txid }
+      // Trigger refetch to sync server state
+      await collection.utils.refetch()
     },
     // You can also implement onUpdate, onDelete as needed
   })
