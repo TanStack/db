@@ -85,7 +85,10 @@ function isCapacitorSQLiteDatabaseLike(
   )
 }
 
-function extractQueryRows<T>(result: CapacitorSQLiteValues, sql: string): ReadonlyArray<T> {
+function extractQueryRows<T>(
+  result: CapacitorSQLiteValues,
+  sql: string,
+): ReadonlyArray<T> {
   if (Array.isArray(result.values)) {
     return result.values as ReadonlyArray<T>
   }
@@ -165,7 +168,9 @@ export class CapacitorSQLiteDriver implements SQLiteDriver {
       return activeTransactionDriver.transaction(fn)
     }
 
-    return this.transactionWithDriver((transactionDriver) => fn(transactionDriver))
+    return this.transactionWithDriver((transactionDriver) =>
+      fn(transactionDriver),
+    )
   }
 
   async transactionWithDriver<T>(
@@ -311,7 +316,10 @@ export class CapacitorSQLiteDriver implements SQLiteDriver {
       await this.database.execute(`RELEASE SAVEPOINT ${savepointName}`, false)
       return result
     } catch (error) {
-      await this.database.execute(`ROLLBACK TO SAVEPOINT ${savepointName}`, false)
+      await this.database.execute(
+        `ROLLBACK TO SAVEPOINT ${savepointName}`,
+        false,
+      )
       await this.database.execute(`RELEASE SAVEPOINT ${savepointName}`, false)
       throw error
     }

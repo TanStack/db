@@ -5,7 +5,9 @@ import type { NativeCapacitorSQLiteTestDatabase } from './native-capacitor-sqlit
 
 export function registerCapacitorNativeE2ESuite(options: {
   suiteName: string
-  createDatabase: (databaseOptions: { filename: string }) => NativeCapacitorSQLiteTestDatabase
+  createDatabase: (databaseOptions: {
+    filename: string
+  }) => NativeCapacitorSQLiteTestDatabase
 }): void {
   const { suiteName, createDatabase } = options
   registerPersistedCollectionConformanceSuite({

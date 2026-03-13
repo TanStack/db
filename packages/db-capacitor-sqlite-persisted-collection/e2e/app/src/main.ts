@@ -102,7 +102,9 @@ async function run(): Promise<void> {
       },
     })
 
-    const failedResults = result.results.filter((entry) => entry.status === `failed`)
+    const failedResults = result.results.filter(
+      (entry) => entry.status === `failed`,
+    )
     const summary = {
       passed: result.passed,
       failed: result.failed,

@@ -68,10 +68,14 @@ async function resolveSimulatorId(): Promise<string> {
 
   const devices = await new Promise<string>((resolvePromise, rejectPromise) => {
     let output = ``
-    const child = spawn(`xcrun`, [`simctl`, `list`, `devices`, `available`, `-j`], {
-      cwd: packageDirectory,
-      stdio: [`ignore`, `pipe`, `inherit`],
-    })
+    const child = spawn(
+      `xcrun`,
+      [`simctl`, `list`, `devices`, `available`, `-j`],
+      {
+        cwd: packageDirectory,
+        stdio: [`ignore`, `pipe`, `inherit`],
+      },
+    )
 
     child.stdout.on(`data`, (chunk) => {
       output += String(chunk)
@@ -104,7 +108,9 @@ async function resolveSimulatorId(): Promise<string> {
     .flatMap(([, runtimeDevices]) => runtimeDevices)
     .filter((device) => device.isAvailable && device.name.includes(`iPhone`))
 
-  const bootedDevice = availableIPhones.find((device) => device.state === `Booted`)
+  const bootedDevice = availableIPhones.find(
+    (device) => device.state === `Booted`,
+  )
   if (bootedDevice) {
     return bootedDevice.udid
   }
@@ -122,7 +128,11 @@ async function resolveSimulatorId(): Promise<string> {
 
 async function ensureNativeProject(): Promise<void> {
   const iosProjectDirectory = resolve(appDirectory, `ios`)
-  const iosXcodeProjectPath = resolve(iosProjectDirectory, `App`, `App.xcodeproj`)
+  const iosXcodeProjectPath = resolve(
+    iosProjectDirectory,
+    `App`,
+    `App.xcodeproj`,
+  )
   const iosPodfilePath = resolve(iosProjectDirectory, `App`, `Podfile`)
 
   if (existsSync(iosXcodeProjectPath) && !existsSync(iosPodfilePath)) {
@@ -217,20 +227,16 @@ async function waitForResult(): Promise<RuntimeResultRow> {
     Promise.resolve(),
   )
   await runCommand(`xcrun`, [`simctl`, `bootstatus`, simulatorId, `-b`])
-  await runCommand(`xcrun`, [`simctl`, `terminate`, simulatorId, appId]).catch(() =>
-    Promise.resolve(),
+  await runCommand(`xcrun`, [`simctl`, `terminate`, simulatorId, appId]).catch(
+    () => Promise.resolve(),
   )
-  await runCommand(`pnpm`, [
-    `exec`,
-    `cap`,
-    `run`,
-    `ios`,
-    `--target`,
-    simulatorId,
-    `--no-sync`,
-  ], {
-    cwd: appDirectory,
-  })
+  await runCommand(
+    `pnpm`,
+    [`exec`, `cap`, `run`, `ios`, `--target`, simulatorId, `--no-sync`],
+    {
+      cwd: appDirectory,
+    },
+  )
 
   const appDataContainer = await resolveAppDataContainer()
   const databasePath = resolve(
