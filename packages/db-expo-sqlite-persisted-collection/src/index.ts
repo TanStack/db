@@ -4,10 +4,7 @@ export type {
   ExpoSQLitePersistenceOptions,
   ExpoSQLiteSchemaMismatchPolicy,
 } from './expo'
-export {
-  ExpoSQLiteDriver,
-  createExpoSQLiteDriver,
-} from './expo-sqlite-driver'
+export { ExpoSQLiteDriver, createExpoSQLiteDriver } from './expo-sqlite-driver'
 export type {
   ExpoSQLiteBindParams,
   ExpoSQLiteRunResult,

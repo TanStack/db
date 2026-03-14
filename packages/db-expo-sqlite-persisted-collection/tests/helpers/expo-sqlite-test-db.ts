@@ -84,11 +84,13 @@ function createTransactionHandle(
     getAllAsync: <T>(
       sql: string,
       params?: ExpoSQLiteBindParams,
-    ): Promise<ReadonlyArray<T>> => Promise.resolve(executeAll<T>(database, sql, params)),
+    ): Promise<ReadonlyArray<T>> =>
+      Promise.resolve(executeAll<T>(database, sql, params)),
     runAsync: (
       sql: string,
       params?: ExpoSQLiteBindParams,
-    ): Promise<ExpoSQLiteRunResult> => Promise.resolve(executeRun(database, sql, params)),
+    ): Promise<ExpoSQLiteRunResult> =>
+      Promise.resolve(executeRun(database, sql, params)),
   }
 }
 

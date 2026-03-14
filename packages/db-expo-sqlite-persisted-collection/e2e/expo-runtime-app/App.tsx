@@ -90,10 +90,7 @@ export default function App() {
     setStatusLines((currentLines) => [...currentLines, message])
   }
 
-  const databaseHandles = useMemo(
-    () => new Map<string, DatabaseHandle>(),
-    [],
-  )
+  const databaseHandles = useMemo(() => new Map<string, DatabaseHandle>(), [])
   const activeTransactions = useMemo(
     () => new Map<string, ActiveTransaction>(),
     [],
@@ -132,19 +129,25 @@ export default function App() {
     ): Promise<ExpoRuntimeSmokeTestResult> => {
       const database = await SQLite.openDatabaseAsync(databaseName)
       const collectionId = `expo-runtime-smoke-${Date.now().toString(36)}`
-      const persistence = createExpoSQLitePersistence<{
-        id: string
-        title: string
-        score: number
-      }, string>({
-        database,
-      })
-      const collection = createCollection(
-        persistedCollectionOptions<{
+      const persistence = createExpoSQLitePersistence<
+        {
           id: string
           title: string
           score: number
-        }, string>({
+        },
+        string
+      >({
+        database,
+      })
+      const collection = createCollection(
+        persistedCollectionOptions<
+          {
+            id: string
+            title: string
+            score: number
+          },
+          string
+        >({
           id: collectionId,
           getKey: (todo) => todo.id,
           persistence,
@@ -164,7 +167,10 @@ export default function App() {
         collection.startSyncImmediate()
         await collection.stateWhenReady()
 
-        const reloadedRows = await persistence.adapter.loadSubset(collectionId, {})
+        const reloadedRows = await persistence.adapter.loadSubset(
+          collectionId,
+          {},
+        )
         return {
           insertedTitle: `Persisted from Expo runtime`,
           reloadedCount: reloadedRows.length,
@@ -175,22 +181,33 @@ export default function App() {
       }
     }
 
-    const handleCommand = async (command: ExpoRuntimeCommand): Promise<unknown> => {
+    const handleCommand = async (
+      command: ExpoRuntimeCommand,
+    ): Promise<unknown> => {
       switch (command.type) {
         case `db:exec`: {
-          const database = await getDatabase(command.databaseId, command.databaseName)
+          const database = await getDatabase(
+            command.databaseId,
+            command.databaseName,
+          )
           await database.execAsync(command.sql)
           return undefined
         }
         case `db:getAll`: {
-          const database = await getDatabase(command.databaseId, command.databaseName)
+          const database = await getDatabase(
+            command.databaseId,
+            command.databaseName,
+          )
           const params = normalizeSqliteParams(command.params)
           return params === undefined
             ? database.getAllAsync(command.sql)
             : database.getAllAsync(command.sql, params)
         }
         case `db:run`: {
-          const database = await getDatabase(command.databaseId, command.databaseName)
+          const database = await getDatabase(
+            command.databaseId,
+            command.databaseName,
+          )
           const params = normalizeSqliteParams(command.params)
           return params === undefined
             ? database.runAsync(command.sql)
@@ -205,7 +222,10 @@ export default function App() {
           return undefined
         }
         case `tx:start`: {
-          const database = await getDatabase(command.databaseId, command.databaseName)
+          const database = await getDatabase(
+            command.databaseId,
+            command.databaseName,
+          )
           const complete = createDeferred()
           let readyResolve!: () => void
           let readyReject!: (error?: unknown) => void

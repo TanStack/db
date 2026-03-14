@@ -1,5 +1,8 @@
 import { ensureExpoEmulatorRuntime } from './expo-emulator-runtime'
-import type { ExpoSQLiteTestDatabase, ExpoSQLiteTestDatabaseFactory } from './expo-sqlite-test-db'
+import type {
+  ExpoSQLiteTestDatabase,
+  ExpoSQLiteTestDatabaseFactory,
+} from './expo-sqlite-test-db'
 
 function resolvePlatform(): `ios` | `android` {
   const platform = process.env.TANSTACK_DB_EXPO_RUNTIME_PLATFORM?.trim()
@@ -19,11 +22,19 @@ export function createMobileSQLiteTestDatabaseFactory(): ExpoSQLiteTestDatabaseF
 
   return (options): ExpoSQLiteTestDatabase => {
     let databasePromise:
-      | Promise<ReturnType<Awaited<ReturnType<typeof ensureExpoEmulatorRuntime>>[`createDatabase`]>>
+      | Promise<
+          ReturnType<
+            Awaited<
+              ReturnType<typeof ensureExpoEmulatorRuntime>
+            >[`createDatabase`]
+          >
+        >
       | undefined
 
     const getDatabase = () => {
-      databasePromise ??= getRuntime().then((runtime) => runtime.createDatabase(options))
+      databasePromise ??= getRuntime().then((runtime) =>
+        runtime.createDatabase(options),
+      )
       return databasePromise
     }
 
@@ -33,7 +44,8 @@ export function createMobileSQLiteTestDatabaseFactory(): ExpoSQLiteTestDatabaseF
       },
       getAllAsync: async <T>(sql, params) =>
         (await getDatabase()).getAllAsync<T>(sql, params),
-      runAsync: async (sql, params) => (await getDatabase()).runAsync(sql, params),
+      runAsync: async (sql, params) =>
+        (await getDatabase()).runAsync(sql, params),
       withExclusiveTransactionAsync: async <T>(task): Promise<T> =>
         (await getDatabase()).withExclusiveTransactionAsync(task),
       closeAsync: async () => {

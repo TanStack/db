@@ -3,10 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { createCollection } from '@tanstack/db'
-import {
-  createExpoSQLitePersistence,
-  persistedCollectionOptions,
-} from '../src'
+import { createExpoSQLitePersistence, persistedCollectionOptions } from '../src'
 import { createExpoSQLiteTestDatabase } from './helpers/expo-sqlite-test-db'
 
 type Todo = {

@@ -1,11 +1,11 @@
 import { existsSync } from 'node:fs'
-import {   createServer } from 'node:http'
+import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { createServer as createNetServer } from 'node:net'
 import { basename, delimiter, resolve } from 'node:path'
-import {  spawn } from 'node:child_process'
-import type {IncomingMessage, ServerResponse} from 'node:http';
-import type {ChildProcessWithoutNullStreams} from 'node:child_process';
+import { spawn } from 'node:child_process'
+import type { IncomingMessage, ServerResponse } from 'node:http'
+import type { ChildProcessWithoutNullStreams } from 'node:child_process'
 import type {
   ExpoSQLiteBindParams,
   ExpoSQLiteDatabaseLike,
@@ -401,7 +401,9 @@ class ExpoEmulatorRuntime {
     this.childProcess.once(`exit`, (code) => {
       if (code !== 0) {
         this.sessionReady.reject(
-          new Error(`Expo emulator app exited before registering (code ${code})`),
+          new Error(
+            `Expo emulator app exited before registering (code ${code})`,
+          ),
         )
       }
     })
@@ -470,7 +472,10 @@ class ExpoEmulatorRuntime {
       return
     }
 
-    if (request.method === `POST` && requestUrl.pathname === `/command-result`) {
+    if (
+      request.method === `POST` &&
+      requestUrl.pathname === `/command-result`
+    ) {
       const body = await readJsonBody<ExpoRuntimeCommandResult>(request)
       if (!body) {
         jsonResponse(response, 400, { error: `Missing command result payload` })
