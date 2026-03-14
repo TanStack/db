@@ -1,3 +1,4 @@
+import { hashKey } from '../utils.js'
 import {
   isPredicateSubset,
   isWhereSubset,
@@ -42,11 +43,14 @@ export class DeduplicatedLoadSubset {
     | ((options: LoadSubsetOptions) => void)
     | undefined
 
-  // Combined where predicate for all unlimited calls (no limit)
-  private unlimitedWhere: BasicExpression<boolean> | undefined = undefined
+  // Combined where predicate for unlimited calls, scoped by metadata context.
+  private unlimitedWhereByMeta = new Map<
+    string,
+    BasicExpression<boolean> | undefined
+  >()
 
-  // Flag to track if we've loaded all data (unlimited call with no where clause)
-  private hasLoadedAllData = false
+  // Tracks if all data has been loaded for a metadata context.
+  private hasLoadedAllDataByMeta = new Set<string>()
 
   // List of all limited calls (with limit, possibly with orderBy)
   // We clone options before storing to prevent mutation of stored predicates
@@ -83,16 +87,19 @@ export class DeduplicatedLoadSubset {
    * @returns true if data is already loaded, or a Promise that resolves when data is loaded
    */
   loadSubset = (options: LoadSubsetOptions): true | Promise<void> => {
+    const metaKey = hashKey(options.meta ?? null)
+
     // If we've loaded all data, everything is covered
-    if (this.hasLoadedAllData) {
+    if (this.hasLoadedAllDataByMeta.has(metaKey)) {
       this.onDeduplicate?.(options)
       return true
     }
 
     // Check against unlimited combined predicate
     // If we've loaded all data matching a where clause, we don't need to refetch subsets
-    if (this.unlimitedWhere !== undefined && options.where !== undefined) {
-      if (isWhereSubset(options.where, this.unlimitedWhere)) {
+    const unlimitedWhere = this.unlimitedWhereByMeta.get(metaKey)
+    if (unlimitedWhere !== undefined && options.where !== undefined) {
+      if (isWhereSubset(options.where, unlimitedWhere)) {
         this.onDeduplicate?.(options)
         return true // Data already loaded via unlimited call
       }
@@ -132,13 +139,13 @@ export class DeduplicatedLoadSubset {
     // may be narrowed with a difference expression for the actual backend request.
     const trackingOptions = cloneOptions(options)
     const loadOptions = cloneOptions(options)
-    if (this.unlimitedWhere !== undefined && options.limit === undefined) {
+    if (unlimitedWhere !== undefined && options.limit === undefined) {
       // Compute difference to get only the missing data
       // We can only do this for unlimited queries
       // and we can only remove data that was loaded from unlimited queries
       // because with limited queries we have no way to express that we already loaded part of the matching data
       loadOptions.where =
-        minusWherePredicates(loadOptions.where, this.unlimitedWhere) ??
+        minusWherePredicates(loadOptions.where, unlimitedWhere) ??
         loadOptions.where
     }
 
@@ -195,8 +202,8 @@ export class DeduplicatedLoadSubset {
    * state after the reset. This prevents old requests from repopulating cleared state.
    */
   reset(): void {
-    this.unlimitedWhere = undefined
-    this.hasLoadedAllData = false
+    this.unlimitedWhereByMeta.clear()
+    this.hasLoadedAllDataByMeta.clear()
     this.limitedCalls = []
     this.inflightCalls = []
     // Increment generation to invalidate any in-flight completion handlers
@@ -205,23 +212,26 @@ export class DeduplicatedLoadSubset {
   }
 
   private updateTracking(options: LoadSubsetOptions): void {
+    const metaKey = hashKey(options.meta ?? null)
+
     // Update tracking based on whether this was a limited or unlimited call
     if (options.limit === undefined) {
       // Unlimited call - update combined where predicate
       // We ignore orderBy for unlimited calls as mentioned in requirements
       if (options.where === undefined) {
         // No where clause = all data loaded
-        this.hasLoadedAllData = true
-        this.unlimitedWhere = undefined
-        this.limitedCalls = []
-        this.inflightCalls = []
-      } else if (this.unlimitedWhere === undefined) {
-        this.unlimitedWhere = options.where
+        this.hasLoadedAllDataByMeta.add(metaKey)
+        this.unlimitedWhereByMeta.delete(metaKey)
+      } else if (this.unlimitedWhereByMeta.get(metaKey) === undefined) {
+        this.unlimitedWhereByMeta.set(metaKey, options.where)
       } else {
-        this.unlimitedWhere = unionWherePredicates([
-          this.unlimitedWhere,
-          options.where,
-        ])
+        this.unlimitedWhereByMeta.set(
+          metaKey,
+          unionWherePredicates([
+            this.unlimitedWhereByMeta.get(metaKey)!,
+            options.where,
+          ]),
+        )
       }
     } else {
       // Limited call - add to list for future subset checks

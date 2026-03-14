@@ -229,6 +229,57 @@ const productsCollection = createCollection(
 )
 ```
 
+## Query-Level Dynamic Meta
+
+In addition to static collection-level `meta`, you can pass dynamic metadata at the query level using the `.meta()` chainable method. This is useful when the metadata depends on runtime conditions or user-specific context that varies between different queries.
+
+### When to Use Query-Level Meta
+
+Query-level meta is useful for:
+- **Multi-tenancy**: Different queries for different tenants
+- **User-specific context**: User ID, permissions, or roles that vary per query
+- **Request-scoped parameters**: API flags or options specific to a query invocation
+- **Authorization scopes**: Different authorization contexts for different queries
+
+### Basic Usage
+
+Use `.meta()` when building a live query to attach dynamic metadata:
+
+```typescript
+import { createLiveQueryCollection, eq } from "@tanstack/db"
+
+// Tenant-specific query
+const tenantProducts = createLiveQueryCollection((q) =>
+  q
+    .from({ product: productsCollection })
+    .where(({ product }) => eq(product.active, true))
+    .meta({ tenantId: "tenant-123" })
+)
+```
+
+The metadata passed to `.meta()` is merged with the collection-level meta and passed to your query function via `ctx.meta`:
+
+```typescript
+const productsCollection = createCollection(
+  queryCollectionOptions({
+    queryKey: ["products"],
+    queryFn: async (ctx) => {
+      // Both collection-level and query-level meta are available
+      const { loadSubsetOptions, tenantId } = ctx.meta
+      
+      return api.getProducts({
+        ...parseLoadSubsetOptions(loadSubsetOptions),
+        tenantId, // From query-level .meta()
+      })
+    },
+    queryClient,
+    getKey: (item) => item.id,
+  })
+)
+```
+
+For detailed information about meta merging, precedence rules, cache key isolation, and more examples, see the [Query Metadata section in the Live Queries guide](../guides/live-queries.md#query-metadata).
+
 ## Persistence Handlers
 
 You can define handlers that are called when mutations occur. These handlers can persist changes to your backend and control whether the query should refetch after the operation:

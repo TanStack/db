@@ -144,4 +144,32 @@ describe(`buildQuery function`, () => {
     expect(select).toHaveProperty(`content`)
     expect(select).toHaveProperty(`user`)
   })
+
+  it(`attaches query metadata to query IR`, () => {
+    const query = buildQuery((q) =>
+      q
+        .from({ employees: employeesCollection })
+        .meta({ scope: `tenant-1`, includeClients: true }),
+    )
+
+    expect(query.meta).toEqual({
+      scope: `tenant-1`,
+      includeClients: true,
+    })
+  })
+
+  it(`merges metadata across multiple meta calls`, () => {
+    const query = buildQuery((q) =>
+      q
+        .from({ employees: employeesCollection })
+        .meta({ scope: `tenant-1`, includeClients: false })
+        .meta({ includeClients: true, includeParent: true }),
+    )
+
+    expect(query.meta).toEqual({
+      scope: `tenant-1`,
+      includeClients: true,
+      includeParent: true,
+    })
+  })
 })

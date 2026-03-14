@@ -449,6 +449,135 @@ describe(`QueryCollection`, () => {
     )
   })
 
+  it(`should merge query-level meta into queryFn context`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([])
+
+    const config: QueryCollectionConfig<TestItem> = {
+      id: `dynamic-meta-test`,
+      queryClient,
+      queryKey: [`dynamic-meta-test`],
+      queryFn,
+      getKey,
+      syncMode: `on-demand`,
+      meta: {
+        staticFlag: `from-config`,
+      },
+    }
+
+    const collection = createCollection(queryCollectionOptions(config))
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: collection })
+          .where(({ item }) => eq(item.id, `1`))
+          .meta({
+            scope: `tenant-1`,
+            includeClients: true,
+          }),
+    })
+
+    await liveQuery.preload()
+
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalled()
+    })
+
+    expect(queryFn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        meta: expect.objectContaining({
+          staticFlag: `from-config`,
+          scope: `tenant-1`,
+          includeClients: true,
+          loadSubsetOptions: expect.objectContaining({
+            meta: expect.objectContaining({
+              scope: `tenant-1`,
+              includeClients: true,
+            }),
+          }),
+        }),
+      }),
+    )
+  })
+
+  it(`should prefer query-level meta values over collection-level meta`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([])
+
+    const config: QueryCollectionConfig<TestItem> = {
+      id: `dynamic-meta-precedence-test`,
+      queryClient,
+      queryKey: [`dynamic-meta-precedence-test`],
+      queryFn,
+      getKey,
+      syncMode: `on-demand`,
+      meta: {
+        scope: `collection-scope`,
+        includeClients: false,
+      },
+    }
+
+    const collection = createCollection(queryCollectionOptions(config))
+
+    const liveQuery = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: collection })
+          .where(({ item }) => eq(item.id, `1`))
+          .meta({
+            scope: `query-scope`,
+            includeClients: true,
+          }),
+    })
+
+    await liveQuery.preload()
+
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalled()
+    })
+
+    const context = queryFn.mock.calls[0]?.[0]
+    expect(context?.meta?.scope).toBe(`query-scope`)
+    expect(context?.meta?.includeClients).toBe(true)
+  })
+
+  it(`should use distinct query keys when only meta differs`, async () => {
+    const queryFn = vi.fn().mockResolvedValue([{ id: `1`, name: `Item 1` }])
+
+    const config: QueryCollectionConfig<TestItem> = {
+      id: `dynamic-meta-query-key-test`,
+      queryClient,
+      queryKey: [`dynamic-meta-query-key-test`],
+      queryFn,
+      getKey,
+      syncMode: `on-demand`,
+    }
+
+    const collection = createCollection(queryCollectionOptions(config))
+
+    const queryA = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: collection })
+          .where(({ item }) => eq(item.id, `1`))
+          .meta({ scope: `tenant-a` }),
+    })
+
+    const queryB = createLiveQueryCollection({
+      query: (q) =>
+        q
+          .from({ item: collection })
+          .where(({ item }) => eq(item.id, `1`))
+          .meta({ scope: `tenant-b` }),
+    })
+
+    await queryA.preload()
+    await queryB.preload()
+
+    await vi.waitFor(() => {
+      expect(queryFn).toHaveBeenCalledTimes(2)
+    })
+  })
+
   describe(`loadSubsetOptions passed to queryFn`, () => {
     it(`should pass eq where clause to queryFn via loadSubsetOptions`, async () => {
       const queryKey = [`loadSubsetTest`]
