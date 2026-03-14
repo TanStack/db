@@ -1006,4 +1006,60 @@ describe(`createDeduplicatedLoadSubset`, () => {
       expect(callCount).toBe(1)
     })
   })
+
+  describe(`meta-aware deduplication`, () => {
+    it(`should NOT dedupe unlimited calls across different meta contexts`, async () => {
+      let callCount = 0
+      const mockLoadSubset = () => {
+        callCount++
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      const where = gt(ref(`age`), val(10))
+
+      await deduplicated.loadSubset({
+        where,
+        meta: { scope: `tenant-a` },
+      })
+      expect(callCount).toBe(1)
+
+      await deduplicated.loadSubset({
+        where,
+        meta: { scope: `tenant-b` },
+      })
+      expect(callCount).toBe(2)
+    })
+
+    it(`should dedupe when predicates and meta are identical`, async () => {
+      let callCount = 0
+      const mockLoadSubset = () => {
+        callCount++
+        return Promise.resolve()
+      }
+
+      const deduplicated = new DeduplicatedLoadSubset({
+        loadSubset: mockLoadSubset,
+      })
+
+      const where = gt(ref(`age`), val(10))
+      const meta = { scope: `tenant-a`, includeClients: true }
+
+      await deduplicated.loadSubset({
+        where,
+        meta,
+      })
+      expect(callCount).toBe(1)
+
+      const result = await deduplicated.loadSubset({
+        where: gt(ref(`age`), val(20)),
+        meta: { ...meta },
+      })
+      expect(result).toBe(true)
+      expect(callCount).toBe(1)
+    })
+  })
 })

@@ -50,6 +50,12 @@ export function serializeLoadSubsetOptions(
     result.offset = options.offset
   }
 
+  // Include dynamic query metadata to avoid cache key collisions between
+  // requests that share predicates but differ by runtime context (e.g. tenant scope).
+  if (options.meta && Object.keys(options.meta).length > 0) {
+    result.meta = serializeValue(options.meta)
+  }
+
   return Object.keys(result).length === 0 ? undefined : JSON.stringify(result)
 }
 
