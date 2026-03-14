@@ -1,5 +1,5 @@
 ---
-"@tanstack/db": patch
+'@tanstack/db': patch
 ---
 
 fix(db): treat objects with `Symbol.toStringTag` as leaf values in `IsPlainObject`
