@@ -8,6 +8,13 @@
       "when": 1752697558683,
       "tag": "0000_slimy_frank_castle",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1772367710323,
+      "tag": "0001_lyrical_quicksilver",
+      "breakpoints": true
     }
   ]
 }
