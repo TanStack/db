@@ -1,6 +1,6 @@
 {
   "name": "@tanstack/solid-db",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "description": "Solid integration for @tanstack/db",
   "author": "Kyle Mathews",
   "license": "MIT",
