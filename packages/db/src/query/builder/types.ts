@@ -862,6 +862,12 @@ export type Prettify<T> = {
 
 /**
  * IsPlainObject - Utility type to check if T is a plain object
+ *
+ * Returns `false` for:
+ * - Arrays (ReadonlyArray)
+ * - JavaScript built-ins (Date, Map, Set, etc.)
+ * - Objects with `Symbol.toStringTag` (class instances like Temporal types,
+ *   TypedArrays not already in JsBuiltIns, etc.) — these are not plain data objects
  */
 type IsPlainObject<T> = T extends unknown
   ? T extends object
@@ -869,7 +875,9 @@ type IsPlainObject<T> = T extends unknown
       ? false
       : T extends JsBuiltIns
         ? false
-        : true
+        : T extends { readonly [Symbol.toStringTag]: string }
+          ? false
+          : true
     : false
   : false
 
