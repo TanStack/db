@@ -1,6 +1,7 @@
 import { PropRef, Value } from '../ir.js'
 import type { BasicExpression } from '../ir.js'
 import type { RefLeaf } from './types.js'
+import type { VirtualRowProps } from '../../virtual-props.js'
 
 export interface RefProxy<T = any> {
   /** @internal */
@@ -18,10 +19,7 @@ export interface RefProxy<T = any> {
 export type VirtualPropsRefProxy<
   TKey extends string | number = string | number,
 > = {
-  readonly $synced: RefLeaf<boolean>
-  readonly $origin: RefLeaf<'local' | 'remote'>
-  readonly $key: RefLeaf<TKey>
-  readonly $collectionId: RefLeaf<string>
+  readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
 }
 
 /**

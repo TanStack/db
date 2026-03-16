@@ -467,7 +467,7 @@ describe(`LocalOnly Collection`, () => {
     it(`should allow adding more items after initial data`, () => {
       const initialItems: Array<TestItem> = [{ id: 100, name: `Initial Item` }]
 
-      const testCollection = createCollection<TestItem, number>(
+      const testCollection = createCollection(
         localOnlyCollectionOptions({
           id: `test-initial-plus-more`,
           getKey: (item: TestItem) => item.id,
@@ -504,7 +504,7 @@ describe(`LocalOnly Collection`, () => {
       // mutation is triggered from inside an mutation handler callback after a short
       // delay" test in collection-subscribe-changes.test.ts
 
-      const testCollection = createCollection<TestItem, number>(
+      const testCollection = createCollection(
         localOnlyCollectionOptions({
           id: `numbers`,
           getKey: (item) => item.id,
@@ -616,10 +616,10 @@ describe(`LocalOnly Collection`, () => {
     })
 
     it(`should only accept mutations for the specific collection`, () => {
-      const otherCollection = createCollection<TestItem, number>(
+      const otherCollection = createCollection(
         localOnlyCollectionOptions({
           id: `other-collection`,
-          getKey: (item) => item.id,
+          getKey: (item: TestItem) => item.id,
         }),
       )
 

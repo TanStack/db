@@ -2,7 +2,11 @@ import { deepEquals } from '../utils'
 import { SortedMap } from '../SortedMap'
 import { enrichRowWithVirtualProps } from '../virtual-props.js'
 import { DIRECT_TRANSACTION_METADATA_KEY } from './transaction-metadata.js'
-import type { VirtualOrigin, WithVirtualProps } from '../virtual-props.js'
+import type {
+  VirtualOrigin,
+  VirtualRowProps,
+  WithVirtualProps,
+} from '../virtual-props.js'
 import type { Transaction } from '../transactions'
 import type { StandardSchemaV1 } from '@standard-schema/spec'
 import type {
@@ -34,6 +38,16 @@ interface PendingSyncedTransaction<
    * writeUpdate, writeDelete, writeUpsert) which need synchronous updates to syncedData.
    */
   immediate?: boolean
+}
+
+type InternalChangeMessage<
+  T extends object = Record<string, unknown>,
+  TKey extends string | number = string | number,
+> = ChangeMessage<T, TKey> & {
+  __virtualProps?: {
+    value?: VirtualRowProps<TKey>
+    previousValue?: VirtualRowProps<TKey>
+  }
 }
 
 export class CollectionStateManager<
@@ -162,20 +176,58 @@ export class CollectionStateManager<
     return this.rowOrigins.get(key) ?? 'remote'
   }
 
-  /**
-   * Enriches a row with virtual properties using the "add-if-missing" pattern.
-   * If the row already has virtual properties (from an upstream collection),
-   * they are preserved. Otherwise, new values are computed.
-   */
-  public enrichWithVirtualProps(
-    row: TOutput,
+  private createVirtualPropsSnapshot(
     key: TKey,
+    overrides?: Partial<VirtualRowProps<TKey>>,
+  ): VirtualRowProps<TKey> {
+    return {
+      $synced: overrides?.$synced ?? this.isRowSynced(key),
+      $origin: overrides?.$origin ?? this.getRowOrigin(key),
+      $key: overrides?.$key ?? key,
+      $collectionId: overrides?.$collectionId ?? this.collection.id,
+    }
+  }
+
+  private getVirtualPropsSnapshotForState(
+    key: TKey,
+    options?: {
+      rowOrigins?: ReadonlyMap<TKey, VirtualOrigin>
+      optimisticUpserts?: Pick<Map<TKey, unknown>, 'has'>
+      optimisticDeletes?: Pick<Set<TKey>, 'has'>
+      completedOptimisticKeys?: Pick<Map<TKey, unknown>, 'has'>
+    },
+  ): VirtualRowProps<TKey> {
+    if (this.isLocalOnly) {
+      return this.createVirtualPropsSnapshot(key, {
+        $synced: true,
+        $origin: 'local',
+      })
+    }
+
+    const optimisticUpserts = options?.optimisticUpserts ?? this.optimisticUpserts
+    const optimisticDeletes = options?.optimisticDeletes ?? this.optimisticDeletes
+    const hasOptimisticChange =
+      optimisticUpserts.has(key) ||
+      optimisticDeletes.has(key) ||
+      options?.completedOptimisticKeys?.has(key) === true
+
+    return this.createVirtualPropsSnapshot(key, {
+      $synced: !hasOptimisticChange,
+      $origin: hasOptimisticChange
+        ? 'local'
+        : (options?.rowOrigins ?? this.rowOrigins).get(key) ?? 'remote',
+    })
+  }
+
+  private enrichWithVirtualPropsSnapshot(
+    row: TOutput,
+    virtualProps: VirtualRowProps<TKey>,
   ): WithVirtualProps<TOutput, TKey> {
     const existingRow = row as Partial<WithVirtualProps<TOutput, TKey>>
-    const synced = existingRow.$synced ?? this.isRowSynced(key)
-    const origin = existingRow.$origin ?? this.getRowOrigin(key)
-    const resolvedKey = existingRow.$key ?? key
-    const collectionId = existingRow.$collectionId ?? this.collection.id
+    const synced = existingRow.$synced ?? virtualProps.$synced
+    const origin = existingRow.$origin ?? virtualProps.$origin
+    const resolvedKey = existingRow.$key ?? virtualProps.$key
+    const collectionId = existingRow.$collectionId ?? virtualProps.$collectionId
 
     const cached = this.virtualPropsCache.get(row as object)
     if (
@@ -207,6 +259,27 @@ export class CollectionStateManager<
     return enriched
   }
 
+  private clearOriginTrackingState(): void {
+    this.rowOrigins.clear()
+    this.pendingLocalChanges.clear()
+    this.pendingLocalOrigins.clear()
+  }
+
+  /**
+   * Enriches a row with virtual properties using the "add-if-missing" pattern.
+   * If the row already has virtual properties (from an upstream collection),
+   * they are preserved. Otherwise, new values are computed.
+   */
+  public enrichWithVirtualProps(
+    row: TOutput,
+    key: TKey,
+  ): WithVirtualProps<TOutput, TKey> {
+    return this.enrichWithVirtualPropsSnapshot(
+      row,
+      this.createVirtualPropsSnapshot(key),
+    )
+  }
+
   /**
    * Creates a change message with virtual properties.
    * Uses the "add-if-missing" pattern so that pass-through from upstream
@@ -215,15 +288,25 @@ export class CollectionStateManager<
   public enrichChangeMessage(
     change: ChangeMessage<TOutput, TKey>,
   ): ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey> {
-    const enrichedValue = this.enrichWithVirtualProps(change.value, change.key)
+    const { __virtualProps } = change as InternalChangeMessage<TOutput, TKey>
+    const enrichedValue = __virtualProps?.value
+      ? this.enrichWithVirtualPropsSnapshot(change.value, __virtualProps.value)
+      : this.enrichWithVirtualProps(change.value, change.key)
     const enrichedPreviousValue = change.previousValue
-      ? this.enrichWithVirtualProps(change.previousValue, change.key)
+      ? __virtualProps?.previousValue
+        ? this.enrichWithVirtualPropsSnapshot(
+            change.previousValue,
+            __virtualProps.previousValue,
+          )
+        : this.enrichWithVirtualProps(change.previousValue, change.key)
       : undefined
 
     return {
-      ...change,
+      key: change.key,
+      type: change.type,
       value: enrichedValue,
       previousValue: enrichedPreviousValue,
+      metadata: change.metadata,
     } as ChangeMessage<WithVirtualProps<TOutput, TKey>, TKey>
   }
 
@@ -386,6 +469,7 @@ export class CollectionStateManager<
 
     const previousState = new Map(this.optimisticUpserts)
     const previousDeletes = new Set(this.optimisticDeletes)
+    const previousRowOrigins = new Map(this.rowOrigins)
 
     // Update pending optimistic state for completed/failed transactions
     for (const transaction of this.transactions.values()) {
@@ -529,8 +613,13 @@ export class CollectionStateManager<
     this.size = this.calculateSize()
 
     // Collect events for changes
-    const events: Array<ChangeMessage<TOutput, TKey>> = []
-    this.collectOptimisticChanges(previousState, previousDeletes, events)
+    const events: Array<InternalChangeMessage<TOutput, TKey>> = []
+    this.collectOptimisticChanges(
+      previousState,
+      previousDeletes,
+      previousRowOrigins,
+      events,
+    )
 
     // Filter out events for recently synced keys to prevent duplicates
     // BUT: Only filter out events that are actually from sync operations
@@ -621,7 +710,8 @@ export class CollectionStateManager<
   private collectOptimisticChanges(
     previousUpserts: Map<TKey, TOutput>,
     previousDeletes: Set<TKey>,
-    events: Array<ChangeMessage<TOutput, TKey>>,
+    previousRowOrigins: ReadonlyMap<TKey, VirtualOrigin>,
+    events: Array<InternalChangeMessage<TOutput, TKey>>,
   ): void {
     const allKeys = new Set([
       ...previousUpserts.keys(),
@@ -637,11 +727,31 @@ export class CollectionStateManager<
         previousUpserts,
         previousDeletes,
       )
+      const previousVirtualProps = this.getVirtualPropsSnapshotForState(key, {
+        rowOrigins: previousRowOrigins,
+        optimisticUpserts: previousUpserts,
+        optimisticDeletes: previousDeletes,
+      })
+      const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
 
       if (previousValue !== undefined && currentValue === undefined) {
-        events.push({ type: `delete`, key, value: previousValue })
+        events.push({
+          type: `delete`,
+          key,
+          value: previousValue,
+          __virtualProps: {
+            value: previousVirtualProps,
+          },
+        })
       } else if (previousValue === undefined && currentValue !== undefined) {
-        events.push({ type: `insert`, key, value: currentValue })
+        events.push({
+          type: `insert`,
+          key,
+          value: currentValue,
+          __virtualProps: {
+            value: nextVirtualProps,
+          },
+        })
       } else if (
         previousValue !== undefined &&
         currentValue !== undefined &&
@@ -652,6 +762,10 @@ export class CollectionStateManager<
           key,
           value: currentValue,
           previousValue,
+          __virtualProps: {
+            value: nextVirtualProps,
+            previousValue: previousVirtualProps,
+          },
         })
       }
     }
@@ -745,6 +859,8 @@ export class CollectionStateManager<
         ? committedSyncedTransactions.find((t) => t.truncate)
             ?.optimisticSnapshot
         : null
+      let truncatePendingLocalChanges: Set<TKey> | undefined
+      let truncatePendingLocalOrigins: Set<TKey> | undefined
 
       // First collect all keys that will be affected by sync operations
       const changedKeys = new Set<TKey>()
@@ -790,28 +906,6 @@ export class CollectionStateManager<
         }
       }
 
-      const getPreviousVirtualProps = (key: TKey) => {
-        if (this.isLocalOnly) {
-          return { synced: true, origin: 'local' as const }
-        }
-        if (
-          previousOptimisticUpserts.has(key) ||
-          previousOptimisticDeletes.has(key) ||
-          completedOptimisticOps.has(key)
-        ) {
-          return { synced: false, origin: 'local' as const }
-        }
-        return {
-          synced: true,
-          origin: previousRowOrigins.get(key) ?? 'remote',
-        }
-      }
-
-      const getNextVirtualProps = (key: TKey) => ({
-        synced: this.isRowSynced(key),
-        origin: this.getRowOrigin(key),
-      })
-
       for (const transaction of committedSyncedTransactions) {
         // Handle truncate operations first
         if (transaction.truncate) {
@@ -836,9 +930,14 @@ export class CollectionStateManager<
 
           // 2) Clear the authoritative synced base. Subsequent server ops in this
           //    same commit will rebuild the base atomically.
+          // Preserve pending local tracking just long enough for operations in this
+          // truncate batch to retain correct local origin semantics.
+          truncatePendingLocalChanges = new Set(this.pendingLocalChanges)
+          truncatePendingLocalOrigins = new Set(this.pendingLocalOrigins)
           this.syncedData.clear()
           this.syncedMetadata.clear()
           this.syncedKeys.clear()
+          this.clearOriginTrackingState()
 
           // 3) Clear currentVisibleState for truncated keys to ensure subsequent operations
           //    are compared against the post-truncate state (undefined) rather than pre-truncate state
@@ -882,7 +981,9 @@ export class CollectionStateManager<
           const origin: VirtualOrigin =
             this.isLocalOnly ||
             this.pendingLocalChanges.has(key) ||
-            this.pendingLocalOrigins.has(key)
+            this.pendingLocalOrigins.has(key) ||
+            truncatePendingLocalChanges?.has(key) === true ||
+            truncatePendingLocalOrigins?.has(key) === true
               ? 'local'
               : 'remote'
 
@@ -1053,19 +1154,24 @@ export class CollectionStateManager<
       for (const key of changedKeys) {
         const previousVisibleValue = currentVisibleState.get(key)
         const newVisibleValue = this.get(key) // This returns the new derived state
-        const previousVirtualProps = getPreviousVirtualProps(key)
-        const nextVirtualProps = getNextVirtualProps(key)
+        const previousVirtualProps = this.getVirtualPropsSnapshotForState(key, {
+          rowOrigins: previousRowOrigins,
+          optimisticUpserts: previousOptimisticUpserts,
+          optimisticDeletes: previousOptimisticDeletes,
+          completedOptimisticKeys: completedOptimisticOps,
+        })
+        const nextVirtualProps = this.getVirtualPropsSnapshotForState(key)
         const virtualChanged =
-          previousVirtualProps.synced !== nextVirtualProps.synced ||
-          previousVirtualProps.origin !== nextVirtualProps.origin
+          previousVirtualProps.$synced !== nextVirtualProps.$synced ||
+          previousVirtualProps.$origin !== nextVirtualProps.$origin
         const previousValueWithVirtual =
           previousVisibleValue !== undefined
             ? enrichRowWithVirtualProps(
                 previousVisibleValue,
                 key,
                 this.collection.id,
-                () => previousVirtualProps.synced,
-                () => previousVirtualProps.origin,
+                () => previousVirtualProps.$synced,
+                () => previousVirtualProps.$origin,
               )
             : undefined
 
@@ -1111,8 +1217,8 @@ export class CollectionStateManager<
                 previousValueFromCompleted,
                 key,
                 this.collection.id,
-                () => previousVirtualProps.synced,
-                () => previousVirtualProps.origin,
+                () => previousVirtualProps.$synced,
+                () => previousVirtualProps.$origin,
               )
             events.push({
               type: `update`,
@@ -1198,7 +1304,7 @@ export class CollectionStateManager<
       .catch(() => {
         // Transaction failed, but we want to keep failed transactions for reference
         // so don't remove it.
-        // This empty catch block is necessary to prevent unhandled promise rejections.
+        // Rollback already triggers state recomputation via touchCollection().
       })
   }
 
@@ -1263,9 +1369,7 @@ export class CollectionStateManager<
     this.pendingOptimisticDeletes.clear()
     this.pendingOptimisticDirectUpserts.clear()
     this.pendingOptimisticDirectDeletes.clear()
-    this.rowOrigins.clear()
-    this.pendingLocalChanges.clear()
-    this.pendingLocalOrigins.clear()
+    this.clearOriginTrackingState()
     this.isLocalOnly = false
     this.size = 0
     this.pendingSyncedTransactions = []

@@ -97,19 +97,6 @@ export interface VirtualRowProps<
 }
 
 /**
- * Virtual properties as ref types for use in query expressions.
- * These are the types used when accessing virtual properties in query callbacks.
- *
- * @internal
- */
-export type VirtualRefProps<TKey extends string | number = string | number> = {
-  readonly $synced: boolean
-  readonly $origin: VirtualOrigin
-  readonly $key: TKey
-  readonly $collectionId: string
-}
-
-/**
  * Adds virtual properties to a row type.
  *
  * @template T - The base row type
@@ -140,10 +127,7 @@ export type WithVirtualProps<
  * // { id: string; name: string }
  * ```
  */
-export type WithoutVirtualProps<T> = Omit<
-  T,
-  '$synced' | '$origin' | '$key' | '$collectionId'
->
+export type WithoutVirtualProps<T> = Omit<T, keyof VirtualRowProps>
 
 /**
  * Checks if a value has virtual properties attached.
@@ -164,8 +148,7 @@ export function hasVirtualProps(
   return (
     typeof value === 'object' &&
     value !== null &&
-    '$synced' in value &&
-    '$origin' in value
+    VIRTUAL_PROP_NAMES.every((name) => name in value)
   )
 }
 

@@ -9,7 +9,7 @@ import type {
   Value,
 } from '../ir.js'
 import type { QueryBuilder } from './index.js'
-import type { VirtualOrigin, WithVirtualProps } from '../../virtual-props.js'
+import type { VirtualRowProps, WithVirtualProps } from '../../virtual-props.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -496,11 +496,8 @@ type NonNull<T> = T extends null ? never : T
  * }))
  * ```
  */
-type VirtualPropsRef = {
-  readonly $synced: RefLeaf<boolean>
-  readonly $origin: RefLeaf<VirtualOrigin>
-  readonly $key: RefLeaf<string | number>
-  readonly $collectionId: RefLeaf<string>
+type VirtualPropsRef<TKey extends string | number = string | number> = {
+  readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
 }
 
 /**

@@ -6,6 +6,7 @@ import { localOnlyCollectionOptions } from '../src/local-only.js'
 import { createTransaction } from '../src/transactions'
 import { and, count, eq, gt } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
+import { hasVirtualProps } from '../src/virtual-props.js'
 import { stripVirtualProps } from './utils'
 import type { OutputWithVirtual } from './utils'
 import type {
@@ -2301,6 +2302,55 @@ describe(`Virtual properties`, () => {
     subscription.unsubscribe()
   })
 
+  it(`should preserve previousValue virtual props from pre-optimistic state`, async () => {
+    const changes: Array<
+      ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
+    > = []
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-previous-value`,
+      getKey: (item) => item.id,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: `row-1`, value: `remote` },
+          })
+          commit()
+          markReady()
+        },
+      },
+      onUpdate: async () => {
+        await waitForChanges()
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const subscription = collection.subscribeChanges(
+      (events) => changes.push(...events),
+      { includeInitialState: false },
+    )
+
+    collection.update(`row-1`, (draft) => {
+      draft.value = `local`
+    })
+    await waitForChanges()
+
+    const updateChange = changes.find(
+      (change) => change.type === `update` && change.key === `row-1`,
+    )
+
+    expect(updateChange).toBeDefined()
+    expect(updateChange!.value.$synced).toBe(false)
+    expect(updateChange!.value.$origin).toBe(`local`)
+    expect(updateChange!.previousValue?.$synced).toBe(true)
+    expect(updateChange!.previousValue?.$origin).toBe(`remote`)
+
+    subscription.unsubscribe()
+  })
+
   it(`should set $origin local for non-optimistic inserts`, async () => {
     const changes: Array<ChangeMessage<{ id: string; value: string }>> = []
     let syncFns:
@@ -2425,6 +2475,213 @@ describe(`Virtual properties`, () => {
     expect(value.$origin).toBe(`remote`)
 
     subscription.unsubscribe()
+  })
+
+  it(`should clear pending local origin after failed non-optimistic mutations`, async () => {
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `insert`
+            value: { id: string; value: string }
+          }) => void
+          commit: () => void
+        }
+      | undefined
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-failed-non-optimistic-origin`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          syncFns = {
+            begin,
+            write,
+            commit,
+          }
+          markReady()
+        },
+      },
+      onInsert: () => Promise.reject(new Error(`insert failed`)),
+    })
+
+    await collection.stateWhenReady()
+
+    const tx = collection.insert(
+      { id: `row-1`, value: `local` },
+      { optimistic: false },
+    )
+    await expect(tx.isPersisted.promise).rejects.toThrow(`insert failed`)
+
+    if (!syncFns) {
+      throw new Error(`Sync not ready`)
+    }
+
+    syncFns.begin()
+    syncFns.write({
+      type: `insert`,
+      value: { id: `row-1`, value: `remote` },
+    })
+    syncFns.commit()
+
+    await waitForChanges()
+
+    expect(collection.state.get(`row-1`)?.$synced).toBe(true)
+    expect(collection.state.get(`row-1`)?.$origin).toBe(`remote`)
+  })
+
+  it(`should reset stale row origin state across truncate`, async () => {
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `insert`
+            value: { id: string; value: string }
+          }) => void
+          commit: () => void
+          truncate: () => void
+        }
+      | undefined
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-truncate-origin-reset`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          syncFns = {
+            begin,
+            write,
+            commit,
+            truncate,
+          }
+          markReady()
+        },
+      },
+      onInsert: ({ transaction }) => {
+        if (!syncFns) {
+          throw new Error(`Sync not ready`)
+        }
+
+        syncFns.begin()
+        transaction.mutations.forEach((mutation) => {
+          syncFns!.write({
+            type: `insert`,
+            value: mutation.modified as { id: string; value: string },
+          })
+        })
+        syncFns.commit()
+
+        return Promise.resolve()
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const insertTx = collection.insert(
+      { id: `row-1`, value: `local` },
+      { optimistic: false },
+    )
+    await insertTx.isPersisted.promise
+    await waitForChanges()
+
+    expect(collection.state.get(`row-1`)?.$origin).toBe(`local`)
+
+    if (!syncFns) {
+      throw new Error(`Sync not ready`)
+    }
+
+    syncFns.begin()
+    syncFns.truncate()
+    syncFns.commit()
+    await waitForChanges()
+
+    syncFns.begin()
+    syncFns.write({
+      type: `insert`,
+      value: { id: `row-1`, value: `remote` },
+    })
+    syncFns.commit()
+    await waitForChanges()
+
+    expect(collection.state.get(`row-1`)?.$origin).toBe(`remote`)
+  })
+
+  it(`should preserve local origin for rows confirmed in the same truncate batch`, async () => {
+    let syncFns:
+      | {
+          begin: () => void
+          write: (change: {
+            type: `insert`
+            value: { id: string; value: string }
+          }) => void
+          commit: () => void
+          truncate: () => void
+        }
+      | undefined
+
+    const collection = createCollection<{ id: string; value: string }, string>({
+      id: `virtual-props-truncate-local-confirmation`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, truncate, markReady }) => {
+          syncFns = {
+            begin,
+            write,
+            commit,
+            truncate,
+          }
+          markReady()
+        },
+      },
+      onInsert: async ({ transaction }) => {
+        if (!syncFns) {
+          throw new Error(`Sync not ready`)
+        }
+
+        syncFns.begin()
+        syncFns.truncate()
+        transaction.mutations.forEach((mutation) => {
+          syncFns!.write({
+            type: `insert`,
+            value: mutation.modified as { id: string; value: string },
+          })
+        })
+        syncFns.commit()
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const tx = collection.insert(
+      { id: `row-1`, value: `local` },
+      { optimistic: false },
+    )
+    await tx.isPersisted.promise
+    await waitForChanges()
+
+    expect(collection.state.get(`row-1`)?.$synced).toBe(true)
+    expect(collection.state.get(`row-1`)?.$origin).toBe(`local`)
+  })
+
+  it(`hasVirtualProps should require the full virtual prop shape`, () => {
+    expect(
+      hasVirtualProps({
+        $synced: true,
+        $origin: `remote`,
+      }),
+    ).toBe(false)
+
+    expect(
+      hasVirtualProps({
+        $synced: true,
+        $origin: `remote`,
+        $key: `row-1`,
+        $collectionId: `collection-1`,
+      }),
+    ).toBe(true)
   })
 
   it(`should pass through virtual properties in live query collections`, async () => {
@@ -2587,7 +2844,7 @@ describe(`Virtual properties`, () => {
   })
 
   it(`should mark local-only collections as synced with local origin`, async () => {
-    const collection = createCollection<{ id: string; value: string }, string>(
+    const collection = createCollection(
       localOnlyCollectionOptions({
         id: `virtual-props-local-only`,
         getKey: (item: { id: string; value: string }) => item.id,
@@ -2597,16 +2854,9 @@ describe(`Virtual properties`, () => {
     const changes: Array<
       ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
     > = []
-    const subscription = collection.subscribeChanges(
-      (
-        events: Array<
-          ChangeMessage<
-            OutputWithVirtual<{ id: string; value: string }, string>
-          >
-        >,
-      ) => changes.push(...events),
-      { includeInitialState: false },
-    )
+    const subscription = collection.subscribeChanges((events) => {
+      changes.push(...events)
+    }, { includeInitialState: false })
 
     collection.insert({ id: `local-1`, value: `local` })
     await waitForChanges()
