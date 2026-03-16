@@ -118,7 +118,11 @@ export const todoAPI = {
   }) {
     const mutations = transaction.mutations
 
-    console.log(`sync todos`, mutations[0].changes, (mutations[0].original as Record<string, unknown>).text)
+    console.log(
+      `sync todos`,
+      mutations[0].changes,
+      (mutations[0].original as Record<string, unknown>).text,
+    )
     for (const mutation of mutations) {
       try {
         switch (mutation.type) {
