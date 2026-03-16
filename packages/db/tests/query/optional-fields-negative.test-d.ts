@@ -170,7 +170,7 @@ describe(`Optional Fields - Type Safety Tests`, () => {
           .select(({ user, dept }) => ({
             user_name: user.name,
 
-            dept_name: dept?.name, // Should be string | undefined due to left join
+            dept_name: dept.name, // Should be string | undefined due to left join
           })),
     })
 

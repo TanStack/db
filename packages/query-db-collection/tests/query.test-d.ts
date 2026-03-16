@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { describe, expectTypeOf, it } from 'vitest'
 import {
   and,

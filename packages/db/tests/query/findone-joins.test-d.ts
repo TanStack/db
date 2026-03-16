@@ -205,7 +205,7 @@ describe(`findOne() with joins`, () => {
           )
           .select(({ todo, todoOptions }) => ({
             todoText: todo.text,
-            optionText: todoOptions?.optionText,
+            optionText: todoOptions.optionText,
           }))
           .findOne(),
     })
@@ -232,7 +232,7 @@ describe(`findOne() with joins`, () => {
           .findOne()
           .select(({ todo, todoOptions }) => ({
             todoText: todo.text,
-            optionText: todoOptions?.optionText,
+            optionText: todoOptions.optionText,
           })),
     })
 

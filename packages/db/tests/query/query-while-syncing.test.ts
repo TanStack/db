@@ -428,7 +428,7 @@ describe(`Query while syncing`, () => {
               )
               .select(({ user, dept }) => ({
                 user_name: user.name,
-                department_name: dept?.name,
+                department_name: dept.name,
               })),
         })
 

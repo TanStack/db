@@ -232,7 +232,7 @@ describe(`Query2 Subqueries`, () => {
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: activeUser?.name,
+          userName: activeUser.name,
         }))
 
       const builtQuery = getQueryIR(query)
@@ -267,7 +267,7 @@ describe(`Query2 Subqueries`, () => {
         .select(({ issue, activeUser }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: activeUser?.name,
+          userName: activeUser.name,
         }))
 
       const builtQuery = getQueryIR(query)
@@ -363,7 +363,7 @@ describe(`Query2 Subqueries`, () => {
         .select(({ issue, userInfo }) => ({
           issueId: issue.id,
           issueTitle: issue.title,
-          userName: userInfo?.name,
+          userName: userInfo.name,
         }))
 
       const builtQuery = getQueryIR(outerQuery)

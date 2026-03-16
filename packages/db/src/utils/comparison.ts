@@ -1,3 +1,4 @@
+import { isTemporal } from '../utils'
 import type { CompareOptions } from '../query/builder/types'
 
 // WeakMap to store stable IDs for objects
@@ -52,6 +53,15 @@ export const ascComparator = (a: any, b: any, opts: CompareOptions): number => {
   // If both are dates, compare them
   if (a instanceof Date && b instanceof Date) {
     return a.getTime() - b.getTime()
+  }
+
+  // If both are Temporal objects of the same type, compare by string representation
+  if (isTemporal(a) && isTemporal(b)) {
+    const aStr = a.toString()
+    const bStr = b.toString()
+    if (aStr < bStr) return -1
+    if (aStr > bStr) return 1
+    return 0
   }
 
   // If at least one of the values is an object, use stable IDs for comparison
@@ -152,6 +162,10 @@ export const UNDEFINED_SENTINEL = `__TS_DB_BTREE_UNDEFINED_VALUE__`
 export function normalizeValue(value: any): any {
   if (value instanceof Date) {
     return value.getTime()
+  }
+
+  if (isTemporal(value)) {
+    return `__temporal__${value[Symbol.toStringTag]}__${value.toString()}`
   }
 
   // Normalize Uint8Arrays/Buffers to a string representation for Map key usage

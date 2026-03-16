@@ -135,10 +135,10 @@ importers:
         specifier: ^20.3.16
         version: 20.3.17(@angular/common@20.3.17(@angular/core@20.3.17(@angular/compiler@20.3.17)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.17(@angular/compiler@20.3.17)(rxjs@7.8.2)(zone.js@0.15.1))(@angular/platform-browser@20.3.17(@angular/common@20.3.17(@angular/core@20.3.17(@angular/compiler@20.3.17)(rxjs@7.8.2)(zone.js@0.15.1))(rxjs@7.8.2))(@angular/core@20.3.17(@angular/compiler@20.3.17)(rxjs@7.8.2)(zone.js@0.15.1)))(rxjs@7.8.2)
       '@tanstack/angular-db':
-        specifier: ^0.1.57
+        specifier: ^0.1.59
         version: link:../../../packages/angular-db
       '@tanstack/db':
-        specifier: ^0.5.31
+        specifier: ^0.5.33
         version: link:../../../packages/db
       rxjs:
         specifier: ^7.8.2
@@ -205,13 +205,13 @@ importers:
         specifier: 11.4.1
         version: 11.4.1(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))
       '@tanstack/offline-transactions':
-        specifier: ^1.0.22
+        specifier: ^1.0.24
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.0.28
+        specifier: ^1.0.30
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.75
+        specifier: ^0.1.77
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -278,13 +278,13 @@ importers:
   examples/react/offline-transactions:
     dependencies:
       '@tanstack/offline-transactions':
-        specifier: ^1.0.22
+        specifier: ^1.0.24
         version: link:../../../packages/offline-transactions
       '@tanstack/query-db-collection':
-        specifier: ^1.0.28
+        specifier: ^1.0.30
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.75
+        specifier: ^0.1.77
         version: link:../../../packages/react-db
       '@tanstack/react-query':
         specifier: ^5.90.20
@@ -345,10 +345,10 @@ importers:
   examples/react/paced-mutations-demo:
     dependencies:
       '@tanstack/db':
-        specifier: ^0.5.31
+        specifier: ^0.5.33
         version: link:../../../packages/db
       '@tanstack/react-db':
-        specifier: ^0.1.75
+        specifier: ^0.1.77
         version: link:../../../packages/react-db
       mitt:
         specifier: ^3.0.1
@@ -385,10 +385,10 @@ importers:
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.0.28
+        specifier: ^1.0.30
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.75
+        specifier: ^0.1.77
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.159.5
@@ -413,16 +413,16 @@ importers:
         version: 11.10.0(typescript@5.9.3)
       better-auth:
         specifier: ^1.4.18
-        version: 1.4.18(729747650ed4470a3fba4304afaaac34)
+        version: 1.4.18(f0d0dd48972fd7f950434dfde049fd7e)
       dotenv:
         specifier: ^17.2.4
         version: 17.3.1
       drizzle-orm:
         specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6)
+        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6)
       pg:
         specifier: ^8.18.0
         version: 8.19.0
@@ -518,16 +518,16 @@ importers:
   examples/react/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.2.39
+        specifier: ^0.2.41
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.0.28
+        specifier: ^1.0.30
         version: link:../../../packages/query-db-collection
       '@tanstack/react-db':
-        specifier: ^0.1.75
+        specifier: ^0.1.77
         version: link:../../../packages/react-db
       '@tanstack/react-router':
         specifier: ^1.159.5
@@ -536,17 +536,17 @@ importers:
         specifier: ^1.159.5
         version: 1.163.5(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: ^0.1.75
+        specifier: ^0.1.77
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6
         version: 2.8.6
       drizzle-orm:
         specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6)
+        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -639,16 +639,16 @@ importers:
   examples/solid/todo:
     dependencies:
       '@tanstack/electric-db-collection':
-        specifier: ^0.2.39
+        specifier: ^0.2.41
         version: link:../../../packages/electric-db-collection
       '@tanstack/query-core':
         specifier: ^5.90.20
         version: 5.90.20
       '@tanstack/query-db-collection':
-        specifier: ^1.0.28
+        specifier: ^1.0.30
         version: link:../../../packages/query-db-collection
       '@tanstack/solid-db':
-        specifier: ^0.2.11
+        specifier: ^0.2.13
         version: link:../../../packages/solid-db
       '@tanstack/solid-router':
         specifier: ^1.159.5
@@ -657,17 +657,17 @@ importers:
         specifier: ^1.159.5
         version: 1.163.5(@tanstack/react-router@1.163.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(solid-js@1.9.11)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/trailbase-db-collection':
-        specifier: ^0.1.75
+        specifier: ^0.1.77
         version: link:../../../packages/trailbase-db-collection
       cors:
         specifier: ^2.8.6
         version: 2.8.6
       drizzle-orm:
         specifier: ^0.45.1
-        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
+        version: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76)
       express:
         specifier: ^5.2.1
         version: 5.2.1
@@ -858,6 +858,9 @@ importers:
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
+      temporal-polyfill:
+        specifier: ^0.3.0
+        version: 0.3.0
 
   packages/electric-db-collection:
     dependencies:
@@ -938,16 +941,13 @@ importers:
         version: 1.47.0
       '@powersync/node':
         specifier: ^0.15.2
-        version: 0.15.2(@powersync/common@1.47.0)(better-sqlite3@12.6.2)
+        version: 0.15.2(@powersync/common@1.47.0)
       '@types/debug':
         specifier: ^4.1.12
         version: 4.1.12
       '@vitest/coverage-istanbul':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4)
-      better-sqlite3:
-        specifier: ^12.6.2
-        version: 12.6.2
 
   packages/query-db-collection:
     dependencies:
@@ -5429,10 +5429,6 @@ packages:
     resolution: {integrity: sha512-pbnl5XzGBdrFU/wT4jqmJVPn2B6UHPBOhzMQkY/SPUPB6QtUXtmBHBIwCbXJol93mOpGMnQyP/+BB19q04xj7g==}
     engines: {node: '>=4'}
 
-  better-sqlite3@12.6.2:
-    resolution: {integrity: sha512-8VYKM3MjCa9WcaSAI3hzwhmyHVlH8tiGFwf0RlTsZPWJ1I5MkzjiudCo4KC4DxOaL/53A5B1sI/IbldNFDbsKA==}
-    engines: {node: 20.x || 22.x || 23.x || 24.x || 25.x}
-
   bidi-js@1.0.3:
     resolution: {integrity: sha512-RKshQI1R3YQ+n9YJz2QQ147P66ELpa1FQEg20Dk8oW9t2KgLbpDLLp9aGZ7y8WHSshDknG0bknqGw5/tyCs5tw==}
 
@@ -5447,12 +5443,6 @@ packages:
   binary-extensions@2.3.0:
     resolution: {integrity: sha512-Ceh+7ox5qe7LJuLHoY0feh3pHuUDHAcRUeyL2VYghZwfpkNIy/+8Ocg0a3UuSoYzavmylwuLWQOf3hl0jjMMIw==}
     engines: {node: '>=8'}
-
-  bindings@1.5.0:
-    resolution: {integrity: sha512-p2q/t/mhvuOj/UeLlV6566GD/guowlr0hHxClI0W9m7MWYkL1F0hLo+0Aexs9HSPCtR1SXQ0TD3MMKrXZajbiQ==}
-
-  bl@4.1.0:
-    resolution: {integrity: sha512-1W07cM9gS6DcLperZfFSj+bWLtaPGSOHWhPiGzXmvVJbRLdG82sH/Kn8EtW1VqWVA54AKf2h5k5BbnIbwF3h6w==}
 
   body-parser@1.20.3:
     resolution: {integrity: sha512-7rAxByjUMqQ3/bHJy7D6OGXvx/MMc4IqBn/X0fcM1QUcAItpZrBEYhWGem+tzXH90c+G01ypMcYJBO9Y30203g==}
@@ -5606,9 +5596,6 @@ packages:
   chokidar@5.0.0:
     resolution: {integrity: sha512-TQMmc3w+5AxjpL8iIiwebF73dRDF4fBIieAqGn9RGCWaEVwQ6Fb2cGe31Yns0RRIzii5goJ1Y7xbMwo1TxMplw==}
     engines: {node: '>= 20.19.0'}
-
-  chownr@1.1.4:
-    resolution: {integrity: sha512-jJ0bqzaylmJtVnNgzTeSOs8DPavpbYgEr/b0YL8/2GO3xJEhInFmhKMUnEJQjZumK7KXGFhUy89PrsJWlakBVg==}
 
   chownr@3.0.0:
     resolution: {integrity: sha512-+IxzY9BZOQd/XuYPRmrvEVjF/nqj5kgT4kEq7VofrDoM1MxoRjEWkrCC3EtLi59TVawxTAn+orJwFQcrqEN1+g==}
@@ -5924,10 +5911,6 @@ packages:
   decode-uri-component@0.2.2:
     resolution: {integrity: sha512-FqUYQ+8o158GyGTrMFJms9qh3CqTKvAqgqsTnkLI8sKu0028orqBhxNMFkFen0zGyg6epACD32pjVk58ngIErQ==}
     engines: {node: '>=0.10'}
-
-  decompress-response@6.0.0:
-    resolution: {integrity: sha512-aW35yZM6Bb/4oJlZncMH2LCoZtJXTRxES17vE3hoRiowU2kWHaJKFkSBDnDR+cm9J+9QhXmREyIfv0pji9ejCQ==}
-    engines: {node: '>=10'}
 
   dedent-js@1.0.1:
     resolution: {integrity: sha512-OUepMozQULMLUmhxS95Vudo0jb0UchLimi3+pQ2plj61Fcy8axbP9hbiD4Sz6DPqn6XG3kfmziVfQ1rSys5AJQ==}
@@ -6537,10 +6520,6 @@ packages:
     resolution: {integrity: sha512-VyhnebXciFV2DESc+p6B+y0LjSm0krU4OgJN44qFAhBY0TJ+1V61tYD2+wHusZ6F9n5K+vl8k0sTy7PEfV4qpg==}
     engines: {node: '>=16.17'}
 
-  expand-template@2.0.3:
-    resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
-    engines: {node: '>=6'}
-
   expect-type@1.2.2:
     resolution: {integrity: sha512-JhFGDVJ7tmDJItKhYgJCGLOWjuK9vPxiXoUFLwLDc99NlmklilbiQJwoctZtt13+xMw91MCk/REan6MWHqDjyA==}
     engines: {node: '>=12.0.0'}
@@ -6708,9 +6687,6 @@ packages:
     resolution: {integrity: sha512-XXTUwCvisa5oacNGRP9SfNtYBNAMi+RPwBFmblZEF7N7swHYQS6/Zfk7SRwx4D5j3CH211YNRco1DEMNVfZCnQ==}
     engines: {node: '>=16.0.0'}
 
-  file-uri-to-path@1.0.0:
-    resolution: {integrity: sha512-0Zt+s3L7Vf1biwWZ29aARiVYLx7iMGnEUl9x33fbB/j3jR81u/O2LbqK+Bm1CDSNDKVtJ/YjwY7TUd5SkeLQLw==}
-
   fill-range@7.1.1:
     resolution: {integrity: sha512-YsGpe3WHLK8ZYi4tWDg2Jy3ebRz2rXowDxnld4bkQB00cc/1Zw9AWnC0i9ztDJitivtQvaI9KaLyKrc+hBW0yg==}
     engines: {node: '>=8'}
@@ -6792,9 +6768,6 @@ packages:
   fresh@2.0.0:
     resolution: {integrity: sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A==}
     engines: {node: '>= 0.8'}
-
-  fs-constants@1.0.0:
-    resolution: {integrity: sha512-y6OAwoSIf7FyjMIv94u+b5rdheZEjzR63GTyZJm5qh4Bi+2YgwLCcI/fPFZkL5PSixOt6ZNKm+w+Hfp/Bciwow==}
 
   fs-extra@7.0.1:
     resolution: {integrity: sha512-YJDaCJZEnBmcbw13fvdAM9AwNOJwOzrE4pqMqBq5nFiEqXUqHwlK4B+3pUw6JNvfSPtX05xFHtYy/1ni01eGCw==}
@@ -6886,9 +6859,6 @@ packages:
   getenv@2.0.0:
     resolution: {integrity: sha512-VilgtJj/ALgGY77fiLam5iD336eSWi96Q15JSAG1zi8NRBysm3LXKdGnHb4m5cuyxvOLQQKWpBZAT6ni4FI2iQ==}
     engines: {node: '>=6'}
-
-  github-from-package@0.0.0:
-    resolution: {integrity: sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw==}
 
   glob-parent@5.1.2:
     resolution: {integrity: sha512-AOIgSQCepiJYwP3ARnGx+5VnTu2HBYdzbGP45eLw1vr3zB3vZLeyed1sC9hnbcOc9/SrMyM5RPQrkGz4aS9Zow==}
@@ -8109,10 +8079,6 @@ packages:
     resolution: {integrity: sha512-VP79XUPxV2CigYP3jWwAUFSku2aKqBH7uTAapFWCBqutsbmDo96KY5o8uh6U+/YSIn5OxJnXp73beVkpqMIGhA==}
     engines: {node: '>=18'}
 
-  mimic-response@3.1.0:
-    resolution: {integrity: sha512-z0yWI+4FDrrweS8Zmt4Ej5HdJmky15+L2e6Wgn3+iK5fWzb6T3fhNFq2+MeTRb064c6Wr4N/wv0DzQTjNzHNGQ==}
-    engines: {node: '>=10'}
-
   min-indent@1.0.1:
     resolution: {integrity: sha512-I9jwMn07Sy/IwOj3zVkVik2JTvgpaykDZEigL6Rx6N9LbMywwUSMtxET+7lVoDLLd3O3IXwJwvuuns8UB/HeAg==}
     engines: {node: '>=4'}
@@ -8171,9 +8137,6 @@ packages:
 
   mitt@3.0.1:
     resolution: {integrity: sha512-vKivATfr97l2/QBCYAkXYDbrIWPM2IIKEl7YPhjCvKlG3kE2gm+uBo6nEXK3M5/Ffh/FLpKExzOQ3JJoJGFKBw==}
-
-  mkdirp-classic@0.5.3:
-    resolution: {integrity: sha512-gKLcREMhtuZRwRAfqP3RFW+TK4JqApVBtOIftVgjuABpAtpxhPGaDcfvbhNvD0B8iD1oUr/txX35NjcaY6Ns/A==}
 
   mkdirp@0.5.6:
     resolution: {integrity: sha512-FP+p8RB8OWpF3YZBCrP5gtADmtXApB5AMLn+vdyA+PyxCjrCs00mjyUozssO33cwDeT3wNGdLxJ5M//YqtHAJw==}
@@ -8257,9 +8220,6 @@ packages:
     resolution: {integrity: sha512-yJBmDJr18xy47dbNVlHcgdPrulSn1nhSE6Ns9vTG+Nx9VPT6iV1MD6aQFp/t52zpf82FhLLTXAXr30NuCnxvwA==}
     engines: {node: ^20.0.0 || >=22.0.0}
 
-  napi-build-utils@2.0.0:
-    resolution: {integrity: sha512-GEbrYkbfF7MoNaoh2iGG84Mnf/WZfB0GdGEsM8wz7Expx/LlWf5U8t9nvJKXSp3qr5IsEbK04cBGhol/KwOsWA==}
-
   napi-postinstall@0.3.3:
     resolution: {integrity: sha512-uTp172LLXSxuSYHv/kou+f6KW3SMppU9ivthaVTXian9sOt3XM/zHYHpRZiLgQoxeWfYUnslNWQHF1+G71xcow==}
     engines: {node: ^12.20.0 || ^14.18.0 || >=16.0.0}
@@ -8296,10 +8256,6 @@ packages:
 
   no-case@3.0.4:
     resolution: {integrity: sha512-fgAN3jGAh+RoxUGZHTSOLJIqUc2wmoBwGR4tbpNAKmmovFoWq0OdRkb0VkldReO2a2iBT/OEulG9XSUc10r3zg==}
-
-  node-abi@3.87.0:
-    resolution: {integrity: sha512-+CGM1L1CgmtheLcBuleyYOn7NWPVu0s0EJH2C4puxgEZb9h8QpR9G2dBfZJOAUhi7VQxuBPMd0hiISWcTyiYyQ==}
-    engines: {node: '>=10'}
 
   node-addon-api@6.1.0:
     resolution: {integrity: sha512-+eawOlIgy680F0kBzPUNFhMZGtJ1YmqM6l4+Crf4IkImjYrO/mqPwRMh352g23uIaQKFItcQ64I7KMaJxHgAVA==}
@@ -8755,12 +8711,6 @@ packages:
   postgres@3.4.8:
     resolution: {integrity: sha512-d+JFcLM17njZaOLkv6SCev7uoLaBtfK86vMUXhW1Z4glPWh4jozno9APvW/XKFJ3CCxVoC7OL38BqRydtu5nGg==}
     engines: {node: '>=12'}
-
-  prebuild-install@7.1.3:
-    resolution: {integrity: sha512-8Mf2cbV7x1cXPUILADGI3wuhfqWvtiLA1iclTDbFRZkgRQS0NqsPZphna9V+HyTEadheuPmjaJMsbzKQFOzLug==}
-    engines: {node: '>=10'}
-    deprecated: No longer maintained. Please contact the author of the relevant native addon; alternatives are available.
-    hasBin: true
 
   prelude-ls@1.2.1:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
@@ -9385,12 +9335,6 @@ packages:
     resolution: {integrity: sha512-/fUgUhYghuLzVT/gaJoeVehLCgZiUxPCPMcyVNY0lIf/cTCz58K/WTI7PefDarXxp9nUKpEwg1yyz3eSBMTtgA==}
     engines: {node: ^20.17.0 || >=22.9.0}
 
-  simple-concat@1.0.1:
-    resolution: {integrity: sha512-cSFtAPtRhljv69IK0hTVZQ+OfE9nePi/rtJmw5UjHeVyVroEqJXP1sFztKUy1qU+xvz3u/sfYJLa947b7nAN2Q==}
-
-  simple-get@4.0.1:
-    resolution: {integrity: sha512-brv7p5WgH0jmQJr1ZDDfKDOSeWWg+OVypG99A/5vYGPqJ6pxiaHLy8nxtFjBA7oMa01ebA9gfh1uMCFqOuXxvA==}
-
   simple-git@3.30.0:
     resolution: {integrity: sha512-q6lxyDsCmEal/MEGhP1aVyQ3oxnagGlBDOVSIB4XUVLl1iZh0Pah6ebC9V4xBap/RfgP2WlI8EKs0WS0rMEJHg==}
 
@@ -9725,13 +9669,6 @@ packages:
     resolution: {integrity: sha512-g9ljZiwki/LfxmQADO3dEY1CbpmXT5Hm2fJ+QaGKwSXUylMybePR7/67YW7jOrrvjEgL1Fmz5kzyAjWVWLlucg==}
     engines: {node: '>=6'}
 
-  tar-fs@2.1.4:
-    resolution: {integrity: sha512-mDAjwmZdh7LTT6pNleZ05Yt65HC3E+NiQzl672vQG38jIrehtJk/J3mNwIg+vShQPcLF/LV7CMnDW6vjj6sfYQ==}
-
-  tar-stream@2.2.0:
-    resolution: {integrity: sha512-ujeqbceABgwMZxEJnk2HDY2DlnUZ+9oEcb1KzTVfYHio0UE6dG71n60d8D2I4qNvleWrrXpmjpt7vZeF1LnMZQ==}
-    engines: {node: '>=6'}
-
   tar@7.5.7:
     resolution: {integrity: sha512-fov56fJiRuThVFXD6o6/Q354S7pnWMJIVlDBYijsTNx6jKSE4pvrDTs6lUnmGvNyfJwFQQwWy3owKz1ucIhveQ==}
     engines: {node: '>=18'}
@@ -9900,9 +9837,6 @@ packages:
   tuf-js@4.1.0:
     resolution: {integrity: sha512-50QV99kCKH5P/Vs4E2Gzp7BopNV+KzTXqWeaxrfu5IQJBOULRsTIS9seSsOVT8ZnGXzCyx55nYWAi4qJzpZKEQ==}
     engines: {node: ^20.17.0 || >=22.9.0}
-
-  tunnel-agent@0.6.0:
-    resolution: {integrity: sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w==}
 
   tweetnacl@1.0.3:
     resolution: {integrity: sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw==}
@@ -13454,15 +13388,13 @@ snapshots:
       async-mutex: 0.5.0
       event-iterator: 2.0.0
 
-  '@powersync/node@0.15.2(@powersync/common@1.47.0)(better-sqlite3@12.6.2)':
+  '@powersync/node@0.15.2(@powersync/common@1.47.0)':
     dependencies:
       '@powersync/common': 1.47.0
       async-mutex: 0.5.0
       bson: 6.10.4
       comlink: 4.4.2
       undici: 7.21.0
-    optionalDependencies:
-      better-sqlite3: 12.6.2
 
   '@protobufjs/aspromise@1.1.2': {}
 
@@ -15501,7 +15433,7 @@ snapshots:
       postcss: 8.5.6
       postcss-media-query-parser: 0.2.3
 
-  better-auth@1.4.18(729747650ed4470a3fba4304afaaac34):
+  better-auth@1.4.18(f0d0dd48972fd7f950434dfde049fd7e):
     dependencies:
       '@better-auth/core': 1.4.18(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.6))(jose@6.1.3)(kysely@0.28.11)(nanostores@1.1.0)
       '@better-auth/telemetry': 1.4.18(@better-auth/core@1.4.18(@better-auth/utils@0.3.0)(@better-fetch/fetch@1.1.21)(better-call@1.1.8(zod@4.3.6))(jose@6.1.3)(kysely@0.28.11)(nanostores@1.1.0))
@@ -15518,9 +15450,8 @@ snapshots:
     optionalDependencies:
       '@tanstack/react-start': 1.163.5(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
       '@tanstack/solid-start': 1.163.5(@tanstack/react-router@1.163.3(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(solid-js@1.9.11)(vite-plugin-solid@2.11.10(@testing-library/jest-dom@6.9.1)(solid-js@1.9.11)(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1)))(vite@7.3.1(@types/node@25.2.2)(jiti@2.6.1)(lightningcss@1.31.1)(sass@1.90.0)(terser@5.44.0)(tsx@4.21.0)(yaml@2.8.1))
-      better-sqlite3: 12.6.2
       drizzle-kit: 0.31.9
-      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
+      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
       mongodb: 6.21.0(socks@2.8.7)
       pg: 8.19.0
       react: 19.2.4
@@ -15547,11 +15478,6 @@ snapshots:
     dependencies:
       is-windows: 1.0.2
 
-  better-sqlite3@12.6.2:
-    dependencies:
-      bindings: 1.5.0
-      prebuild-install: 7.1.3
-
   bidi-js@1.0.3:
     dependencies:
       require-from-string: 2.0.2
@@ -15561,16 +15487,6 @@ snapshots:
   binary-decision-diagram@3.2.0: {}
 
   binary-extensions@2.3.0: {}
-
-  bindings@1.5.0:
-    dependencies:
-      file-uri-to-path: 1.0.0
-
-  bl@4.1.0:
-    dependencies:
-      buffer: 5.7.1
-      inherits: 2.0.4
-      readable-stream: 3.6.2
 
   body-parser@1.20.3:
     dependencies:
@@ -15787,8 +15703,6 @@ snapshots:
   chokidar@5.0.0:
     dependencies:
       readdirp: 5.0.0
-
-  chownr@1.1.4: {}
 
   chownr@3.0.0: {}
 
@@ -16100,10 +16014,6 @@ snapshots:
 
   decode-uri-component@0.2.2: {}
 
-  decompress-response@6.0.0:
-    dependencies:
-      mimic-response: 3.1.0
-
   dedent-js@1.0.1: {}
 
   deep-eql@5.0.2: {}
@@ -16216,24 +16126,23 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8):
+  drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8):
     optionalDependencies:
       '@opentelemetry/api': 1.9.0
       '@types/pg': 8.18.0
-      better-sqlite3: 12.6.2
       gel: 2.1.1
       kysely: 0.28.11
       pg: 8.19.0
       postgres: 3.4.8
 
-  drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76):
+  drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@3.25.76):
     dependencies:
-      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
+      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
       zod: 3.25.76
 
-  drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6):
+  drizzle-zod@0.8.3(drizzle-orm@0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8))(zod@4.3.6):
     dependencies:
-      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(better-sqlite3@12.6.2)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
+      drizzle-orm: 0.45.1(@opentelemetry/api@1.9.0)(@types/pg@8.18.0)(gel@2.1.1)(kysely@0.28.11)(pg@8.19.0)(postgres@3.4.8)
       zod: 4.3.6
 
   dunder-proto@1.0.1:
@@ -16817,8 +16726,6 @@ snapshots:
       signal-exit: 4.1.0
       strip-final-newline: 3.0.0
 
-  expand-template@2.0.3: {}
-
   expect-type@1.2.2: {}
 
   expo-asset@11.1.7(expo@53.0.27(@babel/core@7.29.0)(@expo/metro-runtime@5.0.5(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4)))(graphql@16.12.0)(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(react-native@0.79.6(@babel/core@7.29.0)(@types/react@19.2.14)(react@19.2.4))(react@19.2.4):
@@ -17040,8 +16947,6 @@ snapshots:
     dependencies:
       flat-cache: 4.0.1
 
-  file-uri-to-path@1.0.0: {}
-
   fill-range@7.1.1:
     dependencies:
       to-regex-range: 5.0.1
@@ -17150,8 +17055,6 @@ snapshots:
 
   fresh@2.0.0: {}
 
-  fs-constants@1.0.0: {}
-
   fs-extra@7.0.1:
     dependencies:
       graceful-fs: 4.2.11
@@ -17258,8 +17161,6 @@ snapshots:
       resolve-pkg-maps: 1.0.0
 
   getenv@2.0.0: {}
-
-  github-from-package@0.0.0: {}
 
   glob-parent@5.1.2:
     dependencies:
@@ -18611,8 +18512,6 @@ snapshots:
 
   mimic-function@5.0.1: {}
 
-  mimic-response@3.1.0: {}
-
   min-indent@1.0.1: {}
 
   mingo@6.5.6: {}
@@ -18670,8 +18569,6 @@ snapshots:
       minipass: 7.1.2
 
   mitt@3.0.1: {}
-
-  mkdirp-classic@0.5.3: {}
 
   mkdirp@0.5.6:
     dependencies:
@@ -18738,8 +18635,6 @@ snapshots:
 
   nanostores@1.1.0: {}
 
-  napi-build-utils@2.0.0: {}
-
   napi-postinstall@0.3.3: {}
 
   nats@2.29.3:
@@ -18766,10 +18661,6 @@ snapshots:
     dependencies:
       lower-case: 2.0.2
       tslib: 2.8.1
-
-  node-abi@3.87.0:
-    dependencies:
-      semver: 7.7.4
 
   node-addon-api@6.1.0:
     optional: true
@@ -19269,21 +19160,6 @@ snapshots:
       xtend: 4.0.2
 
   postgres@3.4.8: {}
-
-  prebuild-install@7.1.3:
-    dependencies:
-      detect-libc: 2.0.4
-      expand-template: 2.0.3
-      github-from-package: 0.0.0
-      minimist: 1.2.8
-      mkdirp-classic: 0.5.3
-      napi-build-utils: 2.0.0
-      node-abi: 3.87.0
-      pump: 3.0.3
-      rc: 1.2.8
-      simple-get: 4.0.1
-      tar-fs: 2.1.4
-      tunnel-agent: 0.6.0
 
   prelude-ls@1.2.1: {}
 
@@ -20066,14 +19942,6 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  simple-concat@1.0.1: {}
-
-  simple-get@4.0.1:
-    dependencies:
-      decompress-response: 6.0.0
-      once: 1.4.0
-      simple-concat: 1.0.1
-
   simple-git@3.30.0:
     dependencies:
       '@kwsites/file-exists': 1.1.1
@@ -20468,21 +20336,6 @@ snapshots:
 
   tapable@2.3.0: {}
 
-  tar-fs@2.1.4:
-    dependencies:
-      chownr: 1.1.4
-      mkdirp-classic: 0.5.3
-      pump: 3.0.3
-      tar-stream: 2.2.0
-
-  tar-stream@2.2.0:
-    dependencies:
-      bl: 4.1.0
-      end-of-stream: 1.4.5
-      fs-constants: 1.0.0
-      inherits: 2.0.4
-      readable-stream: 3.6.2
-
   tar@7.5.7:
     dependencies:
       '@isaacs/fs-minipass': 4.0.1
@@ -20634,10 +20487,6 @@ snapshots:
       make-fetch-happen: 15.0.3
     transitivePeerDependencies:
       - supports-color
-
-  tunnel-agent@0.6.0:
-    dependencies:
-      safe-buffer: 5.2.1
 
   tweetnacl@1.0.3: {}
 

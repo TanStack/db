@@ -1,9 +1,15 @@
-import { MultiSet, serializeValue } from '@tanstack/db-ivm'
 import {
   normalizeExpressionPaths,
   normalizeOrderByPaths,
 } from '../compiler/expressions.js'
-import type { MultiSetArray, RootStreamBuilder } from '@tanstack/db-ivm'
+import {
+  computeOrderedLoadCursor,
+  computeSubscriptionOrderByHints,
+  filterDuplicateInserts,
+  sendChangesToInput,
+  splitUpdates,
+  trackBiggestSentValue,
+} from './utils.js'
 import type { Collection } from '../../collection/index.js'
 import type {
   ChangeMessage,
@@ -147,25 +153,11 @@ export class CollectionSubscriber<
     changes: Iterable<ChangeMessage<any, string | number>>,
     callback?: () => boolean,
   ) {
-    // Filter changes to prevent duplicate inserts to D2 pipeline.
-    // This ensures D2 multiplicity stays at 1 for visible items, so deletes
-    // properly reduce multiplicity to 0 (triggering DELETE output).
     const changesArray = Array.isArray(changes) ? changes : [...changes]
-    const filteredChanges: Array<ChangeMessage<any, string | number>> = []
-    for (const change of changesArray) {
-      if (change.type === `insert`) {
-        if (this.sentToD2Keys.has(change.key)) {
-          // Skip duplicate insert - already sent to D2
-          continue
-        }
-        this.sentToD2Keys.add(change.key)
-      } else if (change.type === `delete`) {
-        // Remove from tracking so future re-inserts are allowed
-        this.sentToD2Keys.delete(change.key)
-      }
-      // Updates are handled as delete+insert by splitUpdates, so no special handling needed
-      filteredChanges.push(change)
-    }
+    const filteredChanges = filterDuplicateInserts(
+      changesArray,
+      this.sentToD2Keys,
+    )
 
     // currentSyncState and input are always defined when this method is called
     // (only called from active subscriptions during a sync session)
@@ -202,27 +194,10 @@ export class CollectionSubscriber<
     }
 
     // Get the query's orderBy and limit to pass to loadSubset.
-    // Only include orderBy when it is scoped to this alias and uses simple refs,
-    // to avoid leaking cross-collection paths into backend-specific compilers.
-    const { orderBy, limit, offset } = this.collectionConfigBuilder.query
-    const effectiveLimit =
-      limit !== undefined && offset !== undefined ? limit + offset : limit
-    const normalizedOrderBy = orderBy
-      ? normalizeOrderByPaths(orderBy, this.alias)
-      : undefined
-    const canPassOrderBy =
-      normalizedOrderBy?.every((clause) => {
-        const exp = clause.expression
-        if (exp.type !== `ref`) {
-          return false
-        }
-        const path = exp.path
-        return Array.isArray(path) && path.length === 1
-      }) ?? false
-    const orderByForSubscription = canPassOrderBy
-      ? normalizedOrderBy
-      : undefined
-    const limitForSubscription = canPassOrderBy ? effectiveLimit : undefined
+    const hints = computeSubscriptionOrderByHints(
+      this.collectionConfigBuilder.query,
+      this.alias,
+    )
 
     // Track loading via the loadSubset promise directly.
     // requestSnapshot uses trackLoadSubsetPromise: false (needed for truncate handling),
@@ -241,8 +216,8 @@ export class CollectionSubscriber<
       ...(includeInitialState && { includeInitialState }),
       whereExpression,
       onStatusChange,
-      orderBy: orderByForSubscription,
-      limit: limitForSubscription,
+      orderBy: hints.orderBy,
+      limit: hints.limit,
       onLoadSubsetResult,
     })
 
@@ -415,52 +390,28 @@ export class CollectionSubscriber<
     if (!orderByInfo) {
       return
     }
-    const { orderBy, valueExtractorForRawRow, offset } = orderByInfo
-    const biggestSentRow = this.biggest
 
-    // Extract all orderBy column values from the biggest sent row
-    // For single-column: returns single value, for multi-column: returns array
-    const extractedValues = biggestSentRow
-      ? valueExtractorForRawRow(biggestSentRow)
-      : undefined
+    const cursor = computeOrderedLoadCursor(
+      orderByInfo,
+      this.biggest,
+      this.lastLoadRequestKey,
+      this.alias,
+      n,
+    )
+    if (!cursor) return // Duplicate request — skip
 
-    // Normalize to array format for minValues
-    let minValues: Array<unknown> | undefined
-    if (extractedValues !== undefined) {
-      minValues = Array.isArray(extractedValues)
-        ? extractedValues
-        : [extractedValues]
-    }
-
-    const loadRequestKey = this.getLoadRequestKey({
-      minValues,
-      offset,
-      limit: n,
-    })
-
-    // Skip if we already requested a load for this cursor+window.
-    // This prevents infinite loops from cached data re-writes while still allowing
-    // window moves (offset/limit changes) to trigger new requests.
-    if (this.lastLoadRequestKey === loadRequestKey) {
-      return
-    }
-
-    // Normalize the orderBy clauses such that the references are relative to the collection
-    const normalizedOrderBy = normalizeOrderByPaths(orderBy, this.alias)
+    this.lastLoadRequestKey = cursor.loadRequestKey
 
     // Take the `n` items after the biggest sent value
-    // Pass the current window offset to ensure proper deduplication
+    // Omit offset so requestLimitedSnapshot can advance based on
+    // the number of rows already loaded (supports offset-based backends).
     subscription.requestLimitedSnapshot({
-      orderBy: normalizedOrderBy,
+      orderBy: cursor.normalizedOrderBy,
       limit: n,
-      minValues,
-      // Omit offset so requestLimitedSnapshot can advance the offset based on
-      // the number of rows already loaded (supports offset-based backends).
+      minValues: cursor.minValues,
       trackLoadSubsetPromise: false,
       onLoadSubsetResult: this.orderedLoadSubsetResult,
     })
-
-    this.lastLoadRequestKey = loadRequestKey
   }
 
   private getWhereClauseForAlias(): BasicExpression<boolean> | undefined {
@@ -487,24 +438,15 @@ export class CollectionSubscriber<
     changes: Array<ChangeMessage<any, string | number>>,
     comparator: (a: any, b: any) => number,
   ): void {
-    for (const change of changes) {
-      if (change.type === `delete`) {
-        continue
-      }
-
-      const isNewKey = !this.sentToD2Keys.has(change.key)
-
-      // Only track inserts/updates for cursor positioning, not deletes
-      if (!this.biggest) {
-        this.biggest = change.value
-        this.lastLoadRequestKey = undefined
-      } else if (comparator(this.biggest, change.value) < 0) {
-        this.biggest = change.value
-        this.lastLoadRequestKey = undefined
-      } else if (isNewKey) {
-        // New key with same orderBy value - allow another load if needed
-        this.lastLoadRequestKey = undefined
-      }
+    const result = trackBiggestSentValue(
+      changes,
+      this.biggest,
+      this.sentToD2Keys,
+      comparator,
+    )
+    this.biggest = result.biggest
+    if (result.shouldResetLoadKey) {
+      this.lastLoadRequestKey = undefined
     }
   }
 
@@ -524,63 +466,5 @@ export class CollectionSubscriber<
     this.collectionConfigBuilder.liveQueryCollection!._sync.trackLoadPromise(
       promise,
     )
-  }
-
-  private getLoadRequestKey(options: {
-    minValues: Array<unknown> | undefined
-    offset: number
-    limit: number
-  }): string {
-    return serializeValue({
-      minValues: options.minValues ?? null,
-      offset: options.offset,
-      limit: options.limit,
-    })
-  }
-}
-
-/**
- * Helper function to send changes to a D2 input stream
- */
-function sendChangesToInput(
-  input: RootStreamBuilder<unknown>,
-  changes: Iterable<ChangeMessage>,
-  getKey: (item: ChangeMessage[`value`]) => any,
-): number {
-  const multiSetArray: MultiSetArray<unknown> = []
-  for (const change of changes) {
-    const key = getKey(change.value)
-    if (change.type === `insert`) {
-      multiSetArray.push([[key, change.value], 1])
-    } else if (change.type === `update`) {
-      multiSetArray.push([[key, change.previousValue], -1])
-      multiSetArray.push([[key, change.value], 1])
-    } else {
-      // change.type === `delete`
-      multiSetArray.push([[key, change.value], -1])
-    }
-  }
-
-  if (multiSetArray.length !== 0) {
-    input.sendData(new MultiSet(multiSetArray))
-  }
-
-  return multiSetArray.length
-}
-
-/** Splits updates into a delete of the old value and an insert of the new value */
-function* splitUpdates<
-  T extends object = Record<string, unknown>,
-  TKey extends string | number = string | number,
->(
-  changes: Iterable<ChangeMessage<T, TKey>>,
-): Generator<ChangeMessage<T, TKey>> {
-  for (const change of changes) {
-    if (change.type === `update`) {
-      yield { type: `delete`, key: change.key, value: change.previousValue! }
-      yield { type: `insert`, key: change.key, value: change.value }
-    } else {
-      yield change
-    }
   }
 }

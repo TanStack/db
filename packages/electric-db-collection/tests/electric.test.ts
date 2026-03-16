@@ -2451,8 +2451,8 @@ describe(`Electric Integration`, () => {
       const testCollection = createCollection(electricCollectionOptions(config))
 
       mockStream.isUpToDate = true
-      mockForceDisconnectAndRefresh.mockImplementationOnce(async () => {
-        throw new Error(`PauseLock held`)
+      mockForceDisconnectAndRefresh.mockImplementationOnce(() => {
+        return Promise.reject(new Error(`PauseLock held`))
       })
 
       await testCollection._sync.loadSubset({ limit: 10 })

@@ -268,7 +268,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
-                user_name: activeUser?.name,
+                user_name: activeUser.name,
                 issue_status: issue.status,
               }))
           },
@@ -412,8 +412,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
                 issue_status: issue.status,
-                user_name: activeUser?.name,
-                user_status: activeUser?.status,
+                user_name: activeUser.name,
+                user_status: activeUser.status,
               }))
           },
         })
@@ -468,7 +468,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
         expect(results).toHaveLength(1)
         expect(results[0]!.product.id).toBe(1)
         expect(results[0]!.tried).toBeDefined()
-        expect(results[0]!.tried!.userId).toBe(1)
+        expect(results[0]!.tried.userId).toBe(1)
         expect(results[0]).toEqual({
           product: { id: 1, a: `8` },
           tried: sampleTrials[0],
@@ -782,8 +782,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .select(({ issue, author }) => ({
                 issue_id: issue.id,
                 issue_title: issue.title,
-                author_name: author?.userName,
-                author_bio: author?.profileBio,
+                author_name: author.userName,
+                author_bio: author.profileBio,
               }))
           },
         })

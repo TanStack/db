@@ -1,8 +1,8 @@
-import { test, inject } from 'vitest'
-import { Client } from 'pg'
-import { makePgClient } from './global-setup'
-import type { SeedDataResult } from '../src/types'
+import { inject, test } from 'vitest'
 import { generateSeedData } from '../src/fixtures/seed-data'
+import { makePgClient } from './global-setup'
+import type { Client } from 'pg'
+import type { SeedDataResult } from '../src/types'
 
 /**
  * Base fixture with database client and abort controller
@@ -14,6 +14,7 @@ export const testWithDb = test.extend<{
   testSchema: string
   tableName: (base: string) => string
 }>({
+  // eslint-disable-next-line no-empty-pattern
   dbClient: async ({}, use) => {
     const schema = inject('testSchema')
     const client = makePgClient({
@@ -28,16 +29,19 @@ export const testWithDb = test.extend<{
     await client.end()
   },
 
+  // eslint-disable-next-line no-empty-pattern
   aborter: async ({}, use) => {
     const controller = new AbortController()
     await use(controller)
     controller.abort('Test complete')
   },
 
+  // eslint-disable-next-line no-empty-pattern
   baseUrl: async ({}, use) => {
     await use(inject('baseUrl'))
   },
 
+  // eslint-disable-next-line no-empty-pattern
   testSchema: async ({}, use) => {
     await use(inject('testSchema'))
   },
@@ -63,7 +67,7 @@ export const testWithTables = testWithDb.extend<{
 }>({
   usersTable: async ({ dbClient, tableName, task }, use) => {
     const name = tableName('users')
-    const taskFile = task.file?.name.replace(/'/g, '`') ?? 'unknown'
+    const taskFile = task.file.name.replace(/'/g, '`')
     const taskName = task.name.replace(/'/g, '`')
 
     await dbClient.query(`
@@ -90,9 +94,10 @@ export const testWithTables = testWithDb.extend<{
     }
   },
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   postsTable: async ({ dbClient, tableName, usersTable, task }, use) => {
     const name = tableName('posts')
-    const taskFile = task.file?.name.replace(/'/g, '`') ?? 'unknown'
+    const taskFile = task.file.name.replace(/'/g, '`')
     const taskName = task.name.replace(/'/g, '`')
 
     await dbClient.query(`
@@ -119,11 +124,12 @@ export const testWithTables = testWithDb.extend<{
   },
 
   commentsTable: async (
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     { dbClient, tableName, postsTable, usersTable, task },
     use,
   ) => {
     const name = tableName('comments')
-    const taskFile = task.file?.name.replace(/'/g, '`') ?? 'unknown'
+    const taskFile = task.file.name.replace(/'/g, '`')
     const taskName = task.name.replace(/'/g, '`')
 
     await dbClient.query(`
@@ -171,6 +177,7 @@ export const testWithSeedData = testWithTables.extend<{
   seedData: SeedDataResult
   insertSeedData: () => Promise<void>
 }>({
+  // eslint-disable-next-line no-empty-pattern
   seedData: async ({}, use) => {
     const seed = generateSeedData()
     await use(seed)

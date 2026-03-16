@@ -445,7 +445,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons?.name,
+            name: persons.name,
           })),
       )
     })
@@ -820,7 +820,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons?.name,
+            name: persons.name,
           })),
       )
 
@@ -1409,7 +1409,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              name: persons?.name,
+              name: persons.name,
             })),
         )
       })
@@ -1835,7 +1835,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              userName: persons?.name,
+              userName: persons.name,
             })),
         )
       })
@@ -2432,7 +2432,7 @@ describe(`Query Collections`, () => {
             )
             .select(({ persons, ic }) => ({
               name: persons.name,
-              issueCount: ic?.issueCount,
+              issueCount: ic.issueCount,
             }))
         }, [])
       })
