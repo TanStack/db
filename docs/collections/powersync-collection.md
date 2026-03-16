@@ -579,7 +579,28 @@ This approach allows you to:
 
 ## On-demand Sync Mode (Query Driven Sync)
 
-By default the PowerSync collection uses the `eager` sync mode, but you can opt to use `on-demand` sync mode instead. To better understand the advantage of using a query-driven sync approach, consider the following examples that depict how data flows under the hood when using either. 
+By default the PowerSync collection uses the `eager` sync mode, but you can opt to use `on-demand` sync mode instead. In on-demand mode, the collection is query-driven - it only loads data from SQLite that satisfies the predicates of your active live queries, rather than syncing everything and filtering afterwards.
+
+To understand how data flows under the hood, it helps to know that there are two independent dimensions at play:
+
+- **Sync mode** (`eager` vs `on-demand`) - controls how data moves from SQLite into the TanStack DB collection
+- **Sync Streams** (optional) - controls how data moves from the PowerSync Service into SQLite, using the `onLoad` or `onLoadSubset` hooks
+
+These dimensions compose independently, giving you six combinations covered below:
+
+| Example | Sync mode | Sync Streams | Parameters |
+|---|---|---|---|
+| 1 | Eager | No | - |
+| 2 | On-demand | No | - |
+| 3 | Eager | Yes | Hardcoded |
+| 4 | On-demand | Yes | Hardcoded |
+| 5 | On-demand | Yes | Dynamic - `extractSimpleComparisons` |
+| 6 | On-demand | Yes | Dynamic - `parseWhereExpression` |
+
+Examples 1 and 2 assume SQLite is already fully populated by PowerSync's sync mechanism. Examples 3–6 add Sync Streams, which let you control which data from the PowerSync Service reaches SQLite in the first place - useful when you only want a subset of data on-device.
+
+In examples 3 and 4, Sync Stream subscription parameters are hardcoded. Examples 5 and 6 show how to derive those parameters dynamically from the live query's predicates, so the subscription automatically adjusts as the query changes.
+
 
 ### 1. Eager Mode
 
@@ -735,7 +756,7 @@ streams:
     query: SELECT * FROM todos WHERE list_id = subscription.parameter('list') AND list_id IN (SELECT id FROM lists WHERE owner_id = auth.user_id())
 ```
 
-## 1. Eager Mode with Sync Streams
+### 3. Eager Mode with Sync Streams
 
 Use the `onLoad` hook to subscribe to a Sync Stream when the collection first loads, so SQLite is populated before the collection starts serving queries. In `eager` mode, all rows in SQLite are synced into the TanStack DB collection; live query filtering then runs against that full dataset. 
 The hook can optionally return a cleanup function where you can unsubscribe from the Sync Stream.
@@ -830,7 +851,7 @@ const liveQuery = createLiveQueryCollection({
 })
 ```
 
-## 2. On-Demand Mode with Sync Streams
+### 4. On-Demand Mode with Sync Streams
 
 Use the `onLoadSubset` hook to subscribe to a Sync Stream whenever the collection's data boundary changes (i.e. when the set of active live queries changes). In `on-demand` mode, only rows that satisfy the active live query predicates are synced from SQLite into the TanStack DB collection. 
 The hook can optionally return a cleanup function where you can unsubscribe from the Sync Stream when that subset is no longer needed.
@@ -925,7 +946,7 @@ const liveQuery = createLiveQueryCollection({
 })
 ```
 
-## 3 On-Demand Mode with Simple Predicates
+### 5. On-Demand Mode with Simple Predicates
 
 In the previous example, the Sync Stream subscription parameters were hardcoded. In practice, you'll often want to derive those parameters dynamically from the live query's where clause. That way, changing the query automatically adjusts which data is synced from the PowerSync Service. `extractSimpleComparisons` is a convenience helper that parses the expression tree from `onLoadSubset` into a flat list of `{ field, operator, value }` objects. 
 
@@ -1047,11 +1068,11 @@ const liveQuery = createLiveQueryCollection({
 })
 ```
 
-## 4. On-Demand Mode with Complex Predicates
-While `extractSimpleComparisons` works well for simple, single-condition filters. However, live queries often combine multiple conditions using `and`, `or`, or other nested expressions. `parseWhereExpression` lets you provide custom handler functions for each operator (eq, and, etc.). This gives you full control over how a compound expression tree is unpacked and transformed into the parameters object passed to `syncStream()`. It's useful when your Sync Stream accepts multiple parameters and you need to extract all of them from a single composite where clause. For example, filtering by both `list_id` and `completed` status simultaneously.
+### 6. On-Demand Mode with Complex Predicates
 
-Assume a small adjustment to the Sync Stream definition of todos (adding the `completed` subscription parameter)
+While `extractSimpleComparisons` works well for simple, single-condition filters, live queries often combine multiple conditions using `and`, `or`, or other nested expressions. `parseWhereExpression` lets you provide custom handler functions for each operator (`eq`, `and`, etc.). This gives you full control over how a compound expression tree is unpacked and transformed into the parameters object passed to `syncStream()`. It's useful when your Sync Stream accepts multiple parameters and you need to extract all of them from a single composite where clause - for example, filtering by both `list_id` and `completed` status simultaneously.
 
+Assume a small adjustment to the Sync Stream definition of todos (adding the `completed` subscription parameter):
 ```
 todos:
     query: SELECT * FROM todos WHERE list_id = subscription.parameter('list') AND completed = subscription.parameter("completed") AND list_id IN (SELECT id FROM lists WHERE owner_id = auth.user_id())
@@ -1059,7 +1080,7 @@ todos:
 
 The `list` parameter name is kept as-is (consistent with most examples), but must be mapped to `list_id` to work with the following example. Alternatively, it can be named `list_id` in the Sync Stream definition to skip the programmatic mapping step.
 
-This example starts with 4 todos in the PowerSync Service, the Sync Stream subscription criteria (`list_id = "list_1" and completed = 1`) is derived from the live query registered against the collection. Only 1 todo gets synced via the Sync Stream to the SQLite database. One todos gets synced from the SQLite database to the collection. Finally the TanStack DB query returns 1 todo that matches `eq(todo.list_id, 'list_id') and eq(todo.completed, 1)`.
+This example starts with 4 todos in the PowerSync Service, the Sync Stream subscription criteria (`list_id = "list_1" and completed = 1`) is derived from the live query registered against the collection. Only 1 todo gets synced via the Sync Stream to the SQLite database. One todo gets synced from the SQLite database to the collection. Finally the TanStack DB query returns 1 todo that matches `eq(todo.list_id, 'list_id') and eq(todo.completed, 1)`.
 
 ```mermaid
 block-beta 
