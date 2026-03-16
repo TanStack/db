@@ -681,7 +681,10 @@ describe(`persistedCollectionOptions`, () => {
 
     await collection.preload()
     await flushAsyncWork()
-    expect(stripVirtualProps(collection.get(`2`))).toEqual({ id: `2`, title: `Delete` })
+    expect(stripVirtualProps(collection.get(`2`))).toEqual({
+      id: `2`,
+      title: `Delete`,
+    })
 
     adapter.rows.delete(`2`)
 
@@ -833,7 +836,10 @@ describe(`persistedCollectionOptions`, () => {
 
     // Targeted path should NOT have called loadSubset again
     expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload)
-    expect(stripVirtualProps(collection.get(`1`))).toEqual({ id: `1`, title: `Updated` })
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({
+      id: `1`,
+      title: `Updated`,
+    })
   })
 
   it(`targeted update removes row that no longer matches WHERE`, async () => {
@@ -871,7 +877,10 @@ describe(`persistedCollectionOptions`, () => {
     // Load a filtered subset with WHERE title = 'Keep'
     await (collection as any)._sync.loadSubset({ where: whereExpr })
     await flushAsyncWork()
-    expect(stripVirtualProps(collection.get(`2`))).toEqual({ id: `2`, title: `Keep` })
+    expect(stripVirtualProps(collection.get(`2`))).toEqual({
+      id: `2`,
+      title: `Keep`,
+    })
 
     // Change the row so it no longer matches WHERE title = 'Keep'
     adapter.rows.set(`2`, { id: `2`, title: `Changed` })
@@ -944,7 +953,10 @@ describe(`persistedCollectionOptions`, () => {
     expect(adapter.loadSubsetCalls.length).toBeGreaterThan(
       loadSubsetCallsAfterPaginated,
     )
-    expect(stripVirtualProps(collection.get(`1`))).toEqual({ id: `1`, title: `Updated` })
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({
+      id: `1`,
+      title: `Updated`,
+    })
   })
 })
 
