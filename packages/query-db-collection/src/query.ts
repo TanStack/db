@@ -803,6 +803,7 @@ export function queryCollectionOptions(
 
     type UpdateHandler = Parameters<QueryObserver[`subscribe`]>[0]
 
+    // eslint-disable-next-line no-shadow
     const makeQueryResultHandler = (queryKey: QueryKey) => {
       const hashedQueryKey = hashKey(queryKey)
       const handleQueryResult: UpdateHandler = (result) => {

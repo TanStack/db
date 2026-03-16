@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, test } from 'vitest'
 import { createLiveQueryCollection, eq, gt } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 // Sample data types for join-subquery testing
 type Issue = {
@@ -268,7 +268,7 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               )
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
-                user_name: activeUser?.name,
+                user_name: activeUser.name,
                 issue_status: issue.status,
               }))
           },
@@ -412,8 +412,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .select(({ issue, activeUser }) => ({
                 issue_title: issue.title,
                 issue_status: issue.status,
-                user_name: activeUser?.name,
-                user_status: activeUser?.status,
+                user_name: activeUser.name,
+                user_status: activeUser.status,
               }))
           },
         })
@@ -460,11 +460,15 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
-        const results = joinSubquery.toArray
+        const results = joinSubquery.toArray.map((row) => ({
+          ...stripVirtualProps(row),
+          product: stripVirtualProps(row.product),
+          tried: stripVirtualProps(row.tried),
+        }))
         expect(results).toHaveLength(1)
         expect(results[0]!.product.id).toBe(1)
         expect(results[0]!.tried).toBeDefined()
-        expect(results[0]!.tried!.userId).toBe(1)
+        expect(results[0]!.tried.userId).toBe(1)
         expect(results[0]).toEqual({
           product: { id: 1, a: `8` },
           tried: sampleTrials[0],
@@ -493,7 +497,10 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
-        const results = joinSubquery.toArray
+        const results = joinSubquery.toArray.map((row) => ({
+          ...stripVirtualProps(row),
+          issue: stripVirtualProps(row.issue),
+        }))
         expect(results).toEqual([
           {
             issue: {
@@ -531,7 +538,10 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           startSync: true,
         })
 
-        const results = joinSubquery.toArray
+        const results = joinSubquery.toArray.map((row) => ({
+          ...stripVirtualProps(row),
+          issue: stripVirtualProps(row.issue),
+        }))
         expect(results).toEqual([
           {
             issue: {
@@ -609,7 +619,9 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
           expect(typeof result.is_high_priority).toBe(`boolean`)
         })
 
-        const sortedResults = results.sort((a, b) => a.id - b.id)
+        const sortedResults = results
+          .map((result) => stripVirtualProps(result))
+          .sort((a, b) => a.id - b.id)
         expect(sortedResults).toEqual([
           {
             id: 1,
@@ -770,8 +782,8 @@ function createJoinSubqueryTests(autoIndex: `off` | `eager`): void {
               .select(({ issue, author }) => ({
                 issue_id: issue.id,
                 issue_title: issue.title,
-                author_name: author?.userName,
-                author_bio: author?.profileBio,
+                author_name: author.userName,
+                author_bio: author.profileBio,
               }))
           },
         })

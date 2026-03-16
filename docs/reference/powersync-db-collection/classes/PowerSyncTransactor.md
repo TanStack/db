@@ -113,7 +113,7 @@ Persists a Transaction to the PowerSync SQLite database.
 protected getMutationCollectionMeta(mutation): PowerSyncCollectionMeta<any>;
 ```
 
-Defined in: [PowerSyncTransactor.ts:294](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L294)
+Defined in: [PowerSyncTransactor.ts:297](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L297)
 
 #### Parameters
 
@@ -136,7 +136,7 @@ protected handleDelete(
 waitForCompletion): Promise<PendingOperation | null>;
 ```
 
-Defined in: [PowerSyncTransactor.ts:221](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L221)
+Defined in: [PowerSyncTransactor.ts:223](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L223)
 
 #### Parameters
 
@@ -199,7 +199,7 @@ protected handleOperationWithCompletion(
 handler): Promise<PendingOperation | null>;
 ```
 
-Defined in: [PowerSyncTransactor.ts:263](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L263)
+Defined in: [PowerSyncTransactor.ts:266](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L266)
 
 Helper function which wraps a persistence operation by:
 - Fetching the mutation's collection's SQLite table details
@@ -239,7 +239,7 @@ protected handleUpdate(
 waitForCompletion): Promise<PendingOperation | null>;
 ```
 
-Defined in: [PowerSyncTransactor.ts:187](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L187)
+Defined in: [PowerSyncTransactor.ts:188](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L188)
 
 #### Parameters
 
@@ -267,7 +267,7 @@ Defined in: [PowerSyncTransactor.ts:187](https://github.com/TanStack/db/blob/mai
 protected processMutationMetadata(mutation): string | null;
 ```
 
-Defined in: [PowerSyncTransactor.ts:313](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L313)
+Defined in: [PowerSyncTransactor.ts:316](https://github.com/TanStack/db/blob/main/packages/powersync-db-collection/src/PowerSyncTransactor.ts#L316)
 
 Processes collection mutation metadata for persistence to the database.
 We only support storing string metadata.

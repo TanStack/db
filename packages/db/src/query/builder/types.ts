@@ -1,4 +1,4 @@
-import type { CollectionImpl } from '../../collection/index.js'
+import type { Collection, CollectionImpl } from '../../collection/index.js'
 import type { SingleResult, StringCollationConfig } from '../../types.js'
 import type {
   Aggregate,
@@ -9,6 +9,8 @@ import type {
   Value,
 } from '../ir.js'
 import type { QueryBuilder } from './index.js'
+import type { VirtualRowProps, WithVirtualProps } from '../../virtual-props.js'
+import type { ToArrayWrapper } from './functions.js'
 
 /**
  * Context - The central state container for query builder operations
@@ -83,7 +85,9 @@ export type Source = {
  * This can be an explicit type passed by the user or the schema output type.
  */
 export type InferCollectionType<T> =
-  T extends CollectionImpl<infer TOutput, any, any, any, any> ? TOutput : never
+  T extends CollectionImpl<infer TOutput, infer TKey, any, any, any>
+    ? WithVirtualProps<TOutput, TKey>
+    : never
 
 /**
  * SchemaFromSource - Converts a Source definition into a ContextSchema
@@ -174,6 +178,8 @@ type SelectValue =
   | undefined // Optional values
   | { [key: string]: SelectValue }
   | Array<RefLeaf<any>>
+  | ToArrayWrapper // toArray() wrapped subquery
+  | QueryBuilder<any> // includes subquery (produces a child Collection)
 
 // Recursive shape for select objects allowing nested projections
 type SelectShape = { [key: string]: SelectValue | SelectShape }
@@ -227,30 +233,47 @@ export type ResultTypeFromSelect<TSelectObject> = WithoutRefBrand<
   Prettify<{
     [K in keyof TSelectObject]: NeedsExtraction<TSelectObject[K]> extends true
       ? ExtractExpressionType<TSelectObject[K]>
-      : TSelectObject[K] extends Ref<infer _T>
-        ? ExtractRef<TSelectObject[K]>
-        : TSelectObject[K] extends RefLeaf<infer T>
-          ? T
-          : TSelectObject[K] extends RefLeaf<infer T> | undefined
-            ? T | undefined
-            : TSelectObject[K] extends RefLeaf<infer T> | null
-              ? T | null
-              : TSelectObject[K] extends Ref<infer _T> | undefined
-                ? ExtractRef<TSelectObject[K]> | undefined
-                : TSelectObject[K] extends Ref<infer _T> | null
-                  ? ExtractRef<TSelectObject[K]> | null
-                  : TSelectObject[K] extends Aggregate<infer T>
-                    ? T
-                    : TSelectObject[K] extends
-                          | string
-                          | number
-                          | boolean
-                          | null
-                          | undefined
-                      ? TSelectObject[K]
-                      : TSelectObject[K] extends Record<string, any>
-                        ? ResultTypeFromSelect<TSelectObject[K]>
-                        : never
+      : TSelectObject[K] extends ToArrayWrapper<infer T>
+        ? Array<T>
+        : // includes subquery (bare QueryBuilder) — produces a child Collection
+          TSelectObject[K] extends QueryBuilder<infer TChildContext>
+          ? Collection<GetResult<TChildContext>>
+          : // Ref (full object ref or spread with RefBrand) - recursively process properties
+            TSelectObject[K] extends Ref<infer _T>
+            ? ExtractRef<TSelectObject[K]>
+            : // RefLeaf (simple property ref like user.name)
+              TSelectObject[K] extends RefLeaf<infer T>
+              ? IsNullableRef<TSelectObject[K]> extends true
+                ? T | undefined
+                : T
+              : // RefLeaf | undefined (schema-optional field)
+                TSelectObject[K] extends RefLeaf<infer T> | undefined
+                ? T | undefined
+                : // RefLeaf | null (schema-nullable field)
+                  TSelectObject[K] extends RefLeaf<infer T> | null
+                  ? IsNullableRef<Exclude<TSelectObject[K], null>> extends true
+                    ? T | null | undefined
+                    : T | null
+                  : // Ref | undefined (optional object-type schema field)
+                    TSelectObject[K] extends Ref<infer _T> | undefined
+                    ?
+                        | ExtractRef<Exclude<TSelectObject[K], undefined>>
+                        | undefined
+                    : // Ref | null (nullable object-type schema field)
+                      TSelectObject[K] extends Ref<infer _T> | null
+                      ? ExtractRef<Exclude<TSelectObject[K], null>> | null
+                      : TSelectObject[K] extends Aggregate<infer T>
+                        ? T
+                        : TSelectObject[K] extends
+                              | string
+                              | number
+                              | boolean
+                              | null
+                              | undefined
+                          ? TSelectObject[K]
+                          : TSelectObject[K] extends Record<string, any>
+                            ? ResultTypeFromSelect<TSelectObject[K]>
+                            : never
   }>
 >
 
@@ -366,24 +389,17 @@ export type FunctionalHavingRow<TContext extends Context> = TContext[`schema`] &
   (TContext[`result`] extends object ? { $selected: TContext[`result`] } : {})
 
 /**
- * RefProxyForContext - Creates ref proxies for all tables/collections in a query context
+ * RefsForContext - Creates ref proxies for all tables/collections in a query context
  *
  * This is the main entry point for creating ref objects in query builder callbacks.
- * It handles optionality by placing undefined/null OUTSIDE the RefProxy to enable
- * JavaScript's optional chaining operator (?.):
+ * For nullable join sides (left/right/full joins), it produces `Ref<T, true>` instead
+ * of `Ref<T> | undefined`. This accurately reflects that the proxy object is always
+ * present at build time (it's a truthy proxy that records property access paths),
+ * while the `Nullable` flag ensures the result type correctly includes `| undefined`.
  *
  * Examples:
- * - Required field: `RefProxy<User>` → user.name works
- * - Optional field: `RefProxy<User> | undefined` → user?.name works
- * - Nullable field: `RefProxy<User> | null` → user?.name works
- * - Both optional and nullable: `RefProxy<User> | undefined` → user?.name works
- *
- * The key insight is that `RefProxy<User | undefined>` would NOT allow `user?.name`
- * because the undefined is "inside" the proxy, but `RefProxy<User> | undefined`
- * does allow it because the undefined is "outside" the proxy.
- *
- * The logic prioritizes optional chaining by always placing `undefined` outside when
- * a type is both optional and nullable (e.g., `string | null | undefined`).
+ * - Required field: `Ref<User>` → user.name works, result is T
+ * - Nullable join side: `Ref<User, true>` → user.name works, result is T | undefined
  *
  * After `select()` is called, this type also includes `$selected` which provides access
  * to the SELECT result fields via `$selected.fieldName` syntax.
@@ -394,17 +410,17 @@ export type RefsForContext<TContext extends Context> = {
   > extends true
     ? IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is both non-exact optional and non-exact nullable (e.g., string | null | undefined)
-          // Extract the non-undefined and non-null part and place undefined outside
-          Ref<NonNullable<TContext[`schema`][K]>> | undefined
+        // Extract the non-undefined and non-null part, mark as nullable ref
+        Ref<NonNullable<TContext[`schema`][K]>, true>
       : // T is optional (T | undefined) but not exactly undefined, and not nullable
-          // Extract the non-undefined part and place undefined outside
-          Ref<NonUndefined<TContext[`schema`][K]>> | undefined
+        // Extract the non-undefined part, mark as nullable ref
+        Ref<NonUndefined<TContext[`schema`][K]>, true>
     : IsNonExactNullable<TContext[`schema`][K]> extends true
       ? // T is nullable (T | null) but not exactly null, and not optional
-        // Extract the non-null part and place null outside
-        Ref<NonNull<TContext[`schema`][K]>> | null
+        // Extract the non-null part, mark as nullable ref
+        Ref<NonNull<TContext[`schema`][K]>, true>
       : // T is exactly undefined, exactly null, or neither optional nor nullable
-        // Wrap in RefProxy as-is (includes exact undefined, exact null, and normal types)
+        // Wrap in Ref as-is (includes exact undefined, exact null, and normal types)
         Ref<TContext[`schema`][K]>
 } & (TContext[`result`] extends object
   ? { $selected: Ref<TContext[`result`]> }
@@ -472,6 +488,29 @@ type NonUndefined<T> = T extends undefined ? never : T
 type NonNull<T> = T extends null ? never : T
 
 /**
+ * Virtual properties available on all Ref types in query builders.
+ * These allow querying on sync status, origin, key, and collection ID.
+ *
+ * @example
+ * ```typescript
+ * // Filter by sync status
+ * .where(({ user }) => eq(user.$synced, true))
+ *
+ * // Filter by origin
+ * .where(({ order }) => eq(order.$origin, 'local'))
+ *
+ * // Access key in select
+ * .select(({ user }) => ({
+ *   key: user.$key,
+ *   collectionId: user.$collectionId,
+ * }))
+ * ```
+ */
+type VirtualPropsRef<TKey extends string | number = string | number> = {
+  readonly [K in keyof VirtualRowProps<TKey>]: RefLeaf<VirtualRowProps<TKey>[K]>
+}
+
+/**
  * Ref - The user-facing ref interface for the query builder
  *
  * This is a clean type that represents a reference to a value in the query,
@@ -479,8 +518,13 @@ type NonNull<T> = T extends null ? never : T
  * It provides a recursive interface that allows nested property access while
  * preserving optionality and nullability correctly.
  *
- * When spread in select clauses, it correctly produces the underlying data type
- * without Ref wrappers, enabling clean spread operations.
+ * The `Nullable` parameter indicates whether this ref comes from a nullable
+ * join side (left/right/full). When `true`, the `Nullable` flag propagates
+ * through all nested property accesses, ensuring the result type includes
+ * `| undefined` for all fields accessed through this ref.
+ *
+ * Includes virtual properties ($synced, $origin, $key, $collectionId) for
+ * querying on sync status and row metadata.
  *
  * Example usage:
  * ```typescript
@@ -488,32 +532,37 @@ type NonNull<T> = T extends null ? never : T
  * const users: Ref<{ id: number; profile?: { bio: string } }> = { ... }
  * users.id // Ref<number> - clean display
  * users.profile?.bio // Ref<string> - nested optional access works
+ * users.$synced // RefLeaf<boolean> - virtual property access
+ *
+ * // Nullable ref (left/right/full join side):
+ * select(({ dept }) => ({ name: dept.name })) // result: string | undefined
  *
  * // Spread operations work cleanly:
  * select(({ user }) => ({ ...user })) // Returns User type, not Ref types
  * ```
  */
-export type Ref<T = any> = {
+export type Ref<T = any, Nullable extends boolean = false> = {
   [K in keyof T]: IsNonExactOptional<T[K]> extends true
     ? IsNonExactNullable<T[K]> extends true
       ? // Both optional and nullable
         IsPlainObject<NonNullable<T[K]>> extends true
-        ? Ref<NonNullable<T[K]>> | undefined
-        : RefLeaf<NonNullable<T[K]>> | undefined
+        ? Ref<NonNullable<T[K]>, Nullable> | undefined
+        : RefLeaf<NonNullable<T[K]>, Nullable> | undefined
       : // Optional only
         IsPlainObject<NonUndefined<T[K]>> extends true
-        ? Ref<NonUndefined<T[K]>> | undefined
-        : RefLeaf<NonUndefined<T[K]>> | undefined
+        ? Ref<NonUndefined<T[K]>, Nullable> | undefined
+        : RefLeaf<NonUndefined<T[K]>, Nullable> | undefined
     : IsNonExactNullable<T[K]> extends true
       ? // Nullable only
         IsPlainObject<NonNull<T[K]>> extends true
-        ? Ref<NonNull<T[K]>> | null
-        : RefLeaf<NonNull<T[K]>> | null
+        ? Ref<NonNull<T[K]>, Nullable> | null
+        : RefLeaf<NonNull<T[K]>, Nullable> | null
       : // Required
         IsPlainObject<T[K]> extends true
-        ? Ref<T[K]>
-        : RefLeaf<T[K]>
-} & RefLeaf<T>
+        ? Ref<T[K], Nullable>
+        : RefLeaf<T[K], Nullable>
+} & RefLeaf<T, Nullable> &
+  VirtualPropsRef
 
 /**
  * Ref - The user-facing ref type with clean IDE display
@@ -527,11 +576,19 @@ export type Ref<T = any> = {
  * - No internal properties like __refProxy, __path, __type are visible
  */
 declare const RefBrand: unique symbol
-export type RefLeaf<T = any> = { readonly [RefBrand]?: T }
+declare const NullableBrand: unique symbol
+export type RefLeaf<T = any, Nullable extends boolean = false> = {
+  readonly [RefBrand]?: T
+} & ([Nullable] extends [true] ? { readonly [NullableBrand]?: true } : {})
 
-// Helper type to remove RefBrand from objects
+// Detect NullableBrand by checking for the key's presence
+type IsNullableRef<T> = typeof NullableBrand extends keyof T ? true : false
+
+// Helper type to remove RefBrand and NullableBrand from objects
 type WithoutRefBrand<T> =
-  T extends Record<string, any> ? Omit<T, typeof RefBrand> : T
+  T extends Record<string, any>
+    ? Omit<T, typeof RefBrand | typeof NullableBrand>
+    : T
 
 /**
  * PreserveSingleResultFlag - Conditionally includes the singleResult flag
@@ -650,6 +707,10 @@ export type InferResultType<TContext extends Context> =
     ? GetResult<TContext> | undefined
     : Array<GetResult<TContext>>
 
+type WithVirtualPropsIfObject<TResult> = TResult extends object
+  ? WithVirtualProps<TResult, string | number>
+  : TResult
+
 /**
  * GetResult - Determines the final result type of a query
  *
@@ -677,7 +738,7 @@ export type InferResultType<TContext extends Context> =
  */
 export type GetResult<TContext extends Context> = Prettify<
   TContext[`result`] extends object
-    ? TContext[`result`]
+    ? WithVirtualPropsIfObject<TContext[`result`]>
     : TContext[`hasJoins`] extends true
       ? // Optionality is already applied in the schema, just return it
         TContext[`schema`]

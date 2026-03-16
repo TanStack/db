@@ -12,7 +12,7 @@ import {
   length,
   or,
 } from '../../src/query/builder/functions'
-import { mockSyncCollectionOptions } from '../utils'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils'
 
 interface TestItem {
   id: string
@@ -766,7 +766,7 @@ describe(`Query Index Optimization`, () => {
         await liveQuery.stateWhenReady()
 
         // Should have found results where both items are active
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
@@ -960,7 +960,7 @@ describe(`Query Index Optimization`, () => {
         // Should only include results where both sides match the WHERE condition
         // Charlie and Eve are filtered out because they have no matching 'other' records
         // and the WHERE clause requires other.status = 'active' (can't be NULL)
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
@@ -1079,7 +1079,7 @@ describe(`Query Index Optimization`, () => {
         // Should only include results where both sides match the WHERE condition
         // Charlie and Eve are filtered out because they have no matching 'other' records
         // and the WHERE clause requires other.status = 'active' (can't be NULL)
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
@@ -1174,7 +1174,7 @@ describe(`Query Index Optimization`, () => {
         await liveQuery.stateWhenReady()
 
         // Should include all results from the first collection
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
@@ -1267,7 +1267,7 @@ describe(`Query Index Optimization`, () => {
         await liveQuery.stateWhenReady()
 
         // Should have found results where both items are active
-        expect(liveQuery.toArray).toEqual([
+        expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
           { id: `1`, name: `Alice`, otherName: `Other Active Item` },
         ])
 
@@ -1316,7 +1316,7 @@ describe(`Query Index Optimization`, () => {
       // Should have found limited results
       expect(liveQuery.size).toBe(2)
 
-      expect(liveQuery.toArray).toEqual([
+      expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
         { id: `5`, name: `Eve`, age: 22 },
         { id: `1`, name: `Alice`, age: 25 },
       ])
@@ -1337,7 +1337,7 @@ describe(`Query Index Optimization`, () => {
 
       expect(liveQuery.size).toBe(2)
 
-      expect(liveQuery.toArray).toEqual([
+      expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
         { id: `6`, name: `Dave`, age: 20 },
         { id: `5`, name: `Eve`, age: 22 },
       ])
@@ -1381,7 +1381,7 @@ describe(`Query Index Optimization`, () => {
 
       expect(liveQuery.size).toBe(6)
 
-      expect(liveQuery.toArray).toEqual([
+      expect(liveQuery.toArray.map((row) => stripVirtualProps(row))).toEqual([
         { id: `5`, name: `Eve`, age: 22 },
         { id: `1`, name: `Alice`, age: 25 },
         { id: `4`, name: `Diana`, age: 28 },

@@ -14,9 +14,23 @@ import {
   or,
 } from '../src/query/builder/functions'
 import { PropRef } from '../src/query/ir'
-import { expectIndexUsage, withIndexTracking } from './utils'
+import { expectIndexUsage, stripVirtualProps, withIndexTracking } from './utils'
 import type { Collection } from '../src/collection/index.js'
 import type { MutationFn, PendingMutation } from '../src/types'
+
+const normalizeChange = (change: any) => ({
+  ...change,
+  value: stripVirtualProps(change.value),
+  previousValue: stripVirtualProps(change.previousValue),
+})
+
+const stripVirtualOnlyUpdates = (changes: Array<any>) =>
+  changes.map(normalizeChange).filter((change) => {
+    if (change.type !== `update`) {
+      return true
+    }
+    return JSON.stringify(change.value) !== JSON.stringify(change.previousValue)
+  })
 
 interface TestItem {
   id: string
@@ -212,12 +226,13 @@ describe(`Collection Indexes`, () => {
 
       // Item should be in collection state
       expect(collection.size).toBe(6)
-      expect(collection.get(`6`)).toEqual(newItem)
+      expect(stripVirtualProps(collection.get(`6`))).toEqual(newItem)
 
-      // Should trigger subscription
-      expect(changes).toHaveLength(1)
-      expect(changes[0]?.type).toBe(`insert`)
-      expect(changes[0]?.value.name).toBe(`Frank`)
+      // Should trigger subscription (ignore virtual-only confirmation update)
+      const dataChanges = stripVirtualOnlyUpdates(changes)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.type).toBe(`insert`)
+      expect(dataChanges[0]?.value.name).toBe(`Frank`)
 
       subscription.unsubscribe()
     })
@@ -251,10 +266,11 @@ describe(`Collection Indexes`, () => {
       expect(updatedItem?.status).toBe(`inactive`)
       expect(updatedItem?.age).toBe(26)
 
-      // Should trigger subscription
-      expect(changes).toHaveLength(1)
-      expect(changes[0]?.type).toBe(`update`)
-      expect(changes[0]?.value.status).toBe(`inactive`)
+      // Should trigger subscription (ignore virtual-only confirmation update)
+      const dataChanges = stripVirtualOnlyUpdates(changes)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.type).toBe(`update`)
+      expect(dataChanges[0]?.value.status).toBe(`inactive`)
 
       subscription.unsubscribe()
     })
@@ -280,10 +296,11 @@ describe(`Collection Indexes`, () => {
       expect(updatedItem?.status).toBe(`inactive`)
       expect(updatedItem?.age).toBe(26)
 
-      // Should trigger subscription
-      expect(changes).toHaveLength(1)
-      expect(changes[0]?.type).toBe(`insert`)
-      expect(changes[0]?.value.status).toBe(`inactive`)
+      // Should trigger subscription (ignore virtual-only confirmation update)
+      const dataChanges = stripVirtualOnlyUpdates(changes)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.type).toBe(`insert`)
+      expect(dataChanges[0]?.value.status).toBe(`inactive`)
 
       subscription.unsubscribe()
     })
@@ -371,8 +388,9 @@ describe(`Collection Indexes`, () => {
       )
       await tx1.isPersisted.promise
 
-      expect(activeChanges).toHaveLength(1)
-      expect(activeChanges[0]?.value.name).toBe(`Bob`)
+      const dataChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.value.name).toBe(`Bob`)
 
       // Change active item to inactive (should trigger delete event for item leaving filter)
       activeChanges.length = 0
@@ -385,10 +403,11 @@ describe(`Collection Indexes`, () => {
       await tx2.isPersisted.promise
 
       // Should trigger delete event for item that no longer matches filter
-      expect(activeChanges).toHaveLength(1)
-      expect(activeChanges[0]?.type).toBe(`delete`)
-      expect(activeChanges[0]?.key).toBe(`1`)
-      expect(activeChanges[0]?.value.status).toBe(`active`) // Should be the previous value
+      const filteredChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(filteredChanges).toHaveLength(1)
+      expect(filteredChanges[0]?.type).toBe(`delete`)
+      expect(filteredChanges[0]?.key).toBe(`1`)
+      expect(filteredChanges[0]?.value.status).toBe(`active`) // Should be the previous value
 
       subscription.unsubscribe()
     })
@@ -414,8 +433,9 @@ describe(`Collection Indexes`, () => {
       )
       await tx1.isPersisted.promise
 
-      expect(activeChanges).toHaveLength(1)
-      expect(activeChanges[0]?.value.name).toBe(`Bob`)
+      const dataChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(dataChanges).toHaveLength(1)
+      expect(dataChanges[0]?.value.name).toBe(`Bob`)
 
       // Change active item to inactive (should trigger delete event for item leaving filter)
       activeChanges.length = 0
@@ -430,7 +450,8 @@ describe(`Collection Indexes`, () => {
       // Subscriber shoiuld not receive any changes
       // because it is not aware of that key
       // so it should also not receive the delete of that key
-      expect(activeChanges).toHaveLength(0)
+      const filteredChanges = stripVirtualOnlyUpdates(activeChanges)
+      expect(filteredChanges).toHaveLength(0)
 
       subscription.unsubscribe()
     })
@@ -1175,8 +1196,9 @@ describe(`Collection Indexes`, () => {
         )
         await tx1.isPersisted.promise
 
-        expect(changes).toHaveLength(1)
-        expect(changes[0]?.value.name).toBe(`Frank`)
+        const dataChanges = stripVirtualOnlyUpdates(changes)
+        expect(dataChanges).toHaveLength(1)
+        expect(dataChanges[0]?.value.name).toBe(`Frank`)
 
         // Add an inactive item (should not trigger)
         changes.length = 0
@@ -1251,8 +1273,9 @@ describe(`Collection Indexes`, () => {
         )
         await tx.isPersisted.promise
 
-        expect(changes).toHaveLength(1)
-        expect(changes[0]?.value.name).toBe(`Diana`)
+        const dataChanges = stripVirtualOnlyUpdates(changes)
+        expect(dataChanges).toHaveLength(1)
+        expect(dataChanges[0]?.value.name).toBe(`Diana`)
 
         subscription.unsubscribe()
       })

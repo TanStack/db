@@ -6,7 +6,6 @@
  */
 
 import { describe, expect, inject } from 'vitest'
-import { parse as uuidParse, stringify as uuidStringify } from 'uuid'
 import { createCollection } from '@tanstack/db'
 import { initClient } from 'trailbase'
 import { trailBaseCollectionOptions } from '../src/trailbase'
@@ -16,7 +15,7 @@ import {
   createJoinsTestSuite,
   createLiveUpdatesTestSuite,
   createMutationsTestSuite,
-  // createPaginationTestSuite,
+  createPaginationTestSuite,
   createPredicatesTestSuite,
   createProgressiveTestSuite,
   generateSeedData,
@@ -38,6 +37,37 @@ declare module 'vitest' {
   }
 }
 
+function parseUuid(uuid: string): Uint8Array {
+  const hex = uuid.replace(/-/g, '')
+
+  if (!/^[0-9a-fA-F]{32}$/.test(hex)) {
+    throw new Error(`Invalid UUID: ${uuid}`)
+  }
+
+  return Uint8Array.from(
+    Array.from({ length: 16 }, (_, index) =>
+      Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16),
+    ),
+  )
+}
+
+function stringifyUuid(bytes: Uint8Array): string {
+  if (bytes.length !== 16) {
+    throw new Error(`UUID bytes must be 16 bytes, got ${bytes.length}`)
+  }
+
+  const hex = Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('')
+
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20),
+  ].join('-')
+}
 // / Decode a "url-safe" base64 string to bytes.
 function urlSafeBase64Decode(base64: string): Uint8Array {
   return Uint8Array.from(
@@ -54,11 +84,11 @@ function urlSafeBase64Encode(bytes: Uint8Array): string {
 }
 
 function parseTrailBaseId(id: string): string {
-  return uuidStringify(urlSafeBase64Decode(id))
+  return stringifyUuid(urlSafeBase64Decode(id))
 }
 
 function toTrailBaseId(id: string): string {
-  return urlSafeBase64Encode(uuidParse(id))
+  return urlSafeBase64Encode(parseUuid(id))
 }
 
 /**
@@ -405,7 +435,7 @@ describe(`TrailBase Collection E2E Tests`, async () => {
 
   // Run all shared test suites
   createPredicatesTestSuite(getConfig)
-  // createPaginationTestSuite(getConfig)
+  createPaginationTestSuite(getConfig)
   createJoinsTestSuite(getConfig)
   createDeduplicationTestSuite(getConfig)
   createCollationTestSuite(getConfig)

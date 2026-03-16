@@ -14,7 +14,10 @@ import {
 } from '@tanstack/db'
 import { useEffect } from 'react'
 import { useLiveQuery } from '../src/useLiveQuery'
-import { mockSyncCollectionOptions } from '../../db/tests/utils'
+import {
+  mockSyncCollectionOptions,
+  stripVirtualProps,
+} from '../../db/tests/utils'
 
 type Person = {
   id: string
@@ -442,7 +445,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons?.name,
+            name: persons.name,
           })),
       )
     })
@@ -817,7 +820,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons?.name,
+            name: persons.name,
           })),
       )
 
@@ -1406,7 +1409,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              name: persons?.name,
+              name: persons.name,
             })),
         )
       })
@@ -1832,7 +1835,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              userName: persons?.name,
+              userName: persons.name,
             })),
         )
       })
@@ -2381,11 +2384,15 @@ describe(`Query Collections`, () => {
       })
 
       const results = result.current.data
-      expect(results.find((r) => r.team === `team1`)).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team1`)),
+      ).toEqual({
         team: `team1`,
         memberCount: 2, // John Doe + John Smith
       })
-      expect(results.find((r) => r.team === `team2`)).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team2`)),
+      ).toEqual({
         team: `team2`,
         memberCount: 1, // Jane Doe
       })
@@ -2425,7 +2432,7 @@ describe(`Query Collections`, () => {
             )
             .select(({ persons, ic }) => ({
               name: persons.name,
-              issueCount: ic?.issueCount,
+              issueCount: ic.issueCount,
             }))
         }, [])
       })
@@ -2435,11 +2442,15 @@ describe(`Query Collections`, () => {
       })
 
       const results = result.current.data
-      expect(results.find((r) => r.name === `John Doe`)).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.name === `John Doe`)),
+      ).toEqual({
         name: `John Doe`,
         issueCount: 2, // Issues 1 and 3
       })
-      expect(results.find((r) => r.name === `Jane Doe`)).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.name === `Jane Doe`)),
+      ).toEqual({
         name: `Jane Doe`,
         issueCount: 1, // Issue 2
       })
@@ -2471,11 +2482,15 @@ describe(`Query Collections`, () => {
       })
 
       const results = result.current.data
-      expect(results.find((r) => r.team === `team1`)).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team1`)),
+      ).toEqual({
         team: `team1`,
         totalAge: 65, // 30 + 35
       })
-      expect(results.find((r) => r.team === `team2`)).toEqual({
+      expect(
+        stripVirtualProps(results.find((r) => r.team === `team2`)),
+      ).toEqual({
         team: `team2`,
         totalAge: 25,
       })

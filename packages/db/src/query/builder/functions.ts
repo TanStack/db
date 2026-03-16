@@ -2,7 +2,8 @@ import { Aggregate, Func } from '../ir'
 import { toExpression } from './ref-proxy.js'
 import type { BasicExpression } from '../ir'
 import type { RefProxy } from './ref-proxy.js'
-import type { RefLeaf } from './types.js'
+import type { Context, GetResult, RefLeaf } from './types.js'
+import type { QueryBuilder } from './index.js'
 
 type StringRef =
   | RefLeaf<string>
@@ -376,3 +377,14 @@ export const operators = [
 ] as const
 
 export type OperatorName = (typeof operators)[number]
+
+export class ToArrayWrapper<T = any> {
+  declare readonly _type: T
+  constructor(public readonly query: QueryBuilder<any>) {}
+}
+
+export function toArray<TContext extends Context>(
+  query: QueryBuilder<TContext>,
+): ToArrayWrapper<GetResult<TContext>> {
+  return new ToArrayWrapper(query)
+}
