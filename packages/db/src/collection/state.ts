@@ -204,8 +204,10 @@ export class CollectionStateManager<
       })
     }
 
-    const optimisticUpserts = options?.optimisticUpserts ?? this.optimisticUpserts
-    const optimisticDeletes = options?.optimisticDeletes ?? this.optimisticDeletes
+    const optimisticUpserts =
+      options?.optimisticUpserts ?? this.optimisticUpserts
+    const optimisticDeletes =
+      options?.optimisticDeletes ?? this.optimisticDeletes
     const hasOptimisticChange =
       optimisticUpserts.has(key) ||
       optimisticDeletes.has(key) ||
@@ -215,7 +217,7 @@ export class CollectionStateManager<
       $synced: !hasOptimisticChange,
       $origin: hasOptimisticChange
         ? 'local'
-        : (options?.rowOrigins ?? this.rowOrigins).get(key) ?? 'remote',
+        : ((options?.rowOrigins ?? this.rowOrigins).get(key) ?? 'remote'),
     })
   }
 

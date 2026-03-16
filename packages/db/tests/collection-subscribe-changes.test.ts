@@ -2854,9 +2854,12 @@ describe(`Virtual properties`, () => {
     const changes: Array<
       ChangeMessage<OutputWithVirtual<{ id: string; value: string }, string>>
     > = []
-    const subscription = collection.subscribeChanges((events) => {
-      changes.push(...events)
-    }, { includeInitialState: false })
+    const subscription = collection.subscribeChanges(
+      (events) => {
+        changes.push(...events)
+      },
+      { includeInitialState: false },
+    )
 
     collection.insert({ id: `local-1`, value: `local` })
     await waitForChanges()
