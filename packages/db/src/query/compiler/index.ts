@@ -15,6 +15,7 @@ import {
   LimitOffsetRequireOrderByError,
   UnsupportedFromTypeError,
 } from '../../errors.js'
+import { VIRTUAL_PROP_NAMES } from '../../virtual-props.js'
 import {
   IncludesSubquery,
   PropRef,
@@ -540,6 +541,7 @@ export function compileQuery(
       query.having,
       query.select,
       query.fnHaving,
+      mainCollectionId,
       groupByMainSource,
     )
   } else if (query.select) {
@@ -555,6 +557,7 @@ export function compileQuery(
         query.having,
         query.select,
         query.fnHaving,
+        mainCollectionId,
         groupByMainSource,
       )
     }
@@ -628,7 +631,10 @@ export function compileQuery(
       map(([key, [row, orderByIndex]]) => {
         // Extract the final results from $selected and include orderBy index
         const raw = (row as any).$selected
-        const finalResults = unwrapValue(raw)
+        const finalResults = attachVirtualPropsToSelected(
+          unwrapValue(raw),
+          row as Record<string, any>,
+        )
         // When in includes mode, embed the correlation key and parentContext
         if (parentKeyStream) {
           const correlationKey = (row as any)[mainSource]?.__correlationKey
@@ -668,7 +674,10 @@ export function compileQuery(
     map(([key, row]) => {
       // Extract the final results from $selected and return [key, [results, undefined]]
       const raw = (row as any).$selected
-      const finalResults = unwrapValue(raw)
+      const finalResults = attachVirtualPropsToSelected(
+        unwrapValue(raw),
+        row as Record<string, any>,
+      )
       // When in includes mode, embed the correlation key and parentContext
       if (parentKeyStream) {
         const correlationKey = (row as any)[mainSource]?.__correlationKey
@@ -906,6 +915,35 @@ function isValue(raw: any): boolean {
 // Helper to unwrap a Value expression or return the value itself
 function unwrapValue(value: any): any {
   return isValue(value) ? value.value : value
+}
+
+function attachVirtualPropsToSelected(
+  selected: any,
+  row: Record<string, any>,
+): any {
+  if (!selected || typeof selected !== `object`) {
+    return selected
+  }
+
+  let needsMerge = false
+  for (const prop of VIRTUAL_PROP_NAMES) {
+    if (selected[prop] == null && prop in row) {
+      needsMerge = true
+      break
+    }
+  }
+
+  if (!needsMerge) {
+    return selected
+  }
+
+  for (const prop of VIRTUAL_PROP_NAMES) {
+    if (selected[prop] == null && prop in row) {
+      selected[prop] = row[prop]
+    }
+  }
+
+  return selected
 }
 
 /**

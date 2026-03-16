@@ -8,6 +8,7 @@ import {
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode'
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory'
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv'
+import { stripVirtualProps } from '../../db/tests/utils'
 import { OPEN_RXDB_SUBSCRIPTIONS, rxdbCollectionOptions } from '../src/rxdb'
 import type { RxCollection } from 'rxdb/plugins/core'
 import type { RxDBCollectionConfig } from '../src/rxdb'
@@ -109,8 +110,8 @@ describe(`RxDB Integration`, () => {
 
       // Verify the collection state contains our items
       expect(collection.size).toBe(initialItems.length)
-      expect(collection.get(`1`)).toEqual(initialItems[0])
-      expect(collection.get(`2`)).toEqual(initialItems[1])
+      expect(stripVirtualProps(collection.get(`1`))).toEqual(initialItems[0])
+      expect(stripVirtualProps(collection.get(`2`))).toEqual(initialItems[1])
 
       // Verify the synced data
       expect(collection._state.syncedData.size).toBe(initialItems.length)
@@ -130,10 +131,22 @@ describe(`RxDB Integration`, () => {
       expect(collection._state.syncedData.size).toBe(docsAmount)
 
       // Spot-check a few positions
-      expect(collection.get(`1`)).toEqual({ id: `1`, name: `Item 1` })
-      expect(collection.get(`10`)).toEqual({ id: `10`, name: `Item 10` })
-      expect(collection.get(`11`)).toEqual({ id: `11`, name: `Item 11` })
-      expect(collection.get(`25`)).toEqual({ id: `25`, name: `Item 25` })
+      expect(stripVirtualProps(collection.get(`1`))).toEqual({
+        id: `1`,
+        name: `Item 1`,
+      })
+      expect(stripVirtualProps(collection.get(`10`))).toEqual({
+        id: `10`,
+        name: `Item 10`,
+      })
+      expect(stripVirtualProps(collection.get(`11`))).toEqual({
+        id: `11`,
+        name: `Item 11`,
+      })
+      expect(stripVirtualProps(collection.get(`25`))).toEqual({
+        id: `25`,
+        name: `Item 25`,
+      })
 
       // Ensure no gaps
       for (let i = 1; i <= docsAmount; i++) {
@@ -151,15 +164,15 @@ describe(`RxDB Integration`, () => {
 
       // inserts
       const doc = await rxCollection.insert({ id: `3`, name: `inserted` })
-      expect(collection.get(`3`).name).toEqual(`inserted`)
+      expect(stripVirtualProps(collection.get(`3`))?.name).toEqual(`inserted`)
 
       // updates
       await doc.getLatest().patch({ name: `updated` })
-      expect(collection.get(`3`).name).toEqual(`updated`)
+      expect(stripVirtualProps(collection.get(`3`))?.name).toEqual(`updated`)
 
       // deletes
       await doc.getLatest().remove()
-      expect(collection.get(`3`)).toEqual(undefined)
+      expect(stripVirtualProps(collection.get(`3`))).toEqual(undefined)
 
       await db.remove()
     })
@@ -180,7 +193,7 @@ describe(`RxDB Integration`, () => {
       collection.update(`3`, (d) => {
         d.name = `updated`
       })
-      expect(collection.get(`3`).name).toEqual(`updated`)
+      expect(stripVirtualProps(collection.get(`3`))?.name).toEqual(`updated`)
       await collection.stateWhenReady()
       await rxCollection.database.requestIdlePromise()
       doc = await rxCollection.findOne(`3`).exec(true)
@@ -228,7 +241,7 @@ describe(`RxDB Integration`, () => {
       const subscription = collection.subscribeChanges(() => {})
 
       await collection.toArrayWhenReady()
-      expect(collection.get(`3`).name).toEqual(`Item 3`)
+      expect(stripVirtualProps(collection.get(`3`))?.name).toEqual(`Item 3`)
 
       subscription.unsubscribe()
       await db.remove()
@@ -305,7 +318,7 @@ describe(`RxDB Integration`, () => {
         })
         await tx.isPersisted.promise
       }).rejects.toThrow(/schema validation error/)
-      expect(collection.get(`2`).name).toBe(`Item 2`)
+      expect(stripVirtualProps(collection.get(`2`))?.name).toBe(`Item 2`)
 
       await db.remove()
     })

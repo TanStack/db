@@ -1536,13 +1536,20 @@ function flushIncludesState(
             parentKeys.add(parentKey)
 
             // Attach child Collection (or array snapshot for toArray) to the parent result
+            const childValue = state.materializeAsArray
+              ? [...state.childRegistry.get(routingKey)!.collection.toArray]
+              : state.childRegistry.get(routingKey)!.collection
             if (state.materializeAsArray) {
-              parentResult[state.fieldName] = [
-                ...state.childRegistry.get(routingKey)!.collection.toArray,
-              ]
+              parentResult[state.fieldName] = childValue
             } else {
-              parentResult[state.fieldName] =
-                state.childRegistry.get(routingKey)!.collection
+              parentResult[state.fieldName] = childValue
+            }
+
+            // Parent rows may already be materialized in the live collection by the
+            // time includes state is flushed, so update the stored row as well.
+            const storedParent = parentCollection.get(parentKey as any)
+            if (storedParent && storedParent !== parentResult) {
+              storedParent[state.fieldName] = childValue
             }
           }
         }

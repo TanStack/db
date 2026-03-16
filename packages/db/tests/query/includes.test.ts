@@ -7,7 +7,7 @@ import {
   toArray,
 } from '../../src/query/index.js'
 import { createCollection } from '../../src/collection/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 
 type Project = {
   id: number
@@ -80,7 +80,39 @@ function createCommentsCollection() {
  * Extracts child collection items as a sorted plain array for comparison.
  */
 function childItems(collection: any, sortKey = `id`): Array<any> {
-  return [...collection.toArray].sort(
+  return sortedPlainRows(collection, sortKey)
+}
+
+function stripVirtualPropsDeep(value: any): any {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripVirtualPropsDeep(item))
+  }
+
+  if (value && typeof value === `object`) {
+    if (`toArray` in value) {
+      return toTree(value)
+    }
+
+    const base = stripVirtualProps(value)
+    const out: Record<string, any> = {}
+    for (const [key, entry] of Object.entries(base || {})) {
+      out[key] = stripVirtualPropsDeep(entry)
+    }
+    return out
+  }
+
+  return value
+}
+
+function plainRows(collectionOrArray: any): Array<any> {
+  const rows = Array.isArray(collectionOrArray)
+    ? [...collectionOrArray]
+    : [...collectionOrArray.toArray]
+  return rows.map((row: any) => stripVirtualPropsDeep(row))
+}
+
+function sortedPlainRows(collectionOrArray: any, sortKey = `id`): Array<any> {
+  return plainRows(collectionOrArray).sort(
     (a: any, b: any) => a[sortKey] - b[sortKey],
   )
 }
@@ -96,24 +128,7 @@ function toTree(collectionOrArray: any, sortKey = `id`): Array<any> {
       ? [...collectionOrArray]
       : [...collectionOrArray.toArray]
   ).sort((a: any, b: any) => a[sortKey] - b[sortKey])
-  return rows.map((row: any) => {
-    if (typeof row !== `object` || row === null) return row
-    const out: Record<string, any> = {}
-    for (const [key, value] of Object.entries(row)) {
-      if (Array.isArray(value)) {
-        out[key] = toTree(value, sortKey)
-      } else if (
-        value &&
-        typeof value === `object` &&
-        `toArray` in (value as any)
-      ) {
-        out[key] = toTree(value, sortKey)
-      } else {
-        out[key] = value
-      }
-    }
-    return out
-  })
+  return rows.map((row: any) => stripVirtualPropsDeep(row))
 }
 
 describe(`includes subqueries`, () => {
@@ -403,7 +418,7 @@ describe(`includes subqueries`, () => {
       // Verify the parent row has the updated array
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
-      expect(alpha.issues.sort((a: any, b: any) => a.id - b.id)).toEqual([
+      expect(sortedPlainRows(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
         { id: 12, title: `New Alpha issue` },
@@ -490,7 +505,7 @@ describe(`includes subqueries`, () => {
       // Verify the parent row has the updated array
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
-      expect(alpha.issues.sort((a: any, b: any) => a.id - b.id)).toEqual([
+      expect(sortedPlainRows(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
         { id: 12, title: `New Alpha issue` },
@@ -556,7 +571,7 @@ describe(`includes subqueries`, () => {
       // Alpha's issues should be sorted by title descending:
       // "Feature for Alpha" before "Bug in Alpha"
       const alpha = collection.get(1) as any
-      const alphaIssues = [...alpha.issues.toArray]
+      const alphaIssues = plainRows(alpha.issues)
       expect(alphaIssues).toEqual([
         { id: 11, title: `Feature for Alpha` },
         { id: 10, title: `Bug in Alpha` },
@@ -564,12 +579,12 @@ describe(`includes subqueries`, () => {
 
       // Beta has one issue, order doesn't matter but it should still work
       const beta = collection.get(2) as any
-      const betaIssues = [...beta.issues.toArray]
+      const betaIssues = plainRows(beta.issues)
       expect(betaIssues).toEqual([{ id: 20, title: `Bug in Beta` }])
 
       // Gamma has no issues
       const gamma = collection.get(3) as any
-      expect([...gamma.issues.toArray]).toEqual([])
+      expect(plainRows(gamma.issues)).toEqual([])
     })
 
     it(`newly inserted children appear in the correct order`, async () => {
@@ -591,7 +606,7 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       // Alpha issues sorted ascending: "Bug in Alpha", "Feature for Alpha"
-      expect([...(collection.get(1) as any).issues.toArray]).toEqual([
+      expect(plainRows((collection.get(1) as any).issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
       ])
@@ -605,7 +620,7 @@ describe(`includes subqueries`, () => {
       issues.utils.commit()
 
       // Should maintain ascending order: Bug, Docs, Feature
-      expect([...(collection.get(1) as any).issues.toArray]).toEqual([
+      expect(plainRows((collection.get(1) as any).issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 12, title: `Docs for Alpha` },
         { id: 11, title: `Feature for Alpha` },
@@ -635,19 +650,17 @@ describe(`includes subqueries`, () => {
 
       // Alpha has 2 issues; limit(1) with asc title should keep only "Bug in Alpha"
       const alpha = collection.get(1) as any
-      expect([...alpha.issues.toArray]).toEqual([
+      expect(plainRows(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
       ])
 
       // Beta has 1 issue; limit(1) keeps it
       const beta = collection.get(2) as any
-      expect([...beta.issues.toArray]).toEqual([
-        { id: 20, title: `Bug in Beta` },
-      ])
+      expect(plainRows(beta.issues)).toEqual([{ id: 20, title: `Bug in Beta` }])
 
       // Gamma has 0 issues; limit(1) still empty
       const gamma = collection.get(3) as any
-      expect([...gamma.issues.toArray]).toEqual([])
+      expect(plainRows(gamma.issues)).toEqual([])
     })
 
     it(`inserting a child that displaces an existing one respects the limit`, async () => {
@@ -670,7 +683,7 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       // Alpha should have exactly 1 issue (limit 1): "Bug in Alpha"
-      const alphaIssues = [...(collection.get(1) as any).issues.toArray]
+      const alphaIssues = plainRows((collection.get(1) as any).issues)
       expect(alphaIssues).toHaveLength(1)
       expect(alphaIssues).toEqual([{ id: 10, title: `Bug in Alpha` }])
 
@@ -683,12 +696,12 @@ describe(`includes subqueries`, () => {
       issues.utils.commit()
 
       // The new issue should displace "Bug in Alpha" since it sorts first
-      expect([...(collection.get(1) as any).issues.toArray]).toEqual([
+      expect(plainRows((collection.get(1) as any).issues)).toEqual([
         { id: 12, title: `Alpha priority issue` },
       ])
 
       // Beta should still have its 1 issue (limit is per-parent)
-      expect([...(collection.get(2) as any).issues.toArray]).toEqual([
+      expect(plainRows((collection.get(2) as any).issues)).toEqual([
         { id: 20, title: `Bug in Beta` },
       ])
     })
@@ -1200,14 +1213,14 @@ describe(`includes subqueries`, () => {
 
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
-      expect(alpha.issues.sort((a: any, b: any) => a.id - b.id)).toEqual([
+      expect(sortedPlainRows(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
       ])
 
       const beta = collection.get(2) as any
       expect(Array.isArray(beta.issues)).toBe(true)
-      expect(beta.issues).toEqual([{ id: 20, title: `Bug in Beta` }])
+      expect(plainRows(beta.issues)).toEqual([{ id: 20, title: `Bug in Beta` }])
     })
 
     it(`empty parents get empty arrays`, async () => {
@@ -1216,7 +1229,7 @@ describe(`includes subqueries`, () => {
 
       const gamma = collection.get(3) as any
       expect(Array.isArray(gamma.issues)).toBe(true)
-      expect(gamma.issues).toEqual([])
+      expect(plainRows(gamma.issues)).toEqual([])
     })
 
     it(`adding a child re-emits the parent with updated array`, async () => {
@@ -1232,7 +1245,7 @@ describe(`includes subqueries`, () => {
 
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
-      expect(alpha.issues.sort((a: any, b: any) => a.id - b.id)).toEqual([
+      expect(sortedPlainRows(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
         { id: 12, title: `New Alpha issue` },
@@ -1251,7 +1264,9 @@ describe(`includes subqueries`, () => {
       issues.utils.commit()
 
       const alpha = collection.get(1) as any
-      expect(alpha.issues).toEqual([{ id: 11, title: `Feature for Alpha` }])
+      expect(plainRows(alpha.issues)).toEqual([
+        { id: 11, title: `Feature for Alpha` },
+      ])
     })
 
     it(`array respects ORDER BY`, async () => {
@@ -1275,7 +1290,7 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       const alpha = collection.get(1) as any
-      expect(alpha.issues).toEqual([
+      expect(plainRows(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
       ])
@@ -1303,13 +1318,15 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       const alpha = collection.get(1) as any
-      expect(alpha.issues).toEqual([{ id: 10, title: `Bug in Alpha` }])
+      expect(plainRows(alpha.issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+      ])
 
       const beta = collection.get(2) as any
-      expect(beta.issues).toEqual([{ id: 20, title: `Bug in Beta` }])
+      expect(plainRows(beta.issues)).toEqual([{ id: 20, title: `Bug in Beta` }])
 
       const gamma = collection.get(3) as any
-      expect(gamma.issues).toEqual([])
+      expect(plainRows(gamma.issues)).toEqual([])
     })
   })
 
@@ -1350,14 +1367,14 @@ describe(`includes subqueries`, () => {
       const issue10 = alpha.issues.get(10)
       // comments should be an array
       expect(Array.isArray(issue10.comments)).toBe(true)
-      expect(issue10.comments.sort((a: any, b: any) => a.id - b.id)).toEqual([
+      expect(sortedPlainRows(issue10.comments)).toEqual([
         { id: 100, body: `Looks bad` },
         { id: 101, body: `Fixed it` },
       ])
 
       const issue11 = alpha.issues.get(11)
       expect(Array.isArray(issue11.comments)).toBe(true)
-      expect(issue11.comments).toEqual([])
+      expect(plainRows(issue11.comments)).toEqual([])
     })
 
     it(`adding a comment (grandchild-only change) updates the issue's comments array`, async () => {
@@ -1365,7 +1382,7 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       const issue11Before = (collection.get(1) as any).issues.get(11)
-      expect(issue11Before.comments).toEqual([])
+      expect(plainRows(issue11Before.comments)).toEqual([])
 
       comments.utils.begin()
       comments.utils.write({
@@ -1376,7 +1393,7 @@ describe(`includes subqueries`, () => {
 
       const issue11After = (collection.get(1) as any).issues.get(11)
       expect(Array.isArray(issue11After.comments)).toBe(true)
-      expect(issue11After.comments).toEqual([
+      expect(plainRows(issue11After.comments)).toEqual([
         { id: 110, body: `Great feature` },
       ])
     })
@@ -1396,7 +1413,9 @@ describe(`includes subqueries`, () => {
       comments.utils.commit()
 
       const issue10After = (collection.get(1) as any).issues.get(10)
-      expect(issue10After.comments).toEqual([{ id: 101, body: `Fixed it` }])
+      expect(plainRows(issue10After.comments)).toEqual([
+        { id: 101, body: `Fixed it` },
+      ])
     })
 
     it(`adding an issue (middle-level insert) creates a child with empty comments array`, async () => {
@@ -1749,16 +1768,14 @@ describe(`includes subqueries`, () => {
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
 
-      const sortedIssues = alpha.issues.sort((a: any, b: any) => a.id - b.id)
+      const sortedIssues = sortedPlainRows(alpha.issues)
       expect(Array.isArray(sortedIssues[0].comments)).toBe(true)
-      expect(
-        sortedIssues[0].comments.sort((a: any, b: any) => a.id - b.id),
-      ).toEqual([
+      expect(sortedPlainRows(sortedIssues[0].comments)).toEqual([
         { id: 100, body: `Looks bad` },
         { id: 101, body: `Fixed it` },
       ])
 
-      expect(sortedIssues[1].comments).toEqual([])
+      expect(plainRows(sortedIssues[1].comments)).toEqual([])
     })
 
     it(`adding a comment (grandchild-only change) updates both array levels`, async () => {
@@ -1776,7 +1793,9 @@ describe(`includes subqueries`, () => {
       expect(Array.isArray(alpha.issues)).toBe(true)
       const issue11 = alpha.issues.find((i: any) => i.id === 11)
       expect(Array.isArray(issue11.comments)).toBe(true)
-      expect(issue11.comments).toEqual([{ id: 110, body: `Great feature` }])
+      expect(plainRows(issue11.comments)).toEqual([
+        { id: 110, body: `Great feature` },
+      ])
     })
 
     it(`removing a comment (grandchild-only change) updates both array levels`, async () => {
@@ -1792,7 +1811,9 @@ describe(`includes subqueries`, () => {
 
       const alpha = collection.get(1) as any
       const issue10 = alpha.issues.find((i: any) => i.id === 10)
-      expect(issue10.comments).toEqual([{ id: 101, body: `Fixed it` }])
+      expect(plainRows(issue10.comments)).toEqual([
+        { id: 101, body: `Fixed it` },
+      ])
     })
 
     it(`adding an issue (middle-level insert) re-emits parent with updated array`, async () => {
@@ -1955,12 +1976,14 @@ describe(`includes subqueries`, () => {
       const gamma = collection.get(3) as any
       expect(gamma.issues).toHaveLength(1)
       expect(gamma.issues[0].id).toBe(30)
-      expect(gamma.issues[0].comments).toEqual([])
+      expect(plainRows(gamma.issues[0].comments)).toEqual([])
 
       // Alpha's issue 11 should have the new comment
       const alpha = collection.get(1) as any
       const issue11 = alpha.issues.find((i: any) => i.id === 11)
-      expect(issue11.comments).toEqual([{ id: 110, body: `Great feature` }])
+      expect(plainRows(issue11.comments)).toEqual([
+        { id: 110, body: `Great feature` },
+      ])
     })
   })
 
@@ -2869,14 +2892,14 @@ describe(`includes subqueries`, () => {
 
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
-      expect(alpha.issues.sort((a: any, b: any) => a.id - b.id)).toEqual([
+      expect(sortedPlainRows(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
       ])
 
       const beta = collection.get(2) as any
       expect(Array.isArray(beta.issues)).toBe(true)
-      expect(beta.issues).toEqual([{ id: 20, title: `Bug in Beta` }])
+      expect(plainRows(beta.issues)).toEqual([{ id: 20, title: `Bug in Beta` }])
     })
 
     it(`empty parents get empty arrays`, async () => {
@@ -2885,7 +2908,7 @@ describe(`includes subqueries`, () => {
 
       const gamma = collection.get(3) as any
       expect(Array.isArray(gamma.issues)).toBe(true)
-      expect(gamma.issues).toEqual([])
+      expect(plainRows(gamma.issues)).toEqual([])
     })
 
     it(`adding a child re-emits the parent with updated array`, async () => {
@@ -2901,7 +2924,7 @@ describe(`includes subqueries`, () => {
 
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
-      expect(alpha.issues.sort((a: any, b: any) => a.id - b.id)).toEqual([
+      expect(sortedPlainRows(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
         { id: 12, title: `New Alpha issue` },
@@ -2920,7 +2943,9 @@ describe(`includes subqueries`, () => {
       issues.utils.commit()
 
       const alpha = collection.get(1) as any
-      expect(alpha.issues).toEqual([{ id: 11, title: `Feature for Alpha` }])
+      expect(plainRows(alpha.issues)).toEqual([
+        { id: 11, title: `Feature for Alpha` },
+      ])
     })
 
     it(`array respects ORDER BY`, async () => {
@@ -2944,7 +2969,7 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       const alpha = collection.get(1) as any
-      expect(alpha.issues).toEqual([
+      expect(plainRows(alpha.issues)).toEqual([
         { id: 10, title: `Bug in Alpha` },
         { id: 11, title: `Feature for Alpha` },
       ])
@@ -2972,13 +2997,15 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       const alpha = collection.get(1) as any
-      expect(alpha.issues).toEqual([{ id: 10, title: `Bug in Alpha` }])
+      expect(plainRows(alpha.issues)).toEqual([
+        { id: 10, title: `Bug in Alpha` },
+      ])
 
       const beta = collection.get(2) as any
-      expect(beta.issues).toEqual([{ id: 20, title: `Bug in Beta` }])
+      expect(plainRows(beta.issues)).toEqual([{ id: 20, title: `Bug in Beta` }])
 
       const gamma = collection.get(3) as any
-      expect(gamma.issues).toEqual([])
+      expect(plainRows(gamma.issues)).toEqual([])
     })
   })
 
@@ -3019,14 +3046,14 @@ describe(`includes subqueries`, () => {
       const issue10 = alpha.issues.get(10)
       // comments should be an array
       expect(Array.isArray(issue10.comments)).toBe(true)
-      expect(issue10.comments.sort((a: any, b: any) => a.id - b.id)).toEqual([
+      expect(sortedPlainRows(issue10.comments)).toEqual([
         { id: 100, body: `Looks bad` },
         { id: 101, body: `Fixed it` },
       ])
 
       const issue11 = alpha.issues.get(11)
       expect(Array.isArray(issue11.comments)).toBe(true)
-      expect(issue11.comments).toEqual([])
+      expect(plainRows(issue11.comments)).toEqual([])
     })
 
     it(`adding a comment (grandchild-only change) updates the issue's comments array`, async () => {
@@ -3034,7 +3061,7 @@ describe(`includes subqueries`, () => {
       await collection.preload()
 
       const issue11Before = (collection.get(1) as any).issues.get(11)
-      expect(issue11Before.comments).toEqual([])
+      expect(plainRows(issue11Before.comments)).toEqual([])
 
       comments.utils.begin()
       comments.utils.write({
@@ -3045,7 +3072,7 @@ describe(`includes subqueries`, () => {
 
       const issue11After = (collection.get(1) as any).issues.get(11)
       expect(Array.isArray(issue11After.comments)).toBe(true)
-      expect(issue11After.comments).toEqual([
+      expect(plainRows(issue11After.comments)).toEqual([
         { id: 110, body: `Great feature` },
       ])
     })
@@ -3065,7 +3092,9 @@ describe(`includes subqueries`, () => {
       comments.utils.commit()
 
       const issue10After = (collection.get(1) as any).issues.get(10)
-      expect(issue10After.comments).toEqual([{ id: 101, body: `Fixed it` }])
+      expect(plainRows(issue10After.comments)).toEqual([
+        { id: 101, body: `Fixed it` },
+      ])
     })
 
     it(`adding an issue (middle-level insert) creates a child with empty comments array`, async () => {
@@ -3418,16 +3447,14 @@ describe(`includes subqueries`, () => {
       const alpha = collection.get(1) as any
       expect(Array.isArray(alpha.issues)).toBe(true)
 
-      const sortedIssues = alpha.issues.sort((a: any, b: any) => a.id - b.id)
+      const sortedIssues = sortedPlainRows(alpha.issues)
       expect(Array.isArray(sortedIssues[0].comments)).toBe(true)
-      expect(
-        sortedIssues[0].comments.sort((a: any, b: any) => a.id - b.id),
-      ).toEqual([
+      expect(sortedPlainRows(sortedIssues[0].comments)).toEqual([
         { id: 100, body: `Looks bad` },
         { id: 101, body: `Fixed it` },
       ])
 
-      expect(sortedIssues[1].comments).toEqual([])
+      expect(plainRows(sortedIssues[1].comments)).toEqual([])
     })
 
     it(`adding a comment (grandchild-only change) updates both array levels`, async () => {
@@ -3445,7 +3472,9 @@ describe(`includes subqueries`, () => {
       expect(Array.isArray(alpha.issues)).toBe(true)
       const issue11 = alpha.issues.find((i: any) => i.id === 11)
       expect(Array.isArray(issue11.comments)).toBe(true)
-      expect(issue11.comments).toEqual([{ id: 110, body: `Great feature` }])
+      expect(plainRows(issue11.comments)).toEqual([
+        { id: 110, body: `Great feature` },
+      ])
     })
 
     it(`removing a comment (grandchild-only change) updates both array levels`, async () => {
@@ -3461,7 +3490,9 @@ describe(`includes subqueries`, () => {
 
       const alpha = collection.get(1) as any
       const issue10 = alpha.issues.find((i: any) => i.id === 10)
-      expect(issue10.comments).toEqual([{ id: 101, body: `Fixed it` }])
+      expect(plainRows(issue10.comments)).toEqual([
+        { id: 101, body: `Fixed it` },
+      ])
     })
 
     it(`adding an issue (middle-level insert) re-emits parent with updated array`, async () => {
@@ -3624,12 +3655,14 @@ describe(`includes subqueries`, () => {
       const gamma = collection.get(3) as any
       expect(gamma.issues).toHaveLength(1)
       expect(gamma.issues[0].id).toBe(30)
-      expect(gamma.issues[0].comments).toEqual([])
+      expect(plainRows(gamma.issues[0].comments)).toEqual([])
 
       // Alpha's issue 11 should have the new comment
       const alpha = collection.get(1) as any
       const issue11 = alpha.issues.find((i: any) => i.id === 11)
-      expect(issue11.comments).toEqual([{ id: 110, body: `Great feature` }])
+      expect(plainRows(issue11.comments)).toEqual([
+        { id: 110, body: `Great feature` },
+      ])
     })
   })
 
@@ -3746,15 +3779,15 @@ describe(`includes subqueries`, () => {
 
         // Alpha has 2 issues
         const alpha = collection.get(1) as any
-        expect(alpha.issueCount).toEqual([{ total: 2 }])
+        expect(plainRows(alpha.issueCount)).toEqual([{ total: 2 }])
 
         // Beta has 1 issue
         const beta = collection.get(2) as any
-        expect(beta.issueCount).toEqual([{ total: 1 }])
+        expect(plainRows(beta.issueCount)).toEqual([{ total: 1 }])
 
         // Gamma has 0 issues — empty array
         const gamma = collection.get(3) as any
-        expect(gamma.issueCount).toEqual([])
+        expect(plainRows(gamma.issueCount)).toEqual([])
       })
     })
 
@@ -3833,16 +3866,16 @@ describe(`includes subqueries`, () => {
         // Alpha's issues
         const alpha = collection.get(1) as any
         const issue10 = alpha.issues.get(10)
-        expect(issue10.commentCount).toEqual([{ total: 2 }])
+        expect(plainRows(issue10.commentCount)).toEqual([{ total: 2 }])
 
         const issue11 = alpha.issues.get(11)
         // Issue 11 has 0 comments — empty array
-        expect(issue11.commentCount).toEqual([])
+        expect(plainRows(issue11.commentCount)).toEqual([])
 
         // Beta's issue
         const beta = collection.get(2) as any
         const issue20 = beta.issues.get(20)
-        expect(issue20.commentCount).toEqual([{ total: 1 }])
+        expect(plainRows(issue20.commentCount)).toEqual([{ total: 1 }])
       })
     })
   })
