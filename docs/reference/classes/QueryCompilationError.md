@@ -14,6 +14,7 @@ Defined in: [packages/db/src/errors.ts:423](https://github.com/TanStack/db/blob/
 ## Extended by
 
 - [`DistinctRequiresSelectError`](DistinctRequiresSelectError.md)
+- [`FnSelectWithGroupByError`](FnSelectWithGroupByError.md)
 - [`HavingRequiresGroupByError`](HavingRequiresGroupByError.md)
 - [`LimitOffsetRequireOrderByError`](LimitOffsetRequireOrderByError.md)
 - [`CollectionInputNotFoundError`](CollectionInputNotFoundError.md)

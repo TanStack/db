@@ -1,5 +1,29 @@
 # @tanstack/db
 
+## 0.5.33
+
+### Patch Changes
+
+- Add `createEffect` API for reactive delta-driven effects and `useLiveQueryEffect` React hook. ([#1221](https://github.com/TanStack/db/pull/1221))
+
+  `createEffect` attaches callbacks to a live query's delta stream — firing `onEnter`, `onExit`, and `onUpdate` for row-level query-result transitions and `onBatch` for the full delta batch from each graph run — without materialising the full result set. Supports `skipInitial`, `orderBy` + `limit` (top-K window), joins, lazy loading, transaction coalescing, async disposal with `AbortSignal`, and `onSourceError` / `onError` callbacks.
+
+  `useLiveQueryEffect` is the React hook wrapper that manages the effect lifecycle (create on mount, dispose on unmount, recreate on dependency change).
+
+## 0.5.32
+
+### Patch Changes
+
+- fix(db): use `Ref<T, Nullable>` brand instead of `Ref<T> | undefined` for nullable join refs in declarative select ([#1262](https://github.com/TanStack/db/pull/1262))
+
+  The declarative `select()` callback receives proxy objects that record property accesses. These proxies are always truthy at build time, but nullable join sides (left/right/full) were typed as `Ref<T> | undefined`, misleading users into using `?.` and `??` operators that have no effect at runtime. Nullable join refs are now typed as `Ref<T, true>`, which allows direct property access without optional chaining while correctly producing `T | undefined` in the result type.
+
+- Fix unbounded WHERE expression growth in `DeduplicatedLoadSubset` when loading all data after accumulating specific predicates. The deduplication layer now correctly tracks the original request predicate (e.g., `where: undefined` for "load all") instead of the optimized difference query sent to the backend, ensuring `hasLoadedAllData` is properly set and subsequent requests are deduplicated. ([#1348](https://github.com/TanStack/db/pull/1348))
+
+- fix(db): throw error when fn.select() is used with groupBy() ([#1324](https://github.com/TanStack/db/pull/1324))
+
+- Add `queryOnce` helper for one-shot query execution, including `findOne()` support and optional QueryBuilder configs. ([#1211](https://github.com/TanStack/db/pull/1211))
+
 ## 0.5.31
 
 ### Patch Changes

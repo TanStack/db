@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createCollection } from '../../src/collection/index.js'
 import { createLiveQueryCollection } from '../../src/query/index.js'
-import { mockSyncCollectionOptions } from '../utils.js'
+import { mockSyncCollectionOptions, stripVirtualProps } from '../utils.js'
 import { add, eq, upper } from '../../src/query/builder/functions.js'
 
 // Base type used in bug report
@@ -101,9 +101,11 @@ describe(`select spreads (runtime)`, () => {
     const results = Array.from(collection.values())
     expect(results).toHaveLength(2)
     // Should match initial data exactly
-    expect(results).toEqual(initialMessages)
+    expect(results.map((row) => stripVirtualProps(row))).toEqual(
+      initialMessages,
+    )
     // Index access by key
-    expect(collection.get(1)).toEqual(initialMessages[0])
+    expect(stripVirtualProps(collection.get(1))).toEqual(initialMessages[0])
   })
 
   it(`spread + computed fields merges fields with correct values`, async () => {
@@ -177,7 +179,11 @@ describe(`select spreads (runtime)`, () => {
 
     const results = Array.from(collection.values())
     expect(results).toHaveLength(3)
-    expect(collection.get(3)).toEqual({ id: 3, text: `test`, user: `alex` })
+    expect(stripVirtualProps(collection.get(3))).toEqual({
+      id: 3,
+      text: `test`,
+      user: `alex`,
+    })
   })
 
   it(`spreading preserves nested object fields intact`, async () => {
@@ -190,7 +196,7 @@ describe(`select spreads (runtime)`, () => {
     await collection.preload()
 
     const results = Array.from(collection.values())
-    expect(results).toEqual(nestedMessages)
+    expect(results.map((row) => stripVirtualProps(row))).toEqual(nestedMessages)
 
     const r1 = results.find((r) => r.id === 1) as MessageWithMeta
     expect(r1.meta.author.name).toBe(`sam`)

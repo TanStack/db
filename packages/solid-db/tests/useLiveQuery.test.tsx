@@ -292,7 +292,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons?.name,
+            name: persons.name,
           })),
       )
     })
@@ -657,7 +657,7 @@ describe(`Query Collections`, () => {
           .select(({ issues, persons }) => ({
             id: issues.id,
             title: issues.title,
-            name: persons?.name,
+            name: persons.name,
           })),
       )
 
@@ -1231,7 +1231,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              name: persons?.name,
+              name: persons.name,
             })),
         )
       })
@@ -1629,7 +1629,7 @@ describe(`Query Collections`, () => {
             .select(({ issues, persons }) => ({
               id: issues.id,
               title: issues.title,
-              userName: persons?.name,
+              userName: persons.name,
             })),
         )
       })
@@ -1953,8 +1953,8 @@ describe(`Query Collections`, () => {
         expect(content).toBeTruthy()
       })
 
-      const count = await findByTestId(`count`)
-      expect(count.textContent).toBe(`3`)
+      const countEl = await findByTestId(`count`)
+      expect(countEl.textContent).toBe(`3`)
     })
   })
 

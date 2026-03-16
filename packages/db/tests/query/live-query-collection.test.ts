@@ -3,6 +3,7 @@ import { Temporal } from 'temporal-polyfill'
 import { createCollection } from '../../src/collection/index.js'
 import {
   and,
+  coalesce,
   createLiveQueryCollection,
   eq,
   ilike,
@@ -13,6 +14,7 @@ import {
   flushPromises,
   mockSyncCollectionOptions,
   mockSyncCollectionOptionsNoInitialState,
+  stripVirtualProps,
 } from '../utils.js'
 import { createDeferred } from '../../src/deferred'
 import type { ChangeMessage, LoadSubsetOptions } from '../../src/types.js'
@@ -417,8 +419,16 @@ describe(`createLiveQueryCollection`, () => {
 
     // The live query should be ready and have the initial data
     expect(liveQuery.size).toBe(2) // Alice and Charlie are active
-    expect(liveQuery.get(1)).toEqual({ id: 1, name: `Alice`, active: true })
-    expect(liveQuery.get(3)).toEqual({ id: 3, name: `Charlie`, active: true })
+    expect(stripVirtualProps(liveQuery.get(1))).toEqual({
+      id: 1,
+      name: `Alice`,
+      active: true,
+    })
+    expect(stripVirtualProps(liveQuery.get(3))).toEqual({
+      id: 3,
+      name: `Charlie`,
+      active: true,
+    })
     expect(liveQuery.get(2)).toBeUndefined() // Bob is not active
     expect(liveQuery.status).toBe(`ready`)
 
@@ -430,7 +440,11 @@ describe(`createLiveQueryCollection`, () => {
 
     // The live query should update to include the new data
     expect(liveQuery.size).toBe(3) // Alice, Charlie, and David are active
-    expect(liveQuery.get(4)).toEqual({ id: 4, name: `David`, active: true })
+    expect(stripVirtualProps(liveQuery.get(4))).toEqual({
+      id: 4,
+      name: `David`,
+      active: true,
+    })
   })
 
   it(`should not reuse finalized graph after GC cleanup (resubscribe is safe)`, async () => {
@@ -2284,7 +2298,7 @@ describe(`createLiveQueryCollection`, () => {
             .select(({ base: b, related: r }) => ({
               id: b.id,
               name: b.name,
-              value: r?.value,
+              value: r.value,
             })),
         getKey: (item) => item.id, // Valid for 1:1 joins with unique keys
       })
@@ -2324,9 +2338,9 @@ describe(`createLiveQueryCollection`, () => {
             .join({ users }, ({ comments: c, users: u }) => eq(c.userId, u.id))
             .select(({ comments: c, users: u }) => ({
               id: c.id,
-              userId: u?.id ?? c.userId,
+              userId: coalesce(u.id, c.userId),
               text: c.text,
-              userName: u?.name,
+              userName: u.name,
             })),
         getKey: (item) => item.userId,
         startSync: true,
