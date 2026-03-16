@@ -68,7 +68,6 @@ function stringifyUuid(bytes: Uint8Array): string {
     hex.slice(20),
   ].join('-')
 }
-
 // / Decode a "url-safe" base64 string to bytes.
 function urlSafeBase64Decode(base64: string): Uint8Array {
   return Uint8Array.from(
