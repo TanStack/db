@@ -172,6 +172,20 @@ function createCoordinatorHarness(): CoordinatorHarness {
   return harness
 }
 
+const stripVirtualProps = <T extends Record<string, any> | undefined>(
+  value: T,
+): T => {
+  if (!value || typeof value !== `object`) return value
+  const {
+    $synced: _synced,
+    $origin: _origin,
+    $key: _key,
+    $collectionId: _collectionId,
+    ...rest
+  } = value as Record<string, unknown>
+  return rest as T
+}
+
 async function flushAsyncWork(delayMs: number = 0): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs))
 }
@@ -196,7 +210,7 @@ describe(`persistedCollectionOptions`, () => {
 
     await insertTx.isPersisted.promise
 
-    expect(collection.get(`1`)).toEqual({
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({
       id: `1`,
       title: `Phase 0`,
     })
@@ -236,7 +250,7 @@ describe(`persistedCollectionOptions`, () => {
 
     await tx.commit()
 
-    expect(collection.get(`manual-1`)).toEqual({
+    expect(stripVirtualProps(collection.get(`manual-1`))).toEqual({
       id: `manual-1`,
       title: `Manual`,
     })
@@ -394,7 +408,7 @@ describe(`persistedCollectionOptions`, () => {
     await collection.stateWhenReady()
     await flushAsyncWork()
 
-    expect(collection.get(`remote-1`)).toEqual({
+    expect(stripVirtualProps(collection.get(`remote-1`))).toEqual({
       id: `remote-1`,
       title: `From remote`,
     })
@@ -557,11 +571,11 @@ describe(`persistedCollectionOptions`, () => {
     await readyPromise
     await flushAsyncWork()
 
-    expect(collection.get(`cached-1`)).toEqual({
+    expect(stripVirtualProps(collection.get(`cached-1`))).toEqual({
       id: `cached-1`,
       title: `Cached row`,
     })
-    expect(collection.get(`during-hydrate`)).toEqual({
+    expect(stripVirtualProps(collection.get(`during-hydrate`))).toEqual({
       id: `during-hydrate`,
       title: `During hydrate`,
     })
@@ -636,7 +650,7 @@ describe(`persistedCollectionOptions`, () => {
     await flushAsyncWork()
 
     expect(coordinator.pullSinceCalls).toBe(1)
-    expect(collection.get(`2`)).toEqual({
+    expect(stripVirtualProps(collection.get(`2`))).toEqual({
       id: `2`,
       title: `Recovered`,
     })
@@ -667,7 +681,7 @@ describe(`persistedCollectionOptions`, () => {
 
     await collection.preload()
     await flushAsyncWork()
-    expect(collection.get(`2`)).toEqual({ id: `2`, title: `Delete` })
+    expect(stripVirtualProps(collection.get(`2`))).toEqual({ id: `2`, title: `Delete` })
 
     adapter.rows.delete(`2`)
 
@@ -819,7 +833,7 @@ describe(`persistedCollectionOptions`, () => {
 
     // Targeted path should NOT have called loadSubset again
     expect(adapter.loadSubsetCalls.length).toBe(loadSubsetCallsAfterPreload)
-    expect(collection.get(`1`)).toEqual({ id: `1`, title: `Updated` })
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({ id: `1`, title: `Updated` })
   })
 
   it(`targeted update removes row that no longer matches WHERE`, async () => {
@@ -857,7 +871,7 @@ describe(`persistedCollectionOptions`, () => {
     // Load a filtered subset with WHERE title = 'Keep'
     await (collection as any)._sync.loadSubset({ where: whereExpr })
     await flushAsyncWork()
-    expect(collection.get(`2`)).toEqual({ id: `2`, title: `Keep` })
+    expect(stripVirtualProps(collection.get(`2`))).toEqual({ id: `2`, title: `Keep` })
 
     // Change the row so it no longer matches WHERE title = 'Keep'
     adapter.rows.set(`2`, { id: `2`, title: `Changed` })
@@ -930,7 +944,7 @@ describe(`persistedCollectionOptions`, () => {
     expect(adapter.loadSubsetCalls.length).toBeGreaterThan(
       loadSubsetCallsAfterPaginated,
     )
-    expect(collection.get(`1`)).toEqual({ id: `1`, title: `Updated` })
+    expect(stripVirtualProps(collection.get(`1`))).toEqual({ id: `1`, title: `Updated` })
   })
 })
 
