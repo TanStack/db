@@ -907,7 +907,7 @@ importers:
         version: link:../db-sqlite-persisted-collection-core
       better-sqlite3:
         specifier: ^12.6.2
-        version: 12.6.2
+        version: 12.8.0
       typescript:
         specifier: '>=4.7'
         version: 5.9.3
