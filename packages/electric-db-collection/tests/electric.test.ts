@@ -3971,7 +3971,7 @@ describe(`Electric Integration`, () => {
   })
 
   describe(`syncMode configuration - GC and resync`, () => {
-    it(`should resync after garbage collection and new subscription`, () => {
+    it(`should resync after garbage collection and new subscription`, async () => {
       // Use fake timers for this test
       vi.useFakeTimers()
 
@@ -4021,7 +4021,7 @@ describe(`Electric Integration`, () => {
       expect(testCollection.size).toBe(2)
 
       // Fast-forward time to trigger GC (past the 100ms gcTime)
-      vi.advanceTimersByTime(150)
+      await vi.advanceTimersByTimeAsync(150)
 
       // Collection should be cleaned up
       expect(testCollection.status).toBe(`cleaned-up`)
