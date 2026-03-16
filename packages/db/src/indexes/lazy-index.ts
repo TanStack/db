@@ -5,6 +5,13 @@ import type {
 } from './base-index.js'
 import type { BasicExpression } from '../query/ir.js'
 
+export class IndexRemovedError extends Error {
+  constructor(indexId: number) {
+    super(`Index ${indexId} has been removed from its collection.`)
+    this.name = `IndexRemovedError`
+  }
+}
+
 /**
  * Utility to determine if a resolver is a constructor or async loader
  */
@@ -39,6 +46,7 @@ async function resolveIndexConstructor<TKey extends string | number>(
 export class LazyIndexWrapper<TKey extends string | number = string | number> {
   private indexPromise: Promise<BaseIndex<TKey>> | null = null
   private resolvedIndex: BaseIndex<TKey> | null = null
+  private removed = false
 
   constructor(
     private id: number,
@@ -67,6 +75,8 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
    * Resolve the actual index
    */
   async resolve(): Promise<BaseIndex<TKey>> {
+    this.throwIfRemoved()
+
     if (this.resolvedIndex) {
       return this.resolvedIndex
     }
@@ -76,6 +86,7 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
     }
 
     this.resolvedIndex = await this.indexPromise
+    this.throwIfRemoved()
     return this.resolvedIndex
   }
 
@@ -83,13 +94,15 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
    * Check if already resolved
    */
   isResolved(): boolean {
-    return this.resolvedIndex !== null
+    return !this.removed && this.resolvedIndex !== null
   }
 
   /**
    * Get resolved index (throws if not ready)
    */
   getResolved(): BaseIndex<TKey> {
+    this.throwIfRemoved()
+
     if (!this.resolvedIndex) {
       throw new Error(
         `Index ${this.id} has not been resolved yet. Ensure collection is synced.`,
@@ -103,6 +116,12 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
    */
   getId(): number {
     return this.id
+  }
+
+  markRemoved(): void {
+    this.removed = true
+    this.resolvedIndex = null
+    this.indexPromise = null
   }
 
   /**
@@ -122,6 +141,12 @@ export class LazyIndexWrapper<TKey extends string | number = string | number> {
   private async createIndex(): Promise<BaseIndex<TKey>> {
     const IndexClass = await resolveIndexConstructor(this.resolver)
     return new IndexClass(this.id, this.expression, this.name, this.options)
+  }
+
+  private throwIfRemoved(): void {
+    if (this.removed) {
+      throw new IndexRemovedError(this.id)
+    }
   }
 }
 
