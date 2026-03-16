@@ -1,5 +1,6 @@
-import { D2, output } from '@tanstack/db-ivm'
-import { compileQuery } from '../compiler/index.js'
+import { D2, output, serializeValue } from '@tanstack/db-ivm'
+import { INCLUDES_ROUTING, compileQuery } from '../compiler/index.js'
+import { createCollection } from '../../collection/index.js'
 import {
   MissingAliasInputsError,
   SetWindowRequiresOrderByError,
@@ -16,13 +17,17 @@ import {
   extractCollectionsFromQuery,
 } from './utils.js'
 import type { LiveQueryInternalUtils } from './internal.js'
-import type { WindowOptions } from '../compiler/index.js'
+import type {
+  IncludesCompilationResult,
+  WindowOptions,
+} from '../compiler/index.js'
 import type { SchedulerContextId } from '../../scheduler.js'
 import type { CollectionSubscription } from '../../collection/subscription.js'
 import type { RootStreamBuilder } from '@tanstack/db-ivm'
 import type { OrderByOptimizationInfo } from '../compiler/order-by.js'
 import type { Collection } from '../../collection/index.js'
 import type {
+  ChangeMessage,
   CollectionConfigSingleRowOption,
   KeyedStream,
   ResultStream,
@@ -31,7 +36,7 @@ import type {
   UtilsRecord,
 } from '../../types.js'
 import type { Context, GetResult } from '../builder/types.js'
-import type { BasicExpression, QueryIR } from '../ir.js'
+import type { BasicExpression, PropRef, QueryIR } from '../ir.js'
 import type { LazyCollectionCallbacks } from '../compiler/joins.js'
 import type {
   Changes,
@@ -140,6 +145,7 @@ export class CollectionConfigBuilder<
   public sourceWhereClausesCache:
     | Map<string, BasicExpression<boolean>>
     | undefined
+  private includesCache: Array<IncludesCompilationResult> | undefined
 
   // Map of source alias to subscription
   readonly subscriptions: Record<string, CollectionSubscription> = {}
@@ -632,6 +638,7 @@ export class CollectionConfigBuilder<
       this.inputsCache = undefined
       this.pipelineCache = undefined
       this.sourceWhereClausesCache = undefined
+      this.includesCache = undefined
 
       // Reset lazy source alias state
       this.lazySources.clear()
@@ -680,6 +687,7 @@ export class CollectionConfigBuilder<
     this.pipelineCache = compilation.pipeline
     this.sourceWhereClausesCache = compilation.sourceWhereClauses
     this.compiledAliasToCollectionId = compilation.aliasToCollectionId
+    this.includesCache = compilation.includes
 
     // Defensive check: verify all compiled aliases have corresponding inputs
     // This should never happen since all aliases come from user declarations,
@@ -727,10 +735,19 @@ export class CollectionConfigBuilder<
       }),
     )
 
+    // Set up includes output routing and child collection lifecycle
+    const includesState = this.setupIncludesOutput(
+      this.includesCache,
+      syncState,
+    )
+
     // Flush pending changes and reset the accumulator.
     // Called at the end of each graph run to commit all accumulated changes.
     syncState.flushPendingChanges = () => {
-      if (pendingChanges.size === 0) {
+      const hasParentChanges = pendingChanges.size > 0
+      const hasChildChanges = hasPendingIncludesChanges(includesState)
+
+      if (!hasParentChanges && !hasChildChanges) {
         return
       }
 
@@ -762,10 +779,22 @@ export class CollectionConfigBuilder<
         changesToApply = merged
       }
 
-      begin()
-      changesToApply.forEach(this.applyChanges.bind(this, config))
-      commit()
+      // 1. Flush parent changes
+      if (hasParentChanges) {
+        begin()
+        changesToApply.forEach(this.applyChanges.bind(this, config))
+        commit()
+      }
       pendingChanges = new Map()
+
+      // 2. Process includes: create/dispose child Collections, route child changes
+      flushIncludesState(
+        includesState,
+        config.collection,
+        this.id,
+        hasParentChanges ? changesToApply : null,
+        config,
+      )
     }
 
     graph.finalize()
@@ -776,6 +805,87 @@ export class CollectionConfigBuilder<
     syncState.pipeline = pipeline
 
     return syncState as FullSyncState
+  }
+
+  /**
+   * Sets up output callbacks for includes child pipelines.
+   * Each includes entry gets its own output callback that accumulates child changes,
+   * and a child registry that maps correlation key → child Collection.
+   */
+  private setupIncludesOutput(
+    includesEntries: Array<IncludesCompilationResult> | undefined,
+    syncState: SyncState,
+  ): Array<IncludesOutputState> {
+    if (!includesEntries || includesEntries.length === 0) {
+      return []
+    }
+
+    return includesEntries.map((entry) => {
+      const state: IncludesOutputState = {
+        fieldName: entry.fieldName,
+        childCorrelationField: entry.childCorrelationField,
+        hasOrderBy: entry.hasOrderBy,
+        materializeAsArray: entry.materializeAsArray,
+        childRegistry: new Map(),
+        pendingChildChanges: new Map(),
+        correlationToParentKeys: new Map(),
+      }
+
+      // Attach output callback on the child pipeline
+      entry.pipeline.pipe(
+        output((data) => {
+          const messages = data.getInner()
+          syncState.messagesCount += messages.length
+
+          for (const [[childKey, tupleData], multiplicity] of messages) {
+            const [childResult, _orderByIndex, correlationKey, parentContext] =
+              tupleData as unknown as [
+                any,
+                string | undefined,
+                unknown,
+                Record<string, any> | null,
+              ]
+
+            const routingKey = computeRoutingKey(correlationKey, parentContext)
+
+            // Accumulate by [routingKey, childKey]
+            let byChild = state.pendingChildChanges.get(routingKey)
+            if (!byChild) {
+              byChild = new Map()
+              state.pendingChildChanges.set(routingKey, byChild)
+            }
+
+            const existing = byChild.get(childKey) || {
+              deletes: 0,
+              inserts: 0,
+              value: childResult,
+              orderByIndex: _orderByIndex,
+            }
+
+            if (multiplicity < 0) {
+              existing.deletes += Math.abs(multiplicity)
+            } else if (multiplicity > 0) {
+              existing.inserts += multiplicity
+              existing.value = childResult
+            }
+
+            byChild.set(childKey, existing)
+          }
+        }),
+      )
+
+      // Set up shared buffers for nested includes (e.g., comments inside issues)
+      if (entry.childCompilationResult.includes) {
+        state.nestedSetups = setupNestedPipelines(
+          entry.childCompilationResult.includes,
+          syncState,
+        )
+        state.nestedRoutingIndex = new Map()
+        state.nestedRoutingReverseIndex = new Map()
+      }
+
+      return state
+    })
   }
 
   private applyChanges(
@@ -1010,6 +1120,658 @@ function createOrderByComparator<T extends object>(
 
     // Fallback to no ordering if indices are missing
     return 0
+  }
+}
+
+/**
+ * Shared buffer setup for a single nested includes level.
+ * Pipeline output writes into the buffer; during flush the buffer is drained
+ * into per-entry states via the routing index.
+ */
+type NestedIncludesSetup = {
+  compilationResult: IncludesCompilationResult
+  /** Shared buffer: nestedCorrelationKey → Map<childKey, Changes> */
+  buffer: Map<unknown, Map<unknown, Changes<any>>>
+  /** For 3+ levels of nesting */
+  nestedSetups?: Array<NestedIncludesSetup>
+}
+
+/**
+ * State tracked per includes entry for output routing and child lifecycle
+ */
+type IncludesOutputState = {
+  fieldName: string
+  childCorrelationField: PropRef
+  /** Whether the child query has an ORDER BY clause */
+  hasOrderBy: boolean
+  /** When true, parent gets Array<T> instead of Collection<T> */
+  materializeAsArray: boolean
+  /** Maps correlation key value → child Collection entry */
+  childRegistry: Map<unknown, ChildCollectionEntry>
+  /** Pending child changes: correlationKey → Map<childKey, Changes> */
+  pendingChildChanges: Map<unknown, Map<unknown, Changes<any>>>
+  /** Reverse index: correlation key → Set of parent collection keys */
+  correlationToParentKeys: Map<unknown, Set<unknown>>
+  /** Shared nested pipeline setups (one per nested includes level) */
+  nestedSetups?: Array<NestedIncludesSetup>
+  /** nestedCorrelationKey → parentCorrelationKey */
+  nestedRoutingIndex?: Map<unknown, unknown>
+  /** parentCorrelationKey → Set<nestedCorrelationKeys> */
+  nestedRoutingReverseIndex?: Map<unknown, Set<unknown>>
+}
+
+type ChildCollectionEntry = {
+  collection: Collection<any, any, any>
+  syncMethods: SyncMethods<any> | null
+  resultKeys: WeakMap<object, unknown>
+  orderByIndices: WeakMap<object, string> | null
+  /** Per-entry nested includes states (one per nested includes level) */
+  includesStates?: Array<IncludesOutputState>
+}
+
+/**
+ * Sets up shared buffers for nested includes pipelines.
+ * Instead of writing directly into a single shared IncludesOutputState,
+ * each nested pipeline writes into a buffer that is later drained per-entry.
+ */
+function setupNestedPipelines(
+  includes: Array<IncludesCompilationResult>,
+  syncState: SyncState,
+): Array<NestedIncludesSetup> {
+  return includes.map((entry) => {
+    const buffer: Map<unknown, Map<unknown, Changes<any>>> = new Map()
+
+    // Attach output callback that writes into the shared buffer
+    entry.pipeline.pipe(
+      output((data) => {
+        const messages = data.getInner()
+        syncState.messagesCount += messages.length
+
+        for (const [[childKey, tupleData], multiplicity] of messages) {
+          const [childResult, _orderByIndex, correlationKey, parentContext] =
+            tupleData as unknown as [
+              any,
+              string | undefined,
+              unknown,
+              Record<string, any> | null,
+            ]
+
+          const routingKey = computeRoutingKey(correlationKey, parentContext)
+
+          let byChild = buffer.get(routingKey)
+          if (!byChild) {
+            byChild = new Map()
+            buffer.set(routingKey, byChild)
+          }
+
+          const existing = byChild.get(childKey) || {
+            deletes: 0,
+            inserts: 0,
+            value: childResult,
+            orderByIndex: _orderByIndex,
+          }
+
+          if (multiplicity < 0) {
+            existing.deletes += Math.abs(multiplicity)
+          } else if (multiplicity > 0) {
+            existing.inserts += multiplicity
+            existing.value = childResult
+          }
+
+          byChild.set(childKey, existing)
+        }
+      }),
+    )
+
+    const setup: NestedIncludesSetup = {
+      compilationResult: entry,
+      buffer,
+    }
+
+    // Recursively set up deeper levels
+    if (entry.childCompilationResult.includes) {
+      setup.nestedSetups = setupNestedPipelines(
+        entry.childCompilationResult.includes,
+        syncState,
+      )
+    }
+
+    return setup
+  })
+}
+
+/**
+ * Creates fresh per-entry IncludesOutputState array from NestedIncludesSetup array.
+ * Each entry gets its own isolated state for nested includes.
+ */
+function createPerEntryIncludesStates(
+  setups: Array<NestedIncludesSetup>,
+): Array<IncludesOutputState> {
+  return setups.map((setup) => {
+    const state: IncludesOutputState = {
+      fieldName: setup.compilationResult.fieldName,
+      childCorrelationField: setup.compilationResult.childCorrelationField,
+      hasOrderBy: setup.compilationResult.hasOrderBy,
+      materializeAsArray: setup.compilationResult.materializeAsArray,
+      childRegistry: new Map(),
+      pendingChildChanges: new Map(),
+      correlationToParentKeys: new Map(),
+    }
+
+    if (setup.nestedSetups) {
+      state.nestedSetups = setup.nestedSetups
+      state.nestedRoutingIndex = new Map()
+      state.nestedRoutingReverseIndex = new Map()
+    }
+
+    return state
+  })
+}
+
+/**
+ * Drains shared buffers into per-entry states using the routing index.
+ * Returns the set of parent correlation keys that had changes routed to them.
+ */
+function drainNestedBuffers(state: IncludesOutputState): Set<unknown> {
+  const dirtyCorrelationKeys = new Set<unknown>()
+
+  if (!state.nestedSetups) return dirtyCorrelationKeys
+
+  for (let i = 0; i < state.nestedSetups.length; i++) {
+    const setup = state.nestedSetups[i]!
+    const toDelete: Array<unknown> = []
+
+    for (const [nestedCorrelationKey, childChanges] of setup.buffer) {
+      const parentCorrelationKey =
+        state.nestedRoutingIndex!.get(nestedCorrelationKey)
+      if (parentCorrelationKey === undefined) {
+        // Unroutable — parent not yet seen; keep in buffer
+        continue
+      }
+
+      const entry = state.childRegistry.get(parentCorrelationKey)
+      if (!entry || !entry.includesStates) {
+        continue
+      }
+
+      // Route changes into this entry's per-entry state at position i
+      const entryState = entry.includesStates[i]!
+      for (const [childKey, changes] of childChanges) {
+        let byChild = entryState.pendingChildChanges.get(nestedCorrelationKey)
+        if (!byChild) {
+          byChild = new Map()
+          entryState.pendingChildChanges.set(nestedCorrelationKey, byChild)
+        }
+        const existing = byChild.get(childKey)
+        if (existing) {
+          existing.inserts += changes.inserts
+          existing.deletes += changes.deletes
+          if (changes.inserts > 0) {
+            existing.value = changes.value
+            if (changes.orderByIndex !== undefined) {
+              existing.orderByIndex = changes.orderByIndex
+            }
+          }
+        } else {
+          byChild.set(childKey, { ...changes })
+        }
+      }
+
+      dirtyCorrelationKeys.add(parentCorrelationKey)
+      toDelete.push(nestedCorrelationKey)
+    }
+
+    for (const key of toDelete) {
+      setup.buffer.delete(key)
+    }
+  }
+
+  return dirtyCorrelationKeys
+}
+
+/**
+ * Updates the routing index after processing child changes.
+ * Maps nested correlation keys to parent correlation keys so that
+ * grandchild changes can be routed to the correct per-entry state.
+ */
+function updateRoutingIndex(
+  state: IncludesOutputState,
+  correlationKey: unknown,
+  childChanges: Map<unknown, Changes<any>>,
+): void {
+  if (!state.nestedSetups) return
+
+  for (const setup of state.nestedSetups) {
+    for (const [, change] of childChanges) {
+      if (change.inserts > 0) {
+        // Read the nested routing key from the INCLUDES_ROUTING stamp.
+        // Must use the composite routing key (not raw correlationKey) to match
+        // how nested buffers are keyed by computeRoutingKey.
+        const nestedRouting =
+          change.value[INCLUDES_ROUTING]?.[setup.compilationResult.fieldName]
+        const nestedCorrelationKey = nestedRouting?.correlationKey
+        const nestedParentContext = nestedRouting?.parentContext ?? null
+        const nestedRoutingKey = computeRoutingKey(
+          nestedCorrelationKey,
+          nestedParentContext,
+        )
+
+        if (nestedCorrelationKey != null) {
+          state.nestedRoutingIndex!.set(nestedRoutingKey, correlationKey)
+          let reverseSet = state.nestedRoutingReverseIndex!.get(correlationKey)
+          if (!reverseSet) {
+            reverseSet = new Set()
+            state.nestedRoutingReverseIndex!.set(correlationKey, reverseSet)
+          }
+          reverseSet.add(nestedRoutingKey)
+        }
+      } else if (change.deletes > 0 && change.inserts === 0) {
+        // Remove from routing index
+        const nestedRouting2 =
+          change.value[INCLUDES_ROUTING]?.[setup.compilationResult.fieldName]
+        const nestedCorrelationKey = nestedRouting2?.correlationKey
+        const nestedParentContext2 = nestedRouting2?.parentContext ?? null
+        const nestedRoutingKey = computeRoutingKey(
+          nestedCorrelationKey,
+          nestedParentContext2,
+        )
+
+        if (nestedCorrelationKey != null) {
+          state.nestedRoutingIndex!.delete(nestedRoutingKey)
+          const reverseSet =
+            state.nestedRoutingReverseIndex!.get(correlationKey)
+          if (reverseSet) {
+            reverseSet.delete(nestedRoutingKey)
+            if (reverseSet.size === 0) {
+              state.nestedRoutingReverseIndex!.delete(correlationKey)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Cleans routing index entries when a parent is deleted.
+ * Uses the reverse index to find and remove all nested routing entries.
+ */
+function cleanRoutingIndexOnDelete(
+  state: IncludesOutputState,
+  correlationKey: unknown,
+): void {
+  if (!state.nestedRoutingReverseIndex) return
+
+  const nestedKeys = state.nestedRoutingReverseIndex.get(correlationKey)
+  if (nestedKeys) {
+    for (const nestedKey of nestedKeys) {
+      state.nestedRoutingIndex!.delete(nestedKey)
+    }
+    state.nestedRoutingReverseIndex.delete(correlationKey)
+  }
+}
+
+/**
+ * Recursively checks whether any nested buffer has pending changes.
+ */
+function hasNestedBufferChanges(setups: Array<NestedIncludesSetup>): boolean {
+  for (const setup of setups) {
+    if (setup.buffer.size > 0) return true
+    if (setup.nestedSetups && hasNestedBufferChanges(setup.nestedSetups))
+      return true
+  }
+  return false
+}
+
+/**
+ * Computes a composite routing key from correlation key and parent context.
+ * When parentContext is null (no parent filters), returns the raw correlationKey
+ * for zero behavioral change on existing queries.
+ */
+function computeRoutingKey(
+  correlationKey: unknown,
+  parentContext: Record<string, any> | null,
+): unknown {
+  if (parentContext == null) return correlationKey
+  return JSON.stringify([correlationKey, parentContext])
+}
+
+/**
+ * Creates a child Collection entry for includes subqueries.
+ * The child Collection is a full-fledged Collection instance that starts syncing immediately.
+ */
+function createChildCollectionEntry(
+  parentId: string,
+  fieldName: string,
+  correlationKey: unknown,
+  hasOrderBy: boolean,
+  nestedSetups?: Array<NestedIncludesSetup>,
+): ChildCollectionEntry {
+  const resultKeys = new WeakMap<object, unknown>()
+  const orderByIndices = hasOrderBy ? new WeakMap<object, string>() : null
+  let syncMethods: SyncMethods<any> | null = null
+
+  const compare = orderByIndices
+    ? createOrderByComparator(orderByIndices)
+    : undefined
+
+  const collection = createCollection<any, string | number>({
+    id: `__child-collection:${parentId}-${fieldName}-${serializeValue(correlationKey)}`,
+    getKey: (item: any) => resultKeys.get(item) as string | number,
+    compare,
+    sync: {
+      rowUpdateMode: `full`,
+      sync: (methods) => {
+        syncMethods = methods
+        return () => {
+          syncMethods = null
+        }
+      },
+    },
+    startSync: true,
+  })
+
+  const entry: ChildCollectionEntry = {
+    collection,
+    get syncMethods() {
+      return syncMethods
+    },
+    resultKeys,
+    orderByIndices,
+  }
+
+  if (nestedSetups) {
+    entry.includesStates = createPerEntryIncludesStates(nestedSetups)
+  }
+
+  return entry
+}
+
+/**
+ * Flushes includes state using a bottom-up per-entry approach.
+ * Five phases ensure correct ordering:
+ *   1. Parent INSERTs — create child entries with per-entry nested states
+ *   2. Child changes — apply to child Collections, update routing index
+ *   3. Drain nested buffers — route buffered grandchild changes to per-entry states
+ *   4. Flush per-entry states — recursively flush nested includes on each entry
+ *   5. Parent DELETEs — clean up child entries and routing index
+ */
+function flushIncludesState(
+  includesState: Array<IncludesOutputState>,
+  parentCollection: Collection<any, any, any>,
+  parentId: string,
+  parentChanges: Map<unknown, Changes<any>> | null,
+  parentSyncMethods: SyncMethods<any> | null,
+): void {
+  for (const state of includesState) {
+    // Phase 1: Parent INSERTs — ensure a child Collection exists for every parent
+    if (parentChanges) {
+      for (const [parentKey, changes] of parentChanges) {
+        if (changes.inserts > 0) {
+          const parentResult = changes.value
+          // Extract routing info from INCLUDES_ROUTING symbol (set by compiler)
+          const routing = parentResult[INCLUDES_ROUTING]?.[state.fieldName]
+          const correlationKey = routing?.correlationKey
+          const parentContext = routing?.parentContext ?? null
+          const routingKey = computeRoutingKey(correlationKey, parentContext)
+
+          if (correlationKey != null) {
+            // Ensure child Collection exists for this routing key
+            if (!state.childRegistry.has(routingKey)) {
+              const entry = createChildCollectionEntry(
+                parentId,
+                state.fieldName,
+                routingKey,
+                state.hasOrderBy,
+                state.nestedSetups,
+              )
+              state.childRegistry.set(routingKey, entry)
+            }
+            // Update reverse index: routing key → parent keys
+            let parentKeys = state.correlationToParentKeys.get(routingKey)
+            if (!parentKeys) {
+              parentKeys = new Set()
+              state.correlationToParentKeys.set(routingKey, parentKeys)
+            }
+            parentKeys.add(parentKey)
+
+            // Attach child Collection (or array snapshot for toArray) to the parent result
+            const childValue = state.materializeAsArray
+              ? [...state.childRegistry.get(routingKey)!.collection.toArray]
+              : state.childRegistry.get(routingKey)!.collection
+            if (state.materializeAsArray) {
+              parentResult[state.fieldName] = childValue
+            } else {
+              parentResult[state.fieldName] = childValue
+            }
+
+            // Parent rows may already be materialized in the live collection by the
+            // time includes state is flushed, so update the stored row as well.
+            const storedParent = parentCollection.get(parentKey as any)
+            if (storedParent && storedParent !== parentResult) {
+              storedParent[state.fieldName] = childValue
+            }
+          }
+        }
+      }
+    }
+
+    // Track affected correlation keys for toArray re-emit (before clearing pendingChildChanges)
+    const affectedCorrelationKeys = state.materializeAsArray
+      ? new Set<unknown>(state.pendingChildChanges.keys())
+      : null
+
+    // Phase 2: Child changes — apply to child Collections
+    // Track which entries had child changes and capture their childChanges maps
+    const entriesWithChildChanges = new Map<
+      unknown,
+      { entry: ChildCollectionEntry; childChanges: Map<unknown, Changes<any>> }
+    >()
+    if (state.pendingChildChanges.size > 0) {
+      for (const [correlationKey, childChanges] of state.pendingChildChanges) {
+        // Ensure child Collection exists for this correlation key
+        let entry = state.childRegistry.get(correlationKey)
+        if (!entry) {
+          entry = createChildCollectionEntry(
+            parentId,
+            state.fieldName,
+            correlationKey,
+            state.hasOrderBy,
+            state.nestedSetups,
+          )
+          state.childRegistry.set(correlationKey, entry)
+        }
+
+        // For non-toArray: attach the child Collection to ANY parent that has this correlation key
+        // For toArray: skip — the array snapshot is set during re-emit below
+        if (!state.materializeAsArray) {
+          attachChildCollectionToParent(
+            parentCollection,
+            state.fieldName,
+            correlationKey,
+            state.correlationToParentKeys,
+            entry.collection,
+          )
+        }
+
+        // Apply child changes to the child Collection
+        if (entry.syncMethods) {
+          entry.syncMethods.begin()
+          for (const [childKey, change] of childChanges) {
+            entry.resultKeys.set(change.value, childKey)
+            if (entry.orderByIndices && change.orderByIndex !== undefined) {
+              entry.orderByIndices.set(change.value, change.orderByIndex)
+            }
+            if (change.inserts > 0 && change.deletes === 0) {
+              entry.syncMethods.write({ value: change.value, type: `insert` })
+            } else if (
+              change.inserts > change.deletes ||
+              (change.inserts === change.deletes &&
+                entry.syncMethods.collection.has(
+                  entry.syncMethods.collection.getKeyFromItem(change.value),
+                ))
+            ) {
+              entry.syncMethods.write({ value: change.value, type: `update` })
+            } else if (change.deletes > 0) {
+              entry.syncMethods.write({ value: change.value, type: `delete` })
+            }
+          }
+          entry.syncMethods.commit()
+        }
+
+        // Update routing index for nested includes
+        updateRoutingIndex(state, correlationKey, childChanges)
+
+        entriesWithChildChanges.set(correlationKey, { entry, childChanges })
+      }
+      state.pendingChildChanges.clear()
+    }
+
+    // Phase 3: Drain nested buffers — route buffered grandchild changes to per-entry states
+    const dirtyFromBuffers = drainNestedBuffers(state)
+
+    // Phase 4: Flush per-entry states
+    // First: entries that had child changes in Phase 2
+    for (const [, { entry, childChanges }] of entriesWithChildChanges) {
+      if (entry.includesStates) {
+        flushIncludesState(
+          entry.includesStates,
+          entry.collection,
+          entry.collection.id,
+          childChanges,
+          entry.syncMethods,
+        )
+      }
+    }
+    // Then: entries that only had buffer-routed changes (no child changes at this level)
+    for (const correlationKey of dirtyFromBuffers) {
+      if (entriesWithChildChanges.has(correlationKey)) continue
+      const entry = state.childRegistry.get(correlationKey)
+      if (entry?.includesStates) {
+        flushIncludesState(
+          entry.includesStates,
+          entry.collection,
+          entry.collection.id,
+          null,
+          entry.syncMethods,
+        )
+      }
+    }
+
+    // For toArray entries: re-emit affected parents with updated array snapshots.
+    // We mutate items in-place (so collection.get() reflects changes immediately)
+    // and emit UPDATE events directly. We bypass the sync methods because
+    // commitPendingTransactions compares previous vs new visible state using
+    // deepEquals, but in-place mutation means both sides reference the same
+    // object, so the comparison always returns true and suppresses the event.
+    const toArrayReEmitKeys = state.materializeAsArray
+      ? new Set([...(affectedCorrelationKeys || []), ...dirtyFromBuffers])
+      : null
+    if (parentSyncMethods && toArrayReEmitKeys && toArrayReEmitKeys.size > 0) {
+      const events: Array<ChangeMessage<any>> = []
+      for (const correlationKey of toArrayReEmitKeys) {
+        const parentKeys = state.correlationToParentKeys.get(correlationKey)
+        if (!parentKeys) continue
+        const entry = state.childRegistry.get(correlationKey)
+        for (const parentKey of parentKeys) {
+          const item = parentCollection.get(parentKey as any)
+          if (item) {
+            const key = parentSyncMethods.collection.getKeyFromItem(item)
+            // Capture previous value before in-place mutation
+            const previousValue = { ...item }
+            if (entry) {
+              item[state.fieldName] = [...entry.collection.toArray]
+            }
+            events.push({
+              type: `update`,
+              key,
+              value: item,
+              previousValue,
+            })
+          }
+        }
+      }
+      if (events.length > 0) {
+        // Emit directly — the in-place mutation already updated the data in
+        // syncedData, so we only need to notify subscribers.
+        const changesManager = (parentCollection as any)._changes as {
+          emitEvents: (
+            changes: Array<ChangeMessage<any>>,
+            forceEmit?: boolean,
+          ) => void
+        }
+        changesManager.emitEvents(events, true)
+      }
+    }
+
+    // Phase 5: Parent DELETEs — dispose child Collections and clean up
+    if (parentChanges) {
+      for (const [parentKey, changes] of parentChanges) {
+        if (changes.deletes > 0 && changes.inserts === 0) {
+          const routing = changes.value[INCLUDES_ROUTING]?.[state.fieldName]
+          const correlationKey = routing?.correlationKey
+          const parentContext = routing?.parentContext ?? null
+          const routingKey = computeRoutingKey(correlationKey, parentContext)
+          if (correlationKey != null) {
+            // Clean up reverse index first, only delete child collection
+            // when the last parent referencing it is removed
+            const parentKeys = state.correlationToParentKeys.get(routingKey)
+            if (parentKeys) {
+              parentKeys.delete(parentKey)
+              if (parentKeys.size === 0) {
+                cleanRoutingIndexOnDelete(state, routingKey)
+                state.childRegistry.delete(routingKey)
+                state.correlationToParentKeys.delete(routingKey)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Clean up the internal routing stamp from parent/child results
+  if (parentChanges) {
+    for (const [, changes] of parentChanges) {
+      delete changes.value[INCLUDES_ROUTING]
+    }
+  }
+}
+
+/**
+ * Checks whether any includes state has pending changes that need to be flushed.
+ * Checks direct pending child changes and shared nested buffers.
+ */
+function hasPendingIncludesChanges(
+  states: Array<IncludesOutputState>,
+): boolean {
+  for (const state of states) {
+    if (state.pendingChildChanges.size > 0) return true
+    if (state.nestedSetups && hasNestedBufferChanges(state.nestedSetups))
+      return true
+  }
+  return false
+}
+
+/**
+ * Attaches a child Collection to parent rows that match a given correlation key.
+ * Uses the reverse index to look up parent keys directly instead of scanning.
+ */
+function attachChildCollectionToParent(
+  parentCollection: Collection<any, any, any>,
+  fieldName: string,
+  correlationKey: unknown,
+  correlationToParentKeys: Map<unknown, Set<unknown>>,
+  childCollection: Collection<any, any, any>,
+): void {
+  const parentKeys = correlationToParentKeys.get(correlationKey)
+  if (!parentKeys) return
+
+  for (const parentKey of parentKeys) {
+    const item = parentCollection.get(parentKey as any)
+    if (item) {
+      item[fieldName] = childCollection
+    }
   }
 }
 
