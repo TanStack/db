@@ -233,7 +233,9 @@ export function processGroupBy(
           VIRTUAL_HAS_LOCAL_KEY
         ]
         resultRow.$synced = groupSynced ?? true
-        resultRow.$origin = (groupHasLocal ? `local` : `remote`) satisfies VirtualOrigin
+        resultRow.$origin = (
+          groupHasLocal ? `local` : `remote`
+        ) satisfies VirtualOrigin
         resultRow.$key = resultKey
         resultRow.$collectionId =
           aggregateCollectionId ?? resultRow.$collectionId
@@ -407,7 +409,9 @@ export function processGroupBy(
         VIRTUAL_HAS_LOCAL_KEY
       ]
       resultRow.$synced = groupSynced ?? true
-      resultRow.$origin = (groupHasLocal ? `local` : `remote`) satisfies VirtualOrigin
+      resultRow.$origin = (
+        groupHasLocal ? `local` : `remote`
+      ) satisfies VirtualOrigin
       resultRow.$key = finalKey
       resultRow.$collectionId = aggregateCollectionId ?? resultRow.$collectionId
       if (mainSource && correlationKey !== undefined) {

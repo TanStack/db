@@ -656,9 +656,7 @@ describe(`includes subqueries`, () => {
 
       // Beta has 1 issue; limit(1) keeps it
       const beta = collection.get(2) as any
-      expect(plainRows(beta.issues)).toEqual([
-        { id: 20, title: `Bug in Beta` },
-      ])
+      expect(plainRows(beta.issues)).toEqual([{ id: 20, title: `Bug in Beta` }])
 
       // Gamma has 0 issues; limit(1) still empty
       const gamma = collection.get(3) as any
@@ -1772,9 +1770,7 @@ describe(`includes subqueries`, () => {
 
       const sortedIssues = sortedPlainRows(alpha.issues)
       expect(Array.isArray(sortedIssues[0].comments)).toBe(true)
-      expect(
-        sortedPlainRows(sortedIssues[0].comments),
-      ).toEqual([
+      expect(sortedPlainRows(sortedIssues[0].comments)).toEqual([
         { id: 100, body: `Looks bad` },
         { id: 101, body: `Fixed it` },
       ])
@@ -3453,9 +3449,7 @@ describe(`includes subqueries`, () => {
 
       const sortedIssues = sortedPlainRows(alpha.issues)
       expect(Array.isArray(sortedIssues[0].comments)).toBe(true)
-      expect(
-        sortedPlainRows(sortedIssues[0].comments),
-      ).toEqual([
+      expect(sortedPlainRows(sortedIssues[0].comments)).toEqual([
         { id: 100, body: `Looks bad` },
         { id: 101, body: `Fixed it` },
       ])

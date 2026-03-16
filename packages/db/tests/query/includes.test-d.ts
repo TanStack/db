@@ -168,12 +168,12 @@ describe(`includes subquery types`, () => {
       expectTypeOf(result.issues.toArray[0]!.$key).toEqualTypeOf<
         string | number
       >()
-      expectTypeOf(result.issues.toArray[0]!.$collectionId).toEqualTypeOf<
-        string
-      >()
-      expectTypeOf(result.issues.toArray[0]!.comments.toArray[0]!).toMatchTypeOf<
-        WithVirtualProps<{ id: number; body: string }>
-      >()
+      expectTypeOf(
+        result.issues.toArray[0]!.$collectionId,
+      ).toEqualTypeOf<string>()
+      expectTypeOf(
+        result.issues.toArray[0]!.comments.toArray[0]!,
+      ).toMatchTypeOf<WithVirtualProps<{ id: number; body: string }>>()
     })
   })
 
