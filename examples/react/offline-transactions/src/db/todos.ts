@@ -118,12 +118,12 @@ export const todoAPI = {
   }) {
     const mutations = transaction.mutations
 
-    console.log(`sync todos`, mutations[0].changes, mutations[0].original.text)
+    console.log(`sync todos`, mutations[0].changes, (mutations[0].original as Record<string, unknown>).text)
     for (const mutation of mutations) {
       try {
         switch (mutation.type) {
           case `insert`: {
-            const todoData = mutation.modified as Todo
+            const todoData = mutation.modified as unknown as Todo
             const response = await fetchWithRetry(`/api/todos`, {
               method: `POST`,
               headers: {
@@ -145,7 +145,7 @@ export const todoAPI = {
           case `update`: {
             const todoData = mutation.modified as Partial<Todo>
             const response = await fetch(
-              `/api/todos/${(mutation.modified as Todo).id}`,
+              `/api/todos/${(mutation.modified as unknown as Todo).id}`,
               {
                 method: `PUT`,
                 headers: {
@@ -167,7 +167,7 @@ export const todoAPI = {
 
           case `delete`: {
             const response = await fetchWithRetry(
-              `/api/todos/${(mutation.original as Todo).id}`,
+              `/api/todos/${(mutation.original as unknown as Todo).id}`,
               {
                 method: `DELETE`,
                 headers: {

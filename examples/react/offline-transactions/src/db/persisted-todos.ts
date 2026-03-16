@@ -29,12 +29,12 @@ export async function createPersistedTodoCollection(): Promise<PersistedTodosHan
     dbName: `tanstack-db-demo`,
   })
 
-  const persistence = createBrowserWASQLitePersistence({
+  const persistence = createBrowserWASQLitePersistence<PersistedTodo, string>({
     database,
     coordinator,
   })
 
-  const collection = createCollection<PersistedTodo, string>(
+  const collection = createCollection(
     persistedCollectionOptions<PersistedTodo, string>({
       id: `persisted-todos`,
       getKey: (todo) => todo.id,
@@ -44,7 +44,7 @@ export async function createPersistedTodoCollection(): Promise<PersistedTodosHan
   )
 
   return {
-    collection,
+    collection: collection,
     close: async () => {
       coordinator.dispose()
       await database.close?.()
