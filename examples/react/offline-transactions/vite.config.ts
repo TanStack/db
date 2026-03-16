@@ -81,6 +81,11 @@ export default defineConfig({
         __dirname,
         `../../../packages/db-browser-wa-sqlite-persisted-collection/src/index.ts`,
       ),
+      // Required because the browser package's source re-exports from core
+      '@tanstack/db-sqlite-persisted-collection-core': path.resolve(
+        __dirname,
+        `../../../packages/db-sqlite-persisted-collection-core/src/index.ts`,
+      ),
     },
   },
   optimizeDeps: {
