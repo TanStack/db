@@ -3,6 +3,9 @@ type CleanupTask = {
   callback: () => void
 }
 
+/**
+ * Batches many GC registrations behind a single shared timeout.
+ */
 export class CleanupQueue {
   private static instance: CleanupQueue | null = null
 
@@ -20,6 +23,10 @@ export class CleanupQueue {
     return CleanupQueue.instance
   }
 
+  /**
+   * Queues a cleanup task and defers timeout selection to a microtask so
+   * multiple synchronous registrations can share one root timer.
+   */
   public schedule(key: unknown, gcTime: number, callback: () => void): void {
     const executeAt = Date.now() + gcTime
     this.tasks.set(key, { executeAt, callback })
@@ -37,6 +44,9 @@ export class CleanupQueue {
     this.tasks.delete(key)
   }
 
+  /**
+   * Keeps only one active timeout: whichever task is due next.
+   */
   private updateTimeout(): void {
     if (this.timeoutId !== null) {
       clearTimeout(this.timeoutId)
@@ -58,10 +68,13 @@ export class CleanupQueue {
     this.timeoutId = setTimeout(() => this.process(), delay)
   }
 
+  /**
+   * Runs every task whose deadline has passed, then schedules the next wakeup
+   * if there is still pending work.
+   */
   private process(): void {
     this.timeoutId = null
     const now = Date.now()
-
     for (const [key, task] of this.tasks.entries()) {
       if (now >= task.executeAt) {
         this.tasks.delete(key)
@@ -78,7 +91,9 @@ export class CleanupQueue {
     }
   }
 
-  // Only used for testing to clean up state
+  /**
+   * Resets the singleton instance for tests.
+   */
   public static resetInstance(): void {
     if (CleanupQueue.instance) {
       if (CleanupQueue.instance.timeoutId !== null) {
