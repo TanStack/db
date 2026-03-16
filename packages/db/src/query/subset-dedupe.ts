@@ -126,10 +126,8 @@ export class DeduplicatedLoadSubset {
       return prom
     }
 
-    // Not fully covered by existing data — load the missing subset.
-    // We need two clones: trackingOptions preserves the original predicate for
-    // accurate tracking (e.g., where=undefined means "all data"), while loadOptions
-    // may be narrowed with a difference expression for the actual backend request.
+    // Preserve the original request for tracking and in-flight dedupe, but allow
+    // the backend request to be narrowed to only the missing subset.
     const trackingOptions = cloneOptions(options)
     const loadOptions = cloneOptions(options)
     if (this.unlimitedWhere !== undefined && options.limit === undefined) {
@@ -147,7 +145,6 @@ export class DeduplicatedLoadSubset {
 
     // Handle both sync (true) and async (Promise<void>) return values
     if (resultPromise === true) {
-      // Sync return - update tracking with the original predicate
       this.updateTracking(trackingOptions)
       return true
     } else {
@@ -159,7 +156,7 @@ export class DeduplicatedLoadSubset {
 
       // We need to create a reference to the in-flight entry so we can remove it later
       const inflightEntry = {
-        options: loadOptions, // Store load options for subset matching of in-flight requests
+        options: trackingOptions,
         promise: resultPromise
           .then((result) => {
             // Only update tracking if this request is still from the current generation
@@ -238,5 +235,12 @@ export class DeduplicatedLoadSubset {
  * would reflect the mutated values rather than what was actually loaded.
  */
 export function cloneOptions(options: LoadSubsetOptions): LoadSubsetOptions {
-  return { ...options }
+  return {
+    ...options,
+    orderBy: options.orderBy?.map((clause) => ({
+      ...clause,
+      compareOptions: { ...clause.compareOptions },
+    })),
+    cursor: options.cursor ? { ...options.cursor } : undefined,
+  }
 }
