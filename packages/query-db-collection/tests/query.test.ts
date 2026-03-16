@@ -7,6 +7,7 @@ import {
   ilike,
   or,
 } from '@tanstack/db'
+import { createFilterFunctionFromExpression } from '../../db/src/collection/change-events'
 import { queryCollectionOptions } from '../src/query'
 import type { QueryFunctionContext } from '@tanstack/query-core'
 import type {
@@ -28,6 +29,12 @@ interface CategorisedItem {
   id: string
   name: string
   category: string
+}
+
+interface OrderedMessage {
+  id: string
+  sequence: number
+  createdAt: number
 }
 
 const getKey = (item: TestItem) => item.id
@@ -4489,6 +4496,125 @@ describe(`QueryCollection`, () => {
   })
 
   describe(`Cache Persistence on Remount`, () => {
+    it(`should not skip ordered rows after remounting with a smaller window over cached data`, async () => {
+      const PAGE_SIZE = 50
+      const initialRows: Array<OrderedMessage> = Array.from(
+        { length: 200 },
+        (_, index) => ({
+          id: `message-${String(index + 6).padStart(4, `0`)}`,
+          sequence: index + 6,
+          createdAt: 10_000 - index,
+        }),
+      )
+
+      let backendRows = [...initialRows]
+
+      const customQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000,
+            staleTime: Infinity,
+            retry: false,
+          },
+        },
+      })
+
+      const queryFn = vi.fn().mockImplementation((ctx) => {
+        const options = ctx.meta?.loadSubsetOptions ?? {}
+        let rows = [...backendRows].sort(
+          (left, right) =>
+            right.createdAt - left.createdAt || right.id.localeCompare(left.id),
+        )
+
+        if (options.cursor?.whereFrom) {
+          const includeRow = createFilterFunctionFromExpression(
+            options.cursor.whereFrom,
+          )
+          rows = rows.filter(includeRow)
+        }
+
+        if (options.limit !== undefined) {
+          rows = rows.slice(0, options.limit)
+        }
+
+        return Promise.resolve(rows)
+      })
+
+      const config: QueryCollectionConfig<OrderedMessage> = {
+        id: `ordered-remount-gap-test`,
+        queryClient: customQueryClient,
+        queryKey: (opts) => [
+          `ordered-remount-gap-test`,
+          opts.limit ?? null,
+          opts.cursor ? JSON.stringify(opts.cursor.whereFrom) : `initial`,
+        ],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const source = createCollection(queryCollectionOptions(config))
+
+      const firstQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ message: source })
+            .orderBy(({ message }) => message.createdAt, `desc`)
+            .limit(PAGE_SIZE * 3 + 1),
+      })
+
+      await firstQuery.preload()
+      await vi.waitFor(() => {
+        expect(firstQuery.size).toBe(151)
+      })
+
+      await firstQuery.cleanup()
+      await flushPromises()
+
+      backendRows = [
+        ...Array.from({ length: 5 }, (_, index) => ({
+          id: `message-${String(index + 1).padStart(4, `0`)}`,
+          sequence: index + 1,
+          createdAt: 20_000 - index,
+        })),
+        ...backendRows,
+      ]
+
+      const secondQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ message: source })
+            .orderBy(({ message }) => message.createdAt, `desc`)
+            .limit(PAGE_SIZE + 1),
+      })
+
+      await secondQuery.preload()
+      await vi.waitFor(() => {
+        expect(secondQuery.size).toBe(51)
+      })
+
+      for (const expectedLimit of [101, 151, 201, 251]) {
+        const result = secondQuery.utils.setWindow({
+          offset: 0,
+          limit: expectedLimit,
+        })
+        if (result !== true) {
+          await result
+        }
+      }
+
+      await vi.waitFor(() => {
+        expect(secondQuery.size).toBe(205)
+      })
+
+      expect(secondQuery.toArray.map((row) => row.sequence)).toEqual(
+        Array.from({ length: 205 }, (_, index) => index + 1),
+      )
+
+      await secondQuery.cleanup()
+      customQueryClient.clear()
+    })
+
     it(`should process cached results immediately when QueryObserver resubscribes`, async () => {
       const queryKey = [`remount-cache-test`]
       const items: Array<TestItem> = [
@@ -4766,6 +4892,206 @@ describe(`QueryCollection`, () => {
 
       // Cleanup
       testQueryClient.clear()
+    })
+
+    it(`should preserve rows loaded by a history query when a disjoint after-query returns no rows in the same session`, async () => {
+      type PartitionedMessage = OrderedMessage & {
+        partition: `history` | `after`
+      }
+
+      const rows: Array<PartitionedMessage> = Array.from(
+        { length: 26 },
+        (_, index) => ({
+          id: `message-${String(index + 1).padStart(4, `0`)}`,
+          sequence: index + 1,
+          createdAt: 10_000 - index,
+          partition: `history`,
+        }),
+      )
+
+      const localQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000,
+            staleTime: Infinity,
+            retry: false,
+          },
+        },
+      })
+
+      const queryFn = vi.fn().mockImplementation((ctx) => {
+        const options = ctx.meta?.loadSubsetOptions ?? {}
+        let filteredRows = [...rows]
+
+        if (options.where) {
+          const includeRow = createFilterFunctionFromExpression(options.where)
+          filteredRows = filteredRows.filter(includeRow)
+        }
+
+        return Promise.resolve(filteredRows)
+      })
+
+      const collection = createCollection(
+        queryCollectionOptions<PartitionedMessage>({
+          id: `same-session-disjoint-queries`,
+          queryClient: localQueryClient,
+          queryKey: [`same-session-disjoint-queries`],
+          queryFn,
+          getKey: (item) => item.id,
+          syncMode: `on-demand`,
+        }),
+      )
+
+      const historyQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ message: collection })
+            .where(({ message }) => eq(message.partition, `history`))
+            .select(({ message }) => message),
+      })
+
+      const afterQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ message: collection })
+            .where(({ message }) => eq(message.partition, `after`))
+            .select(({ message }) => message),
+      })
+
+      await historyQuery.preload()
+      await flushPromises()
+
+      expect(historyQuery.size).toBe(rows.length)
+      expect(collection.size).toBe(rows.length)
+
+      await afterQuery.preload()
+      await flushPromises()
+
+      expect(afterQuery.size).toBe(0)
+      expect(historyQuery.size).toBe(rows.length)
+      expect(collection.size).toBe(rows.length)
+      expect(collection._state.syncedData.size).toBe(rows.length)
+
+      await historyQuery.cleanup()
+      await afterQuery.cleanup()
+      localQueryClient.clear()
+    })
+
+    it(`should preserve rows loaded by a history query when a disjoint after-query returns no rows after remount`, async () => {
+      type PartitionedMessage = OrderedMessage & {
+        partition: `history` | `after`
+      }
+
+      const restoredRows: Array<PartitionedMessage> = Array.from(
+        { length: 26 },
+        (_, index) => ({
+          id: `message-${String(index + 1).padStart(4, `0`)}`,
+          sequence: index + 1,
+          createdAt: 10_000 - index,
+          partition: `history`,
+        }),
+      )
+
+      const queryFn = vi.fn().mockImplementation((ctx) => {
+        const options = ctx.meta?.loadSubsetOptions ?? {}
+        let rows = [...restoredRows]
+
+        if (options.where) {
+          const includeRow = createFilterFunctionFromExpression(options.where)
+          rows = rows.filter(includeRow)
+        }
+
+        return Promise.resolve(rows)
+      })
+
+      const warmQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000,
+            staleTime: Infinity,
+            retry: false,
+          },
+        },
+      })
+
+      const config: QueryCollectionConfig<PartitionedMessage> = {
+        id: `restored-synced-rows-empty-query`,
+        queryClient: warmQueryClient,
+        queryKey: [`restored-synced-rows-empty-query`],
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+      }
+
+      const warmCollection = createCollection(queryCollectionOptions(config))
+
+      const historyQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ message: warmCollection })
+            .where(({ message }) => eq(message.partition, `history`))
+            .select(({ message }) => message),
+      })
+
+      await historyQuery.preload()
+      await flushPromises()
+
+      expect(historyQuery.size).toBe(restoredRows.length)
+      expect(warmCollection.size).toBe(restoredRows.length)
+
+      await historyQuery.cleanup()
+      warmQueryClient.clear()
+
+      const restoredQueryClient = new QueryClient({
+        defaultOptions: {
+          queries: {
+            gcTime: 5 * 60 * 1000,
+            staleTime: Infinity,
+            retry: false,
+          },
+        },
+      })
+
+      const restoredConfig: QueryCollectionConfig<PartitionedMessage> = {
+        ...config,
+        queryClient: restoredQueryClient,
+      }
+
+      const collection = createCollection(queryCollectionOptions(restoredConfig))
+
+      // Simulate the warm-remount state from the app repro:
+      // the collection already contains history rows from the previous session,
+      // but the new session has not rebuilt per-query row ownership yet.
+      restoredRows.forEach((row) => {
+        collection._state.syncedData.set(row.id, row)
+      })
+      collection._state.size = restoredRows.length
+
+      expect(collection.size).toBe(restoredRows.length)
+      expect(collection._state.syncedData.size).toBe(restoredRows.length)
+      expect([...collection._state.syncedData.values()]).toEqual(restoredRows)
+
+      const afterQuery = createLiveQueryCollection({
+        query: (q) =>
+          q
+            .from({ message: collection })
+            .where(({ message }) => eq(message.partition, `after`))
+            .select(({ message }) => message),
+      })
+
+      await afterQuery.preload()
+      await flushPromises()
+
+      expect(queryFn).toHaveBeenCalled()
+      expect(afterQuery.size).toBe(0)
+
+      // Contract: a disjoint "after" query with no rows must not delete the
+      // non-overlapping history rows that were already present in the collection.
+      expect(collection.size).toBe(restoredRows.length)
+      expect(collection._state.syncedData.size).toBe(restoredRows.length)
+
+      await afterQuery.cleanup()
+      restoredQueryClient.clear()
     })
   })
 
