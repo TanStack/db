@@ -616,7 +616,7 @@ function decodeStoredSqliteRows<TKey extends string | number, T extends object>(
 }
 
 function stableStringify(value: unknown): string {
-  return JSON.stringify(value)
+  return serializePersistedRowValue(value)
 }
 
 function compileSqlExpression(
@@ -1586,10 +1586,9 @@ export class SQLiteCorePersistenceAdapter<
     }
 
     const deltas = replayRows.map((row) => {
-      const parsed = JSON.parse(row.replay_json ?? `null`) as ReplayableTxDelta<
-        Record<string, unknown>,
-        TKey
-      > | null
+      const parsed = deserializePersistedRowValue<
+        ReplayableTxDelta<Record<string, unknown>, TKey> | null
+      >(row.replay_json ?? `null`)
       if (!parsed) {
         throw new InvalidPersistedCollectionConfigError(
           `missing replay payload for applied_tx row`,
