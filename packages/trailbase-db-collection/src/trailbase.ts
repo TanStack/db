@@ -153,14 +153,14 @@ export function trailBaseCollectionOptions<
 
     return new Promise<void>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        unsubscribe()
+        sub.unsubscribe()
         reject(new TimeoutWaitingForIdsError(ids.toString()))
       }, timeout)
 
-      const unsubscribe = seenIds.subscribe((value) => {
-        if (completed(value.currentVal)) {
+      const sub = seenIds.subscribe((value) => {
+        if (completed(value)) {
           clearTimeout(timeoutId)
-          unsubscribe()
+          sub.unsubscribe()
           resolve()
         }
       })
