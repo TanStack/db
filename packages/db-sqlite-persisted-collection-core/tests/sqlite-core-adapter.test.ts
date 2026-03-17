@@ -334,6 +334,7 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(updated).toEqual([
         {
           key: `1`,
+          refCount: 0,
           value: {
             id: `1`,
             title: `Updated`,
@@ -494,6 +495,7 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(filtered).toEqual([
         {
           key: `2`,
+          refCount: 0,
           value: {
             id: `2`,
             title: `Task Beta`,

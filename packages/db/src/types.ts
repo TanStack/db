@@ -323,6 +323,18 @@ export type SyncConfigRes = {
   loadSubset?: LoadSubsetFn
   unloadSubset?: UnloadSubsetFn
 }
+/**
+ * Optional metadata storage for persisting query tracking state across
+ * restarts. When provided by a persistence layer, the query layer can
+ * persist per-row ref counts so that on warm start, pre-hydrated rows
+ * are not incorrectly deleted by disjoint queries.
+ */
+export interface MetadataStorage {
+  load: (key: string) => Promise<unknown | undefined>
+  store: (key: string, value: unknown) => Promise<void>
+  delete: (key: string) => Promise<void>
+}
+
 export interface SyncConfig<
   T extends object = Record<string, unknown>,
   TKey extends string | number = string | number,
@@ -339,6 +351,11 @@ export interface SyncConfig<
     commit: () => void
     markReady: () => void
     truncate: () => void
+    /**
+     * Optional metadata storage for persisting query tracking state.
+     * Provided by the persistence layer when available.
+     */
+    metadataStorage?: MetadataStorage
   }) => void | CleanupFn | SyncConfigRes
 
   /**

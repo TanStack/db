@@ -16,6 +16,7 @@ import type {
   DeleteMutationFnParams,
   InsertMutationFnParams,
   LoadSubsetOptions,
+  MetadataStorage,
   PendingMutation,
   SyncConfig,
   SyncConfigRes,
@@ -193,7 +194,7 @@ export interface PersistenceAdapter<
     collectionId: string,
     options: LoadSubsetOptions,
     ctx?: { requiredIndexSignatures?: ReadonlyArray<string> },
-  ) => Promise<Array<{ key: TKey; value: T }>>
+  ) => Promise<Array<{ key: TKey; value: T; refCount?: number }>>
   applyCommittedTx: (
     collectionId: string,
     tx: PersistedTx<T, TKey>,
@@ -209,6 +210,23 @@ export interface PersistenceAdapter<
     latestSeq: number
     latestRowVersion: number
   }>
+  updateRefCounts?: (
+    collectionId: string,
+    updates: Array<{ key: TKey; refCount: number }>,
+  ) => Promise<void>
+  loadMetadata?: (
+    collectionId: string,
+    key: string,
+  ) => Promise<unknown | undefined>
+  storeMetadata?: (
+    collectionId: string,
+    key: string,
+    value: unknown,
+  ) => Promise<void>
+  deleteMetadata?: (
+    collectionId: string,
+    key: string,
+  ) => Promise<void>
 }
 
 export interface SQLiteDriver {
@@ -778,6 +796,20 @@ class PersistedCollectionRuntime<
     return this.isHydrating
   }
 
+  createMetadataStorage(): MetadataStorage | undefined {
+    const adapter = this.persistence.adapter
+    if (!adapter.loadMetadata || !adapter.storeMetadata || !adapter.deleteMetadata) {
+      return undefined
+    }
+    const collectionId = this.collectionId
+    return {
+      load: (key: string) => adapter.loadMetadata!(collectionId, key),
+      store: (key: string, value: unknown) =>
+        adapter.storeMetadata!(collectionId, key, value),
+      delete: (key: string) => adapter.deleteMetadata!(collectionId, key),
+    }
+  }
+
   isApplyingInternally(): boolean {
     return this.internalApplyDepth > 0
   }
@@ -1042,7 +1074,7 @@ class PersistedCollectionRuntime<
 
   private loadSubsetRowsUnsafe(
     options: LoadSubsetOptions,
-  ): Promise<Array<{ key: TKey; value: T }>> {
+  ): Promise<Array<{ key: TKey; value: T; refCount?: number }>> {
     return this.persistence.adapter.loadSubset(this.collectionId, options, {
       requiredIndexSignatures: this.getRequiredIndexSignatures(),
     })
@@ -1059,6 +1091,29 @@ class PersistedCollectionRuntime<
       const rows = await this.loadSubsetRowsUnsafe(options)
 
       this.applyRowsToCollection(rows)
+
+      // Store hydrated ref counts in metadata so the query layer can
+      // restore them on init and protect rows from premature deletion.
+      const refCountEntries = rows
+        .filter((row) => (row.refCount ?? 0) > 0)
+        .map((row) => [String(row.key), row.refCount!] as const)
+      if (refCountEntries.length > 0 && this.persistence.adapter.storeMetadata) {
+        // Merge with any existing ref counts from prior hydrations
+        const existing =
+          ((await this.persistence.adapter.loadMetadata?.(
+            this.collectionId,
+            `queryTracking:rowRefCounts`,
+          )) as Record<string, number> | undefined) ?? {}
+        const merged = { ...existing }
+        for (const [key, count] of refCountEntries) {
+          merged[key] = count
+        }
+        await this.persistence.adapter.storeMetadata(
+          this.collectionId,
+          `queryTracking:rowRefCounts`,
+          merged,
+        )
+      }
     } finally {
       this.isHydrating = false
     }
@@ -1930,8 +1985,11 @@ function createWrappedSyncConfig<
         params.collection as Collection<T, TKey, PersistedCollectionUtils>,
       )
 
+      const metadataStorage = runtime.createMetadataStorage()
+
       const wrappedParams = {
         ...params,
+        metadataStorage,
         markReady: () => {
           void runtime
             .ensureStarted()

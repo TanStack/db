@@ -620,20 +620,37 @@ export function queryCollectionOptions(
   // 3. Decrements refcount and GCs rows where count reaches 0
   const queryRefCounts = new Map<string, number>()
 
+  // Per-row reference count — the source of truth for deletion decisions.
+  // Incremented when a query newly claims a row, decremented when a query
+  // releases it. A row is only eligible for deletion when its ref count
+  // reaches zero. On warm start, ref counts can be restored from persistence
+  // so that pre-hydrated rows are protected from deletion by disjoint queries.
+  const rowRefCounts = new Map<string | number, number>()
+
   // Helper function to add a row to the internal state
   const addRow = (rowKey: string | number, hashedQueryKey: string) => {
     const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
+    const isNewClaim = !rowToQueriesSet.has(hashedQueryKey)
     rowToQueriesSet.add(hashedQueryKey)
     rowToQueries.set(rowKey, rowToQueriesSet)
 
     const queryToRowsSet = queryToRows.get(hashedQueryKey) || new Set()
     queryToRowsSet.add(rowKey)
     queryToRows.set(hashedQueryKey, queryToRowsSet)
+
+    if (isNewClaim) {
+      rowRefCounts.set(rowKey, (rowRefCounts.get(rowKey) ?? 0) + 1)
+    }
   }
 
-  // Helper function to remove a row from the internal state
+  // Helper function to remove a row from the internal state.
+  // Returns true only if the row's ref count reaches zero, meaning no query
+  // (including from a previous session) owns it and it can be deleted.
+  // If the query never owned this row (wasPresent is false), returns false —
+  // a query should not delete rows it never loaded.
   const removeRow = (rowKey: string | number, hashedQuerKey: string) => {
     const rowToQueriesSet = rowToQueries.get(rowKey) || new Set()
+    const wasPresent = rowToQueriesSet.has(hashedQuerKey)
     rowToQueriesSet.delete(hashedQuerKey)
     rowToQueries.set(rowKey, rowToQueriesSet)
 
@@ -641,11 +658,59 @@ export function queryCollectionOptions(
     queryToRowsSet.delete(rowKey)
     queryToRows.set(hashedQuerKey, queryToRowsSet)
 
-    return rowToQueriesSet.size === 0
+    if (wasPresent) {
+      const newCount = Math.max(0, (rowRefCounts.get(rowKey) ?? 0) - 1)
+      rowRefCounts.set(rowKey, newCount)
+      return newCount === 0
+    }
+
+    // Query never owned this row — do not delete it
+    return false
   }
 
   const internalSync: SyncConfig<any>[`sync`] = (params) => {
-    const { begin, write, commit, markReady, collection } = params
+    const { begin, write, commit, markReady, collection, metadataStorage } =
+      params
+
+    // Load persisted ref counts from metadata storage on init.
+    // This runs before any query result is processed, ensuring that
+    // rows hydrated from persistence are protected from premature deletion.
+    if (metadataStorage) {
+      void metadataStorage
+        .load(`queryTracking:rowRefCounts`)
+        .then((persisted) => {
+          if (persisted && typeof persisted === `object`) {
+            for (const [key, count] of Object.entries(
+              persisted as Record<string, number>,
+            )) {
+              if (count > 0 && !rowRefCounts.has(key)) {
+                rowRefCounts.set(key, count)
+              }
+            }
+          }
+        })
+        .catch(() => {
+          // Metadata loading is best-effort
+        })
+    }
+
+    // Persist ref counts to metadata storage after tracking changes.
+    const persistRefCounts = () => {
+      if (!metadataStorage) {
+        return
+      }
+      const refCountSnapshot: Record<string, number> = {}
+      for (const [key, count] of rowRefCounts.entries()) {
+        if (count > 0) {
+          refCountSnapshot[String(key)] = count
+        }
+      }
+      void metadataStorage
+        .store(`queryTracking:rowRefCounts`, refCountSnapshot)
+        .catch(() => {
+          // Metadata persistence is best-effort
+        })
+    }
 
     // Track whether sync has been started
     let syncStarted = false
@@ -860,6 +925,8 @@ export function queryCollectionOptions(
 
           commit()
 
+          persistRefCounts()
+
           // Mark collection as ready after first successful query result
           markReady()
         } else if (result.isError) {
@@ -976,14 +1043,22 @@ export function queryCollectionOptions(
           return
         }
 
+        const wasPresent = queries.has(hashedQueryKey)
         queries.delete(hashedQueryKey)
+
+        if (wasPresent) {
+          const newCount = Math.max(0, (rowRefCounts.get(rowKey) ?? 0) - 1)
+          rowRefCounts.set(rowKey, newCount)
+        }
 
         if (queries.size === 0) {
           rowToQueries.delete(rowKey)
+        }
 
-          if (collection.has(rowKey)) {
-            rowsToDelete.push(collection.get(rowKey))
-          }
+        const currentCount = rowRefCounts.get(rowKey) ?? 0
+        if (currentCount <= 0 && collection.has(rowKey)) {
+          rowsToDelete.push(collection.get(rowKey))
+          rowRefCounts.delete(rowKey)
         }
       })
 
@@ -994,6 +1069,8 @@ export function queryCollectionOptions(
         })
         commit()
       }
+
+      persistRefCounts()
 
       state.observers.delete(hashedQueryKey)
       queryToRows.delete(hashedQueryKey)

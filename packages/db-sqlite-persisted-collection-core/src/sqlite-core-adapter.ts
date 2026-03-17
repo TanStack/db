@@ -38,6 +38,7 @@ type StoredSqliteRow = {
   key: string
   value: string
   row_version: number
+  ref_count: number
 }
 
 type SQLiteCoreAdapterSchemaMismatchPolicy =
@@ -589,6 +590,7 @@ type InMemoryRow<TKey extends string | number, T extends object> = {
   key: TKey
   value: T
   rowVersion: number
+  refCount: number
 }
 
 function compileSqlExpression(
@@ -1072,6 +1074,7 @@ export class SQLiteCorePersistenceAdapter<
       return orderedRows.map((row) => ({
         key: row.key,
         value: row.value,
+        refCount: row.refCount,
       }))
     }
 
@@ -1079,6 +1082,7 @@ export class SQLiteCorePersistenceAdapter<
     return rows.map((row) => ({
       key: row.key,
       value: row.value,
+      refCount: row.refCount,
     }))
   }
 
@@ -1405,7 +1409,7 @@ export class SQLiteCorePersistenceAdapter<
     const orderByCompiled = compileOrderByClauses(options.orderBy)
 
     const queryParams: Array<SqliteSupportedValue> = []
-    let sql = `SELECT key, value, row_version FROM ${collectionTableSql}`
+    let sql = `SELECT key, value, row_version, ref_count FROM ${collectionTableSql}`
 
     if (options.where && whereCompiled.supported) {
       sql = `${sql} WHERE ${whereCompiled.sql}`
@@ -1428,6 +1432,7 @@ export class SQLiteCorePersistenceAdapter<
         key,
         value,
         rowVersion: row.row_version,
+        refCount: row.ref_count,
       }
     })
 
@@ -1646,9 +1651,18 @@ export class SQLiteCorePersistenceAdapter<
       `CREATE TABLE IF NOT EXISTS ${collectionTableSql} (
          key TEXT PRIMARY KEY,
          value TEXT NOT NULL,
-         row_version INTEGER NOT NULL
+         row_version INTEGER NOT NULL,
+         ref_count INTEGER NOT NULL DEFAULT 0
        )`,
     )
+    // Migration for existing tables that lack the ref_count column
+    try {
+      await this.driver.exec(
+        `ALTER TABLE ${collectionTableSql} ADD COLUMN ref_count INTEGER NOT NULL DEFAULT 0`,
+      )
+    } catch {
+      // Column already exists — safe to ignore
+    }
     await this.driver.exec(
       `CREATE INDEX IF NOT EXISTS ${quoteIdentifier(`${tableName}_row_version_idx`)}
        ON ${collectionTableSql} (row_version)`,
@@ -1828,8 +1842,81 @@ export class SQLiteCorePersistenceAdapter<
          updated_at INTEGER NOT NULL
        )`,
     )
+    await this.driver.exec(
+      `CREATE TABLE IF NOT EXISTS collection_metadata (
+         collection_id TEXT NOT NULL,
+         key TEXT NOT NULL,
+         value TEXT NOT NULL,
+         updated_at INTEGER NOT NULL,
+         PRIMARY KEY (collection_id, key)
+       )`,
+    )
 
     this.initialized = true
+  }
+
+  async updateRefCounts(
+    collectionId: string,
+    updates: Array<{ key: string | number; refCount: number }>,
+  ): Promise<void> {
+    if (updates.length === 0) {
+      return
+    }
+
+    const tableMapping = await this.ensureCollectionReady(collectionId)
+    const collectionTableSql = quoteIdentifier(tableMapping.tableName)
+
+    await this.runInTransaction(async (transactionDriver) => {
+      for (const update of updates) {
+        const encodedKey = encodePersistedStorageKey(update.key)
+        await transactionDriver.run(
+          `UPDATE ${collectionTableSql} SET ref_count = ? WHERE key = ?`,
+          [update.refCount, encodedKey],
+        )
+      }
+    })
+  }
+
+  async loadMetadata(
+    collectionId: string,
+    key: string,
+  ): Promise<unknown | undefined> {
+    await this.ensureInitialized()
+    const rows = await this.driver.query<{ value: string }>(
+      `SELECT value FROM collection_metadata WHERE collection_id = ? AND key = ?`,
+      [collectionId, key],
+    )
+    if (rows.length === 0) {
+      return undefined
+    }
+    return JSON.parse(rows[0]!.value)
+  }
+
+  async storeMetadata(
+    collectionId: string,
+    key: string,
+    value: unknown,
+  ): Promise<void> {
+    await this.ensureInitialized()
+    await this.driver.run(
+      `INSERT INTO collection_metadata (collection_id, key, value, updated_at)
+       VALUES (?, ?, ?, CAST(strftime('%s', 'now') AS INTEGER))
+       ON CONFLICT(collection_id, key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = excluded.updated_at`,
+      [collectionId, key, JSON.stringify(value)],
+    )
+  }
+
+  async deleteMetadata(
+    collectionId: string,
+    key: string,
+  ): Promise<void> {
+    await this.ensureInitialized()
+    await this.driver.run(
+      `DELETE FROM collection_metadata WHERE collection_id = ? AND key = ?`,
+      [collectionId, key],
+    )
   }
 }
 
