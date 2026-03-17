@@ -240,14 +240,15 @@ type PersistedScannedRowForQuery<TItem extends object> = {
   metadata?: unknown
 }
 
-type QuerySyncMetadataWithPersistedScan<TItem extends object> =
-  SyncMetadataApi<string | number> & {
-    row: SyncMetadataApi<string | number>[`row`] & {
-      scanPersisted?: (options?: {
-        metadataOnly?: boolean
-      }) => Promise<Array<PersistedScannedRowForQuery<TItem>>>
-    }
+type QuerySyncMetadataWithPersistedScan<TItem extends object> = SyncMetadataApi<
+  string | number
+> & {
+  row: SyncMetadataApi<string | number>[`row`] & {
+    scanPersisted?: (options?: {
+      metadataOnly?: boolean
+    }) => Promise<Array<PersistedScannedRowForQuery<TItem>>>
   }
+}
 
 /**
  * Implementation class for QueryCollectionUtils with explicit dependency injection
@@ -859,16 +860,18 @@ export function queryCollectionOptions(
           string | number,
           { value: any; owners: Set<string> }
         >()
-        getHydratedOwnedRowsForQueryBaseline(hashedQueryKey).forEach((rowKey) => {
-          const value = collection.get(rowKey)
-          const owners = rowToQueries.get(rowKey)
-          if (value && owners) {
-            baseline.set(rowKey, {
-              value,
-              owners: new Set(owners),
-            })
-          }
-        })
+        getHydratedOwnedRowsForQueryBaseline(hashedQueryKey).forEach(
+          (rowKey) => {
+            const value = collection.get(rowKey)
+            const owners = rowToQueries.get(rowKey)
+            if (value && owners) {
+              baseline.set(rowKey, {
+                value,
+                owners: new Set(owners),
+              })
+            }
+          },
+        )
         return baseline
       }
 
@@ -879,8 +882,7 @@ export function queryCollectionOptions(
       const scannedRows = await scanPersisted()
 
       scannedRows.forEach((row) => {
-        const rowMetadata =
-          row.metadata as Record<string, unknown> | undefined
+        const rowMetadata = row.metadata as Record<string, unknown> | undefined
         const queryMetadata = rowMetadata?.queryCollection
         if (!queryMetadata || typeof queryMetadata !== `object`) {
           return
@@ -914,9 +916,7 @@ export function queryCollectionOptions(
       return baseline
     }
 
-    const cleanupPersistedPlaceholder = async (
-      hashedQueryKey: string,
-    ) => {
+    const cleanupPersistedPlaceholder = async (hashedQueryKey: string) => {
       if (!metadata) {
         return
       }
@@ -939,7 +939,9 @@ export function queryCollectionOptions(
         write({ type: `delete`, value: row })
       })
 
-      metadata.collection.delete(`${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`)
+      metadata.collection.delete(
+        `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+      )
       commit()
     }
 
@@ -982,7 +984,9 @@ export function queryCollectionOptions(
         return
       }
 
-      const retentionEntries = metadata.collection.list(QUERY_COLLECTION_GC_PREFIX)
+      const retentionEntries = metadata.collection.list(
+        QUERY_COLLECTION_GC_PREFIX,
+      )
       const now = Date.now()
 
       for (const { key, value } of retentionEntries) {
@@ -1238,7 +1242,9 @@ export function queryCollectionOptions(
 
       begin()
       if (metadata) {
-        metadata.collection.delete(`${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`)
+        metadata.collection.delete(
+          `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+        )
       }
 
       previouslyOwnedRows.forEach((key) => {
@@ -1287,7 +1293,8 @@ export function queryCollectionOptions(
       result: QueryObserverResult<any, any>,
     ) => {
       const hashedQueryKey = hashKey(queryKey)
-      const persistedBaseline = await loadPersistedBaselineForQuery(hashedQueryKey)
+      const persistedBaseline =
+        await loadPersistedBaselineForQuery(hashedQueryKey)
       if (collection.status === `cleaned-up`) {
         return
       }
@@ -1515,14 +1522,14 @@ export function queryCollectionOptions(
           metadata.collection.set(
             `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
             {
-            queryHash: hashedQueryKey,
-            mode:
-              persistedGcTime === Number.POSITIVE_INFINITY
-                ? `until-revalidated`
-                : `ttl`,
-            ...(persistedGcTime === Number.POSITIVE_INFINITY
-              ? {}
-              : { expiresAt: Date.now() + persistedGcTime }),
+              queryHash: hashedQueryKey,
+              mode:
+                persistedGcTime === Number.POSITIVE_INFINITY
+                  ? `until-revalidated`
+                  : `ttl`,
+              ...(persistedGcTime === Number.POSITIVE_INFINITY
+                ? {}
+                : { expiresAt: Date.now() + persistedGcTime }),
             },
           )
           commit()

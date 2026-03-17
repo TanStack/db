@@ -1224,10 +1224,7 @@ function createElectricSync<T extends Row<unknown>>(
           }
         }
 
-        if (
-          record.kind === `reset` &&
-          typeof record.updatedAt === `number`
-        ) {
+        if (record.kind === `reset` && typeof record.updatedAt === `number`) {
           return {
             kind: `reset` as const,
             updatedAt: record.updatedAt,
@@ -1315,9 +1312,7 @@ function createElectricSync<T extends Row<unknown>>(
               : undefined),
         handle:
           shapeOptions.handle ??
-          (canUsePersistedResume
-            ? persistedResumeState.handle
-            : undefined),
+          (canUsePersistedResume ? persistedResumeState.handle : undefined),
         signal: abortController.signal,
         onError: (errorParams) => {
           // Just immediately mark ready if there's an error to avoid blocking

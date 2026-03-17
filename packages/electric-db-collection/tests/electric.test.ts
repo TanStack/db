@@ -93,7 +93,9 @@ describe(`Electric Integration`, () => {
     }
   }
 
-  const createPersistedAdapter = (collectionMetadata?: Map<string, unknown>) => ({
+  const createPersistedAdapter = (
+    collectionMetadata?: Map<string, unknown>,
+  ) => ({
     loadSubset: async () => [],
     loadCollectionMetadata: async () =>
       Array.from((collectionMetadata ?? new Map()).entries()).map(
@@ -3349,9 +3351,7 @@ describe(`Electric Integration`, () => {
           handle: undefined,
         }),
       )
-      expect(
-        metadataHarness.collectionMetadata.get(`electric:resume`),
-      ).toEqual(
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
         expect.objectContaining({
           kind: `reset`,
         }),
@@ -3390,9 +3390,7 @@ describe(`Electric Integration`, () => {
         },
       ])
 
-      expect(
-        metadataHarness.collectionMetadata.get(`electric:resume`),
-      ).toEqual(
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
         expect.objectContaining({
           kind: `reset`,
         }),
@@ -3446,9 +3444,7 @@ describe(`Electric Integration`, () => {
         },
       ])
 
-      expect(
-        metadataHarness.collectionMetadata.get(`electric:resume`),
-      ).toEqual(
+      expect(metadataHarness.collectionMetadata.get(`electric:resume`)).toEqual(
         expect.objectContaining({
           kind: `resume`,
           offset: `10_0`,

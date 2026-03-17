@@ -78,7 +78,9 @@ export type TxCommitted = {
         value: Record<string, unknown>
       }>
       deletedKeys: Array<string | number>
-      rowMetadataMutations?: Array<PersistedRowMetadataMutation<string | number>>
+      rowMetadataMutations?: Array<
+        PersistedRowMetadataMutation<string | number>
+      >
       collectionMetadataMutations?: Array<PersistedCollectionMetadataMutation>
     }
 )
@@ -153,7 +155,9 @@ export type PullSinceResponse =
       requiresFullReload: false
       changedKeys: Array<string | number>
       deletedKeys: Array<string | number>
-      deltas?: Array<ReplayableTxDelta<Record<string, unknown>, string | number>>
+      deltas?: Array<
+        ReplayableTxDelta<Record<string, unknown>, string | number>
+      >
     }
   | {
       type: `rpc:pullSince:res`
@@ -176,9 +180,7 @@ export interface PersistedIndexSpec {
 
 export type PersistedRowMetadataMutation<
   TKey extends string | number = string | number,
-> =
-  | { type: `set`; key: TKey; value: unknown }
-  | { type: `delete`; key: TKey }
+> = { type: `set`; key: TKey; value: unknown } | { type: `delete`; key: TKey }
 
 export type PersistedCollectionMetadataMutation =
   | { type: `set`; key: string; value: unknown }
@@ -1675,8 +1677,9 @@ class PersistedCollectionRuntime<
         value: Record<string, unknown>
       }>,
       deletedKeys: args.deletedKeys,
-      rowMetadataMutations:
-        rowMetadataMutations as Array<PersistedRowMetadataMutation<string | number>>,
+      rowMetadataMutations: rowMetadataMutations as Array<
+        PersistedRowMetadataMutation<string | number>
+      >,
       collectionMetadataMutations,
     }
   }
@@ -2212,7 +2215,8 @@ function createWrappedSyncConfig<
     ...sourceSyncConfig,
     sync: (params) => {
       const transactionStack: Array<OpenSyncTransaction<T, TKey>> = []
-      const getOpenTransaction = () => transactionStack[transactionStack.length - 1]
+      const getOpenTransaction = () =>
+        transactionStack[transactionStack.length - 1]
       let fullStartPromise: Promise<void> | null = null
       const cancelledLoads = new WeakSet<object>()
       runtime.setSyncControls({
@@ -2285,7 +2289,8 @@ function createWrappedSyncConfig<
               row: {
                 get: (key: TKey) => {
                   const openTransaction = getOpenTransaction()
-                  const pendingWrite = openTransaction?.rowMetadataWrites.get(key)
+                  const pendingWrite =
+                    openTransaction?.rowMetadataWrites.get(key)
                   if (pendingWrite) {
                     return pendingWrite.type === `delete`
                       ? undefined
@@ -2371,8 +2376,8 @@ function createWrappedSyncConfig<
                 },
                 list: (prefix?: string) => {
                   const merged = new Map(
-                    params.metadata!.collection
-                      .list()
+                    params
+                      .metadata!.collection.list()
                       .map(({ key, value }) => [key, value]),
                   )
                   const openTransaction = getOpenTransaction()
@@ -2463,7 +2468,9 @@ function createWrappedSyncConfig<
           return sourceResult
         }
 
-        sourceResult = normalizeSyncFnResult(sourceSyncConfig.sync(wrappedParams))
+        sourceResult = normalizeSyncFnResult(
+          sourceSyncConfig.sync(wrappedParams),
+        )
         return sourceResult
       })()
 

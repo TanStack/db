@@ -1148,24 +1148,26 @@ export class SQLiteCorePersistenceAdapter<
       )
       const currentRowVersion = versionRows[0]?.latest_row_version ?? 0
       const nextRowVersion = Math.max(currentRowVersion + 1, tx.rowVersion)
-      const replayDelta: ReplayableTxDelta<Record<string, unknown>, TKey> | null =
-        tx.truncate
-          ? null
-          : {
-              txId: tx.txId,
-              latestRowVersion: nextRowVersion,
-              changedRows: tx.mutations
-                .filter((mutation) => mutation.type !== `delete`)
-                .map((mutation) => ({
-                  key: mutation.key,
-                  value: mutation.value as Record<string, unknown>,
-                })),
-              deletedKeys: tx.mutations
-                .filter((mutation) => mutation.type === `delete`)
-                .map((mutation) => mutation.key),
-              rowMetadataMutations: tx.rowMetadataMutations ?? [],
-              collectionMetadataMutations: tx.collectionMetadataMutations ?? [],
-            }
+      const replayDelta: ReplayableTxDelta<
+        Record<string, unknown>,
+        TKey
+      > | null = tx.truncate
+        ? null
+        : {
+            txId: tx.txId,
+            latestRowVersion: nextRowVersion,
+            changedRows: tx.mutations
+              .filter((mutation) => mutation.type !== `delete`)
+              .map((mutation) => ({
+                key: mutation.key,
+                value: mutation.value as Record<string, unknown>,
+              })),
+            deletedKeys: tx.mutations
+              .filter((mutation) => mutation.type === `delete`)
+              .map((mutation) => mutation.key),
+            rowMetadataMutations: tx.rowMetadataMutations ?? [],
+            collectionMetadataMutations: tx.collectionMetadataMutations ?? [],
+          }
 
       if (tx.truncate) {
         await transactionDriver.run(`DELETE FROM ${collectionTableSql}`)
@@ -1518,38 +1520,38 @@ export class SQLiteCorePersistenceAdapter<
 
     const [changedRows, deletedRows, latestVersionRows, replayRows] =
       await Promise.all([
-      this.driver.query<{ key: string }>(
-        `SELECT key
+        this.driver.query<{ key: string }>(
+          `SELECT key
          FROM ${collectionTableSql}
          WHERE row_version > ?`,
-        [fromRowVersion],
-      ),
-      this.driver.query<{ key: string }>(
-        `SELECT key
+          [fromRowVersion],
+        ),
+        this.driver.query<{ key: string }>(
+          `SELECT key
          FROM ${tombstoneTableSql}
          WHERE row_version > ?`,
-        [fromRowVersion],
-      ),
-      this.driver.query<{ latest_row_version: number }>(
-        `SELECT latest_row_version
+          [fromRowVersion],
+        ),
+        this.driver.query<{ latest_row_version: number }>(
+          `SELECT latest_row_version
          FROM collection_version
          WHERE collection_id = ?
          LIMIT 1`,
-        [collectionId],
-      ),
-      this.driver.query<{
-        tx_id: string
-        row_version: number
-        replay_json: string | null
-        replay_requires_full_reload: number
-      }>(
-        `SELECT tx_id, row_version, replay_json, replay_requires_full_reload
+          [collectionId],
+        ),
+        this.driver.query<{
+          tx_id: string
+          row_version: number
+          replay_json: string | null
+          replay_requires_full_reload: number
+        }>(
+          `SELECT tx_id, row_version, replay_json, replay_requires_full_reload
          FROM applied_tx
          WHERE collection_id = ? AND row_version > ?
          ORDER BY term ASC, seq ASC`,
-        [collectionId, fromRowVersion],
-      ),
-    ])
+          [collectionId, fromRowVersion],
+        ),
+      ])
 
     const latestRowVersion = latestVersionRows[0]?.latest_row_version ?? 0
     const changedKeyCount = changedRows.length + deletedRows.length
@@ -1584,9 +1586,10 @@ export class SQLiteCorePersistenceAdapter<
     }
 
     const deltas = replayRows.map((row) => {
-      const parsed = JSON.parse(
-        row.replay_json ?? `null`,
-      ) as ReplayableTxDelta<Record<string, unknown>, TKey> | null
+      const parsed = JSON.parse(row.replay_json ?? `null`) as ReplayableTxDelta<
+        Record<string, unknown>,
+        TKey
+      > | null
       if (!parsed) {
         throw new InvalidPersistedCollectionConfigError(
           `missing replay payload for applied_tx row`,

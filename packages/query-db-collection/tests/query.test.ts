@@ -4826,7 +4826,9 @@ describe(`QueryCollection`, () => {
 
         const liveQuery = createLiveQueryCollection({
           query: (q) =>
-            q.from({ item: collection }).where(({ item }) => eq(item.category, `A`)),
+            q
+              .from({ item: collection })
+              .where(({ item }) => eq(item.category, `A`)),
         })
 
         await liveQuery.preload()
