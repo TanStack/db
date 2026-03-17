@@ -334,16 +334,6 @@ Collection metadata should be loaded before new sync subscriptions begin
 processing, so startup GC or resume-state decisions can run against a stable
 baseline.
 
-### Backward compatibility and migrations
-
-Existing persisted databases without metadata support should migrate by:
-
-1. adding the new `metadata` column to collection tables
-2. creating `collection_metadata`
-3. treating missing metadata as `undefined`
-
-No existing rows need rewriting during migration.
-
 ## Query Collection Usage
 
 ### Problem to solve
@@ -722,7 +712,17 @@ sync: ({ begin, write, commit, metadata }) => {
 ```ts
 sync: ({ begin, write, commit, metadata }) => {
   const resumeState = metadata?.collection.get('electric:resume') as
-    | { offset?: string; handle?: string }
+    | {
+        kind: 'resume'
+        offset: string
+        handle: string
+        shapeId: string
+        updatedAt: number
+      }
+    | {
+        kind: 'reset'
+        updatedAt: number
+      }
     | undefined
 
   // use resumeState to configure the stream
@@ -731,8 +731,10 @@ sync: ({ begin, write, commit, metadata }) => {
   begin()
   write({ type: 'update', value: row, metadata: rowHeaders })
   metadata?.collection.set('electric:resume', {
+    kind: 'resume',
     offset: nextOffset,
     handle: nextHandle,
+    shapeId: nextShapeId,
     updatedAt: Date.now(),
   })
   commit()

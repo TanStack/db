@@ -94,6 +94,14 @@ equivalent restart path is required:
 
 This makes restart behavior explicit rather than relying on stale resume state.
 
+Ordering requirement:
+
+- write the `kind: 'reset'` marker before starting the refetch/reload path,
+  using a metadata-only transaction if needed
+
+That way, if the app crashes during refetch, restart will not attempt to resume
+from stale persisted stream state.
+
 ### 5. Carry row metadata through hydration
 
 Hydrated rows from SQLite should restore the Electric row metadata that was

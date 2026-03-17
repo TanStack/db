@@ -53,7 +53,7 @@ Suggested keys:
 
 - `queryCollection:gc:<queryHash>`
 - optionally `queryCollection:query:<queryHash>` for serialized query identity
-- optionally `queryCollection:metaVersion` for migration/versioning
+- optionally `queryCollection:metaVersion` for query metadata versioning
 
 ## Proposed implementation steps
 
@@ -79,6 +79,9 @@ persistedRetention?: {
 ```
 
 The second shape is more extensible, but either is acceptable.
+
+This should be added to the public query collection option types defined in
+`packages/query-db-collection/src/query.ts`.
 
 ### 2. Rebuild ownership from hydrated rows
 
@@ -125,7 +128,28 @@ At startup:
 Startup retention cleanup must run under the same mutex or startup critical
 section as hydration and replay to avoid races with new query subscriptions.
 
-### 7. Revalidation flow for indefinite persisted retention
+### 7. Explicit cold-row cleanup strategy for expired TTL placeholders
+
+Phase 3 must define a concrete cold-row cleanup path for on-demand mode.
+
+For the initial Level 1 implementation, that path should be one of:
+
+- adapter-driven full scan of persisted rows with non-null row metadata, or
+- denormalized owned row keys stored on the retention entry itself
+
+The implementation must choose one and document it. Startup cleanup cannot be
+left as an abstract promise if expired placeholders may own rows that are not
+currently hydrated.
+
+If the first implementation uses the scan-based path, it should do all of the
+following under the same startup mutex:
+
+1. find rows owned by the expired placeholder
+2. remove the placeholder from each row's owner set
+3. delete rows whose owner set becomes empty
+4. delete the placeholder retention entry
+
+### 8. Revalidation flow for indefinite persisted retention
 
 When a query retained with `mode: 'until-revalidated'` is requested again:
 
@@ -138,15 +162,27 @@ When a query retained with `mode: 'until-revalidated'` is requested again:
 
 This is the key behavior required for long offline periods.
 
-### 8. Consider narrowing cleanup diff logic
+This revalidation baseline is required for correctness. The implementation must
+not continue to diff only against all rows in `collection._state.syncedData`,
+because that would preserve the warm-start deletion bug this phase is intended
+to fix.
 
-As an implementation improvement, consider moving away from diffing against all
-rows in `collection._state.syncedData` and instead diff against:
+In on-demand mode, if the previously owned rows are not all hydrated in memory,
+the implementation must obtain the baseline from persisted ownership data
+directly, either via:
+
+- row metadata scan / lookup, or
+- denormalized owned row keys on the retention entry, or
+- a future normalized ownership index
+
+### 9. Use query-owned baseline for reconciliation
+
+When reconciling a query after restart or revalidation, diff against:
 
 - the rows previously owned by the specific query
 
-That is a more semantically accurate baseline and reduces dependence on unrelated
-persisted rows already being present in the collection.
+This is not an optional improvement. It is the required reconciliation model for
+Phase 3.
 
 ## Important design constraints
 
@@ -169,6 +205,21 @@ eviction APIs, but the design should leave room for:
 - evict all query placeholders for a collection
 - evict by age or storage-pressure policy
 
+### Runtime TTL expiry needs explicit policy
+
+Finite persisted retention should not only be handled on restart.
+
+When a `ttl` placeholder expires while the app remains running, the runtime
+should schedule the same cleanup flow that startup cleanup would perform:
+
+1. locate the rows owned by the placeholder
+2. remove the placeholder from those rows
+3. delete orphaned rows
+4. remove the retention entry
+
+This runtime TTL cleanup should run under the same mutex used for startup
+cleanup and query revalidation.
+
 ### Versioning matters
 
 If query identity hashing or serialization changes across app versions, retained
@@ -185,6 +236,7 @@ The implementation should leave room for:
 - query unsubscribes and resubscribes before persisted retention cleanup runs
 - query retained indefinitely while another query updates shared rows
 - startup with only a subset of rows hydrated in on-demand mode
+- expired `ttl` placeholder owning only cold rows in on-demand mode
 - placeholder exists but the same query is never requested again
 - query identity serialization changes across versions
 - metadata-only ownership updates with unchanged row values
@@ -203,10 +255,12 @@ The implementation should leave room for:
 - warm-start with multiple disjoint queries does not drop unrelated rows
 - overlapping queries preserve shared row ownership across restart
 - finite persisted retention expires and cleans up orphaned rows
+- finite persisted retention expires while the app remains running
 - indefinite persisted retention survives restart and long offline gaps
 - re-requesting an indefinite retained query reconciles deleted rows correctly
 - in-memory `gcTime` expiry does not remove indefinitely retained persisted rows
 - on-demand hydration reconstructs ownership for loaded subsets
+- on-demand expired-placeholder cleanup handles cold rows correctly
 - metadata-only ownership updates persist correctly
 
 ## Exit criteria

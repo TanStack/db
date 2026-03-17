@@ -66,6 +66,8 @@ This should be reflected in:
 - normalized sync operation shapes
 - buffered sync transactions
 - adapter `applyCommittedTx()`
+- replay payload classification so the runtime knows when exact targeted replay
+  is possible and when it must fall back to reload
 
 ### 4. Make metadata transactional in SQLite
 
@@ -87,6 +89,17 @@ sync subscriptions start processing. This is necessary for:
 - Electric resume-state restoration
 - future collection-scoped metadata consumers
 
+This should be reflected in the adapter contract explicitly, for example via:
+
+```ts
+loadCollectionMetadata?: (
+  collectionId: string,
+) => Promise<Array<{ key: string; value: unknown }>>
+```
+
+The exact method name is flexible, but startup collection metadata loading must
+be a first-class adapter capability.
+
 ### 6. Carry metadata through replay and hydration
 
 Metadata must not be lost in:
@@ -95,10 +108,18 @@ Metadata must not be lost in:
 - buffered sync transaction application
 - internal persisted transaction creation
 - self/follower replay
+- `pullSince`-style gap recovery
 
-For the first implementation, it is acceptable to use conservative reload
-fallback when a metadata-bearing committed tx cannot be replayed exactly through
-targeted invalidation.
+For the first pass, replay behavior should be explicit:
+
+- hydration must carry row metadata exactly
+- local commit must carry row and collection metadata exactly
+- if a committed tx contains metadata changes and the targeted replay protocol
+  cannot represent them exactly, followers should fall back to reload behavior
+- if gap recovery encounters metadata-bearing changes it cannot replay exactly,
+  recovery should also fall back to reload behavior
+
+This must be documented in the implementation, not left implicit.
 
 ## Important design constraints
 
@@ -114,19 +135,20 @@ This is required for:
 - Electric resume metadata commits
 - query retention metadata updates
 
-### Backward compatibility
-
-Existing adapters or persisted databases without metadata should still function
-by treating row metadata as `undefined` and collection metadata as empty.
-
 ### Serialization
 
 Use the same persisted JSON encoding and decoding path already used for row
 values, so metadata can safely round-trip supported value types.
 
+### Crash-consistency boundary
+
+The implementation must keep row writes, row metadata writes, and collection
+metadata writes inside the same SQLite transaction boundary.
+
+If any part of the tx fails, all three categories must roll back together.
+
 ## Edge cases to handle
 
-- hydrating rows when `metadata` column is absent in old data
 - metadata-only tx commit
 - delete row with row metadata present
 - row update with partial row value and metadata merge semantics
@@ -134,6 +156,7 @@ values, so metadata can safely round-trip supported value types.
 - replay of metadata-bearing committed txs to follower tabs
 - sequence-gap recovery when metadata changed in a missed tx
 - full reload fallback correctness when targeted metadata replay is unavailable
+- startup collection metadata load before subscription processing
 
 ## Acceptance criteria
 
@@ -153,8 +176,7 @@ values, so metadata can safely round-trip supported value types.
 - hydrated rows apply metadata into collection state
 - follower runtime converges on metadata-bearing txs
 - seq-gap recovery remains correct when metadata changed
-- migration from old schema leaves behavior unchanged for collections with no
-  metadata
+- startup collection metadata loads before any sync subscription attaches
 
 ## Exit criteria
 

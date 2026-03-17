@@ -32,13 +32,13 @@ offline gaps.
 - row metadata and collection metadata are isolated but share the same commit
   boundary
 - truncate clears row metadata but does not silently clear collection metadata
+- startup reads of persisted metadata are allowed outside a transaction
 
 ### SQLite invariants
 
 - row values and row metadata are committed atomically
 - collection metadata commits atomically with the same persisted tx
 - hydrated rows restore both value and metadata
-- old persisted databases without metadata remain readable
 
 ### Query collection invariants
 
@@ -79,10 +79,11 @@ Cases:
 
 - `metadata.row.set()` inside a transaction
 - `metadata.collection.set()` inside a transaction
+- `metadata.collection.get()` outside a transaction during startup
 - read-your-own-writes for row metadata
 - read-your-own-writes for collection metadata
 - metadata-only commit
-- metadata calls outside a transaction throw
+- metadata writes outside a transaction throw
 - `write({ metadata })` and `metadata.row.set()` on the same row in one tx
 - truncate behavior with row metadata present
 
@@ -100,7 +101,6 @@ Cases:
 - collection metadata persists and loads
 - metadata-only tx survives restart
 - row delete removes row metadata
-- migration from pre-metadata schema
 - metadata-bearing tx replay correctness
 - sequence-gap recovery with metadata changes
 
@@ -118,9 +118,13 @@ Cases:
 - persisted ownership reconstruction in eager mode
 - persisted ownership reconstruction in on-demand mode for loaded subsets
 - finite persisted retention expiry
+- finite persisted retention expiry while the app remains running
 - `persistedGcTime: Infinity` or equivalent indefinite retention
 - in-memory `gcTime` expiry does not remove indefinitely retained persisted rows
 - re-requesting an indefinitely retained query reconciles stale/deleted rows
+- query reconciliation diffs against the query-owned baseline, not the whole
+  collection
+- expired placeholder cleanup handles cold rows in on-demand mode
 - query identity version mismatch / incompatible retained metadata fallback
 
 ### Electric integration tests
@@ -157,6 +161,8 @@ Add:
 - SQLite schema and hydration tests
 - adapter atomicity tests
 - runtime restart tests
+- transaction-boundary tests that prove row data, row metadata, and collection
+  metadata share the same SQLite commit/rollback boundary
 
 ### While implementing Phase 3
 
@@ -166,6 +172,8 @@ Add:
 - finite retention tests
 - indefinite retention tests
 - long-offline warm-start tests
+- on-demand cold-row cleanup tests
+- runtime TTL expiry tests
 
 ### While implementing Phase 4
 
@@ -184,6 +192,32 @@ Add:
 - startup GC races with new subscriptions
 - follower runtimes diverge because metadata-bearing txs were not replayed
 - Electric resumes from a token that was never durably committed
+
+## Crash-consistency testing approach
+
+Where atomicity is claimed, tests should verify transaction boundaries rather
+than merely assume SQLite atomicity.
+
+Suggested approach:
+
+- use a driver or adapter double that records transaction boundaries
+- force failures after some writes have been staged but before commit completes
+- verify row values, row metadata, and collection metadata all roll back
+  together
+
+This is especially important for `applyCommittedTx()` and any metadata-only tx
+paths.
+
+## Performance regression checks
+
+Add lightweight regression coverage for:
+
+- row hydration with metadata present
+- row writes with metadata absent
+- row writes with metadata present
+
+These do not need to be strict benchmarks, but they should catch obvious
+accidental regressions caused by metadata serialization or replay changes.
 
 ## Definition of done
 
