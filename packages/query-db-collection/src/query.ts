@@ -220,6 +220,19 @@ interface QueryCollectionState {
   >
 }
 
+type PersistedQueryRetentionEntry =
+  | {
+      queryHash: string
+      mode: `ttl`
+      expiresAt: number
+    }
+  | {
+      queryHash: string
+      mode: `until-revalidated`
+    }
+
+const QUERY_COLLECTION_GC_PREFIX = `queryCollection:gc:`
+
 /**
  * Implementation class for QueryCollectionUtils with explicit dependency injection
  * for better testability and architectural clarity
@@ -703,16 +716,128 @@ export function queryCollectionOptions(
       })
     }
 
-    const getOwnedRowsForQuery = (hashedQueryKey: string) => {
+    const parsePersistedQueryRetentionEntry = (
+      value: unknown,
+      expectedHash: string,
+    ): PersistedQueryRetentionEntry | undefined => {
+      if (!value || typeof value !== `object`) {
+        return undefined
+      }
+
+      const record = value as Record<string, unknown>
+      if (record.queryHash !== expectedHash) {
+        return undefined
+      }
+
+      if (record.mode === `until-revalidated`) {
+        return {
+          queryHash: expectedHash,
+          mode: `until-revalidated`,
+        }
+      }
+
+      if (
+        record.mode === `ttl` &&
+        typeof record.expiresAt === `number` &&
+        Number.isFinite(record.expiresAt)
+      ) {
+        return {
+          queryHash: expectedHash,
+          mode: `ttl`,
+          expiresAt: record.expiresAt,
+        }
+      }
+
+      return undefined
+    }
+
+    const getPersistedOwnedRowsForQueryBaseline = (hashedQueryKey: string) => {
+      const knownRows = queryToRows.get(hashedQueryKey)
+      if (knownRows) {
+        return new Set(knownRows)
+      }
+
       const ownedRows = new Set<string | number>()
       for (const [rowKey] of collection._state.syncedData.entries()) {
         const owners = getPersistedOwners(rowKey)
+        if (owners.size === 0) {
+          continue
+        }
+
+        rowToQueries.set(rowKey, new Set(owners))
+        owners.forEach((owner) => {
+          const queryToRowsSet = queryToRows.get(owner) || new Set()
+          queryToRowsSet.add(rowKey)
+          queryToRows.set(owner, queryToRowsSet)
+        })
+
         if (owners.has(hashedQueryKey)) {
           ownedRows.add(rowKey)
-          addRow(rowKey, hashedQueryKey)
         }
       }
       return ownedRows
+    }
+
+    const cleanupPersistedPlaceholder = (
+      hashedQueryKey: string,
+      options?: { deleteRetentionEntry?: boolean },
+    ) => {
+      const rowKeys = getPersistedOwnedRowsForQueryBaseline(hashedQueryKey)
+      const rowsToDelete: Array<any> = []
+      const needsTransaction = metadata !== undefined
+
+      if (!needsTransaction) {
+        return
+      }
+
+      begin()
+
+      rowKeys.forEach((rowKey) => {
+        const oldItem = collection.get(rowKey)
+        if (!oldItem) {
+          return
+        }
+
+        const owners = getPersistedOwners(rowKey)
+        owners.delete(hashedQueryKey)
+        setPersistedOwners(rowKey, owners)
+        const needToRemove = removeRow(rowKey, hashedQueryKey)
+        if (needToRemove) {
+          rowsToDelete.push(oldItem)
+        }
+      })
+
+      rowsToDelete.forEach((row) => {
+        write({ type: `delete`, value: row })
+      })
+
+      if (options?.deleteRetentionEntry !== false) {
+        metadata.collection.delete(`${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`)
+      }
+      commit()
+    }
+
+    const consumePersistedQueryRetentionAtStartup = () => {
+      if (!metadata) {
+        return
+      }
+
+      const retentionEntries = metadata.collection.list(QUERY_COLLECTION_GC_PREFIX)
+      const now = Date.now()
+
+      retentionEntries.forEach(({ key, value }) => {
+        const hashedQueryKey = key.slice(QUERY_COLLECTION_GC_PREFIX.length)
+        const parsed = parsePersistedQueryRetentionEntry(value, hashedQueryKey)
+        if (!parsed) {
+          return
+        }
+
+        if (parsed.mode === `ttl` && parsed.expiresAt <= now) {
+          cleanupPersistedPlaceholder(parsed.queryHash, {
+            deleteRetentionEntry: syncMode !== `on-demand`,
+          })
+        }
+      })
     }
 
     /**
@@ -744,12 +869,6 @@ export function queryCollectionOptions(
       const key = generateQueryKeyFromOptions(opts)
       const hashedQueryKey = hashKey(key)
       const extendedMeta = { ...meta, loadSubsetOptions: opts }
-
-      if (metadata) {
-        begin()
-        metadata.collection.delete(`queryCollection:gc:${hashedQueryKey}`)
-        commit()
-      }
 
       if (state.observers.has(hashedQueryKey)) {
         // We already have a query for this queryKey
@@ -901,7 +1020,8 @@ export function queryCollectionOptions(
           const currentSyncedItems: Map<string | number, any> = new Map(
             collection._state.syncedData.entries(),
           )
-          const previouslyOwnedRows = getOwnedRowsForQuery(hashedQueryKey)
+          const previouslyOwnedRows =
+            getPersistedOwnedRowsForQueryBaseline(hashedQueryKey)
           const newItemsMap = new Map<string | number, any>()
           newItemsArray.forEach((item) => {
             const key = getKey(item)
@@ -909,6 +1029,11 @@ export function queryCollectionOptions(
           })
 
           begin()
+          if (metadata) {
+            metadata.collection.delete(
+              `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+            )
+          }
 
           previouslyOwnedRows.forEach((key) => {
             const oldItem = currentSyncedItems.get(key)
@@ -1002,6 +1127,8 @@ export function queryCollectionOptions(
       unsubscribes.clear()
     }
 
+    consumePersistedQueryRetentionAtStartup()
+
     // Mark that sync has started
     syncStarted = true
 
@@ -1051,12 +1178,8 @@ export function queryCollectionOptions(
       unsubscribes.delete(hashedQueryKey)
 
       const rowKeys = queryToRows.get(hashedQueryKey) ?? new Set()
+      const nextOwnersByRow = new Map<string | number, Set<string>>()
       const rowsToDelete: Array<any> = []
-      const shouldWriteMetadata = metadata !== undefined && rowKeys.size > 0
-
-      if (shouldWriteMetadata) {
-        begin()
-      }
 
       rowKeys.forEach((rowKey) => {
         const queries = rowToQueries.get(rowKey)
@@ -1065,21 +1188,33 @@ export function queryCollectionOptions(
           return
         }
 
-        queries.delete(hashedQueryKey)
-        setPersistedOwners(rowKey, queries)
+        const nextOwners = new Set(queries)
+        nextOwners.delete(hashedQueryKey)
+        nextOwnersByRow.set(rowKey, nextOwners)
 
-        if (queries.size === 0) {
-          rowToQueries.delete(rowKey)
-
-          if (collection.has(rowKey)) {
-            rowsToDelete.push(collection.get(rowKey))
-          }
+        if (nextOwners.size === 0 && collection.has(rowKey)) {
+          rowsToDelete.push(collection.get(rowKey))
         }
       })
 
-      if (!shouldWriteMetadata && rowsToDelete.length > 0) {
+      const shouldWriteMetadata =
+        metadata !== undefined && nextOwnersByRow.size > 0
+      const needsTransaction = shouldWriteMetadata || rowsToDelete.length > 0
+      if (needsTransaction) {
         begin()
       }
+
+      nextOwnersByRow.forEach((owners, rowKey) => {
+        if (owners.size === 0) {
+          rowToQueries.delete(rowKey)
+        } else {
+          rowToQueries.set(rowKey, owners)
+        }
+
+        if (shouldWriteMetadata) {
+          setPersistedOwners(rowKey, owners)
+        }
+      })
 
       if (rowsToDelete.length > 0) {
         rowsToDelete.forEach((row) => {
@@ -1087,7 +1222,7 @@ export function queryCollectionOptions(
         })
       }
 
-      if (shouldWriteMetadata || rowsToDelete.length > 0) {
+      if (needsTransaction) {
         commit()
       }
 
@@ -1133,7 +1268,9 @@ export function queryCollectionOptions(
       if (persistedGcTime !== undefined) {
         if (metadata) {
           begin()
-          metadata.collection.set(`queryCollection:gc:${hashedQueryKey}`, {
+          metadata.collection.set(
+            `${QUERY_COLLECTION_GC_PREFIX}${hashedQueryKey}`,
+            {
             queryHash: hashedQueryKey,
             mode:
               persistedGcTime === Number.POSITIVE_INFINITY
@@ -1142,12 +1279,14 @@ export function queryCollectionOptions(
             ...(persistedGcTime === Number.POSITIVE_INFINITY
               ? {}
               : { expiresAt: Date.now() + persistedGcTime }),
-          })
+            },
+          )
           commit()
         }
         unsubscribes.get(hashedQueryKey)?.()
         unsubscribes.delete(hashedQueryKey)
         state.observers.delete(hashedQueryKey)
+        hashToQueryKey.delete(hashedQueryKey)
         queryRefCounts.set(hashedQueryKey, 0)
         return
       }

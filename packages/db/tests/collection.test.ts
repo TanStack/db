@@ -1400,7 +1400,7 @@ describe(`Collection`, () => {
       value: `should not be cleared`,
     })
     expect(collection._state.syncedData.size).toBe(1)
-    expect(collection._state.syncedMetadata.size).toBe(1)
+    expect(collection._state.syncedMetadata.size).toBe(0)
   })
 
   it(`should handle truncate with empty collection`, async () => {
@@ -1561,6 +1561,101 @@ describe(`Collection`, () => {
     commit()
 
     expect(collection._state.syncedMetadata.has(1)).toBe(false)
+  })
+
+  it(`should not retain a synced metadata entry for inserts without metadata`, async () => {
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `sync-insert-no-metadata-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial` },
+          })
+          commit()
+          markReady()
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    expect(collection._state.syncedMetadata.has(1)).toBe(false)
+  })
+
+  it(`should treat row metadata as cleared after truncate within the same sync transaction`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `sync-row-metadata-truncate-read-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, write, commit, markReady, metadata, truncate }) => {
+          begin()
+          write({
+            type: `insert`,
+            value: { id: 1, value: `initial` },
+            metadata: { source: `sync` },
+          })
+          commit()
+          markReady()
+
+          testSyncFunctions = { begin, commit, metadata, truncate }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+    expect(collection._state.syncedMetadata.get(1)).toEqual({ source: `sync` })
+
+    const { begin, commit, metadata, truncate } = testSyncFunctions
+    begin()
+    expect(metadata.row.get(1)).toEqual({ source: `sync` })
+    metadata.collection.set(`survivor:key`, { persisted: true })
+    truncate()
+    expect(metadata.row.get(1)).toBeUndefined()
+    expect(metadata.collection.get(`survivor:key`)).toEqual({ persisted: true })
+    expect(metadata.collection.list()).toContainEqual({
+      key: `survivor:key`,
+      value: { persisted: true },
+    })
+    commit()
+  })
+
+  it(`should preserve collection metadata across truncate unless explicitly changed`, async () => {
+    let testSyncFunctions: any = null
+
+    const collection = createCollection<{ id: number; value: string }>({
+      id: `sync-collection-metadata-truncate-test`,
+      getKey: (item) => item.id,
+      startSync: true,
+      sync: {
+        sync: ({ begin, commit, markReady, metadata, truncate }) => {
+          begin()
+          metadata?.collection.set(`startup:key`, { ready: true })
+          commit()
+          markReady()
+
+          testSyncFunctions = { begin, commit, metadata, truncate }
+        },
+      },
+    })
+
+    await collection.stateWhenReady()
+
+    const { begin, commit, metadata, truncate } = testSyncFunctions
+    begin()
+    truncate()
+    expect(metadata.collection.get(`startup:key`)).toEqual({ ready: true })
+    expect(metadata.collection.list()).toContainEqual({
+      key: `startup:key`,
+      value: { ready: true },
+    })
+    commit()
   })
 
   it(`open sync transaction isn't applied when optimistic mutation is resolved/rejected`, async () => {

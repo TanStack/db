@@ -173,10 +173,18 @@ export class CollectionSyncManager<
             if (messageType === `delete`) {
               pendingTransaction.deletedKeys.add(key)
               pendingTransaction.rowMetadataWrites.set(key, { type: `delete` })
-            } else if (
-              messageType === `insert` ||
-              message.metadata !== undefined
-            ) {
+            } else if (messageType === `insert`) {
+              if (message.metadata !== undefined) {
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `set`,
+                  value: message.metadata,
+                })
+              } else {
+                pendingTransaction.rowMetadataWrites.set(key, {
+                  type: `delete`,
+                })
+              }
+            } else if (message.metadata !== undefined) {
               pendingTransaction.rowMetadataWrites.set(key, {
                 type: `set`,
                 value: message.metadata,
@@ -288,6 +296,9 @@ export class CollectionSyncManager<
             return pendingWrite.type === `delete`
               ? undefined
               : pendingWrite.value
+          }
+          if (pendingTransaction?.truncate) {
+            return undefined
           }
           return this.state.syncedMetadata.get(key)
         },

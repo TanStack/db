@@ -14,6 +14,7 @@ import type {
   Collection,
   DeleteMutationFnParams,
   InsertMutationFnParams,
+  SyncMetadataApi,
   TransactionWithMutations,
   UpdateMutationFnParams,
 } from '@tanstack/db'
@@ -35,6 +36,49 @@ const getKey = (item: TestItem) => item.id
 
 // Helper to advance timers and allow microtasks to flush
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+function createInMemorySyncMetadataApi<
+  TKey extends string | number = string | number,
+>(seed?: {
+  rowMetadata?: ReadonlyMap<TKey, unknown>
+  collectionMetadata?: ReadonlyMap<string, unknown>
+}): {
+  api: SyncMetadataApi<TKey>
+  rowMetadata: Map<TKey, unknown>
+  collectionMetadata: Map<string, unknown>
+} {
+  const rowMetadata = new Map(seed?.rowMetadata)
+  const collectionMetadata = new Map(seed?.collectionMetadata)
+
+  return {
+    rowMetadata,
+    collectionMetadata,
+    api: {
+      row: {
+        get: (key) => rowMetadata.get(key),
+        set: (key, value) => {
+          rowMetadata.set(key, value)
+        },
+        delete: (key) => {
+          rowMetadata.delete(key)
+        },
+      },
+      collection: {
+        get: (key) => collectionMetadata.get(key),
+        set: (key, value) => {
+          collectionMetadata.set(key, value)
+        },
+        delete: (key) => {
+          collectionMetadata.delete(key)
+        },
+        list: (prefix) =>
+          Array.from(collectionMetadata.entries())
+            .filter(([key]) => (prefix ? key.startsWith(prefix) : true))
+            .map(([key, value]) => ({ key, value })),
+      },
+    },
+  }
+}
 
 describe(`QueryCollection`, () => {
   let queryClient: QueryClient
@@ -4275,7 +4319,7 @@ describe(`QueryCollection`, () => {
       })
     })
 
-    it(`should diff against persisted query-owned rows on warm start`, async () => {
+    it(`should diff against retained query-owned rows on warm start`, async () => {
       const baseQueryKey = [`persisted-baseline-test`]
       const queryFn = vi.fn().mockResolvedValue([])
 
@@ -4289,22 +4333,51 @@ describe(`QueryCollection`, () => {
         startSync: false,
       }
 
-      const collection = createCollection(queryCollectionOptions(config))
+      const baseOptions = queryCollectionOptions(config)
+      const originalSync = baseOptions.sync
       const ownedRow = { id: `1`, name: `Owned row`, category: `A` }
       const unrelatedRow = { id: `2`, name: `Unrelated row`, category: `B` }
       const ownedQueryHash = hashKey(baseQueryKey)
+      const metadataHarness = createInMemorySyncMetadataApi<string | number>({
+        rowMetadata: new Map([
+          [
+            ownedRow.id,
+            {
+              queryCollection: {
+                owners: {
+                  [ownedQueryHash]: true,
+                },
+              },
+            },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [
+            `queryCollection:gc:${ownedQueryHash}`,
+            {
+              queryHash: ownedQueryHash,
+              mode: `until-revalidated`,
+            },
+          ],
+        ]),
+      })
 
-      collection._state.syncedData.set(ownedRow.id, ownedRow)
-      collection._state.syncedData.set(unrelatedRow.id, unrelatedRow)
-      collection._state.syncedMetadata.set(ownedRow.id, {
-        queryCollection: {
-          owners: {
-            [ownedQueryHash]: true,
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+            params.begin({ immediate: true })
+            params.write({ type: `insert`, value: ownedRow })
+            params.write({ type: `insert`, value: unrelatedRow })
+            params.commit()
+
+            return originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            })
           },
         },
       })
-      collection._state.syncedMetadata.set(unrelatedRow.id, undefined)
-      collection._state.size = 2
 
       await collection.preload()
       await flushPromises()
@@ -4312,6 +4385,181 @@ describe(`QueryCollection`, () => {
       expect(queryFn).toHaveBeenCalledTimes(1)
       expect(collection.has(ownedRow.id)).toBe(false)
       expect(collection.has(unrelatedRow.id)).toBe(true)
+      expect(
+        metadataHarness.collectionMetadata.has(
+          `queryCollection:gc:${ownedQueryHash}`,
+        ),
+      ).toBe(false)
+    })
+
+    it(`should clean up expired persisted ttl placeholders on startup`, async () => {
+      const baseQueryKey = [`persisted-ttl-cleanup-test`]
+      const queryFn = vi.fn().mockResolvedValue([])
+      const expiredQueryHash = hashKey(baseQueryKey)
+      const otherOwnerHash = `other-owner`
+
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `persisted-ttl-cleanup-test`,
+        queryClient,
+        queryKey: baseQueryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }
+
+      const baseOptions = queryCollectionOptions(config)
+      const originalSync = baseOptions.sync
+      const orphanRow = { id: `1`, name: `Orphan`, category: `A` }
+      const sharedRow = { id: `2`, name: `Shared`, category: `B` }
+      const metadataHarness = createInMemorySyncMetadataApi<string | number>({
+        rowMetadata: new Map([
+          [
+            orphanRow.id,
+            {
+              queryCollection: {
+                owners: {
+                  [expiredQueryHash]: true,
+                },
+              },
+            },
+          ],
+          [
+            sharedRow.id,
+            {
+              queryCollection: {
+                owners: {
+                  [expiredQueryHash]: true,
+                  [otherOwnerHash]: true,
+                },
+              },
+            },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [
+            `queryCollection:gc:${expiredQueryHash}`,
+            {
+              queryHash: expiredQueryHash,
+              mode: `ttl`,
+              expiresAt: Date.now() - 1_000,
+            },
+          ],
+        ]),
+      })
+
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+            params.begin({ immediate: true })
+            params.write({ type: `insert`, value: orphanRow })
+            params.write({ type: `insert`, value: sharedRow })
+            params.commit()
+
+            return originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            })
+          },
+        },
+      })
+
+      await collection.stateWhenReady()
+      await flushPromises()
+
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(collection.has(orphanRow.id)).toBe(false)
+      expect(collection.has(sharedRow.id)).toBe(true)
+      expect(
+        metadataHarness.collectionMetadata.get(
+          `queryCollection:gc:${expiredQueryHash}`,
+        ),
+      ).toEqual({
+        queryHash: expiredQueryHash,
+        mode: `ttl`,
+        expiresAt: expect.any(Number),
+      })
+      expect(metadataHarness.rowMetadata.get(sharedRow.id)).toEqual({
+        queryCollection: {
+          owners: {
+            [otherOwnerHash]: true,
+          },
+        },
+      })
+    })
+
+    it(`should preserve until-revalidated retained rows on startup`, async () => {
+      const baseQueryKey = [`persisted-until-revalidated-test`]
+      const queryFn = vi.fn().mockResolvedValue([])
+      const retainedQueryHash = hashKey(baseQueryKey)
+
+      const config: QueryCollectionConfig<CategorisedItem> = {
+        id: `persisted-until-revalidated-test`,
+        queryClient,
+        queryKey: baseQueryKey,
+        queryFn,
+        getKey: (item) => item.id,
+        syncMode: `on-demand`,
+        startSync: true,
+      }
+
+      const baseOptions = queryCollectionOptions(config)
+      const originalSync = baseOptions.sync
+      const retainedRow = { id: `1`, name: `Retained`, category: `A` }
+      const metadataHarness = createInMemorySyncMetadataApi<string | number>({
+        rowMetadata: new Map([
+          [
+            retainedRow.id,
+            {
+              queryCollection: {
+                owners: {
+                  [retainedQueryHash]: true,
+                },
+              },
+            },
+          ],
+        ]),
+        collectionMetadata: new Map([
+          [
+            `queryCollection:gc:${retainedQueryHash}`,
+            {
+              queryHash: retainedQueryHash,
+              mode: `until-revalidated`,
+            },
+          ],
+        ]),
+      })
+
+      const collection = createCollection({
+        ...baseOptions,
+        sync: {
+          sync: (params: Parameters<typeof originalSync.sync>[0]) => {
+            params.begin({ immediate: true })
+            params.write({ type: `insert`, value: retainedRow })
+            params.commit()
+
+            return originalSync.sync({
+              ...params,
+              metadata: metadataHarness.api,
+            })
+          },
+        },
+      })
+
+      await collection.stateWhenReady()
+      await flushPromises()
+
+      expect(queryFn).not.toHaveBeenCalled()
+      expect(collection.has(retainedRow.id)).toBe(true)
+      expect(
+        metadataHarness.collectionMetadata.get(
+          `queryCollection:gc:${retainedQueryHash}`,
+        ),
+      ).toEqual({
+        queryHash: retainedQueryHash,
+        mode: `until-revalidated`,
+      })
     })
 
     it(`should reset refcount after query GC and reload (stale refcount bug)`, async () => {

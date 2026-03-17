@@ -179,6 +179,7 @@ export type PersistedTx<
   term: number
   seq: number
   rowVersion: number
+  truncate?: boolean
   mutations: Array<
     | {
         type: `insert`
@@ -772,6 +773,7 @@ class PersistedCollectionRuntime<
     metadata: null,
   }
   private started = false
+  private startupMetadataPromise: Promise<void> | null = null
   private startPromise: Promise<void> | null = null
   private internalApplyDepth = 0
   private isHydrating = false
@@ -845,6 +847,15 @@ class PersistedCollectionRuntime<
     return this.startPromise
   }
 
+  async ensureStartupMetadataLoaded(): Promise<void> {
+    if (this.startupMetadataPromise) {
+      return this.startupMetadataPromise
+    }
+
+    this.startupMetadataPromise = this.loadStartupMetadataInternal()
+    return this.startupMetadataPromise
+  }
+
   private async startInternal(): Promise<void> {
     if (this.started) {
       return
@@ -852,6 +863,21 @@ class PersistedCollectionRuntime<
 
     this.started = true
 
+    await this.ensureStartupMetadataLoaded()
+
+    const indexBootstrapSnapshot = this.collection?.getIndexMetadata() ?? []
+    this.attachIndexLifecycleListeners()
+    await this.bootstrapPersistedIndexes(indexBootstrapSnapshot)
+
+    if (this.syncMode !== `on-demand`) {
+      this.activeSubsets.set(this.getSubsetKey({}), {})
+      await this.applyMutex.run(() =>
+        this.hydrateSubsetUnsafe({}, { requestRemoteEnsure: false }),
+      )
+    }
+  }
+
+  private async loadStartupMetadataInternal(): Promise<void> {
     // Restore stream position from the database so that new mutations
     // don't collide with previously applied transactions.
     if (this.persistence.adapter.getStreamPosition) {
@@ -866,22 +892,27 @@ class PersistedCollectionRuntime<
     }
 
     await this.loadCollectionMetadataIntoCollection()
-
-    const indexBootstrapSnapshot = this.collection?.getIndexMetadata() ?? []
-    this.attachIndexLifecycleListeners()
-    await this.bootstrapPersistedIndexes(indexBootstrapSnapshot)
-
-    if (this.syncMode !== `on-demand`) {
-      this.activeSubsets.set(this.getSubsetKey({}), {})
-      await this.applyMutex.run(() =>
-        this.hydrateSubsetUnsafe({}, { requestRemoteEnsure: false }),
-      )
-    }
   }
 
   private async loadCollectionMetadataIntoCollection(): Promise<void> {
+    const collectionMetadata = await this.loadCollectionMetadataSnapshot()
+    this.replaceCollectionMetadataSnapshot(collectionMetadata)
+  }
+
+  private async loadCollectionMetadataSnapshot(): Promise<
+    Array<{ key: string; value: unknown }>
+  > {
+    if (!this.persistence.adapter.loadCollectionMetadata) {
+      return []
+    }
+
+    return this.persistence.adapter.loadCollectionMetadata(this.collectionId)
+  }
+
+  private replaceCollectionMetadataSnapshot(
+    collectionMetadata: Array<{ key: string; value: unknown }>,
+  ): void {
     if (
-      !this.persistence.adapter.loadCollectionMetadata ||
       !this.syncControls.begin ||
       !this.syncControls.commit ||
       !this.syncControls.metadata
@@ -889,18 +920,26 @@ class PersistedCollectionRuntime<
       return
     }
 
-    const collectionMetadata =
-      await this.persistence.adapter.loadCollectionMetadata(this.collectionId)
-
-    if (collectionMetadata.length === 0) {
-      return
-    }
+    const nextMetadata = new Map(
+      collectionMetadata.map(({ key, value }) => [key, value]),
+    )
+    const currentKeys = this.syncControls.metadata.collection
+      .list()
+      .map(({ key }) => key)
 
     this.withInternalApply(() => {
       this.syncControls.begin?.({ immediate: true })
-      collectionMetadata.forEach(({ key, value }) => {
+
+      currentKeys.forEach((key) => {
+        if (!nextMetadata.has(key)) {
+          this.syncControls.metadata?.collection.delete(key)
+        }
+      })
+
+      nextMetadata.forEach((value, key) => {
         this.syncControls.metadata?.collection.set(key, value)
       })
+
       this.syncControls.commit?.()
     })
   }
@@ -1163,16 +1202,25 @@ class PersistedCollectionRuntime<
     })
   }
 
-  private replaceCollectionRows(
+  private replaceCollectionSnapshot(
     rows: Array<{ key: TKey; value: T; metadata?: unknown }>,
+    collectionMetadata: Array<{ key: string; value: unknown }>,
   ): void {
     if (
       !this.syncControls.begin ||
       !this.syncControls.write ||
-      !this.syncControls.commit
+      !this.syncControls.commit ||
+      !this.syncControls.metadata
     ) {
       return
     }
+
+    const nextMetadata = new Map(
+      collectionMetadata.map(({ key, value }) => [key, value]),
+    )
+    const currentKeys = this.syncControls.metadata.collection
+      .list()
+      .map(({ key }) => key)
 
     this.withInternalApply(() => {
       this.syncControls.begin?.({ immediate: true })
@@ -1185,6 +1233,16 @@ class PersistedCollectionRuntime<
           metadata: row.metadata as Record<string, unknown> | undefined,
         })
       }
+
+      currentKeys.forEach((key) => {
+        if (!nextMetadata.has(key)) {
+          this.syncControls.metadata?.collection.delete(key)
+        }
+      })
+
+      nextMetadata.forEach((value, key) => {
+        this.syncControls.metadata?.collection.set(key, value)
+      })
 
       this.syncControls.commit?.()
     })
@@ -1271,10 +1329,10 @@ class PersistedCollectionRuntime<
     const streamPosition = this.nextLocalStreamPosition()
 
     if (
-      transaction.truncate ||
-      (transaction.operations.length === 0 &&
-        transaction.rowMetadataWrites.size === 0 &&
-        transaction.collectionMetadataWrites.size === 0)
+      !transaction.truncate &&
+      transaction.operations.length === 0 &&
+      transaction.rowMetadataWrites.size === 0 &&
+      transaction.collectionMetadataWrites.size === 0
     ) {
       this.publishTxCommittedEvent(
         this.createTxCommittedPayload({
@@ -1302,6 +1360,7 @@ class PersistedCollectionRuntime<
         hasMetadataChanges:
           transaction.rowMetadataWrites.size > 0 ||
           transaction.collectionMetadataWrites.size > 0,
+        requiresFullReload: transaction.truncate,
         changedRows: transaction.operations
           .filter((operation) => operation.type === `update`)
           .map((operation) => ({ key: operation.key, value: operation.value })),
@@ -1321,14 +1380,13 @@ class PersistedCollectionRuntime<
       term: streamPosition.term,
       seq: streamPosition.seq,
       rowVersion: streamPosition.rowVersion,
+      truncate: transaction.truncate,
       mutations: transaction.operations.map((operation) =>
         operation.type === `update`
           ? {
               type: `update`,
               key: operation.key,
               value: operation.value,
-              metadata: operation.metadata,
-              metadataChanged: operation.metadata !== undefined,
             }
           : {
               type: `delete`,
@@ -1909,19 +1967,25 @@ class PersistedCollectionRuntime<
 
     this.isHydrating = true
     try {
-      const mergedRows = new Map<TKey, T>()
+      const mergedRows = new Map<TKey, { value: T; metadata?: unknown }>()
+      const collectionMetadata = await this.loadCollectionMetadataSnapshot()
       for (const options of activeSubsetOptions) {
         const subsetRows = await this.loadSubsetRowsUnsafe(options)
         for (const row of subsetRows) {
-          mergedRows.set(row.key, row.value)
+          mergedRows.set(row.key, {
+            value: row.value,
+            metadata: row.metadata,
+          })
         }
       }
 
-      this.replaceCollectionRows(
-        Array.from(mergedRows.entries()).map(([key, value]) => ({
+      this.replaceCollectionSnapshot(
+        Array.from(mergedRows.entries()).map(([key, row]) => ({
           key,
-          value,
+          value: row.value,
+          metadata: row.metadata,
         })),
+        collectionMetadata,
       )
     } finally {
       this.isHydrating = false
@@ -2037,6 +2101,9 @@ function createWrappedSyncConfig<
     ...sourceSyncConfig,
     sync: (params) => {
       const transactionStack: Array<OpenSyncTransaction<T, TKey>> = []
+      const getOpenTransaction = () => transactionStack[transactionStack.length - 1]
+      let fullStartPromise: Promise<void> | null = null
+      const cancelledLoads = new WeakSet<object>()
       runtime.setSyncControls({
         begin: params.begin,
         write: params.write as SyncControlFns<T, TKey>[`write`],
@@ -2051,18 +2118,9 @@ function createWrappedSyncConfig<
       const wrappedParams = {
         ...params,
         markReady: () => {
-          void runtime
-            .ensureStarted()
-            .then(() => {
-              params.markReady()
-            })
-            .catch((error) => {
-              console.warn(
-                `Failed persisted sync startup before markReady:`,
-                error,
-              )
-              params.markReady()
-            })
+          void (fullStartPromise ?? runtime.ensureStarted()).then(() => {
+            params.markReady()
+          })
         },
         begin: (options?: { immediate?: boolean }) => {
           const transaction: OpenSyncTransaction<T, TKey> = {
@@ -2082,7 +2140,7 @@ function createWrappedSyncConfig<
         },
         write: (message: ChangeMessageOrDeleteKeyMessage<T, TKey>) => {
           const normalization = runtime.normalizeSyncWriteMessage(message)
-          const openTransaction = transactionStack[transactionStack.length - 1]
+          const openTransaction = getOpenTransaction()
 
           if (!openTransaction) {
             params.write(normalization.forwardMessage)
@@ -2091,6 +2149,13 @@ function createWrappedSyncConfig<
 
           openTransaction.operations.push(normalization.operation)
           if (normalization.operation.type === `delete`) {
+            openTransaction.rowMetadataWrites.set(normalization.operation.key, {
+              type: `delete`,
+            })
+          } else if (
+            message.type === `insert` &&
+            normalization.operation.metadata === undefined
+          ) {
             openTransaction.rowMetadataWrites.set(normalization.operation.key, {
               type: `delete`,
             })
@@ -2107,10 +2172,21 @@ function createWrappedSyncConfig<
         metadata: params.metadata
           ? {
               row: {
-                get: (key: TKey) => params.metadata!.row.get(key),
+                get: (key: TKey) => {
+                  const openTransaction = getOpenTransaction()
+                  const pendingWrite = openTransaction?.rowMetadataWrites.get(key)
+                  if (pendingWrite) {
+                    return pendingWrite.type === `delete`
+                      ? undefined
+                      : pendingWrite.value
+                  }
+                  if (openTransaction?.truncate) {
+                    return undefined
+                  }
+                  return params.metadata!.row.get(key)
+                },
                 set: (key: TKey, value: unknown) => {
-                  const openTransaction =
-                    transactionStack[transactionStack.length - 1]
+                  const openTransaction = getOpenTransaction()
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
                       `metadata.row.set must be called within an open sync transaction`,
@@ -2125,8 +2201,7 @@ function createWrappedSyncConfig<
                   }
                 },
                 delete: (key: TKey) => {
-                  const openTransaction =
-                    transactionStack[transactionStack.length - 1]
+                  const openTransaction = getOpenTransaction()
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
                       `metadata.row.delete must be called within an open sync transaction`,
@@ -2141,10 +2216,19 @@ function createWrappedSyncConfig<
                 },
               },
               collection: {
-                get: (key: string) => params.metadata!.collection.get(key),
+                get: (key: string) => {
+                  const openTransaction = getOpenTransaction()
+                  const pendingWrite =
+                    openTransaction?.collectionMetadataWrites.get(key)
+                  if (pendingWrite) {
+                    return pendingWrite.type === `delete`
+                      ? undefined
+                      : pendingWrite.value
+                  }
+                  return params.metadata!.collection.get(key)
+                },
                 set: (key: string, value: unknown) => {
-                  const openTransaction =
-                    transactionStack[transactionStack.length - 1]
+                  const openTransaction = getOpenTransaction()
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
                       `metadata.collection.set must be called within an open sync transaction`,
@@ -2159,8 +2243,7 @@ function createWrappedSyncConfig<
                   }
                 },
                 delete: (key: string) => {
-                  const openTransaction =
-                    transactionStack[transactionStack.length - 1]
+                  const openTransaction = getOpenTransaction()
                   if (!openTransaction) {
                     throw new InvalidPersistedCollectionConfigError(
                       `metadata.collection.delete must be called within an open sync transaction`,
@@ -2173,18 +2256,45 @@ function createWrappedSyncConfig<
                     params.metadata!.collection.delete(key)
                   }
                 },
-                list: (prefix?: string) =>
-                  params.metadata!.collection.list(prefix),
+                list: (prefix?: string) => {
+                  const merged = new Map(
+                    params.metadata!.collection
+                      .list()
+                      .map(({ key, value }) => [key, value]),
+                  )
+                  const openTransaction = getOpenTransaction()
+                  if (openTransaction) {
+                    for (const [
+                      key,
+                      metadataWrite,
+                    ] of openTransaction.collectionMetadataWrites) {
+                      if (metadataWrite.type === `delete`) {
+                        merged.delete(key)
+                      } else {
+                        merged.set(key, metadataWrite.value)
+                      }
+                    }
+                  }
+
+                  return Array.from(merged.entries())
+                    .filter(([key]) => (prefix ? key.startsWith(prefix) : true))
+                    .map(([key, value]) => ({
+                      key,
+                      value,
+                    }))
+                },
               },
             }
           : undefined,
         truncate: () => {
-          const openTransaction = transactionStack[transactionStack.length - 1]
+          const openTransaction = getOpenTransaction()
           if (!openTransaction) {
             params.truncate()
             return
           }
 
+          openTransaction.operations = []
+          openTransaction.rowMetadataWrites.clear()
           openTransaction.truncate = true
           if (!openTransaction.queuedBecauseHydrating) {
             params.truncate()
@@ -2230,21 +2340,40 @@ function createWrappedSyncConfig<
         },
       }
 
-      const sourceResult = normalizeSyncFnResult(
-        sourceSyncConfig.sync(wrappedParams),
-      )
-      void runtime.ensureStarted()
+      let sourceResult: SyncConfigRes = {}
+      const startupState = { cleanedUp: false }
+      fullStartPromise = runtime.ensureStarted()
+      const sourceResultPromise = (async () => {
+        await runtime.ensureStartupMetadataLoaded()
+
+        if (startupState.cleanedUp) {
+          return sourceResult
+        }
+
+        sourceResult = normalizeSyncFnResult(sourceSyncConfig.sync(wrappedParams))
+        return sourceResult
+      })()
 
       return {
         cleanup: () => {
+          startupState.cleanedUp = true
           sourceResult.cleanup?.()
           runtime.cleanup()
           runtime.clearSyncControls()
         },
-        loadSubset: (options: LoadSubsetOptions) =>
-          runtime.loadSubset(options, sourceResult.loadSubset),
-        unloadSubset: (options: LoadSubsetOptions) =>
-          runtime.unloadSubset(options, sourceResult.unloadSubset),
+        loadSubset: async (options: LoadSubsetOptions) => {
+          cancelledLoads.delete(options as object)
+          await fullStartPromise
+          const resolvedSourceResult = await sourceResultPromise
+          if (startupState.cleanedUp || cancelledLoads.has(options as object)) {
+            return
+          }
+          await runtime.loadSubset(options, resolvedSourceResult.loadSubset)
+        },
+        unloadSubset: (options: LoadSubsetOptions) => {
+          cancelledLoads.add(options as object)
+          runtime.unloadSubset(options, sourceResult.unloadSubset)
+        },
       }
     },
   }

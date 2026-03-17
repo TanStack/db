@@ -1191,21 +1191,47 @@ function createElectricSync<T extends Row<unknown>>(
         collection,
         metadata,
       } = params
-      const persistedResumeState = metadata?.collection.get(
-        `electric:resume`,
-      ) as
-        | {
-            kind: `resume`
-            offset: string
-            handle: string
-            shapeId: string
-            updatedAt: number
+      const readPersistedResumeState = () => {
+        const persistedResumeState = metadata?.collection.get(`electric:resume`)
+        if (!persistedResumeState || typeof persistedResumeState !== `object`) {
+          return undefined
+        }
+
+        const record = persistedResumeState as Record<string, unknown>
+        if (
+          record.kind === `resume` &&
+          typeof record.offset === `string` &&
+          typeof record.handle === `string` &&
+          typeof record.shapeId === `string` &&
+          typeof record.updatedAt === `number`
+        ) {
+          return {
+            kind: `resume` as const,
+            offset: record.offset,
+            handle: record.handle,
+            shapeId: record.shapeId,
+            updatedAt: record.updatedAt,
           }
-        | {
-            kind: `reset`
-            updatedAt: number
+        }
+
+        if (
+          record.kind === `reset` &&
+          typeof record.updatedAt === `number`
+        ) {
+          return {
+            kind: `reset` as const,
+            updatedAt: record.updatedAt,
           }
-        | undefined
+        }
+
+        return undefined
+      }
+
+      const persistedResumeState = readPersistedResumeState()
+      const canUsePersistedResume =
+        shapeOptions.offset === undefined &&
+        shapeOptions.handle === undefined &&
+        persistedResumeState?.kind === `resume`
 
       // Wrap markReady to wait for test hook in progressive mode
       let progressiveReadyGate: Promise<void> | null = null
@@ -1264,14 +1290,14 @@ function createElectricSync<T extends Row<unknown>>(
         // so we default to `now` when there is no saved offset.
         offset:
           shapeOptions.offset ??
-          (persistedResumeState?.kind === `resume`
+          (canUsePersistedResume
             ? (persistedResumeState.offset as Offset)
             : syncMode === `on-demand`
               ? `now`
               : undefined),
         handle:
           shapeOptions.handle ??
-          (persistedResumeState?.kind === `resume`
+          (canUsePersistedResume
             ? persistedResumeState.handle
             : undefined),
         signal: abortController.signal,
@@ -1331,6 +1357,19 @@ function createElectricSync<T extends Row<unknown>>(
           shapeId: shapeHandle,
           updatedAt: Date.now(),
         })
+      }
+
+      const commitResetResumeMetadataImmediately = () => {
+        if (!metadata) {
+          return
+        }
+
+        begin({ immediate: true })
+        metadata.collection.set(`electric:resume`, {
+          kind: `reset`,
+          updatedAt: Date.now(),
+        })
+        commit()
       }
 
       /**
@@ -1511,16 +1550,13 @@ function createElectricSync<T extends Row<unknown>>(
               `${collectionId ? `[${collectionId}] ` : ``}Received must-refetch message, starting transaction with truncate`,
             )
 
+            commitResetResumeMetadataImmediately()
+
             // Start a transaction and truncate the collection
             if (!transactionStarted) {
               begin()
               transactionStarted = true
             }
-
-            metadata?.collection.set(`electric:resume`, {
-              kind: `reset`,
-              updatedAt: Date.now(),
-            })
 
             truncate()
 

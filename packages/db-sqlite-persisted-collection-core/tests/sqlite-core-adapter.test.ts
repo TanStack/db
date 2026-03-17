@@ -544,6 +544,106 @@ export function runSQLiteCoreAdapterContractSuite(
       expect(metadataRows).toEqual([{ key: `electric:resume` }])
     })
 
+    it(`persists truncate transactions while preserving explicit collection metadata`, async () => {
+      const { adapter } = registerContractHarness()
+      const collectionId = `truncate-metadata-roundtrip`
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `seed-1`,
+        term: 1,
+        seq: 1,
+        rowVersion: 1,
+        mutations: [
+          {
+            type: `insert`,
+            key: `1`,
+            value: {
+              id: `1`,
+              title: `Before truncate`,
+              createdAt: `2026-01-01T00:00:00.000Z`,
+              score: 1,
+            },
+            metadata: {
+              owner: `before`,
+            },
+            metadataChanged: true,
+          },
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `resume`,
+              offset: `10_0`,
+              handle: `handle-1`,
+              shapeId: `shape-1`,
+              updatedAt: 1,
+            },
+          },
+        ],
+      })
+
+      await adapter.applyCommittedTx(collectionId, {
+        txId: `truncate-2`,
+        term: 1,
+        seq: 2,
+        rowVersion: 2,
+        truncate: true,
+        mutations: [
+          {
+            type: `insert`,
+            key: `2`,
+            value: {
+              id: `2`,
+              title: `After truncate`,
+              createdAt: `2026-01-02T00:00:00.000Z`,
+              score: 2,
+            },
+            metadata: {
+              owner: `after`,
+            },
+            metadataChanged: true,
+          },
+        ],
+        collectionMetadataMutations: [
+          {
+            type: `set`,
+            key: `electric:resume`,
+            value: {
+              kind: `reset`,
+              updatedAt: 2,
+            },
+          },
+        ],
+      })
+
+      expect(await adapter.loadSubset(collectionId, {})).toEqual([
+        {
+          key: `2`,
+          value: {
+            id: `2`,
+            title: `After truncate`,
+            createdAt: `2026-01-02T00:00:00.000Z`,
+            score: 2,
+          },
+          metadata: {
+            owner: `after`,
+          },
+        },
+      ])
+
+      expect(await adapter.loadCollectionMetadata?.(collectionId)).toEqual([
+        {
+          key: `electric:resume`,
+          value: {
+            kind: `reset`,
+            updatedAt: 2,
+          },
+        },
+      ])
+    })
+
     it(`supports pushdown operators with correctness-preserving fallback`, async () => {
       const { adapter } = registerContractHarness()
       const collectionId = `todos`

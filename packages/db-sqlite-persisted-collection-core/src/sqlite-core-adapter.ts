@@ -1123,6 +1123,11 @@ export class SQLiteCorePersistenceAdapter<
       const currentRowVersion = versionRows[0]?.latest_row_version ?? 0
       const nextRowVersion = Math.max(currentRowVersion + 1, tx.rowVersion)
 
+      if (tx.truncate) {
+        await transactionDriver.run(`DELETE FROM ${collectionTableSql}`)
+        await transactionDriver.run(`DELETE FROM ${tombstoneTableSql}`)
+      }
+
       for (const mutation of tx.mutations) {
         const encodedKey = encodePersistedStorageKey(mutation.key)
         if (mutation.type === `delete`) {
